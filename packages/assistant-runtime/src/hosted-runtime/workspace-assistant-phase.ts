@@ -9290,14 +9290,10 @@ function buildHostedAssistantCronStatusOptions(
   };
 }
 
-type HostedAssistantDeviceTool = NonNullable<
-  NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]
->;
-
 function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): HostedAssistantDeviceTool | undefined {
+}): NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"] | undefined {
   const deviceSyncPort = input.input.runtime.platform.deviceSyncPort ?? null;
   if (!deviceSyncPort) {
     return undefined;

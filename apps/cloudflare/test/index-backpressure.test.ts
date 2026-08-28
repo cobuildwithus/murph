@@ -85,7 +85,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
-  it("stamps UserRunner RPC entry before delegating to the hosted runner", async () => {
+  it("stamps UserRunner activation facts once and RPC entry per ensure instruction", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-06T12:00:00.000Z"));
     const ensure = vi.spyOn(
@@ -97,22 +97,60 @@ describe("cloudflare worker queue backpressure routes", () => {
       recommendedRecheckAt: "2026-08-06T12:01:00.000Z",
       runtimeAttemptId: "runtime-attempt-test",
     });
-    const harness = createUserRunnerDurableObject();
+    const bucket = createBucketStore();
+    const storage = createStorage();
+    const env = {
+      ...createHostedExecutionTestEnv(),
+      RUNNER_CONTAINER: storage.runnerContainerNamespace,
+      RUNNER_CONTAINER_SMOKE: storage.runnerContainerNamespace,
+    };
+    Object.defineProperty(env, "BUNDLES", {
+      enumerable: true,
+      get() {
+        vi.setSystemTime(new Date("2026-08-06T12:00:00.025Z"));
+        return bucket.api;
+      },
+    });
+    const durableObject = new UserRunnerDurableObject(storage.state, env as never);
 
-    await harness.durableObject.ensureRuntimeProcessingForUser({
+    vi.setSystemTime(new Date("2026-08-06T12:00:01.000Z"));
+    await durableObject.ensureRuntimeProcessingForUser({
       orchestration: {
         cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T11:59:59.900Z"),
       },
-      orchestrationAttemptId: "rpc-entry-test",
+      orchestrationAttemptId: "rpc-entry-cold-test",
       userId: "member_123",
     });
 
-    expect(ensure).toHaveBeenCalledWith({
+    vi.setSystemTime(new Date("2026-08-06T12:00:02.000Z"));
+    await durableObject.ensureRuntimeProcessingForUser({
+      orchestration: {
+        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T12:00:01.900Z"),
+      },
+      orchestrationAttemptId: "rpc-entry-warm-test",
+      userId: "member_123",
+    });
+
+    expect(ensure).toHaveBeenNthCalledWith(1, {
       orchestration: {
         cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T11:59:59.900Z"),
-        userRunnerRpcStartedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
+        userRunnerConstructorStartedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
+        userRunnerConstructorFinishedAtEpochMs: Date.parse("2026-08-06T12:00:00.025Z"),
+        userRunnerFirstEnsureRuntimeProcessingAtEpochMs: Date.parse("2026-08-06T12:00:01.000Z"),
+        userRunnerRpcStartedAtEpochMs: Date.parse("2026-08-06T12:00:01.000Z"),
       },
-      orchestrationAttemptId: "rpc-entry-test",
+      orchestrationAttemptId: "rpc-entry-cold-test",
+      userId: "member_123",
+    });
+    expect(ensure).toHaveBeenNthCalledWith(2, {
+      orchestration: {
+        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T12:00:01.900Z"),
+        userRunnerConstructorStartedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
+        userRunnerConstructorFinishedAtEpochMs: Date.parse("2026-08-06T12:00:00.025Z"),
+        userRunnerFirstEnsureRuntimeProcessingAtEpochMs: Date.parse("2026-08-06T12:00:01.000Z"),
+        userRunnerRpcStartedAtEpochMs: Date.parse("2026-08-06T12:00:02.000Z"),
+      },
+      orchestrationAttemptId: "rpc-entry-warm-test",
       userId: "member_123",
     });
   });

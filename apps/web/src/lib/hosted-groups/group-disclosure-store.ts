@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
-  HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -52,23 +52,31 @@ export type HostedGroupDisclosureReadClient = PrismaClient | Prisma.TransactionC
 
 export type HostedGroupDisclosurePermissionReactionTxResult =
   | { kind: "accepted" }
-  | {
-      kind: "limit_reached" | "not_found" | "not_group_member" | "wrong_thread";
-    };
+  | { kind: "not_found" | "not_group_member" | "wrong_thread" };
 
-export type HostedGroupDisclosurePermissionAppendTxResult =
-  | { kind: "accepted" }
-  | { kind: "limit_reached" };
+export type HostedGroupDisclosurePermissionAppendTxResult = { kind: "accepted" };
 
-export type HostedGroupDisclosurePermissionRecordTxResult =
-  | { kind: "recorded" }
-  | { kind: "limit_reached" };
+export type HostedGroupDisclosurePermissionRecordTxResult = { kind: "recorded" };
 
 export interface HostedGroupDisclosureGrantSummary {
   grantId: string;
   groupLabel: string;
   memberId: string;
   permissionText: string;
+}
+
+export type HostedGroupDisclosureGrantPageResult =
+  | {
+      grants: HostedGroupDisclosureGrantSummary[];
+      kind: "ok";
+      nextCursor: string | null;
+      truncated: boolean;
+    }
+  | { kind: "cursor_invalid" };
+
+interface HostedGroupDisclosureGrantPageCursor {
+  grantedAt: Date;
+  id: string;
 }
 
 export type HostedGroupDisclosureGrantRevocationTxResult =
@@ -188,9 +196,7 @@ export async function admitHostedGroupDisclosurePermissionAppendTx(input: {
     permissionText,
     tx: input.tx,
   });
-  return admission.kind === "limit_reached"
-    ? { kind: "limit_reached" }
-    : { kind: "accepted" };
+  return { kind: "accepted" };
 }
 
 export async function recordHostedGroupDisclosurePermissionTx(input: {
@@ -230,9 +236,6 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
     permissionText,
     tx: input.tx,
   });
-  if (admission.kind === "limit_reached") {
-    return { kind: "limit_reached" };
-  }
   if (admission.existing) {
     return { kind: "recorded" };
   }
@@ -262,8 +265,7 @@ async function readHostedGroupDisclosurePermissionAppendAdmissionAfterLock(input
   permissionText: string;
   tx: Prisma.TransactionClient;
 }): Promise<
-  | { existing: boolean; kind: "accepted"; runtimeMemberId: string }
-  | { kind: "limit_reached" }
+  { existing: boolean; kind: "accepted"; runtimeMemberId: string }
 > {
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
@@ -317,13 +319,6 @@ async function readHostedGroupDisclosurePermissionAppendAdmissionAfterLock(input
     });
   }
 
-  const permissionHistoryCount =
-    await input.tx.hostedGroupDisclosurePermission.count({
-      where: { groupId: input.groupId },
-    });
-  if (permissionHistoryCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX) {
-    return { kind: "limit_reached" };
-  }
   return {
     existing: false,
     kind: "accepted",
@@ -461,26 +456,6 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     return { kind: "accepted" };
   }
 
-  const groupGrantHistoryCount =
-    await input.tx.hostedGroupDisclosureGrant.count({
-      where: {
-        membership: { groupId: permission.group.id },
-        permission: { groupId: permission.group.id },
-      },
-    });
-  const memberGrantHistoryCount =
-    await input.tx.hostedGroupDisclosureGrant.count({
-      where: {
-        membership: { memberId: input.memberId },
-      },
-    });
-  if (
-    groupGrantHistoryCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX
-    || memberGrantHistoryCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX
-  ) {
-    return { kind: "limit_reached" };
-  }
-
   await input.tx.hostedGroupDisclosureGrant.create({
     data: {
       grantedAt: input.now,
@@ -493,38 +468,64 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
 }
 
 export async function readActiveHostedGroupDisclosureGrantsForGroup(input: {
+  cursor?: string | null;
   groupId: string;
   prisma?: HostedGroupDisclosureReadClient;
-}): Promise<HostedGroupDisclosureGrantSummary[]> {
+}): Promise<HostedGroupDisclosureGrantPageResult> {
   const prisma = input.prisma ?? getPrisma();
+  const cursor = parseHostedGroupDisclosureGrantPageCursor(input.cursor ?? null);
+  if (cursor === "invalid") {
+    return { kind: "cursor_invalid" };
+  }
   const rows = await prisma.hostedGroupDisclosureGrant.findMany({
     where: {
       membership: { groupId: input.groupId },
       permission: { groupId: input.groupId },
       revokedAt: null,
+      ...(cursor
+        ? {
+            OR: [
+              { grantedAt: { gt: cursor.grantedAt } },
+              { grantedAt: cursor.grantedAt, id: { gt: cursor.id } },
+            ],
+          }
+        : {}),
     },
     orderBy: [{ grantedAt: "asc" }, { id: "asc" }],
     select: hostedGroupDisclosureGrantSummarySelect,
-    take: HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
+    take: HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX + 1,
   });
-  return projectHostedGroupDisclosureGrantSummaries({ prisma, rows });
+  return projectHostedGroupDisclosureGrantPage({ prisma, rows });
 }
 
 export async function readActiveHostedGroupDisclosureGrantsForMember(input: {
+  cursor?: string | null;
   memberId: string;
   prisma?: HostedGroupDisclosureReadClient;
-}): Promise<HostedGroupDisclosureGrantSummary[]> {
+}): Promise<HostedGroupDisclosureGrantPageResult> {
   const prisma = input.prisma ?? getPrisma();
+  const cursor = parseHostedGroupDisclosureGrantPageCursor(input.cursor ?? null);
+  if (cursor === "invalid") {
+    return { kind: "cursor_invalid" };
+  }
   const rows = await prisma.hostedGroupDisclosureGrant.findMany({
     where: {
       membership: { memberId: input.memberId },
       revokedAt: null,
+      ...(cursor
+        ? {
+            OR: [
+              { grantedAt: { gt: cursor.grantedAt } },
+              { grantedAt: cursor.grantedAt, id: { gt: cursor.id } },
+            ],
+          }
+        : {}),
     },
     orderBy: [{ grantedAt: "asc" }, { id: "asc" }],
     select: hostedGroupDisclosureGrantSummarySelect,
-    take: HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
+    take: HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX + 1,
   });
-  return projectHostedGroupDisclosureGrantSummaries({ prisma, rows });
+  return projectHostedGroupDisclosureGrantPage({ prisma, rows });
 }
 
 export async function revokeHostedGroupDisclosureGrantForMemberTx(input: {
@@ -660,6 +661,7 @@ export async function readHostedGroupDisclosureGrantAuthorityTx(input: {
 }
 
 const hostedGroupDisclosureGrantSummarySelect = {
+  grantedAt: true,
   id: true,
   membership: {
     select: { groupId: true, memberId: true },
@@ -677,6 +679,28 @@ const hostedGroupDisclosureGrantSummarySelect = {
 type HostedGroupDisclosureGrantSummaryRow = Prisma.HostedGroupDisclosureGrantGetPayload<{
   select: typeof hostedGroupDisclosureGrantSummarySelect;
 }>;
+
+async function projectHostedGroupDisclosureGrantPage(input: {
+  prisma: HostedGroupDisclosureReadClient;
+  rows: HostedGroupDisclosureGrantSummaryRow[];
+}): Promise<HostedGroupDisclosureGrantPageResult> {
+  const selectedRows = input.rows.slice(
+    0,
+    HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
+  );
+  const nextCursor = input.rows.length > HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX
+    ? buildHostedGroupDisclosureGrantPageCursor(selectedRows.at(-1) ?? null)
+    : null;
+  return {
+    grants: await projectHostedGroupDisclosureGrantSummaries({
+      prisma: input.prisma,
+      rows: selectedRows,
+    }),
+    kind: "ok",
+    nextCursor,
+    truncated: nextCursor !== null,
+  };
+}
 
 async function projectHostedGroupDisclosureGrantSummaries(input: {
   prisma: HostedGroupDisclosureReadClient;
@@ -724,6 +748,67 @@ async function projectHostedGroupDisclosureGrantSummaries(input: {
       permissionText,
     }];
   });
+}
+
+function buildHostedGroupDisclosureGrantPageCursor(
+  row: { grantedAt: Date; id: string } | null,
+): string | null {
+  if (!row) {
+    return null;
+  }
+  return Buffer.from(JSON.stringify({
+    grantedAt: row.grantedAt.toISOString(),
+    id: row.id,
+    version: 1,
+  }), "utf8").toString("base64url");
+}
+
+function parseHostedGroupDisclosureGrantPageCursor(
+  value: string | null,
+): HostedGroupDisclosureGrantPageCursor | null | "invalid" {
+  if (value === null) {
+    return null;
+  }
+  if (
+    value.length === 0
+    || [...value].length > HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS
+  ) {
+    return "invalid";
+  }
+  try {
+    const bytes = Buffer.from(value, "base64url");
+    if (bytes.toString("base64url") !== value) {
+      return "invalid";
+    }
+    const parsed: unknown = JSON.parse(bytes.toString("utf8"));
+    if (
+      !parsed
+      || typeof parsed !== "object"
+      || Array.isArray(parsed)
+      || Object.keys(parsed).sort().join(",") !== "grantedAt,id,version"
+    ) {
+      return "invalid";
+    }
+    const record = parsed as Record<string, unknown>;
+    if (
+      record.version !== 1
+      || typeof record.grantedAt !== "string"
+      || typeof record.id !== "string"
+      || record.id.trim().length === 0
+    ) {
+      return "invalid";
+    }
+    const grantedAt = new Date(record.grantedAt);
+    if (
+      !Number.isFinite(grantedAt.getTime())
+      || grantedAt.toISOString() !== record.grantedAt
+    ) {
+      return "invalid";
+    }
+    return { grantedAt, id: record.id };
+  } catch {
+    return "invalid";
+  }
 }
 
 function digestCanonicalHostedGroupDisclosurePermissionText(input: {

@@ -68,37 +68,46 @@ Murph Cloud workflow and GitHub Environment without exposing its value to the
 public repository, only after vendor approval confirms that the exact hosted
 Gemini project has the applicable paid/no-training controls required by
 Murph's health-data policy. Key presence alone does not prove those controls.
-Finally, deploy the Worker and runner bundle together with
-immediate convergence. The runner receives only the normal injected-credential
-sentinel; the Worker owns the real key and substitutes it only after the exact
-Gemini request passes authorization and shape validation.
+Finally, deploy the Worker and runner bundle with the compatible egress reader
+active before a new runner request shape can reach it. The runner receives only
+the normal injected-credential sentinel; the Worker owns the real key and
+substitutes it only after the exact Gemini request passes authorization and
+shape validation. During this rollout the Worker accepts the two current
+profiles, standard 1 FPS or detailed-motion 5 FPS with medium thinking and no
+explicit output-token cap, plus only the exact previous 1 FPS, low-thinking,
+1,800-token shape from a warm old runner.
 
 Do not deploy the Cloudflare producer ahead of Web pricing: the Worker now
 withholds a successful Gemini response until Web accepts its usage row, so an
 older Web would turn every otherwise successful analysis into a 502. Missing
 key configuration is fail-closed and
-omits `murph.analyze_video`. During an immediate rollout, old instances omit
-the tool and new instances expose it for private-direct turns and authenticated
-Linq/Telegram group turns with accepted user-action input. Any authenticated
-group participant may request analysis of another participant's video in the
-same accepted group turn. Unverified external groups continue to omit it. An
-eligible turn may receive the schema before its accepted input has video
-authority because the provider tool set freezes at turn start; this lets the
-first live-steered video be frozen and authorized before tool execution in that
-same turn. There is no schema, backfill, dual-write, or stored compatibility
-state.
+omits `murph.analyze_video`. During this update, an old runner continues to emit
+the exact legacy profile while a new runner may emit either current profile;
+the compatible Worker accepts both without permitting arbitrary FPS, thinking,
+or output settings. Both generations expose the tool for private-direct turns
+and authenticated Linq/Telegram group turns with accepted user-action input.
+Any authenticated group participant may request analysis of another
+participant's video in the same accepted group turn; unverified external groups
+continue to omit it. New requests choose the mode before egress and never retry
+the clip at another rate. An eligible turn may receive the schema before its
+accepted input has video authority because the provider tool set freezes at
+turn start; this lets the first live-steered video be frozen and authorized
+before tool execution in that same turn. There is no schema, backfill,
+dual-write, or stored compatibility state.
 
-Rollback the Worker/runner producer first, then remove the private secret
-mapping if desired; the Web reader and pricing branch are safe to leave in
-place. Post-deploy, use one consented short MP4/MOV/WebM video in a private
-direct conversation to verify a single Gemini request, explicit 1 FPS
-metadata, bounded output, and one usage
-record. Then use one consented group video and verify one Gemini request plus
-one group-visible result when its uploader requests analysis. Have a different
-authenticated participant request analysis of a second consented group video
-and verify the same single-request result. Inspect only bounded status/error
-aggregates, never media, prompts, paths, response bodies, sender handles, or
-credential values.
+Do not revert the compatible Worker while a new runner can still emit the new
+request shape. Disable the tool or roll back the runner writer first, drain warm
+new runners, and only then revert the reader; the Web usage reader and pricing
+branch are safe to leave in place. Post-deploy, use consented short supported
+videos in a private direct conversation to verify one ordinary request selects
+standard 1 FPS and one rapid-movement or exercise-form request selects detailed
+motion 5 FPS. Confirm both finish with one Gemini call and one usage record.
+Then use one consented group video and verify the same single-request result
+when its uploader requests analysis. Have a different authenticated participant
+request analysis of a second consented group video and verify the same result.
+Inspect only bounded status/error aggregates and token counters, never media,
+prompts, paths, request or response bodies, sender handles, or credential
+values.
 
 ### Hosted inbox video transience rollout
 
@@ -939,28 +948,35 @@ New runners may send an optional `lineLookupKey` solely for post-send
 line-health attribution; old Web ignores it, and new Web retains its existing
 fallback when an older supported runner omits it.
 
-### Canonical Linq Send-Route Rollout
+### Canonical Linq Send-Route Runtime Floor
 
-Deploy Web first with the complete ephemeral `resolvedRoute` response while it
-continues returning the deprecated `threadIsDirect` and conditional
-`targetOverride` fields. The existing runtime ignores the additive route and
-continues using the legacy fields, so this short reader-first window preserves
-ordinary delivery. Then deploy Cloudflare and the runner bundle immediately
-with `container_rollout=immediate`; the new runtime requires `resolvedRoute`,
-uses it as the sole provider target/recipient/sender/directness source, and
-reasserts the exact value before capability lookup and provider dispatch.
+The Web engagement response returns the complete ephemeral `resolvedRoute` as
+its sole route authority. Current Cloudflare and runner code requires that
+field, uses it as the only provider target/recipient/sender/directness source,
+and reasserts the exact value before capability lookup and provider dispatch.
+There is no database migration or persisted runtime-state floor.
 
-Do not deploy the new runtime before Web. It intentionally fails closed when
-the canonical route is absent. If rollback is required during the compatibility
-window, roll Cloudflare back first and Web second. Keep the legacy Web fields
-until a later independently reviewed cleanup after the old runtime is outside
-the rollback window; no database migration or persisted runtime-state floor is
-introduced by this protocol.
+The supported skew is one-way: pre-cleanup Web, which returns `resolvedRoute`
+plus ignored legacy fields, works with the current runtime; cleanup Web, which
+returns only `resolvedRoute`, also works with the current runtime. Cleanup Web
+does not support a pre-canonical runtime because that runtime does not read the
+route authority.
+
+For this cleanup, deploy Cloudflare and the runner bundle first with
+`container_rollout=immediate`, prove the canonical reader fleet has converged,
+and wait one full 60-second signed-callback skew after the last older container
+is gone before deploying Web. That drain also prevents the retired
+guard-only provider-start telemetry shape from reaching the cleanup Web parser.
+After Web is live, the canonical reader is the hard runtime rollback floor.
+Web may roll back only to a build that still emits complete `resolvedRoute`;
+never roll Cloudflare or the runner below the canonical reader while cleanup
+Web is live. Prefer a compatible forward fix.
 
 After rollout, prove one authorized private scheduled native card, one ordinary
 direct reply, one group reply, and one private Assistant Ask continuation.
 Confirm no canonical-route protocol-unavailable or route-mismatch error appears
-for those controlled sends.
+for those controlled sends, and confirm provider-start telemetry contains no
+guard-only event from an older runtime.
 
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 
@@ -1289,7 +1305,7 @@ The Cloudflare automation private JWK is only used to unwrap the `cloudflare-aut
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
 `HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.
 `MURPH_DATA_API_KEY` is required so the Worker can authorize the internal `murph-data-api.worker` product label lookup endpoints (`/api/foods` and `/api/supplements`) without exposing the key to the runner. Hosted web must have `MURPH_LABELS_DB_URL` before serving either route; `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback.
-Hosted message images do not use Cloudflare Images. The runner stores generated bytes as canonical vault captures and final delivery uses Linq attachments or Telegram multipart upload. Linq group avatars remain available through the narrow `results.worker/private-image-urls` boundary: the Worker passes only validated bytes and MIME type to the existing per-user `UserRunner`, which serializes the write-fence check and deterministic application-encrypted R2 staging with account deletion, then returns an opaque at-most-one-day capability on the current deployment's exact `CF_PUBLIC_BASE_URL` origin for the immediate avatar mutation. Hosted Web accepts that capability only when its origin matches `HOSTED_EXECUTION_CONTROL_URL`; production and preview therefore reject one another's capabilities while the isolated preview Worker, R2 bucket, secret, and Web boundary complete the same journey. The capability hides the member id, R2 key, storage namespace, and image hash. Its canonical path ends in `group-avatar.<ext>`, with the extension derived from the verified MIME type; the public GET/HEAD route also accepts the already-shipped extensionless path during rolling deployment and rollback, decrypts and verifies the object, rejects an extension/MIME mismatch, returns matching successful content headers with no HEAD body, and responds with `private, no-store`. A retry reuses the deterministic object only while its original lifecycle window remains and cannot extend capability validity past that boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same key before returning another capability. Account deletion makes the existing bounded Cloudflare cleanup attempt before acknowledging completion and synchronously sweeps the member prefix when that attempt succeeds; its encrypted receipt and retention cron retain retry ownership on timeout or provider failure. The R2 lifecycle makes any remaining object eligible for asynchronous deletion after 24 hours rather than guaranteeing physical deletion by that age. Neither cleanup path relies on Linq fetch timing. `HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET` is Worker-only, must contain at least 32 characters, and must not enter runner env. During this cutover, the workflow maps the existing GitHub environment secret named `CLOUDFLARE_IMAGES_SIGNING_KEY` into that new Worker variable so no secret value is copied or exposed; rename the GitHub secret in a later coordinated deploy. The legacy `results.worker/generated-images` route remains a `410 Gone` rolling-deploy tombstone.
+Hosted message images do not use Cloudflare Images. The runner stores generated bytes as canonical vault captures and final delivery uses Linq attachments or Telegram multipart upload. Linq group avatars remain available through the narrow `results.worker/private-image-urls` boundary: the Worker passes only validated bytes and MIME type to the existing per-user `UserRunner`, which serializes the write-fence check and deterministic application-encrypted R2 staging with account deletion, then returns an opaque at-most-one-day capability on the current deployment's exact `CF_PUBLIC_BASE_URL` origin for the immediate avatar mutation. Hosted Web accepts that capability only when its origin matches `HOSTED_EXECUTION_CONTROL_URL`; production and preview therefore reject one another's capabilities while the isolated preview Worker, R2 bucket, secret, and Web boundary complete the same journey. The capability hides the member id, R2 key, storage namespace, and image hash. Its canonical path ends in `group-avatar.<ext>`, with the extension derived from the verified MIME type; the public GET/HEAD route also accepts the already-shipped extensionless path during rolling deployment and rollback, decrypts and verifies the object, rejects an extension/MIME mismatch, returns matching successful content headers with no HEAD body, and responds with `private, no-store`. A retry reuses the deterministic object only while its original lifecycle window remains and cannot extend capability validity past that boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same key before returning another capability. Account deletion makes the existing bounded Cloudflare cleanup attempt before acknowledging completion and synchronously sweeps the member prefix when that attempt succeeds; its encrypted receipt and retention cron retain retry ownership on timeout or provider failure. The R2 lifecycle makes any remaining object eligible for asynchronous deletion after 24 hours rather than guaranteeing physical deletion by that age. Neither cleanup path relies on Linq fetch timing. `HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET` is Worker-only, must contain at least 32 characters, and must not enter runner env. During this cutover, the workflow maps the existing GitHub environment secret named `CLOUDFLARE_IMAGES_SIGNING_KEY` into that new Worker variable so no secret value is copied or exposed; rename the GitHub secret in a later coordinated deploy.
 
 For the private-media cutover, deploy hosted Web and Cloudflare/runner as a
 tandem change, with Web first and Cloudflare immediately afterward using
@@ -1300,13 +1316,12 @@ URL and the exact queryless
 queryless variants, extra path segments, query parameters on the public variant,
 and non-Images origins. The new Worker creates only encrypted R2 capabilities.
 Verify the generated-image Linq attachment smoke, an R2-backed group-avatar
-mutation, both legacy parser fixtures, the private-media GET response headers,
-and the `410` tombstone. The Web deploy also switches the
+mutation, both legacy parser fixtures, and the private-media GET response
+headers. The Web deploy also switches the
 explicit results-card flow to authenticated same-origin POST and tombstone both
 legacy card GET routes. The two deployments are wire-compatible during the
-brief window for either legacy avatar URL shape; an old generated-image runner
-against the new Worker receives `410` and falls back to text, while a new
-runner no longer calls the image-upload route. Once a
+brief window for either legacy avatar URL shape. Supported generated-image
+runners no longer call the retired public-object upload route. Once a
 new runner persists a `vault_image` outbox descriptor, that reader-capable
 runner bundle is the rollback floor; use a forward fix rather than rolling
 containers below it. Keep both legacy avatar inputs only until every legacy

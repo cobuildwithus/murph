@@ -1770,22 +1770,27 @@ describe('assistant Codex turn planning', () => {
     expect(plan.turnContextPrompt).not.toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain(
-      `Read and follow \`${skillRef}\` before advancing, declining, or completing onboarding`,
+      `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
     )
     expect(plan.developerInstructions).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion.',
     )
     const onboardingDecisionContract = [
       'During discovery, a stated health goal is context, not an action request.',
       'Only an immediate request or safety need moves problem-solving ahead of the park.',
       'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
-      'Honor pause, defer, skip, and decline.',
-      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
+      'Once a data source is identified, postponing only its optional connection does not pause onboarding. Do not issue or reissue a link; acknowledge the choice, continue to the next unresolved foundation beat unless the user explicitly pauses onboarding itself, and never imply the connection exists until visible evidence proves it.',
     ] as const
     for (const clause of onboardingDecisionContract) {
       expect(plan.developerInstructions).toContain(clause)
       expect(plan.turnContextPrompt).not.toContain(clause)
     }
+    expect(plan.developerInstructions).not.toContain(
+      'Honor pause, defer, skip, and decline.',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
+    )
     expect(plan.developerInstructions).not.toContain(
       'roughly 5-6 short assistant messages',
     )
@@ -2662,6 +2667,115 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain('bootstrap contract')
     expect(plan.assistantContractFingerprint).toEqual(expect.any(String))
   })
+
+  it.each([
+    { label: 'direct', threadIsDirect: true },
+    { label: 'group', threadIsDirect: false },
+  ] as const)(
+    'rotates an eligible pre-existing $label group-tool thread once with bounded history',
+    async ({ label, threadIsDirect }) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: true,
+      })
+      const vault = await mkdtemp(
+        path.join(os.tmpdir(), `assistant-group-contract-rotation-${label}-`),
+      )
+      const route = createRoute()
+      const threadId = `thread-contract-rotation-${label}`
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        groupTool: { request: vi.fn() },
+      }
+      const sharedPlan = createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: threadIsDirect,
+        threadId,
+        threadIsDirect,
+      })
+      const common = {
+        executionContext: {
+          hosted: {
+            memberId: `member-contract-rotation-${label}`,
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          deliverResponse: true,
+          threadId,
+          threadIsDirect,
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation' as const,
+          threadScope: 'session-thread' as const,
+          toolProfile: 'provider-turn' as const,
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+        },
+        route,
+        sharedPlan,
+      }
+
+      try {
+        await appendAssistantTranscriptEntries(vault, 'session-test', [
+          { kind: 'user', text: 'Keep the earlier constraint in mind.' },
+          { kind: 'assistant', text: 'I will preserve that constraint.' },
+        ])
+        const firstPostDeployPlan = await resolveAssistantRouteTurnPlan({
+          ...common,
+          session: createSession({
+            resumeState: {
+              assistantContractFingerprint: '0'.repeat(64),
+              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              threadId: `provider-thread-before-${label}`,
+            },
+            turnCount: 2,
+          }),
+        })
+
+        expect(firstPostDeployPlan.resume).toBeNull()
+        expect(firstPostDeployPlan.dynamicTools).toContainEqual(
+          expect.objectContaining({ name: 'group_consult', namespace: 'murph' }),
+        )
+        expect(firstPostDeployPlan.conversationHistoryMessages).toEqual([
+          { content: 'Keep the earlier constraint in mind.', role: 'user' },
+          { content: 'I will preserve that constraint.', role: 'assistant' },
+        ])
+        expect(firstPostDeployPlan.developerInstructions).not.toBeNull()
+
+        const replacementThreadId = `provider-thread-after-${label}`
+        const secondPostDeployPlan = await resolveAssistantRouteTurnPlan({
+          ...common,
+          session: createSession({
+            resumeState: {
+              assistantContractFingerprint:
+                firstPostDeployPlan.assistantContractFingerprint,
+              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              threadId: replacementThreadId,
+            },
+            turnCount: 3,
+          }),
+        })
+
+        expect(secondPostDeployPlan.resume?.codexThreadId).toBe(
+          replacementThreadId,
+        )
+        expect(secondPostDeployPlan.conversationHistoryMessages).toBeUndefined()
+        expect(secondPostDeployPlan.developerInstructions).toBeNull()
+      } finally {
+        await rm(vault, { force: true, recursive: true })
+      }
+    },
+  )
 
   it('keeps the assistant contract fingerprint stable across repeated identical plans', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
@@ -5091,31 +5205,49 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('starts a fresh thread when the dynamic tool contract changes', async () => {
+  it('starts a fresh thread when the exercise routine card contract changes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: true,
     })
     const route = createRoute()
+    const currentPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    const oldDynamicTools = currentPlan.dynamicTools.map((tool) =>
+      tool.name === 'attach_exercise_routine_card'
+        ? {
+            ...tool,
+            inputSchema: {
+              ...tool.inputSchema,
+              required: [
+                ...(tool.inputSchema.required ?? []),
+                'footer',
+                'subtitle',
+              ],
+            },
+          }
+        : tool)
+    expect(currentPlan.dynamicTools).toContainEqual(
+      expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+    )
     const oldToolContractFingerprint = buildAssistantCodexContractFingerprint({
-      developerInstructions: (await resolveAssistantRouteTurnPlan({
-        executionContext: null,
-        input: createMessageInput(),
-        profile: {
-          promptProfile: 'conversation',
-          threadScope: 'session-thread',
-          toolProfile: 'provider-turn',
-        },
-        promptTimeContext: {
-          currentLocalDate: '2026-05-04',
-          currentTimeZone: 'Asia/Kuala_Lumpur',
-        },
-        route,
-        session: createSession(),
-        sharedPlan: createSharedPlan(),
-      })).developerInstructions,
-      dynamicTools: resolveMurphDynamicTools({}).slice(0, 1),
+      developerInstructions: currentPlan.developerInstructions,
+      dynamicTools: oldDynamicTools,
       routeFingerprint: route.routeFingerprint ?? route.routeId,
     })
 

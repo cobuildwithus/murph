@@ -708,6 +708,23 @@ async function normalizeWorkoutExerciseReplacement(input: {
     ) {
       replacementExercise.setPlanIsFinite = existingExercise.setPlanIsFinite
     }
+    if (
+      replacementExercise.targetWeightPerSet === undefined
+      && existingExercise.targetWeightPerSet !== undefined
+      && existingExercise.targetWeightUnit !== undefined
+    ) {
+      if (
+        replacementExercise.unitOverride !== undefined
+        && replacementExercise.unitOverride !== existingExercise.targetWeightUnit
+      ) {
+        throw new VaultCliError(
+          'invalid_option',
+          `Workout edit cannot change the weight unit for exercise ${existingExercise.order} (${existingExercise.name}) while preserving its planned ${existingExercise.targetWeightUnit} load. Re-read the workout and preserve that unit, or use the targeted live-workout commands to change the plan explicitly.`,
+        )
+      }
+      replacementExercise.targetWeightPerSet = existingExercise.targetWeightPerSet
+      replacementExercise.targetWeightUnit = existingExercise.targetWeightUnit
+    }
 
     for (const existingSet of existingExercise.sets ?? []) {
       if (!replacementExercise.sets.some(

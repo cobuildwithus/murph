@@ -539,6 +539,18 @@
     {
       "issue": "cobuildwithus/murph#2364",
       "path": ".agents/friction-log/20260826141134-preliminary-reviewgpt-omits/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2369",
+      "path": ".agents/friction-log/20260826093734-package-vitest-configs/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2377",
+      "path": ".agents/friction-log/20260826015901-prisma-format-rewrites/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2388",
+      "path": ".agents/friction-log/20260826170418-reviewgpt-attachment-capture/friction.md"
     }
   ],
   "version": 1

@@ -29,12 +29,17 @@ import {
   isHostedProductSupportEscalationFeedback,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
   isHostedRuntimeAssistantAskDiagnosticCode,
   isHostedRuntimeAssistantAskRequestId,
@@ -42,6 +47,7 @@ import {
   type HostedRuntimeAssistantConfigurationToolRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupSummary,
+  type HostedRuntimeGroupParticipantTarget,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupEmailParticipantSummary,
@@ -504,6 +510,68 @@ const groupQuestionSchema = z
     { message: 'question exceeds the Unicode code-point limit' },
   )
 
+const groupParticipantTargetSchema = z
+  .object({
+    participantCount: z
+      .number()
+      .int()
+      .min(1)
+      .max(HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX)
+      .optional(),
+    participants: z
+      .array(
+        z
+          .object({
+            displayName: z
+              .string()
+              .trim()
+              .min(1)
+              .refine(
+                (value) =>
+                  Array.from(value).length
+                  <= HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+                { message: 'displayName exceeds the Unicode code-point limit' },
+              )
+              .refine(
+                (value) =>
+                  !/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/u.test(value)
+                  && !/(?:^|\D)\+?\d[\d\s().-]{6,}\d(?:\D|$)/u.test(value),
+                { message: 'displayName must not contain a full phone number or email' },
+              )
+              .optional(),
+            emailParticipant: z.literal(true).optional(),
+            phoneHint: z
+              .object({
+                areaCode: z.string().regex(/^\d{3}$/u).optional(),
+                lastFour: z.string().regex(/^\d{4}$/u).optional(),
+              })
+              .strict()
+              .refine(
+                (value) => value.areaCode !== undefined || value.lastFour !== undefined,
+                { message: 'phoneHint requires areaCode or lastFour' },
+              )
+              .optional(),
+          })
+          .strict()
+          .refine(
+            (value) =>
+              value.displayName !== undefined
+              || value.emailParticipant === true
+              || value.phoneHint !== undefined,
+            { message: 'participant clue is empty' },
+          ),
+      )
+      .max(HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.participantCount !== undefined
+      || (value.participants?.length ?? 0) > 0,
+    { message: 'participantTarget requires participantCount or participants' },
+  )
+
 const groupDisclosureGrantIdSchema = z
   .string()
   .trim()
@@ -520,6 +588,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .object({
       action: z.literal('ask'),
       groupLabel: groupLabelSchema.optional(),
+      participantTarget: groupParticipantTargetSchema.optional(),
       question: groupQuestionSchema,
     })
     .strict(),
@@ -528,6 +597,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       action: z.literal('handoff'),
       context: groupHandoffContextSchema,
       groupLabel: groupLabelSchema.optional(),
+      participantTarget: groupParticipantTargetSchema.optional(),
     })
     .strict(),
   z
@@ -541,6 +611,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.enum([
+        'ask_current_sender_privately',
         'clarify_current_sender',
         'continue_current_sender_in_group',
         'continue_current_sender_privately',
@@ -602,6 +673,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_current'),
+      disclosureGrantCursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS)
+        .optional(),
     })
     .strict(),
   z
@@ -710,6 +787,18 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('list_memberships'),
+      cursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS)
+        .optional(),
+      disclosureGrantCursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS)
+        .optional(),
     })
     .strict(),
   z
@@ -920,6 +1009,14 @@ const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
   'startUrl',
 ] as const
 
+const COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS = Object.keys(
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema.properties,
+)
+const computerPauseForUserValidationPaths =
+  collectSafeJsonSchemaValidationPaths(
+    MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema,
+  )
+
 const computerNavigationUrlSchema = z
   .string()
   .trim()
@@ -1108,9 +1205,9 @@ export interface MurphDynamicToolExecutionResult {
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
   /**
-   * Trusted runtime-owned text that must be delivered when the model supplies
-   * no response text or card. Analyze-video uses this for the best completed
-   * tool outcome so successful observations cannot disappear behind no-reply.
+   * Runtime-selected text that must be delivered when the model supplies no
+   * response text or card. Analyze-video failure text is trusted status;
+   * successful observation text remains untrusted data, never instructions.
    */
   requiredFinalResponseFallback?: string
   requiredVaultFileApprovalUrl?: string
@@ -1191,12 +1288,14 @@ type MurphGroupToolRequest =
   | {
       action: 'ask'
       groupLabel?: string
+      participantTarget?: HostedRuntimeGroupParticipantTarget
       question: string
     }
   | {
       action: 'handoff'
       context: string
       groupLabel?: string
+      participantTarget?: HostedRuntimeGroupParticipantTarget
     }
   | {
       action: 'ask_current_sender'
@@ -2013,6 +2112,8 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerPauseForUserArgumentsSchema,
         schemaName: 'murph.computer_pause_for_user.input',
+        schemaPaths: computerPauseForUserValidationPaths,
+        schemaRootKeys: COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS,
         toolName: 'murph.computer_pause_for_user',
       })
       return parsed.ok
@@ -2118,10 +2219,7 @@ function readGeneratedImageToolCallId(
 export async function executeMurphDynamicToolRequest(input: {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
-  assistantStyleSettingsAvailable?: boolean | null
-  groupRoomModelAvailable?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
-  memberMemoryAvailable?: boolean | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -2389,7 +2487,6 @@ export async function executeMurphDynamicToolRequest(input: {
     }
     case 'group-room-model':
       return await executeGroupRoomModelDynamicTool({
-        available: input.groupRoomModelAvailable === true,
         managedMaintenanceAuthorized:
           input.groupRoomModelMaintenanceAuthorized === true,
         request: input.request,
@@ -2399,7 +2496,6 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'member-memory':
       return await executeMemberMemoryDynamicTool({
-        available: input.memberMemoryAvailable === true,
         managedMaintenanceAuthorized:
           input.memberMemoryMaintenanceAuthorized === true,
         request: input.request,
@@ -2455,7 +2551,6 @@ export async function executeMurphDynamicToolRequest(input: {
         authority: resolveHostedAssistantPersonalizationToolAuthority(
           hostedToolContext,
         ),
-        available: input.assistantStyleSettingsAvailable === true,
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
           hostedToolContext?.personalizationTool ?? null,
@@ -4562,6 +4657,18 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
+    (response.action === 'ask' || response.action === 'handoff')
+    && response.result.status === 'accepted'
+  ) {
+    return {
+      action: response.action,
+      result: {
+        status: 'queued' as const,
+        targetLabel: response.result.targetLabel,
+      },
+    }
+  }
+  if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
   ) {
@@ -5038,6 +5145,9 @@ async function executeGroupTool(input: {
       ...(input.request.groupLabel !== undefined
         ? { groupLabel: input.request.groupLabel }
         : {}),
+      ...(input.request.participantTarget !== undefined
+        ? { participantTarget: input.request.participantTarget }
+        : {}),
       originAssistantInputId,
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
@@ -5064,6 +5174,9 @@ async function executeGroupTool(input: {
       ...(input.request.groupLabel === undefined
         ? {}
         : { groupLabel: input.request.groupLabel }),
+      ...(input.request.participantTarget === undefined
+        ? {}
+        : { participantTarget: input.request.participantTarget }),
       originAssistantInputId,
     }
   } else if (input.request.action === 'ask_current_sender') {
@@ -7165,6 +7278,7 @@ function parseGroupArguments(
   }
   if (
     parsed.data.action === 'ask_current_sender'
+    || parsed.data.action === 'ask_current_sender_privately'
     || parsed.data.action === 'clarify_current_sender'
     || parsed.data.action === 'continue_current_sender_in_group'
     || parsed.data.action === 'continue_current_sender_privately'
@@ -7357,14 +7471,27 @@ function parseGroupArguments(
     }
   }
   if (
-    parsed.data.action === 'list_memberships'
-    || parsed.data.action === 'read_next_group'
+    parsed.data.action === 'read_next_group'
     || parsed.data.action === 'cancel_next_group'
     || parsed.data.action === 'read_chat_name'
     || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_chat_participants'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
+  }
+  if (parsed.data.action === 'list_memberships') {
+    return {
+      ok: true,
+      request: {
+        action: 'list_memberships',
+        ...(parsed.data.cursor === undefined
+          ? {}
+          : { cursor: parsed.data.cursor }),
+        ...(parsed.data.disclosureGrantCursor === undefined
+          ? {}
+          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+      },
+    }
   }
   if (parsed.data.action === 'create_signup_referral_link') {
     return {
@@ -7398,7 +7525,15 @@ function parseGroupArguments(
     }
   }
   if (parsed.data.action === 'read_current') {
-    return { ok: true, request: { action: 'read_current' } }
+    return {
+      ok: true,
+      request: {
+        action: 'read_current',
+        ...(parsed.data.disclosureGrantCursor === undefined
+          ? {}
+          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+      },
+    }
   }
   return {
     ok: false,
@@ -7418,6 +7553,7 @@ function parseGroupArguments(
 
 function readCurrentSenderToolDecision(action:
   | 'ask_current_sender'
+  | 'ask_current_sender_privately'
   | 'clarify_current_sender'
   | 'continue_current_sender_in_group'
   | 'continue_current_sender_privately'
@@ -7429,6 +7565,7 @@ function readCurrentSenderToolDecision(action:
   switch (action) {
     case 'ask_current_sender':
       return { audience: 'group', mode: 'new' }
+    case 'ask_current_sender_privately':
     case 'message_current_sender':
       return { audience: 'current_sender', mode: 'new' }
     case 'clarify_current_sender':
@@ -7596,6 +7733,7 @@ function parseComputerArguments<TArgs>(input: {
   argumentsValue: unknown
   schema: z.ZodType<TArgs> & { shape?: Record<string, unknown> }
   schemaName: string
+  schemaPaths?: readonly string[]
   schemaRootKeys?: readonly string[]
   toolName: string
 }):
@@ -7609,6 +7747,7 @@ function parseComputerArguments<TArgs>(input: {
         error: parsed.error,
         rawInput: input.argumentsValue,
         schemaName: input.schemaName,
+        schemaPaths: input.schemaPaths,
         schemaRootKeys: input.schemaRootKeys ?? readZodObjectRootKeys(input.schema),
         toolName: input.toolName,
       }),
@@ -7786,7 +7925,8 @@ function parseAttachExerciseRoutineCardArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_exercise_routine_card.input'
   const toolName = 'murph.attach_exercise_routine_card'
-  const parsed = attachExerciseRoutineCardArgumentsSchema.safeParse(value)
+  const runtimeValue = defaultExerciseRoutineNullableText(value)
+  const parsed = attachExerciseRoutineCardArgumentsSchema.safeParse(runtimeValue)
   if (!parsed.success) {
     return {
       ok: false,
@@ -7806,6 +7946,23 @@ function parseAttachExerciseRoutineCardArguments(
   return {
     card: parsed.data.card,
     ok: true,
+  }
+}
+
+function defaultExerciseRoutineNullableText(value: unknown): unknown {
+  const input = asRecord(value)
+  const card = asRecord(input?.card)
+  if (card?.kind !== 'exercise_routine') {
+    return value
+  }
+
+  return {
+    ...input,
+    card: {
+      footer: null,
+      subtitle: null,
+      ...card,
+    },
   }
 }
 

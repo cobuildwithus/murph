@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 50,
+  "item": {
+    "id": "usage-limit-notices-recover",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Usage-limit notices recover reliably",
+    "summary": "If a brief account update collision happens as Murph reaches its hosted usage limit, the one-time explanation now retries instead of disappearing.",
+    "details": "Only the pre-delivery claim retries, and only once; message delivery itself is not repeated.",
+    "relevanceTags": ["hosted-runtime", "reliability"],
+    "sourcePullRequests": [2424]
+  }
+}

@@ -24,7 +24,7 @@ vi.mock('../src/assistant/outbox.js', () => ({
 }))
 
 describe('assistant ask continuation', () => {
-  it('builds an isolated turn and preserves reviewed group-delivery proof', () => {
+  it('builds an isolated turn on the canonical target and preserves reviewed group-delivery proof', () => {
     const routeAuthority = {
       channel: 'telegram' as const,
       containerMemberId: 'member-group',
@@ -57,12 +57,12 @@ describe('assistant ask continuation', () => {
       persistUserPromptOnFailure: false,
       reviewedAssistantAskCompletionExpiresAt:
         '2099-01-01T00:00:00.000Z',
-      sandbox: 'read-only',
       sessionId: 'session-private',
       suppressProviderFailureTranscriptAudit: true,
       turnTrigger: 'automation-auto-reply',
       userMessageContent: null,
     })
+    expect(message.sandbox).toBeUndefined()
     expect(message.acceptedTurnInput).toBeUndefined()
     expect(message.codexConfigOverrides).toBeUndefined()
   })
@@ -106,7 +106,7 @@ describe('assistant ask continuation', () => {
     }
   })
 
-  it('abandons a queued continuation intent when abort arrives after queueing', async () => {
+  it('abandons a queued continuation intent when final authorization throws', async () => {
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-ask-abort-after-queue-'),
     )
@@ -117,7 +117,7 @@ describe('assistant ask continuation', () => {
         threadId: 'thread-abort',
         vault,
       })
-      const abort = new DOMException('Foreground input arrived.', 'AbortError')
+      const abort = new DOMException('Authorization check failed.', 'AbortError')
       continuationMocks.markOutboxIntentTerminal.mockReset()
       continuationMocks.markOutboxIntentTerminal.mockResolvedValue(true)
 

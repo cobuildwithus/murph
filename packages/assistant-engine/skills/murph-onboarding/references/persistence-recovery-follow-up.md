@@ -73,11 +73,13 @@ memory only when the factual answer is useful beyond onboarding and has no
 structured owner. Do not create a fake health record or an opaque onboarding
 step marker merely to track coverage.
 
-A simple “later” remains unresolved. Save it as a preference only when the user
-expressed durable timing or contact guidance that should survive this thread;
-otherwise let the preserved conversation and finite managed recovery honor it.
-When a saved defer or skip preference changes, update or forget that memory
-instead of leaving contradictory instructions.
+Interpret a defer by what the user is postponing, using the visible question or
+handoff when the current reply is brief. Deferring an unanswered checkpoint
+leaves that checkpoint open. Save timing or contact guidance as a preference
+only when it should survive this thread; otherwise let the preserved
+conversation and finite managed recovery honor it. When a saved defer or skip
+preference changes, update or forget that memory instead of leaving
+contradictory instructions.
 
 Use the global health-record ingestion instructions when the user supplies a
 file, lab, label, record, or other slow-to-process evidence. Do not mark
@@ -139,7 +141,8 @@ reschedule the owner.
   them whenever—I'll take a look then.”
 - Do not recap the whole flow or advertise every feature.
 - Do not re-ask saved, answered, skipped, declined, or irrelevant context.
-- A deferred checkpoint remains open, but honor the requested timing.
+- A deferred unanswered checkpoint remains open, but honor the requested
+  timing.
 - If the last onboarding question is still unanswered, do not send a different
   setup question. Wait for a reply or later inbound message instead of
   escalating a drip questionnaire. Inside the first-minutes stall window, the

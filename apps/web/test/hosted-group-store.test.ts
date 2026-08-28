@@ -6,6 +6,9 @@ import {
   hostedVaultShareProjectionKindToScope,
   type HostedVaultShareFixedProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
+import {
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -70,7 +73,6 @@ import {
   ensureHostedGroupStructureForThreadContainerTx,
   HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
-  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   leaveHostedGroupMemberTx,
   prepareHostedGroupJoinOfferPostTx,
   readHostedGroupJoinView,
@@ -82,6 +84,9 @@ import {
 import {
   normalizeHostedVaultShareProjectionKinds,
 } from "@/src/lib/hosted-groups/join-policy";
+import {
+  HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
+} from "@/src/lib/hosted-vault-share/delivery-limits";
 
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
@@ -307,7 +312,7 @@ function buildTx(input?: {
           return input?.activeDestinationGrantCount ?? 0;
         }
         return input?.activeGroupGrantCount
-          ?? HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION;
+          ?? HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE;
       }),
       findUnique: vi.fn(async () => {
         return input?.activeShareAlreadyExists ? { status: "granted" } : null;
@@ -776,37 +781,6 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("propagates the central grant owner's bounded fan-out rejection", async () => {
-    const tx = buildTx();
-    mocks.grantHostedVaultShareTx
-      .mockResolvedValueOnce({
-        id: "share_profile",
-        requiresProjection: false,
-      })
-      .mockRejectedValueOnce(hostedOnboardingError({
-        code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
-        httpStatus: 409,
-        message: "The vault-share grant limit was reached.",
-        retryable: false,
-      }));
-
-    await expect(acceptHostedGroupJoinCodeTx({
-      expectedMembershipId: null,
-      joinCode: "join_1",
-      memberId: "member_grantor",
-      now: new Date("2026-07-01T00:00:00.000Z"),
-      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
-      tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
-      httpStatus: 409,
-    });
-
-    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(
-      expect.objectContaining({ projectionScope: SLEEP_SCOPE }),
-    );
-  });
-
   it("refuses to add a group vault-share grant beyond the destination projection cap", async () => {
     const tx = buildTx({
       activeDestinationGrantCount: HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
@@ -839,7 +813,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
   it("keeps an existing active group vault-share grant idempotent without recounting", async () => {
     const tx = buildTx({
-      activeGroupGrantCount: HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+      activeGroupGrantCount: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
       activeShareAlreadyExists: true,
       existingMembershipId: "membership_existing",
     });
@@ -2260,6 +2234,33 @@ describe("organic hosted-group materialization", () => {
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 
+  it("uses a provider title only when creating the group row", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: false,
+      ownerMemberId: "member_owner",
+    });
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      initialDisplayName: "Weekend Warriors",
+      now: new Date("2026-08-25T12:00:00.000Z"),
+      tx,
+    })).resolves.toMatchObject({ created: true });
+
+    expect(tx.hostedGroup.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ displayName: "Weekend Warriors" }),
+      select: { id: true },
+    });
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      initialDisplayName: "Renamed Provider Group",
+      now: new Date("2026-08-25T12:01:00.000Z"),
+      tx,
+    })).resolves.toMatchObject({ created: false });
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+  });
+
   it("repairs owner membership without rewriting an existing group configuration", async () => {
     const tx = buildGroupLinkTx({
       existingDisplayName: "Existing Group",
@@ -3436,10 +3437,11 @@ describe("readHostedGroupMembershipsForMember", () => {
           runtimeMemberId: "member_group_family",
         },
       ],
+      nextCursor: null,
       truncated: false,
     });
     expect(hostedGroupMemberFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: 26,
+      take: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1,
       where: { memberId: "member_self" },
     }));
     expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -3453,19 +3455,24 @@ describe("readHostedGroupMembershipsForMember", () => {
     }));
   });
 
-  it("returns at most 25 memberships and reports when more exist", async () => {
-    const membershipRows = Array.from({ length: 26 }, (_, index) => ({
-      id: `membership_${index + 1}`,
-      role: "member",
-      group: {
-        displayName: `Group ${index + 1}`,
-        joinCode: `join_${index + 1}`,
-        joinPolicyJson: JOIN_POLICY,
-        kind: "friends",
-        runtimeMemberId: `member_group_${index + 1}`,
-        _count: { members: index + 1 },
-      },
-    }));
+  it("returns a bounded membership page with a cursor for the remaining rows", async () => {
+    const pageCreatedAt = new Date("2026-08-01T12:00:00.000Z");
+    const membershipRows = Array.from(
+      { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1 },
+      (_, index) => ({
+        createdAt: pageCreatedAt,
+        id: `membership_${index + 1}`,
+        role: "member",
+        group: {
+          displayName: `Group ${index + 1}`,
+          joinCode: `join_${index + 1}`,
+          joinPolicyJson: JOIN_POLICY,
+          kind: "friends",
+          runtimeMemberId: `member_group_${index + 1}`,
+          _count: { members: index + 1 },
+        },
+      }),
+    );
     const hostedVaultShareFindMany = vi.fn(async () => []);
     const prisma = createPrismaStub({
       hostedGroupMember: { findMany: vi.fn(async () => membershipRows) },
@@ -3477,17 +3484,103 @@ describe("readHostedGroupMembershipsForMember", () => {
       prisma,
     });
 
-    expect(result.memberships).toHaveLength(25);
+    expect(result.memberships).toHaveLength(HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX);
     expect(result.memberships.at(0)?.displayName).toBe("Group 1");
-    expect(result.memberships.at(-1)?.displayName).toBe("Group 25");
+    expect(result.memberships.at(-1)?.displayName).toBe(
+      `Group ${HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX}`,
+    );
+    const expectedCursor = Buffer.from(JSON.stringify({
+      createdAt: pageCreatedAt.toISOString(),
+      id: `membership_${HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX}`,
+      version: 1,
+    }), "utf8").toString("base64url");
+    expect(result.nextCursor).toBe(expectedCursor);
     expect(result.truncated).toBe(true);
     expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         destinationMemberId: {
-          in: Array.from({ length: 25 }, (_, index) => `member_group_${index + 1}`),
+          in: Array.from(
+            { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX },
+            (_, index) => `member_group_${index + 1}`,
+          ),
         },
       }),
     }));
+  });
+
+  it("continues after an exact member-scoped membership cursor", async () => {
+    const cursorCreatedAt = new Date("2026-08-01T12:00:00.000Z");
+    const cursor = Buffer.from(JSON.stringify({
+      createdAt: cursorCreatedAt.toISOString(),
+      id: "membership_64",
+      version: 1,
+    }), "utf8").toString("base64url");
+    const hostedGroupMemberFindMany = vi.fn(async () => []);
+    const prisma = createPrismaStub({
+      hostedGroupMember: { findMany: hostedGroupMemberFindMany },
+      hostedVaultShare: { findMany: vi.fn(async () => []) },
+    });
+
+    await expect(readHostedGroupMembershipsForMember({
+      cursor,
+      memberId: "member_self",
+      prisma,
+    })).resolves.toEqual({
+      memberships: [],
+      nextCursor: null,
+      truncated: false,
+    });
+    expect(hostedGroupMemberFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          memberId: "member_self",
+          OR: [
+            { createdAt: { gt: cursorCreatedAt } },
+            { createdAt: cursorCreatedAt, id: { gt: "membership_64" } },
+          ],
+        },
+      }),
+    );
+  });
+
+  it("marks a malformed membership cursor invalid instead of treating it as exhaustion", async () => {
+    const hostedGroupMemberFindMany = vi.fn(async () => []);
+    const prisma = createPrismaStub({
+      hostedGroupMember: { findMany: hostedGroupMemberFindMany },
+      hostedVaultShare: { findMany: vi.fn(async () => []) },
+    });
+
+    const paddedCursor = `${Buffer.from(
+      JSON.stringify({
+        createdAt: "2026-08-01T12:00:00.000Z",
+        id: "membership_64",
+        version: 1,
+      }),
+      "utf8",
+    ).toString("base64url")}=`;
+    const nonCanonicalTimestampCursor = Buffer.from(JSON.stringify({
+      createdAt: "2026-08-01T12:00:00Z",
+      id: "membership_64",
+      version: 1,
+    }), "utf8").toString("base64url");
+
+    for (const cursor of [
+      "not-a-server-cursor",
+      paddedCursor,
+      nonCanonicalTimestampCursor,
+    ]) {
+      await expect(readHostedGroupMembershipsForMember({
+        cursor,
+        memberId: "member_self",
+        prisma,
+      })).resolves.toEqual({
+        cursorInvalid: true,
+        memberships: [],
+        nextCursor: null,
+        truncated: false,
+      });
+    }
+    expect(hostedGroupMemberFindMany).not.toHaveBeenCalled();
   });
 });
 

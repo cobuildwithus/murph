@@ -433,7 +433,7 @@ describe("HostedDataPrivacySettings", () => {
     );
   });
 
-  test("sends the typed deletion confirmation phrase when the delete flow is submitted", async () => {
+  test("deletes with the typed confirmation phrase without secure approval", async () => {
     mockHostedDataPrivacyDeleteFlowState();
 
     const { document, window } = loadLinkedom().parseHTML(
@@ -456,16 +456,12 @@ describe("HostedDataPrivacySettings", () => {
 
     await clickButton(container, "Delete account", window);
 
-    expect(mocks.authorize).toHaveBeenCalledWith("account.delete");
+    expect(mocks.authorize).not.toHaveBeenCalled();
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
       onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
       onSuccessfulResponseHeaders: expect.any(Function),
       payload: {
-        authorization: {
-          signature: `0x${"11".repeat(65)}`,
-          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
-        },
         confirmationPhrase: "DELETE MY ACCOUNT",
       },
       url: "/api/settings/privacy/delete",
@@ -476,6 +472,45 @@ describe("HostedDataPrivacySettings", () => {
     expect(
       mocks.publishBrowserVaultSessionEnding.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.requestHostedOnboardingJson.mock.invocationCallOrder[0]);
+  });
+
+  test("keeps deletion available when secure approval is unavailable", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, {
+        authenticated: true,
+        authorizationEnabled: false,
+      }));
+    });
+
+    expect(container.textContent).toContain("Data export is temporarily unavailable.");
+    assert.equal(findButton(container, "Export").disabled, true);
+    assert.equal(findButton(container, "Delete").disabled, false);
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.authorize).not.toHaveBeenCalled();
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: { confirmationPhrase: "DELETE MY ACCOUNT" },
+        url: "/api/settings/privacy/delete",
+      }),
+    );
   });
 
   test("sends the answered exit reason and note alongside the deletion", async () => {
@@ -505,10 +540,6 @@ describe("HostedDataPrivacySettings", () => {
     await clickButton(container, "Delete account", window);
 
     expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload).toEqual({
-      authorization: {
-        signature: `0x${"11".repeat(65)}`,
-        token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
-      },
       confirmationPhrase: "DELETE MY ACCOUNT",
       exitNote: "Texts were great, price was not.",
       exitReason: "too_expensive",
@@ -897,8 +928,7 @@ describe("HostedDataPrivacySettings", () => {
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
     });
-    expect(mocks.authorize).toHaveBeenNthCalledWith(2, "account.delete");
-    expect(mocks.authorize).toHaveBeenCalledTimes(2);
+    expect(mocks.authorize).not.toHaveBeenCalled();
   });
 
   test("links reconnect-required deletion guidance to the wearables recovery surface", async () => {
@@ -1014,36 +1044,6 @@ describe("HostedDataPrivacySettings", () => {
     // A placeholder holding the phrase reads as a pre-filled confirmation.
     expect(phraseInput.getAttribute("placeholder")).toBeNull();
     assert.equal(findButton(container, "Delete account").disabled, true);
-  });
-
-  test("an authorization failure does not invalidate an unchanged session", async () => {
-    mockHostedDataPrivacyDeleteFlowState();
-    mocks.authorize.mockRejectedValueOnce(new Error("authorization unavailable"));
-
-    const { document, window } = loadLinkedom().parseHTML(
-      "<html><body><div id='root'></div></body></html>",
-    );
-    installGlobals(window, document);
-    const container = document.getElementById("root");
-    assert.ok(container);
-
-    const root: Root = createRoot(container);
-    cleanupRender = async () => {
-      await act(async () => {
-        root.unmount();
-      });
-    };
-
-    await act(async () => {
-      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
-    });
-
-    await clickButton(container, "Delete account", window);
-
-    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
-    expect(mocks.publishBrowserVaultSessionEnding).not.toHaveBeenCalled();
-    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
-    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
   });
 
   test("does not submit deletion until the exact confirmation phrase is typed", async () => {

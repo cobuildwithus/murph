@@ -61,6 +61,12 @@ export type {
   CanonicalQuerySourceHash,
   QuerySourceManifestEntry,
 } from "./vault-source.ts";
+export {
+  QUERY_SOURCE_INVALID_CODE,
+  QueryVaultSourceError,
+  type QuerySourceIssue,
+  type QueryVaultSourceErrorDetails,
+} from "./source-errors.ts";
 export type {
   EntityFilter,
   ExperimentFilter,
@@ -69,6 +75,7 @@ export type {
   VaultEntitiesByFamily,
   VaultReadModel,
 } from "./model.ts";
+export { compareCanonicalEntities } from "./canonical-entities.ts";
 export type {
   CanonicalEntity,
   CanonicalEntityFamily,
