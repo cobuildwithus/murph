@@ -234,14 +234,14 @@ describe('Codex thread instructions', () => {
         name: 'member maintenance',
       },
     ] as const
-    const outputOnlyOverrides = [
-      'features.shell_tool=false',
-      'web_search="disabled"',
-      'features.apps=false',
-      'features.browser_use=false',
-      'features.plugins=false',
-      'features.multi_agent=false',
-    ]
+    const outputOnlyThreadConfig = {
+      'features.apps': false,
+      'features.browser_use': false,
+      'features.multi_agent': false,
+      'features.plugins': false,
+      'features.shell_tool': false,
+      web_search: 'disabled',
+    }
 
     for (const [index, scenario] of scenarios.entries()) {
       codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
@@ -266,9 +266,9 @@ describe('Codex thread instructions', () => {
             ? 'danger-full-access'
             : 'read-only',
         }),
-        codexConfigOverrides: scenario.maintenance !== null
-          ? []
-          : outputOnlyOverrides,
+        codexThreadConfig: scenario.maintenance !== null
+          ? null
+          : outputOnlyThreadConfig,
         developerInstructions: scenario.contract,
         dynamicTools: scenario.maintenance === 'group'
           ? [MURPH_GROUP_ROOM_MODEL_TOOL]
@@ -319,7 +319,7 @@ describe('Codex thread instructions', () => {
             : 'danger-full-access',
         )
       } else {
-        expect(appServerInput?.configOverrides).toEqual(outputOnlyOverrides)
+        expect(appServerInput?.threadConfig).toEqual(outputOnlyThreadConfig)
         expect(appServerInput?.dynamicTools).toEqual([])
         expect(appServerInput?.sandbox).toBe('read-only')
       }

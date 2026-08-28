@@ -24,6 +24,14 @@ export const isoTimestampSchema = z
 export const localDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a calendar date in YYYY-MM-DD form.')
+  .refine(
+    (value) => {
+      const parsed = new Date(`${value}T00:00:00.000Z`)
+      return Number.isFinite(parsed.getTime())
+        && parsed.toISOString().slice(0, 10) === value
+    },
+    'Expected a real calendar date in YYYY-MM-DD form.',
+  )
   .describe('Calendar date in YYYY-MM-DD form.')
 
 export const occurredAtOptionSchema = z

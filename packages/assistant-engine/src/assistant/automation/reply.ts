@@ -795,7 +795,10 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
           : [],
         reason: ASSISTANT_NO_REPLY_SUPPRESSION_REASON,
       }
-      if (event.messageReactionPending) {
+      if (
+        event.messageReactionPending ||
+        event.precedingReplyDeliveryContextOrdinal !== null
+      ) {
         deferredTerminalSuppressionEvidence.push(evidenceDraft)
       } else {
         const recordedAt = new Date().toISOString()
@@ -5808,8 +5811,11 @@ function buildTrustedHostedImageCompletionEffectRestriction(
   }
 }
 
-function buildTrustedHostedImageCompletionTurnContext(
-  inputs: readonly AssistantAutoReplyPromptInput[],
+export function buildTrustedHostedImageCompletionTurnContext(
+  inputs: readonly Pick<
+    AssistantAutoReplyPromptInput,
+    'inputId' | 'trustedHostedImageCompletion'
+  >[],
 ): string | null {
   const completions = inputs.flatMap((input) =>
     input.trustedHostedImageCompletion == null

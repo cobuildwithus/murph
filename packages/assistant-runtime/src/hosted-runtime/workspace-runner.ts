@@ -378,6 +378,10 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
+  awaitBackgroundMaintenanceBarrier?: ((input: {
+    drainPendingForegroundWake(): Promise<void>;
+    foregroundConversationWorkObserved(): boolean;
+  }) => Promise<void>) | null;
   checkpointRuntimeRedactedStatus?: ((
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
@@ -411,6 +415,7 @@ export interface HostedWorkspaceRunnerInput {
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
   now?: () => string;
+  onForegroundConversationWorkObserved?: (() => void) | null;
 }
 
 interface HostedMailboxPostCheckpointEffectsResult {
@@ -976,12 +981,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
   let foregroundMailboxImportLoop:
     ReturnType<typeof startHostedForegroundConversationMailboxImportLoop> | null = null;
-  const startForegroundMailboxImportLoop = async (): Promise<void> => {
+  const startForegroundMailboxImportLoop = async (): Promise<
+    ReturnType<typeof startHostedForegroundConversationMailboxImportLoop>
+  > => {
     if (foregroundMailboxImportLoop) {
-      return;
+      return foregroundMailboxImportLoop;
     }
     foregroundRuntimeWakeObservedAfterStop = false;
-    foregroundMailboxImportLoop = await withHostedCanonicalWritePort(
+    const startedLoop = await withHostedCanonicalWritePort(
       hostedCanonicalMailboxWritePort,
       async () => startHostedForegroundConversationMailboxImportLoop({
         checkpointRequestBuilder: checkpointRequestSession,
@@ -994,15 +1001,27 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         },
         onForegroundConversationWorkObserved: () => {
           foregroundConversationWorkObserved = true;
+          input.onForegroundConversationWorkObserved?.();
         },
         checkpointCanonicalMailboxImportProgress,
       }),
     );
-    input.trackLocalWorkspaceMutationCompletion?.(foregroundMailboxImportLoop.completion);
+    foregroundMailboxImportLoop = startedLoop;
+    input.trackLocalWorkspaceMutationCompletion?.(startedLoop.completion);
+    return startedLoop;
   };
   const mailboxImportBeforeForegroundLoop =
     checkpointRequestSession.latestMailboxImport();
-  await startForegroundMailboxImportLoop();
+  const foregroundMailboxImportLoopAtBarrier =
+    await startForegroundMailboxImportLoop();
+  await input.awaitBackgroundMaintenanceBarrier?.({
+    drainPendingForegroundWake: async () =>
+      await foregroundMailboxImportLoopAtBarrier.drainPendingWake(),
+    foregroundConversationWorkObserved: () =>
+      initialAssistantInputBatchHasWork
+      || initialMailboxImportHasForegroundConversationWork
+      || foregroundConversationWorkObserved,
+  });
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
     const activeLoop = foregroundMailboxImportLoop;
     if (!activeLoop) {
@@ -1945,13 +1964,22 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
   signal: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedWorkspaceRunnerAssistantInputBatch | null> {
-  const foregroundReplyDeferredForImmediateAssistantWork =
+  const foregroundReplyDeferredForLocalRerun =
     input.assistantPhaseResult.foregroundReplyFailed === undefined
-    && input.assistantPhaseResult.nextWakeReason === "assistant"
-    && typeof input.assistantPhaseResult.nextWakeAt === "string"
-    && hostedWorkspaceRunnerWakeIsImmediate(
-      input.assistantPhaseResult.nextWakeAt,
-      input.now,
+    && (
+      (
+        input.latestAssistantInputBatch === null
+        && input.assistantPhaseResult
+          .afterCheckpointKeepsForegroundImportLoop === true
+      )
+      || (
+        input.assistantPhaseResult.nextWakeReason === "assistant"
+        && typeof input.assistantPhaseResult.nextWakeAt === "string"
+        && hostedWorkspaceRunnerWakeIsImmediate(
+          input.assistantPhaseResult.nextWakeAt,
+          input.now,
+        )
+      )
     );
   const foregroundReplyCompletedCleanly =
     input.assistantPhaseResult.foregroundReplyFailed === 0;
@@ -1959,7 +1987,7 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
     input.acceptedInitialAssistantInputBatch === null
     || input.assistantPhaseResult.progressed !== true
     || (
-      !foregroundReplyDeferredForImmediateAssistantWork
+      !foregroundReplyDeferredForLocalRerun
       && !foregroundReplyCompletedCleanly
     )
     || input.selectedInitialAssistantInputIds.length === 0
@@ -1980,16 +2008,16 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
   const pendingSelectedInputIds = input.selectedInitialAssistantInputIds.filter(
     (inputId) => pendingInputIds.has(inputId),
   );
-  // Bounded assistant-owned system work can make durable progress and yield an
-  // immediate wake before the foreground reply phase starts. In that case every
-  // selected input is still pending and must be restored to the invocation-local
-  // rerun batch. Once a reply phase has run, retain the narrower handled-prefix
-  // repair behavior below.
+  // Foreground-causal system work can checkpoint before the foreground reply
+  // starts while deliberately retaining its import loop. With no distinct
+  // boundary tail, the still-pending selection must remain invocation-local
+  // even when the next owner wake is for model-free work. Once a reply phase
+  // has run, retain the narrower handled-prefix repair behavior below.
   if (
     pendingSelectedInputIds.length === 0
     || (
       pendingSelectedInputIds.length === input.selectedInitialAssistantInputIds.length
-      && !foregroundReplyDeferredForImmediateAssistantWork
+      && !foregroundReplyDeferredForLocalRerun
     )
   ) {
     return input.latestAssistantInputBatch;

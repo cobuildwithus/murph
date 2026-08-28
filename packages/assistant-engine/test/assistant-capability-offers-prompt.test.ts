@@ -195,7 +195,40 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('to join by reacting')
   })
 
-  it('routes participant evidence directly and keeps memberships as a bounded last resort', () => {
+  it('routes complete current-sender requests through the admitted group workflow', () => {
+    const section = getPromptSection(
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+        conversationScope: 'group',
+        hostedRuntime: true,
+      })).stableRouteCapabilityPrompt,
+      HOSTED_GROUPS_HEADER,
+    )
+
+    expect(section).toContain(
+      'asks for an answer that requires their own private history or context',
+    )
+    expect(section).toContain(
+      'choose `ask_current_sender` for an explicit answer in the group, `ask_current_sender_privately` for an explicit private answer',
+    )
+    expect(section).toContain('complete request or destination answer')
+    expect(section).toContain('never add `question`')
+    expect(section).toContain('do not tell them to switch chats')
+    expect(section).toContain(
+      '`clarify_current_sender` only when the answer destination is genuinely ambiguous',
+    )
+    expect(section).toContain(
+      "Use the matching continuation action only when the same sender's next reply solely selects the group or private destination",
+    )
+    expect(section).toContain('If that reply adds or changes substance')
+    expect(section).toContain(
+      'ask the sender to restate one complete, self-contained request and its intended answer destination in a single next message',
+    )
+    expect(section).toContain(
+      'treat that accepted message as a new request, not a continuation',
+    )
+  })
+
+  it('lists memberships before direct consultation and clarifies from safe inventory labels', () => {
     const directLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
     )
@@ -214,41 +247,56 @@ describe('assistant capability-offers prompt contract', () => {
       HOSTED_GROUPS_HEADER,
     )
 
-    expect(directLayers.prompt).toContain('last resort for a generic group cue')
     expect(directSection).toContain(
-      'names a visible group',
+      'call `murph.group_membership action="list_memberships"`',
     )
     expect(directSection).toContain(
-      'pass that name as `groupLabel` to `murph.group_consult` without calling `list_memberships`',
+      'joined-group consultation is available only for groups Murph has already joined',
+    )
+    expect(directSection).toContain('cannot access an unjoined device chat')
+    expect(directSection).toContain(
+      'State that distinction for capability questions',
     )
     expect(directSection).toContain(
-      'otherwise run `vault-cli memory show`',
+      'search/load deferred `murph.group_consult` via `tool_search` or code-mode `ALL_TOOLS` before redirecting or denying',
     )
     expect(directSection).toContain(
-      'use "a member" only when canonical memory has no preferred name',
-    )
-    expect(directSection).toContain('club, team, community, or shared challenge')
-    expect(directSection).toContain(
-      'call `murph.group_consult action="ask"` or `action="handoff"` directly with `participantTarget`',
-    )
-    expect(directSection).toContain('without calling `list_memberships`')
-    expect(directSection).toContain(
-      'include only other people, never the requester/self',
-    )
-    expect(directSection).toContain('convert total chat size only when clear')
-    expect(directSection).toContain(
-      'without an exact title or participant evidence',
+      'do not claim this build cannot access or message a joined group',
     )
     expect(directSection).toContain(
-      'Accept only one membership across the complete result or one exact normalized visible-label match',
+      'Select only an exact opaque `membershipId` returned in this conversation',
     )
-    expect(directSection).toContain('ask one narrow clarification')
+    expect(directSection).toContain(
+      'while `nextCursor` is nonnull, call `list_memberships` again with that exact cursor',
+    )
+    expect(directSection).toContain("complete inventory's titles")
+    expect(directSection).not.toContain('If the candidate is not settled')
+    expect(directSection).toContain(
+      'send only identity-neutral factual context; the host supplies any group-safe attribution',
+    )
+    expect(directSection).not.toContain('memory show')
+    expect(directSection).toContain(
+      '`participantRoster.participantCount`, which is the real chat participant count',
+    )
+    expect(directSection).toContain(
+      'Never use `memberCount` for this clarification',
+    )
+    expect(directSection).toContain(
+      'Never treat `truncated` or one entry\'s unavailable participant roster as global unavailability',
+    )
+    expect(directSection).toContain(
+      'every inventory entry containing that safe label remains a candidate',
+    )
+    expect(directSection).toContain(
+      'Do not treat people the member omitted as exclusions unless they explicitly say only',
+    )
+    expect(directSection).toContain('ask one concise natural clarification')
+    expect(directSection).toContain(
+      'give every candidate its own real participant count or other safe label',
+    )
     expect(directSection).toContain('paste-or-screenshot fallback')
-    expect(directSection).toContain('distinct nonblank visible labels')
-    expect(directSection).toContain('Never fuzzy-match')
-    expect(directSection).toContain('select by role or newness')
-    expect(directSection).toContain('expose identifiers, or fan out')
-    expect(directSection).toContain('ordinary ambiguity without a group cue')
+    expect(directSection).toContain('Never expose, quote, edit, infer')
+    expect(directSection).toContain('never guess among unresolved entries or fan out')
     expect(directSection).toContain('Track each cursor chain separately')
     expect(directSection).toContain(
       'When one chain returns its null next cursor, that chain is exhausted for this turn',
@@ -258,6 +306,8 @@ describe('assistant capability-offers prompt contract', () => {
     )
     expect(groupPrompt).not.toContain('last resort for a generic group cue')
     expect(unverifiedPrompt).not.toContain('last resort for a generic group cue')
+    expect(groupPrompt).not.toContain('cannot access an unjoined device chat')
+    expect(unverifiedPrompt).not.toContain('cannot access an unjoined device chat')
     expect(groupPrompt).not.toContain('names a visible group')
     expect(unverifiedPrompt).not.toContain('names a visible group')
   })
@@ -468,6 +518,8 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('`action="share_contact_card"` are available')
     expect(section).toContain('not authenticated strongly enough')
     expect(section).toContain('share a contact card')
+    expect(section).not.toContain('ask_current_sender')
+    expect(section).not.toContain('requires their own private history or context')
   })
 
   it('keeps group-email transport restrictions without hosted group tools', () => {

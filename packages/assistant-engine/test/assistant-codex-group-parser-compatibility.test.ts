@@ -25,8 +25,16 @@ type GroupFamilyName = keyof typeof GROUP_FAMILY_ACTIONS;
 type GroupAction = (typeof GROUP_FAMILY_ACTIONS)[GroupFamilyName][number];
 
 const GROUP_ACTION_FIXTURES = {
-  ask: { action: "ask", question: "What changed this week?" },
-  handoff: { action: "handoff", context: "The member completed the workout." },
+  ask: {
+    action: "ask",
+    membershipId: "membership-test",
+    question: "What changed this week?",
+  },
+  handoff: {
+    action: "handoff",
+    context: "The member completed the workout.",
+    membershipId: "membership-test",
+  },
   ask_current_sender: { action: "ask_current_sender", message_ref: MESSAGE_REF },
   ask_current_sender_privately: {
     action: "ask_current_sender_privately",
@@ -267,11 +275,6 @@ describe("murph.group parser-first family compatibility", () => {
   it("does not treat unknown or legacy-only actions as read_current", () => {
     expect(readMurphDynamicToolRequest(groupToolCall("group_membership", {
       action: "future_group_action",
-    }))).toMatchObject({ kind: "invalid-group-arguments" });
-
-    expect(readMurphDynamicToolRequest(groupToolCall("group_consult", {
-      action: "message_current_sender",
-      message_ref: MESSAGE_REF,
     }))).toMatchObject({ kind: "invalid-group-arguments" });
 
     expect(readMurphDynamicToolRequest(groupToolCall("group_membership", {

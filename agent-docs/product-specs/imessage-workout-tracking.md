@@ -207,6 +207,14 @@ creation write; Murph never starts an empty event and appends the initial
 exercises. Exact member-stated repetitions for every set of an exercise are
 stored on that exercise in that creation write.
 
+Every newly authored ad-hoc exercise also carries one explicit result family.
+Resistance exercises carry `weight_reps` plus an lb/kg editor hint from the
+member's current request or saved strength-unit preference, even when the load
+itself is still unknown; the unknown load remains empty. Unloaded bodyweight
+work carries `bodyweight` and no resistance-unit hint. The targeted start and
+exercise-add commands reject missing result metadata before canonical
+persistence instead of emitting an ambiguous native result field.
+
 Murph verifies the successful creation result before issuing the exact old
 workout delete with the proposal-time lifecycle revision. It never deletes
 first. A creation failure leaves the old workout untouched. A stale or failed

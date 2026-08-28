@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-26
+Last verified: 2026-08-27
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -164,58 +164,48 @@ narrow injected boundaries and prove acquisition ordering, success, relevant
 failure exits, exactly-once release, and awaited cleanup. Text inspection may
 supplement that proof, but it cannot establish runtime cleanup behavior.
 
-Native companion auth/control/device-sync PRs additionally use the applicable
-`Native iOS hosted E2E` and `Native Android hosted E2E` statuses described in
-`agent-docs/references/testing-ci-map.md`.
-A canceled native workflow must not be rerun directly because the rerun retains
-its original queue identity. Manual native retry is infrastructure-only. From
-an authenticated operator checkout, use
-`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code xcodebuild_failed`
-only for the explicit allowlisted iOS `xcodebuild_failed` infrastructure
-failure, after inspecting and recording that closed failure code from the
-private run. The supplied failure code is an operator attestation: the helper
-validates the allowlisted literal but does not discover or verify its run
-provenance. When the Android controller reports that a direct workflow rerun
-could not enter the live queue, its status supplies the corresponding
-attestation; use
-`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code android_workflow_rerun`.
-Non-allowlisted journey, product, legacy-contract, and workflow-contract
-literals are rejected. The helper requires the PR to remain ready and
-revalidates the open same-repository human-authored PR and exact current head
-before rerunning a successful exact-head Repo Hygiene owner. Its completion
-creates a fresh applicable iOS and Android waiter without widening the
-protected environment or secret boundary.
-A status description that records a real pass is production-shaped evidence:
-exact hosted PR Web deployment plus real Privy/Junction and HealthKit or Health
-Connect native flow.
-Path-filtered informational success explicitly records that no real journey ran
-and must not become a required-check substitute. UI completion is not enough;
-trusted orchestration must also prove the exact candidate is anonymously reachable,
-a freshly created fixed Privy principal exists, and a connected real Junction
-`apple_health_kit` or `health_connect` provider exists before cleanup. Local
-mocked or hosted-local tests do not replace it. Runtime credentials stay in the dedicated Vercel
-custom environment; the cleanup/dispatch credentials stay only in protected
-Actions environments. Junction cleanup completely enumerates the configured
-sandbox team, validates every returned team id, and deletes at most one user in
-the lane's explicit client-user-id namespace before touching the isolated
-database; unrelated sandbox users are never cleanup targets. Because a Junction
-Team API key still has full team data access, a shared team is allowed only for
-disposable sandbox identities and never for staging, production, or real-person
-data.
-PR reset ownership is `orchestrator_owned_reset`, while production canary mode
-is non-destructive and receives none of that authority. Controller child
-commands and direct PostgreSQL reads are explicitly time-bounded.
-The Android controller additionally binds the exact private Android commit to
-an immutable lightweight tag and a short dispatch lease. It mints short-lived
-GitHub App installation credentials inside the existing protected controller
-owner and refreshes them before expiry; the App private key is removed from the
-process environment before any child command. If a dispatch receipt is
-uncertain, or a known run cannot be proven terminal after cancellation, cleanup
-remains fenced through the lease, the private job timeout, and a terminal grace
-window. Raw Android
-instrumentation output and provider prose are never uploaded or published;
-only the private workflow's closed allowlisted stage summary may reach Actions
-output. See `agent-docs/operations/native-android-hosted-e2e.md`.
+Native iOS and Android hosted E2E are production canaries, not pull-request
+statuses. The trusted default-branch controllers run on staggered six-hour
+schedules: iOS at minute 17 and Android at minute 47. Each cheap selection job
+reads the latest completed scheduled outcome for its own workflow and skips the
+native job only when that outcome succeeded at the current protected-`main`
+SHA. Missing history, a newer SHA, or a latest failure admits the canary. An
+explicit rerun of the same trusted schedule attempt bypasses the no-change
+skip. Reviewed native source pins live in
+`.github/native-hosted-e2e-controller.json`, so a source rotation advances the
+protected-main checkpoint.
+
+Neither controller admits `workflow_run`, `deployment_status`, or
+branch-selectable `workflow_dispatch` events, and neither publishes a commit
+status. Fixed non-canceling workflow concurrency bounds each platform to one
+running and one pending controller. The workflows do not receive the destructive
+PR database, Privy, Junction-namespace, or candidate-deployment authority.
+
+A scheduled native pass is production-shaped evidence for the current
+protected-`main` checkpoint and the exact deployed Web SHA it dispatches.
+Trusted orchestration proves the scheduled revision remains in `main` history,
+then resolves the current production alias. When the alias trails `main`, the
+existing Vercel build classifier must prove the complete intervening diff is
+eligible dated release notes; otherwise the controller fails before paid
+dispatch and retries. It dispatches that deployed SHA with the reviewed
+immutable iOS or Android source in `production_canary` mode. The private journey uses
+`non_destructive_existing_identity`; local mocked or hosted-local tests do not
+replace it. The iOS and Android production environments remain separate and
+contain only their repository dispatch credentials plus production-alias proof
+authority. Source refs and SHAs are committed policy, not environment values.
+
+Controller child commands are time-bounded. Android additionally binds the
+private commit to an immutable lightweight tag and a short dispatch lease,
+refreshes repository-scoped GitHub App credentials before expiry, and removes
+the App private key from the process environment before child work. If a
+dispatch receipt is uncertain, or a known run cannot be proven terminal after
+cancellation, execution remains fenced through the lease, private-job timeout,
+and terminal grace window. Raw native instrumentation and provider prose are
+never uploaded; only closed allowlisted stage summaries may reach Actions
+output. Deterministic workflow and dispatcher proof is owned by
+`node --test scripts/native-ios-hosted-e2e.test.mjs` and
+`node --test scripts/native-android-hosted-e2e.test.mjs`. See
+`agent-docs/operations/native-android-hosted-e2e.md`.
 
 ## Expensive And Stochastic Proof Order
 
@@ -1188,7 +1178,7 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
   origin used only as an inequality guard. An isolated Vercel preview
   database/crypto/control-plane boundary is a prerequisite; production Web or
   production stateful secrets are never a preview bootstrap fallback.
-- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, patches the native bundled Codex model catalog so `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` support the OpenAI flex service tier, validates those entries, and copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app`; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
+- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, patches the native bundled Codex model catalog so `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` support the OpenAI flex service tier, validates those entries, and copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app`; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
 - The local assistant daemon entrypoint lives under `packages/assistantd`; `murph-assistantd` binds to one vault, rejects non-loopback hosts, requires a bearer token on every route, sets `MURPH_ASSISTANTD_DISABLE_CLIENT=1` in its own process so daemon-local calls do not recurse back through HTTP, and now fronts the steady-state assistant session/message/options flows plus session/status/outbox/cron inspection and serializable automation control whenever the CLI invocation does not need local-only hooks such as live provider events, foreground inbox events, abort propagation, or local session/transcript snapshots.
 - The current runner scaffold now ships as a preassembled deploy bundle copied into the native image rather than rebuilding the workspace from repo source inside Docker. `apps/cloudflare/DEPLOY.md` is the durable guide for the current staged manual deploy path.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.

@@ -39,10 +39,16 @@ export type CodexAppServerSteerRequestInput = Omit<
   images?: readonly CodexAppServerPreparedImageInput[] | null
 }
 
+type CodexAppServerPreparedThreadInput = Omit<
+  CodexAppServerTurnInput,
+  'approvalPolicy'
+> & {
+  approvalPolicy: 'never'
+  workingDirectory: string
+}
+
 export function buildCodexThreadStartParams(
-  input: CodexAppServerTurnInput & {
-    workingDirectory: string
-  },
+  input: CodexAppServerPreparedThreadInput,
 ): Record<string, unknown> {
   return {
     ...buildCodexThreadContextParams({
@@ -66,9 +72,7 @@ export function buildCodexThreadMetadataResumeParams(
 }
 
 export function buildCodexThreadResumeParams(input: {
-  input: CodexAppServerTurnInput & {
-    workingDirectory: string
-  }
+  input: CodexAppServerPreparedThreadInput
   codexThreadId: string
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
@@ -81,9 +85,7 @@ export function buildCodexThreadResumeParams(input: {
 export function buildCodexThreadContextParams(input: {
   includeInstructions: boolean
   includeServiceName: boolean
-  input: CodexAppServerTurnInput & {
-    workingDirectory: string
-  }
+  input: CodexAppServerPreparedThreadInput
 }): Record<string, unknown> {
   const permissions = normalizeNullableString(input.input.permissions)
   if (permissions && input.input.sandbox) {
@@ -98,7 +100,7 @@ export function buildCodexThreadContextParams(input: {
   }
 
   return stripUndefinedRpcParams({
-    approvalPolicy: mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
+    approvalPolicy: input.input.approvalPolicy,
     baseInstructions: input.includeInstructions
       ? normalizeNullableString(input.input.baseInstructions)
       : undefined,
@@ -128,9 +130,7 @@ export function buildCodexThreadContextParams(input: {
 }
 
 function buildCodexThreadResumeContextParams(
-  input: CodexAppServerTurnInput & {
-    workingDirectory: string
-  },
+  input: CodexAppServerPreparedThreadInput,
 ): Record<string, unknown> {
   const permissions = normalizeNullableString(input.permissions)
   if (permissions && input.sandbox) {
@@ -145,13 +145,16 @@ function buildCodexThreadResumeContextParams(
   }
 
   return {
-    approvalPolicy: mapCodexAppServerApprovalPolicy(input.approvalPolicy),
+    approvalPolicy: input.approvalPolicy,
     cwd: input.workingDirectory,
     model: normalizeNullableString(input.model),
     modelProvider: normalizeNullableString(input.modelProvider),
     permissions,
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots
       ? [...input.runtimeWorkspaceRoots]
+      : undefined,
+    config: input.threadConfig
+      ? { ...input.threadConfig }
       : undefined,
     sandbox: permissions
       ? undefined
@@ -236,12 +239,6 @@ export function buildCodexAppServerInputItems(input: {
       path: image.path,
     })),
   ]
-}
-
-export function mapCodexAppServerApprovalPolicy(
-  approvalPolicy: string | null | undefined,
-): 'never' {
-  return resolveSupportedCodexAppServerApprovalPolicy(approvalPolicy)
 }
 
 export function mapCodexAppServerSandboxMode(

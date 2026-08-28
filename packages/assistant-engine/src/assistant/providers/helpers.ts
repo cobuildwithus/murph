@@ -213,12 +213,11 @@ export function resolveAssistantProviderPrompt(
     .join('\n\n')
 }
 
-export function mergeCodexConfigOverrides(input: {
-  modelProvider?: string | null
-  showThinkingTraces: boolean
-}): readonly string[] | undefined {
+export function resolveCodexModelProviderConfigOverrides(
+  modelProviderInput?: string | null,
+): readonly string[] | undefined {
   const overrides: string[] = []
-  const modelProvider = normalizeNullableString(input.modelProvider)
+  const modelProvider = normalizeNullableString(modelProviderInput)
   const modelProviderConfig =
     resolveAssistantCodexModelProviderConfig(modelProvider)
 
@@ -264,20 +263,7 @@ export function mergeCodexConfigOverrides(input: {
       'false',
     )
   }
-  // Multi-agent V2 is enabled by the hosted config.toml's
-  // [features.multi_agent_v2] table (which also carries Murph's
-  // proactive-delegation tool and mode hints). A CLI
-  // `--config features.multi_agent_v2=true` boolean would take precedence
-  // over that table and silently reset the feature to defaults, dropping
-  // those configured hints — never emit it.
-  if (!input.showThinkingTraces) {
-    return overrides.length > 0 ? overrides : undefined
-  }
-
-  upsertCodexConfigOverride(overrides, 'model_reasoning_summary', '"auto"')
-  upsertCodexConfigOverride(overrides, 'hide_agent_reasoning', 'false')
-
-  return overrides
+  return overrides.length > 0 ? overrides : undefined
 }
 
 function formatCodexTomlString(value: string): string {

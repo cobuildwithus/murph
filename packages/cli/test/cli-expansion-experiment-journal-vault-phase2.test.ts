@@ -3546,11 +3546,7 @@ test.sequential(
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
 
-      const regexShapedLegacyDate = await runSliceCli<{
-        created: boolean
-        date: string
-        journalPath: string
-      }>([
+      const invalidCalendarDate = await runSliceCli([
         'journal',
         'ensure',
         '2026-02-30',
@@ -3711,12 +3707,11 @@ test.sequential(
         vaultRoot,
       ])
 
-      assert.equal(regexShapedLegacyDate.ok, true)
-      assert.equal(requireData(regexShapedLegacyDate).created, true)
-      assert.equal(requireData(regexShapedLegacyDate).date, '2026-02-30')
+      assert.equal(invalidCalendarDate.ok, false)
+      assert.equal(invalidCalendarDate.error?.code, 'VALIDATION_ERROR')
       assert.equal(
-        requireData(regexShapedLegacyDate).journalPath,
-        'journal/2026/2026-02-30.md',
+        invalidCalendarDate.error?.fieldErrors?.some((issue) => issue.path === 'date'),
+        true,
       )
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
@@ -3776,7 +3771,7 @@ test.sequential(
       )
       assert.equal('markdown' in (requireData(listed).items[0] ?? {}), false)
 
-      await access(path.join(vaultRoot, 'journal/2026/2026-02-30.md'))
+      await assert.rejects(access(path.join(vaultRoot, 'journal/2026/2026-02-30.md')))
       const journalPath = path.join(vaultRoot, 'journal/2026/2026-03-12.md')
       const journalMarkdown = await readFile(journalPath, 'utf8')
       assert.match(journalMarkdown, /Evening note from the CLI append helper\./u)

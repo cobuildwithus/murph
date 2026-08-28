@@ -1069,6 +1069,7 @@ export function buildWranglerLocalDevConfig(
       // cloudflare-dev/runnercontainer:<tag>" until the harness times out.
       HOSTED_RUNNER_CONTAINER_CLASS: input.className,
       HOSTED_RUNNER_LOCAL_BUILD_ID: hostedRunnerLocalBuildId,
+      HOSTED_RUNNER_LOCAL_WORKER_NAME: workerName,
     },
     instance_type: "standard-1",
     max_instances: input.maxInstances,

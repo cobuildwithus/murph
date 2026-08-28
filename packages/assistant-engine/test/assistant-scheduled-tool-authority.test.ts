@@ -149,7 +149,6 @@ describe("scheduled assistant tool authority", () => {
     });
 
     const result = await executeMurphDynamicToolRequest({
-      assistantStyleSettingsAvailable: true,
       env: {},
       fetchImpl: fetch,
       hostedToolContext: context,

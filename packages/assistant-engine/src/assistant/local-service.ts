@@ -1369,6 +1369,37 @@ export async function sendAssistantMessageLocal(
             ),
           ]
         }
+        function resolveNoReplyAcceptedInputIds(
+          deliveryContextOrdinal: number,
+          precedingReplyDeliveryContextOrdinal: number | null,
+        ): readonly string[] {
+          if (precedingReplyDeliveryContextOrdinal === null) {
+            return resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+              deliveryContextOrdinal,
+            )
+          }
+          if (
+            precedingReplyDeliveryContextOrdinal < 0 ||
+            precedingReplyDeliveryContextOrdinal >= deliveryContextOrdinal ||
+            deliveryContextOrdinal >=
+              acceptedInputIdsByDeliveryContextOrdinal.length
+          ) {
+            throw new VaultCliError(
+              'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+              'Assistant no-reply selection referenced an invalid delivery context ordinal.',
+            )
+          }
+          return [
+            ...new Set(
+              acceptedInputIdsByDeliveryContextOrdinal
+                .slice(
+                  precedingReplyDeliveryContextOrdinal + 1,
+                  deliveryContextOrdinal + 1,
+                )
+                .flat(),
+            ),
+          ]
+        }
         const authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer =
           async (authorizationInput) => {
             const deliveryContextOrdinal =
@@ -1553,17 +1584,29 @@ export async function sendAssistantMessageLocal(
           const deliveryContextOrdinal =
             selectedProviderResult.acceptedNoReplyDeliveryContextOrdinals?.at(-1)
             ?? selectedProviderResult.responseDeliveryContextOrdinal
+          const precedingReplyDeliveryContextOrdinal = Math.max(
+            -1,
+            ...(selectedProviderResult.precedingResponseSegments ?? [])
+              .map((segment) => segment.deliveryContextOrdinal)
+              .filter((ordinal) => ordinal < deliveryContextOrdinal),
+          )
           await currentInput.onFinishWithoutReplyAccepted?.({
-            acceptedInputIds:
-              resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
-                deliveryContextOrdinal,
-              ),
+            acceptedInputIds: resolveNoReplyAcceptedInputIds(
+              deliveryContextOrdinal,
+              precedingReplyDeliveryContextOrdinal < 0
+                ? null
+                : precedingReplyDeliveryContextOrdinal,
+            ),
             deliveryContextOrdinal,
             messageReactionPending:
               (selectedProviderResult.reactions ?? []).some(
                 (reaction) =>
                   reaction.deliveryContextOrdinal <= deliveryContextOrdinal,
               ),
+            precedingReplyDeliveryContextOrdinal:
+              precedingReplyDeliveryContextOrdinal < 0
+                ? null
+                : precedingReplyDeliveryContextOrdinal,
           })
         }
         type CurrentProviderRequestResult =
@@ -1584,6 +1627,7 @@ export async function sendAssistantMessageLocal(
           providerRequestAcceptedInputItems = acceptedInputItemsForProviderRequest
           providerRequestStartedAtMs = null
           providerResultReturnedAt = null
+          let failedNoReplyRecoveryBlocked = false
 
           const onFirstAssistantResponseCompleted = () => {
             if (holdGroupReplyDraft && providerRequestOrdinal === 0) {
@@ -1611,6 +1655,8 @@ export async function sendAssistantMessageLocal(
               const deliveryContextOrdinal =
                 providerRequestDeliveryContextBaseOrdinal +
                 event.deliveryContextOrdinal
+              failedNoReplyRecoveryBlocked ||=
+                event.precedingReplyDeliveryContextOrdinal !== null
               await drainLiveSteeredActiveTurnInputs({
                 continuation: providerRequestContinuation,
                 sessionId: currentSession.sessionId,
@@ -1622,14 +1668,16 @@ export async function sendAssistantMessageLocal(
                   prompt: currentInput.prompt,
                   vault: currentInput.vault,
                 })
-                const acceptedInputIds =
-                  resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
-                    deliveryContextOrdinal,
-                  )
+                const acceptedInputIds = resolveNoReplyAcceptedInputIds(
+                  deliveryContextOrdinal,
+                  event.precedingReplyDeliveryContextOrdinal,
+                )
                 await currentInput.onFinishWithoutReplyAccepted?.({
                   acceptedInputIds,
                   deliveryContextOrdinal,
                   messageReactionPending: event.messageReactionPending,
+                  precedingReplyDeliveryContextOrdinal:
+                    event.precedingReplyDeliveryContextOrdinal,
                 })
               }
             },
@@ -1759,6 +1807,7 @@ export async function sendAssistantMessageLocal(
               providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
             const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
             const recoverableNoReplyDeliveryContextOrdinal =
+              !failedNoReplyRecoveryBlocked &&
               latestAcceptedDeliveryContextOrdinal >= 0 &&
               acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
                 ? latestAcceptedDeliveryContextOrdinal

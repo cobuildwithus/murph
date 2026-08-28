@@ -484,7 +484,32 @@ describe("helper barrel exports", () => {
     ]);
     expect(JSON.stringify(eventContractError.context?.issues)).not.toContain("private-submitted");
     expect(eventContractError.context).not.toHaveProperty("errors");
+    expect(eventContractError.context).not.toHaveProperty("hint");
     expect(formatStructuredErrorMessage(eventContractError)).not.toContain("private-submitted");
+
+    const storedEventContractError = toEventUpsertVaultCliError(
+      Object.assign(new Error("Bad stored event"), {
+        name: "VaultError",
+        code: "EVENT_CONTRACT_INVALID",
+        details: {
+          stage: "read",
+          errors: ["$.title: private-stored-title is invalid"],
+        },
+      }),
+    );
+    expect(storedEventContractError).toEqual(
+      expect.objectContaining({
+        code: "contract_invalid",
+        context: expect.objectContaining({
+          stage: "read",
+          hint: "Run vault validate, then repair or restore the event ledger before retrying.",
+          issues: [{ code: "custom", publicPath: ["title"] }],
+        }),
+      }),
+    );
+    expect(formatStructuredErrorMessage(storedEventContractError)).not.toContain(
+      "private-stored-title",
+    );
 
     const assessmentContractError = toAssessmentImportVaultCliError(
       Object.assign(new Error("Bad assessment"), {

@@ -103,8 +103,9 @@ test("createDeviceSyncClient surfaces invalid JSON responses from the daemon", a
       error instanceof VaultCliError &&
       error.code === "device_sync_invalid_response" &&
       /invalid JSON payload/u.test(error.message) &&
-      error.context?.baseUrl === "http://127.0.0.1:8788" &&
-      error.context?.path === "/providers",
+      error.context?.stage === "response" &&
+      !("baseUrl" in (error.context ?? {})) &&
+      !("path" in (error.context ?? {})),
   );
 });
 
@@ -133,9 +134,115 @@ test("createDeviceSyncClient validates connection authorization URLs before open
     (error) =>
       error instanceof VaultCliError &&
       error.code === "device_sync_invalid_response" &&
-      error.context?.path === "/providers/oura/connect",
+      error.context?.stage === "response",
   );
   assert.equal(openedUrl, null);
+});
+
+test("createDeviceSyncClient bounds unavailable requests without leaking transport details", async () => {
+  const privateTransportDetail = "private-device-transport-detail";
+  const client = createDeviceSyncClient({
+    baseUrl: "http://127.0.0.1:8788",
+    timeoutMs: 5,
+    fetchImpl: async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      signal?.addEventListener("abort", () => {
+        reject(new Error(privateTransportDetail));
+      }, { once: true });
+    }),
+  });
+
+  await assert.rejects(
+    () => client.listProviders(),
+    (error) => {
+      if (!(error instanceof VaultCliError)) return false;
+      const projection = projectVaultCliError(error);
+      assert.equal(projection.code, "device_sync_timeout");
+      assert.equal(projection.retryable, true);
+      assert.equal(projection.stage, "transport");
+      assert.match(projection.message, /retry/u);
+      assert.equal(JSON.stringify(projection).includes(privateTransportDetail), false);
+      return true;
+    },
+  );
+});
+
+test("createDeviceSyncClient makes ambiguous POST transport recovery explicit", async () => {
+  const privateTransportDetail = "private-device-write-transport-detail";
+  const client = createDeviceSyncClient({
+    baseUrl: "http://127.0.0.1:8788",
+    fetchImpl: async () => {
+      throw new TypeError(privateTransportDetail);
+    },
+  });
+
+  await assert.rejects(
+    () => client.beginConnection({ provider: "oura" }),
+    (error) => {
+      if (!(error instanceof VaultCliError)) return false;
+      const projection = projectVaultCliError(error);
+      assert.equal(projection.retryable, false);
+      assert.equal(projection.stage, "transport");
+      assert.match(projection.message, /may have been received/u);
+      assert.match(projection.message, /Inspect current device sync state/u);
+      assert.doesNotMatch(projection.message, /retry|try again/iu);
+      assert.equal(JSON.stringify(projection).includes(privateTransportDetail), false);
+      return true;
+    },
+  );
+});
+
+test("createDeviceSyncClient keeps ambiguous POST failures non-retryable", async () => {
+  const client = createDeviceSyncClient({
+    baseUrl: "http://127.0.0.1:8788",
+    fetchImpl: async () => new Response(JSON.stringify({
+      error: {
+        code: "DEVICE_SYNC_BUSY",
+        message: "Try again",
+        retryable: true,
+      },
+    }), { status: 503 }),
+  });
+
+  await assert.rejects(
+    () => client.beginConnection({ provider: "oura" }),
+    (error) => {
+      if (!(error instanceof VaultCliError)) return false;
+      const projection = projectVaultCliError(error);
+      assert.equal(projection.code, "DEVICE_SYNC_BUSY");
+      assert.equal(projection.retryable, false);
+      assert.equal(projection.stage, "response");
+      assert.match(projection.message, /may have been received/u);
+      assert.match(projection.message, /Inspect current device sync state/u);
+      assert.doesNotMatch(projection.message, /retry|try again/iu);
+      return true;
+    },
+  );
+});
+
+test("createDeviceSyncClient classifies response body failures without echoing causes", async () => {
+  const privateBodyFailure = "private-device-body-failure";
+  const client = createDeviceSyncClient({
+    baseUrl: "http://127.0.0.1:8788",
+    fetchImpl: async () => new Response(new ReadableStream({
+      pull() {
+        throw new Error(privateBodyFailure);
+      },
+    }), { status: 200 }),
+  });
+
+  await assert.rejects(
+    () => client.listProviders(),
+    (error) => {
+      if (!(error instanceof VaultCliError)) return false;
+      const projection = projectVaultCliError(error);
+      assert.equal(projection.code, "device_sync_response_unavailable");
+      assert.equal(projection.retryable, true);
+      assert.equal(projection.stage, "response");
+      assert.equal(JSON.stringify(projection).includes(privateBodyFailure), false);
+      return true;
+    },
+  );
 });
 
 test("createDeviceSyncClient keeps malformed connection responses fieldless", async () => {

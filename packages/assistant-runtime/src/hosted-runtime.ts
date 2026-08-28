@@ -4,9 +4,7 @@ import path from "node:path";
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
-  attachHostedRuntimeFailurePhaseCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeFailurePhaseName,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceStagedMilestones,
@@ -14,6 +12,7 @@ import {
   type HostedRuntimeRedactedJson,
   type HostedMailboxLane,
   type HostedWorkspaceCheckpointResponse,
+  type HostedWorkspaceInvocationProcessingMode,
   type HostedWorkspaceInvocationResult,
   type HostedWorkspaceState,
   isHostedRuntimeFutureMailboxContinuation,
@@ -45,13 +44,9 @@ import {
   MURPH_ANDROID_APP_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
-  buildHostedExecutionSafeErrorDiagnostics,
-  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
-  readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
   type HostedExecutionConversationMessageChannel,
-  type HostedExecutionLogPhase,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
@@ -187,9 +182,19 @@ import {
   type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
-  restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
+import {
+  attachHostedRuntimeFailurePhase,
+  raceHostedRuntimeCancellation,
+  readHostedRuntimeAbortReason,
+  startHostedWorkspaceRestorePreparation,
+  type HostedRuntimePhaseLogger,
+  type HostedWorkspaceRestorePreparation,
+} from "./hosted-workspace-restore-preparation.ts";
+export {
+  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
+} from "./hosted-workspace-restore-preparation.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
   hostedCanonicalWriteReceiptRecoveryStatusFields,
@@ -230,10 +235,12 @@ import {
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
+  type HostedSystemMailboxPendingItem,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
   compactHostedConversationMailboxHandledItemSelection,
   collectHostedPendingAssistantInputMediaRetentionProtections,
+  inspectHostedPendingAssistantInputWakeCandidate,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
   assertNever,
@@ -251,6 +258,7 @@ import {
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   hostedRuntimeWakeReasonUsesAssistantPhase,
+  selectHostedRuntimeOwnerWakeCandidate,
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
@@ -426,14 +434,7 @@ const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
   "dispatch-assistant-notification",
   "run-device-sync-wake",
-] as const;
-const HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_ROUTE_ACTIONS = [
-  "apply-runtime-control-request",
   "run-environment-interview",
-] as const;
-const HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_KINDS = [
-  "environment-interview.completed",
-  "runtime.browser-vault-refresh-requested",
 ] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
@@ -657,17 +658,6 @@ async function hasHostedPreCheckpointLocalExternalCompletion(input: {
   }) !== null;
 }
 
-async function hasHostedQueuedEnvironmentInterview(input: {
-  now: string;
-  vaultRoot: string;
-}): Promise<boolean> {
-  return findNextHostedSystemMailboxQueueItem({
-    allowedRouteActions: ["run-environment-interview"],
-    now: input.now,
-    state: await readHostedSystemMailboxState(input.vaultRoot),
-  }) !== null;
-}
-
 async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   prefetch: HostedMailboxPrefixPrefetch,
 ): Promise<{
@@ -675,7 +665,6 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   containsOnlyDeviceSyncWakes: boolean;
   containsOnlyInitialMemberActivation: boolean;
   containsOnlySafeSystemWakes: boolean;
-  hasEnvironmentInterviewWake: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
@@ -757,9 +746,6 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           )
         )
       ),
-    hasEnvironmentInterviewWake: systemItems.some((item) =>
-      item.kind === "environment-interview.completed"
-    ),
     hasSystemWork: response.items.some((item) => item.lane === "system"),
   };
 }
@@ -784,6 +770,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
     context?: HostedWorkspaceRuntimeJobImportContext,
   ): Promise<HostedMailboxItemImportOutcome>;
   platform: HostedRuntimePlatform;
+  preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onConversationActivityObserved?: (
     observation: Exclude<HostedConversationActivityObservation, "not_observed">,
@@ -824,6 +811,7 @@ export interface HostedWorkspaceRuntimeJobImportContext {
 interface HostedRuntimeWakeLatencySeed {
   foregroundWaitResolvedAtEpochMs?: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
   runtimeWakeNotifiedAtEpochMs?: number | null;
 }
 
@@ -925,6 +913,9 @@ function createHostedRuntimeWakeLatencySeed(
   return {
     foregroundWaitResolvedAtEpochMs: Date.now(),
     ...(notification.orchestration ? { orchestration: notification.orchestration } : {}),
+    ...(notification.requestedProcessingMode
+      ? { requestedProcessingMode: notification.requestedProcessingMode }
+      : {}),
     runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
   };
 }
@@ -1039,8 +1030,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     vaultRoot: input.vaultRoot,
   });
   const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
-    allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
-    allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+    now: () => now.toISOString(),
     vaultRoot: input.vaultRoot,
   });
   const assistantCronWake = await resolveHostedAssistantCronWakeAfterInitialImport({
@@ -1048,25 +1038,29 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     runtimeEnv: input.runtimeEnv,
     vaultRoot: input.vaultRoot,
   });
+  const outboxWake = createHostedRuntimeWakeCandidate(
+    outboxWakeAt,
+    HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+  );
 
   const modelFreeWake = selectEarliestHostedRuntimeWake([
     ...(input.extraCandidates ?? []),
     {
-      at: systemMailboxWake.at,
-      reason: systemMailboxWake.reason,
+      at: systemMailboxWake.executionClass === "model_free"
+        ? systemMailboxWake.at
+        : null,
+      reason: systemMailboxWake.executionClass === "model_free"
+        ? systemMailboxWake.reason
+        : null,
     },
     {
       at: input.mailboxImportRetryAt ?? null,
       reason: input.mailboxImportRetryAt ? "mailbox" : null,
     },
+    outboxWake,
   ]);
   const assistantWake = selectEarliestHostedRuntimeWake([
-    {
-      at: outboxWakeAt,
-      reason: outboxWakeAt
-        ? HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
-        : null,
-    },
+    outboxWake,
     {
       at: pendingAssistantInputWakeAt,
       reason: pendingAssistantInputWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
@@ -1080,23 +1074,38 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
       reason: assistantCronWake.reason,
     },
   ]);
-  const selectedWake = !input.assistantExecutionBlocked && assistantCronWake.dueNow
-    ? {
-        nextWakeAt: assistantCronWake.at,
-        nextWakeReason: assistantCronWake.reason,
-      }
-    : input.assistantExecutionBlocked && modelFreeWake.nextWakeAt
-    ? modelFreeWake
-    : selectEarliestHostedRuntimeWake([
-        {
-          at: modelFreeWake.nextWakeAt,
-          reason: modelFreeWake.nextWakeReason,
-        },
-        {
-          at: assistantWake.nextWakeAt,
-          reason: assistantWake.nextWakeReason,
-        },
-      ]);
+  const selectedWake = input.assistantExecutionBlocked
+    ? modelFreeWake.nextWakeAt
+      ? modelFreeWake
+      : assistantWake
+    : (() => {
+        const selected = selectHostedRuntimeOwnerWakeCandidate({
+          backgroundCandidates: [
+            {
+              at: assistantWake.nextWakeAt,
+              reason: assistantWake.nextWakeReason,
+            },
+            ...input.extraCandidates ?? [],
+            createHostedRuntimeWakeCandidate(
+              input.mailboxImportRetryAt ?? null,
+              "mailbox",
+            ),
+          ],
+          foregroundCandidates: [
+            outboxWake,
+            createHostedRuntimeWakeCandidate(
+              pendingAssistantInputWakeAt,
+              HOSTED_ASSISTANT_WAKE_REASON,
+            ),
+          ],
+          nowMs: input.nowMs,
+          systemMailboxWake,
+        });
+        return {
+          nextWakeAt: selected.at,
+          nextWakeReason: selected.reason,
+        };
+      })();
   return {
     assistantCronWakeAt: assistantCronWake.at,
     assistantCronDueNow: assistantCronWake.dueNow,
@@ -1151,21 +1160,6 @@ function hostedSystemMailboxWakeChangedFromWorkspace(input: {
       nextWakeAt: input.workspace?.nextWakeAt ?? null,
       nextWakeReason: input.workspace?.nextWakeReason ?? null,
     });
-}
-
-export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Error {
-  readonly actualWorkspaceVersion: string | null;
-  readonly expectedWorkspaceVersion: string;
-
-  constructor(input: {
-    actualWorkspaceVersion: string | null;
-    expectedWorkspaceVersion: string;
-  }) {
-    super("Hosted workspace runtime job read a stale workspace version.");
-    this.name = "HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError";
-    this.actualWorkspaceVersion = input.actualWorkspaceVersion;
-    this.expectedWorkspaceVersion = input.expectedWorkspaceVersion;
-  }
 }
 
 export class HostedRuntimeCheckpointInterruptedByWakeError extends Error {
@@ -1397,10 +1391,27 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
+  let exactDetachedAssistantAskCompletion: Promise<void> | null = null;
+  let startExactDetachedAssistantAsk: (() => Promise<void>) | null = null;
+  let ordinaryConsentedAssistantAskSelected = false;
+  let selectedSystemMailboxOwnerItem: HostedSystemMailboxPendingItem | null = null;
   let imageGenerationController: HostedImageGenerationController | null = null;
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
+  const pauseDetachedAssistantAskOnRuntimeAbort = () => {
+    detachedAssistantAskController?.requestPauseAndRequeue();
+  };
+  runtimeAbortController.signal.addEventListener(
+    "abort",
+    pauseDetachedAssistantAskOnRuntimeAbort,
+    { once: true },
+  );
+  options.shutdownSignal?.addEventListener(
+    "abort",
+    pauseDetachedAssistantAskOnRuntimeAbort,
+    { once: true },
+  );
   let codexProcessPreparationStart:
     | Promise<HostedCodexAssistantProcessPreparation | null>
     | null = null;
@@ -1435,8 +1446,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         snapshot.localWorkspaceCleanForWarmReuse === true;
       return snapshot;
     };
-  const phaseLogger = createHostedRuntimePhaseLogger();
-  const emitPhaseLog = phaseLogger.emit;
+  let phaseLogger: HostedRuntimePhaseLogger | null =
+    options.preparedWorkspaceRestore?.phaseLogger ?? null;
   const pendingDeferredUsageCaptures = new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
   const pendingLocalWorkspaceMutationCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
@@ -1478,7 +1489,22 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   };
 
   try {
-    const runtimePhaseStartedAt = new Date().toISOString();
+    const workspaceRestorePreparation = options.preparedWorkspaceRestore
+      ?? startHostedWorkspaceRestorePreparation({
+        job: input,
+        platform: runtime.platform,
+        signal: runtimeAbortController.signal,
+        vaultRoot: options.vaultRoot,
+      });
+    workspaceRestorePreparation.adoptRuntimeAbortGuard({
+      assertLive: assertRuntimeNotAborted,
+      job: input,
+      vaultRoot: options.vaultRoot,
+    });
+    const activePhaseLogger = workspaceRestorePreparation.phaseLogger;
+    phaseLogger = activePhaseLogger;
+    const emitPhaseLog = activePhaseLogger.emit;
+    const runtimePhaseStartedAt = workspaceRestorePreparation.runtimePhaseStartedAt;
     const invocationOrchestrationLatencySeed = createHostedRuntimeOrchestrationLatencySeed(
       readHostedRuntimeInvocationOrchestrationLatencyDiagnostics(options.latencyMilestones),
     );
@@ -1488,43 +1514,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ...(baseLatencyMilestones ?? {}),
       runtimePhaseStartedAt,
     };
-    emitPhaseLog({
-      input,
-      requestId,
-      stage: "workspace.read",
-      status: "start",
-    });
-    const workspaceRead = Object.hasOwn(input.request, "workspace")
-      ? {
-          fetchedAt: new Date().toISOString(),
-          workspace: input.request.workspace ?? null,
-        }
-      : await raceHostedRuntimeCancellation(
-          workspacePort.read(),
-          runtimeAbortController.signal,
-        );
-    emitPhaseLog({
-      details: {
-        actualWorkspaceVersion: workspaceRead.workspace?.version ?? null,
-        workspaceReadSource: Object.hasOwn(input.request, "workspace")
-          ? "invocation_request"
-          : "workspace_port",
-        workspacePresent: workspaceRead.workspace !== null,
-      },
-      input,
-      requestId,
-      stage: "workspace.read",
-      status: "done",
-    });
-    assertRuntimeNotAborted();
-    assertWorkspaceRunVersionMatchesRequest({
-      expectedWorkspaceVersion: input.request.workspaceVersion,
-      workspace: workspaceRead.workspace,
-    });
-    assertWorkspaceRunUserMatchesRequest({
-      expectedUserId: input.request.userId,
-      workspace: workspaceRead.workspace,
-    });
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,
     );
@@ -1612,15 +1601,42 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
     });
-    const kickDetachedAssistantAskAfterImport = (
+    const selectNextApprovedDetachedAssistantAskItemId = async (): Promise<
+      string | null
+    > => {
+      if (
+        runtimeAbortController.signal.aborted
+        || options.shutdownSignal?.aborted === true
+      ) {
+        return null;
+      }
+      const selectedItem = findNextHostedSystemMailboxQueueItem({
+        allowedRouteActions: null,
+        now: new Date().toISOString(),
+        state: await readHostedSystemMailboxState(restored.vaultRoot),
+      });
+      return selectedItem?.routeAction === "run-assistant-ask"
+        && selectedItem.wake.kind === "assistant.ask.requested"
+        && isHostedApprovedContinuationSystemMailboxItem(selectedItem)
+        ? selectedItem.itemId
+        : null;
+    };
+    const kickDetachedAssistantAskAfterImport = async (
       item: HostedMailboxResolvedImportItem,
       outcome: HostedMailboxItemImportOutcome,
-    ): void => {
+    ): Promise<void> => {
       if (
         item.route.action === "run-assistant-ask"
         && (outcome.status === "imported" || outcome.status === "skipped")
       ) {
-        detachedAssistantAskController?.kick();
+        const controller = detachedAssistantAskController;
+        if (controller) {
+          if (!ordinaryConsentedAssistantAskSelected) {
+            controller.kick();
+          } else if (!startExactDetachedAssistantAsk) {
+            controller.kick();
+          }
+        }
       }
       if (
         outcome.status === "imported"
@@ -1632,24 +1648,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         preCheckpointExternalCompletionImported = true;
       }
     };
-    let assistantProviderHandoffRequested = false;
-    let environmentInterviewHandoffRequested = false;
-    const runtimeOwnerHandoffRequested = (): boolean =>
-      assistantProviderHandoffRequested || environmentInterviewHandoffRequested;
+    let runtimeOwnerHandoffRequested = false;
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
         item,
         async (importItem, context) => {
           assertRuntimeNotAborted();
-          if (
-            (input.request.processingMode ?? "default") === "default"
-            && importItem.item.kind === "environment-interview.completed"
-          ) {
-            environmentInterviewHandoffRequested = true;
-          }
           const outcome = await options.importItem(importItem, context);
           assertRuntimeNotAborted();
-          kickDetachedAssistantAskAfterImport(importItem, outcome);
+          await kickDetachedAssistantAskAfterImport(importItem, outcome);
           return outcome;
         },
         createMailboxImportContext(context),
@@ -1661,24 +1668,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       assertRuntimeNotAborted();
       const outcome = await options.importItem(item, createMailboxImportContext(context));
       assertRuntimeNotAborted();
-      kickDetachedAssistantAskAfterImport(item, outcome);
+      await kickDetachedAssistantAskAfterImport(item, outcome);
       return outcome;
     };
-    emitPhaseLog({
-      input,
-      requestId,
-      stage: "workspace.restore",
-      status: "start",
-    });
-    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
-      logContext: runtimeLogContext,
-      platform: guardedRuntime.platform,
-      signal: runtimeAbortController.signal,
-      vaultRoot: options.vaultRoot,
-      workspace: workspaceRead.workspace,
-    });
+    const {
+      restored,
+      workspaceRead,
+      workspaceRestoreDoneAt,
+    } = await workspaceRestorePreparation.promise;
     assertRuntimeNotAborted();
-    const workspaceRestoreDoneAt = new Date().toISOString();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone
     // object already passed to the assistant_input_staged event. No new request,
@@ -1700,17 +1698,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           restoreWasCold: restored.restoreWasCold,
         },
       };
-    emitPhaseLog({
-      details: {
-        materializedArtifactPathCount: restored.materializedArtifactPaths.size,
-        restoreMode: restored.mode,
-        restoreWasCold: restored.restoreWasCold,
-      },
-      input,
-      requestId,
-      stage: "workspace.restore",
-      status: "done",
-    });
     assertRuntimeNotAborted();
     const hostedVaultStartupPreparation = await prepareHostedVaultForRuntime({
       assertRuntimeNotAborted,
@@ -1960,6 +1947,25 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       platform: runnerPlatform,
     };
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
+      awaitBackgroundMaintenanceBarrier: async (barrier) => {
+        if (!startExactDetachedAssistantAsk) {
+          return;
+        }
+        await barrier.drainPendingForegroundWake();
+        if (barrier.foregroundConversationWorkObserved()) {
+          startExactDetachedAssistantAsk = null;
+          detachedAssistantAskController?.kick();
+          return;
+        }
+        await startExactDetachedAssistantAsk();
+        if (
+          !runtimeAbortController.signal.aborted
+          && options.shutdownSignal?.aborted !== true
+        ) {
+          detachedAssistantAskController?.resume();
+          detachedAssistantAskController?.kick();
+        }
+      },
       checkpointRuntimeRedactedStatus,
       checkpointRequestBuilder,
       expectedUserId: input.request.userId,
@@ -1967,6 +1973,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+      onForegroundConversationWorkObserved: () => {
+        if (!ordinaryConsentedAssistantAskSelected) {
+          return;
+        }
+        if (exactDetachedAssistantAskCompletion !== null) {
+          detachedAssistantAskController?.requestPauseAndRequeue();
+        }
+      },
       trackDeferredUsageCapture,
       trackLocalWorkspaceMutationCompletion,
       platform: runnerPlatform,
@@ -1998,16 +2012,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     const systemMailboxProcessingMode =
       input.request.processingMode === "system_mailbox";
-    const environmentInterviewProcessingMode =
-      input.request.processingMode === "environment_interview";
-    const defaultProcessingMode =
-      (input.request.processingMode ?? "default") === "default";
-    let restoredEnvironmentInterviewHandoffPending =
-      defaultProcessingMode
-      && await hasHostedQueuedEnvironmentInterview({
-        now: baseRunnerInput.now?.() ?? new Date().toISOString(),
-        vaultRoot: restored.vaultRoot,
-      });
     // This marker can only suppress assistant execution. The Cloudflare
     // boundary sets it when platform policy has already made the normal
     // assistant handoff impossible. Assistant sources remain durable in the
@@ -2069,7 +2073,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       });
       return preparedCodexRuntime;
     };
-    if (!systemMailboxProcessingMode && !environmentInterviewProcessingMode) {
+    if (!systemMailboxProcessingMode) {
       hostedCodexRuntime = await prepareInvocationCodexRuntime();
       invocationAssistantTarget = await readHostedAssistantExecutionDefaultTarget({
         homeDirectory: restored.operatorHomeRoot,
@@ -2125,7 +2129,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     assertRuntimeNotAborted();
     const initialMailboxImportLanes =
       input.request.processingMode === "system_mailbox"
-        || input.request.processingMode === "environment_interview"
         ? (["system"] as const)
         : initialMailboxImportPlan.lanes;
     const initialPendingRuntimeWake = consumePendingHostedRuntimeWake(
@@ -2133,8 +2136,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       options.shutdownSignal ?? null,
     );
     const returnSystemMailboxBeforeInitialImport =
-      input.request.processingMode === "system_mailbox"
-        ? async () => {
+      systemMailboxProcessingMode
+        ? async (
+            requestedProcessingMode: HostedWorkspaceInvocationProcessingMode | null = null,
+          ) => {
             const projectedWake = await resolveHostedSystemMailboxProcessingModeWake({
               assistantExecutionBlocked,
               mailboxImportRetryAt: null,
@@ -2143,18 +2148,23 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               runtimeEnv: invocationRuntimeEnv,
               vaultRoot: restored.vaultRoot,
             });
-            const returnedWake = selectEarliestHostedRuntimeWake([
-              {
-                at: projectedWake.nextWakeAt,
-                reason: projectedWake.nextWakeReason,
-              },
-              {
-                at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
-                reason: activeWorkspace?.inboxMediaRetentionWakeAt
-                  ? "inbox_media_retention"
-                  : null,
-              },
-            ]);
+            const returnedWake = requestedProcessingMode === "default"
+              ? {
+                  nextWakeAt: new Date(Date.now()).toISOString(),
+                  nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
+                }
+              : selectEarliestHostedRuntimeWake([
+                  {
+                    at: projectedWake.nextWakeAt,
+                    reason: projectedWake.nextWakeReason,
+                  },
+                  {
+                    at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
+                    reason: activeWorkspace?.inboxMediaRetentionWakeAt
+                      ? "inbox_media_retention"
+                      : null,
+                  },
+                ]);
             const redactedStatus = await withHostedMailboxProgressStatus({
               redactedStatus: activeWorkspace?.redactedStatus ?? null,
               vaultRoot: restored.vaultRoot,
@@ -2189,7 +2199,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       returnSystemMailboxBeforeInitialImport
       && initialPendingRuntimeWake !== null
     ) {
-      return await returnSystemMailboxBeforeInitialImport();
+      return await returnSystemMailboxBeforeInitialImport(
+        initialPendingRuntimeWake.requestedProcessingMode ?? null,
+      );
     }
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       mergeHostedRuntimeWakeLatencySeeds(
@@ -2215,10 +2227,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
         importItemContext: initialMailboxImportContext,
         lanes: initialMailboxImportLanes,
-        prefetchLanes:
-          input.request.processingMode === "environment_interview"
-            ? initialMailboxImportLanes
-            : HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+        prefetchLanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
         runnerInput: baseRunnerInput,
         requestId,
       });
@@ -2239,6 +2248,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             ? { orchestration: notification.orchestration }
             : {}),
           notifiedAtEpochMs: notification.notifiedAtEpochMs,
+          ...(notification.requestedProcessingMode
+            ? { requestedProcessingMode: notification.requestedProcessingMode }
+            : {}),
         });
         if (
           notification.latestNotifiedAtEpochMs !== undefined
@@ -2264,7 +2276,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && options.shutdownSignal?.aborted !== true
           && error instanceof HostedRuntimeCheckpointInterruptedByWakeError
         ) {
-          return await returnSystemMailboxBeforeInitialImport();
+          return await returnSystemMailboxBeforeInitialImport(
+            notification.requestedProcessingMode ?? null,
+          );
         }
         restoreInitialMailboxFetchWake(notification);
         throw error;
@@ -2329,14 +2343,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         userId: null,
       });
     };
-    const returnInitialMailboxImportBeforeForeground = async () => {
+    const returnInitialMailboxImportBeforeForeground = async (handoff?: {
+      assistantWakeAt: string;
+    }) => {
       const redactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,
       );
-      const systemMailboxWake = await resolveDeferredMailboxImportSystemMailboxWake(
-        initialMailboxImport.importResult,
-        restored.vaultRoot,
-      );
+      const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+        vaultRoot: restored.vaultRoot,
+      });
       const assistantCronWake =
         input.request.processingMode === "system_mailbox"
           ? await resolveHostedAssistantCronWakeAfterInitialImport({
@@ -2362,7 +2377,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
       const stagedAssistantInput =
         hostedMailboxImportStagedConversationInput(initialMailboxImport);
-      const checkpointNextWake = !assistantExecutionBlocked && assistantCronWake?.dueNow
+      const checkpointNextWake = handoff
+        ? selectEarliestHostedRuntimeWake([
+            {
+              at: handoff.assistantWakeAt,
+              reason: HOSTED_ASSISTANT_WAKE_REASON,
+            },
+            {
+              at: assistantCronWake?.at ?? null,
+              reason: assistantCronWake?.reason ?? null,
+            },
+          ])
+        : !assistantExecutionBlocked && assistantCronWake?.dueNow
         ? {
             nextWakeAt: assistantCronWake.at,
             nextWakeReason: assistantCronWake.reason,
@@ -2413,7 +2439,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         && hostedRuntimeWakeIsDue(activeWorkspace.nextWakeAt ?? null);
       const dueAssistantHandoffRequiresCheckpoint =
         !assistantExecutionBlocked
-        && assistantCronWake?.dueNow === true
+        && (handoff !== undefined || assistantCronWake?.dueNow === true)
         && !activeWorkspaceAlreadyOwnsDueAssistantWake;
 
       if (
@@ -2487,7 +2513,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const checkpointRedactedStatus =
           checkpoint.workspace.redactedStatus ?? redactedStatus;
         const immediateRecheckRequested =
-          immediateRecheckCandidate
+          (handoff !== undefined || immediateRecheckCandidate)
           && !isHostedRuntimeFutureMailboxContinuation({
             nextWakeAt: checkpointReturnedNextWake.nextWakeAt,
             nextWakeReason: checkpointReturnedNextWake.nextWakeReason,
@@ -2522,7 +2548,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
 
       const invocationResult = {
-        ...(!assistantExecutionBlocked && assistantCronWake?.dueNow
+        ...(handoff !== undefined
+          || (!assistantExecutionBlocked && assistantCronWake?.dueNow)
           ? { immediateRecheckRequested: true as const }
           : {}),
         nextWakeAt: returnedNextWake.nextWakeAt,
@@ -2556,20 +2583,27 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         || hostedVaultStartupPreparation.mutated;
       let checkpointed = false;
       let foregroundWakeObserved = false;
+      let defaultOwnerWakeObserved = false;
       let assistantCronDeadlineMs: number | null = null;
-      const consumeForegroundWake = (): boolean => {
-        if (foregroundWakeObserved) {
-          return true;
-        }
-        const notification = consumePendingRuntimeWakeUnlessShuttingDown({
-          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-          shutdownSignal: options.shutdownSignal ?? null,
-        });
+      const observeForegroundWake = (
+        notification: RuntimeWakeNotification | null,
+      ): boolean => {
         if (!notification) {
           return false;
         }
         foregroundWakeObserved = true;
+        defaultOwnerWakeObserved ||=
+          notification.requestedProcessingMode === "default";
         return true;
+      };
+      const consumeForegroundWake = (): boolean => {
+        const pendingWakeObserved = observeForegroundWake(
+          consumePendingRuntimeWakeUnlessShuttingDown({
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+            shutdownSignal: options.shutdownSignal ?? null,
+          }),
+        );
+        return pendingWakeObserved || foregroundWakeObserved;
       };
       const shouldYieldSystemMailboxWork = (): boolean =>
         consumeForegroundWake()
@@ -2607,7 +2641,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ...extraCandidates,
       ]);
       const finishInitialImportEffectsOnce = async () => {
-        if (!checkpointed) {
+        if (!checkpointed || shouldYieldSystemMailboxWork()) {
           return;
         }
         if (!initialMailboxImportPostCheckpointEffectsFinished) {
@@ -2836,21 +2870,35 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceInvocationResult> => {
         const projectedWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
-        const returnedWake = selectEarliestHostedRuntimeWake([
-          {
-            at: projectedWake.nextWakeAt,
-            reason: projectedWake.nextWakeReason,
-          },
-          {
-            at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
-            reason: activeWorkspace?.inboxMediaRetentionWakeAt
-              ? "inbox_media_retention"
-              : null,
-          },
-        ]);
+        const requestedDefaultOwnerWakeAt = defaultOwnerWakeObserved
+          ? new Date(Date.now()).toISOString()
+          : assistantCronDeadlineMs !== null
+              && Date.now() >= assistantCronDeadlineMs
+            ? new Date(assistantCronDeadlineMs).toISOString()
+            : null;
+        const defaultOwnerDueNow =
+          requestedDefaultOwnerWakeAt !== null
+          || projectedWake.assistantCronDueNow;
+        const returnedWake = requestedDefaultOwnerWakeAt
+          ? {
+              nextWakeAt: requestedDefaultOwnerWakeAt,
+              nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
+            }
+          : selectEarliestHostedRuntimeWake([
+              {
+                at: projectedWake.nextWakeAt,
+                reason: projectedWake.nextWakeReason,
+              },
+              {
+                at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
+                reason: activeWorkspace?.inboxMediaRetentionWakeAt
+                  ? "inbox_media_retention"
+                  : null,
+              },
+            ]);
         const invocationResult = {
           ...(foregroundWakeObserved
-              || (!assistantExecutionBlocked && projectedWake.assistantCronDueNow)
+              || (!assistantExecutionBlocked && defaultOwnerDueNow)
             ? { immediateRecheckRequested: true as const }
             : {}),
           nextWakeAt: returnedWake.nextWakeAt,
@@ -3099,16 +3147,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               );
             } catch (error) {
               await recordWakeInterruption.dispose();
-              if (recordWakeInterruption.takeNotification()) {
-                foregroundWakeObserved = true;
+              if (
+                observeForegroundWake(recordWakeInterruption.takeNotification())
+              ) {
                 return { preempted: true, prepared: true };
               }
               throw error;
             }
             await recordWakeInterruption.dispose();
-            if (recordWakeInterruption.takeNotification()) {
-              foregroundWakeObserved = true;
-            }
+            observeForegroundWake(recordWakeInterruption.takeNotification());
             return {
               preempted: shouldYieldSystemMailboxWork(),
               prepared: true,
@@ -3302,18 +3349,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
 
       const initialProjectedWake = await resolveCurrentSystemMailboxModeWake();
+      const defaultOwnerDueNow =
+        hostedRuntimeWakeReasonIsAssistant(initialProjectedWake.nextWakeReason)
+        && hostedRuntimeWakeIsDue(initialProjectedWake.nextWakeAt);
       const projectedAssistantCronDeadlineMs = Date.parse(
         initialProjectedWake.assistantCronWakeAt ?? "",
       );
       assistantCronDeadlineMs = !assistantExecutionBlocked
-        && !environmentInterviewProcessingMode
         && Number.isFinite(projectedAssistantCronDeadlineMs)
-        ? projectedAssistantCronDeadlineMs
-        : null;
+          ? projectedAssistantCronDeadlineMs
+          : null;
       if (
         !assistantExecutionBlocked
-        && !environmentInterviewProcessingMode
-        && initialProjectedWake.assistantCronDueNow
+        && (
+          defaultOwnerDueNow
+        )
       ) {
         if (
           importOrStartupCheckpointPending
@@ -3331,12 +3381,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
 
       const modelFreePass = await runSystemMailboxLifecycleItem({
-        allowedRouteActions: environmentInterviewProcessingMode
-          ? HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_ROUTE_ACTIONS
-          : HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
-        allowedWakeKinds: environmentInterviewProcessingMode
-          ? HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_KINDS
-          : HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+        allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
+        allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
         stagePrefix: "system_mailbox.model_free",
       });
       assertRuntimeNotAborted();
@@ -3367,23 +3413,43 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     if (initialMailboxImportResult.bootstrapPending) {
       return await returnInitialMailboxImportBeforeForeground();
     }
-    if (environmentInterviewProcessingMode) {
-      return await returnSystemMailboxProcessingModeAfterInitialImport();
-    }
     let systemMailboxForegroundWakePrefetch: HostedMailboxPrefixPrefetch | null = null;
     let systemMailboxForegroundWakeResult: HostedWorkspaceInvocationResult | null = null;
-    const selectedSystemMailboxOwnerItem = systemMailboxProcessingMode
+    const systemMailboxOwnerSelectionAt = new Date().toISOString();
+    selectedSystemMailboxOwnerItem = systemMailboxProcessingMode
       && !assistantExecutionBlocked
       ? findNextHostedSystemMailboxQueueItem({
           allowedRouteActions: null,
-          now: new Date().toISOString(),
+          now: systemMailboxOwnerSelectionAt,
           state: await readHostedSystemMailboxState(restored.vaultRoot),
         })
       : null;
+    ordinaryConsentedAssistantAskSelected =
+      selectedSystemMailboxOwnerItem?.routeAction === "run-assistant-ask"
+      && selectedSystemMailboxOwnerItem.wake.kind === "assistant.ask.requested"
+      && !isHostedApprovedContinuationSystemMailboxItem(
+        selectedSystemMailboxOwnerItem,
+      );
+    const pendingAssistantInputProjection = ordinaryConsentedAssistantAskSelected
+      ? await inspectHostedPendingAssistantInputWakeCandidate({
+          vaultRoot: restored.vaultRoot,
+        })
+      : null;
+    if (pendingAssistantInputProjection?.hasCandidate === true) {
+      return await returnInitialMailboxImportBeforeForeground({
+        assistantWakeAt: systemMailboxOwnerSelectionAt,
+      });
+    }
     const systemMailboxForegroundOwnerSelected =
       selectedSystemMailboxOwnerItem !== null
-      && isHostedApprovedContinuationSystemMailboxItem(
-        selectedSystemMailboxOwnerItem,
+      && (
+        isHostedApprovedContinuationSystemMailboxItem(
+          selectedSystemMailboxOwnerItem,
+        )
+        || (
+          selectedSystemMailboxOwnerItem.routeAction === "run-assistant-ask"
+          && selectedSystemMailboxOwnerItem.wake.kind === "assistant.ask.requested"
+        )
       );
     if (
       input.request.processingMode === "system_mailbox"
@@ -3408,6 +3474,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
       if (
         systemMailboxResult.immediateRecheckRequested !== true
+        || assistantExecutionBlocked
         || runtimeAbortController.signal.aborted
         || options.shutdownSignal?.aborted === true
       ) {
@@ -3478,7 +3545,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (liveAssistantProvider === invocationAssistantProvider) {
         return "current";
       }
-      assistantProviderHandoffRequested = true;
+      runtimeOwnerHandoffRequested = true;
       return "handoff";
     };
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
@@ -3781,13 +3848,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             workspace: passInput.workspace,
         });
         recordBrowserVaultReplicaRefreshIntent(passResult);
-        if (passForeground && restoredEnvironmentInterviewHandoffPending) {
-          // A foreground owner may restore Environment work staged by the
-          // owner it preempted. Finish this one user-visible pass, then hand
-          // the durable queue back to the dedicated model-free owner.
-          restoredEnvironmentInterviewHandoffPending = false;
-          environmentInterviewHandoffRequested = true;
-        }
         if (
           passResult.runtimeStateDirty
           && (
@@ -3851,7 +3911,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         return refresh;
       } catch (error) {
         if (maintenanceSignal.aborted) {
-          phaseLogger.close("browser_vault.refresh");
+          activePhaseLogger.close("browser_vault.refresh");
         } else {
           emitPhaseLog({
             error,
@@ -3879,8 +3939,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let invocationLocalProjectedAssistantWakeKey: string | null = null;
     let hotProjectedAssistantWakeAttemptedKey: string | null = null;
     let durableCheckpointFollowUpPending = false;
-    let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> =
-      systemMailboxForegroundWakeResult?.redactedStatus ?? {};
+    let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> = {};
     let invocationStatus: HostedWorkspaceInvocationResult["status"] =
       resolveHostedWorkspaceInvocationStatus({
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
@@ -3918,7 +3977,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     const markIdleCheckpointTimerAfterDirtyWork = () => {
       setIdleCheckpointStartBy(
-        Date.now() + (runtimeOwnerHandoffRequested() ? 0 : idleCheckpointDelayMs),
+        Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
       );
     };
     if (runtimeStateDirty) {
@@ -3990,6 +4049,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       resolveProviderAuthority:
         resolveInvocationAssistantProviderAuthority,
+      ...(ordinaryConsentedAssistantAskSelected
+        ? {
+            selectNextExactItemId:
+              selectNextApprovedDetachedAssistantAskItemId,
+          }
+        : {}),
       usageRecordPort: runtime.platform.usageRecordPort ?? null,
       userEnvKeys: Object.keys(runtime.userEnv),
       vaultRoot: restored.vaultRoot,
@@ -4008,9 +4073,34 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     closeDetachedAssistantAskBeforeWorkspaceRelease = async () => {
       await detachedAssistantAskController?.closeAndRequeue();
     };
-    // Resume an exact request retained by an interrupted earlier invocation.
-    // kick() only owns the invocation-local promise; it never awaits the ask.
-    detachedAssistantAskController.kick();
+    if (
+      selectedSystemMailboxOwnerItem?.routeAction === "run-assistant-ask"
+      && selectedSystemMailboxOwnerItem.wake.kind === "assistant.ask.requested"
+      && !isHostedApprovedContinuationSystemMailboxItem(
+        selectedSystemMailboxOwnerItem,
+      )
+    ) {
+      const exactController = detachedAssistantAskController;
+      const exactItemId = selectedSystemMailboxOwnerItem.itemId;
+      startExactDetachedAssistantAsk = () => {
+        if (exactDetachedAssistantAskCompletion) {
+          return exactDetachedAssistantAskCompletion;
+        }
+        startExactDetachedAssistantAsk = null;
+        const completion = exactController.kickExact(exactItemId);
+        exactDetachedAssistantAskCompletion = completion;
+        const releaseExactCompletion = () => {
+          if (exactDetachedAssistantAskCompletion === completion) {
+            exactDetachedAssistantAskCompletion = null;
+          }
+        };
+        void completion.then(releaseExactCompletion, releaseExactCompletion);
+        return completion;
+      };
+    } else {
+      // Approved continuations retain their foreground-priority drain behavior.
+      detachedAssistantAskController.kick();
+    }
     const runDurableCheckpointEffectsBestEffort = async (effectOptions: {
       vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
       withholdVaultShareDependentEffects?: boolean;
@@ -4948,15 +5038,20 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (presentedDefaultWakeKey !== null) {
           unservicedRecheckWakeKeys.delete(presentedDefaultWakeKey);
         }
+        const nowMs = Date.now();
         const wakeResolution = resolvePendingWakeAfterForegroundPass({
           assistantProjectedWakeKey: passProjectedAssistantWakeKey,
           checkpointPendingBeforePass,
           passWake,
           presentedProjectedAssistantWakeKey,
           previousPendingWake,
+          previousPendingWakeIsForeground:
+            previousPendingWakeKey !== null
+            && previousPendingWakeKey
+              === previousInvocationLocalProjectedAssistantWakeKey,
           preserveDueAssistantWakeOnNoProgress,
           replaceWake,
-          nowMs: Date.now(),
+          nowMs,
         });
         pendingWake = wakeResolution.pendingWake;
         // The older due token remains checkpoint authority until its hot
@@ -5143,14 +5238,29 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         await flushImageGenerationWork();
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
         let rerunAssistantInputBatch =
-          runtimeOwnerHandoffRequested()
+          runtimeOwnerHandoffRequested
             ? null
             : prependReadyImageCompletionInputs(
                 resolveForegroundRerunAssistantInputBatch(passResult),
               );
         let continueForegroundCausalPass =
-          !runtimeOwnerHandoffRequested()
+          !runtimeOwnerHandoffRequested
           && shouldContinueForegroundCausalPass(passResult);
+        const requestDueMailboxOwnerHandoffIfForegroundIdle = (): void => {
+          if (
+            runtimeOwnerHandoffRequested
+            || rerunAssistantInputBatch !== null
+            || continueForegroundCausalPass
+            || (input.request.processingMode ?? "default") !== "default"
+            || pendingWake.nextWakeReason !== "mailbox"
+            || !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
+          ) {
+            return;
+          }
+          runtimeOwnerHandoffRequested = true;
+          markIdleCheckpointTimerAfterDirtyWork();
+        };
+        requestDueMailboxOwnerHandoffIfForegroundIdle();
         while (
           options.shutdownSignal?.aborted !== true
           && (rerunAssistantInputBatch || continueForegroundCausalPass)
@@ -5187,14 +5297,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
           await flushImageGenerationWork();
           rerunAssistantInputBatch =
-            runtimeOwnerHandoffRequested()
+            runtimeOwnerHandoffRequested
               ? null
               : prependReadyImageCompletionInputs(
                   resolveForegroundRerunAssistantInputBatch(passResult),
                 );
           continueForegroundCausalPass =
-            !runtimeOwnerHandoffRequested()
+            !runtimeOwnerHandoffRequested
             && shouldContinueForegroundCausalPass(passResult);
+          requestDueMailboxOwnerHandoffIfForegroundIdle();
         }
         return passResult;
       };
@@ -5209,14 +5320,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         signal?: AbortSignal;
         systemMailboxAdmission: "all" | "pre_checkpoint_safe";
       }): Promise<boolean> => {
-        if (runtimeOwnerHandoffRequested()) {
+        if (runtimeOwnerHandoffRequested) {
           return false;
         }
-        const requestRestoredEnvironmentInterviewHandoff = (): void => {
-          restoredEnvironmentInterviewHandoffPending = false;
-          environmentInterviewHandoffRequested = true;
-          markIdleCheckpointTimerAfterDirtyWork();
-        };
         // Graceful shutdown hands staged work to the durable checkpoint before
         // this invocation starts another assistant or provider turn.
         const shouldContinue = () =>
@@ -5240,10 +5346,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               reason: "assistant",
             });
           }
-          const systemMailboxWake = await resolveDeferredMailboxImportSystemMailboxWake(
-            mailboxImport.importResult,
-            restored.vaultRoot,
-          );
+          const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+            vaultRoot: restored.vaultRoot,
+          });
           wakeCandidates.push({
             at: systemMailboxWake.at,
             reason: systemMailboxWake.reason,
@@ -5427,11 +5532,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 initialMailboxPrefetch,
               )
             : null;
-        if (preCheckpointSystemPrefetch?.hasEnvironmentInterviewWake === true) {
-          // The durable row, not the payloadless wake, authorizes this handoff.
-          environmentInterviewHandoffRequested = true;
-          markIdleCheckpointTimerAfterDirtyWork();
-        }
         const hasForegroundConversationWork =
           hostedAssistantInputBatchHasWork(
             invocationLocalAssistantInputBatch,
@@ -5446,15 +5546,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             now: baseRunnerInput.now?.() ?? new Date().toISOString(),
             vaultRoot: restored.vaultRoot,
           });
-        if (
-          !hasForegroundConversationWork
-          && !shouldRunLocalPreCheckpointSystemWork
-          && restoredEnvironmentInterviewHandoffPending
-        ) {
-          requestRestoredEnvironmentInterviewHandoff();
-          await finishMailboxImportWithoutAssistant(conversationImport);
-          return false;
-        }
         const shouldRunConversationAssistant = shouldContinue() && (
           input.runAssistantWithoutMailboxWork === true
           || hasForegroundConversationWork
@@ -5531,6 +5622,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             requestIdKind: input.requestIdKind,
             signal: input.signal,
           });
+          await stageMailboxImportWake(systemImport);
         } catch (error) {
           if (!runtimeAbortController.signal.aborted && !shouldContinue()) {
             await stageMailboxImportWake(systemImport);
@@ -5548,9 +5640,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         } = {},
       ): Promise<boolean> => {
         await flushImageGenerationWork();
+        const currentProcessingMode = input.request.processingMode ?? "default";
+        const requestedOwnerHandoff =
+          latencySeed?.requestedProcessingMode !== undefined
+          && latencySeed.requestedProcessingMode !== null
+          && latencySeed.requestedProcessingMode !== currentProcessingMode;
+        const finishRequestedOwnerHandoff = (ran: boolean): boolean => {
+          if (requestedOwnerHandoff) {
+            runtimeOwnerHandoffRequested = true;
+            markIdleCheckpointTimerAfterDirtyWork();
+          }
+          return ran;
+        };
         if (
           latencySeed !== null
-          && !runtimeOwnerHandoffRequested()
+          && !runtimeOwnerHandoffRequested
           && !runtimeAbortController.signal.aborted
           && options.shutdownSignal?.aborted !== true
         ) {
@@ -5566,23 +5670,25 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
         }
         if (
-          !runtimeOwnerHandoffRequested()
+          !runtimeOwnerHandoffRequested
           && options.shutdownSignal?.aborted !== true
           && !runtimeAbortController.signal.aborted
           && (wakeOptions.shouldContinue?.() ?? true)
           && hostedAssistantInputBatchHasWork(readyImageCompletionInputBatch)
         ) {
-          return await runForegroundMailboxWakeIfWork({
-            includeReadyImageCompletion: true,
-            latencySeed,
-            rearmIdleCheckpointAfterEmptyProbe:
-              wakeOptions.rearmIdleCheckpointAfterEmptyProbe === true,
-            requestIdKind: "checkpoint-interrupt",
-            runAssistantWithoutMailboxWork: true,
-            shouldContinue: wakeOptions.shouldContinue,
-            signal: wakeOptions.signal,
-            systemMailboxAdmission: "pre_checkpoint_safe",
-          });
+          return finishRequestedOwnerHandoff(
+            await runForegroundMailboxWakeIfWork({
+              includeReadyImageCompletion: true,
+              latencySeed,
+              rearmIdleCheckpointAfterEmptyProbe:
+                wakeOptions.rearmIdleCheckpointAfterEmptyProbe === true,
+              requestIdKind: "checkpoint-interrupt",
+              runAssistantWithoutMailboxWork: true,
+              shouldContinue: wakeOptions.shouldContinue,
+              signal: wakeOptions.signal,
+              systemMailboxAdmission: "pre_checkpoint_safe",
+            }),
+          );
         }
         const ran = await runForegroundMailboxWakeIfWork({
           latencySeed,
@@ -5590,7 +5696,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             wakeOptions.rearmIdleCheckpointAfterEmptyProbe === true,
           requestIdKind: "checkpoint-interrupt",
           runAssistantWithoutMailboxWork:
-            pendingWake.nextWakeAt !== null
+            !requestedOwnerHandoff
+              && pendingWake.nextWakeAt !== null
               && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
               && !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
               && !(
@@ -5603,7 +5710,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           signal: wakeOptions.signal,
           systemMailboxAdmission: "pre_checkpoint_safe",
         });
-        return ran;
+        return finishRequestedOwnerHandoff(ran);
       };
       const runPostCheckpointMailboxWake = async (input: {
         initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
@@ -5611,6 +5718,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         shouldContinue: () => boolean;
         signal: AbortSignal;
       }): Promise<boolean> => {
+        const committedAssistantWakeIsDue =
+          hostedRuntimeWakeReasonIsAssistant(
+            committedWorkspace?.nextWakeReason ?? null,
+          )
+          && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null);
         return await runForegroundMailboxWakeIfWork({
           latencySeed: input.latencySeed,
           rearmIdleCheckpointAfterEmptyProbe: false,
@@ -5618,7 +5730,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           initialMailboxPrefetch: input.initialMailboxPrefetch ?? null,
           shouldContinue: input.shouldContinue,
           signal: input.signal,
-          systemMailboxAdmission: "all",
+          systemMailboxAdmission: committedAssistantWakeIsDue
+            ? "pre_checkpoint_safe"
+            : "all",
         });
       };
       const resolveHotProjectedAssistantWake = (): {
@@ -5671,21 +5785,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
 
       result = await runForegroundPass({
-        foregroundCausalOnly:
-          input.request.processingMode === "environment_interview",
-        ...(systemMailboxForegroundWakePrefetch
-          ? {
-              initialMailboxImportContext:
-                createHostedRuntimeWakeInitialImportContext(null),
-              initialMailboxImportLanes:
-                HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
-              initialMailboxPrefetch: systemMailboxForegroundWakePrefetch,
-            }
-          : {
-              initialMailboxImport,
-              initialMailboxImportContext,
-              initialMailboxPrefetch: initialMailboxImportResult.prefetch,
-            }),
+        initialMailboxImport,
+        initialMailboxImportContext,
+        initialMailboxPrefetch: initialMailboxImportResult.prefetch,
         latencySeed: null,
         ...(initialProviderStartCriticalPath
           ? { providerStartCriticalPath: initialProviderStartCriticalPath }
@@ -5700,7 +5802,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         || hostedVaultStartupPreparation.mutated;
       runtimeStateDirty ||= runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
       if (runtimeDirtyAfterForeground) {
-        markIdleCheckpointTimerAfterDirtyWork();
+        ensureIdleCheckpointStartBy(
+          Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
+        );
       } else if (committedInboxMediaRetentionWakeDue) {
         setIdleCheckpointStartBy(Date.now());
       }
@@ -5880,7 +5984,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           checkpointWakeLatencySeed ??= pendingWakeLatencySeed;
         }
         const idleMaintenancePendingWork =
-          runtimeOwnerHandoffRequested()
+          runtimeOwnerHandoffRequested
           || pendingDurableCheckpointEffects.length > 0
           || durableCheckpointFollowUpPending
           || invocationStatus === "budget_exhausted"
@@ -6047,7 +6151,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           createHostedRuntimeCheckpointWakeInterruption({
             enabled:
               idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
-              && !runtimeOwnerHandoffRequested(),
+              && !runtimeOwnerHandoffRequested,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           });
         try {
@@ -6077,7 +6181,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         } catch (error) {
           resumeDetachedAssistantAskAfterWorkspaceBoundary();
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
-            phaseLogger.close("workspace.checkpoint.idle_shutdown");
+            activePhaseLogger.close("workspace.checkpoint.idle_shutdown");
             const shutdownWasSignaled = () => options.shutdownSignal?.aborted === true;
             if (
               shutdownWasSignaled()
@@ -6122,7 +6226,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             continue;
           }
           if (isHostedRuntimeCheckpointSupersededByWorkspaceProgress(error)) {
-            phaseLogger.close("workspace.checkpoint.idle_shutdown");
+            activePhaseLogger.close("workspace.checkpoint.idle_shutdown");
             await runForegroundPass({
               latencySeed: null,
               requestIdKind: "checkpoint-interrupt",
@@ -6189,7 +6293,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const mayRunPostCheckpointWork = (): boolean =>
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
           && options.shutdownSignal?.aborted !== true
-          && !runtimeOwnerHandoffRequested();
+          && !runtimeOwnerHandoffRequested;
         const postCheckpointWorkSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
@@ -6540,7 +6644,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           idleMaintenance.nextWakeReason === "inbox_media_retention"
           && idleMaintenance.nextWakeAt !== null;
         const immediateRecheckCandidate =
-          runtimeOwnerHandoffRequested()
+          runtimeOwnerHandoffRequested
           || immediateDefaultWakeWasNotPresented
           || immediateRetentionContinuationProduced;
         const checkpointReturnWake = selectEarliestHostedRuntimeWake([
@@ -6556,7 +6660,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           },
         ]);
         const immediateRecheckRequested =
-          runtimeOwnerHandoffRequested()
+          runtimeOwnerHandoffRequested
           || (
             immediateRecheckCandidate
             && !isHostedRuntimeFutureMailboxContinuation({
@@ -6695,12 +6799,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     });
     return invocationResult;
   } catch (error) {
-    const failedRuntimePhases = phaseLogger.failOpenPhases({
+    const failedRuntimePhases = phaseLogger?.failOpenPhases({
       error,
       input,
       requestId,
-    });
-    emitPhaseLog({
+    }) ?? [];
+    phaseLogger?.emit({
       error,
       input,
       requestId,
@@ -6720,6 +6824,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       failedRuntimePhases[0] ?? "runtime",
     );
   } finally {
+    runtimeAbortController.signal.removeEventListener(
+      "abort",
+      pauseDetachedAssistantAskOnRuntimeAbort,
+    );
+    options.shutdownSignal?.removeEventListener(
+      "abort",
+      pauseDetachedAssistantAskOnRuntimeAbort,
+    );
     try {
       await drainOwnedVaultShareProjection();
     } finally {
@@ -6735,129 +6847,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
     }
   }
-}
-
-type HostedRuntimePhaseLogStatus = "done" | "fail" | "start";
-
-type HostedRuntimePhaseName = HostedRuntimeFailurePhaseName;
-
-interface HostedRuntimePhaseLogState {
-  ordinal: number;
-  runtimeStartedAtMs: number;
-  startedAtMsByStage: Map<HostedRuntimePhaseName, number>;
-}
-
-interface HostedRuntimePhaseLogger {
-  close(stage: HostedRuntimePhaseName): void;
-  emit(input: HostedRuntimePhaseLogInput): void;
-  failOpenPhases(
-    input: Omit<HostedRuntimePhaseLogInput, "stage" | "status">,
-  ): HostedRuntimePhaseName[];
-}
-
-interface HostedRuntimePhaseLogInput {
-  details?: HostedExecutionStructuredLogDetails;
-  error?: unknown;
-  input: HostedAssistantWorkspaceRuntimeJobInput;
-  phase?: HostedExecutionLogPhase;
-  requestId: string;
-  stage: HostedRuntimePhaseName;
-  status: HostedRuntimePhaseLogStatus;
-}
-
-function createHostedRuntimePhaseLogger(): HostedRuntimePhaseLogger {
-  const state: HostedRuntimePhaseLogState = {
-    ordinal: 0,
-    runtimeStartedAtMs: Date.now(),
-    startedAtMsByStage: new Map(),
-  };
-
-  return {
-    close(stage) {
-      state.startedAtMsByStage.delete(stage);
-    },
-    emit(input) {
-      emitHostedRuntimePhaseLog(input, state);
-    },
-    failOpenPhases(input) {
-      const openStages = Array.from(state.startedAtMsByStage.keys()).reverse();
-      for (const stage of openStages) {
-        emitHostedRuntimePhaseLog({
-          ...input,
-          stage,
-          status: "fail",
-        }, state);
-      }
-      return openStages;
-    },
-  };
-}
-
-function attachHostedRuntimeFailurePhase(
-  error: unknown,
-  phase: HostedRuntimePhaseName,
-): unknown {
-  if (
-    !(error instanceof Error)
-    || deriveHostedExecutionErrorCode(error) !== "runtime_error"
-  ) {
-    return error;
-  }
-
-  // The shared canonical classifier is the single authority: if it cannot
-  // produce an actionable classification, preserve the causal phase without
-  // changing `.code`, `.errorCode`, retry behavior, or durable failure state.
-  return attachHostedRuntimeFailurePhaseCode(error, phase);
-}
-
-function emitHostedRuntimePhaseLog(
-  input: HostedRuntimePhaseLogInput,
-  state: HostedRuntimePhaseLogState,
-): void {
-  const phaseTrace = buildHostedRuntimePhaseTraceMetadata(input, state);
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    details: {
-      attemptId: input.input.request.attemptId,
-      leaseGeneration: input.input.request.leaseGeneration,
-      requestId: input.requestId,
-      runtimePhase: input.stage,
-      ...phaseTrace,
-      runtimePhaseStatus: input.status,
-      workspaceVersion: input.input.request.workspaceVersion,
-      ...buildHostedRuntimePhaseFailureMetadata(input.error),
-      ...(input.details ?? {}),
-    },
-    level: input.status === "fail" ? "error" : "info",
-    message: "Hosted workspace runtime phase boundary.",
-    phase: input.phase ?? (input.status === "fail" ? "failed" : "wake.running"),
-    userId: null,
-  });
-}
-
-function buildHostedRuntimePhaseFailureMetadata(
-  error: unknown,
-): HostedExecutionStructuredLogDetails {
-  if (error === undefined) {
-    return {};
-  }
-  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-
-  return {
-    failureDetailsPresent: hasHostedRuntimePhaseOwnProperty(error, "details"),
-    ...(typeof diagnostics?.errorCode === "string"
-      ? { failureErrorCode: diagnostics.errorCode }
-      : {}),
-    ...(typeof diagnostics?.errorName === "string"
-      ? { failureErrorName: diagnostics.errorName }
-      : {}),
-    failureErrorDetailPresent: typeof diagnostics?.errorDetail === "string",
-    ...(typeof diagnostics?.errorStatus === "number"
-      ? { failureErrorStatus: diagnostics.errorStatus }
-      : {}),
-    failureMessagePresent: error instanceof Error && error.message.trim().length > 0,
-    failureName: readHostedExecutionSafeErrorName(error) ?? null,
-  };
 }
 
 function buildHostedBrowserVaultRefreshLogDetails(
@@ -6876,6 +6865,9 @@ function buildHostedBrowserVaultRefreshLogDetails(
       : {}),
     ...("maxBytes" in refresh
       ? { browserVaultReplicaMaxBytes: refresh.maxBytes }
+      : {}),
+    ...(refresh.status === "deferred_timeout"
+      ? { browserVaultRefreshStage: refresh.refreshStage }
       : {}),
     ...("source" in refresh
       ? {
@@ -6909,38 +6901,6 @@ function classifyHostedBrowserVaultReplicaRefresh(
     default:
       return assertNever(refresh);
   }
-}
-
-function hasHostedRuntimePhaseOwnProperty(error: unknown, key: string): boolean {
-  return Boolean(
-    error
-      && typeof error === "object"
-      && Object.prototype.hasOwnProperty.call(error, key),
-  );
-}
-
-function buildHostedRuntimePhaseTraceMetadata(
-  input: Pick<HostedRuntimePhaseLogInput, "stage" | "status">,
-  state: HostedRuntimePhaseLogState,
-): HostedExecutionStructuredLogDetails {
-  const nowMs = Date.now();
-  state.ordinal += 1;
-  const phaseStartedAtMs = state.startedAtMsByStage.get(input.stage) ?? null;
-  const details: HostedExecutionStructuredLogDetails = {
-    runtimeElapsedMs: Math.max(0, nowMs - state.runtimeStartedAtMs),
-    runtimePhaseOrdinal: state.ordinal,
-    ...(phaseStartedAtMs === null || input.status === "start"
-      ? {}
-      : { runtimePhaseDurationMs: Math.max(0, nowMs - phaseStartedAtMs) }),
-  };
-
-  if (input.status === "start") {
-    state.startedAtMsByStage.set(input.stage, nowMs);
-  } else {
-    state.startedAtMsByStage.delete(input.stage);
-  }
-
-  return details;
 }
 
 // Single owner for the protections + materializer + retention wiring used by
@@ -7349,6 +7309,7 @@ function resolvePendingWakeAfterForegroundPass(input: {
   passWake: HostedRuntimePendingWake;
   presentedProjectedAssistantWakeKey: string | null;
   previousPendingWake: HostedRuntimePendingWake;
+  previousPendingWakeIsForeground: boolean;
   preserveDueAssistantWakeOnNoProgress: boolean;
   replaceWake: boolean;
 }): HostedRuntimePendingWakeResolution {
@@ -7360,11 +7321,26 @@ function resolvePendingWakeAfterForegroundPass(input: {
   const carriedWakeIsDue =
     input.previousPendingWake.nextWakeAt !== null
     && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs);
-  const freshDueSupersedesCarriedDue =
-    carriedWakeIsDue
-    && !hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
+  const presentedAssistantYieldedToDueMailbox =
+    input.presentedProjectedAssistantWakeKey !== null
+    && input.assistantProjectedWakeKey === null
+    && input.passWake.nextWakeReason === "mailbox"
     && input.passWake.nextWakeAt !== null
     && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs);
+  const freshDueMailboxOwnerSupersedesCarriedBackground =
+    carriedWakeIsDue
+    && !input.previousPendingWakeIsForeground
+    && input.passWake.nextWakeReason === "mailbox"
+    && input.passWake.nextWakeAt !== null
+    && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs);
+  const freshDueSupersedesCarriedDue =
+    freshDueMailboxOwnerSupersedesCarriedBackground
+    || (
+      carriedWakeIsDue
+      && !hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
+      && input.passWake.nextWakeAt !== null
+      && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs)
+    );
   const preservePendingWakeThroughPreCheckpointPass =
     input.checkpointPendingBeforePass
     && input.presentedProjectedAssistantWakeKey === null
@@ -7401,6 +7377,7 @@ function resolvePendingWakeAfterForegroundPass(input: {
 
   if (
     input.preserveDueAssistantWakeOnNoProgress
+    && !presentedAssistantYieldedToDueMailbox
     && input.presentedProjectedAssistantWakeKey !== null
     && input.assistantProjectedWakeKey === null
     && input.previousPendingWake.nextWakeAt !== null
@@ -7939,32 +7916,6 @@ function assertHostedWorkspaceCheckpointAccepted(
   }
 }
 
-function raceHostedRuntimeCancellation<T>(
-  promise: Promise<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  if (signal.aborted) {
-    return Promise.reject(readHostedRuntimeAbortReason(signal));
-  }
-
-  return new Promise<T>((resolve, reject) => {
-    const abort = () => {
-      reject(readHostedRuntimeAbortReason(signal));
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", abort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", abort);
-        reject(error);
-      },
-    );
-  });
-}
-
 function startOwnedHostedProjectionStage<T>(input: {
   ownerSignals: readonly AbortSignal[];
   runStage: (signal: AbortSignal) => Promise<T>;
@@ -7986,12 +7937,6 @@ function startOwnedHostedProjectionStage<T>(input: {
     },
     promise,
   };
-}
-
-function readHostedRuntimeAbortReason(signal: AbortSignal): unknown {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : new Error("Hosted workspace runtime was aborted.");
 }
 
 function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null | undefined): void {
@@ -8284,74 +8229,12 @@ function shouldCheckpointHostedReplayBudgetProgressBeforeForeground(input: {
     && nextConversationSeq <= consumedConversationSeq;
 }
 
-async function resolveDeferredMailboxImportSystemMailboxWake(
-  importResult: HostedMailboxImportLoopResult,
-  vaultRoot: string,
-): Promise<{
-  at: string | null;
-  reason: string | null;
-}> {
-  if ((importResult.importedSystemMailboxItemIds?.length ?? 0) === 0) {
-    return {
-      at: null,
-      reason: null,
-    };
-  }
-
-  return await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot });
-}
-
 function parseHostedMailboxSeqOrNull(value: string | null | undefined): bigint | null {
   return value !== undefined
     && value !== null
     && /^(?:0|[1-9][0-9]*)$/u.test(value)
     ? BigInt(value)
     : null;
-}
-
-function assertWorkspaceRunVersionMatchesRequest(input: {
-  expectedWorkspaceVersion: string;
-  workspace: HostedWorkspaceState | null;
-}): void {
-  if (workspaceRunVersionMatchesRequest(input)) {
-    return;
-  }
-
-  throw new HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError({
-    actualWorkspaceVersion: input.workspace?.version ?? null,
-    expectedWorkspaceVersion: input.expectedWorkspaceVersion,
-  });
-}
-
-function workspaceRunVersionMatchesRequest(input: {
-  expectedWorkspaceVersion: string;
-  workspace: HostedWorkspaceState | null;
-}): boolean {
-  const actualWorkspaceVersion = input.workspace?.version ?? null;
-
-  if (actualWorkspaceVersion === input.expectedWorkspaceVersion) {
-    return true;
-  }
-
-  if (actualWorkspaceVersion === null && input.expectedWorkspaceVersion === "0") {
-    return true;
-  }
-
-  return false;
-}
-
-function assertWorkspaceRunUserMatchesRequest(input: {
-  expectedUserId: string;
-  workspace: HostedWorkspaceState | null;
-}): void {
-  if (input.workspace === null || input.workspace.userId === input.expectedUserId) {
-    return;
-  }
-
-  throw new HostedWorkspaceRunnerUserMismatchError({
-    actualUserId: input.workspace.userId,
-    expectedUserId: input.expectedUserId,
-	  });
 }
 
 function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined): number {

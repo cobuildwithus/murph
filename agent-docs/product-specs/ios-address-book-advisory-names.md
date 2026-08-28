@@ -1,6 +1,6 @@
 # iOS address-book advisory names
 
-Last verified: 2026-07-30
+Last verified: 2026-08-28
 
 ## Product boundary
 
@@ -172,19 +172,20 @@ For a registered participant, the label remains only the owner's private
 presentation hint: it does not replace or modify that participant's Murph
 identity, and `hasOwnMurph` remains a separate durable-activation fact.
 
-The fourth consumer is private-to-joined-group target selection for Linq
-iMessage/SMS groups. Its authority is the authenticated requester's current
-membership, not group ownership. Web may read only that requester's enabled
-projection and uses familiar labels solely to compare a model-supplied closed
-participant description with complete current provider rosters. It never
-falls back to the group owner's or another member's Contacts. A successful
-selection yields only the existing membership and route effect authority plus
-a safe model-visible description; provider handles remain transient. When the
-requester has no matching shared label, the model may see only participant
-count, NANP area code plus last four, international last four, or a generic
-email-participant marker. Zero matches, multiple matches, incomplete rosters,
-duplicate safe descriptions, or lookup/decryption failure cannot authorize an
-effect.
+The fourth consumer is private joined-group inventory for Linq iMessage/SMS
+groups. Its authority is the authenticated requester's current membership, not
+group ownership. Web may read only that requester's enabled projection and uses
+familiar labels solely as a presentation overlay on complete current provider
+rosters. It never falls back to the group owner's or another member's Contacts.
+Each membership receives its own available or unavailable roster result;
+provider handles remain transient. When the requester has no matching shared
+label, the model sees only the real human participant count, NANP area code plus
+last four, international last four, or a generic email-participant marker.
+Incomplete rosters, missing routes, unsupported providers, or provider failure
+make only that entry unavailable. Lookup or decryption failure falls back to
+masked hints. These labels may help natural clarification but never select a
+route or authorize an effect; Ask and handoff authority comes only from Web's
+locked revalidation of an exact current membership id.
 
 The roster read is shared by route-authorized iMessage and SMS groups. Its Web
 owner also runs the existing best-effort Linq participant reconciliation. That

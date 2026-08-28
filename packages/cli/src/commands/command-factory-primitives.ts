@@ -7,6 +7,8 @@ import {
   withBaseOptions,
   type CommonCommandOptions,
 } from '@murphai/operator-config/command-helpers'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { localDateSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
@@ -19,9 +21,7 @@ import type {
 
 const jsonObjectOutputSchema = z.object({}).catchall(z.unknown())
 
-const localDateOptionSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected YYYY-MM-DD.')
+const localDateOptionSchema = localDateSchema
 
 export const commonListLimitOptionSchema = z
   .number()
@@ -35,6 +35,40 @@ export const commonDateRangeOptionDescriptions = {
   from: 'Optional inclusive lower date bound in YYYY-MM-DD form.',
   to: 'Optional inclusive upper date bound in YYYY-MM-DD form.',
 } as const
+
+export function assertOrderedDateRange(
+  from: string | undefined,
+  to: string | undefined,
+): void {
+  if (from !== undefined && to !== undefined && from > to) {
+    throw invalidDateRangeError()
+  }
+}
+
+export function assertOrderedTimestampRange(
+  from: string | undefined,
+  to: string | undefined,
+): void {
+  if (
+    from !== undefined
+    && to !== undefined
+    && Date.parse(from) > Date.parse(to)
+  ) {
+    throw invalidDateRangeError()
+  }
+}
+
+function invalidDateRangeError(): VaultCliError {
+  return new VaultCliError(
+    'invalid_option',
+    '--from must be on or before --to.',
+    {
+      retryable: false,
+      stage: 'validation',
+      issues: [{ code: 'custom', publicPath: ['from'] }],
+    },
+  )
+}
 
 export type CommandExamples = Array<Record<string, unknown>>
 
@@ -438,9 +472,11 @@ export function createCommonListCommand<
     },
     output: config.output,
     async run({ options, requestId }) {
+      const commonOptions = readCommonListOptions(options, optionNames)
+      assertOrderedDateRange(commonOptions.from, commonOptions.to)
       return config.run(
         buildInput({
-          ...readCommonListOptions(options, optionNames),
+          ...commonOptions,
           requestId,
           vault: options.vault,
         }, options),

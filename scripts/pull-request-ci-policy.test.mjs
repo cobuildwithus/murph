@@ -655,7 +655,7 @@ test("draft reset rejects missing, ambiguous, or mismatched head candidates befo
   }
 });
 
-test("operator docs preserve the ready-only exact-head lifecycle", async () => {
+test("operator docs preserve the ready-only exact-head lifecycle and native canary recovery", async () => {
   const documents = await Promise.all([
     readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
     readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
@@ -665,8 +665,14 @@ test("operator docs preserve the ready-only exact-head lifecycle", async () => {
     assert.match(document, /ready_for_review|ready for review/u);
     assert.match(document, /synchronize[\s\S]{0,240}draft/u);
     assert.match(document, /exact head|exact-head/u);
-    assert.match(document, /infrastructure-only|infrastructure failure/u);
-    assert.match(document, /--failure-code xcodebuild_failed/u);
+    assert.match(document, /production canar/u);
+    assert.match(document, /six-hour/u);
+    assert.match(document, /latest completed\s+scheduled (?:outcome|run)/u);
+    assert.match(document, /explicit rerun/u);
+    assert.doesNotMatch(
+      document,
+      /native-ios-hosted-e2e-retry\.mjs|--failure-code (?:android_workflow_rerun|xcodebuild_failed)/u,
+    );
   }
 });
 
