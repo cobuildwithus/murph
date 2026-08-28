@@ -29,6 +29,7 @@ export interface HostedVaultShareRecentDateBackfillStore {
     grantorMemberId: string;
     now: Date;
   }): Promise<{
+    hasDeferredGrants: boolean;
     refreshedGrants: number;
     signal: HostedVaultShareProjectionMaintenanceSignal | null;
   }>;
@@ -80,6 +81,7 @@ export async function backfillHostedVaultShareRecentDateGenerations(input: {
       grantorMemberId,
       now: (input.now ?? (() => new Date()))(),
     });
+    summary.hasMore ||= refreshed.hasDeferredGrants;
     summary.refreshedGrants += refreshed.refreshedGrants;
     if (!refreshed.signal) {
       continue;
@@ -121,20 +123,21 @@ export function createHostedVaultShareRecentDateBackfillStore(
         const grants = await tx.hostedVaultShare.findMany({
           orderBy: { id: "asc" },
           select: { id: true },
-          take: MAX_GRANTS_PER_GRANTOR_BATCH,
+          take: MAX_GRANTS_PER_GRANTOR_BATCH + 1,
           where: {
             ...candidateWhere(grantedBefore),
             grantorMemberId,
           },
         });
         const nextGrantIds: string[] = [];
-        for (const grant of grants) {
+        for (const grant of grants.slice(0, MAX_GRANTS_PER_GRANTOR_BATCH)) {
           const nextGrantId = generateHostedVaultShareId();
           const updated = await tx.hostedVaultShare.updateMany({
             data: {
               grantedAt: now,
               id: nextGrantId,
               projectionSnapshotCiphertext: null,
+              projectionSourceWorkspaceVersion: null,
             },
             where: {
               id: grant.id,
@@ -154,6 +157,7 @@ export function createHostedVaultShareRecentDateBackfillStore(
             })
           : null;
         return {
+          hasDeferredGrants: grants.length > MAX_GRANTS_PER_GRANTOR_BATCH,
           refreshedGrants: nextGrantIds.length,
           signal,
         };

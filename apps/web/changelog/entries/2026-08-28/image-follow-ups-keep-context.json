@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-28",
+  "order": 100,
+  "item": {
+    "id": "image-follow-ups-keep-context",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Image follow-ups keep their context",
+    "summary": "After Murph finishes creating an image in the background, the follow-up keeps the same conversation capabilities and recent context.",
+    "details": "Any physical note or other external action still requires the exact generated image and the message that authorized it.",
+    "relevanceTags": ["assistant", "images", "reliability"],
+    "sourcePullRequests": [2441]
+  }
+}

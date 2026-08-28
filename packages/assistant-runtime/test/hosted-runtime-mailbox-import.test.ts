@@ -616,6 +616,60 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "2");
   });
 
+  test("imports a Web-owned first-turn pair as context and only replies to the next inbound", async () => {
+    const consumedAt = "2026-04-26T00:00:04.000Z";
+    const { mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [
+        { consumedSeq: "0", lane: "conversation" },
+      ],
+      items: [
+        createMailboxItem({
+          consumedAt,
+          id: "mailbox_item_web_first_turn_inbound_001",
+          laneSeq: "1",
+        }),
+        createMailboxItem({
+          consumedAt,
+          id: "mailbox_item_web_first_turn_outbound_002",
+          laneSeq: "2",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_runtime_next_inbound_003",
+          laneSeq: "3",
+        }),
+      ],
+    });
+    const durablyConsumedBySeq = new Map<string, boolean | undefined>();
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
+        return {
+          assistantInputId: `assistant_input_web_handoff_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_web_first_turn_handoff",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual([...durablyConsumedBySeq.entries()], [
+      ["1", true],
+      ["2", true],
+      ["3", false],
+    ]);
+    assert.deepEqual(result.assistantInputIds, [
+      "assistant_input_web_handoff_3",
+    ]);
+    assert.equal(result.importedCount, 3);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.state.watermarks.conversation, "3");
+  });
+
   test("imports a fresh conversation tail when the consumed watermark lags local import", async () => {
     const nextItem = createMailboxItem({
       id: "mailbox_item_conversation_new_after_replay",

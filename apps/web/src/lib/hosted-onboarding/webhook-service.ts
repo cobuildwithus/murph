@@ -16,9 +16,11 @@ import {
 } from "./linq";
 import {
   getHostedLinqChatSummary,
+  readHostedLinqExplicitGroupDisplayName,
   startHostedLinqChatTypingIndicator,
   stopHostedLinqChatTypingIndicator,
   type HostedLinqChatHandleSummary,
+  type HostedLinqChatSummary,
 } from "./linq-client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
@@ -41,6 +43,7 @@ import {
   summarizeHostedTelegramWebhook,
 } from "./telegram";
 import {
+  buildHostedLinqFirstContactAdmissionRequest,
   HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS,
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
@@ -126,6 +129,13 @@ import {
   tryHostedLinqFirstContactAdmissionDeterministicDecision,
   type HostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
+import {
+  abandonHostedLinqInstantFirstTurn,
+  claimHostedLinqInstantFirstTurn,
+  completeHostedLinqInstantFirstTurn,
+  startHostedLinqInstantFirstTurnGeneration,
+  type HostedLinqInstantFirstTurnGeneration,
+} from "./linq-instant-first-turn";
 import {
   ensureHostedLinqInstantStartStarterUsageEnrollment,
   runHostedLinqInstantStartDeferredActivationWakeBestEffort,
@@ -574,24 +584,78 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const firstContactAdmissionMode = readHostedLinqFirstContactAdmissionMode();
     const requireFirstContactAdmission = firstContactAdmissionMode === "enforce";
     let firstContactAdmissionClassified = false;
+    const instantFirstTurnCandidate =
+      planningEvent.event_type === "message.received"
+      && isHostedLinqInstantStartEventCandidate({
+        event: requireHostedLinqMessageReceivedEvent(planningEvent),
+        phonePrefixes:
+          getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
+      });
+    let instantFirstTurnGeneration:
+      Promise<HostedLinqInstantFirstTurnGeneration> | null = null;
+    let instantFirstTurnOwnsFinalPlan = false;
+    let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null = null;
+    const abandonInstantFirstTurn = async (reason: string): Promise<void> => {
+      if (!instantFirstTurnCandidate) {
+        return;
+      }
+      const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
+      await abandonHostedLinqInstantFirstTurn({
+        eventId: event.event_id,
+        linqChatId: context.summary.chatId,
+        prisma,
+        reason,
+      });
+    };
     try {
       const shouldReuseRecordedFirstContactAdmission =
         planningEvent.event_type === "message.received"
         && (
           requireFirstContactAdmission
-          || isHostedLinqInstantStartEventCandidate({
-            event: requireHostedLinqMessageReceivedEvent(planningEvent),
-            phonePrefixes:
-              getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
-          })
+          || instantFirstTurnCandidate
         );
-      let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null =
-        shouldReuseRecordedFirstContactAdmission
-          ? await readRecordedHostedLinqFirstContactAdmissionDecision({
-              eventId: event.event_id,
-              prisma,
-            })
-          : null;
+      firstContactAdmissionDecision = shouldReuseRecordedFirstContactAdmission
+        ? await readRecordedHostedLinqFirstContactAdmissionDecision({
+            eventId: event.event_id,
+            prisma,
+          })
+        : null;
+      const startInstantFirstTurnGeneration = async (): Promise<void> => {
+        if (
+          instantFirstTurnGeneration
+          || !instantFirstTurnCandidate
+        ) {
+          return;
+        }
+        const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
+        if (!context.participantContact) {
+          return;
+        }
+        const request = buildHostedLinqFirstContactAdmissionRequest({
+          context,
+          event: planningEvent,
+          participantContact: context.participantContact,
+        });
+        const claim = await claimHostedLinqInstantFirstTurn({
+          linqChatId: context.summary.chatId,
+          prisma,
+          request,
+        });
+        if (claim.kind === "unavailable") {
+          return;
+        }
+        const generation = startHostedLinqInstantFirstTurnGeneration({
+          claim,
+          request,
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
+        // Enrollment or later planning can still choose the ordinary signup
+        // path. Observe a rejected speculative generation even when there is
+        // then no active-member handoff to await it; the original promise is
+        // retained so the eligible path still receives the exact error.
+        void generation.catch(() => undefined);
+        instantFirstTurnGeneration = generation;
+      };
       let requiredPendingGroupSetupCandidateId: string | null = null;
       const runPlan = async (instantStartAllowed = true) => {
         let reusableDirectCryptoDomainRoots: {
@@ -614,6 +678,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 affirmativeReaction,
                 event: planningEvent,
                 firstContactAdmissionDecision,
+                ...(planningResolution.initialGroupDisplayName
+                  ? {
+                      initialGroupDisplayName:
+                        planningResolution.initialGroupDisplayName,
+                    }
+                  : {}),
                 instantStartAllowed,
                 pendingGroupParticipantMemberIds:
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
@@ -785,6 +855,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               "first-contact-admission-budget-exhausted",
             );
           } else {
+            // The exact chat/event now owns one durable reply obligation.
+            // Reply generation has no side effects, so it can run beside the
+            // classifier while provider work still waits for persisted allow.
+            await startInstantFirstTurnGeneration();
             let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
             try {
               classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
@@ -884,6 +958,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           "Hosted Linq instant-start enrollment remained unresolved after fallback.",
         );
       }
+      const activeWakeHandoff = plan.wakeHandoffs?.[0];
+      if (
+        activeWakeHandoff
+        && firstContactAdmissionDecision?.kind === "allow"
+        && firstContactAdmissionDecision.source === "model"
+      ) {
+        // Exact-event webhook recovery can arrive after enrollment already
+        // committed, so it no longer sees the enrollment plan above. Reclaim
+        // the same ledger identity and sealed body rather than minting another
+        // reply obligation.
+        await startInstantFirstTurnGeneration();
+      }
     } catch (error) {
       // A recognized home-route owner whose permanent route no longer matches
       // the fallback binding would otherwise retry this rollback forever and
@@ -894,12 +980,27 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           ? await planHostedLinqPermanentHomeRouteRecovery({ event, prisma })
           : null;
       if (!recoveredPlan) {
+        // A pre-provider failure has no persisted reply to resume. The skip
+        // writer ignores ambiguous and completed deliveries.
+        await abandonInstantFirstTurn("planner-failed-before-provider-dispatch");
         finishHostedOnboardingTiming(planTiming, "failed", {
           errorName: deriveHostedOnboardingTimingErrorName(error),
         });
         throw error;
       }
       plan = recoveredPlan;
+    }
+    instantFirstTurnOwnsFinalPlan = Boolean(
+      instantFirstTurnGeneration
+      && firstContactAdmissionDecision?.kind === "allow"
+      && firstContactAdmissionDecision.source === "model"
+      && plan.wakeHandoffs?.[0],
+    );
+    if (!instantFirstTurnOwnsFinalPlan) {
+      // Exact replay may recover a durable claim without recreating the
+      // request-local generation promise. Settle the existing event row before
+      // another path becomes visible; absence remains a no-op.
+      await abandonInstantFirstTurn("planner-selected-non-instant-path");
     }
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {
       desiredSideEffectCount: plan.desiredSideEffects.length,
@@ -1009,14 +1110,54 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       }
     }
 
+    responseReason = plan.response.reason ?? null;
+    let wakeHandoff = plan.wakeHandoffs?.[0];
+    if (
+      wakeHandoff
+      && instantFirstTurnGeneration
+      && instantFirstTurnOwnsFinalPlan
+      && planningEvent.event_type === "message.received"
+    ) {
+      const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
+      if (
+        context.participantContact
+        && context.recipientPhoneNumber
+      ) {
+        try {
+          const instantFirstTurn = await completeHostedLinqInstantFirstTurn({
+            generation: await instantFirstTurnGeneration,
+            inboundMessageId: context.summary.messageId,
+            participantContact: context.participantContact,
+            prisma,
+            recipientPhoneNumber: context.recipientPhoneNumber,
+            service: context.messageEvent.data.service ?? null,
+            wakeHandoff,
+          });
+          if (instantFirstTurn.kind === "accepted") {
+            wakeHandoff = instantFirstTurn.wakeHandoff;
+          }
+        } catch (error) {
+          if (
+            isHostedOnboardingError(error)
+            && error.code === "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY"
+          ) {
+            // The conversation checkpoint will import activation as well once
+            // the exact provider delivery is reconciled. Signaling activation
+            // alone here could let the runtime answer the same inbound while
+            // the Web-owned send is still ambiguous.
+            pendingInstantStartActivationWake = null;
+          }
+          throw error;
+        }
+      }
+    }
+
     scheduleHostedLinqProviderEventIngestionBestEffort({
       event: providerEvent,
       prisma,
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
-    responseReason = plan.response.reason ?? null;
-    const wakeHandoff = plan.wakeHandoffs?.[0];
     const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
     const wakeHandoffResult = await (async () => {
       try {
@@ -1199,6 +1340,7 @@ function scheduleHostedLinqTypingShellPrewarmBestEffort(input: {
 
 interface HostedLinqPlanningEventResolution {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  initialGroupDisplayName?: string;
   pendingGroupParticipantMemberIds?: readonly string[];
   pendingGroupRosterUnavailable?: boolean;
   requestLocalGroupRoster?: {
@@ -1237,6 +1379,9 @@ async function resolveHostedLinqPlanningEvent(input: {
         : null;
     return {
       event: messageEvent,
+      ...(pendingGroupRoster?.initialGroupDisplayName
+        ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
+        : {}),
       ...(pendingGroupRoster?.participantMemberIds == null
         ? {}
         : {
@@ -1271,7 +1416,7 @@ async function resolveHostedLinqPlanningEvent(input: {
   }
 
   let resolvedIsGroup: boolean;
-  let canonicalHandles: readonly HostedLinqChatHandleSummary[] | null = null;
+  let canonicalSummary: HostedLinqChatSummary | null = null;
   if (threadRoute) {
     logHostedLinqChatClassification("thread-route-group");
     resolvedIsGroup = true;
@@ -1284,7 +1429,7 @@ async function resolveHostedLinqPlanningEvent(input: {
         ...(input.signal ? { signal: input.signal } : {}),
       });
       canonicalIsGroup = summary.isGroup;
-      canonicalHandles = summary.handles;
+      canonicalSummary = summary;
     } catch (error) {
       logHostedLinqChatClassification("canonical-unavailable");
       if (input.signal?.aborted) {
@@ -1317,7 +1462,7 @@ async function resolveHostedLinqPlanningEvent(input: {
     resolvedIsGroup && !threadRoute
       ? await resolveHostedLinqPendingGroupParticipantMemberIds({
           chatId: messageEvent.data.chat_id,
-          handles: canonicalHandles,
+          summary: canonicalSummary,
           prisma: input.prisma,
           signal: input.signal,
         })
@@ -1334,6 +1479,9 @@ async function resolveHostedLinqPlanningEvent(input: {
         },
       },
     },
+    ...(pendingGroupRoster?.initialGroupDisplayName
+      ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
+      : {}),
     ...(pendingGroupRoster?.participantMemberIds == null
       ? {}
       : {
@@ -1357,35 +1505,39 @@ async function resolveHostedLinqPlanningEvent(input: {
 
 async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
   chatId: string;
-  handles?: readonly HostedLinqChatHandleSummary[] | null;
+  summary?: HostedLinqChatSummary | null;
   prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<{
   handles: readonly HostedLinqChatHandleSummary[] | null;
+  initialGroupDisplayName: string | null;
   participantMemberIds: string[] | null;
   unavailable: boolean;
 }> {
   try {
-    const summary = input.handles
-      ? null
-      : await getHostedLinqChatSummary({
+    const summary = input.summary
+      ?? await getHostedLinqChatSummary({
           chatId: input.chatId,
           timeoutMs: HOSTED_LINQ_CHAT_CLASSIFICATION_TIMEOUT_MS,
           ...(input.signal ? { signal: input.signal } : {}),
         });
-    if (summary?.isGroup === false) {
+    if (summary.isGroup === false) {
       logHostedLinqPendingGroupRoster("provider_not_group");
       return {
         handles: null,
+        initialGroupDisplayName: null,
         participantMemberIds: null,
         unavailable: false,
       };
     }
-    const handles = input.handles ?? summary?.handles ?? [];
+    const handles = summary.handles;
+    const initialGroupDisplayName =
+      readHostedLinqExplicitGroupDisplayName(summary);
     if (handles.length === 0) {
       logHostedLinqPendingGroupRoster("empty_roster");
       return {
         handles,
+        initialGroupDisplayName,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1406,6 +1558,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       logHostedLinqPendingGroupRoster("oversized_roster");
       return {
         handles,
+        initialGroupDisplayName,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1421,6 +1574,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     logHostedLinqPendingGroupRoster("resolved");
     return {
       handles,
+      initialGroupDisplayName,
       participantMemberIds: memberIds,
       unavailable: false,
     };
@@ -1431,6 +1585,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     logHostedLinqPendingGroupRoster("unavailable");
     return {
       handles: null,
+      initialGroupDisplayName: null,
       participantMemberIds: null,
       unavailable: true,
     };

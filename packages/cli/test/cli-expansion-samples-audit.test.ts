@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { VAULT_LAYOUT } from '@murphai/contracts'
 import { initializeVault } from '@murphai/core'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerAuditCommands } from '../src/commands/audit.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
-import { createUnwiredVaultServices } from '@murphai/vault-usecases'
+import {
+  createIntegratedVaultServices,
+  createUnwiredVaultServices,
+} from '@murphai/vault-usecases'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
@@ -58,6 +62,51 @@ async function runRawSliceCli(args: string[]): Promise<string> {
   return output.join('').trim()
 }
 
+async function countJsonlRecordsUnder(root: string): Promise<number> {
+  let entries: string[]
+  try {
+    entries = await readdir(root, { recursive: true })
+  } catch (error) {
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && error.code === 'ENOENT'
+    ) {
+      return 0
+    }
+    throw error
+  }
+  const counts = await Promise.all(entries
+    .filter((entry) => entry.endsWith('.jsonl'))
+    .map(async (entry) => {
+      const content = await readFile(path.join(root, entry), 'utf8')
+      return content.split('\n').filter(Boolean).length
+    }))
+  return counts.reduce((total, count) => total + count, 0)
+}
+
+async function countAuditRecords(vaultRoot: string): Promise<number> {
+  return countJsonlRecordsUnder(path.join(vaultRoot, VAULT_LAYOUT.auditDirectory))
+}
+
+async function countFilesUnder(root: string): Promise<number> {
+  try {
+    const entries = await readdir(root, { recursive: true, withFileTypes: true })
+    return entries.filter((entry) => entry.isFile()).length
+  } catch (error) {
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && error.code === 'ENOENT'
+    ) {
+      return 0
+    }
+    throw error
+  }
+}
+
 test('samples import-csv schema exposes the expansion-only import options', async () => {
   const schema = JSON.parse(
     await runRawSliceCli(['samples', 'import-csv', '--schema', '--format', 'json']),
@@ -100,6 +149,411 @@ test('samples csv profile and summarize schemas expose composable profiling opti
   assert.equal('profile' in summarizeSchema.options.properties, true)
   assert.equal('thresholdBelow' in summarizeSchema.options.properties, true)
   assert.deepEqual(summarizeSchema.options.required, ['vault', 'stream'])
+})
+
+test('samples batch show help and model metadata describe the list-to-show id contract', async () => {
+  const help = await runRawSliceCli(['samples', 'batch', 'show', '--help'])
+  const llms = await runRawSliceCli(['samples', 'batch', 'show', '--llms-full'])
+
+  assert.match(help, /exact id returned by samples batch list/iu)
+  assert.match(llms, /exact id returned by samples batch list/iu)
+  assert.doesNotMatch(help, /by transform id|transform batch id|xfm_<ULID>/iu)
+  assert.doesNotMatch(llms, /by transform id|transform batch id|xfm_<ULID>/iu)
+})
+
+test.sequential('sample CSV failures expose value-free guidance without multiplying physical row counts across streams', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-repair-'))
+  const invalidRowsPath = path.join(vaultRoot, 'invalid-rows.csv')
+  const timestampInferencePath = path.join(vaultRoot, 'timestamp-inference.csv')
+  const valueInferencePath = path.join(vaultRoot, 'value-inference.csv')
+  const headerlessPath = path.join(vaultRoot, 'headerless.csv')
+  const preamblePath = path.join(vaultRoot, 'preamble.csv')
+  const wrongDelimiterPath = path.join(vaultRoot, 'wrong-delimiter.csv')
+  const longHeaderPath = path.join(vaultRoot, 'long-header.csv')
+  const wideHeaderPath = path.join(vaultRoot, 'wide-header.csv')
+  const timestampMessage = 'Sample CSV column inference failed. Check --delimiter, then retry with --ts-column set to the exact timestamp column name.'
+  const valueMessage = 'Sample CSV column inference failed. Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.'
+
+  function assertNoEcho(value: unknown, sentinels: readonly string[]): void {
+    const serialized = JSON.stringify(value) ?? ''
+    for (const sentinel of sentinels) {
+      assert.equal(serialized.includes(sentinel), false)
+    }
+  }
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const timestampCellSentinel = 'private-timestamp-cell'
+    const valueCellSentinel = 'private-value-cell'
+    const stepsCellSentinel = 'private-steps-cell'
+    await writeFile(
+      invalidRowsPath,
+      `timestamp,bpm,steps\n${timestampCellSentinel},${valueCellSentinel},${stepsCellSentinel}\n`,
+      'utf8',
+    )
+
+    const invalidRows = await runSliceCli([
+      'samples',
+      'import-csv',
+      invalidRowsPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(invalidRows.ok, false)
+    assert.equal(invalidRows.error.code, 'invalid_payload')
+    assert.equal(invalidRows.error.stage, 'validation')
+    assert.equal(invalidRows.error.fieldErrors?.[0]?.path, 'imports.0.samples')
+    assert.equal(invalidRows.error.fieldErrors?.[0]?.code, 'custom')
+    assert.equal(invalidRows.error.fieldErrors?.[0]?.expected, 'array')
+    assert.equal(invalidRows.error.fieldErrors?.[0]?.message, 'This field is invalid.')
+    assert.equal(invalidRows.error.fieldErrors?.[1]?.path, 'imports.1.samples')
+    assert.equal(invalidRows.error.fieldErrors?.[1]?.expected, 'array')
+    assert.equal(
+      invalidRows.error.message,
+      'Sample CSV did not contain any importable rows. Correct invalid timestamp or numeric value cells, then retry.',
+    )
+    assert.doesNotMatch(invalidRows.error.message, /\b\d+ rows?\b/iu)
+    assert.equal(JSON.stringify(invalidRows).includes(timestampCellSentinel), false)
+    assert.equal(JSON.stringify(invalidRows).includes(valueCellSentinel), false)
+    assert.equal(JSON.stringify(invalidRows).includes(stepsCellSentinel), false)
+
+    const privateTimestampHeader = 'custom_private_time_header'
+    const privateTimestampCell = 'private-timestamp-inference-cell'
+    await writeFile(timestampInferencePath, `${privateTimestampHeader},bpm\n${privateTimestampCell},62\n`, 'utf8')
+    const timestampInference = await runSliceCli([
+      'samples',
+      'csv',
+      'profile',
+      timestampInferencePath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(timestampInference.ok, false)
+    assert.equal(timestampInference.meta.command, 'samples csv profile')
+    assert.equal(timestampInference.error.fieldErrors?.[0]?.path, 'tsColumn')
+    assert.equal(timestampInference.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(timestampInference.error.fieldErrors?.[0]?.message, 'This field is invalid.')
+    assert.equal(timestampInference.error.message, timestampMessage)
+    assert.equal(timestampInference.error.hint, undefined)
+    assertNoEcho(timestampInference, [privateTimestampHeader, 'bpm', privateTimestampCell])
+
+    const privateValueHeader = 'custom_private_metric_header'
+    const privateValueCell = 'private-value-inference-cell'
+    await writeFile(
+      valueInferencePath,
+      `timestamp,${privateValueHeader}\n2026-03-12T08:00:00Z,${privateValueCell}\n`,
+      'utf8',
+    )
+    const valueInference = await runSliceCli([
+      'samples',
+      'csv',
+      'import',
+      valueInferencePath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(valueInference.ok, false)
+    assert.equal(valueInference.meta.command, 'samples csv import')
+    assert.equal(valueInference.error.fieldErrors?.[0]?.path, 'valueColumn')
+    assert.equal(valueInference.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(valueInference.error.message, valueMessage)
+    assertNoEcho(valueInference, [privateValueHeader, privateValueCell])
+
+    const headerlessTimestamp = '2042-11-19T12:34:56Z'
+    const headerlessValue = '791337'
+    await writeFile(
+      headerlessPath,
+      `${headerlessTimestamp},${headerlessValue}\n2042-11-19T12:35:56Z,791338\n`,
+      'utf8',
+    )
+    const headerless = await runSliceCli([
+      'samples',
+      'csv',
+      'profile',
+      headerlessPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(headerless.ok, false)
+    assert.equal(headerless.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(headerless.error.message, timestampMessage)
+    assertNoEcho(headerless, [headerlessTimestamp, headerlessValue])
+
+    const privatePreamble = 'private-preamble-sentinel'
+    const preambleHeaderA = 'custom_preamble_time_header'
+    const preambleHeaderB = 'custom_preamble_metric_header'
+    const privatePreambleCell = 'private-preamble-cell'
+    await writeFile(
+      preamblePath,
+      `${privatePreamble}\n${preambleHeaderA},${preambleHeaderB}\n${privatePreambleCell},72\n`,
+      'utf8',
+    )
+    const preamble = await runSliceCli([
+      'samples',
+      'import-csv',
+      preamblePath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(preamble.ok, false)
+    assert.equal(preamble.meta.command, 'samples import-csv')
+    assert.equal(preamble.error.fieldErrors?.[0]?.path, 'tsColumn')
+    assert.equal(preamble.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(preamble.error.message, timestampMessage)
+    assertNoEcho(preamble, [privatePreamble, preambleHeaderA, preambleHeaderB, privatePreambleCell])
+
+    const wrongDelimiterTimestamp = '2043-01-17T03:02:01Z'
+    const wrongDelimiterValue = '881199'
+    const wrongDelimiterHeader = 'custom_time_flag;custom_metric_flag'
+    await writeFile(
+      wrongDelimiterPath,
+      `${wrongDelimiterHeader}\n${wrongDelimiterTimestamp};${wrongDelimiterValue}\n`,
+      'utf8',
+    )
+    const wrongDelimiter = await runSliceCli([
+      'samples',
+      'csv',
+      'profile',
+      wrongDelimiterPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(wrongDelimiter.ok, false)
+    assert.equal(wrongDelimiter.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(wrongDelimiter.error.message, timestampMessage)
+    assertNoEcho(wrongDelimiter, [wrongDelimiterHeader, wrongDelimiterTimestamp, wrongDelimiterValue])
+
+    const longHeader = `metric_${'x'.repeat(200)}`
+    await writeFile(
+      longHeaderPath,
+      `timestamp,${longHeader}\n2043-02-01T00:00:00Z,72\n`,
+      'utf8',
+    )
+    const longHeaderResult = await runSliceCli([
+      'samples',
+      'csv',
+      'import',
+      longHeaderPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(longHeaderResult.ok, false)
+    assert.equal(longHeaderResult.error.fieldErrors?.[0]?.path, 'valueColumn')
+    assert.equal(longHeaderResult.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(longHeaderResult.error.message, valueMessage)
+    assertNoEcho(longHeaderResult, [longHeader, longHeader.slice(0, 24)])
+
+    const wideHeaders = Array.from({ length: 24 }, (_, index) =>
+      `metric_${String(index + 1).padStart(2, '0')}`
+    )
+    await writeFile(
+      wideHeaderPath,
+      `timestamp,${wideHeaders.join(',')}\n2043-02-01T00:00:00Z,${wideHeaders.map(() => '72').join(',')}\n`,
+      'utf8',
+    )
+    const wideHeaderResult = await runSliceCli([
+      'samples',
+      'import-csv',
+      wideHeaderPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(wideHeaderResult.ok, false)
+    assert.equal(wideHeaderResult.meta.command, 'samples import-csv')
+    assert.equal(wideHeaderResult.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(wideHeaderResult.error.message, valueMessage)
+    assertNoEcho(wideHeaderResult, wideHeaders)
+    assert.ok(JSON.stringify(wideHeaderResult.error).length < 1_000)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential.each([
+    {
+      command: ['samples', 'import-csv'] as const,
+      fileName: 'negative-heart-rate.csv',
+      content: 'timestamp,spo2,heart_rate\n2026-03-12T08:00:00Z,97,-17\n',
+      correctedContent: 'timestamp,spo2,heart_rate\n2026-03-12T08:00:00Z,97,62\n',
+      options: [] as const,
+      path: 'imports.1.samples',
+      hint: 'Use a non-negative integer.',
+      sentinels: ['-17'],
+      streams: ['spo2', 'heart_rate'] as const,
+    },
+    {
+      command: ['samples', 'csv', 'import'] as const,
+      fileName: 'negative-spo2.csv',
+      content: 'timestamp,heart_rate,spo2\n2026-03-12T08:00:00Z,62,-1\n',
+      correctedContent: 'timestamp,heart_rate,spo2\n2026-03-12T08:00:00Z,62,98\n',
+      options: [] as const,
+      path: 'imports.1.samples',
+      hint: 'Use a non-negative finite number.',
+      sentinels: ['-1'],
+      streams: ['heart_rate', 'spo2'] as const,
+    },
+    {
+      command: ['samples', 'import-csv'] as const,
+      fileName: 'incompatible-unit.csv',
+      content: 'timestamp,heart_rate\n2026-03-12T08:00:00Z,62\n',
+      correctedContent: null,
+      options: [
+        '--stream', 'heart_rate',
+        '--ts-column', 'timestamp',
+        '--value-column', 'heart_rate',
+        '--unit', 'private-heart-rate-unit',
+      ] as const,
+      path: 'imports.0.samples',
+      hint: 'Use "bpm" for heart_rate.',
+      sentinels: ['private-heart-rate-unit'],
+      streams: ['heart_rate'] as const,
+    },
+])('sample CSV semantic failure $fileName retains fixed repair hints without writes or value echo', async (semanticCase) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-semantics-'))
+    try {
+      await initializeVault({ vaultRoot })
+      const initialAuditCount = await countAuditRecords(vaultRoot)
+      const csvPath = path.join(vaultRoot, semanticCase.fileName)
+      await writeFile(
+        csvPath,
+        semanticCase.content,
+        'utf8',
+      )
+
+      const result = await runSliceCli([
+        ...semanticCase.command,
+        csvPath,
+        '--vault',
+        vaultRoot,
+        ...semanticCase.options,
+      ])
+      const serialized = JSON.stringify(result)
+
+      assert.equal(result.ok, false, semanticCase.fileName)
+      assert.equal(result.meta.command, semanticCase.command.join(' '), semanticCase.fileName)
+      assert.equal(result.error.code, 'invalid_payload', semanticCase.fileName)
+      assert.equal(result.error.stage, 'validation', semanticCase.fileName)
+      assert.equal(result.error.fieldErrors?.[0]?.path, semanticCase.path, semanticCase.fileName)
+      assert.equal(result.error.hint, semanticCase.hint, semanticCase.fileName)
+      for (const sentinel of semanticCase.sentinels) {
+        assert.equal(serialized.includes(sentinel), false, semanticCase.fileName)
+      }
+
+      for (const stream of semanticCase.streams) {
+        assert.equal(
+          await countJsonlRecordsUnder(
+            path.join(vaultRoot, VAULT_LAYOUT.sampleLedgerDirectory, stream),
+          ),
+          0,
+          `${semanticCase.fileName}:${stream}`,
+        )
+      }
+      assert.equal(
+        await countFilesUnder(path.join(vaultRoot, VAULT_LAYOUT.rawDirectory)),
+        0,
+        semanticCase.fileName,
+      )
+      assert.equal(await countAuditRecords(vaultRoot), initialAuditCount, semanticCase.fileName)
+
+      if (semanticCase.correctedContent === null) return
+
+      await writeFile(
+        csvPath,
+        semanticCase.correctedContent,
+        'utf8',
+      )
+      const corrected = await runSliceCli<{
+        importedCount: number
+        imports: Array<{ manifestFile: string }>
+      }>([
+        ...semanticCase.command,
+        csvPath,
+        '--vault',
+        vaultRoot,
+        ...semanticCase.options,
+      ])
+
+      assert.equal(corrected.ok, true, semanticCase.fileName)
+      assert.equal(corrected.meta.command, semanticCase.command.join(' '), semanticCase.fileName)
+      const correctedData = requireData(corrected)
+      assert.equal(correctedData.importedCount, semanticCase.streams.length, semanticCase.fileName)
+      assert.equal(correctedData.imports.length, semanticCase.streams.length, semanticCase.fileName)
+
+      for (const stream of semanticCase.streams) {
+        assert.equal(
+          await countJsonlRecordsUnder(
+            path.join(vaultRoot, VAULT_LAYOUT.sampleLedgerDirectory, stream),
+          ),
+          1,
+          `${semanticCase.fileName}:${stream}`,
+        )
+      }
+      await Promise.all(correctedData.imports.map((entry) =>
+        access(path.join(vaultRoot, entry.manifestFile))))
+      assert.equal(
+        await countAuditRecords(vaultRoot),
+        initialAuditCount + semanticCase.streams.length,
+        semanticCase.fileName,
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+})
+
+test.sequential('samples batch show accepts every exact id emitted by batch list', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-batch-roundtrip-'))
+  const manifestDirectory = path.join(
+    vaultRoot,
+    'raw/samples/heart-rate/import_alpha',
+  )
+
+  try {
+    await mkdir(manifestDirectory, { recursive: true })
+    await writeFile(
+      path.join(manifestDirectory, 'manifest.json'),
+      JSON.stringify({
+        importId: 'import_alpha',
+        importedAt: '2026-04-05T08:00:00.000Z',
+        provenance: { importedCount: 2 },
+      }),
+      'utf8',
+    )
+
+    const listed = await runSliceCli<{
+      items: Array<{ batchId: string }>
+    }>([
+      'samples',
+      'batch',
+      'list',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(listed.ok, true)
+    const listedId = requireData(listed).items[0]?.batchId
+    assert.equal(listedId, 'import_alpha')
+
+    const shown = await runSliceCli<{ batchId: string }>([
+      'samples',
+      'batch',
+      'show',
+      listedId as string,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(shown.ok, true)
+    assert.equal(requireData(shown).batchId, listedId)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test.sequential('samples add records typed manual samples and validates stream-specific fields', async () => {
@@ -215,6 +669,59 @@ test.sequential('samples add records typed manual samples and validates stream-s
     ])
     assert.equal(sleepStageWithValue.ok, false)
     assert.match(sleepStageWithValue.error?.message ?? '', /omit --value/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('samples add reports its direct value field without writes or value echo', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-samples-add-repair-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+    const initialAuditCount = await countAuditRecords(vaultRoot)
+
+    const result = await runSliceCli([
+      'samples',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'heart_rate',
+      '--unit',
+      'bpm',
+      '--recorded-at',
+      '2026-03-12T08:00:00.000Z',
+      '--value',
+      '-17',
+    ])
+
+    assert.equal(result.ok, false)
+    assert.equal(result.error.code, 'invalid_payload')
+    assert.equal(result.error.stage, 'validation')
+    assert.equal(result.error.fieldErrors?.[0]?.path, 'value')
+    assert.equal(result.error.hint, 'Use a non-negative integer.')
+    assert.equal(JSON.stringify(result).includes('-17'), false)
+
+    const samples = await runSliceCli<{ count: number }>([
+      'samples',
+      'list',
+      '--stream',
+      'heart_rate',
+      '--vault',
+      vaultRoot,
+    ])
+    const batches = await runSliceCli<{ items: unknown[] }>([
+      'samples',
+      'batch',
+      'list',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(requireData(samples).count, 0)
+    assert.equal(requireData(batches).items.length, 0)
+    assert.equal(await countAuditRecords(vaultRoot), initialAuditCount)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -525,6 +1032,12 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
 
   try {
     await initializeVault({ vaultRoot })
+    const services = createIntegratedVaultServices()
+    const statsBefore = await services.query.showVaultStats({
+      vault: vaultRoot,
+      requestId: 'audit-stats-before',
+    })
+
     await mkdir(path.join(vaultRoot, 'audit/2026'), { recursive: true })
     await writeFile(
       path.join(vaultRoot, 'audit/2026/2026-03.jsonl'),
@@ -725,6 +1238,19 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
       requireData(descendingListResult).items.map((item) => item.id),
     )
 
+    await assert.rejects(
+      services.query.list({
+        vault: vaultRoot,
+        requestId: 'generic-audit-list',
+        recordType: ['audit'],
+        limit: 10,
+      }),
+      (error: unknown) =>
+        typeof error === 'object'
+        && error !== null
+        && Reflect.get(error, 'code') === 'invalid_option',
+    )
+
     const invalidAuditShow = await runSliceCli([
       'audit',
       'show',
@@ -736,6 +1262,43 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
 
     const auditFile = await readFile(path.join(vaultRoot, 'audit/2026/2026-03.jsonl'), 'utf8')
     assert.match(auditFile, /samples_import_csv/u)
+
+    const statsAfter = await services.query.showVaultStats({
+      vault: vaultRoot,
+      requestId: 'audit-stats-after',
+    })
+    assert.equal(statsAfter.counts.audits, statsBefore.counts.audits + 3)
+    assert.equal(statsAfter.counts.totalRecords, statsBefore.counts.totalRecords + 3)
+
+    const exportResult = await services.query.exportPack({
+      vault: vaultRoot,
+      requestId: 'audit-export',
+      from: '2026-03-12',
+      to: '2026-03-12',
+    })
+    const exportedEntities = JSON.parse(
+      await readFile(
+        path.join(
+          vaultRoot,
+          'exports',
+          'packs',
+          exportResult.packId,
+          'entities.json',
+        ),
+        'utf8',
+      ),
+    ) as Array<{ entityId: string; family: string }>
+    assert.deepEqual(
+      exportedEntities
+        .filter((entity) => entity.family === 'audit')
+        .map((entity) => entity.entityId)
+        .sort(),
+      [
+        'aud_01JNW00000000000000000001',
+        'aud_01JNW00000000000000000002',
+        'aud_01JNW00000000000000000003',
+      ],
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

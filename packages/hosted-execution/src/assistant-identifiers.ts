@@ -20,7 +20,7 @@ export const HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PRE
 export const HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX =
   "assistant-ask-private:";
 export const HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE =
-  "I couldn't answer that from the information available to this group.";
+  "I couldn't get an answer for the earlier question.";
 
 export type HostedMailboxAssistantInputLane = "conversation" | "system";
 

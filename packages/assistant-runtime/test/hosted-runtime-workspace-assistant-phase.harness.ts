@@ -35,6 +35,7 @@ import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 type HostedAssistantPhaseMockName =
   | "applyMurphManagedAutomations"
+  | "assertHostedAssistantLinqTurnCommitAuthority"
   | "buildHostedLinqChannelEnv"
   | "collectHostedAssistantDeliverySideEffects"
   | "collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes"
@@ -81,6 +82,7 @@ type HostedAssistantPhaseMockName =
 
 const mocks: Record<HostedAssistantPhaseMockName, Mock> = vi.hoisted(() => ({
   applyMurphManagedAutomations: vi.fn(),
+  assertHostedAssistantLinqTurnCommitAuthority: vi.fn(),
   refreshReminderAvailability: vi.fn(),
   buildHostedLinqChannelEnv: vi.fn((input: {
     forwardedEnv: Readonly<Record<string, string>>;
@@ -199,6 +201,8 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
 });
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
+  assertHostedAssistantLinqTurnCommitAuthority:
+    mocks.assertHostedAssistantLinqTurnCommitAuthority,
   collectHostedAssistantDeliverySideEffects: mocks.collectHostedAssistantDeliverySideEffects,
   createHostedAssistantProgressDeliveryDependencies:
     mocks.createHostedAssistantProgressDeliveryDependencies,

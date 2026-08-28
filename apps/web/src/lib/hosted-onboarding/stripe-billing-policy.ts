@@ -95,7 +95,6 @@ export async function writeHostedMemberStripeBillingTx(input: {
   if (!currentMember) {
     return null;
   }
-
   const intentionalSuspension = input.suspendedAtOverride;
   const billingOwnsCurrentSuspension =
     isHostedStripeBillingOwnedSuspension(currentMember);

@@ -17,6 +17,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   compactInteger,
+  compactNumber,
   parseCompactFields,
   rejectUnsupportedCompactFields,
   requireCompactString,
@@ -40,6 +41,8 @@ const initialExerciseFields = new Set([
   'name',
   'reps',
   'sets',
+  'targetWeight',
+  'targetWeightUnit',
   'sourceExerciseId',
   'groupId',
   'mode',
@@ -77,11 +80,20 @@ function parseInitialExercise(
     'exercise',
     invalidInitialExercise,
   )
+  const targetWeight = compactNumber(
+    fields,
+    'targetWeight',
+    'exercise',
+    invalidInitialExercise,
+  )
   const mode = fields.get('mode')
-  const parsedMode = mode === undefined
-    ? undefined
-    : exerciseModeSchema.safeParse(mode)
-  if (parsedMode !== undefined && !parsedMode.success) {
+  if (mode === undefined) {
+    invalidInitialExercise(
+      '--exercise field mode is required so the workout editor can use the correct result fields.',
+    )
+  }
+  const parsedMode = exerciseModeSchema.safeParse(mode)
+  if (!parsedMode.success) {
     invalidInitialExercise('--exercise field mode is invalid.')
   }
   const unitOverride = fields.get('unitOverride')
@@ -91,6 +103,33 @@ function parseInitialExercise(
   const parsedUnitOverride = unitOverride === 'lb' || unitOverride === 'kg'
     ? unitOverride
     : undefined
+  const targetWeightUnit = fields.get('targetWeightUnit')
+  if (
+    targetWeightUnit !== undefined
+    && targetWeightUnit !== 'lb'
+    && targetWeightUnit !== 'kg'
+  ) {
+    invalidInitialExercise('--exercise field targetWeightUnit must be lb or kg.')
+  }
+  if ((targetWeight === undefined) !== (targetWeightUnit === undefined)) {
+    invalidInitialExercise(
+      '--exercise fields targetWeight and targetWeightUnit must be provided together.',
+    )
+  }
+  if (
+    parsedMode.data === 'weight_reps'
+    && parsedUnitOverride === undefined
+    && targetWeightUnit === undefined
+  ) {
+    invalidInitialExercise(
+      '--exercise field unitOverride is required for weight_reps when no targetWeightUnit is present.',
+    )
+  }
+  if (parsedMode.data === 'bodyweight' && parsedUnitOverride !== undefined) {
+    invalidInitialExercise(
+      '--exercise field unitOverride is not allowed for bodyweight mode.',
+    )
+  }
 
   return {
     name: requireCompactString(
@@ -101,11 +140,17 @@ function parseInitialExercise(
     ),
     ...(reps === undefined ? {} : { reps }),
     ...(setCount === undefined ? {} : { setCount }),
+    ...(targetWeight === undefined || targetWeightUnit === undefined
+      ? {}
+      : {
+          targetWeight,
+          targetWeightUnit,
+        }),
     ...(fields.has('sourceExerciseId')
       ? { sourceExerciseId: fields.get('sourceExerciseId') }
       : {}),
     ...(fields.has('groupId') ? { groupId: fields.get('groupId') } : {}),
-    ...(parsedMode?.success ? { mode: parsedMode.data } : {}),
+    mode: parsedMode.data,
     ...(parsedUnitOverride ? { unitOverride: parsedUnitOverride } : {}),
     ...(fields.has('note') ? { note: fields.get('note') } : {}),
   }
@@ -166,7 +211,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         options: {
           exercise: [
             "'name=Goblet squat;sets=3;reps=10;mode=weight_reps;unitOverride=lb'",
-            "'name=Row, neutral grip;sets=3;reps=12;mode=weight_reps'",
+            "'name=Row, neutral grip;sets=3;reps=12;mode=weight_reps;unitOverride=lb'",
           ],
           vault: './vault',
         },
@@ -185,7 +230,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .max(100)
         .optional()
         .describe(
-          'Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.',
+          'Initial exercise grammar: name=...;mode=... with required mode and optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/unitOverride/note. weight_reps also requires unitOverride unless targetWeightUnit is present. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.',
         ),
       type: z
         .string()
@@ -257,7 +302,9 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .max(80)
         .optional()
         .describe('Optional superset or circuit group id.'),
-      mode: exerciseModeSchema.optional(),
+      mode: exerciseModeSchema.describe(
+        'Required result family for the native workout editor.',
+      ),
       unitOverride: z.enum(['lb', 'kg']).optional(),
       note: z.string().min(1).max(4000).optional(),
       sets: z
@@ -272,6 +319,18 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
     }),
     output: showResultSchema,
     async run({ args, options }) {
+      if (options.mode === 'weight_reps' && options.unitOverride === undefined) {
+        throw new VaultCliError(
+          'invalid_option',
+          '--unit-override is required when --mode is weight_reps.',
+        )
+      }
+      if (options.mode === 'bodyweight' && options.unitOverride !== undefined) {
+        throw new VaultCliError(
+          'invalid_option',
+          '--unit-override is not allowed when --mode is bodyweight.',
+        )
+      }
       return addLiveWorkoutExercise({
         vault: options.vault,
         workoutId: options.workoutId,

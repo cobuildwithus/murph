@@ -307,7 +307,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // chunk count unchanged; existing startup tolerances cover that bounded growth.
 // Clean exact-preemption handoff adds 586B to total output while remaining
 // inside the fixed entry, static-closure, and chunk-count startup budgets.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_435_265;
+// Event-ledger gzip compatibility extends existing Core/query read and canonical
+// write paths without adding a forbidden boot input. Exact Linux production
+// assembly measured 11,457,689B total on 2026-08-28. Ratchet that baseline and
+// retain the fixed 32KB total cross-platform allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_457_689 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 64_257;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 1_950_662;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;

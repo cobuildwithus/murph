@@ -7,8 +7,23 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { readRawBodyBuffer } from "../http";
 import {
-  openHostedUserSecureBoxString,
-  sealHostedUserSecureBoxString,
+  runWithFreshHostedDomainRootUnwrapCache,
+  runWithHostedDomainRootProviderCallsDisabled,
+  runWithHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  HostedDomainRootPreparationMismatchError,
+  prepareHostedDomainRootForWeb,
+  readPreparedHostedDomainRootForWebLocal,
+  revalidatePreparedHostedDomainRootForWebTx,
+  type PreparedHostedDomainRootForWeb,
+} from "../hosted-crypto/domain-root-store";
+import {
+  openHostedUserSecureBoxStringFromPreparedRoot,
+  prewarmHostedUserSecureBoxStrings,
+  readHostedUserSecureBoxStringRootReference,
+  sealHostedUserSecureBoxStringFromPreparedRoot,
+  type HostedSecureBoxStringRootReference,
 } from "../hosted-crypto/secure-box";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
@@ -44,6 +59,9 @@ const MEAL_PHOTO_CAPTURE_MAX_AUTHORITY_REVISION = 2_147_483_647;
 const MEAL_PHOTO_CAPTURE_SECRET_SCOPE = "meal-photo-capture-idempotency";
 const MEAL_PHOTO_CAPTURE_ENROLLMENT_TABLE = "hosted_meal_photo_capture_enrollment";
 const MEAL_PHOTO_CAPTURE_SECRET_FIELD = "idempotency_secret_encrypted";
+const MEAL_PHOTO_CAPTURE_ENROLLMENT_CRYPTO_PREPARATION_ATTEMPTS = 2;
+const MEAL_PHOTO_CAPTURE_ENROLLMENT_CRYPTO_PREPARATION_REASON =
+  "device-sync.meal-photo-capture-enrollment";
 const MEAL_PHOTO_CAPTURE_V1_ALLOWED_ENROLLMENT_KEYS = new Set([
   "appInstallationId",
   "appVersion",
@@ -152,6 +170,58 @@ export interface MealPhotoCaptureEnrollmentResponse {
   uploadToken: string;
 }
 
+type MealPhotoCaptureAuthorityState = "active" | "prepared" | "revoked";
+
+interface MealPhotoCaptureEnrollmentPreparationRow {
+  activatedAt: Date | null;
+  authorityRevision: number;
+  expiresAt: Date | null;
+  id: string;
+  idempotencySecretEncrypted: string | null;
+  revokedAt: Date | null;
+  uploadTokenHash: string | null;
+}
+
+interface CompleteMealPhotoCaptureEnrollmentPreparationRow
+  extends MealPhotoCaptureEnrollmentPreparationRow {
+  expiresAt: Date;
+  idempotencySecretEncrypted: string;
+  uploadTokenHash: string;
+}
+
+interface MealPhotoCaptureEnrollmentAuthoritySnapshot {
+  authorityRevision: number;
+  authorityState: MealPhotoCaptureAuthorityState;
+  enrollmentId: string | null;
+}
+
+type PreparedMealPhotoCaptureEnrollment =
+  | {
+      authority: MealPhotoCaptureEnrollmentAuthoritySnapshot;
+      kind: "authority-conflict";
+    }
+  | {
+      authority: MealPhotoCaptureEnrollmentAuthoritySnapshot;
+      kind: "incomplete-credentials";
+    }
+  | {
+      authority: MealPhotoCaptureEnrollmentAuthoritySnapshot;
+      enrollmentId: string;
+      idempotencySecret: string;
+      idempotencySecretEncrypted: string;
+      idempotencySecretRootReference: HostedSecureBoxStringRootReference | null;
+      kind: "reuse-existing-secret";
+    }
+  | {
+      authority: MealPhotoCaptureEnrollmentAuthoritySnapshot;
+      enrollmentId: string;
+      idempotencySecret: string;
+      idempotencySecretEncrypted: string;
+      idempotencySecretRootReference: HostedSecureBoxStringRootReference;
+      kind: "new-secret";
+      preparedRoot: PreparedHostedDomainRootForWeb;
+    };
+
 export interface ActiveMealPhotoCaptureEnrollment {
   enrollmentId: string;
   expiresAt: Date;
@@ -222,99 +292,367 @@ export async function issueMealPhotoCaptureEnrollment(input: {
   const now = input.now ?? new Date();
   const installationIdHash = hashMealPhotoCaptureValue(input.request.appInstallationId);
 
-  return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
-    await assertHostedHistoricalLaunchConsentGranted({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-    const existing = await tx.hostedMealPhotoCaptureEnrollment.findUnique({
-      where: {
-        memberId_installationIdHash: {
-          installationIdHash,
-          memberId: input.memberId,
-        },
-      },
-    });
-    assertMealPhotoCaptureAuthorityRevisionCanAdvance({
-      currentRevision: existing?.authorityRevision ?? 0,
-      currentState: readMealPhotoCaptureAuthorityState(existing),
-      operation: "enroll",
-      request: input.request,
-    });
-    const enrollmentId = existing?.id ?? generateMealPhotoCaptureEnrollmentId();
-    let reusableEncryptedSecret: string | null = null;
-    if (existing && !existing.revokedAt) {
-      if (
-        !existing.uploadTokenHash
-        || !existing.idempotencySecretEncrypted
-        || !existing.expiresAt
-      ) {
-        throw new Error(
-          "Active meal photo capture enrollment has incomplete credentials.",
-        );
-      }
-      reusableEncryptedSecret = existing.idempotencySecretEncrypted;
-    }
-    const idempotencySecret = reusableEncryptedSecret
-      ? await openMealPhotoCaptureIdempotencySecret({
-          enrollmentId,
-          memberId: input.memberId,
-          prisma: tx,
-          value: reusableEncryptedSecret,
-        })
-      : generateMealPhotoCaptureIdempotencySecret();
-    const idempotencySecretEncrypted = reusableEncryptedSecret
-      ? reusableEncryptedSecret
-      : await sealMealPhotoCaptureIdempotencySecret({
-          enrollmentId,
-          memberId: input.memberId,
-          prisma: tx,
-          value: idempotencySecret,
-        });
-    const uploadToken = generateMealPhotoCaptureToken();
-    const expiresAt = new Date(now.getTime() + MEAL_PHOTO_CAPTURE_ENROLLMENT_TTL_MS);
-    const activatedAt = input.request.schemaVersion === 1 ? now : null;
-
-    await tx.hostedMealPhotoCaptureEnrollment.upsert({
-      create: {
-        activatedAt,
-        authorityRevision: readRequestedAuthorityRevision(input.request),
-        createdAt: now,
-        expiresAt,
-        id: enrollmentId,
-        idempotencySecretEncrypted,
+  for (
+    let attempt = 0;
+    attempt < MEAL_PHOTO_CAPTURE_ENROLLMENT_CRYPTO_PREPARATION_ATTEMPTS;
+    attempt += 1
+  ) {
+    const runAttempt = async (): Promise<MealPhotoCaptureEnrollmentResponse> => {
+      const prepared = await prepareMealPhotoCaptureEnrollment({
         installationIdHash,
         memberId: input.memberId,
-        revokeReason: null,
-        revokedAt: null,
-        updatedAt: now,
-        uploadTokenHash: hashMealPhotoCaptureValue(uploadToken),
-      },
-      update: {
-        activatedAt,
-        authorityRevision: readRequestedAuthorityRevision(input.request),
-        expiresAt,
-        idempotencySecretEncrypted,
-        revokeReason: null,
-        revokedAt: null,
-        updatedAt: now,
-        uploadTokenHash: hashMealPhotoCaptureValue(uploadToken),
-      },
-      where: {
-        memberId_installationIdHash: {
-          installationIdHash,
-          memberId: input.memberId,
-        },
-      },
-    });
-
-    return {
-      expiresAt,
-      idempotencySecret,
-      uploadToken,
+        prisma: input.prisma,
+        request: input.request,
+      });
+      return input.prisma.$transaction(
+        (tx) => runWithHostedDomainRootProviderCallsDisabled(() =>
+          issuePreparedMealPhotoCaptureEnrollmentTx({
+            installationIdHash,
+            memberId: input.memberId,
+            now,
+            prepared,
+            request: input.request,
+            tx,
+          })
+        ),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
     };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+    try {
+      return await (attempt === 0
+        ? runWithHostedDomainRootUnwrapCache(runAttempt)
+        : runWithFreshHostedDomainRootUnwrapCache(runAttempt));
+    } catch (error) {
+      if (
+        error instanceof HostedDomainRootPreparationMismatchError
+        && attempt + 1 < MEAL_PHOTO_CAPTURE_ENROLLMENT_CRYPTO_PREPARATION_ATTEMPTS
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new HostedDomainRootPreparationMismatchError();
+}
+
+async function prepareMealPhotoCaptureEnrollment(input: {
+  installationIdHash: string;
+  memberId: string;
+  prisma: PrismaClient;
+  request: MealPhotoCaptureEnrollmentRequest;
+}): Promise<PreparedMealPhotoCaptureEnrollment> {
+  const existing = await input.prisma.hostedMealPhotoCaptureEnrollment.findUnique({
+    where: {
+      memberId_installationIdHash: {
+        installationIdHash: input.installationIdHash,
+        memberId: input.memberId,
+      },
+    },
+  });
+  const authority = readMealPhotoCaptureEnrollmentAuthoritySnapshot(existing);
+  if (!canMealPhotoCaptureAuthorityRevisionAdvance({
+    currentRevision: authority.authorityRevision,
+    request: input.request,
+  })) {
+    return { authority, kind: "authority-conflict" };
+  }
+
+  if (existing && !existing.revokedAt) {
+    if (!hasCompleteMealPhotoCaptureEnrollmentCredentials(existing)) {
+      return { authority, kind: "incomplete-credentials" };
+    }
+    const idempotencySecretRootReference =
+      readHostedUserSecureBoxStringRootReference({
+        lane: "device-sync-token",
+        value: existing.idempotencySecretEncrypted,
+      });
+    await prewarmHostedUserSecureBoxStrings({
+      entries: [{
+        aad: mealPhotoCaptureSecretAad(existing.id),
+        scope: MEAL_PHOTO_CAPTURE_SECRET_SCOPE,
+        userId: input.memberId,
+        value: existing.idempotencySecretEncrypted,
+      }],
+      lane: "device-sync-token",
+      prisma: input.prisma,
+    });
+    const idempotencySecret = await openHostedUserSecureBoxStringFromPreparedRoot({
+      aad: mealPhotoCaptureSecretAad(existing.id),
+      lane: "device-sync-token",
+      preparedRootKeyId: idempotencySecretRootReference?.rootKeyId ?? null,
+      scope: MEAL_PHOTO_CAPTURE_SECRET_SCOPE,
+      userId: input.memberId,
+      value: existing.idempotencySecretEncrypted,
+    });
+    if (!idempotencySecret) {
+      throw new Error("Meal photo capture idempotency secret could not be opened.");
+    }
+    return {
+      authority,
+      enrollmentId: existing.id,
+      idempotencySecret,
+      idempotencySecretEncrypted: existing.idempotencySecretEncrypted,
+      idempotencySecretRootReference,
+      kind: "reuse-existing-secret",
+    };
+  }
+
+  const enrollmentId = existing?.id ?? generateMealPhotoCaptureEnrollmentId();
+  const idempotencySecret = generateMealPhotoCaptureIdempotencySecret();
+  const preparedRoot = await prepareHostedDomainRootForWeb({
+    domain: "device",
+    prisma: input.prisma,
+    reason: MEAL_PHOTO_CAPTURE_ENROLLMENT_CRYPTO_PREPARATION_REASON,
+    userId: input.memberId,
+  });
+  const localRoot = readPreparedHostedDomainRootForWebLocal(preparedRoot);
+  const idempotencySecretEncrypted =
+    await sealHostedUserSecureBoxStringFromPreparedRoot({
+      aad: mealPhotoCaptureSecretAad(enrollmentId),
+      lane: "device-sync-token",
+      preparedRoot: localRoot.root,
+      preparedRootKeyId: localRoot.rootKeyId,
+      scope: MEAL_PHOTO_CAPTURE_SECRET_SCOPE,
+      userId: input.memberId,
+      value: idempotencySecret,
+    });
+  if (!idempotencySecretEncrypted) {
+    throw new Error("Meal photo capture idempotency secret could not be sealed.");
+  }
+  const idempotencySecretRootReference =
+    readHostedUserSecureBoxStringRootReference({
+      lane: "device-sync-token",
+      value: idempotencySecretEncrypted,
+    });
+  if (
+    !idempotencySecretRootReference
+    || idempotencySecretRootReference.domain !== preparedRoot.domain
+    || idempotencySecretRootReference.rootKeyId !== localRoot.rootKeyId
+  ) {
+    throw new Error(
+      "Meal photo capture idempotency secret did not use the exact prepared root.",
+    );
+  }
+  return {
+    authority,
+    enrollmentId,
+    idempotencySecret,
+    idempotencySecretEncrypted,
+    idempotencySecretRootReference,
+    kind: "new-secret",
+    preparedRoot,
+  };
+}
+
+async function issuePreparedMealPhotoCaptureEnrollmentTx(input: {
+  installationIdHash: string;
+  memberId: string;
+  now: Date;
+  prepared: PreparedMealPhotoCaptureEnrollment;
+  request: MealPhotoCaptureEnrollmentRequest;
+  tx: Prisma.TransactionClient;
+}): Promise<MealPhotoCaptureEnrollmentResponse> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  await assertHostedHistoricalLaunchConsentGranted({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const existing = await input.tx.hostedMealPhotoCaptureEnrollment.findUnique({
+    where: {
+      memberId_installationIdHash: {
+        installationIdHash: input.installationIdHash,
+        memberId: input.memberId,
+      },
+    },
+  });
+  assertMealPhotoCaptureEnrollmentAuthorityMatchesPreparation({
+    current: existing,
+    prepared: input.prepared.authority,
+    request: input.request,
+  });
+  assertMealPhotoCaptureAuthorityRevisionCanAdvance({
+    currentRevision: existing?.authorityRevision ?? 0,
+    currentState: readMealPhotoCaptureAuthorityState(existing),
+    operation: "enroll",
+    request: input.request,
+  });
+
+  let enrollmentId: string;
+  let idempotencySecret: string;
+  let idempotencySecretEncrypted: string;
+  switch (input.prepared.kind) {
+    case "authority-conflict":
+      throw new Error(
+        "Meal photo capture authority conflict preparation unexpectedly advanced.",
+      );
+    case "incomplete-credentials":
+      if (
+        existing
+        && !existing.revokedAt
+        && hasCompleteMealPhotoCaptureEnrollmentCredentials(existing)
+      ) {
+        throw new HostedDomainRootPreparationMismatchError();
+      }
+      throw new Error(
+        "Active meal photo capture enrollment has incomplete credentials.",
+      );
+    case "reuse-existing-secret": {
+      if (
+        !existing
+        || existing.revokedAt
+        || !hasCompleteMealPhotoCaptureEnrollmentCredentials(existing)
+      ) {
+        throw new HostedDomainRootPreparationMismatchError();
+      }
+      if (
+        existing.idempotencySecretEncrypted
+        !== input.prepared.idempotencySecretEncrypted
+      ) {
+        throw new HostedDomainRootPreparationMismatchError();
+      }
+      const currentRootReference = readHostedUserSecureBoxStringRootReference({
+        lane: "device-sync-token",
+        value: existing.idempotencySecretEncrypted,
+      });
+      if (
+        !areMealPhotoCaptureSecretRootReferencesEqual(
+          currentRootReference,
+          input.prepared.idempotencySecretRootReference,
+        )
+      ) {
+        throw new HostedDomainRootPreparationMismatchError();
+      }
+      enrollmentId = input.prepared.enrollmentId;
+      idempotencySecret = input.prepared.idempotencySecret;
+      idempotencySecretEncrypted = input.prepared.idempotencySecretEncrypted;
+      break;
+    }
+    case "new-secret": {
+      const revalidatedRoot = await revalidatePreparedHostedDomainRootForWebTx({
+        prepared: input.prepared.preparedRoot,
+        tx: input.tx,
+      });
+      if (
+        input.prepared.idempotencySecretRootReference.domain
+          !== input.prepared.preparedRoot.domain
+        || input.prepared.idempotencySecretRootReference.rootKeyId
+          !== revalidatedRoot.rootKeyId
+      ) {
+        throw new HostedDomainRootPreparationMismatchError();
+      }
+      enrollmentId = input.prepared.enrollmentId;
+      idempotencySecret = input.prepared.idempotencySecret;
+      idempotencySecretEncrypted = input.prepared.idempotencySecretEncrypted;
+      break;
+    }
+  }
+
+  const uploadToken = generateMealPhotoCaptureToken();
+  const expiresAt = new Date(
+    input.now.getTime() + MEAL_PHOTO_CAPTURE_ENROLLMENT_TTL_MS,
+  );
+  const activatedAt = input.request.schemaVersion === 1 ? input.now : null;
+
+  await input.tx.hostedMealPhotoCaptureEnrollment.upsert({
+    create: {
+      activatedAt,
+      authorityRevision: readRequestedAuthorityRevision(input.request),
+      createdAt: input.now,
+      expiresAt,
+      id: enrollmentId,
+      idempotencySecretEncrypted,
+      installationIdHash: input.installationIdHash,
+      memberId: input.memberId,
+      revokeReason: null,
+      revokedAt: null,
+      updatedAt: input.now,
+      uploadTokenHash: hashMealPhotoCaptureValue(uploadToken),
+    },
+    update: {
+      activatedAt,
+      authorityRevision: readRequestedAuthorityRevision(input.request),
+      expiresAt,
+      idempotencySecretEncrypted,
+      revokeReason: null,
+      revokedAt: null,
+      updatedAt: input.now,
+      uploadTokenHash: hashMealPhotoCaptureValue(uploadToken),
+    },
+    where: {
+      memberId_installationIdHash: {
+        installationIdHash: input.installationIdHash,
+        memberId: input.memberId,
+      },
+    },
+  });
+
+  return {
+    expiresAt,
+    idempotencySecret,
+    uploadToken,
+  };
+}
+
+function readMealPhotoCaptureEnrollmentAuthoritySnapshot(
+  enrollment: MealPhotoCaptureEnrollmentPreparationRow | null,
+): MealPhotoCaptureEnrollmentAuthoritySnapshot {
+  return {
+    authorityRevision: enrollment?.authorityRevision ?? 0,
+    authorityState: readMealPhotoCaptureAuthorityState(enrollment),
+    enrollmentId: enrollment?.id ?? null,
+  };
+}
+
+function assertMealPhotoCaptureEnrollmentAuthorityMatchesPreparation(input: {
+  current: MealPhotoCaptureEnrollmentPreparationRow | null;
+  prepared: MealPhotoCaptureEnrollmentAuthoritySnapshot;
+  request: MealPhotoCaptureEnrollmentRequest;
+}): void {
+  const current = readMealPhotoCaptureEnrollmentAuthoritySnapshot(input.current);
+  const generationChanged =
+    current.enrollmentId !== input.prepared.enrollmentId;
+  if (
+    input.request.schemaVersion === 1
+    && generationChanged
+    && (
+      input.prepared.enrollmentId !== null
+      || current.authorityState === "revoked"
+    )
+  ) {
+    throw mealPhotoCaptureAuthorityRevisionConflict({
+      currentRevision: current.authorityRevision,
+      currentState: current.authorityState,
+      operation: "enroll",
+    });
+  }
+  if (
+    generationChanged
+    || current.authorityRevision !== input.prepared.authorityRevision
+    || current.authorityState !== input.prepared.authorityState
+  ) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
+}
+
+function hasCompleteMealPhotoCaptureEnrollmentCredentials(
+  enrollment: MealPhotoCaptureEnrollmentPreparationRow,
+): enrollment is CompleteMealPhotoCaptureEnrollmentPreparationRow {
+  return Boolean(
+    enrollment.uploadTokenHash
+    && enrollment.idempotencySecretEncrypted
+    && enrollment.expiresAt,
+  );
+}
+
+function areMealPhotoCaptureSecretRootReferencesEqual(
+  left: HostedSecureBoxStringRootReference | null,
+  right: HostedSecureBoxStringRootReference | null,
+): boolean {
+  return left === null || right === null
+    ? left === right
+    : left.domain === right.domain && left.rootKeyId === right.rootKeyId;
 }
 
 export async function revokeMealPhotoCaptureEnrollmentForMember(input: {
@@ -324,9 +662,12 @@ export async function revokeMealPhotoCaptureEnrollmentForMember(input: {
   request: MealPhotoCaptureRevocationRequest;
 }): Promise<{ revoked: boolean }> {
   const now = input.now ?? new Date();
+  const installationIdHash = hashMealPhotoCaptureValue(
+    input.request.appInstallationId,
+  );
+  const revocationEnrollmentId = generateMealPhotoCaptureEnrollmentId();
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
-    const installationIdHash = hashMealPhotoCaptureValue(input.request.appInstallationId);
     const existing = await tx.hostedMealPhotoCaptureEnrollment.findUnique({
       where: {
         memberId_installationIdHash: {
@@ -342,13 +683,26 @@ export async function revokeMealPhotoCaptureEnrollmentForMember(input: {
         operation: "revoke",
         request: input.request,
       });
-      if (!existing || existing.revokedAt) {
-        return { revoked: false };
-      }
-      const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
-        data: {
+      await tx.hostedMealPhotoCaptureEnrollment.upsert({
+        create: {
           activatedAt: null,
+          authorityRevision: 0,
+          createdAt: now,
           expiresAt: null,
+          id: revocationEnrollmentId,
+          idempotencySecretEncrypted: null,
+          installationIdHash,
+          memberId: input.memberId,
+          revokeReason: "member_disabled",
+          revokedAt: now,
+          updatedAt: now,
+          uploadTokenHash: null,
+        },
+        update: {
+          activatedAt: null,
+          authorityRevision: 0,
+          expiresAt: null,
+          id: revocationEnrollmentId,
           idempotencySecretEncrypted: null,
           revokeReason: "member_disabled",
           revokedAt: now,
@@ -356,11 +710,13 @@ export async function revokeMealPhotoCaptureEnrollmentForMember(input: {
           uploadTokenHash: null,
         },
         where: {
-          id: existing.id,
-          revokedAt: null,
+          memberId_installationIdHash: {
+            installationIdHash,
+            memberId: input.memberId,
+          },
         },
       });
-      return { revoked: result.count > 0 };
+      return { revoked: true };
     }
 
     if (
@@ -424,6 +780,7 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
     throw mealPhotoCaptureAuthRequired();
   }
   const now = input.now ?? new Date();
+  const revocationEnrollmentId = generateMealPhotoCaptureEnrollmentId();
   const uploadTokenHash = hashMealPhotoCaptureValue(token);
   const enrollment = await input.prisma.hostedMealPhotoCaptureEnrollment.findUnique({
     where: {
@@ -450,6 +807,9 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
       data: {
         activatedAt: null,
         expiresAt: null,
+        ...(current.authorityRevision === 0
+          ? { id: revocationEnrollmentId }
+          : {}),
         idempotencySecretEncrypted: null,
         revokeReason: "scoped_token_revoked",
         revokedAt: now,
@@ -806,15 +1166,11 @@ function readRequestedAuthorityRevision(
 
 function assertMealPhotoCaptureAuthorityRevisionCanAdvance(input: {
   currentRevision: number;
-  currentState: "active" | "prepared" | "revoked";
+  currentState: MealPhotoCaptureAuthorityState;
   operation: "enroll" | "revoke";
   request: MealPhotoCaptureEnrollmentRequest | MealPhotoCaptureRevocationRequest;
 }): void {
-  if (
-    input.request.schemaVersion === 1
-      ? input.currentRevision === 0
-      : input.request.authorityRevision > input.currentRevision
-  ) {
+  if (canMealPhotoCaptureAuthorityRevisionAdvance(input)) {
     return;
   }
   throw mealPhotoCaptureAuthorityRevisionConflict({
@@ -824,13 +1180,22 @@ function assertMealPhotoCaptureAuthorityRevisionCanAdvance(input: {
   });
 }
 
+function canMealPhotoCaptureAuthorityRevisionAdvance(input: {
+  currentRevision: number;
+  request: MealPhotoCaptureEnrollmentRequest | MealPhotoCaptureRevocationRequest;
+}): boolean {
+  return input.request.schemaVersion === 1
+    ? input.currentRevision === 0
+    : input.request.authorityRevision > input.currentRevision;
+}
+
 function readMealPhotoCaptureAuthorityState(
   enrollment: {
     activatedAt: Date | null;
     authorityRevision: number;
     revokedAt: Date | null;
   } | null,
-): "active" | "prepared" | "revoked" {
+): MealPhotoCaptureAuthorityState {
   if (enrollment?.revokedAt) {
     return "revoked";
   }
@@ -990,46 +1355,6 @@ function readBearerToken(request: Request): string | null {
 
 function hashMealPhotoCaptureValue(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-async function openMealPhotoCaptureIdempotencySecret(input: {
-  enrollmentId: string;
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-  value: string;
-}): Promise<string> {
-  const value = await openHostedUserSecureBoxString({
-    aad: mealPhotoCaptureSecretAad(input.enrollmentId),
-    lane: "device-sync-token",
-    prisma: input.prisma,
-    scope: MEAL_PHOTO_CAPTURE_SECRET_SCOPE,
-    userId: input.memberId,
-    value: input.value,
-  });
-  if (!value) {
-    throw new Error("Meal photo capture idempotency secret could not be opened.");
-  }
-  return value;
-}
-
-async function sealMealPhotoCaptureIdempotencySecret(input: {
-  enrollmentId: string;
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-  value: string;
-}): Promise<string> {
-  const value = await sealHostedUserSecureBoxString({
-    aad: mealPhotoCaptureSecretAad(input.enrollmentId),
-    lane: "device-sync-token",
-    prisma: input.prisma,
-    scope: MEAL_PHOTO_CAPTURE_SECRET_SCOPE,
-    userId: input.memberId,
-    value: input.value,
-  });
-  if (!value) {
-    throw new Error("Meal photo capture idempotency secret could not be sealed.");
-  }
-  return value;
 }
 
 function mealPhotoCaptureSecretAad(enrollmentId: string) {

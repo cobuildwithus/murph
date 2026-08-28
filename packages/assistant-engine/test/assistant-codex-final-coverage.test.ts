@@ -44,26 +44,6 @@ const EXPECTED_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG = {
   ...EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
   ...EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
 } as const
-const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
-  'features.shell_tool=true',
-  'features.apps=true',
-  'memories.use_memories=true',
-  'web_search="live"',
-  'memories.generate_memories=false',
-  'web_search="disabled"',
-  'features.web_search_request=false',
-  'features.standalone_web_search=false',
-  'features.apps=false',
-  'features.enable_mcp_apps=false',
-  'features.browser_use=false',
-  'features.plugins=false',
-  'features.multi_agent=false',
-  'features.multi_agent_v2=false',
-  'features.tool_suggest=false',
-  'memories.use_memories=false',
-  'features.shell_tool=false',
-] as const
-
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
   resolveCodexAssistantCapabilities: vi.fn(),
@@ -973,7 +953,7 @@ describe('Codex model catalog', () => {
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.providerConfig).toMatchObject({
       approvalPolicy: 'never',
-      sandbox: 'read-only',
+      sandbox: null,
     })
     expect(providerInput?.codexConfigOverrides).toEqual([
       'features.shell_tool=true',
@@ -999,7 +979,7 @@ describe('Codex model catalog', () => {
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
 
-  it('restricts native completion capabilities without removing exact hosted effects', async () => {
+  it('keeps a trusted image completion on the ordinary Codex launch identity while preserving exact hosted effects', async () => {
     const route = createRoute({
       providerOptions: {
         sandbox: 'danger-full-access',
@@ -1148,28 +1128,30 @@ describe('Codex model catalog', () => {
     const completionProviderInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(completionProviderInput?.providerConfig).toMatchObject({
-      approvalPolicy: 'never',
-      sandbox: 'read-only',
+      approvalPolicy: null,
+      sandbox: 'danger-full-access',
     })
-    expect(completionProviderInput?.codexThreadConfig).toEqual(
-      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
-    )
+    expect(completionProviderInput?.codexThreadConfig).toBeNull()
     expect(completionProviderInput?.codexConfigOverrides).toEqual(
-      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES,
+      input.codexConfigOverrides,
     )
-    expect(completionProviderInput?.activeTurnSteering).toBeNull()
+    expect(completionProviderInput?.activeTurnSteering).toBe(activeTurnSteering)
+    expect(completionProviderInput?.environments).toEqual([
+      { PRIVATE_ENVIRONMENT: 'must-not-pass' },
+    ])
     expect(completionProviderInput).toMatchObject({
       dynamicTools,
-      environments: [],
       hostedToolContext,
       materializeWorkspaceArtifacts,
       progressDelivery,
-      providerFetch: null,
-      publicInternetFetch: null,
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      providerFetch,
+      publicInternetFetch,
       requireHostedPrivateImageDelivery: true,
       resume: {
         codexThreadId: 'thread-completion-native-authority',
       },
+      runtimeWorkspaceRoots: ['/work'],
       vaultRoot: '/vaults/test',
       workingDirectory: '/work',
     })

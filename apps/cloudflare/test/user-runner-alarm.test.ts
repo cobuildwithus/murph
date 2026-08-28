@@ -51,6 +51,9 @@ import {
 } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { HostedUserRunnerWithTestControls } from "../src/user-runner/hosted-user-runner-test.ts";
+import {
+  HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
+} from "../src/user-runner/runtime-processing-responses.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 import type {
   DurableObjectStateLike,
@@ -3449,6 +3452,7 @@ describe("HostedUserRunner execution coordination", () => {
         kind: "accepted" as const,
       }),
     );
+    const writeDataPoint = vi.fn();
     let activeAttemptId = "";
     let activeGeneration = "";
     const readActiveRuntimeUserFence = vi.fn<
@@ -3463,6 +3467,7 @@ describe("HostedUserRunner execution coordination", () => {
       abortWorkspaceInvocation,
       ensureProcessing,
       readActiveRuntimeUserFence,
+      runtimeRetryAnalytics: { writeDataPoint },
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -3487,6 +3492,15 @@ describe("HostedUserRunner execution coordination", () => {
     expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      blobs: [
+        HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
+        "container_busy",
+        "active_runtime_contention",
+      ],
+      doubles: [1, 5_000],
+      indexes: ["container_busy"],
+    });
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
       active_expires_at: null,
@@ -3836,9 +3850,11 @@ describe("HostedUserRunner execution coordination", () => {
         action: "woken" as const,
         kind: "accepted" as const,
       }));
+      const writeDataPoint = vi.fn();
       const { invoke, runner, sql } = createRunnerHarness({
         abortWorkspaceInvocation,
         ensureProcessing,
+        runtimeRetryAnalytics: { writeDataPoint },
         workspace: createWorkspaceState({ version: "7" }),
       });
       await runner.bindUser(TEST_USER_ID);
@@ -3867,6 +3883,15 @@ describe("HostedUserRunner execution coordination", () => {
       });
       expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
       expect(invoke).not.toHaveBeenCalled();
+      expect(writeDataPoint).toHaveBeenCalledWith({
+        blobs: [
+          HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
+          "container_busy",
+          "cooperative_handoff_pending",
+        ],
+        doubles: [1, 5_000],
+        indexes: ["container_busy"],
+      });
       expect(readRunnerMeta(sql)).toMatchObject({
         active_attempt_id: token.attemptId,
         active_expires_at: null,
@@ -3976,6 +4001,46 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("attributes unavailable background preemption before preserving the active fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const writeDataPoint = vi.fn();
+    const { invoke, runner, sql } = createRunnerHarness({
+      runtimeRetryAnalytics: { writeDataPoint },
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      processingMode: "inbox_media_retention",
+      runnerContainerName: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-default-behind-retention-without-abort",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.000Z",
+    });
+
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      blobs: [
+        HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
+        "container_busy",
+        "background_preemption_unavailable",
+      ],
+      doubles: [1, 5_000],
+      indexes: ["container_busy"],
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_generation: token.generation,
+      active_reason: "inbox_media_retention",
+    });
+  });
+
   it.each([
     ["retention", "stale", "inbox_media_retention", false, "2026-04-27T00:00:05.000Z"],
     ["retention", "queued", "inbox_media_retention", false, "2026-04-27T00:00:05.000Z"],
@@ -3997,6 +4062,7 @@ describe("HostedUserRunner execution coordination", () => {
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
     >(async () => abortStatus);
+    const writeDataPoint = vi.fn();
     let activeAttemptId = "";
     let activeGeneration = "";
     const readActiveRuntimeUserFence = vi.fn<
@@ -4010,6 +4076,7 @@ describe("HostedUserRunner execution coordination", () => {
     const { invoke, runner, sql } = createRunnerHarness({
       abortWorkspaceInvocation,
       readActiveRuntimeUserFence,
+      runtimeRetryAnalytics: { writeDataPoint },
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -4042,6 +4109,26 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
+    expect(writeDataPoint).toHaveBeenCalledWith(
+      abortStatus === "failed"
+        ? {
+            blobs: [
+              HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
+              "container_rpc_error",
+            ],
+            doubles: [1, 30_000],
+            indexes: ["container_rpc_error"],
+          }
+        : {
+            blobs: [
+              HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
+              "container_busy",
+              "background_preemption_not_accepted",
+            ],
+            doubles: [1, 5_000],
+            indexes: ["container_busy"],
+          },
+    );
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
       active_expires_at: null,

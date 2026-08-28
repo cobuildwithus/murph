@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupOfferAffirmation: vi.fn(),
   answerHostedTelegramCallbackQueryBestEffort: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  resolveHostedMemberCoreByTelegramUserId: vi.fn(),
   resolveHostedMemberRoutingByTelegramUserId: vi.fn(),
 }));
 
@@ -18,6 +19,8 @@ vi.mock("@/src/lib/hosted-groups/group-offer-affirmation", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  resolveHostedMemberCoreByTelegramUserId:
+    mocks.resolveHostedMemberCoreByTelegramUserId,
   resolveHostedMemberRoutingByTelegramUserId:
     mocks.resolveHostedMemberRoutingByTelegramUserId,
 }));
@@ -59,8 +62,8 @@ function buildCallbackQuery(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
-    lookup: { core: { id: "usr_1", suspendedAt: null } },
+  mocks.resolveHostedMemberCoreByTelegramUserId.mockResolvedValue({
+    core: { id: "usr_1", suspendedAt: null },
     status: "found",
   });
   mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
@@ -158,7 +161,7 @@ describe("hosted telegram group offer callback", () => {
   });
 
   it("never grants when the telegram identity is ambiguous", async () => {
-    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+    mocks.resolveHostedMemberCoreByTelegramUserId.mockResolvedValue({
       status: "ambiguous",
     });
 
@@ -172,8 +175,8 @@ describe("hosted telegram group offer callback", () => {
   });
 
   it("never grants for a suspended or inactive member", async () => {
-    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
-      lookup: { core: { id: "usr_1", suspendedAt: new Date("2026-07-01T00:00:00.000Z") } },
+    mocks.resolveHostedMemberCoreByTelegramUserId.mockResolvedValue({
+      core: { id: "usr_1", suspendedAt: new Date("2026-07-01T00:00:00.000Z") },
       status: "found",
     });
     expect(
@@ -183,8 +186,8 @@ describe("hosted telegram group offer callback", () => {
       }),
     ).toEqual({ handled: false, reason: "suspended-member" });
 
-    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
-      lookup: { core: { id: "usr_1", suspendedAt: null } },
+    mocks.resolveHostedMemberCoreByTelegramUserId.mockResolvedValue({
+      core: { id: "usr_1", suspendedAt: null },
       status: "found",
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
@@ -205,7 +208,7 @@ describe("hosted telegram group offer callback", () => {
     ["an ambiguous identity", {}],
   ])("answers the callback even when it refuses to grant for %s", async (_l, overrides) => {
     if (Object.keys(overrides).length === 0) {
-      mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      mocks.resolveHostedMemberCoreByTelegramUserId.mockResolvedValue({
         status: "ambiguous",
       });
     }
@@ -228,8 +231,8 @@ describe("hosted telegram group offer callback", () => {
     );
 
     vi.clearAllMocks();
-    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
-      lookup: { core: { id: "usr_1", suspendedAt: null } },
+    mocks.resolveHostedMemberCoreByTelegramUserId.mockResolvedValue({
+      core: { id: "usr_1", suspendedAt: null },
       status: "found",
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
@@ -244,7 +247,7 @@ describe("hosted telegram group offer callback", () => {
     expect(mocks.answerHostedTelegramCallbackQueryBestEffort).toHaveBeenCalledTimes(1);
   });
 
-  it("revalidates the telegram binding inside the grant transaction", async () => {
+  it("revalidates the telegram binding through the core-only lookup inside the grant transaction", async () => {
     const tx = { $queryRaw: async () => [] } as never;
     mocks.acceptHostedGroupOfferAffirmation.mockImplementation(async (args: {
       assertActorStillBound?: (tx: unknown) => Promise<void>;
@@ -258,11 +261,20 @@ describe("hosted telegram group offer callback", () => {
       callbackQuery: buildCallbackQuery(),
       prisma,
     })).resolves.toMatchObject({ handled: true });
+    expect(mocks.resolveHostedMemberCoreByTelegramUserId).toHaveBeenNthCalledWith(1, {
+      prisma,
+      telegramUserId: "4242",
+    });
+    expect(mocks.resolveHostedMemberCoreByTelegramUserId).toHaveBeenNthCalledWith(2, {
+      prisma: tx,
+      telegramUserId: "4242",
+    });
+    expect(mocks.resolveHostedMemberRoutingByTelegramUserId).not.toHaveBeenCalled();
 
     // A concurrent relink moves the telegram identity to another member.
-    mocks.resolveHostedMemberRoutingByTelegramUserId
-      .mockResolvedValueOnce({ lookup: { core: { id: "usr_1", suspendedAt: null } }, status: "found" })
-      .mockResolvedValueOnce({ lookup: { core: { id: "usr_other", suspendedAt: null } }, status: "found" });
+    mocks.resolveHostedMemberCoreByTelegramUserId
+      .mockResolvedValueOnce({ core: { id: "usr_1", suspendedAt: null }, status: "found" })
+      .mockResolvedValueOnce({ core: { id: "usr_other", suspendedAt: null }, status: "found" });
 
     // A changed binding must stay terminal: refuse, answer once, no throw.
     mocks.acceptHostedGroupOfferAffirmation.mockImplementation(async (args: {

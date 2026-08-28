@@ -12,7 +12,7 @@ import {
   type MealNutrientKey,
   type MealNutrientTotal,
 } from "../src/index.ts";
-import * as modelModule from "../src/model.ts";
+import * as vaultSourceModule from "../src/vault-source.ts";
 
 function createMealEntity(
   entityId: string,
@@ -575,7 +575,7 @@ test("summarizeMealNutritionTotals keeps the latest imported meal revision", () 
   ]);
 });
 
-test("readMealNutritionTotals reads the vault before summarizing", async () => {
+test("readMealNutritionTotals reads only the event family before summarizing", async () => {
   const readModel = createVaultReadModel({
     vaultRoot: "./vault",
     entities: [
@@ -589,27 +589,26 @@ test("readMealNutritionTotals reads the vault before summarizing", async () => {
       }),
     ],
   });
-  const readVaultSpy = vi
-    .spyOn(modelModule, "readVault")
-    .mockResolvedValue(readModel);
+  const readFamilySpy = vi
+    .spyOn(vaultSourceModule, "readCanonicalEntityFamilySource")
+    .mockResolvedValue(readModel.entities);
+  const options = {
+    from: "2026-04-14",
+    to: "2026-04-14",
+  };
 
   try {
-    const result = await readMealNutritionTotals("./vault", {
-      from: "2026-04-14",
-      to: "2026-04-14",
-    });
+    const result = await readMealNutritionTotals("./vault", options);
 
-    assert.equal(readVaultSpy.mock.calls.length, 1);
-    assert.deepEqual(readVaultSpy.mock.calls[0], ["./vault"]);
-    assert.equal(result.mealCount, 1);
-    assert.equal(result.totals.calories.total, 500);
-    assert.equal(result.days[0]?.date, "2026-04-14");
+    assert.equal(readFamilySpy.mock.calls.length, 1);
+    assert.deepEqual(readFamilySpy.mock.calls[0], ["./vault", "event"]);
+    assert.deepEqual(result, summarizeMealNutritionTotals(readModel, options));
   } finally {
-    readVaultSpy.mockRestore();
+    readFamilySpy.mockRestore();
   }
 });
 
-test("readMealNutrientTotals reads the vault before summarizing", async () => {
+test("readMealNutrientTotals reads only the event family before summarizing", async () => {
   const readModel = createVaultReadModel({
     vaultRoot: "./vault",
     entities: [
@@ -623,28 +622,21 @@ test("readMealNutrientTotals reads the vault before summarizing", async () => {
       }),
     ],
   });
-  const readVaultSpy = vi
-    .spyOn(modelModule, "readVault")
-    .mockResolvedValue(readModel);
+  const readFamilySpy = vi
+    .spyOn(vaultSourceModule, "readCanonicalEntityFamilySource")
+    .mockResolvedValue(readModel.entities);
+  const options = {
+    from: "2026-04-14",
+    to: "2026-04-14",
+  };
 
   try {
-    const result = await readMealNutrientTotals("./vault", {
-      from: "2026-04-14",
-      to: "2026-04-14",
-    });
+    const result = await readMealNutrientTotals("./vault", options);
 
-    assert.equal(readVaultSpy.mock.calls.length, 1);
-    assert.deepEqual(readVaultSpy.mock.calls[0], ["./vault"]);
-    assert.equal(result.mealCount, 1);
-    assert.deepEqual(requireNutrient(result.nutrients, "vitaminB12Mcg"), {
-      category: "vitamin",
-      contributingMealCount: 1,
-      key: "vitaminB12Mcg",
-      label: "Vitamin B12",
-      total: 2.4,
-      unit: "mcg",
-    });
+    assert.equal(readFamilySpy.mock.calls.length, 1);
+    assert.deepEqual(readFamilySpy.mock.calls[0], ["./vault", "event"]);
+    assert.deepEqual(result, summarizeMealNutrientTotals(readModel, options));
   } finally {
-    readVaultSpy.mockRestore();
+    readFamilySpy.mockRestore();
   }
 });

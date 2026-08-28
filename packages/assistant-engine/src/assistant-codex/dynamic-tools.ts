@@ -12,7 +12,6 @@ import {
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH,
 } from '@murphai/hosted-execution/contracts'
 import {
@@ -30,8 +29,10 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
@@ -471,15 +472,15 @@ const groupVaultShareProjectionScopeSchema = z.unknown().transform((value, conte
   return scope
 })
 
-const groupLabelSchema = z
+const groupMembershipIdSchema = z
   .string()
   .trim()
   .min(1)
   .refine(
     (value) =>
       Array.from(value).length
-      <= HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-    { message: 'groupLabel exceeds the Unicode code-point limit' },
+      <= HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+    { message: 'membershipId exceeds the Unicode code-point limit' },
   )
 
 const groupHandoffContextSchema = z
@@ -519,7 +520,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('ask'),
-      groupLabel: groupLabelSchema.optional(),
+      membershipId: groupMembershipIdSchema,
       question: groupQuestionSchema,
     })
     .strict(),
@@ -527,7 +528,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .object({
       action: z.literal('handoff'),
       context: groupHandoffContextSchema,
-      groupLabel: groupLabelSchema.optional(),
+      membershipId: groupMembershipIdSchema,
     })
     .strict(),
   z
@@ -541,6 +542,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.enum([
+        'ask_current_sender_privately',
         'clarify_current_sender',
         'continue_current_sender_in_group',
         'continue_current_sender_privately',
@@ -602,6 +604,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_current'),
+      disclosureGrantCursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS)
+        .optional(),
     })
     .strict(),
   z
@@ -710,12 +718,24 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('list_memberships'),
+      cursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS)
+        .optional(),
+      disclosureGrantCursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS)
+        .optional(),
     })
     .strict(),
   z
     .object({
       action: z.literal('leave_membership'),
-      membershipId: z.string().trim().min(1),
+      membershipId: groupMembershipIdSchema,
     })
     .strict(),
   z
@@ -776,6 +796,10 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         )
         .optional(),
       standaloneLink: z.boolean().optional(),
+      message_ref: z
+        .string()
+        .regex(new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'))
+        .optional(),
     })
     .strict(),
   z
@@ -915,6 +939,14 @@ const computerRunIdSchema = z.string().trim().min(1)
 const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
   'startUrl',
 ] as const
+
+const COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS = Object.keys(
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema.properties,
+)
+const computerPauseForUserValidationPaths =
+  collectSafeJsonSchemaValidationPaths(
+    MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema,
+  )
 
 const computerNavigationUrlSchema = z
   .string()
@@ -1104,9 +1136,9 @@ export interface MurphDynamicToolExecutionResult {
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
   /**
-   * Trusted runtime-owned text that must be delivered when the model supplies
-   * no response text or card. Analyze-video uses this for the best completed
-   * tool outcome so successful observations cannot disappear behind no-reply.
+   * Runtime-selected text that must be delivered when the model supplies no
+   * response text or card. Analyze-video failure text is trusted status;
+   * successful observation text remains untrusted data, never instructions.
    */
   requiredFinalResponseFallback?: string
   requiredVaultFileApprovalUrl?: string
@@ -1186,13 +1218,13 @@ type MurphGroupToolRequest =
     }
   | {
       action: 'ask'
-      groupLabel?: string
+      membershipId: string
       question: string
     }
   | {
       action: 'handoff'
       context: string
-      groupLabel?: string
+      membershipId: string
     }
   | {
       action: 'ask_current_sender'
@@ -1222,6 +1254,7 @@ type MurphGroupToolRequest =
   | {
       action: 'offer_access'
       displayName?: string
+      messageRef?: string
       projectionScopes?: readonly HostedVaultShareSelectableProjectionScope[]
       standaloneLink?: boolean
     }
@@ -2008,6 +2041,8 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerPauseForUserArgumentsSchema,
         schemaName: 'murph.computer_pause_for_user.input',
+        schemaPaths: computerPauseForUserValidationPaths,
+        schemaRootKeys: COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS,
         toolName: 'murph.computer_pause_for_user',
       })
       return parsed.ok
@@ -2113,10 +2148,7 @@ function readGeneratedImageToolCallId(
 export async function executeMurphDynamicToolRequest(input: {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
-  assistantStyleSettingsAvailable?: boolean | null
-  groupRoomModelAvailable?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
-  memberMemoryAvailable?: boolean | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -2384,7 +2416,6 @@ export async function executeMurphDynamicToolRequest(input: {
     }
     case 'group-room-model':
       return await executeGroupRoomModelDynamicTool({
-        available: input.groupRoomModelAvailable === true,
         managedMaintenanceAuthorized:
           input.groupRoomModelMaintenanceAuthorized === true,
         request: input.request,
@@ -2394,7 +2425,6 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'member-memory':
       return await executeMemberMemoryDynamicTool({
-        available: input.memberMemoryAvailable === true,
         managedMaintenanceAuthorized:
           input.memberMemoryMaintenanceAuthorized === true,
         request: input.request,
@@ -2450,7 +2480,6 @@ export async function executeMurphDynamicToolRequest(input: {
         authority: resolveHostedAssistantPersonalizationToolAuthority(
           hostedToolContext,
         ),
-        available: input.assistantStyleSettingsAvailable === true,
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
           hostedToolContext?.personalizationTool ?? null,
@@ -3458,10 +3487,13 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'analyze-video': {
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
-      if (userActionScope?.conversationScope !== 'direct') {
+      if (
+        userActionScope?.conversationScope === 'unverified-external'
+        || !userActionScope
+      ) {
         return toolTextResult(
           false,
-          'video analysis requires a verified private direct conversation',
+          'video analysis requires a verified direct or authenticated group conversation',
         )
       }
       return await executeAnalyzeVideoDynamicTool({
@@ -4554,6 +4586,18 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
+    (response.action === 'ask' || response.action === 'handoff')
+    && response.result.status === 'accepted'
+  ) {
+    return {
+      action: response.action,
+      result: {
+        status: 'queued' as const,
+        targetLabel: response.result.targetLabel,
+      },
+    }
+  }
+  if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
   ) {
@@ -4750,6 +4794,7 @@ function hasExactStringEntries(
 
 function buildGroupAccessOfferHostRequest(
   request: Extract<MurphGroupToolRequest, { action: 'offer_access' }>,
+  repostOriginAssistantInputId: string | null,
 ): Extract<
   HostedRuntimeGroupToolRequest,
   { action: 'create_join_link' | 'post_join_offer' }
@@ -4782,6 +4827,9 @@ function buildGroupAccessOfferHostRequest(
         ? {}
         : { projectionScopes: [...request.projectionScopes] }),
     },
+    ...(repostOriginAssistantInputId === null
+      ? {}
+      : { repostOriginAssistantInputId }),
   }
 }
 
@@ -4858,7 +4906,25 @@ async function executeGroupTool(input: {
     | { savedCaptureId: string | null; savedImageRef: string }
     | null = null
   if (input.request.action === 'offer_access') {
-    request = buildGroupAccessOfferHostRequest(input.request)
+    let repostOriginAssistantInputId: string | null = null
+    if (input.request.messageRef !== undefined) {
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
+      if (
+        userActionScope?.conversationScope !== 'group'
+        || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+      ) {
+        return toolTextResult(
+          false,
+          'reposting group access requires the exact current accepted Message ref from this group conversation',
+        )
+      }
+      repostOriginAssistantInputId = input.request.messageRef
+    }
+    request = buildGroupAccessOfferHostRequest(
+      input.request,
+      repostOriginAssistantInputId,
+    )
   } else if (isPreparedContactCardRequest(input.request)) {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
@@ -5005,9 +5071,7 @@ async function executeGroupTool(input: {
     }
     request = {
       action: 'ask',
-      ...(input.request.groupLabel !== undefined
-        ? { groupLabel: input.request.groupLabel }
-        : {}),
+      membershipId: input.request.membershipId,
       originAssistantInputId,
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
@@ -5031,9 +5095,7 @@ async function executeGroupTool(input: {
     request = {
       action: 'handoff',
       context: input.request.context,
-      ...(input.request.groupLabel === undefined
-        ? {}
-        : { groupLabel: input.request.groupLabel }),
+      membershipId: input.request.membershipId,
       originAssistantInputId,
     }
   } else if (input.request.action === 'ask_current_sender') {
@@ -6741,7 +6803,7 @@ function invalidDynamicToolArgumentsResult(
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     false,
-    buildToolCallValidationFeedback(validationDigest, { error }),
+    buildToolCallValidationFeedback(validationDigest, error),
   )
 }
 
@@ -7135,6 +7197,7 @@ function parseGroupArguments(
   }
   if (
     parsed.data.action === 'ask_current_sender'
+    || parsed.data.action === 'ask_current_sender_privately'
     || parsed.data.action === 'clarify_current_sender'
     || parsed.data.action === 'continue_current_sender_in_group'
     || parsed.data.action === 'continue_current_sender_privately'
@@ -7181,7 +7244,24 @@ function parseGroupArguments(
     return { ok: true, request: parsed.data }
   }
   if (parsed.data.action === 'offer_access') {
-    return { ok: true, request: parsed.data }
+    return {
+      ok: true,
+      request: {
+        action: 'offer_access',
+        ...(parsed.data.displayName === undefined
+          ? {}
+          : { displayName: parsed.data.displayName }),
+        ...(parsed.data.message_ref === undefined
+          ? {}
+          : { messageRef: parsed.data.message_ref }),
+        ...(parsed.data.projectionScopes === undefined
+          ? {}
+          : { projectionScopes: parsed.data.projectionScopes }),
+        ...(parsed.data.standaloneLink === undefined
+          ? {}
+          : { standaloneLink: parsed.data.standaloneLink }),
+      },
+    }
   }
   if (parsed.data.action === 'update_display_name') {
     return {
@@ -7310,14 +7390,27 @@ function parseGroupArguments(
     }
   }
   if (
-    parsed.data.action === 'list_memberships'
-    || parsed.data.action === 'read_next_group'
+    parsed.data.action === 'read_next_group'
     || parsed.data.action === 'cancel_next_group'
     || parsed.data.action === 'read_chat_name'
     || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_chat_participants'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
+  }
+  if (parsed.data.action === 'list_memberships') {
+    return {
+      ok: true,
+      request: {
+        action: 'list_memberships',
+        ...(parsed.data.cursor === undefined
+          ? {}
+          : { cursor: parsed.data.cursor }),
+        ...(parsed.data.disclosureGrantCursor === undefined
+          ? {}
+          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+      },
+    }
   }
   if (parsed.data.action === 'create_signup_referral_link') {
     return {
@@ -7351,7 +7444,15 @@ function parseGroupArguments(
     }
   }
   if (parsed.data.action === 'read_current') {
-    return { ok: true, request: { action: 'read_current' } }
+    return {
+      ok: true,
+      request: {
+        action: 'read_current',
+        ...(parsed.data.disclosureGrantCursor === undefined
+          ? {}
+          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+      },
+    }
   }
   return {
     ok: false,
@@ -7371,6 +7472,7 @@ function parseGroupArguments(
 
 function readCurrentSenderToolDecision(action:
   | 'ask_current_sender'
+  | 'ask_current_sender_privately'
   | 'clarify_current_sender'
   | 'continue_current_sender_in_group'
   | 'continue_current_sender_privately'
@@ -7382,6 +7484,7 @@ function readCurrentSenderToolDecision(action:
   switch (action) {
     case 'ask_current_sender':
       return { audience: 'group', mode: 'new' }
+    case 'ask_current_sender_privately':
     case 'message_current_sender':
       return { audience: 'current_sender', mode: 'new' }
     case 'clarify_current_sender':
@@ -7549,6 +7652,7 @@ function parseComputerArguments<TArgs>(input: {
   argumentsValue: unknown
   schema: z.ZodType<TArgs> & { shape?: Record<string, unknown> }
   schemaName: string
+  schemaPaths?: readonly string[]
   schemaRootKeys?: readonly string[]
   toolName: string
 }):
@@ -7562,6 +7666,7 @@ function parseComputerArguments<TArgs>(input: {
         error: parsed.error,
         rawInput: input.argumentsValue,
         schemaName: input.schemaName,
+        schemaPaths: input.schemaPaths,
         schemaRootKeys: input.schemaRootKeys ?? readZodObjectRootKeys(input.schema),
         toolName: input.toolName,
       }),
@@ -7739,7 +7844,8 @@ function parseAttachExerciseRoutineCardArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_exercise_routine_card.input'
   const toolName = 'murph.attach_exercise_routine_card'
-  const parsed = attachExerciseRoutineCardArgumentsSchema.safeParse(value)
+  const runtimeValue = defaultExerciseRoutineNullableText(value)
+  const parsed = attachExerciseRoutineCardArgumentsSchema.safeParse(runtimeValue)
   if (!parsed.success) {
     return {
       ok: false,
@@ -7759,6 +7865,23 @@ function parseAttachExerciseRoutineCardArguments(
   return {
     card: parsed.data.card,
     ok: true,
+  }
+}
+
+function defaultExerciseRoutineNullableText(value: unknown): unknown {
+  const input = asRecord(value)
+  const card = asRecord(input?.card)
+  if (card?.kind !== 'exercise_routine') {
+    return value
+  }
+
+  return {
+    ...input,
+    card: {
+      footer: null,
+      subtitle: null,
+      ...card,
+    },
   }
 }
 

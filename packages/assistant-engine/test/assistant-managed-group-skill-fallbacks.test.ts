@@ -68,6 +68,9 @@ describe("managed hosted group skill boundary", () => {
     expect(normalized).toContain(
       "only when its requested output requires the absent managed social-behavior policy",
     );
+    expect(normalized).toContain(
+      "For an admitted tool with its own complete resident instructions, follow that tool's bounded workflow",
+    );
   });
 
   it("keeps the exact managed group fallback set registered at stable slugs", () => {

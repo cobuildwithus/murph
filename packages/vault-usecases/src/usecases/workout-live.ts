@@ -265,6 +265,10 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   const appendMutations = input.action.mutations.filter(
     (mutation) => mutation.kind === 'exercise.append',
   )
+  const renameMutations = input.action.mutations.filter(
+    (mutation): mutation is ExerciseRenameMutation =>
+      mutation.kind === 'exercise.rename',
+  )
   const removeMutations = input.action.mutations.filter(
     (mutation): mutation is SetRemoveMutation => mutation.kind === 'set.remove',
   ).sort((left, right) =>
@@ -346,6 +350,19 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   }
 
   if (!applyMemberActionSetAppends(exercises, newSetMutations)) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  if (!applyMemberActionExerciseRenames(
+    exercises,
+    renameMutations,
+    input.action.expectedWorkout.exercises,
+  )) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  if (
+    renameMutations.length > 0
+    && hasAmbiguousWorkoutActionExerciseCoordinates({ exercises })
+  ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
 
@@ -467,6 +484,27 @@ function applyMemberActionSetPuts(
   return true
 }
 
+function applyMemberActionExerciseRenames(
+  exercises: WorkoutExercise[],
+  mutations: ExerciseRenameMutation[],
+  expectedExercises: WorkoutLiveApplyMemberActionV1['expectedWorkout']['exercises'],
+): boolean {
+  for (const mutation of mutations) {
+    const exercise = exercises[mutation.exercisePosition - 1]
+    const expectedExercise = expectedExercises[mutation.exercisePosition - 1]
+    if (
+      !exercise
+      || !expectedExercise
+      || exercise.name !== expectedExercise.name
+      || mutation.name === expectedExercise.name
+    ) {
+      return false
+    }
+    exercise.name = mutation.name
+  }
+  return true
+}
+
 function applyMemberActionSetAppends(
   exercises: WorkoutExercise[],
   mutations: SetAppendMutation[],
@@ -555,6 +593,10 @@ function buildMemberActionWorkoutSet(input: {
 
 type MemberActionSetResult = WorkoutMemberActionSetResultV1 | null
 type MemberActionSetResultKind = NonNullable<MemberActionSetResult>['kind']
+type ExerciseRenameMutation = Extract<
+  WorkoutLiveApplyMemberActionV1['mutations'][number],
+  { kind: 'exercise.rename' }
+>
 type SetPutMutation = Extract<
   WorkoutLiveApplyMemberActionV1['mutations'][number],
   { kind: 'set.put' }
@@ -665,6 +707,43 @@ function buildInitialLiveWorkoutExercises(
         'Exercise repetitions per set must be an integer between 1 and 999.',
       )
     }
+    if (
+      (exercise.targetWeight === undefined)
+      !== (exercise.targetWeightUnit === undefined)
+      || (
+        exercise.targetWeight !== undefined
+        && (
+          !Number.isFinite(exercise.targetWeight)
+          || exercise.targetWeight < 0.01
+          || exercise.targetWeight > 9999
+        )
+      )
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise target weight must be between 0.01 and 9999 with at most two decimal places and an lb or kg unit.',
+      )
+    }
+    if (
+      exercise.targetWeight !== undefined
+      && exercise.mode !== undefined
+      && exercise.mode !== 'weight_reps'
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise target weight requires weight_reps mode.',
+      )
+    }
+    if (
+      exercise.targetWeightUnit !== undefined
+      && exercise.unitOverride !== undefined
+      && exercise.targetWeightUnit !== exercise.unitOverride
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise target weight unit must match unitOverride.',
+      )
+    }
 
     const sourceExerciseId = normalizeOptionalText(exercise.sourceExerciseId)
     const groupId = normalizeOptionalText(exercise.groupId)
@@ -674,12 +753,26 @@ function buildInitialLiveWorkoutExercises(
       order: index + 1,
       ...(sourceExerciseId ? { sourceExerciseId } : {}),
       ...(groupId ? { groupId } : {}),
-      ...(exercise.mode ? { mode: exercise.mode } : {}),
-      ...(exercise.unitOverride ? { unitOverride: exercise.unitOverride } : {}),
+      ...(exercise.mode
+        ? { mode: exercise.mode }
+        : exercise.targetWeight === undefined
+          ? {}
+          : { mode: 'weight_reps' as const }),
+      ...(exercise.unitOverride
+        ? { unitOverride: exercise.unitOverride }
+        : exercise.targetWeightUnit
+          ? { unitOverride: exercise.targetWeightUnit }
+          : {}),
       ...(note ? { note } : {}),
       ...(exercise.reps === undefined
         ? {}
         : { memberRepsPerSet: exercise.reps }),
+      ...(exercise.targetWeight === undefined
+        ? {}
+        : {
+            targetWeightPerSet: exercise.targetWeight,
+            targetWeightUnit: exercise.targetWeightUnit,
+          }),
       setPlanIsFinite: exercise.setCount !== undefined,
       sets: Array.from({ length: setCount }, (_, setIndex) => ({
         order: setIndex + 1,

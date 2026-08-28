@@ -8,6 +8,7 @@ describe("query entity-family metadata", () => {
     expect(ALL_QUERY_ENTITY_FAMILIES).toContain("sample");
     expect(ALL_QUERY_ENTITY_FAMILIES).toContain("protocol");
     expect(ALL_QUERY_ENTITY_FAMILIES).toContain("workout_format");
+    expect(ALL_QUERY_ENTITY_FAMILIES).not.toContain("audit");
     expect("ALL_QUERY_ENTITY_FAMILIES" in queryRoot).toBe(false);
   });
 });

@@ -71,6 +71,50 @@ const TRACKED_WORKOUT_CARD: CompactTableResponseCardV1 = {
   },
 };
 
+it("keeps exact pending targets in the backward-compatible V6 card", () => {
+  const workout = workoutSessionDetailV1Schema.parse({
+    version: 1,
+    state: "active",
+    exercises: [{
+      name: "Bench press",
+      sets: Array.from({ length: 3 }, () => ({
+        status: "pending",
+        target: "135 lb × 8",
+        actual: null,
+      })),
+    }],
+  });
+  const envelope = buildWorkoutSessionAppCardEnvelopeV6({
+    title: "Bench press — 135 lb × 8",
+    subtitle: null,
+    footer: null,
+    workout,
+    editor: {
+      actionBinding: "a".repeat(64),
+      setRemovalBinding: "b".repeat(64),
+      version: 1,
+      exercises: [{
+        unitOverride: "lb",
+        sets: Array.from({ length: 3 }, () => ({
+          logged: false,
+          result: null,
+        })),
+      }],
+    },
+  });
+
+  expect(envelope.schemaVersion).toBe(6);
+  expect(envelope.card.e[0]?.[2]).toEqual([
+    ["p", "135 lb × 8", null],
+    ["p", "135 lb × 8", null],
+    ["p", "135 lb × 8", null],
+  ]);
+  expect(parseCompactTableAppCardEnvelope(envelope)).toMatchObject({
+    title: "Bench press — 135 lb × 8",
+    workout,
+  });
+});
+
 const TRACKED_WORKOUT_EDITOR = {
   actionBinding: "a".repeat(64),
   setRemovalBinding: "b".repeat(64),

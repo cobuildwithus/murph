@@ -24,6 +24,7 @@ import {
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
   HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
+  prepareHostedPrivyPhoneTransferSourceRetirement,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
   readHostedPrivyPhoneTransferProof,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
@@ -102,11 +103,18 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const now = new Date();
   if (phoneTransfer) {
+    const preparedRetirement =
+      await prepareHostedPrivyPhoneTransferSourceRetirement({
+        prisma,
+        sourceMemberId: phoneTransfer.sourceMemberId,
+        targetMemberId: auth.member.id,
+      });
     const retirement = await prisma.$transaction((tx) =>
       prepareHostedPrivyPhoneTransferSourceRetirementTx({
         identity: providerSession.identity,
         member: auth.member,
         now,
+        prepared: preparedRetirement,
         prisma: tx,
         targetPhoneNumberBeforeTransfer:
           currentIdentity?.phoneNumber ?? null,

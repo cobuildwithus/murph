@@ -288,31 +288,31 @@ export function buildTelegramRichMessage(
 export function buildLinqIMessageAppFallbackText(
   card: AssistantResponseCard,
 ):
-  | 'Challenge standings. Ask Murph for this card in text'
-  | 'Exercise routine. Ask Murph for this card in text'
-  | 'Your Murph guide. Ask Murph for this card in text'
-  | 'Your daily nutrition. Ask Murph for this card in text'
-  | 'Your Murph summary. Ask Murph for this card in text'
-  | 'Your workout. Ask Murph for this card in text' {
+  | 'Challenge standings.'
+  | 'Exercise routine.'
+  | 'Your Murph guide.'
+  | 'Your daily nutrition.'
+  | 'Your Murph summary.'
+  | 'Your workout.' {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
     case 'daily_nutrition':
-      return 'Your daily nutrition. Ask Murph for this card in text'
+      return 'Your daily nutrition.'
     case 'compact_table': {
       if (parsed.tracking === null) {
-        return 'Your Murph summary. Ask Murph for this card in text'
+        return 'Your Murph summary.'
       }
       switch (parsed.tracking.kind) {
         case 'workout':
-          return 'Your workout. Ask Murph for this card in text'
+          return 'Your workout.'
       }
     }
     case 'challenge_standings':
-      return 'Challenge standings. Ask Murph for this card in text'
+      return 'Challenge standings.'
     case 'exercise_routine':
-      return 'Exercise routine. Ask Murph for this card in text'
+      return 'Exercise routine.'
     case 'telegram_rich_content':
-      return 'Your Murph guide. Ask Murph for this card in text'
+      return 'Your Murph guide.'
   }
 }
 
@@ -1220,7 +1220,18 @@ function createExerciseRoutineResponseCardJsonSchema() {
   return {
     ...portableSchema,
     description:
-      'Exercise routine card V1 with honest timing and catalog-backed images.',
+      'Exercise routine card V1 authoring with honest timing and catalog-backed images.',
+    required: [
+      'exercises',
+      'intensity',
+      'kind',
+      'labels',
+      'safety',
+      'title',
+      'totalSeconds',
+      'transitionSeconds',
+      'version',
+    ],
   }
 }
 

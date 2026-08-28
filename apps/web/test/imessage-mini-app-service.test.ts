@@ -8,6 +8,7 @@ import {
   IMessageMiniAppService,
   validateIMessageMiniAppEnrollmentBody,
   validateIMessageMiniAppMemberAction,
+  validateIMessageMiniAppRenewalBody,
   type IMessageMiniAppSessionStore,
 } from "../src/lib/imessage-mini-app/service";
 
@@ -29,11 +30,6 @@ function createStore(overrides: Partial<IMessageMiniAppSessionStore> = {}) {
     authenticateAgentSessionByTokenHash: vi.fn(async () => ({
       status: "active" as const,
       session: ACTIVE_SESSION,
-    })),
-    revokeAgentSession: vi.fn(async (input) => ({
-      ...ACTIVE_SESSION,
-      revokedAt: input.now,
-      revokeReason: input.reason,
     })),
     ...overrides,
   } satisfies IMessageMiniAppSessionStore;
@@ -176,24 +172,6 @@ describe("iMessage mini-app service", () => {
     });
   });
 
-  it("revokes the authenticated credential without returning token material", async () => {
-    const token = validMessagesToken();
-    const store = createStore();
-    const service = new IMessageMiniAppService({ request: createRequest(token), store });
-
-    await expect(service.revoke(ACTIVE_SESSION)).resolves.toEqual({
-      schemaVersion: 1,
-      revoked: true,
-    });
-    expect(store.revokeAgentSession).toHaveBeenCalledWith(expect.objectContaining({
-      expectedTokenHash: createHash("sha256")
-        .update(`murph:imessage-mini-app:v1\0${token}`)
-        .digest("hex"),
-      reason: "imessage_app_request",
-      sessionId: ACTIVE_SESSION.id,
-    }));
-  });
-
   it("keeps Messages credentials out of the more powerful device-agent scope", async () => {
     const store = createStore();
     const deviceAgentService = new HostedAgentSessionService({
@@ -204,6 +182,9 @@ describe("iMessage mini-app service", () => {
           throw new Error("unused in this test");
         },
         async rotateAgentSession() {
+          throw new Error("unused in this test");
+        },
+        async revokeAgentSession() {
           throw new Error("unused in this test");
         },
         async touchAgentSession() {
@@ -224,11 +205,16 @@ describe("iMessage mini-app service", () => {
     const now = new Date("2026-08-12T15:00:00.000Z");
     const request = validMemberActionRequest();
     expect(() => validateIMessageMiniAppEnrollmentBody({ schemaVersion: 1 })).not.toThrow();
+    expect(() => validateIMessageMiniAppRenewalBody({ schemaVersion: 1 })).not.toThrow();
     expect(validateIMessageMiniAppMemberAction(request, now)).toEqual(request);
 
     expect(() => validateIMessageMiniAppEnrollmentBody({
       schemaVersion: 1,
       token: "must-not-be-accepted",
+    })).toThrowError(/unsupported fields/iu);
+    expect(() => validateIMessageMiniAppRenewalBody({
+      schemaVersion: 1,
+      memberId: "must-not-be-accepted",
     })).toThrowError(/unsupported fields/iu);
     expect(() => validateIMessageMiniAppMemberAction({
       ...request,

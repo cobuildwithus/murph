@@ -402,6 +402,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
   channel: HostedThreadDeliveryRouteChannel;
   containerMemberId?: string | null;
   initialGroupRoomModelMarkdown?: string | null;
+  initialGroupDisplayName?: string | null;
   mailboxDedupeKey?: string | null;
   monthlyUsageLimitUsdMicros?: bigint | null;
   occurredAt: Date;
@@ -710,6 +711,9 @@ export async function ensureHostedThreadContainerRouteTx(input: {
   });
   await ensureHostedGroupStructureForThreadContainerTx({
     containerMemberId,
+    ...(input.channel === "linq" && input.initialGroupDisplayName
+      ? { initialDisplayName: input.initialGroupDisplayName }
+      : {}),
     now: input.occurredAt,
     tx: input.prisma,
   });

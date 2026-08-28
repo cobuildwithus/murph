@@ -152,6 +152,7 @@ export function resolveAssistantProviderFlatPromptConversationHistorySection(
 function serializeAssistantConversationMessages(
   messages: ReadonlyArray<{
     content: string | AssistantUserMessageContentPart[]
+    occurredAt?: string
     role: 'assistant' | 'user'
   }>,
 ): string[] {
@@ -164,7 +165,8 @@ function serializeAssistantConversationMessages(
     }
 
     const label = message.role === 'assistant' ? 'Assistant' : 'User'
-    return [`${label}:\n${content}`]
+    const occurredAt = normalizeNullableString(message.occurredAt)
+    return [`${label}${occurredAt ? ` at ${occurredAt}` : ''}:\n${content}`]
   })
 }
 

@@ -136,6 +136,13 @@ export const workoutMemberActionMutationV1Schema = z.discriminatedUnion(
       .strict(),
     z
       .object({
+        exercisePosition: workoutExercisePositionSchema,
+        kind: z.literal("exercise.rename"),
+        name: singleLineText(memberActionV1Bounds.exerciseName),
+      })
+      .strict(),
+    z
+      .object({
         exerciseName: singleLineText(memberActionV1Bounds.exerciseName),
         exercisePosition: workoutExercisePositionSchema,
         expectedResult: workoutMemberActionExpectedSetResultV1Schema.nullable(),
@@ -272,13 +279,24 @@ export const workoutLiveApplyMemberActionV1Schema = z
     kind: z.literal("workout.live.apply"),
     mutations: z
       .array(workoutMemberActionMutationV1Schema)
-      .min(1)
+      .min(0)
       .max(memberActionV1Bounds.mutations),
     presentation: workoutSessionPresentationV1Schema.optional(),
+    weightUnitPreference: z.enum(["lb", "kg"]).optional(),
     version: z.literal(1),
   })
   .strict()
   .superRefine((action, context) => {
+    if (
+      action.mutations.length === 0
+      && action.weightUnitPreference === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A workout action requires a mutation or unit preference.",
+        path: ["mutations"],
+      });
+    }
     const targets = new Map<string, WorkoutMemberActionMutationV1>();
     const removalSnapshots = new Map<
       number,
@@ -286,6 +304,7 @@ export const workoutLiveApplyMemberActionV1Schema = z
     >();
     action.mutations.forEach((mutation, index) => {
       const target = mutation.kind === "exercise.append"
+          || mutation.kind === "exercise.rename"
         ? `exercise:${mutation.exercisePosition}`
         : mutation.kind === "set.append"
           ? `set-append:${mutation.exercisePosition}:${mutation.setPosition}`
@@ -300,6 +319,25 @@ export const workoutLiveApplyMemberActionV1Schema = z
         return;
       }
       targets.set(target, mutation);
+
+      if (mutation.kind === "exercise.rename") {
+        const expectedExercise = action.expectedWorkout.exercises[
+          mutation.exercisePosition - 1
+        ];
+        if (expectedExercise === undefined) {
+          context.addIssue({
+            code: "custom",
+            message: "An exercise rename must target an expected exercise.",
+            path: ["mutations", index],
+          });
+        } else if (expectedExercise.name === mutation.name) {
+          context.addIssue({
+            code: "custom",
+            message: "An exercise rename must change the visible name.",
+            path: ["mutations", index, "name"],
+          });
+        }
+      }
 
       if (mutation.kind === "set.remove") {
         const snapshot = {

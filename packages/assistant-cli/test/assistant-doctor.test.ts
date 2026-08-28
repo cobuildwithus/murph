@@ -674,6 +674,25 @@ test('runAssistantDoctor surfaces unexpected directory read failures', async () 
   await assert.rejects(() => runAssistantDoctor(vaultRoot))
 })
 
+test('runAssistantDoctor distinguishes unreadable files from malformed payloads', async () => {
+  const { vaultRoot, paths } = await createAssistantStateFixture()
+  await mkdir(paths.automationStatePath)
+
+  const result = await runAssistantDoctor(vaultRoot)
+  const automationCheck = result.checks.find(
+    (check) => check.name === 'automation-state',
+  )
+
+  assert.equal(result.ok, false)
+  assert.equal(automationCheck?.status, 'fail')
+  assert.equal(automationCheck?.message, 'assistant automation state could not be read.')
+  assert.deepEqual(automationCheck?.details, {
+    present: true,
+    parseError: false,
+    readError: true,
+  })
+})
+
 test('runAssistantDoctor fails when assistant artifacts or secrecy metadata are malformed', async () => {
   const { vaultRoot, paths } = await createAssistantStateFixture()
 

@@ -38,6 +38,9 @@ import type {
 } from '@murphai/hosted-execution/action-approval'
 import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
 import type {
+  AssistantAcceptedTurnInputItemInput,
+} from './active-turn-input-journal.js'
+import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
@@ -550,6 +553,10 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  assertTurnCommitAuthority?(input: {
+    acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+    turnId: string
+  }): Promise<void>
   automationTool?: AssistantHostedAutomationTool | null
   currentAssistantInputId?: () => string | null
   createScheduledGroupTools?(input: {
@@ -711,6 +718,12 @@ export function normalizeAssistantExecutionContext(
   return {
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
+      ...(typeof hosted?.assertTurnCommitAuthority === 'function'
+        ? {
+            assertTurnCommitAuthority:
+              hosted.assertTurnCommitAuthority.bind(hosted),
+          }
+        : {}),
       ...(automationTool ? { automationTool } : {}),
       ...(typeof hosted?.currentAssistantInputId === 'function'
         ? {

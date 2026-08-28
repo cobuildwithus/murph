@@ -33,6 +33,20 @@ const CURRENT_RUNNER_META_COLUMNS = [
   "last_invocation_at",
 ];
 
+function normalizeSql(query: string): string {
+  return query.replace(/\s+/gu, " ").trim();
+}
+
+const ENSURE_RUNNER_SCHEMA_META_SQL = normalizeSql(`
+  CREATE TABLE IF NOT EXISTS runner_schema_meta (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+  )
+`);
+const READ_RUNNER_STATE_SCHEMA_VERSION_SQL =
+  "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'";
+const READ_RUNNER_META_COLUMNS_SQL = "PRAGMA table_info(runner_meta)";
+
 class SqliteCursor<T extends Record<string, DurableObjectSqlValue>>
   implements DurableObjectSqlCursorLike<T> {
   private index = 0;
@@ -85,12 +99,19 @@ class SqliteCursor<T extends Record<string, DurableObjectSqlValue>>
 }
 
 class SqliteDurableObjectSqlStorage {
+  readonly queries: string[] = [];
+
   constructor(private readonly db: DatabaseSync) {}
+
+  resetQueries(): void {
+    this.queries.length = 0;
+  }
 
   exec<T extends Record<string, DurableObjectSqlValue>>(
     query: string,
     ...bindings: DurableObjectSqlValue[]
   ): DurableObjectSqlCursorLike<T> {
+    this.queries.push(normalizeSql(query));
     const statement = this.db.prepare(query);
     const normalized = query.trimStart().toUpperCase();
 
@@ -112,6 +133,7 @@ class SqliteDurableObjectSqlStorage {
 function createDurableObjectState(
   db: DatabaseSync,
   values: Map<string, unknown> = new Map(),
+  sql: SqliteDurableObjectSqlStorage = new SqliteDurableObjectSqlStorage(db),
 ): DurableObjectStateLike {
   return {
     storage: {
@@ -123,7 +145,7 @@ function createDurableObjectState(
         values.set(key, value);
       },
       setAlarm: async () => {},
-      sql: new SqliteDurableObjectSqlStorage(db),
+      sql,
     },
     waitUntil() {},
   };
@@ -196,7 +218,117 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
   return row?.name === "runner_bundle_slots";
 }
 
-  describe("RunnerStateStore schema guard", () => {
+describe("RunnerStateStore schema guard", () => {
+  it("uses only the ordered metadata calls for exact-current activation", () => {
+    const db = new DatabaseSync(":memory:");
+    const sql = new SqliteDurableObjectSqlStorage(db);
+    const state = createDurableObjectState(db, new Map(), sql);
+    expect(() => new RunnerStateStore(state)).not.toThrow();
+    expect(readRunnerStateSchemaVersion(db)).toBe(RUNNER_STATE_SCHEMA_VERSION);
+    db.exec(`
+      CREATE TABLE runner_bundle_slots (
+        slot TEXT PRIMARY KEY
+      )
+    `);
+    sql.resetQueries();
+
+    expect(() => new RunnerStateStore(state)).not.toThrow();
+
+    expect(sql.queries).toEqual([
+      ENSURE_RUNNER_SCHEMA_META_SQL,
+      READ_RUNNER_STATE_SCHEMA_VERSION_SQL,
+    ]);
+    expect(sql.queries).toHaveLength(2);
+    expect(sql.queries.join("\n"))
+      .not.toMatch(/\brunner_meta\b|PRAGMA|active_invocation|DROP TABLE/u);
+    expect(runnerBundleSlotsTableExists(db)).toBe(true);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["invalid", "invalid"],
+    ["zero", 0],
+    ["older", RUNNER_STATE_SCHEMA_VERSION - 1],
+  ] as const)("runs the full schema path for a %s stored version", (_label, storedVersion) => {
+    const db = new DatabaseSync(":memory:");
+    const sql = new SqliteDurableObjectSqlStorage(db);
+    const state = createDurableObjectState(db, new Map(), sql);
+    expect(() => new RunnerStateStore(state)).not.toThrow();
+    if (storedVersion === undefined) {
+      db.exec("DELETE FROM runner_schema_meta WHERE key = 'runner_state_schema_version'");
+    } else {
+      db.prepare(`
+        UPDATE runner_schema_meta
+        SET value = ?
+        WHERE key = 'runner_state_schema_version'
+      `).run(storedVersion);
+    }
+    db.exec(`
+      CREATE TABLE runner_bundle_slots (
+        slot TEXT PRIMARY KEY
+      )
+    `);
+    sql.resetQueries();
+
+    expect(() => new RunnerStateStore(state)).not.toThrow();
+
+    expect(sql.queries).toHaveLength(21);
+    expect(sql.queries[0]).toBe(ENSURE_RUNNER_SCHEMA_META_SQL);
+    expect(sql.queries[1]).toBe(READ_RUNNER_STATE_SCHEMA_VERSION_SQL);
+    expect(sql.queries.filter((query) => query === READ_RUNNER_STATE_SCHEMA_VERSION_SQL))
+      .toHaveLength(1);
+    expect(sql.queries[2]).toMatch(/^CREATE TABLE IF NOT EXISTS runner_meta/u);
+    expect(sql.queries.filter((query) => query === READ_RUNNER_META_COLUMNS_SQL))
+      .toHaveLength(16);
+    expect(sql.queries.at(-3)).toBe("DROP TABLE IF EXISTS runner_bundle_slots");
+    expect(sql.queries.at(-2)).toBe(normalizeSql(`
+      INSERT INTO runner_schema_meta (key, value)
+      VALUES ('runner_state_schema_version', ${RUNNER_STATE_SCHEMA_VERSION})
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `));
+    expect(sql.queries.at(-1)).toBe(READ_RUNNER_META_COLUMNS_SQL);
+    expect(readRunnerStateSchemaVersion(db)).toBe(RUNNER_STATE_SCHEMA_VERSION);
+    expect(runnerBundleSlotsTableExists(db)).toBe(false);
+  });
+
+  it("rejects a future schema before touching runner or retired tables", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(`
+      CREATE TABLE runner_schema_meta (
+        key TEXT PRIMARY KEY,
+        value INTEGER NOT NULL
+      );
+      INSERT INTO runner_schema_meta (key, value)
+      VALUES ('runner_state_schema_version', ${RUNNER_STATE_SCHEMA_VERSION + 1});
+      CREATE TABLE runner_meta (
+        singleton INTEGER PRIMARY KEY,
+        marker TEXT NOT NULL
+      );
+      INSERT INTO runner_meta (singleton, marker)
+      VALUES (1, 'preserve');
+      CREATE TABLE runner_bundle_slots (
+        slot TEXT PRIMARY KEY
+      );
+    `);
+    const sql = new SqliteDurableObjectSqlStorage(db);
+    const state = createDurableObjectState(db, new Map(), sql);
+
+    expect(() => new RunnerStateStore(state)).toThrow(
+      `Hosted runner Durable Object schema version ${RUNNER_STATE_SCHEMA_VERSION + 1} `
+        + `is newer than supported version ${RUNNER_STATE_SCHEMA_VERSION}.`,
+    );
+
+    expect(sql.queries).toEqual([
+      ENSURE_RUNNER_SCHEMA_META_SQL,
+      READ_RUNNER_STATE_SCHEMA_VERSION_SQL,
+    ]);
+    expect(readRunnerStateSchemaVersion(db)).toBe(RUNNER_STATE_SCHEMA_VERSION + 1);
+    expect(db.prepare("SELECT marker FROM runner_meta WHERE singleton = 1").get()).toEqual({
+      marker: "preserve",
+    });
+    expect(runnerBundleSlotsTableExists(db)).toBe(true);
+  });
+
   it("drops the retired split runner bundle table during schema migration", async () => {
     const setupLegacyBundleSchema = (database: DatabaseSync) => {
       database.exec(`

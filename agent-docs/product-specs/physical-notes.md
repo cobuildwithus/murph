@@ -271,6 +271,14 @@ idempotency key equal to the physical-note id. The generated artwork is wrapped
 only in deterministic letter-sized transport HTML with the required print-safe
 margin; visual expression remains model-owned.
 
+Recovery calls the official Lob TypeScript SDK with its typed metadata filter.
+The Web-owned SDK transport adapter narrows the generated client's serialized
+metadata query to Lob's documented `metadata[key]=value` wire shape for the one
+physical-note key. Low-level SDK request-parameter overrides are forbidden by
+the provider-request guard. An indeterminate lookup logs only a bounded category
+and optional HTTP status; it never logs the note id, member id, address, provider
+message, or response body, and it never turns an error into evidence of absence.
+
 USPS Secure Destruction is an account-level Lob setting rather than a per-letter
 API field. Operators enable it in the Lob account before live sending so eligible
 undeliverable First Class notes are destroyed instead of returned to Murph's

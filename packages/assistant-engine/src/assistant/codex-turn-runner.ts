@@ -92,6 +92,9 @@ import {
 import type {
   AssistantHostedToolContext,
 } from './hosted-tool-context.js'
+import type {
+  AnalyzeVideoTurnState,
+} from '../assistant-codex/analyze-video-tool.js'
 import {
   resolveAssistantAcceptedTurnInputReferenceWindow,
   type AssistantAcceptedTurnInputItemInput,
@@ -165,11 +168,6 @@ const ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
   'features.multi_agent_v2=false',
   'features.tool_suggest=false',
 ] as const
-const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
-  ...ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES,
-  'memories.use_memories=false',
-  'features.shell_tool=false',
-] as const
 const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
   'features.shell_tool=false',
   'features.multi_agent=false',
@@ -179,16 +177,9 @@ const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
 
 function resolveAssistantCodexConfigOverrides(input: {
   filesystemDisabledTurn: boolean
-  nativeCapabilitiesRestrictedTurn: boolean
   shellPreservingCapabilitiesRestrictedTurn: boolean
   requested: readonly string[] | null
 }): readonly string[] | null {
-  if (input.nativeCapabilitiesRestrictedTurn) {
-    return [
-      ...(input.requested ?? []),
-      ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES,
-    ]
-  }
   if (input.shellPreservingCapabilitiesRestrictedTurn) {
     return ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES
   }
@@ -265,6 +256,7 @@ export async function executeCodexTurnWithRecovery(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   input: AssistantMessageInput
   onFinishWithoutReplyAccepted?: ((
@@ -307,6 +299,7 @@ export async function executeCodexTurnWithRecovery(input: {
   let attemptOutcome: AssistantCodexAttemptOutcome
   try {
     attemptOutcome = await executeAssistantCodexAttempt({
+      analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
       attemptPlan,
       executionPlan,
       onProviderRequestStarted: input.onProviderRequestStarted ?? null,
@@ -465,6 +458,7 @@ function emitCodexPlanTraceEvent(input: {
 }
 
 async function executeAssistantCodexAttempt(input: {
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   attemptPlan: AssistantCodexAttemptPlan
   executionPlan: AssistantCodexTurnExecutionPlan
   onProviderRequestStarted?: ((event: {
@@ -542,18 +536,8 @@ async function executeAssistantCodexAttempt(input: {
     const hostedRuntimeCapabilitiesRestrictedTurn =
       outputOnlyTurn ||
       executionPlan.profile.promptProfile === 'creative-notification'
-    const readCurrentHostedImageCompletionEffectScope =
-      executionPlan.hostedToolContext
-        ?.currentHostedImageCompletionEffectScope
-    const hostedImageCompletionNativeCapabilitiesRestrictedTurn =
-      executionPlan.input.hostedImageCompletionEffectRestriction != null &&
-      (
-        readCurrentHostedImageCompletionEffectScope == null ||
-        readCurrentHostedImageCompletionEffectScope() !== null
-      )
     const nativeCapabilitiesRestrictedTurn =
-      hostedRuntimeCapabilitiesRestrictedTurn ||
-      hostedImageCompletionNativeCapabilitiesRestrictedTurn
+      hostedRuntimeCapabilitiesRestrictedTurn
     const creativeNotificationSongTurn =
       executionPlan.profile.promptProfile === 'creative-notification' &&
       executionPlan.profile.toolProfile === 'provider-turn'
@@ -610,21 +594,21 @@ async function executeAssistantCodexAttempt(input: {
         provider: attemptPlan.route.provider,
         reasoningEffort,
         sandbox:
-          nativeCapabilitiesRestrictedTurn ||
-          readOnlyAutomationTurn ||
-          groupEmailTurn
-          ? 'read-only'
-          : attemptPlan.route.providerOptions.sandbox,
+          outputOnlyTurn
+            ? null
+            : creativeNotificationSongTurn ||
+                readOnlyAutomationTurn ||
+                groupEmailTurn
+              ? 'read-only'
+              : attemptPlan.route.providerOptions.sandbox,
       },
       turn: {
         abortSignal: serviceTier
           ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
           : executionPlan.input.abortSignal,
+        analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
         activeTurnId: executionPlan.turnId,
-        activeTurnSteering:
-          hostedImageCompletionNativeCapabilitiesRestrictedTurn
-          ? null
-          : executionPlan.activeTurnSteering,
+        activeTurnSteering: executionPlan.activeTurnSteering,
         activeTurnSessionId: attemptPlan.session.sessionId,
         allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
         automationRelativeDateReferenceWindow:
@@ -635,8 +619,6 @@ async function executeAssistantCodexAttempt(input: {
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
           filesystemDisabledTurn: groupEmailTurn,
-          nativeCapabilitiesRestrictedTurn:
-            hostedImageCompletionNativeCapabilitiesRestrictedTurn,
           shellPreservingCapabilitiesRestrictedTurn:
             readOnlyAutomationTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
@@ -757,8 +739,7 @@ async function executeAssistantCodexAttempt(input: {
           : {}),
         providerFetch:
           outputOnlyTurn ||
-          readOnlyAutomationTurn ||
-          hostedImageCompletionNativeCapabilitiesRestrictedTurn
+          readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
@@ -768,8 +749,7 @@ async function executeAssistantCodexAttempt(input: {
         publicInternetFetch:
           outputOnlyTurn ||
           readOnlyAutomationTurn ||
-          toolOnlyMaintenanceTurn ||
-          hostedImageCompletionNativeCapabilitiesRestrictedTurn
+          toolOnlyMaintenanceTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:

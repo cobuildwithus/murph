@@ -185,7 +185,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'appointment-scheduling',
     name: 'appointment-scheduling',
     triggerHint:
-      'Use for booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
+      'Use for check-in, intake, booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
   },
   {
     slug: 'connected-apps',

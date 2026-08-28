@@ -55,6 +55,7 @@ import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
+  inspectHostedRuntimeMailboxToAssistantTimingSubdivision,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
@@ -142,14 +143,17 @@ import {
   type HostedRuntimeAssistantConfigurationUpdateStatus,
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   hostedRuntimeLinqProviderErrorMessageForCode,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
@@ -178,6 +182,8 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupParticipantDisplayNameSource,
+  type HostedRuntimeGroupParticipantLabel,
+  type HostedRuntimeGroupParticipantRoster,
   type HostedRuntimeGroupCurrentSenderDirectResult,
   type HostedRuntimeGroupDailyMetricReportResult,
   type HostedRuntimeGroupMemberAskResult,
@@ -1122,7 +1128,7 @@ export function parseHostedRuntimeGroupToolRequest(
       record,
       new Set([
         "action",
-        "groupLabel",
+        "membershipId",
         "originAssistantInputId",
         "originSessionId",
         "question",
@@ -1131,18 +1137,11 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return {
       action,
-      ...(record.groupLabel === undefined
-        ? {}
-        : {
-            groupLabel: record.groupLabel === null
-              ? null
-              : parseHostedRuntimeGroupAskBoundedText({
-                  label: "Hosted runtime group tool ask request groupLabel",
-                  maxCodePoints:
-                    HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-                  value: record.groupLabel,
-                }),
-          }),
+      membershipId: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime group tool ask request membershipId",
+        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+        value: record.membershipId,
+      }),
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
     };
   }
@@ -1150,7 +1149,12 @@ export function parseHostedRuntimeGroupToolRequest(
     const label = "Hosted runtime group tool handoff request";
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "context", "groupLabel", "originAssistantInputId"]),
+      new Set([
+        "action",
+        "context",
+        "membershipId",
+        "originAssistantInputId",
+      ]),
       label,
     );
     return {
@@ -1160,18 +1164,11 @@ export function parseHostedRuntimeGroupToolRequest(
         maxCodePoints: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
         value: record.context,
       }),
-      ...(record.groupLabel === undefined
-        ? {}
-        : {
-            groupLabel: record.groupLabel === null
-              ? null
-              : parseHostedRuntimeGroupAskBoundedText({
-                  label: `${label} groupLabel`,
-                  maxCodePoints:
-                    HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-                  value: record.groupLabel,
-                }),
-          }),
+      membershipId: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} membershipId`,
+        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+        value: record.membershipId,
+      }),
       originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
         record.originAssistantInputId,
         `${label} originAssistantInputId`,
@@ -1500,13 +1497,32 @@ export function parseHostedRuntimeGroupToolRequest(
         : { setup: parseHostedRuntimePendingGroupSetupInput(record.setup) }),
     };
   }
+  if (action === "read_current") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "disclosureGrantCursor"]),
+      "Hosted runtime group tool read_current request",
+    );
+    return {
+      action,
+      ...(record.disclosureGrantCursor === undefined
+        ? {}
+        : {
+            disclosureGrantCursor: parseHostedRuntimeGroupAskBoundedText({
+              label:
+                "Hosted runtime group tool read_current request disclosureGrantCursor",
+              maxCodePoints:
+                HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+              value: record.disclosureGrantCursor,
+            }),
+          }),
+    };
+  }
   if (
-    action === "read_current"
-    || action === "read_next_group"
+    action === "read_next_group"
     || action === "cancel_next_group"
     || action === "read_chat_name"
     || action === "read_usage"
-    || action === "list_memberships"
   ) {
     assertAllowedObjectKeys(
       record,
@@ -1514,6 +1530,37 @@ export function parseHostedRuntimeGroupToolRequest(
       `Hosted runtime group tool ${action} request`,
     );
     return { action };
+  }
+  if (action === "list_memberships") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "cursor", "disclosureGrantCursor"]),
+      "Hosted runtime group tool list_memberships request",
+    );
+    return {
+      action,
+      ...(record.cursor === undefined
+        ? {}
+        : {
+            cursor: parseHostedRuntimeGroupAskBoundedText({
+              label: "Hosted runtime group tool list_memberships request cursor",
+              maxCodePoints:
+                HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+              value: record.cursor,
+            }),
+          }),
+      ...(record.disclosureGrantCursor === undefined
+        ? {}
+        : {
+            disclosureGrantCursor: parseHostedRuntimeGroupAskBoundedText({
+              label:
+                "Hosted runtime group tool list_memberships request disclosureGrantCursor",
+              maxCodePoints:
+                HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+              value: record.disclosureGrantCursor,
+            }),
+          }),
+    };
   }
   if (action === "leave_membership") {
     assertAllowedObjectKeys(
@@ -1570,7 +1617,12 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "post_join_offer") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "joinOffer", "linqThread"]),
+      new Set([
+        "action",
+        "joinOffer",
+        "linqThread",
+        "repostOriginAssistantInputId",
+      ]),
       "Hosted runtime group tool post_join_offer request",
     );
     return {
@@ -1586,6 +1638,15 @@ export function parseHostedRuntimeGroupToolRequest(
               "Hosted runtime group tool post_join_offer request linqThread",
             ),
       }),
+      ...(record.repostOriginAssistantInputId === undefined
+        ? {}
+        : {
+            repostOriginAssistantInputId:
+              parseHostedExecutionAssistantAskOriginInputId(
+                record.repostOriginAssistantInputId,
+                "Hosted runtime group tool post_join_offer request repostOriginAssistantInputId",
+              ),
+          }),
     };
   }
   if (action === "set_chat_avatar") {
@@ -2827,10 +2888,10 @@ export function parseHostedRuntimeGroupToolResponse(
       );
       if (
         groupLabels.length === 0
-        || groupLabels.length > HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX
+        || groupLabels.length > HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX
       ) {
         throw new TypeError(
-          `Hosted runtime group tool ask clarification groupLabels must contain between 1 and ${HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX} entries.`,
+          `Hosted runtime group tool ask clarification groupLabels must contain between 1 and ${HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX} entries.`,
         );
       }
       return {
@@ -2951,8 +3012,35 @@ export function parseHostedRuntimeGroupToolResponse(
     const result = requireObject(record.result, "Hosted runtime group tool read_current response result");
     const status = requireString(result.status, "Hosted runtime group tool read_current response status");
     if (status === "ok") {
-      assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool read_current ok response result");
-      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+      assertAllowedObjectKeys(
+        result,
+        new Set([
+          "disclosureGrantsTruncated",
+          "group",
+          "nextDisclosureGrantCursor",
+          "status",
+        ]),
+        "Hosted runtime group tool read_current ok response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          ...(result.disclosureGrantsTruncated === undefined
+            ? {}
+            : {
+                disclosureGrantsTruncated: requireBoolean(
+                  result.disclosureGrantsTruncated,
+                  "Hosted runtime group tool read_current disclosureGrantsTruncated",
+                ),
+              }),
+          group: parseHostedRuntimeGroupSummary(result.group),
+          ...parseHostedRuntimeGroupDisclosureNextCursor(
+            result.nextDisclosureGrantCursor,
+            "Hosted runtime group tool read_current nextDisclosureGrantCursor",
+          ),
+        },
+      };
     }
     if (status === "none") {
       assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool read_current none response result");
@@ -3376,7 +3464,15 @@ export function parseHostedRuntimeGroupToolResponse(
     if (status === "ok") {
       assertAllowedObjectKeys(
         result,
-        new Set(["disclosureGrants", "status", "memberships", "truncated"]),
+        new Set([
+          "disclosureGrants",
+          "disclosureGrantsTruncated",
+          "memberships",
+          "nextDisclosureGrantCursor",
+          "nextCursor",
+          "status",
+          "truncated",
+        ]),
         "Hosted runtime group tool list_memberships ok response result",
       );
       return {
@@ -3388,8 +3484,33 @@ export function parseHostedRuntimeGroupToolResponse(
                 result.disclosureGrants,
                 "Hosted runtime group tool list_memberships disclosureGrants",
               ),
+          ...(result.disclosureGrantsTruncated === undefined
+            ? {}
+            : {
+                disclosureGrantsTruncated: requireBoolean(
+                  result.disclosureGrantsTruncated,
+                  "Hosted runtime group tool list_memberships disclosureGrantsTruncated",
+                ),
+              }),
           status,
           memberships: parseHostedRuntimeGroupMembershipSummaries(result.memberships),
+          ...parseHostedRuntimeGroupDisclosureNextCursor(
+            result.nextDisclosureGrantCursor,
+            "Hosted runtime group tool list_memberships nextDisclosureGrantCursor",
+          ),
+          ...(result.nextCursor === undefined
+            ? {}
+            : {
+                nextCursor: result.nextCursor === null
+                  ? null
+                  : parseHostedRuntimeGroupAskBoundedText({
+                      label:
+                        "Hosted runtime group tool list_memberships nextCursor",
+                      maxCodePoints:
+                        HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+                      value: result.nextCursor,
+                    }),
+              }),
           truncated: requireBoolean(
             result.truncated,
             "Hosted runtime group tool list_memberships truncated",
@@ -4309,6 +4430,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
         "kind",
         "memberCount",
         "membershipId",
+        "participantRoster",
         "permissionsUrl",
         "requestedVaultShareProjectionScopes",
         "role",
@@ -4358,6 +4480,15 @@ function parseHostedRuntimeGroupMembershipSummaries(
       kind: requireString(record.kind, `${label} entry kind`),
       memberCount,
       membershipId,
+      participantRoster: record.participantRoster === undefined
+        ? {
+            status: "unavailable",
+            unavailableReason: "participant_roster_not_reported",
+          }
+        : parseHostedRuntimeGroupParticipantRoster(
+            record.participantRoster,
+            `${label} entry participantRoster`,
+          ),
       permissionsUrl: readNullableString(
         record.permissionsUrl,
         `${label} entry permissionsUrl`,
@@ -4537,6 +4668,142 @@ function legacyProjectionKindsToScopes(
   );
 }
 
+function parseHostedRuntimeGroupParticipantRoster(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupParticipantRoster {
+  const record = requireObject(value, label);
+  const status = requireString(record.status, `${label} status`);
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    return {
+      status,
+      unavailableReason: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} unavailableReason`,
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS,
+        value: record.unavailableReason,
+      }),
+    };
+  }
+  if (status !== "available") {
+    throw new TypeError(`${label} status is invalid.`);
+  }
+  assertAllowedObjectKeys(
+    record,
+    new Set(["participantCount", "participantLabels", "status"]),
+    label,
+  );
+  const participantCount = requireNumber(
+    record.participantCount,
+    `${label} participantCount`,
+  );
+  if (
+    !Number.isInteger(participantCount)
+    || participantCount < 1
+    || participantCount > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+  ) {
+    throw new TypeError(
+      `${label} participantCount must be an integer between 1 and ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX}.`,
+    );
+  }
+  const participantValues = requireArray(
+    record.participantLabels,
+    `${label} participantLabels`,
+  );
+  if (
+    participantValues.length > participantCount
+    || participantValues.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+  ) {
+    throw new TypeError(
+      `${label} participantLabels cannot exceed participantCount or ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
+    );
+  }
+  const participantLabels = participantValues.map(
+    (entry, index): HostedRuntimeGroupParticipantLabel => {
+    const entryLabel = `${label} participantLabels[${index}]`;
+    const participantLabel = requireObject(entry, entryLabel);
+    assertAllowedObjectKeys(
+      participantLabel,
+      new Set(["displayName", "emailParticipant", "phoneHint"]),
+      entryLabel,
+    );
+    const presentKeys = ["displayName", "emailParticipant", "phoneHint"]
+      .filter((key) => participantLabel[key] !== undefined);
+    if (presentKeys.length !== 1) {
+      throw new TypeError(`${entryLabel} must contain exactly one safe label.`);
+    }
+    const displayName = participantLabel.displayName === undefined
+      ? undefined
+      : parseHostedRuntimeGroupAskBoundedText({
+          label: `${entryLabel} displayName`,
+          maxCodePoints:
+            HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+          value: participantLabel.displayName,
+        });
+    if (
+      displayName !== undefined
+      && (
+        /\b[^\s@]+@[^\s@]+\.[^\s@]+\b/u.test(displayName)
+        || /(?:^|\D)\+?\d[\d\s().-]{6,}\d(?:\D|$)/u.test(displayName)
+      )
+    ) {
+      throw new TypeError(
+        `${entryLabel} displayName must not contain a full phone number or email address.`,
+      );
+    }
+    const emailParticipant = participantLabel.emailParticipant;
+    if (emailParticipant !== undefined && emailParticipant !== true) {
+      throw new TypeError(`${entryLabel} emailParticipant must be true when present.`);
+    }
+    let phoneHint: { areaCode?: string; lastFour: string } | undefined;
+    if (participantLabel.phoneHint !== undefined) {
+      const phone = requireObject(
+        participantLabel.phoneHint,
+        `${entryLabel} phoneHint`,
+      );
+      assertAllowedObjectKeys(
+        phone,
+        new Set(["areaCode", "lastFour"]),
+        `${entryLabel} phoneHint`,
+      );
+      const areaCode = phone.areaCode;
+      const lastFour = phone.lastFour;
+      if (areaCode !== undefined && (
+        typeof areaCode !== "string" || !/^\d{3}$/u.test(areaCode)
+      )) {
+        throw new TypeError(`${entryLabel} phoneHint areaCode must contain three digits.`);
+      }
+      if (typeof lastFour !== "string" || !/^\d{4}$/u.test(lastFour)) {
+        throw new TypeError(`${entryLabel} phoneHint lastFour must contain four digits.`);
+      }
+      phoneHint = {
+        ...(areaCode === undefined ? {} : { areaCode }),
+        lastFour,
+      };
+    }
+    if (displayName !== undefined) {
+      return { displayName };
+    }
+    if (emailParticipant === true) {
+      return { emailParticipant };
+    }
+    if (!phoneHint) {
+      throw new TypeError(`${entryLabel} is invalid.`);
+    }
+    return { phoneHint };
+  });
+  return {
+    participantCount,
+    participantLabels,
+    status,
+  };
+}
+
 function parseHostedRuntimeGroupAssistantAskFields(
   record: Record<string, unknown>,
   label: string,
@@ -4584,6 +4851,24 @@ function parseHostedRuntimeGroupDisclosurePermissionText(
       HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
     value,
   });
+}
+
+function parseHostedRuntimeGroupDisclosureNextCursor(
+  value: unknown,
+  label: string,
+): { nextDisclosureGrantCursor?: string | null } {
+  if (value === undefined) {
+    return {};
+  }
+  return {
+    nextDisclosureGrantCursor: value === null
+      ? null
+      : parseHostedRuntimeGroupAskBoundedText({
+          label,
+          maxCodePoints: HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+          value,
+        }),
+  };
 }
 
 function parseHostedRuntimeGroupDisclosureGrantId(
@@ -6174,6 +6459,9 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "runtimeInvocationOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalBoolean(orchestration, "triggeredByWebDirect", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerConstructorStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerConstructorFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerFirstEnsureRuntimeProcessingAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "userRunnerRpcStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeConsentLockAcquiredAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "healthDataAdmissionReadStartedAtEpochMs", orchestrationLabel),
@@ -6316,6 +6604,10 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     );
     const parsedPreProvider = {
       ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToAssistantPhaseMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToForegroundPassMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "foregroundPassToWorkspaceForegroundPassMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "workspaceForegroundPassToAssistantPhaseCallbackMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "assistantPhaseCallbackToAssistantPhaseMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationLaneToAssistantServiceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationReadinessMs", preProviderLabel),
@@ -6342,6 +6634,14 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanLockWaitMs", preProviderLabel),
       ...requireOptionalBoolean(preProvider, "receiptScanPerformed", preProviderLabel),
     };
+    if (
+      inspectHostedRuntimeMailboxToAssistantTimingSubdivision(parsedPreProvider).kind
+        === "invalid"
+    ) {
+      throw new TypeError(
+        `${preProviderLabel} mailbox-to-assistant timing subdivision must be absent or contain all four leaves summing to mailboxImportDoneToAssistantPhaseMs`,
+      );
+    }
     if (
       inspectHostedRuntimeAutomationLaneTimingSubdivision(parsedPreProvider).kind
         === "invalid"
@@ -6402,7 +6702,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(provider, "admissionMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "preProviderSetupMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "providerPlanAndGateMs", providerLabel),
-      ...requireOptionalNonNegativeInteger(provider, "linqEgressGuardMs", providerLabel),
     };
   }
 

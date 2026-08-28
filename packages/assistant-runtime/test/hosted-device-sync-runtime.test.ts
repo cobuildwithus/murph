@@ -4,7 +4,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { beforeEach, describe, test, vi } from "vitest";
-import { initializeVault, readJsonlRecords, updateVaultSummary } from "@murphai/core";
+import { initializeVault, readJsonlRecords, updateVaultSummary, VaultError } from "@murphai/core";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
@@ -14227,7 +14227,8 @@ describe("hosted device-sync runtime", () => {
         // running as ordinary ingestion for the temporal resource.
         await assert.rejects(
           readCanonicalEventRecords(restoredWorkspace.vaultRoot),
-          /VAULT_FILE_MISSING|Missing required file/u,
+          (error: unknown) =>
+            error instanceof VaultError && error.code === "VAULT_FILE_MISSING",
         );
       }
     } finally {
@@ -14567,7 +14568,11 @@ describe("hosted device-sync runtime", () => {
 
       // Facet-only temporal imports publish no ordinary facts, and a single
       // sample is insufficient for a facet, so no canonical event exists yet.
-      await assert.rejects(readCanonicalEventRecords(vaultRoot), /VAULT_FILE_MISSING|Missing required file/u);
+      await assert.rejects(
+        readCanonicalEventRecords(vaultRoot),
+        (error: unknown) =>
+          error instanceof VaultError && error.code === "VAULT_FILE_MISSING",
+      );
       assert.equal(caffeineRequestCount, 0);
       assert.equal(waterRequestCount, 0);
       assert.equal(
