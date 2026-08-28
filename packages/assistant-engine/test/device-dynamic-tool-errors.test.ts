@@ -20,6 +20,8 @@ function readToolError(result: Awaited<ReturnType<typeof executeDeviceDynamicToo
 }
 
 const PRIVATE_HOSTED_DEVICE_SENTINEL = 'private-hosted-device-response'
+const CONNECT_EFFECT_ONCE_HINT =
+  'Do not call connect again for this member request. Report the failure, tell the member they can ask again later, and wait for a fresh member request before another connect attempt.'
 const NO_DATA_OUTREACH_EFFECT_ONCE_HINT =
   'Do not retry this request. Wait for a fresh private member instruction before another no-data outreach change.'
 
@@ -89,7 +91,7 @@ describe('hosted device dynamic tool recovery', () => {
     },
     {
       action: 'connect',
-      expectedHint: 'Run list_accounts and inspect the current account state before deciding whether to retry connect.',
+      expectedHint: CONNECT_EFFECT_ONCE_HINT,
       retryable: false,
       response: {
         accountId: PRIVATE_HOSTED_DEVICE_SENTINEL,
@@ -244,7 +246,7 @@ describe('hosted device dynamic tool recovery', () => {
     expect(result.rpcResult.success).toBe(false)
     expect(parsed.error).toEqual({
       code: 'device_connect_provider_unavailable',
-      hint: 'Retry connect with a provider exposed in the current device context.',
+      hint: CONNECT_EFFECT_ONCE_HINT,
       message: 'That device provider is not available to connect.',
       retryable: false,
       stage: 'device-connect',
@@ -312,7 +314,7 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE',
-      hint: 'Retry connect later for the same provider.',
+      hint: CONNECT_EFFECT_ONCE_HINT,
       message: 'Device connection links are temporarily unavailable.',
       retryable: true,
       status: 503,
@@ -320,7 +322,7 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED',
-      hint: 'Continue in the member\'s private Murph conversation before retrying connect.',
+      hint: CONNECT_EFFECT_ONCE_HINT,
       message: 'Device connections require a private member conversation.',
       retryable: false,
       status: 403,
@@ -328,7 +330,7 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED',
-      hint: 'Retry connect with a provider exposed in the current device context.',
+      hint: CONNECT_EFFECT_ONCE_HINT,
       message: 'That device provider is not configured for connection.',
       retryable: false,
       status: 404,
@@ -336,7 +338,7 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'INVALID_REQUEST',
-      hint: 'Retry connect with one provider from the current device context and no extra fields.',
+      hint: CONNECT_EFFECT_ONCE_HINT,
       message: 'The device connection request was invalid.',
       retryable: false,
       status: 400,
@@ -344,7 +346,7 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET',
-      hint: 'Continue in a supported private iMessage or Telegram conversation before retrying connect.',
+      hint: CONNECT_EFFECT_ONCE_HINT,
       message: 'The device connection return target is invalid.',
       retryable: false,
       status: 400,
@@ -443,7 +445,7 @@ describe('hosted device dynamic tool recovery', () => {
 
     expect(readToolError(result).parsed.error).toEqual({
       code: 'device_operation_outcome_unknown',
-      hint: 'Run list_accounts and inspect the current account state before deciding whether to retry connect.',
+      hint: CONNECT_EFFECT_ONCE_HINT,
       message: 'The device operation completion could not be confirmed.',
       retryable: false,
       stage: 'device-connect',

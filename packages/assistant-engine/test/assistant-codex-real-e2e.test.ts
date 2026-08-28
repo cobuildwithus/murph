@@ -7614,6 +7614,27 @@ describeRealCodex('real Codex capability questions e2e', () => {
           await removeRealCodexTemporaryPaths([workingDirectory])
         }
       }
+      const buildDeviceHostedToolContext = (
+        deviceTool: NonNullable<AssistantHostedToolContext['deviceTool']>,
+      ): AssistantHostedToolContext => ({
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        currentInvocationScope: () => ({
+          conversationScope: 'direct',
+          origin: {
+            assistantInputId: 'ain_00000000000000000000000000000029',
+            kind: 'accepted_input',
+            sessionId: 'session-capability-request',
+          },
+          originSessionId: 'session-capability-request',
+        }),
+        deviceTool,
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      })
 
       try {
         for (const inquiry of capabilityInquiries) {
@@ -7736,26 +7757,7 @@ describeRealCodex('real Codex capability questions e2e', () => {
           }
         }
         const concreteRequest = await executeProbe({
-          hostedToolContext: {
-            computerToolsAvailable: false,
-            currentHostedDeliveryContext: () => null,
-            currentHostedMailboxItemIds: () => [],
-            currentInvocationScope: () => ({
-              conversationScope: 'direct',
-              origin: {
-                assistantInputId:
-                  'ain_00000000000000000000000000000029',
-                kind: 'accepted_input',
-                sessionId: 'session-capability-request',
-              },
-              originSessionId: 'session-capability-request',
-            }),
-            deviceTool,
-            sendVaultFile: async () => {
-              throw new Error('Vault file sends are unavailable in this test.')
-            },
-            vaultFileSendAvailable: false,
-          },
+          hostedToolContext: buildDeviceHostedToolContext(deviceTool),
           prompt: 'Can you connect my Garmin and send me the connection link?',
         })
         const concreteActions = readCapabilityRoutingActions(
@@ -7776,12 +7778,71 @@ describeRealCodex('real Codex capability questions e2e', () => {
         )
 
         expect(connectCalls).toHaveLength(1)
-        expect(
-          deviceRequests.filter((request) => request.action === 'connect'),
-        ).toEqual([{ action: 'connect', provider: 'garmin' }])
+        expect(deviceRequests).toEqual([
+          { action: 'connect', provider: 'garmin' },
+        ])
         const concreteReply = concreteRequest.finalMessage.trim()
         expect(concreteReply.endsWith(connectUrl)).toBe(true)
         expect(concreteReply.match(/https:\/\//gu) ?? []).toHaveLength(1)
+
+        const failedDeviceRequests: AssistantHostedDeviceToolRequest[] = []
+        const failedConnect = await executeProbe({
+          hostedToolContext: buildDeviceHostedToolContext({
+            async request(request) {
+              failedDeviceRequests.push(request)
+              if (request.action !== 'connect') {
+                throw new Error(
+                  'Unexpected device action in failed-connect proof.',
+                )
+              }
+              throw {
+                code: 'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE',
+                context: {
+                  retryable: true,
+                  status: 503,
+                  statusCode: 503,
+                },
+                forwardedFromWeb: true,
+                name: 'HostedWebControlPlaneResponseError',
+                retryable: true,
+                status: 503,
+                statusCode: 503,
+              }
+            },
+          }),
+          prompt: 'Can you connect my Garmin and send me the connection link?',
+        })
+        const failedConnectCalls = readCapabilityRoutingActions(
+          failedConnect.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_DEVICE_TOOL.name
+          && action.argumentsValue.action === 'connect'
+        )
+        const failedConnectReply = failedConnect.finalMessage.trim()
+
+        process.stdout.write(
+          `[failed-capability-request-e2e] ${JSON.stringify({
+            connectCalls: failedConnectCalls,
+            deviceRequests: failedDeviceRequests,
+            reply: failedConnectReply,
+          })}\n`,
+        )
+
+        expect(failedConnectCalls).toHaveLength(1)
+        expect(failedDeviceRequests).toEqual([
+          { action: 'connect', provider: 'garmin' },
+        ])
+        expect(failedConnectReply).toMatch(
+          /\b(?:temporarily unavailable|could not|couldn['’]?t|unable)\b/iu,
+        )
+        expect(failedConnectReply).toMatch(
+          /\b(?:again|fresh|later|new request)\b/iu,
+        )
+        expect(failedConnectReply).not.toMatch(/https:\/\//iu)
+        expect(failedConnectReply).not.toMatch(
+          /\b(?:connected successfully|connection (?:link )?is ready)\b/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }

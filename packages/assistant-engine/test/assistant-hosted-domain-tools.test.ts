@@ -1395,7 +1395,10 @@ describe('hosted domain dynamic tools', () => {
       /at most once for that message; after any result, do not retry/u,
     )
     expect(MURPH_DEVICE_TOOL.description).toContain(
-      'For one connection request, call connect at most once; after a successful result, use its connectUrl and do not retry.',
+      'For one connection request, call connect at most once; after a successful result, return its connectUrl exactly, including its opaque query, without calling list_accounts or any device action again.',
+    )
+    expect(MURPH_DEVICE_TOOL.description).toContain(
+      'A returned connectUrl is a user-deliverable link, not a provider credential.',
     )
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
@@ -1918,6 +1921,7 @@ describe('hosted domain dynamic tools', () => {
     }, { signal: abortController.signal })
     expect(readResultPayload(result)).toEqual({
       action: 'connect',
+      hint: 'Return connectUrl exactly in the final reply, including its opaque query. It is a user-deliverable link, not a provider credential. Successful link creation is terminal; do not call list_accounts or any device action again for this member request.',
       link: {
         authorizationUrl: 'https://connect.example.test/authorize',
         connectUrl: 'https://connect.example.test/start',

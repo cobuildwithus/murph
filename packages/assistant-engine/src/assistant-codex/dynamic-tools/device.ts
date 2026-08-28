@@ -12,6 +12,10 @@ import type {
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const DEVICE_TOOL_RESULT_MAX_BYTES = 60_000
+const CONNECT_EFFECT_ONCE_HINT =
+  'Do not call connect again for this member request. Report the failure, tell the member they can ask again later, and wait for a fresh member request before another connect attempt.'
+const CONNECT_SUCCESS_HINT =
+  'Return connectUrl exactly in the final reply, including its opaque query. It is a user-deliverable link, not a provider credential. Successful link creation is terminal; do not call list_accounts or any device action again for this member request.'
 const NO_DATA_OUTREACH_EFFECT_ONCE_HINT =
   'Do not retry this request. Wait for a fresh private member instruction before another no-data outreach change.'
 const deviceProviderSchema = z
@@ -52,7 +56,7 @@ export const MURPH_DEVICE_TOOL = {
   namespace: 'murph',
   name: 'device',
   description:
-    'Work with the current authenticated member’s wearable and health-device accounts. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. For one connection request, call connect at most once; after a successful result, use its connectUrl and do not retry. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin check-in timing while Garmin is the supported no-data-outreach source: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, tokens, delivery routes, or generic commands.',
+    'Work with the current authenticated member’s wearable and health-device accounts. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. For one connection request, call connect at most once; after a successful result, return its connectUrl exactly, including its opaque query, without calling list_accounts or any device action again. A returned connectUrl is a user-deliverable link, not a provider credential. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin check-in timing while Garmin is the supported no-data-outreach source: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, provider access tokens, delivery routes, or generic commands.',
   inputSchema: z.toJSONSchema(deviceArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -189,6 +193,15 @@ function projectDeviceResponseMismatch(
       hint: NO_DATA_OUTREACH_EFFECT_ONCE_HINT,
     }
   }
+  if (action === 'connect') {
+    return {
+      code: 'device_response_mismatch',
+      message: 'The device response action did not match the requested action.',
+      retryable: false,
+      stage: deviceToolStage(action),
+      hint: CONNECT_EFFECT_ONCE_HINT,
+    }
+  }
 
   return {
     code: 'device_response_mismatch',
@@ -220,7 +233,7 @@ function projectDeviceToolError(
           message: 'That device provider is not available to connect.',
           retryable: false,
           stage,
-          hint: 'Retry connect with a provider exposed in the current device context.',
+          hint: CONNECT_EFFECT_ONCE_HINT,
         }
       case 'device_reconcile_unavailable':
         return {
@@ -274,7 +287,7 @@ function projectDeviceToolError(
             code: hostedError.code,
             message: 'Device connection links are temporarily unavailable.',
             retryable: hostedError.retryable,
-            retryHint: 'Retry connect later for the same provider.',
+            retryHint: CONNECT_EFFECT_ONCE_HINT,
             stage,
           })
         case 'HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED':
@@ -283,7 +296,7 @@ function projectDeviceToolError(
             message: 'Device connections require a private member conversation.',
             retryable: false,
             stage,
-            hint: 'Continue in the member\'s private Murph conversation before retrying connect.',
+            hint: CONNECT_EFFECT_ONCE_HINT,
           }
         case 'HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED':
           return {
@@ -291,7 +304,7 @@ function projectDeviceToolError(
             message: 'That device provider is not configured for connection.',
             retryable: false,
             stage,
-            hint: 'Retry connect with a provider exposed in the current device context.',
+            hint: CONNECT_EFFECT_ONCE_HINT,
           }
         case 'INVALID_REQUEST':
           return {
@@ -299,7 +312,7 @@ function projectDeviceToolError(
             message: 'The device connection request was invalid.',
             retryable: false,
             stage,
-            hint: 'Retry connect with one provider from the current device context and no extra fields.',
+            hint: CONNECT_EFFECT_ONCE_HINT,
           }
         case 'HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET':
           return {
@@ -307,7 +320,7 @@ function projectDeviceToolError(
             message: 'The device connection return target is invalid.',
             retryable: false,
             stage,
-            hint: 'Continue in a supported private iMessage or Telegram conversation before retrying connect.',
+            hint: CONNECT_EFFECT_ONCE_HINT,
           }
       }
     }
@@ -349,6 +362,19 @@ function projectUnclassifiedDeviceToolFailure(
       retryable: false,
       stage,
       hint: NO_DATA_OUTREACH_EFFECT_ONCE_HINT,
+    }
+  }
+  if (action === 'connect') {
+    return {
+      code: callerSignalAborted
+        ? 'device_operation_cancelled'
+        : 'device_operation_outcome_unknown',
+      message: callerSignalAborted
+        ? 'The device operation was cancelled.'
+        : 'The device operation completion could not be confirmed.',
+      retryable: false,
+      stage,
+      hint: CONNECT_EFFECT_ONCE_HINT,
     }
   }
   if (callerSignalAborted) {
@@ -459,6 +485,7 @@ function serializeDeviceToolResponse(
     : response.action === 'connect'
       ? {
           action: response.action,
+          hint: CONNECT_SUCCESS_HINT,
           link: {
             authorizationUrl: response.link.authorizationUrl,
             connectUrl: response.link.connectUrl,
