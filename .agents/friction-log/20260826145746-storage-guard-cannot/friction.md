@@ -1,6 +1,7 @@
 ---
 title: 'Storage guard cannot read filesystem capacity during scoped commits'
 severity: 'major'
+issue: 'cobuildwithus/murph#2494'
 ---
 
 ## Expected Behavior

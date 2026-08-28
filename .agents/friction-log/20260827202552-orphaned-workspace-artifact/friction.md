@@ -1,6 +1,7 @@
 ---
 title: 'Orphaned workspace artifact locks block delegated verification indefinitely'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2495'
 ---
 
 ## Expected Behavior
