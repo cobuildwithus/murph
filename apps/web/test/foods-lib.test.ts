@@ -31,6 +31,41 @@ function isProductTestsQuery(text: string): boolean {
   return text.includes('product_tests.id AS "productTestId"');
 }
 
+function readPrivateFoodSearchCandidateBudgets(text: string): number[] {
+  const ranges = [
+    [
+      "fts_index_matches AS MATERIALIZED",
+      "name_nearest_matches AS MATERIALIZED",
+    ],
+    [
+      "name_nearest_matches AS MATERIALIZED",
+      "fts_nearest_matches AS MATERIALIZED",
+    ],
+    [
+      "trigram_matches AS MATERIALIZED",
+      "trigram_candidates AS MATERIALIZED",
+    ],
+  ] as const;
+
+  return ranges.map(([startMarker, endMarker]) => {
+    const start = text.indexOf(startMarker);
+    const end = text.indexOf(endMarker, start + startMarker.length);
+
+    if (start < 0 || end <= start) {
+      throw new Error(`missing private food search CTE range: ${startMarker}`);
+    }
+
+    const limits = [
+      ...text.slice(start, end).matchAll(/\bLIMIT (\d+)\b/gu),
+    ];
+    if (limits.length !== 1) {
+      throw new Error(`unexpected private food search limits: ${startMarker}`);
+    }
+
+    return Number(limits[0]![1]);
+  });
+}
+
 function createFoodsTestRouteHandlers(
   queries: ReturnType<typeof createFoodsQueries>,
 ) {
@@ -630,11 +665,16 @@ describe("foods query helpers", () => {
       "EXISTS (SELECT 1 FROM fts_index_matches)",
     );
     expect(ftsNearestSql).not.toContain("FROM foods");
+    expect(readPrivateFoodSearchCandidateBudgets(searchSql)).toEqual([
+      1_000,
+      1_000,
+      1_000,
+    ]);
     expect(searchCall?.text).toMatch(
-      /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 10000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
+      /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 1000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
     );
     expect(searchCall?.text).toMatch(
-      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 10000/u,
+      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 1000/u,
     );
     expect(searchCall?.text).toMatch(
       /fts_nearest_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches[\s\S]*?to_tsvector/u,
@@ -643,7 +683,7 @@ describe("foods query helpers", () => {
       /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_exact_name_matches[\s\S]*?SELECT \* FROM fts_index_matches[\s\S]*?SELECT \* FROM fts_nearest_matches/u,
     );
     expect(searchCall?.text).toMatch(
-      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM \([\s\S]*?FROM foods[\s\S]*?NOT EXISTS \(SELECT 1 FROM fts_index_matches\)[\s\S]*?ORDER BY name <-> \$1::text\s*LIMIT 10000[\s\S]*?\) nearest_names\s*WHERE name % \$1::text/u,
+      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM \([\s\S]*?FROM foods[\s\S]*?NOT EXISTS \(SELECT 1 FROM fts_index_matches\)[\s\S]*?ORDER BY name <-> \$1::text\s*LIMIT 1000[\s\S]*?\) nearest_names\s*WHERE name % \$1::text/u,
     );
     expect(searchCall?.text).not.toMatch(
       /trigram_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches/u,
@@ -740,6 +780,49 @@ describe("foods query helpers", () => {
     expect(contaminantsCall?.text).not.toContain("threshold_basis IN");
     expect(contaminantsCall?.values).toEqual([["fdc:123"]]);
   });
+
+  it.each([
+    [1, 1_000],
+    [5, 1_000],
+    [20, 4_000],
+    [50, 10_000],
+    [500, 10_000],
+  ] as const)(
+    "derives bounded private food candidates for a %i-result request",
+    async (limit, expectedCandidateBudget) => {
+      const calls: Array<{ text: string; values: unknown[] }> = [];
+      const queries = createFoodsQueries({
+        async query<T>(text: string, values: unknown[]) {
+          calls.push({ text, values });
+          return { rows: [] as T[] };
+        },
+      });
+
+      await queries.searchFoods({
+        q: "candidate budget fixture",
+        limit,
+        includeOffMarket: false,
+      });
+
+      expect(calls).toHaveLength(1);
+      const searchCall = calls[0];
+      const candidateBudgets = readPrivateFoodSearchCandidateBudgets(
+        searchCall?.text ?? "",
+      );
+      expect(candidateBudgets).toEqual([
+        expectedCandidateBudget,
+        expectedCandidateBudget,
+        expectedCandidateBudget,
+      ]);
+      expect(Math.max(...candidateBudgets)).toBeLessThanOrEqual(10_000);
+      expect(searchCall?.values).toEqual([
+        "candidate budget fixture",
+        false,
+        limit,
+        null,
+      ]);
+    },
+  );
 
   it("filters generic food searches to USDA non-branded origins", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];

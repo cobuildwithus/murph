@@ -21,7 +21,9 @@ const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES = 256 * 1_024;
 const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
-const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 10_000;
+const PRIVATE_FOOD_SEARCH_CANDIDATE_FLOOR = 1_000;
+const PRIVATE_FOOD_SEARCH_CANDIDATE_CEILING = 10_000;
+const PRIVATE_FOOD_SEARCH_CANDIDATES_PER_RESULT = 200;
 const PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
@@ -2084,6 +2086,24 @@ type GenericProductLabelSearchInput = {
   stemmedSearch: boolean;
 };
 
+function privateFoodSearchCandidateLimit(resultLimit: number): number {
+  const normalizedResultLimit = Number.isFinite(resultLimit)
+    ? Math.max(1, Math.floor(resultLimit))
+    : 1;
+
+  // Five requested results use the proven 1,000-row floor, while the
+  // supported 50-result maximum reaches the existing 10,000-row ceiling. Keep
+  // the clamped integer as a SQL literal so each indexed branch retains its
+  // concrete bounded plan instead of a generic parameterized LIMIT.
+  return Math.min(
+    PRIVATE_FOOD_SEARCH_CANDIDATE_CEILING,
+    Math.max(
+      PRIVATE_FOOD_SEARCH_CANDIDATE_FLOOR,
+      normalizedResultLimit * PRIVATE_FOOD_SEARCH_CANDIDATES_PER_RESULT,
+    ),
+  );
+}
+
 async function searchGenericProductLabels(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
@@ -2111,6 +2131,7 @@ async function searchGenericProductLabels(
   // exhaustive whole-catalog ranking for completion inside the labels database
   // statement timeout; exact IDs and UPCs use separate direct paths.
   const stemmed = input.stemmedSearch;
+  const candidateLimit = privateFoodSearchCandidateLimit(input.limit);
   const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
     "data_origin",
     input.excludedDataOrigins,
@@ -2178,7 +2199,7 @@ async function searchGenericProductLabels(
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
-          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+          LIMIT ${candidateLimit}
         ),
         name_nearest_matches AS MATERIALIZED (
           SELECT
@@ -2201,7 +2222,7 @@ async function searchGenericProductLabels(
           -- This GiST KNN branch runs only when indexed FTS found rows. The
           -- mutually exclusive typo branch below owns no-FTS searches.
           ORDER BY name <->>> $1::text
-          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+          LIMIT ${candidateLimit}
         ),
         fts_nearest_matches AS MATERIALIZED (
           SELECT
@@ -2293,7 +2314,7 @@ async function searchGenericProductLabels(
             -- threshold below, so eligible rows always precede ineligible
             -- rows while the GiST KNN scan remains bounded.
             ORDER BY name <-> $1::text
-            LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+            LIMIT ${candidateLimit}
           ) nearest_names
           WHERE name % $1::text
         ),

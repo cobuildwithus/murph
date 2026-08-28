@@ -766,18 +766,23 @@ The current search path uses built-in Postgres full-text search plus the
 `pg_trgm` extension for indexed name similarity. Public food searches retain
 their existing 250-candidate SQL bound, and supplement searches retain their
 existing ranking path. Private food-name search uses a separate bounded
-retrieval contract for the roughly two-million-row foods corpus: it admits at
-most 250 literal exact-name rows, 10,000 GIN full-text matches, and 10,000 GiST
-nearest-name candidates before similarity scoring, canonical-key deduplication,
-and window sorting. Exactly one GiST branch is realized: full-text searches use
-strict-word-nearest names, while no-FTS typo searches use whole-name distance
-and its matching whole-name threshold. That shared metric keeps eligible typo
-matches ahead of ineligible names before the cap. The bounded admissions
-preserve representative choice and canonical diversity across the established
-5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
-within the admitted set; it is intentionally not an exhaustive whole-catalog
-ranking. Exact IDs and UPCs continue to use direct lookup
-paths. On `foods_api_failed` failures from private food lookup, including exact
+retrieval contract for the roughly two-million-row foods corpus. Literal
+exact-name admission remains capped at 250 rows. Every other indexed admission
+branch derives the same candidate budget from the requested final result count:
+`min(10,000, max(1,000, 200 × limit))`. A five-result request therefore admits
+1,000 candidates per branch, while the supported 50-result maximum reaches the
+existing 10,000 ceiling. The validated integer is rendered as a concrete SQL
+literal for the GIN full-text, full-text nearest-name GiST, and no-FTS typo GiST
+admissions so each indexed branch retains a bounded concrete plan. Exactly one
+GiST branch is realized: full-text searches use strict-word-nearest names,
+while no-FTS typo searches use whole-name distance and its matching whole-name
+threshold. That shared metric keeps eligible typo matches ahead of ineligible
+names before the cap. The bounded admissions preserve representative choice
+and canonical diversity across the established 5,000-row boundary and
+ineligible-neighbor fixtures. Ranking is deterministic within the admitted
+set; it is intentionally not an exhaustive whole-catalog ranking. Exact IDs
+and UPCs continue to use direct lookup paths. On `foods_api_failed` failures
+from private food lookup, including exact
 ID/UPC dispatch and ranked search, the existing safe structured log adds only
 the closed `failureStage` value `search_rows` or `contaminant_summary`;
 PostgreSQL error codes remain in the existing safe error fields, and SQL/query

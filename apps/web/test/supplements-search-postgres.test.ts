@@ -558,10 +558,41 @@ const TYPO_CASES: readonly SearchCase[] = [
 ] as const;
 
 const FOOD_EXACT_ADMISSION_LIMIT = 250;
-const FOOD_FTS_ADMISSION_LIMIT = 10_000;
-const FOOD_NEAREST_NAME_ADMISSION_LIMIT = 10_000;
-const FOOD_MAX_SORT_INPUT = FOOD_EXACT_ADMISSION_LIMIT +
-  FOOD_FTS_ADMISSION_LIMIT + FOOD_NEAREST_NAME_ADMISSION_LIMIT;
+
+function readPrivateFoodSearchCandidateBudgets(text: string): number[] {
+  const ranges = [
+    [
+      "fts_index_matches AS MATERIALIZED",
+      "name_nearest_matches AS MATERIALIZED",
+    ],
+    [
+      "name_nearest_matches AS MATERIALIZED",
+      "fts_nearest_matches AS MATERIALIZED",
+    ],
+    [
+      "trigram_matches AS MATERIALIZED",
+      "trigram_candidates AS MATERIALIZED",
+    ],
+  ] as const;
+
+  return ranges.map(([startMarker, endMarker]) => {
+    const start = text.indexOf(startMarker);
+    const end = text.indexOf(endMarker, start + startMarker.length);
+
+    if (start < 0 || end <= start) {
+      throw new Error(`missing private food search CTE range: ${startMarker}`);
+    }
+
+    const limits = [
+      ...text.slice(start, end).matchAll(/\bLIMIT (\d+)\b/gu),
+    ];
+    if (limits.length !== 1) {
+      throw new Error(`unexpected private food search limits: ${startMarker}`);
+    }
+
+    return Number(limits[0]![1]);
+  });
+}
 
 const UNICODE_CASES: readonly SearchCase[] = [
   { category: "unicode", name: "curly possessive apostrophe", query: "Doctor’s Best Magnesium", expectedTopId: "doctors-best-magnesium" },
@@ -1154,7 +1185,10 @@ function explainRowsProcessed(node: ExplainPlanNode): number {
   return (node["Actual Rows"] ?? 0) * (node["Actual Loops"] ?? 1);
 }
 
-function expectBoundedFoodSortInputs(nodes: readonly ExplainPlanNode[]): void {
+function expectBoundedFoodSortInputs(
+  nodes: readonly ExplainPlanNode[],
+  candidateBudget: number,
+): void {
   const sortNodes = nodes.filter((node) =>
     node["Node Type"] === "Sort" ||
     node["Node Type"] === "Incremental Sort"
@@ -1166,7 +1200,7 @@ function expectBoundedFoodSortInputs(nodes: readonly ExplainPlanNode[]): void {
     );
     expect(sortInputs).toHaveLength(1);
     expect(explainRowsProcessed(sortInputs[0] ?? {})).toBeLessThanOrEqual(
-      FOOD_MAX_SORT_INPUT,
+      FOOD_EXACT_ADMISSION_LIMIT + candidateBudget * 2,
     );
   }
 }
@@ -1174,7 +1208,7 @@ function expectBoundedFoodSortInputs(nodes: readonly ExplainPlanNode[]): void {
 describe.runIf(Boolean(testDatabaseUrl))(
   "large-catalog food PostgreSQL search bound",
   () => {
-    it("finishes common-token search inside the production statement timeout", async () => {
+    it("uses derived candidate bounds and indexed plans inside the production statement timeout", async () => {
       const client = new pg.Client({
         connectionString: testDatabaseUrl ?? undefined,
       });
@@ -1275,6 +1309,10 @@ describe.runIf(Boolean(testDatabaseUrl))(
         await client.query("ANALYZE foods");
         await client.query("SET LOCAL lock_timeout = '500ms'");
         await client.query("SET LOCAL statement_timeout = '8s'");
+        const { rows: timeoutRows } = await client.query<{
+          statement_timeout: string;
+        }>("SHOW statement_timeout");
+        expect(timeoutRows[0]?.statement_timeout).toBe("8s");
 
         const broad = await queries.searchFoods({
           includeOffMarket: false,
@@ -1287,7 +1325,11 @@ describe.runIf(Boolean(testDatabaseUrl))(
         if (!broadSearch) {
           throw new Error("broad food search SQL was not captured");
         }
-        await client.query("SET LOCAL statement_timeout = '30s'");
+        expect(readPrivateFoodSearchCandidateBudgets(broadSearch.text)).toEqual([
+          4_000,
+          4_000,
+          4_000,
+        ]);
         const broadExplain = await client.query<{ "QUERY PLAN": Array<{
           Plan: ExplainPlanNode;
         }> }>(
@@ -1298,10 +1340,10 @@ describe.runIf(Boolean(testDatabaseUrl))(
         expect(broadPlan).toBeDefined();
         const broadNodes = flattenExplainPlan(broadPlan ?? {});
         expect(broadNodes.some((node) =>
-          node["Index Name"] === "foods_perf_name_rank_idx"
+          node["Index Name"] === "foods_perf_name_rank_idx" &&
+          (node["Actual Loops"] ?? 0) > 0
         )).toBe(true);
-        expectBoundedFoodSortInputs(broadNodes);
-        await client.query("SET LOCAL statement_timeout = '8s'");
+        expectBoundedFoodSortInputs(broadNodes, 4_000);
 
         const brandOnly = await queries.searchFoods({
           includeOffMarket: false,
@@ -1313,6 +1355,11 @@ describe.runIf(Boolean(testDatabaseUrl))(
         if (!brandSearch) {
           throw new Error("brand-only food search SQL was not captured");
         }
+        expect(readPrivateFoodSearchCandidateBudgets(brandSearch.text)).toEqual([
+          1_000,
+          1_000,
+          1_000,
+        ]);
         const brandExplain = await client.query<{ "QUERY PLAN": Array<{
           Plan: ExplainPlanNode;
         }> }>(
@@ -1322,8 +1369,10 @@ describe.runIf(Boolean(testDatabaseUrl))(
         const brandPlan = brandExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
         expect(brandPlan).toBeDefined();
         expect(flattenExplainPlan(brandPlan ?? {}).some((node) =>
-          node["Index Name"] === "foods_perf_search_idx" ||
-          node["Index Name"] === "foods_perf_search_english_idx"
+          (
+            node["Index Name"] === "foods_perf_search_idx" ||
+            node["Index Name"] === "foods_perf_search_english_idx"
+          ) && (node["Actual Loops"] ?? 0) > 0
         )).toBe(true);
 
         const exact = await queries.searchFoods({
@@ -1361,18 +1410,40 @@ describe.runIf(Boolean(testDatabaseUrl))(
           valid_trigram_match: true,
         });
 
-        const firstTypo = await queries.searchFoods({
+        const ceilingTypo = await queries.searchFoods({
           includeOffMarket: false,
           limit: 50,
           q: typoQ,
         });
+        const ceilingTypoSearch = capturedSearch.current;
+        if (!ceilingTypoSearch) {
+          throw new Error(
+            "large-catalog ceiling typo search SQL was not captured",
+          );
+        }
+        expect(ceilingTypo).toHaveLength(50);
+        expect(
+          readPrivateFoodSearchCandidateBudgets(ceilingTypoSearch.text),
+        ).toEqual([10_000, 10_000, 10_000]);
+
+        const floorTypo = await queries.searchFoods({
+          includeOffMarket: false,
+          limit: 5,
+          q: typoQ,
+        });
         const typoSearch = capturedSearch.current;
         if (!typoSearch) {
-          throw new Error("large-catalog typo food search SQL was not captured");
+          throw new Error(
+            "large-catalog floor typo search SQL was not captured",
+          );
         }
-        expect(firstTypo).toHaveLength(50);
+        expect(floorTypo).toHaveLength(5);
+        expect(readPrivateFoodSearchCandidateBudgets(typoSearch.text)).toEqual([
+          1_000,
+          1_000,
+          1_000,
+        ]);
 
-        await client.query("SET LOCAL statement_timeout = '30s'");
         const typoExplain = await client.query<{ "QUERY PLAN": Array<{
           Plan: ExplainPlanNode;
         }> }>(
@@ -1386,8 +1457,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
           node["Index Name"] === "foods_perf_name_rank_idx" &&
           (node["Actual Loops"] ?? 0) > 0
         )).toHaveLength(1);
-        expectBoundedFoodSortInputs(typoNodes);
-        await client.query("SET LOCAL statement_timeout = '8s'");
+        expectBoundedFoodSortInputs(typoNodes, 1_000);
 
         const { rows: obsoleteIndexes } = await client.query<{ name: string | null }>(
           "SELECT to_regclass('foods_perf_canonical_rank_idx')::text AS name",
