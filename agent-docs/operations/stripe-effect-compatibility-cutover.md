@@ -14,43 +14,51 @@ reclaims, executes, or clears a claim, and it does not change a Stripe request.
 3. Drain invocations admitted before convergence. Use the normal deployment
    drain window plus the bounded billing/provider request timeout; confirm no
    pre-cutover Web invocation remains in flight.
-4. Before any claim writer is reachable, deploy its claim-disabled admission
-   phase. That phase must replace every Stripe Customer Portal path that can
-   update or cancel a Subscription, including generic member and Family Portal
-   sessions and `subscription_update_confirm` deep links, with the matching
-   claim-owned mutation. Keep invoice and payment-method self-service only
-   through a Portal configuration that cannot mutate a Subscription. Preserve
-   suspended-member cancellation access through the replacement claim owner;
-   do not remove that user-critical escape path.
-5. Retire the mutation-capable Portal configurations, then drain already-issued
-   sessions before enabling claims. Stripe documents that an unopened Portal
-   session expires after five minutes and that an opened session expires within
-   one hour of its most recent activity. Reset the one-hour drain on any later
-   observed activity. If the last activity cannot be proven, keep claims
-   disabled until Stripe confirms that the old sessions are invalid or an
-   operator invalidates them through a provider-supported mechanism. The
-   session lifetime contract is documented in Stripe's
+4. Before enabling a future claim owner that updates or cancels a Subscription,
+   deploy its claim-disabled admission phase. Replace every Stripe Customer
+   Portal path that can perform the same Subscription mutation, including
+   generic member and Family Portal sessions and
+   `subscription_update_confirm` deep links, with that claim owner. Keep invoice
+   and payment-method self-service in the Portal, and preserve suspended-member
+   cancellation through the replacement owner.
+5. For that Subscription-mutation cutover, retire the overlapping Portal
+   configurations and drain already-issued sessions before enabling its claim.
+   Stripe documents that an unopened Portal session expires after five minutes
+   and that an opened session expires within one hour of its most recent
+   activity. Reset the one-hour drain on later observed activity. If the last
+   activity cannot be proven, keep that writer disabled until Stripe confirms
+   the old sessions are invalid or an operator invalidates them through a
+   provider-supported mechanism. The session lifetime contract is documented
+   in Stripe's
    [Customer Portal guide](https://docs.stripe.com/customer-management).
-6. Deploy the member owner, then the Family owner, then the sponsored-cleanup
-   owner only after each predecessor is terminal. Each claim-enabled release
-   depends on this cutover and may persist claims only after steps 1-5.
+6. The member Customer-creation owner below may deploy after steps 1-3. A later
+   Subscription-mutation owner may deploy only after steps 4-5 also pass and
+   each predecessor is terminal.
 7. The first persisted claim makes this release the rollback floor. Roll back a
    later owner only to this revision or to a newer claim-aware revision; never
    roll back below it while a claim can exist.
 8. Remove the compatibility-only assertions and columns only in a later
-   contract change after all three owners are deployed, all pre-owner
-   revisions and invocations are impossible, no live claim remains, and no
-   supported rollback target needs these columns.
+   contract change after every claim owner is deployed, all pre-owner revisions
+   and invocations are impossible, no live claim remains, and no supported
+   rollback target needs these columns.
 
-If convergence or drain cannot be proven, stop before deploying a claim writer.
-Rollback of this expand release is safe only before any later release persists
-a claim. After that point, recovery is a forward fix or rollback to this floor.
+If the convergence and invocation drain in steps 1-3 cannot be proven, stop
+before deploying any claim writer. Steps 4-5 are additional prerequisites only
+for a writer that overlaps a Portal Subscription mutation. Rollback of this
+expand release is safe only before any later release persists a claim. After
+that point, recovery is a forward fix or rollback to this floor.
 
 ## Member Customer creation owner
 
 The first member claim writer moves reusable Stripe Customer creation out of
-the member-row transaction. It may be enabled only after deployment steps 1-5
-above are complete:
+the member-row transaction. It may be enabled after deployment steps 1-3 above
+are complete. It does not update or cancel a Subscription and may coexist with
+Stripe Customer Portal subscription management: Murph can issue a Portal
+session only from an existing stored Customer, while this owner reuses that
+Customer without creating a claim or calling Stripe. Customer creation claims
+exist only while no stored Customer is available.
+
+Its ownership contract is:
 
 - Preparation locks and revalidates the member, then persists one opaque
   `member.customer-create` claim on the existing member billing row before
