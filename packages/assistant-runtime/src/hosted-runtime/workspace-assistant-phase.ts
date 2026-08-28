@@ -218,7 +218,11 @@ import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
+  hostedRuntimeWakeCandidateIsDue,
+  hostedSystemMailboxWakeIsDueForModelFreeOwner,
   hostedRuntimeWakeReasonUsesAssistantPhase,
+  isHostedSystemMailboxWakeCandidate,
+  selectHostedRuntimeOwnerWakeCandidate,
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
@@ -324,14 +328,6 @@ const HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS = [
 const HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
   "member.action.requested",
-] as const;
-const HOSTED_ENVIRONMENT_INTERVIEW_ROUTE_ACTIONS = [
-  "apply-runtime-control-request",
-  "run-environment-interview",
-] as const;
-const HOSTED_ENVIRONMENT_INTERVIEW_WAKE_KINDS = [
-  "environment-interview.completed",
-  "runtime.browser-vault-refresh-requested",
 ] as const;
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_ROUTE_ACTIONS = [
   "dispatch-assistant-notification",
@@ -2368,6 +2364,26 @@ export async function runHostedWorkspaceAssistantPhase(
     const hasAssistantInputAtPassStart =
       hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null;
+    const systemMailboxOwnerOwnsCurrentPass =
+      !hasAssistantInputAtPassStart
+      && systemMailboxMaintenance.continueAssistantLane === false
+      && systemMailboxMaintenance.result?.nextWakeReason === "mailbox"
+      && hostedRuntimeWakeCandidateIsDue(
+        createHostedRuntimeWakeCandidate(
+          systemMailboxMaintenance.result.nextWakeAt ?? null,
+          systemMailboxMaintenance.result.nextWakeReason,
+        ),
+        resolveHostedAssistantPhaseNowMs(input),
+      );
+    if (
+      systemMailboxOwnerOwnsCurrentPass
+      && systemMailboxMaintenance.result
+    ) {
+      return withHostedDeviceSyncMaintenanceRan(
+        systemMailboxMaintenance.result,
+        systemMailboxMaintenance.deviceSyncMaintenanceRan,
+      );
+    }
     const preManagedAutomationWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
       hasAssistantInputAtPassStart,
       input,
@@ -2412,8 +2428,6 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
     }
-    let continuingSystemMailboxDrainsProviderCleanup =
-      systemMailboxMaintenance.result?.checkpointReason === "outbox_sending";
     let continuingSystemMailboxResult =
       shouldContinueAssistantLane
         ? mergeHostedAssistantPhaseResults(systemMailboxMaintenance.result, managedAutomationsResult)
@@ -2695,9 +2709,6 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
     if (deferredPendingSystemMailboxMaintenance) {
-      continuingSystemMailboxDrainsProviderCleanup =
-        continuingSystemMailboxDrainsProviderCleanup
-        || deferredPendingSystemMailboxMaintenance.result?.checkpointReason === "outbox_sending";
       continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
         continuingSystemMailboxResult,
         deferredPendingSystemMailboxMaintenance.result,
@@ -2766,9 +2777,6 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
     if (shadowedDeviceSyncMaintenance) {
-      continuingSystemMailboxDrainsProviderCleanup =
-        continuingSystemMailboxDrainsProviderCleanup
-        || shadowedDeviceSyncMaintenance.result?.checkpointReason === "outbox_sending";
       continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
         continuingSystemMailboxResult,
         shadowedDeviceSyncMaintenance.result,
@@ -3919,7 +3927,7 @@ function mergeHostedAssistantPhaseResults(
 function postCheckpointDeliveryResultOwnsProviderCleanup(
   result: HostedWorkspaceRunnerAssistantPhaseResult | null,
 ): boolean {
-  return result?.afterCheckpointKeepsForegroundImportLoop === true;
+  return result?.checkpointReason === "outbox_sending";
 }
 
 function mergePendingAssistantInputMaintenanceResult(input: {
@@ -4795,11 +4803,12 @@ async function resolveHostedBackgroundMaintenanceWakeCandidate(input: {
   systemMailboxWake?: HostedRuntimeWakeCandidate | null;
   systemMailboxWakeAt?: string | null;
 }): Promise<HostedRuntimeWakeCandidate> {
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
   const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
   const providerCleanupWakeAt = await resolveHostedProviderCleanupScheduledWakeAt({
-    nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+    nowMs,
     vaultRoot: input.input.restored.vaultRoot,
   });
   const systemMailboxWake = Object.hasOwn(input, "systemMailboxWake")
@@ -4807,21 +4816,50 @@ async function resolveHostedBackgroundMaintenanceWakeCandidate(input: {
     : Object.hasOwn(input, "systemMailboxWakeAt")
       ? createHostedRuntimeWakeCandidate(input.systemMailboxWakeAt ?? null, "assistant")
       : await resolveHostedSystemMailboxNextWakeCandidate({
+          now: () => new Date(nowMs).toISOString(),
           vaultRoot: input.input.restored.vaultRoot,
         });
 
-  return selectHostedRuntimeWakeCandidate([
-    input.deviceSyncFollowUpWake,
-    createHostedRuntimeWakeCandidate(
-      outboxWakeAt,
-      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
-    ),
-    systemMailboxWake,
-    createHostedRuntimeWakeCandidate(input.pendingAssistantInputWakeAt ?? null, "assistant"),
-    createHostedDeviceActivityAutomationWakeCandidate(input.deviceActivityAutomation ?? null),
-    input.assistantCronWake,
-    createHostedRuntimeWakeCandidate(providerCleanupWakeAt, "assistant"),
-  ]);
+  return isHostedSystemMailboxWakeCandidate(systemMailboxWake)
+    ? selectHostedRuntimeOwnerWakeCandidate({
+        backgroundCandidates: [
+          input.deviceSyncFollowUpWake,
+          createHostedDeviceActivityAutomationWakeCandidate(
+            input.deviceActivityAutomation ?? null,
+          ),
+          input.assistantCronWake,
+          createHostedRuntimeWakeCandidate(providerCleanupWakeAt, "assistant"),
+        ],
+        foregroundCandidates: [
+          createHostedRuntimeWakeCandidate(
+            outboxWakeAt,
+            HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+          ),
+          createHostedRuntimeWakeCandidate(
+            input.pendingAssistantInputWakeAt ?? null,
+            "assistant",
+          ),
+        ],
+        nowMs,
+        systemMailboxWake,
+      })
+    : selectHostedRuntimeWakeCandidate([
+        input.deviceSyncFollowUpWake,
+        createHostedRuntimeWakeCandidate(
+          outboxWakeAt,
+          HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+        ),
+        systemMailboxWake,
+        createHostedRuntimeWakeCandidate(
+          input.pendingAssistantInputWakeAt ?? null,
+          "assistant",
+        ),
+        createHostedDeviceActivityAutomationWakeCandidate(
+          input.deviceActivityAutomation ?? null,
+        ),
+        input.assistantCronWake,
+        createHostedRuntimeWakeCandidate(providerCleanupWakeAt, "assistant"),
+      ]);
 }
 
 function shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(
@@ -4839,6 +4877,34 @@ function shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(
   const wakeTimeMs = Date.parse(wakeAt);
   return Number.isFinite(wakeTimeMs)
     && wakeTimeMs <= resolveHostedAssistantPhaseNowMs(phaseInput);
+}
+
+async function resolveDueModelFreeSystemMailboxOwnerSelection(
+  input: {
+    pendingAssistantInputWakeAt: string | null;
+    phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  },
+): Promise<HostedRuntimeWakeCandidate | null> {
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.phaseInput);
+  const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    now: () => new Date(nowMs).toISOString(),
+    vaultRoot: input.phaseInput.restored.vaultRoot,
+  });
+  if (!hostedSystemMailboxWakeIsDueForModelFreeOwner(systemMailboxWake, nowMs)) {
+    return null;
+  }
+
+  const selectedWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
+    input: input.phaseInput,
+    pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
+    systemMailboxWake,
+  });
+  const systemMailboxOwnerSelected = selectedWake.at === systemMailboxWake.at
+    && selectedWake.reason === systemMailboxWake.reason;
+  if (systemMailboxOwnerSelected) {
+    return systemMailboxWake;
+  }
+  return hostedRuntimeWakeCandidateIsDue(selectedWake, nowMs) ? selectedWake : null;
 }
 
 function systemMailboxPreparationRanDeviceSync(
@@ -5648,8 +5714,6 @@ async function runSystemMailboxMaintenancePhase(input: {
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   const phaseInput = input.input;
-  const environmentInterviewOnly =
-    phaseInput.request.processingMode === "environment_interview";
   const hasPendingAssistantInputWakeOverride = Object.hasOwn(
     input,
     "pendingAssistantInputWakeAt",
@@ -5693,14 +5757,10 @@ async function runSystemMailboxMaintenancePhase(input: {
       || phaseInput.foregroundCausalOnly === true
     )
       ? await prepareHostedSystemMailboxItemForCheckpoint({
-          allowedRouteActions: environmentInterviewOnly
-            ? HOSTED_ENVIRONMENT_INTERVIEW_ROUTE_ACTIONS
-            : phaseInput.foregroundCausalOnly === true
+          allowedRouteActions: phaseInput.foregroundCausalOnly === true
             ? HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS
             : HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS,
-          allowedWakeKinds: environmentInterviewOnly
-            ? HOSTED_ENVIRONMENT_INTERVIEW_WAKE_KINDS
-            : phaseInput.foregroundCausalOnly === true
+          allowedWakeKinds: phaseInput.foregroundCausalOnly === true
             ? HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS
             : HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS,
           ...(assistantAskCompletionOccurredBefore === undefined
@@ -5728,7 +5788,6 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   if (
     phaseInput.foregroundCausalOnly === true
-    && !environmentInterviewOnly
     && foregroundCausalPreparation === null
   ) {
     pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(
@@ -5766,7 +5825,6 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   if (
     phaseInput.foregroundCausalOnly === true
-    && !environmentInterviewOnly
     && foregroundCausalPreparation === null
     && pendingAssistantInputWakeAt === null
   ) {
@@ -5851,6 +5909,47 @@ async function runSystemMailboxMaintenancePhase(input: {
     };
   }
 
+  let deferSystemMailboxPreparationForDelivery = false;
+  const initialOwnerWake = !foregroundCausalAttempted
+    && !hasBackgroundSelection
+    ? await resolveDueModelFreeSystemMailboxOwnerSelection({
+        pendingAssistantInputWakeAt,
+        phaseInput,
+      })
+    : null;
+  if (
+    hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      initialOwnerWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    )
+  ) {
+    if (phaseInput.shouldYieldBackgroundMaintenance?.() === true) {
+      return {
+        backgroundMaintenanceYielded: true,
+        continueAssistantLane: false,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
+        result: buildPreAutomationLaneSkippedAssistantWakeResult({
+          wakeAt: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)).toISOString(),
+        }),
+      };
+    }
+    return {
+      backgroundMaintenanceYielded: false,
+      continueAssistantLane: false,
+      deviceSyncMaintenanceRan: false,
+      initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt,
+      result: withHostedRuntimeWakeCandidate({
+        result: { progressed: false },
+        wake: initialOwnerWake,
+      }),
+    };
+  }
+  deferSystemMailboxPreparationForDelivery =
+    initialOwnerWake?.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
+
   if (
     pendingAssistantInputBlocksMaintenance
     && !foregroundCausalAttempted
@@ -5902,28 +6001,76 @@ async function runSystemMailboxMaintenancePhase(input: {
     };
   }
 
+  const refreshedOwnerWake = !deferSystemMailboxPreparationForDelivery
+    && !foregroundCausalAttempted
+    && !hasBackgroundSelection
+    ? await resolveDueModelFreeSystemMailboxOwnerSelection({
+        pendingAssistantInputWakeAt,
+        phaseInput,
+      })
+    : null;
+  if (
+    hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      refreshedOwnerWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    )
+  ) {
+    if (phaseInput.shouldYieldBackgroundMaintenance?.() === true) {
+      return {
+        backgroundMaintenanceYielded: true,
+        continueAssistantLane: false,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
+        result: mergeMemberPreferencesPrePlanningResult(
+          buildPreAutomationLaneSkippedAssistantWakeResult({
+            wakeAt: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)).toISOString(),
+          }),
+        ),
+      };
+    }
+    return {
+      backgroundMaintenanceYielded: false,
+      continueAssistantLane: false,
+      deviceSyncMaintenanceRan: false,
+      initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt,
+      result: mergeMemberPreferencesPrePlanningResult(
+        withHostedRuntimeWakeCandidate({
+          result: { progressed: false },
+          wake: refreshedOwnerWake,
+        }),
+      ),
+    };
+  }
+  deferSystemMailboxPreparationForDelivery =
+    deferSystemMailboxPreparationForDelivery
+    || refreshedOwnerWake?.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
+
   const systemMailboxPreparation = foregroundCausalPreparation
-    ?? await prepareHostedSystemMailboxItemForCheckpoint({
-      ...(input.backgroundRouteActions
-        ? { allowedRouteActions: input.backgroundRouteActions }
-        : {}),
-      ...(input.backgroundWakeKinds
-        ? { allowedWakeKinds: input.backgroundWakeKinds }
-        : {}),
-      executionContext: input.executionContext,
-      operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
-      runtimeLogContext: {
-        attemptId: phaseInput.request.attemptId,
-        leaseGeneration: phaseInput.request.leaseGeneration,
-        workspaceVersion: phaseInput.request.workspaceVersion,
-      },
-      runtime: phaseInput.runtime,
-      runtimeEnv: phaseInput.runtimeEnv,
-      signal: phaseInput.signal ?? null,
-      shouldYieldBackgroundMaintenance:
-        phaseInput.shouldYieldBackgroundMaintenance ?? null,
-      vaultRoot: phaseInput.restored.vaultRoot,
-    });
+    ?? (deferSystemMailboxPreparationForDelivery
+      ? null
+      : await prepareHostedSystemMailboxItemForCheckpoint({
+          ...(input.backgroundRouteActions
+            ? { allowedRouteActions: input.backgroundRouteActions }
+            : {}),
+          ...(input.backgroundWakeKinds
+            ? { allowedWakeKinds: input.backgroundWakeKinds }
+            : {}),
+          executionContext: input.executionContext,
+          operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+          runtimeLogContext: {
+            attemptId: phaseInput.request.attemptId,
+            leaseGeneration: phaseInput.request.leaseGeneration,
+            workspaceVersion: phaseInput.request.workspaceVersion,
+          },
+          runtime: phaseInput.runtime,
+          runtimeEnv: phaseInput.runtimeEnv,
+          signal: phaseInput.signal ?? null,
+          shouldYieldBackgroundMaintenance:
+            phaseInput.shouldYieldBackgroundMaintenance ?? null,
+          vaultRoot: phaseInput.restored.vaultRoot,
+        }));
   const shouldYieldAfterSystemMailboxPreparation = !hasExclusiveSelection
     && phaseInput.shouldYieldBackgroundMaintenance?.() === true;
   const foregroundCausalPreparationSelected =
@@ -6149,6 +6296,11 @@ async function runSystemMailboxMaintenancePhase(input: {
           vaultRoot: phaseInput.restored.vaultRoot,
         });
   const systemMailboxWakeAt = systemMailboxWake?.at ?? null;
+  const modelFreeSystemMailboxOwnerDue =
+    hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      systemMailboxWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    );
   const rawSystemMailboxMetricsWakeAt = "metrics" in systemMailboxPreparation
     ? systemMailboxPreparation.metrics.nextWakeAt ?? null
     : null;
@@ -6180,7 +6332,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         }
       : await prepareHostedProviderCleanupPlan({
           deferred:
-            shouldYieldAfterSystemMailboxPreparation
+            modelFreeSystemMailboxOwnerDue
+            || shouldYieldAfterSystemMailboxPreparation
             || phaseInput.shouldYieldBackgroundMaintenance?.() === true,
           idleCheckpointDelayMs: phaseInput.request.idleCheckpointDelayMs,
           nowMs: resolveHostedAssistantPhaseNowMs(phaseInput),
@@ -6206,6 +6359,28 @@ async function runSystemMailboxMaintenancePhase(input: {
     phaseInput,
     state: systemAssistantCronWakeState,
   });
+  const systemMailboxSuccessorWake = systemAssistantCronWakeState.dueNow
+    && !foregroundCausalAttempted
+    && !hasBackgroundSelection
+    && !hasExclusiveSelection
+    && !shouldContinueAssistantLaneAfterSystemMailboxPreparation(
+      systemMailboxPreparation,
+    )
+    && "item" in systemMailboxPreparation
+    && (
+      systemMailboxPreparation.status === "processed"
+      || systemMailboxPreparation.status === "recording"
+    )
+    ? await resolveHostedSystemMailboxNextWakeCandidate({
+        excludeItemId: systemMailboxPreparation.item.itemId,
+        vaultRoot: phaseInput.restored.vaultRoot,
+      })
+    : null;
+  const modelFreeSystemMailboxSuccessorOwnerDue =
+    hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      systemMailboxSuccessorWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    );
   const dirtyDeviceSyncWake = dirtyDeviceSyncMetrics
     ? selectHostedRuntimeWakeCandidate([
         createHostedRuntimeWakeCandidate(
@@ -6299,7 +6474,9 @@ async function runSystemMailboxMaintenancePhase(input: {
     backgroundMaintenanceYielded,
     continueAssistantLane: phaseInput.foregroundCausalOnly === true
       ? false
-      : !foregroundCausalDeliveryOwnsThisPass
+      : !modelFreeSystemMailboxOwnerDue
+        && !modelFreeSystemMailboxSuccessorOwnerDue
+        && !foregroundCausalDeliveryOwnsThisPass
         && (
           foregroundCausalAttempted
           || foregroundCausalPreparationCompletedWithoutDelivery
@@ -6318,7 +6495,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         : {}),
       ...(shouldRunPostSystemCheckpoint
         ? {
-            ...(systemMailboxDeliveryEffectsForDispatch.length > 0
+            ...(systemMailboxDeliveryEffects.length === 0
+              || systemMailboxDeliveryEffectsForDispatch.length > 0
               || clinicalOutcomeRecordPending
               ? { afterCheckpointKeepsForegroundImportLoop: true }
               : {}),
@@ -6517,6 +6695,19 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       dirtyPostCheckpoint?.afterDurableCheckpoint ?? null,
     );
     const dirtyPostCheckpointWakeAt = dirtyPostCheckpoint?.nextWakeAt ?? null;
+    const statusSystemMailboxWake = createHostedRuntimeWakeCandidate(
+      statusCallback.nextWakeAt,
+      statusCallback.nextWakeReason ?? "assistant",
+    );
+    const refreshedSystemMailboxWake =
+      await resolveHostedSystemMailboxNextWakeCandidate({
+        vaultRoot: input.input.restored.vaultRoot,
+      });
+    const ownerAwareStatusSystemMailboxWake =
+      refreshedSystemMailboxWake.at === statusSystemMailboxWake.at
+      && refreshedSystemMailboxWake.reason === statusSystemMailboxWake.reason
+        ? refreshedSystemMailboxWake
+        : statusSystemMailboxWake;
     const backgroundWake = foregroundCausalOnly
       ? createHostedRuntimeWakeCandidate(null, null)
       : await resolveHostedBackgroundMaintenanceWakeCandidate({
@@ -6525,16 +6716,9 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           deviceSyncFollowUpWake: input.deviceSyncFollowUpWake,
           input: input.input,
           pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
-          systemMailboxWake: createHostedRuntimeWakeCandidate(
-            statusCallback.nextWakeAt,
-            statusCallback.nextWakeReason ?? "assistant",
-          ),
+          systemMailboxWake: ownerAwareStatusSystemMailboxWake,
         });
     const statusNextWake = selectHostedRuntimeWakeCandidate([
-      createHostedRuntimeWakeCandidate(
-        statusCallback.nextWakeAt,
-        statusCallback.nextWakeReason ?? "assistant",
-      ),
       backgroundWake,
       createHostedRuntimeWakeCandidate(
         input.deferredSystemMailboxDeliveryWakeAt,
@@ -7268,7 +7452,7 @@ async function drainHostedPostCheckpointDelivery(input: {
       canConsumeWorkspaceAssistantWake: input.canConsumeWorkspaceAssistantWake,
       phaseInput: input.input,
     });
-  const postSystemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
+  const postSystemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
     vaultRoot: input.input.restored.vaultRoot,
   });
   const postBaseNextWake = dropConsumedWorkspaceAssistantWake(
@@ -7291,21 +7475,46 @@ async function drainHostedPostCheckpointDelivery(input: {
           HOSTED_ASSISTANT_WAKE_REASON,
         )
       : null;
-  const postNextWake = selectHostedRuntimeWakeCandidate([
+  const postOutboxWake = createHostedRuntimeWakeCandidate(
+    postOutboxWakeAt,
+    HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+  );
+  const postPendingAssistantInputWake = createHostedRuntimeWakeCandidate(
+    postDeliveryPendingAssistantInputWakeAt,
+    HOSTED_ASSISTANT_WAKE_REASON,
+  );
+  const selectedForegroundInputWake = createHostedRuntimeWakeCandidate(
+    input.assistantMetrics?.assistantAutomationSelectedInputWakeAt ?? null,
+    HOSTED_ASSISTANT_WAKE_REASON,
+  );
+  const postBackgroundWakeCandidates = [
     postBaseNextWake,
     dropConsumedWorkspaceAssistantWake(postDeliveryCronWake),
     input.postDeliveryReconciliationWake,
-    createHostedRuntimeWakeCandidate(
-      postOutboxWakeAt,
-      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
-    ),
-    createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
-    createHostedRuntimeWakeCandidate(
-      postDeliveryPendingAssistantInputWakeAt,
-      "assistant",
-    ),
     providerCleanup.wake,
-  ]);
+  ];
+  const postNextWake = input.canConsumeWorkspaceAssistantWake
+    && isHostedSystemMailboxWakeCandidate(postSystemMailboxWake)
+    ? selectHostedRuntimeOwnerWakeCandidate({
+        backgroundCandidates: postBackgroundWakeCandidates,
+        foregroundCandidates: [
+          postOutboxWake,
+          postPendingAssistantInputWake,
+          selectedForegroundInputWake,
+        ],
+        nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+        systemMailboxWake: postSystemMailboxWake,
+      })
+    : selectHostedRuntimeWakeCandidate([
+        ...postBackgroundWakeCandidates,
+        postOutboxWake,
+        postPendingAssistantInputWake,
+        selectedForegroundInputWake,
+        createHostedRuntimeWakeCandidate(
+          postSystemMailboxWake.at,
+          HOSTED_ASSISTANT_WAKE_REASON,
+        ),
+      ]);
   const postNextWakeAt = postNextWake.at;
   if (input.assistantDeliveryEffects.length > 0) {
     await writeHostedOutboxDeliveryRuntimeLog({
@@ -9669,7 +9878,8 @@ function shouldResolveHostedAssistantCronWakeAfterAssistantPass(input: {
 }
 
 function shouldExposeHostedAssistantPhaseNextWakeReason(reason: string | null | undefined): boolean {
-  return reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+  return reason === "mailbox"
+    || reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
     || reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
 }
 

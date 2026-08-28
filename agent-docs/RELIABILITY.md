@@ -1663,6 +1663,19 @@ Last verified: 2026-08-28
   or expires; only then may that persisted incident become healthy. Both
   monitors share this lifecycle while retaining distinct state rows, subjects,
   bodies, and incident-scoped idempotency namespaces.
+- Web-platform usage and function-error anomaly detection remains event-driven
+  and Vercel-owned. The signed `alerts.triggered` webhook is delivered inline
+  to the existing operational Resend transport; it adds no five-minute poller,
+  database receipt, retry queue, or second alert-group lifecycle. A successful
+  Resend admission returns 2xx. Missing runtime/email configuration, invalid
+  authentication, malformed documented alert fields, or provider-send failure
+  returns non-2xx so Vercel retains its bounded webhook retry. Every retry of
+  the same Vercel event reconstructs the exact email and reuses a SHA-256
+  digest of the event id as the Resend idempotency identity. Vercel retries for
+  at most 24 hours and Resend retains idempotency keys for 24 hours; the path
+  does not claim provider-side exactly-once behavior outside that shared
+  window. Valid signed event types other than `alerts.triggered` are
+  acknowledged without a provider effect.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
 - Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins and registered dynamic identities resolve immutable ownership by automation id before lifecycle hooks and revalidate the same owner and live route before provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. The post-onboarding choice point is the one registered dynamic member identity. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
 - The unfinished-onboarding follow-up is one finite daily-local automation with exactly three local-day opportunities, anchored to its original first occurrence and closed at 3:00 PM on day three. Member activation is the sole enrollment owner: it persists canonical onboarding start at the activation timestamp and carries any available direct route separately from the optional welcome. Every newly built activation wake emits enrollment intent, defaulting genuine member activation to enrolled; the synthetic group-thread container producer explicitly opts out so it can initialize its vault and room model without acquiring personal onboarding state. A missing intent remains enrolled only for compatibility with pre-deployment wakes. Standard Linq welcome and Linq instant-start therefore share the same seed; an established Telegram direct thread can seed while its welcome remains suppressed. Route-less Telegram activation stays silent, and ordinary managed reconciliation may create the same canonical automation only after a later deliverable direct route appears and only inside the original activation window. Activation-path write failures retry through the activation mailbox; route-later failures reuse the existing bounded managed-setup wake ladder. Canonical slug idempotency prevents duplicates, while completed, expired, group, and archived follow-ups stay closed. No receipt lookup, channel-specific state, queue, or scheduler is another correctness owner. Migration recognizes PR 1203's exact one-shot, the older exact recurring fingerprint, and the bounded original legacy fingerprint; it preserves the one-shot's stored occurrence, derives that record's recurring local minute from the occurrence, preserves an existing daily-local minute instead of rehashing another identity, bounds a fresh recurring predecessor from its creation time, archives an established predecessor whose original three-day window already elapsed, and never restarts an old account from the current maintenance time. Conversion first leaves the source as a finite `at` schedule, durably binds that occurrence in canonical runtime state, and only then exposes the daily-local schedule, so a partial write cannot run on the signup day and normal managed reconciliation can finish a staged conversion. Each occurrence reads canonical onboarding authority before provider entry and again before tool, delivery, and commit boundaries. Queue-only delivery carries the automation revision into the existing outbox authority fence, which re-reads onboarding state at external provider entry; completed state makes the intent terminally stale, while unreadable state fails closed with `ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE` and remains retryable only inside the finite window. When an obsolete predecessor intent settles authority-stale, the hosted post-delivery owner re-reads cron status, preserves the resulting retry wake, and suppresses the generic delivery-failure input because the cancellation was intentional. The latest in-turn lifecycle read replaces the occurrence's earlier diagnostic snapshot. Metadata-only hosted logs identify seed, reconciliation action, persisted-versus-missing state source, status and timestamps, schedule window, model decision, delivery outcome, and run outcome without creating a second correctness owner or storing message content.
@@ -1968,17 +1981,17 @@ Last verified: 2026-08-28
   pinned to the original target and membership generation; expiry is the
   existing ten-minute mailbox deadline, with no second lease, timer, status
   row, or delivery ledger.
-- Participant-described Linq group selection is live, bounded read work inside
-  the existing Ask or handoff admission. It uses one set-based membership and
-  route read, at most four concurrent provider summaries, one absolute
-  deadline, and drains every started provider call. The complete-scan budget is
-  independent of the smaller membership-list response budget; exceeding it,
-  any incomplete/malformed eligible roster, route or provider failure, or
-  duplicate/ambiguous safe description fails closed without choosing or
-  queueing. Provider and KMS work remains outside transactions. The final
-  transaction rechecks the selected membership and exact route, while exact
-  replay compares a versioned normalized participant-target digest binding in
-  the existing encrypted request fields. No new mailbox shape is required.
+- Joined-group roster discovery is live, bounded read work inside the existing
+  paged membership read. It uses one set-based membership and route read, at
+  most four concurrent provider summaries, one absolute deadline, and drains
+  every started provider call. An incomplete or malformed roster, missing
+  route, unsupported provider, or provider failure marks only that membership's
+  roster unavailable; optional Contacts failure falls back to masked hints.
+  Provider and KMS work remains outside transactions. Ask and handoff admission
+  accept only an exact opaque membership id from that inventory. Their final
+  transaction rechecks the requester's active membership generation, expected
+  runtime, and exact route, while exact replay stays pinned to that membership
+  id. No matcher state, digest, new mailbox shape, retry owner, or cache exists.
 - Cloudflare may exact-replay one Assistant Ask control request within the
   original request deadline after a replay-safe transport ambiguity or HTTP
   `5xx`. This applies only to group `ask`, `ask_member`, the canonical

@@ -413,6 +413,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "default_owned",
         reason: "assistant",
       });
     } finally {
@@ -485,6 +486,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "default_owned",
         reason: "assistant",
       });
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
@@ -493,6 +495,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "model_free",
         reason: "device-sync.reconcile",
       });
 
@@ -504,7 +507,56 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "model_free",
         reason: "device-sync.reconcile",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("uses the selected model-free frontier as mailbox wake authority", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const earlierDefaultOwned = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_earlier_default_owned",
+      mailboxDedupeKey: "runtime-control:codex-auth:connect",
+      mailboxLaneSeq: "1",
+      wakeKind: "runtime.codex-auth-requested",
+    });
+    const browserVaultRefresh = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_browser_vault_refresh",
+      mailboxDedupeKey: "runtime-control:browser-vault-refresh:frontier",
+      mailboxLaneSeq: "2",
+      wakeKind: "runtime.browser-vault-refresh-requested",
+    });
+    const laterDefaultOwned = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_default_owned",
+      mailboxDedupeKey: "runtime-control:codex-auth:disconnect",
+      mailboxLaneSeq: "3",
+      wakeKind: "runtime.codex-auth-requested",
+    });
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [earlierDefaultOwned, browserVaultRefresh, laterDefaultOwned],
+      }));
+
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        at: "2026-04-27T00:00:00.000Z",
+        executionClass: "default_owned",
+        reason: "assistant",
+      });
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        excludeItemId: earlierDefaultOwned.itemId,
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        at: "2026-04-27T00:00:00.000Z",
+        executionClass: "model_free",
+        reason: "mailbox",
       });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -589,6 +641,7 @@ describe("hosted runtime system mailbox state", () => {
         }),
       ).resolves.toEqual({
         at: "2026-04-08T00:00:30.000Z",
+        executionClass: null,
         reason: "device-sync.reconcile",
       });
     } finally {
@@ -596,6 +649,31 @@ describe("hosted runtime system mailbox state", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  it("keeps due sequence-less dense raw retention on the default owner", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const dueAt = "2026-04-08T00:00:00.000Z";
+
+    try {
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: dueAt,
+        now: () => "2026-04-07T23:59:30.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => dueAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: dueAt,
+        executionClass: "default_owned",
+        reason: "device-sync.reconcile",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 

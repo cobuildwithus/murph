@@ -15,6 +15,7 @@ import {
   createWorkspaceState,
   importRuntimeControlSystemMailboxItemForTest,
   mocks,
+  readCapturedRuntimePhaseLogs,
   readCheckpointConversationWatermark,
   removeTempRoot,
   requireEventIndex,
@@ -1455,16 +1456,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
       checkpointConversationInputAhead: false,
       checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: true,
-      checkpointTrustedCompletion: true,
-      checkpointSystemControl: false,
-      generatedImageRetention: false,
-      handoff: "trusted completion quiet window",
-    },
-    {
-      checkpointConversation: false,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: true,
       checkpointTrustedCompletion: false,
       checkpointTrustedCompletionRetry: true,
       checkpointSystemControl: false,
@@ -2576,21 +2567,26 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
 
   test("does not schedule a continuation when forced browser-vault refresh maintenance times out", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const attemptId = "attempt_synthetic_browser_vault_marker_force";
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const events: string[] = [];
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
 
     mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
     mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockResolvedValueOnce({
-      source: { fileCount: 0, totalBytes: 0 },
+      refreshStage: "replica_write",
+      source: { fileCount: 7, totalBytes: 4_096 },
       status: "deferred_timeout",
     });
 
     try {
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_browser_vault_marker_force",
+            attemptId,
             workspaceVersion: "0",
           },
         }),
@@ -2631,7 +2627,30 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
       );
       expect(result.status).toBe("idle");
       expect(result.nextWakeAt).toBeNull();
+      const refreshLog = readCapturedRuntimePhaseLogs({
+        attemptId,
+        spy: consoleInfo,
+      }).find((entry) =>
+        entry.details.runtimePhase === "browser_vault.refresh"
+        && entry.details.runtimePhaseStatus === "done"
+        && entry.details.browserVaultRefreshStatus === "deferred_timeout"
+      );
+      assert.ok(refreshLog);
+      expect(Object.fromEntries(
+        Object.entries(refreshLog.details).filter(([key]) => key.startsWith("browserVault")),
+      )).toEqual({
+        browserVaultRefreshStage: "replica_write",
+        browserVaultRefreshStatus: "deferred_timeout",
+        browserVaultReplicaSourceFileCount: 7,
+        browserVaultReplicaSourceTotalBytes: 4_096,
+      });
     } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleInfo.mockRestore();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await removeTempRoot(vaultRoot);
     }

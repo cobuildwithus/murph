@@ -1984,6 +1984,10 @@ export function buildAssistantCronExecutionInstructions(
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
   const independentAuthority =
     buildAssistantCronIndependentAutomationAuthorityInstructions(job)
+  const exerciseCue = buildAssistantCronExerciseCueInstructions(
+    job,
+    independentAuthority !== null,
+  )
   const recurringReminderConversation =
     buildAssistantCronRecurringReminderConversationInstructions(job)
   const overlays = [
@@ -1992,6 +1996,7 @@ export function buildAssistantCronExecutionInstructions(
     independentAuthority,
     recurringReminderConversation,
     supportScope,
+    exerciseCue,
   ]
     .filter((section): section is string => section !== null)
   const providerSafeBase =
@@ -2089,6 +2094,22 @@ function buildAssistantCronSupportScopeInstructions(
     `- Persisted support kind: ${job.source.supportKind}.`,
     `- ${exactScope}`,
   ].join('\n')
+}
+
+function buildAssistantCronExerciseCueInstructions(
+  job: ResolvedAssistantCronJob,
+  independentAutomation: boolean,
+): string | null {
+  if (
+    job.kind !== 'canonical' ||
+    job.source.kind !== 'automation' ||
+    job.source.status !== 'active' ||
+    (job.source.supportKind !== 'reminder' && !independentAutomation)
+  ) {
+    return null
+  }
+
+  return '- For a reminder that cues or teaches an exercise or movement, treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data and never copy it into member-visible text. Before replying, read the matching movement skill and its shared exercise-catalog reference, use natural exercise names in visible text, and attach reviewed catalog media when that reference requires it for the current channel.'
 }
 
 export { ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS }

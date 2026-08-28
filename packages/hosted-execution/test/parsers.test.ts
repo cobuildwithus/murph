@@ -1434,7 +1434,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/senderHandle is invalid/u);
   });
 
-  it("parses bounded self-membership responses without accepting roster fields", () => {
+  it("parses bounded self-membership responses with per-group participant rosters", () => {
     const response = {
       action: "list_memberships",
       result: {
@@ -1458,6 +1458,15 @@ describe("parseHostedRuntimeGroupTool", () => {
           kind: "friends",
           memberCount: 7,
           membershipId: "hgm_self_123",
+          participantRoster: {
+            participantCount: 4,
+            participantLabels: [
+              { displayName: "Taylor" },
+              { phoneHint: { areaCode: "415", lastFour: "9876" } },
+              { emailParticipant: true },
+            ],
+            status: "available",
+          },
           permissionsUrl: "https://example.com/groups/join/abc123",
           sponsorshipUrl: "https://example.com/groups/fund/funding-locator",
           requestedVaultShareProjectionScopes: [
@@ -1478,6 +1487,28 @@ describe("parseHostedRuntimeGroupTool", () => {
     };
 
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const {
+      participantRoster: _omittedParticipantRoster,
+      ...legacyMembershipWithoutRoster
+    } = response.result.memberships[0];
+    void _omittedParticipantRoster;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [legacyMembershipWithoutRoster],
+        status: "ok",
+        truncated: false,
+      },
+    })).toMatchObject({
+      result: {
+        memberships: [{
+          participantRoster: {
+            status: "unavailable",
+            unavailableReason: "participant_roster_not_reported",
+          },
+        }],
+      },
+    });
     const {
       sponsorshipUrl: _omittedSponsorshipUrl,
       ...legacyMembershipWithoutSponsorship

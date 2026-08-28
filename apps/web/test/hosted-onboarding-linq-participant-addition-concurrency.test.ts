@@ -869,6 +869,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             role: "owner",
             runtimeMemberId: containerMemberIds[0],
           }],
+          nextCursor: null,
           truncated: false,
         });
         await expectCanonicalOwnerActionAuthority({

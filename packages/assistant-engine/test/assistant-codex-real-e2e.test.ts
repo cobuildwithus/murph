@@ -18,10 +18,12 @@ import {
   addMeal,
   initializeVault,
   readHabitatAspect,
+  readMemoryDocument,
   removeAutomaticMealPhoto,
   upsertAutomation,
   upsertGoal,
   upsertHabitatAspect,
+  upsertMemory,
 } from '@murphai/core'
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
@@ -87,6 +89,7 @@ import {
   MURPH_GROUP_MEMBERSHIP_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_USAGE_TOOL,
+  MURPH_MEMBER_MEMORY_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
@@ -143,6 +146,8 @@ import type {
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
   MURPH_MANAGED_AUTOMATIONS,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
@@ -167,10 +172,16 @@ import {
   type AssistantAutoReplyPromptInput,
 } from '../src/assistant/automation/prompt-builder.ts'
 import {
+  buildTrustedHostedImageCompletionTurnContext,
+} from '../src/assistant/automation/reply.ts'
+import {
   sendAssistantNotificationLocal,
   type AssistantNotificationInput,
   parseAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
+import {
+  buildAssistantMaintenanceConversationEvidence,
+} from '../src/assistant/maintenance-evidence.ts'
 import {
   prepareAssistantCronNotificationInput,
 } from '../src/assistant/cron/output-history.ts'
@@ -4447,6 +4458,233 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps an ordinary production-shaped scheduled exercise cue natural and attaches reviewed media',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-scheduled-exercise-cue-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        await Promise.all([
+          materializeRoutinePresentationVaultCli(binDirectory),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'mobility-posture',
+          }),
+          materializeAssistantSkillAsset({
+            relativePath: path.join(
+              'shared',
+              'exercise-catalog-runtime.md',
+            ),
+            skillsRoot,
+          }),
+        ])
+        const savedInstructions = [
+          'Send the saved two-minute non-pain mobility break now.',
+          'Alternate 30 seconds of Ankle circles (MB101) with 30 seconds of Torso turns (MB102), repeated twice.',
+          'Use stable support and skip any movement that causes pain.',
+        ].join(' ')
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: savedInstructions,
+          now: new Date('2026-08-28T12:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: 'synthetic-mobility-reminder',
+            identityId: null,
+            participantId: null,
+            threadId: 'synthetic-mobility-reminder',
+            threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '14:00' },
+          slug: 'synthetic-mobility-reminder',
+          status: 'active',
+          tags: [],
+          title: 'Synthetic mobility reminder',
+          vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory),
+          createdAutomation.record.automationId,
+        )
+        expect(source?.kind).toBe('automation')
+        if (!source || source.kind !== 'automation') {
+          throw new Error('Expected the canonical reminder automation source.')
+        }
+        expect(source.supportKind).toBeNull()
+        const jobId = resolveCanonicalAssistantCronJobId(source)
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: '2026-08-28T12:00:00.000Z',
+        })
+        const instructions = buildAssistantCronExecutionInstructions(
+          {
+            job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+            kind: 'canonical',
+            runtimeState,
+            source,
+          },
+          { automationId: null, contextReferences: [] },
+        )
+        const occurrenceAt = '2026-08-28T18:00:00.000Z'
+        const notificationInput = {
+          instructions,
+          outboxAutomationAuthority: {
+            automationId: createdAutomation.record.automationId,
+            expectedUpdatedAt: createdAutomation.record.updatedAt,
+          },
+          recurringReminderConversation: true,
+          scheduledAutomationScheduleKind: source.schedule.kind,
+          scheduledInvocationAuthority: {
+            automationId: createdAutomation.record.automationId,
+            occurrenceAt,
+          },
+          turnTrigger: 'automation-cron',
+          vault: workingDirectory,
+          workingDirectory,
+        } satisfies AssistantNotificationInput
+        const preparedInput = await prepareAssistantCronNotificationInput(
+          notificationInput,
+          { sessionId: 'session-synthetic-mobility-reminder' },
+        )
+
+        expect(preparedInput.instructions).toContain(savedInstructions)
+        expect(preparedInput.instructions).toContain(
+          'read the matching movement skill and its shared exercise-catalog reference',
+        )
+        expect(preparedInput.instructions.indexOf(savedInstructions)).toBeLessThan(
+          preparedInput.instructions.indexOf(
+            'read the matching movement skill and its shared exercise-catalog reference',
+          ),
+        )
+
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: preparedInput.instructions,
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') {
+          throw new Error('Expected the scheduled exercise cue to send.')
+        }
+
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const movementSkillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('mobility-posture/SKILL.md')
+        )
+        const catalogReferenceRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('shared/exercise-catalog-runtime.md')
+        )
+        const ankleShow = actions.find((action) =>
+          action.kind === 'command'
+          && /vault-cli exercise show (?:ankle-circles|MB101) --format json/iu
+            .test(action.command)
+        )
+        const torsoShow = actions.find((action) =>
+          action.kind === 'command'
+          && /vault-cli exercise show (?:torso-turns|MB102) --format json/iu
+            .test(action.command)
+        )
+        const mediaCalls = actions.filter(
+          (action): action is Extract<
+            CapabilityRoutingAction,
+            { kind: 'dynamic' }
+          > =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
+        )
+
+        expect(movementSkillRead, 'movement skill read').toBeDefined()
+        expect(catalogReferenceRead, 'catalog reference read').toBeDefined()
+        expect(ankleShow, 'ankle catalog show').toBeDefined()
+        expect(torsoShow, 'torso catalog show').toBeDefined()
+        expect(mediaCalls, 'response-media calls').toHaveLength(1)
+        expect(
+          catalogReferenceRead?.eventIndex,
+          'catalog guidance before catalog lookup',
+        ).toBeLessThan(ankleShow?.eventIndex ?? -1)
+        expect(ankleShow?.eventIndex, 'catalog lookup before attachment')
+          .toBeLessThan(mediaCalls[0]?.eventIndex ?? -1)
+        expect(torsoShow?.eventIndex, 'catalog lookup before attachment')
+          .toBeLessThan(mediaCalls[0]?.eventIndex ?? -1)
+        expect(mediaCalls[0]?.argumentsValue).toMatchObject({
+          media: [
+            {
+              alt: 'Person making a small ankle circle while standing with support.',
+              source: 'exercise_catalog:MB101:1',
+              url: 'https://cdn.example.test/ankle-circles.png',
+            },
+            {
+              alt: 'Person turning the torso gently while standing.',
+              source: 'exercise_catalog:MB102:1',
+              url: 'https://cdn.example.test/torso-turns.png',
+            },
+          ],
+        })
+        expect(result.responseMedia).toEqual([
+          expect.objectContaining({
+            source: 'exercise_catalog:MB101:1',
+            url: 'https://cdn.example.test/ankle-circles.png',
+          }),
+          expect.objectContaining({
+            source: 'exercise_catalog:MB102:1',
+            url: 'https://cdn.example.test/torso-turns.png',
+          }),
+        ])
+        expect(decision.text).toMatch(/ankle circles/iu)
+        expect(decision.text).toMatch(/torso turns/iu)
+        expect(decision.text).not.toMatch(
+          /MB101|MB102|ankle-circles|torso-turns|exercise_catalog/iu,
+        )
+        process.stdout.write(
+          `[real-codex scheduled exercise cue] ${JSON.stringify({
+            mediaCount: result.responseMedia.length,
+            reply: decision.text.replaceAll(/\s+/gu, ' ').trim(),
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps exercise ids private, uses catalog media, and generates only when catalog media is missing',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -7395,6 +7633,14 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                         kind: 'friends',
                         memberCount: 8,
                         membershipId: 'membership_trail_crew',
+                        participantRoster: {
+                          participantCount: 9,
+                          participantLabels: [
+                            { displayName: 'Taylor' },
+                            { phoneHint: { areaCode: '415', lastFour: '9876' } },
+                          ],
+                          status: 'available',
+                        },
                         permissionsUrl: null,
                         requestedVaultShareProjectionScopes: [],
                         role: 'member',
@@ -7457,11 +7703,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           })}\n`,
         )
 
-        expect(groupRequests).toHaveLength(1)
-        const handoffRequest = groupRequests[0]
+        expect(groupRequests).toHaveLength(2)
+        expect(groupRequests[0]).toEqual({ action: 'list_memberships' })
+        const handoffRequest = groupRequests[1]
         expect(handoffRequest).toMatchObject({
           action: 'handoff',
-          groupLabel: 'Trail Crew',
+          membershipId: 'membership_trail_crew',
         })
         if (
           !handoffRequest
@@ -7753,27 +8000,16 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'targets a joined group directly from requester-relative participant descriptions',
+    'clarifies overlapping participant rosters and hands off by exact membership ID',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const cases = [
         {
-          expectedNames: ['Jordan'],
+          expectedMembershipId: 'membership_taylor_casey',
           prompt:
-            'Tell my existing group chat with Jordan that Member Echo finished the mobility set.',
-          slug: 'named-person',
-        },
-        {
-          expectedNames: ['Jordan', 'Casey'],
-          prompt:
-            'Tell my existing three-person group chat with Jordan and Casey that Member Echo finished the mobility set.',
-          slug: 'total-chat-size',
-        },
-        {
-          expectedNames: ['Jordan', 'Casey'],
-          prompt:
-            'Tell my existing group chat with me, Jordan, and Casey that Member Echo finished the mobility set.',
-          slug: 'explicit-self',
+            'Tell my existing group chat with Taylor that Member Echo finished the mobility set.',
+          selection: 'The four-person one with Casey.',
+          slug: 'overlapping-rosters',
         },
       ] as const
 
@@ -7781,7 +8017,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         for (const testCase of cases) {
           const workingDirectory = await mkdtemp(path.join(
             tmpdir(),
-            `murph-private-group-participant-target-${testCase.slug}-e2e-`,
+            `murph-private-group-membership-selection-${testCase.slug}-e2e-`,
           ))
           type GroupRequest = Parameters<
             NonNullable<AssistantHostedToolContext['groupTool']>['request']
@@ -7791,7 +8027,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           try {
             const skillsRoot = path.join(workingDirectory, 'skills')
             await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
-            const result = await executeRealCodexAppServerTurn({
+            const commonInput = {
               approvalPolicy: 'never',
               baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
               codexCommand:
@@ -7816,7 +8052,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                     `conversation_private_group_participant_${testCase.slug}`,
                   recipientKey:
                     `recipient_private_group_participant_${testCase.slug}`,
-                  returnContactKind: 'text',
+                  returnContactKind: 'text' as const,
                 }),
                 currentHostedMailboxItemIds: () => [],
                 currentUserActionScope: () => ({
@@ -7825,7 +8061,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                   ],
                   conversationId:
                     `conversation_private_group_participant_${testCase.slug}`,
-                  conversationScope: 'direct',
+                  conversationScope: 'direct' as const,
                   inboundMailboxItemIds: [
                     `mailbox_private_group_participant_${testCase.slug}`,
                   ],
@@ -7835,14 +8071,91 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                     `recipient_private_group_participant_${testCase.slug}`,
                 }),
                 groupTool: {
-                  request: async (request) => {
+                  request: async (
+                    request: GroupRequest,
+                  ): ReturnType<
+                    NonNullable<AssistantHostedToolContext['groupTool']>['request']
+                  > => {
                     groupRequests.push(request)
                     if (request.action === 'list_memberships') {
+                      if (request.cursor === undefined) {
+                        return {
+                          action: 'list_memberships',
+                          result: {
+                            disclosureGrants: [],
+                            memberships: [
+                              {
+                                displayName: 'Training Friends',
+                                grantedVaultShareProjectionScopes: [],
+                                kind: 'friends',
+                                memberCount: 2,
+                                membershipId: 'membership_taylor_phone',
+                                participantRoster: {
+                                  participantCount: 3,
+                                  participantLabels: [
+                                    { displayName: 'Taylor' },
+                                    { phoneHint: { areaCode: '212', lastFour: '1042' } },
+                                  ],
+                                  status: 'available',
+                                },
+                                permissionsUrl: null,
+                                requestedVaultShareProjectionScopes: [],
+                                role: 'member',
+                                sponsorshipUrl: null,
+                              },
+                            ],
+                            nextCursor: 'membership_cursor_page_2',
+                            status: 'ok',
+                            truncated: true,
+                          },
+                        }
+                      }
+                      if (request.cursor !== 'membership_cursor_page_2') {
+                        throw new Error('Expected the exact second membership cursor.')
+                      }
                       return {
                         action: 'list_memberships',
                         result: {
                           disclosureGrants: [],
-                          memberships: [],
+                          memberships: [
+                            {
+                              displayName: 'Training Friends',
+                              grantedVaultShareProjectionScopes: [],
+                              kind: 'friends',
+                              memberCount: 3,
+                              membershipId: 'membership_taylor_casey',
+                              participantRoster: {
+                                participantCount: 4,
+                                participantLabels: [
+                                  { displayName: 'Taylor' },
+                                  { displayName: 'Casey' },
+                                  { phoneHint: { areaCode: '646', lastFour: '7788' } },
+                                ],
+                                status: 'available',
+                              },
+                              permissionsUrl: null,
+                              requestedVaultShareProjectionScopes: [],
+                              role: 'member',
+                              sponsorshipUrl: null,
+                            },
+                            {
+                              displayName: null,
+                              grantedVaultShareProjectionScopes: [],
+                              kind: 'friends',
+                              memberCount: 1,
+                              membershipId: 'membership_taylor_pair',
+                              participantRoster: {
+                                participantCount: 2,
+                                participantLabels: [{ displayName: 'Taylor' }],
+                                status: 'available',
+                              },
+                              permissionsUrl: null,
+                              requestedVaultShareProjectionScopes: [],
+                              role: 'member',
+                              sponsorshipUrl: null,
+                            },
+                          ],
+                          nextCursor: null,
                           status: 'ok',
                           truncated: false,
                         },
@@ -7852,7 +8165,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                       action: 'handoff',
                       result: {
                         status: 'accepted',
-                        targetLabel: '2 people: Jordan, Casey',
+                        targetLabel: 'Training Friends',
                       },
                     }
                   },
@@ -7864,15 +8177,59 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               },
               model: config.model,
               modelProvider: config.modelProvider,
-              prompt: testCase.prompt,
               reasoningEffort: 'low',
               sandbox: 'workspace-write',
               workingDirectory,
+            } as const
+            const clarification = await executeRealCodexAppServerTurn({
+              ...commonInput,
+              prompt: testCase.prompt,
+            })
+            expect(clarification.finalMessage, testCase.slug).toMatch(
+              /(?:which|two-person|three-person|four-person|casey|phone)/iu,
+            )
+            expect(clarification.finalMessage, testCase.slug).not.toMatch(
+              /\bthe other\b/iu,
+            )
+            expect(clarification.finalMessage, testCase.slug).not.toContain(
+              'membership_',
+            )
+            for (const participantCount of ['(?:3|three)', '(?:4|four)']) {
+              expect(clarification.finalMessage, testCase.slug).toMatch(
+                new RegExp(
+                  `\\b${participantCount}(?:[- ](?:person|people|member|participant)s?|\\s+in the chat)`,
+                  'iu',
+                ),
+              )
+            }
+            expect(clarification.finalMessage, testCase.slug).toMatch(
+              /(?:\b(?:2|two)(?:[- ](?:person|people|member)|\s+in the chat)|(?:just|only)\s+taylor)/iu,
+            )
+            expect(clarification.finalMessage, testCase.slug).not.toMatch(
+              /\b1[- ]member\b/iu,
+            )
+            expect(groupRequests.slice(0, 2), testCase.slug).toEqual([
+              { action: 'list_memberships' },
+              {
+                action: 'list_memberships',
+                cursor: 'membership_cursor_page_2',
+              },
+            ])
+            expect(
+              groupRequests.filter(({ action }) => action === 'handoff'),
+              testCase.slug,
+            ).toHaveLength(0)
+
+            const result = await executeRealCodexAppServerTurn({
+              ...commonInput,
+              prompt: testCase.selection,
+              resumeSessionId: clarification.sessionId,
             })
 
             process.stdout.write(
               `[group-handoff-participants-e2e] ${JSON.stringify({
-                reply: result.finalMessage.trim(),
+                clarificationReply: clarification.finalMessage.trim(),
+                finalReply: result.finalMessage.trim(),
                 requests: groupRequests,
                 slug: testCase.slug,
               })}\n`,
@@ -7881,7 +8238,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             expect(
               groupRequests.filter(({ action }) => action === 'list_memberships'),
               testCase.slug,
-            ).toHaveLength(0)
+            ).toHaveLength(2)
             const handoffRequests = groupRequests.filter(
               (request): request is Extract<
                 GroupRequest,
@@ -7891,32 +8248,15 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             expect(handoffRequests, testCase.slug).toHaveLength(1)
             expect(handoffRequests[0], testCase.slug).toMatchObject({
               action: 'handoff',
-              participantTarget: {
-                participants: testCase.expectedNames.map((displayName) => ({
-                  displayName,
-                })),
-              },
+              membershipId: testCase.expectedMembershipId,
             })
             expect(handoffRequests[0], testCase.slug)
               .not.toHaveProperty('groupLabel')
-            const participantTarget = handoffRequests[0]?.participantTarget as {
-              participantCount?: number
-              participants?: Array<{ displayName?: string }>
-            }
-            expect(
-              participantTarget.participants?.some(({ displayName }) =>
-                displayName?.toLocaleLowerCase('und') === 'me'
-                || displayName?.toLocaleLowerCase('und') === 'member echo'
-              ),
-              testCase.slug,
-            ).toBe(false)
-            if (testCase.expectedNames.length === 2) {
-              expect(
-                participantTarget.participantCount === undefined
-                || participantTarget.participantCount === 2,
-                testCase.slug,
-              ).toBe(true)
-            }
+            expect(handoffRequests[0], testCase.slug)
+              .not.toHaveProperty('participantTarget')
+            expect(result.finalMessage, testCase.slug).not.toContain(
+              'membership_',
+            )
             expect(result.finalMessage, testCase.slug).toMatch(/queu/iu)
           } finally {
             await removeRealCodexTemporaryPath(workingDirectory)
@@ -10289,6 +10629,263 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex member-memory result compaction e2e', () => {
+  it(
+    'updates one exact saved preference from a compact 24-record show result and stays silent',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-member-memory-compaction-e2e-'),
+      )
+
+      try {
+        const target = await upsertMemory(workingDirectory, {
+          now: new Date('2026-08-26T10:00:00.000Z'),
+          section: 'Preferences',
+          text: 'Weekly summaries must be one short paragraph and must not use bullets.',
+        })
+        const fixtureSections = [
+          'Identity',
+          'Preferences',
+          'Instructions',
+          'Context',
+        ] as const
+        for (let index = 1; index < 24; index += 1) {
+          await upsertMemory(workingDirectory, {
+            now: new Date(`2026-08-26T10:${String(index).padStart(2, '0')}:00.000Z`),
+            section: fixtureSections[index % fixtureSections.length] ?? 'Context',
+            text: `Synthetic maintenance fixture ${String(index).padStart(2, '0')} retained only for compact tool-result coverage.`,
+          })
+        }
+
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'linq',
+            conversationKey: 'linq:direct:member-memory-compaction',
+            delivery: null,
+            identityId: null,
+            threadId: 'thread-member-memory-compaction',
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-26T12:00:00.000Z',
+          lastTurnAt: '2026-08-26T12:01:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session-member-memory-compaction',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: config.codexHome,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'medium',
+            sandbox: 'read-only',
+          },
+          turnCount: 1,
+          updatedAt: '2026-08-26T12:01:00.000Z',
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+          [
+            {
+              createdAt: '2026-08-26T12:00:00.000Z',
+              kind: 'user',
+              text: 'Please replace my saved preference "Weekly summaries must be one short paragraph and must not use bullets.": from now on, weekly summaries must use exactly three concise bullets and no paragraph.',
+            },
+            {
+              createdAt: '2026-08-26T12:01:00.000Z',
+              kind: 'assistant',
+              text: 'Understood. Future weekly summaries will use exactly three concise bullets and no paragraph.',
+            },
+          ],
+        )
+
+        const automation = MURPH_MANAGED_AUTOMATIONS.find(
+          (candidate) =>
+            candidate.automationId
+            === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+        )
+        if (!automation) {
+          throw new Error('Expected overnight memory consolidation automation.')
+        }
+        const evidence = await buildAssistantMaintenanceConversationEvidence({
+          now: new Date('2026-08-27T12:00:00.000Z'),
+          profile: 'member-memory',
+          vault: workingDirectory,
+        })
+        const before = await readMemoryDocument(workingDirectory)
+        expect(before.records).toHaveLength(24)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+              currentLocalDate: '2026-08-27',
+              currentTimeZone: 'America/New_York',
+              profile: 'member-memory',
+            }).prompt,
+          dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
+          env: config.env,
+          ephemeral: true,
+          excludeResumeTurns: true,
+          memberMemoryMaintenanceAuthorized: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          processLifetime: 'one-shot',
+          prompt: [automation.instructions, evidence].join('\n\n'),
+          reasoningEffort: 'medium',
+          runtimeWorkspaceRoots: [workingDirectory],
+          sandbox: 'read-only',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        expect(
+          actions.filter(
+            (action) =>
+              action.kind === 'dynamic'
+              && action.tool !== MURPH_MEMBER_MEMORY_TOOL.name,
+          ),
+        ).toEqual([])
+        const memoryActions = actions.filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_MEMBER_MEMORY_TOOL.name,
+        )
+        process.stdout.write(
+          `[member-memory-result-compaction-actions] ${JSON.stringify(
+            memoryActions.map((action) => ({
+              name: action.kind === 'dynamic' ? action.tool : action.kind,
+              action: action.kind === 'dynamic'
+                ? readString(action.argumentsValue.action)
+                : null,
+              success: action.kind === 'dynamic' && action.success,
+            })),
+          )}\n`,
+        )
+        expect(memoryActions).toHaveLength(2)
+        const [showAction, updateAction] = memoryActions
+        if (showAction?.kind !== 'dynamic' || updateAction?.kind !== 'dynamic') {
+          throw new Error('Expected show then update member-memory calls.')
+        }
+        expect(showAction.eventIndex).toBeLessThan(updateAction.eventIndex)
+        expect(showAction.success).toBe(true)
+        expect(showAction.argumentsValue).toEqual({ action: 'show' })
+        expect(JSON.parse(showAction.output)).toEqual({
+          document: {
+            exists: true,
+            records: before.records.map(({ id, section, text }) => ({
+              id,
+              section,
+              text,
+            })),
+          },
+          memory: null,
+        })
+        const compactShowBytes = Buffer.byteLength(showAction.output, 'utf8')
+        const duplicatedShowBytes = Buffer.byteLength(JSON.stringify({
+          document: before,
+          memory: null,
+        }), 'utf8')
+        expect(compactShowBytes).toBeLessThan(duplicatedShowBytes)
+
+        expect(updateAction.success).toBe(true)
+        expect(updateAction.argumentsValue.action).toBe('update')
+        expect(updateAction.argumentsValue.memoryId).toBe(target.record.id)
+        expect(Object.keys(updateAction.argumentsValue).sort()).toEqual(
+          updateAction.argumentsValue.section === undefined
+            ? ['action', 'memoryId', 'text']
+            : ['action', 'memoryId', 'section', 'text'],
+        )
+        if (updateAction.argumentsValue.section !== undefined) {
+          expect(updateAction.argumentsValue.section).toBe('Preferences')
+        }
+        const updatedText = readString(updateAction.argumentsValue.text)
+        if (!updatedText) {
+          throw new Error('Expected a supported compact memory update.')
+        }
+        expect(updatedText).toMatch(/weekly summaries?/iu)
+        expect(updatedText).toMatch(/\b(?:three|3)\b/iu)
+        expect(updatedText).toMatch(/\bbullets?\b/iu)
+        expect(updatedText).not.toBe(target.record.text)
+
+        const after = await readMemoryDocument(workingDirectory)
+        const updatedRecord = after.records.find(
+          (record) => record.id === target.record.id,
+        )
+        if (!updatedRecord) {
+          throw new Error('Expected the exact saved memory id to remain present.')
+        }
+        expect(JSON.parse(updateAction.output)).toEqual({
+          created: false,
+          memory: {
+            id: target.record.id,
+            section: 'Preferences',
+            text: updatedText,
+          },
+        })
+        expect(updatedRecord).toMatchObject({
+          id: target.record.id,
+          section: 'Preferences',
+          text: updatedText,
+        })
+        expect(after.records).toHaveLength(24)
+        expect(after.records.map((record) => record.id).sort()).toEqual(
+          before.records.map((record) => record.id).sort(),
+        )
+        expect(
+          after.records
+            .filter((record) => record.id !== target.record.id)
+            .map(({ id, section, text }) => ({ id, section, text }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        ).toEqual(
+          before.records
+            .filter((record) => record.id !== target.record.id)
+            .map(({ id, section, text }) => ({ id, section, text }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        )
+
+        const decision = JSON.parse(result.finalMessage.trim())
+        expect(decision).toEqual({
+          kind: 'skip',
+          privateSummary:
+            MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+        })
+        process.stdout.write(
+          `[member-memory-result-compaction-e2e] ${JSON.stringify({
+            calls: [showAction, updateAction].map((action) =>
+              readString(action.argumentsValue.action)),
+            compactShowBytes,
+            decision: decision.kind,
+            recordCount: after.records.length,
+            updatedExactId: updatedRecord.id === target.record.id,
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
   it(
     'maps explicit transcript facts without persisting an exact address or following injected instructions',
@@ -12111,6 +12708,302 @@ describeRealCodex('real Codex proactive physical-note address e2e', () => {
         }
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex physical-note image continuation e2e', () => {
+  it(
+    'keeps a physical-note address through a trusted image completion and terse approval',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-physical-note-image-continuity-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const imageBytes = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      )
+      const media = {
+        alt: 'Generated thank-you note preview',
+        contentType: 'image/png',
+        filename: 'thank-you-note.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/2026/08/thank-you-note/thank-you-note.png',
+        sha256: createHash('sha256').update(imageBytes).digest('hex'),
+        sizeBytes: imageBytes.byteLength,
+        source: 'gpt-image-2',
+      } as const
+      const originInputId = `ain_${'1'.repeat(32)}`
+      const completionInputId = `ain_${'2'.repeat(32)}`
+      const approvalInputId = `ain_${'3'.repeat(32)}`
+      const completionScope = {
+        authorizedOriginAssistantInputId: originInputId,
+        completionAssistantInputId: completionInputId,
+        exactMedia: [media] as const,
+      }
+      const launchedOperationIds: string[] = []
+      const sendRequests: unknown[] = []
+
+      try {
+        await materializePhysicalNoteSkill({ skillsRoot })
+        await materializePhysicalNoteAddressVaultCli({
+          binDirectory,
+          result: buildPhysicalNoteAddressResult({ recommended: true }),
+        })
+        const imagePath = path.join(workingDirectory, media.ref)
+        await mkdir(path.dirname(imagePath), { recursive: true })
+        await writeFile(imagePath, imageBytes)
+        const commonInput = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          dynamicTools: resolveMurphDynamicTools({
+            physicalNotesAvailable: true,
+          }),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: [binDirectory, config.env.PATH]
+              .filter((value): value is string => Boolean(value))
+              .join(path.delimiter),
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        }
+        const generation = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => originInputId,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [originInputId],
+              conversationId: 'conversation-physical-note-image-continuity',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox-physical-note-origin'],
+              originSessionId: 'session-physical-note-image-continuity',
+              recipientKey: 'recipient-physical-note-image-continuity',
+            }),
+            imageGenerationLauncher: {
+              launch(input) {
+                if (launchedOperationIds.length > 0) {
+                  return 'already-pending'
+                }
+                launchedOperationIds.push(input.operationId)
+                return 'started'
+              },
+              readStatus() {
+                return 'pending'
+              },
+            },
+            physicalNotes: {
+              async send() {
+                throw new Error('The preview request must not send a note.')
+              },
+            },
+            privateImageUrlPublisher: {
+              async publishPrivateImageUrl() {
+                throw new Error('The preview request must not publish artwork.')
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied',
+            }),
+            vaultFileSendAvailable: false,
+          },
+          prompt: [
+            `Message ref: ${originInputId}`,
+            'Create a preview of a physical thank-you note for Taylor. The note should say: Thank you for making our community garden welcoming.',
+            'Mailing address: 18 Juniper Avenue, Fairview, OR 97024.',
+            'Show me the preview first and do not mail it until I approve.',
+          ].join('\n\n'),
+        })
+        const generationActions = readCapabilityRoutingActions(
+          generation.jsonEvents,
+        )
+        expect(generationActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )).toHaveLength(1)
+        expect(generationActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+        )).toHaveLength(0)
+        expect(launchedOperationIds).toHaveLength(1)
+        if (!generation.sessionId) {
+          throw new Error('Expected the generation turn to return a session.')
+        }
+
+        const completionTurnContext =
+          buildTrustedHostedImageCompletionTurnContext([{
+            inputId: completionInputId,
+            trustedHostedImageCompletion: {
+              media: [media],
+              originAssistantInputId: originInputId,
+              originAssistantInputIdExact: true,
+              savedImageRef: media.ref,
+              status: 'ready',
+            },
+          }])
+        if (!completionTurnContext) {
+          throw new Error('Expected trusted image completion turn context.')
+        }
+        const completion = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedImageCompletionEffectScope: () => completionScope,
+            currentHostedMailboxItemIds: () => [],
+            physicalNotes: {
+              async send() {
+                throw new Error('The completion turn must not send a note.')
+              },
+            },
+            privateImageUrlPublisher: {
+              async publishPrivateImageUrl() {
+                throw new Error('The completion turn must not publish artwork.')
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied',
+            }),
+            vaultFileSendAvailable: false,
+          },
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools: commonInput.dynamicTools,
+            prompt:
+              'The trusted runtime completion is the current input. Continue the pending preview delivery.',
+            providerConfig: normalizeAssistantProviderConfig({
+              provider: 'codex-cli',
+            }),
+            turnContextPrompt: completionTurnContext,
+            workingDirectory,
+          }),
+          resumeSessionId: generation.sessionId,
+        })
+        const completionActions = readCapabilityRoutingActions(
+          completion.jsonEvents,
+        )
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+        )).toHaveLength(1)
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+        )).toHaveLength(0)
+        expect(completion.responseMedia).toEqual([media])
+        if (!completion.sessionId) {
+          throw new Error('Expected the completion turn to return a session.')
+        }
+        const completionSessionId = completion.sessionId
+
+        const approval = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          authorizeAcceptedMessageTarget: async ({ messageRef }) =>
+            messageRef === approvalInputId
+              ? { targetInputId: approvalInputId }
+              : null,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => approvalInputId,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [approvalInputId],
+              conversationId: 'conversation-physical-note-image-continuity',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox-physical-note-approval'],
+              originSessionId: completionSessionId,
+              recipientKey: 'recipient-physical-note-image-continuity',
+            }),
+            physicalNotes: {
+              async send(request) {
+                sendRequests.push(request)
+                return {
+                  complimentary: true,
+                  costUsdMicros: '0',
+                  physicalNoteId: 'hpn_synthetic_continuity',
+                  status: 'accepted',
+                }
+              },
+            },
+            privateImageUrlPublisher: {
+              async publishPrivateImageUrl() {
+                return {
+                  expiresAt: '2027-08-28T00:00:00.000Z',
+                  url: 'https://private-media.example.test/note',
+                }
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied',
+            }),
+            vaultFileSendAvailable: false,
+          },
+          prompt: [
+            `Message ref: ${approvalInputId}`,
+            'The preview looks right. Mail it now.',
+          ].join('\n\n'),
+          resumeSessionId: completionSessionId,
+        })
+        const approvalActions = readCapabilityRoutingActions(
+          approval.jsonEvents,
+        )
+        const sendCalls = approvalActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+        )
+
+        process.stdout.write(
+          `[physical-note-image-continuity-e2e] ${JSON.stringify({
+            completionMessage: completion.finalMessage,
+            completionMediaCount: completion.responseMedia.length,
+            finalMessage: approval.finalMessage,
+            scenario: 'details, trusted image completion, terse approval',
+            sendCount: sendRequests.length,
+          })}\n`,
+        )
+        expect(sendCalls).toHaveLength(1)
+        expect(sendRequests).toHaveLength(1)
+        expect(sendRequests[0]).toMatchObject({
+          originAssistantInputId: approvalInputId,
+          recipient: {
+            addressLine1: '18 Juniper Avenue',
+            city: 'Fairview',
+            name: 'Taylor',
+            postalCode: '97024',
+            state: 'OR',
+          },
+        })
+        expect(approval.finalMessage).toMatch(/accepted|print|printing/iu)
+        expect(approval.finalMessage).not.toMatch(
+          /address|resend|repeat|provide|what (?:is|was)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
       }
     },
     720_000,

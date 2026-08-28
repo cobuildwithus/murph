@@ -25,8 +25,16 @@ type GroupFamilyName = keyof typeof GROUP_FAMILY_ACTIONS;
 type GroupAction = (typeof GROUP_FAMILY_ACTIONS)[GroupFamilyName][number];
 
 const GROUP_ACTION_FIXTURES = {
-  ask: { action: "ask", question: "What changed this week?" },
-  handoff: { action: "handoff", context: "The member completed the workout." },
+  ask: {
+    action: "ask",
+    membershipId: "membership-test",
+    question: "What changed this week?",
+  },
+  handoff: {
+    action: "handoff",
+    context: "The member completed the workout.",
+    membershipId: "membership-test",
+  },
   ask_current_sender: { action: "ask_current_sender", message_ref: MESSAGE_REF },
   ask_current_sender_privately: {
     action: "ask_current_sender_privately",

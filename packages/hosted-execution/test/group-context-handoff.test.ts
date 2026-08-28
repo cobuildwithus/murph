@@ -105,12 +105,12 @@ describe("private-to-group context handoff contracts", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "handoff",
       context: "  The member set a personal record today.  ",
-      groupLabel: "  Lifting Club  ",
+      membershipId: "  membership_lifting_club  ",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     })).toEqual({
       action: "handoff",
       context: "The member set a personal record today.",
-      groupLabel: "Lifting Club",
+      membershipId: "membership_lifting_club",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     });
     expect(parseHostedRuntimeGroupToolResponse({
@@ -155,6 +155,7 @@ describe("private-to-group context handoff contracts", () => {
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "handoff",
       groupLabel: "Lifting Club",
+      membershipId: "membership_lifting_club",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     })).toThrow();
     expect(() => parseHostedRuntimeGroupToolRequest({
@@ -162,11 +163,13 @@ describe("private-to-group context handoff contracts", () => {
       context: "x".repeat(
         HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS + 1,
       ),
+      membershipId: "membership_lifting_club",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     })).toThrow();
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "handoff",
       context: "A bounded fact.",
+      membershipId: "membership_lifting_club",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       route: "model-controlled",
     })).toThrow();

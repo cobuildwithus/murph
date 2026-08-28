@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-22
+Last verified: 2026-08-27
 
 ## Decision
 
@@ -105,7 +105,10 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint. Temporal applies three distinct retirement
+redacted workspace checkpoint and classifies only the exact first live system
+row as `model_free` or `default_owned`. Environment completion is one generic
+model-free kind; Temporal does not know its product meaning or select a
+feature-specific processing mode. Temporal applies three distinct retirement
 rules: a handled-through frontier that reaches the pointer lane sequence retires
 it as completed; an explicit `systemMailboxFrontier: null` retires only
 Temporal's noncanonical pointer projection because the current facts admit no

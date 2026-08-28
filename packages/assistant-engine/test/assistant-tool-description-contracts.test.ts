@@ -90,17 +90,10 @@ describe("assistant tool description call contracts", () => {
   it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("handoff");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "title=groupLabel",
+      "exact ID after exhausting list_memberships pages",
     );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "ask=group answer; handoff=tell/post/share",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "people/count=participantTarget",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "names not groupLabel; no list",
-    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("participantTarget");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("groupLabel");
     expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("memory show");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "Handoff identity-neutral; host labels",

@@ -15,5 +15,9 @@ describe("first live system mailbox ownership", () => {
       dedupeKey: "runtime.maintenance-requested:item",
       kind: "runtime.maintenance-requested",
     })).toBe("model_free");
+    expect(classifyHostedFirstLiveSystemItemOwnership({
+      dedupeKey: "environment-interview.completed:item",
+      kind: "environment-interview.completed",
+    })).toBe("model_free");
   });
 });

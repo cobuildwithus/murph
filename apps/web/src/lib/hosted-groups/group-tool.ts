@@ -98,6 +98,9 @@ import {
 } from "./group-private-attribution-policy";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
+  readHostedGroupMembershipParticipantRosters,
+} from "./group-membership-participants";
+import {
   requestHostedGroupAssistantAsk,
   requestHostedGroupContextHandoff,
   requestHostedGroupMemberAssistantAsk,
@@ -315,6 +318,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 >;
 
 export async function handleHostedRuntimeGroupTool(input: {
+  includeParticipantRosters?: boolean;
   logger?: Pick<Console, "warn">;
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
@@ -331,11 +335,10 @@ export async function handleHostedRuntimeGroupTool(input: {
 }): Promise<HostedRuntimeGroupToolResponse> {
   if (input.request.action === "ask") {
     const admission = await requestHostedGroupAssistantAsk({
-      groupLabel: input.request.groupLabel,
       memberId: input.memberId,
+      membershipId: input.request.membershipId,
       originAssistantInputId: input.request.originAssistantInputId,
       originSessionId: input.request.originSessionId,
-      participantTarget: input.request.participantTarget,
       question: input.request.question,
     });
     if (admission.mailboxWake) {
@@ -347,10 +350,9 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "handoff") {
     const admission = await requestHostedGroupContextHandoff({
       context: input.request.context,
-      groupLabel: input.request.groupLabel,
       memberId: input.memberId,
+      membershipId: input.request.membershipId,
       originAssistantInputId: input.request.originAssistantInputId,
-      participantTarget: input.request.participantTarget,
     });
     if (admission.mailboxWake) {
       await input.scheduleMailboxWake?.(admission.mailboxWake);
@@ -432,6 +434,7 @@ export async function handleHostedRuntimeGroupTool(input: {
     return handleHostedRuntimeGroupListMemberships({
       cursor: input.request.cursor ?? null,
       disclosureGrantCursor: input.request.disclosureGrantCursor ?? null,
+      includeParticipantRosters: input.includeParticipantRosters ?? true,
       memberId: input.memberId,
     });
   }
@@ -857,6 +860,7 @@ async function handleHostedRuntimeGroupLeaveMembership(input: {
 async function handleHostedRuntimeGroupListMemberships(input: {
   cursor: string | null;
   disclosureGrantCursor: string | null;
+  includeParticipantRosters: boolean;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const access = await readHostedRuntimePersonalActiveAccess(input.memberId);
@@ -914,6 +918,27 @@ async function handleHostedRuntimeGroupListMemberships(input: {
       },
     };
   }
+  let participantRosters: Awaited<
+    ReturnType<typeof readHostedGroupMembershipParticipantRosters>
+  > = new Map();
+  if (input.includeParticipantRosters) {
+    try {
+      participantRosters = await readHostedGroupMembershipParticipantRosters({
+        memberId: input.memberId,
+        memberships,
+        now: new Date(),
+        prisma: access.prisma,
+      });
+    } catch {
+      participantRosters = new Map(memberships.map(({ membershipId }) => [
+        membershipId,
+        {
+          status: "unavailable" as const,
+          unavailableReason: "participant_roster_unavailable",
+        },
+      ]));
+    }
+  }
   const publicBaseUrl = resolveHostedPublicBaseUrl();
   return {
     action: "list_memberships",
@@ -927,11 +952,21 @@ async function handleHostedRuntimeGroupListMemberships(input: {
       ),
       disclosureGrantsTruncated: grants.truncated,
       memberships: memberships.map(({
+        membershipId,
         ownerJoinCode,
         runtimeMemberId,
         ...membership
       }) => ({
         ...membership,
+        membershipId,
+        ...(input.includeParticipantRosters
+          ? {
+              participantRoster: participantRosters.get(membershipId) ?? {
+                status: "unavailable" as const,
+                unavailableReason: "participant_roster_unavailable",
+              },
+            }
+          : {}),
         permissionsUrl: ownerJoinCode
           ? buildHostedGroupJoinUrl({ joinCode: ownerJoinCode, publicBaseUrl })
           : null,
