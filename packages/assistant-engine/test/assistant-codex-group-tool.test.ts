@@ -296,6 +296,16 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("advertises family-bounded schemas", () => {
+    const groupConsultTool = MURPH_GROUP_FAMILY_TOOLS.find(
+      (tool) => tool.name === "group_consult",
+    );
+    expect(groupConsultTool?.description)
+      .toContain("Exact group title: use groupLabel");
+    expect(groupConsultTool?.description)
+      .toContain("People/count description: use participantTarget");
+    expect(groupConsultTool?.description)
+      .toContain("never turn a participant name into groupLabel");
+
     const expectedRootKeys = {
       group_consult: [
         "action", "context", "grantId", "groupLabel", "message_ref",
