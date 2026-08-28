@@ -132,7 +132,7 @@ describe.skipIf(!runPostgresProof)(
         expect(stdout).toContain("temporal_only,1,4.000,4.000,4.000");
         expect(stdout).toContain("temporal_recovery,1,30.000,30.000,30.000");
         expect(stdout).toContain("legacy_unclassified,1,5.000,5.000,5.000");
-        expect(stdout).toContain("web_direct_cold,2,6.000,6.900,7.000");
+        expect(stdout).toContain("web_direct_cold,4,6.000,6.850,7.000");
         expect(stdout).not.toContain("web_direct_existing_runtime");
         expect(stdout).toContain(
           "Cloudflare route -> UserRunner constructor start,1,50.0,50.0,50.0",
@@ -144,13 +144,13 @@ describe.skipIf(!runPostgresProof)(
           "UserRunner constructor finish -> first ensure instruction,1,40.0,40.0,40.0",
         );
         expect(stdout).toContain(
-          "Cloudflare route -> UserRunner RPC,1,100.0,100.0,100.0",
+          "Cloudflare route -> UserRunner RPC,3,100.0,145.0,150.0",
         );
         expect(stdout).toContain(
           "Health-data admission callback,1,100.0,100.0,100.0",
         );
         expect(stdout).toContain(
-          "Accepted -> runner job,2,6000.0,6900.0,7000.0",
+          "Accepted -> runner job,4,6000.0,6850.0,7000.0",
         );
       } finally {
         await runPsql(connection, [
@@ -621,6 +621,43 @@ function createFixtureSql(schemaName: string): string {
         'userRunnerFirstEnsureRuntimeProcessingAtEpochMs', base_ms + 2350,
         'userRunnerRpcStartedAtEpochMs', base_ms + 2550,
         'freshStartRequestedAtEpochMs', base_ms + 2800
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'direct-warm-activation',
+      t0 + INTERVAL '5 seconds',
+      t0 + INTERVAL '11 seconds',
+      'attempt-direct-warm-activation',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 5500,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 5700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-warm-activation',
+        'cloudflareRouteReceivedAtEpochMs', base_ms + 5600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-warm-activation',
+        'userRunnerConstructorStartedAtEpochMs', base_ms + 5650,
+        'userRunnerConstructorFinishedAtEpochMs', base_ms + 5660,
+        'userRunnerFirstEnsureRuntimeProcessingAtEpochMs', base_ms + 5700,
+        'userRunnerRpcStartedAtEpochMs', base_ms + 5750,
+        'freshStartRequestedAtEpochMs', base_ms + 5800
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'direct-legacy-activation-fields-absent',
+      t0 + INTERVAL '9 seconds',
+      t0 + INTERVAL '15 seconds',
+      'attempt-direct-legacy-activation-fields-absent',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 9500,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 9700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-legacy-activation-fields-absent',
+        'cloudflareRouteReceivedAtEpochMs', base_ms + 9600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-legacy-activation-fields-absent',
+        'userRunnerRpcStartedAtEpochMs', base_ms + 9700,
+        'freshStartRequestedAtEpochMs', base_ms + 9800
       ))
     FROM fixture
     UNION ALL
