@@ -515,7 +515,7 @@ export function toVaultCliFilesystemError(
   error: unknown,
   input: {
     message: string
-    fieldPath?: 'out' | 'vault'
+    fieldPath?: 'file' | 'out' | 'vault'
   },
 ) {
   if (error instanceof VaultCliError) {

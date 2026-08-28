@@ -19,6 +19,7 @@ import {
   pruneStoredExportPack,
   showStoredExportPack,
 } from './export-intake-read-helpers.js'
+import { assertOrderedDateRange } from './command-factory-primitives.js'
 
 const exportPackIdSchema = z
   .string()
@@ -118,6 +119,7 @@ export function registerExportCommands(cli: Cli.Cli, services: VaultServices) {
     }),
     output: exportPackResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       return services.query.exportPack({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -158,6 +160,7 @@ export function registerExportCommands(cli: Cli.Cli, services: VaultServices) {
     }),
     output: exportPackListResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       const items = await listStoredExportPacks(options.vault, {
         from: options.from,
         to: options.to,

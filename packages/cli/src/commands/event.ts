@@ -1,6 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   ADVERSE_EFFECT_SEVERITIES,
+  EVENT_KINDS,
   eventSourceSchema,
   publicEventImportJsonlRowPayloadSchemasByKind,
   publicEventWriteKindSchema,
@@ -33,7 +34,6 @@ import {
 } from '@murphai/vault-usecases/records'
 import {
   eventScaffoldKindSchema,
-  showEventRecord,
 } from '@murphai/vault-usecases/records'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { createLedgerEventEntityGroup } from './entity-command-groups.js'
@@ -382,8 +382,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       hint:
         'Combine --kind, repeatable --tag, --experiment <slug>, and --from/--to to narrow the event read model.',
       kindOption: z
-        .string()
-        .min(1)
+        .enum(EVENT_KINDS)
         .optional()
         .describe(
           'Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure.',
@@ -429,7 +428,10 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
             dayKeyPolicy: input.dayKeyPolicy,
           })
 
-          return showEventRecord(input.vault, result.lookupId)
+          return {
+            vault: input.vault,
+            entity: result.entity,
+          }
         },
       }),
       createEntityDeleteCommandConfig({

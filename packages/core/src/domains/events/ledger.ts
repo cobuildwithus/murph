@@ -627,9 +627,8 @@ export async function readOwnedEvent(
       if (
         candidate.kind === input.kind
         && candidate[ownerField] === input.ownerId
-        && typeof candidate.id === "string"
       ) {
-        candidateIds.add(candidate.id);
+        candidateIds.add(validateStoredEventRecord(candidate).id);
       }
     }
   }

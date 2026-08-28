@@ -21,6 +21,7 @@ import type {
   AssistantVaultImageResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import { toVaultCliFilesystemError } from "@murphai/vault-usecases/helpers";
 import sharp from "sharp";
 
 import { MURPH_LOGO_SVG } from "./murph-logo-svg.js";
@@ -129,6 +130,13 @@ export async function renderAndSaveExperimentProgressCard(input: {
     if (error instanceof VaultCliError) {
       throw error;
     }
+    const mapped = toVaultCliFilesystemError(error, {
+      fieldPath: "vault",
+      message: "The experiment progress card could not be saved.",
+    });
+    if (mapped !== error) {
+      throw mapped;
+    }
     throw progressCardFailure(
       "progress_card_persist_failed",
       "The experiment progress card could not be saved.",
@@ -206,6 +214,7 @@ async function resolveSavedProgressCard(input: {
   }
 
   const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-progress-card-"));
+  let persisted = false;
   try {
     const sourcePath = path.join(tempRoot, input.rendered.filename);
     await writeFile(sourcePath, Buffer.from(input.rendered.bytes));
@@ -247,6 +256,7 @@ async function resolveSavedProgressCard(input: {
           false,
         );
       }
+      persisted = true;
       return { ref };
     } catch (error) {
       if (!isVaultError(error) || error.code !== "CAPTURE_LOOKUP_EXISTS") {
@@ -270,10 +280,28 @@ async function resolveSavedProgressCard(input: {
         sha256: input.rendered.sha256,
         vaultRoot: input.vaultRoot,
       });
+      persisted = true;
       return { ref: winner.attachmentRef };
     }
   } finally {
-    await rm(tempRoot, { force: true, recursive: true });
+    try {
+      await rm(tempRoot, { force: true, recursive: true });
+    } catch (error) {
+      if (persisted) {
+        const message =
+          "The experiment progress card was saved, but temporary files could not be cleaned up.";
+        const mapped = toVaultCliFilesystemError(error, { message });
+        if (mapped !== error) {
+          throw mapped;
+        }
+        throw progressCardFailure(
+          "progress_card_cleanup_failed",
+          message,
+          "filesystem",
+          false,
+        );
+      }
+    }
   }
 }
 
@@ -288,7 +316,16 @@ async function assertSavedProgressCardMatches(input: {
     savedBytes = new Uint8Array(
       await readFile(path.join(input.vaultRoot, input.ref)),
     );
-  } catch {
+  } catch (error) {
+    if (readNodeErrorCode(error) !== "ENOENT") {
+      const mapped = toVaultCliFilesystemError(error, {
+        fieldPath: "vault",
+        message: "The saved progress-card image could not be read.",
+      });
+      if (mapped !== error) {
+        throw mapped;
+      }
+    }
     throw progressCardFailure(
       "progress_card_integrity_failed",
       "The saved progress-card image could not be verified.",
@@ -308,6 +345,13 @@ async function assertSavedProgressCardMatches(input: {
       false,
     );
   }
+}
+
+function readNodeErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return null;
+  }
+  return typeof error.code === "string" ? error.code : null;
 }
 
 export function buildExperimentProgressCardSvg(

@@ -1,5 +1,7 @@
 import {
+  eventSourceSchema,
   measurementEntrySchema,
+  storedMediaSchema,
   type EventSource,
   type JsonObject,
   type MeasurementEntry,
@@ -86,8 +88,11 @@ export function normalizeMetricSlug(value: string, fieldName = 'metric'): string
 }
 
 function normalizeQualifierMap(value: unknown): Record<string, string | number | boolean> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (value === undefined) {
     return undefined
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw invalidStructuredMeasurementField('measurement qualifiers')
   }
 
   const qualifierEntries: Array<[string, string | number | boolean]> = []
@@ -97,13 +102,18 @@ function normalizeQualifierMap(value: unknown): Record<string, string | number |
       const normalizedValue = normalizeOptionalText(rawValue)
       if (normalizedValue) {
         qualifierEntries.push([key, normalizedValue])
+      } else {
+        throw invalidStructuredMeasurementField('measurement qualifiers')
       }
       continue
     }
 
     if (typeof rawValue === 'number' || typeof rawValue === 'boolean') {
       qualifierEntries.push([key, rawValue])
+      continue
     }
+
+    throw invalidStructuredMeasurementField('measurement qualifiers')
   }
 
   const qualifiers = Object.fromEntries(qualifierEntries)
@@ -175,12 +185,8 @@ async function loadStructuredMeasurementPayload(inputFile: string): Promise<Meas
   const measurements = Array.isArray(payload.measurements)
     ? payload.measurements.map((entry, index) => normalizeMeasurementEntry(entry, `measurements[${index}]`))
     : undefined
-  const media = Array.isArray(payload.media)
-    ? payload.media.filter((entry): entry is StoredMedia => {
-        const candidate = asJsonObject(entry)
-        return Boolean(candidate && typeof candidate.relativePath === 'string')
-      })
-    : undefined
+  const media = parseOptionalStoredMedia(payload.media)
+  const source = parseOptionalEventSource(payload.source)
 
   return {
     occurredAt: valueAsString(payload.occurredAt),
@@ -188,20 +194,62 @@ async function loadStructuredMeasurementPayload(inputFile: string): Promise<Meas
     note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
     measurements,
     media,
-    rawRefs: Array.isArray(payload.rawRefs)
-      ? payload.rawRefs.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      : undefined,
-    source: valueAsString(payload.source) as MeasurementPayloadInput['source'] | undefined,
-    tags: Array.isArray(payload.tags)
-      ? payload.tags.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      : undefined,
-    relatedIds: Array.isArray(payload.relatedIds)
-      ? payload.relatedIds.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      : undefined,
+    rawRefs: parseOptionalNonEmptyStringArray(payload.rawRefs, 'rawRefs'),
+    source,
+    tags: parseOptionalNonEmptyStringArray(payload.tags, 'tags'),
+    relatedIds: parseOptionalNonEmptyStringArray(payload.relatedIds, 'relatedIds'),
     externalRef: asJsonObject(payload.externalRef) ?? undefined,
     links: payload.links,
     timeZone: valueAsString(payload.timeZone),
   }
+}
+
+function parseOptionalStoredMedia(value: unknown): StoredMedia[] | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  const parsed = storedMediaSchema.array().max(10).safeParse(value)
+  if (!parsed.success) {
+    throw invalidStructuredMeasurementField('media')
+  }
+  return parsed.data
+}
+
+function parseOptionalEventSource(value: unknown): EventSource | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  const parsed = eventSourceSchema.safeParse(value)
+  if (!parsed.success) {
+    throw invalidStructuredMeasurementField('source')
+  }
+  return parsed.data
+}
+
+function parseOptionalNonEmptyStringArray(
+  value: unknown,
+  fieldName: 'rawRefs' | 'relatedIds' | 'tags',
+): string[] | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  if (!Array.isArray(value)) {
+    throw invalidStructuredMeasurementField(fieldName)
+  }
+  return value.map((entry) => {
+    if (typeof entry !== 'string' || entry.trim().length === 0) {
+      throw invalidStructuredMeasurementField(fieldName)
+    }
+    return entry.trim()
+  })
+}
+
+function invalidStructuredMeasurementField(fieldName: string): VaultCliError {
+  return new VaultCliError(
+    'invalid_payload',
+    `Structured measurement ${fieldName} must contain only valid values.`,
+    { retryable: false, stage: 'validation' },
+  )
 }
 
 export function buildMeasurementEventDraft(input: {

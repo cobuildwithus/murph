@@ -267,6 +267,27 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
   assert.equal(rendered.output.includes("second"), false);
 });
 
+test("renderMurphCliEntrypointError uses the final repeated format flag", async () => {
+  const error = new VaultCliError("invalid_option", "Duplicate vault option.");
+  const json = await renderMurphCliEntrypointError(
+    error,
+    ["--format", "yaml", "--json"],
+    { human: false },
+  );
+  const yaml = await renderMurphCliEntrypointError(
+    error,
+    ["--json", "--format", "yaml"],
+    { human: false },
+  );
+
+  assert.deepEqual(JSON.parse(json.output), {
+    code: "invalid_option",
+    message: "Duplicate vault option.",
+    retryable: false,
+  });
+  assert.match(yaml.output, /^code: invalid_option$/mu);
+});
+
 test("renderMurphCliEntrypointError wraps every formatter with full-output", async () => {
   const error = new VaultCliError(
     "invalid_option",
@@ -954,6 +975,75 @@ test("runMurphCliEntrypoint does not mask command failure when warm Codex shutdo
 
   assert.equal(caughtError, primaryError);
   assert.deepEqual(stopWarmCodexAppServer.mock.calls, [["cli-entrypoint-exit"]]);
+});
+
+test("runMurphCliEntrypoint preserves command failure when warm Codex shutdown also fails", async () => {
+  const primaryError = new VaultCliError("command_failed", "Primary command failed.");
+  const cleanupError = new Error("warm shutdown failed");
+  const serve = vi.fn(async () => {
+    throw primaryError;
+  });
+  const stopWarmCodexAppServer = vi.fn(async () => {
+    throw cleanupError;
+  });
+
+  mockCliActionModules({
+    codexLifecycleModule: { stopWarmCodexAppServer },
+    cli: { serve },
+    operatorConfigModule: {
+      expandConfiguredVaultPath: vi.fn(),
+      resolveConfiguredDefaultVault: vi.fn(async () => null),
+      resolveDefaultVault: vi.fn(async () => "/vaults/default"),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      detectSetupProgramName: vi.fn(() => "murph-setup"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => false),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  await assert.rejects(
+    () => runMurphCliEntrypoint(["assistant", "chat"]),
+    (error) => error === primaryError,
+  );
+});
+
+test("runMurphCliEntrypoint surfaces warm Codex shutdown failure after success", async () => {
+  const cleanupError = new Error("warm shutdown failed");
+  const serve = vi.fn(async () => undefined);
+  const stopWarmCodexAppServer = vi.fn(async () => {
+    throw cleanupError;
+  });
+
+  mockCliActionModules({
+    codexLifecycleModule: { stopWarmCodexAppServer },
+    cli: { serve },
+    operatorConfigModule: {
+      expandConfiguredVaultPath: vi.fn(),
+      resolveConfiguredDefaultVault: vi.fn(async () => null),
+      resolveDefaultVault: vi.fn(async () => "/vaults/default"),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      detectSetupProgramName: vi.fn(() => "murph-setup"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => false),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  await assert.rejects(
+    () => runMurphCliEntrypoint(["assistant", "chat"]),
+    (error) => error === cleanupError,
+  );
 });
 
 test("runMurphCliAction reuses setup results for wearable launches and assistant chat handoff", async () => {

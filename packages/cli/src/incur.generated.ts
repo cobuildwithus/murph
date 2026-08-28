@@ -36,7 +36,7 @@ declare module 'incur' {
       'assistant session show': { args: { sessionId: string }; options: { requestId?: string } }
       'assistant status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
       'assistant stop': { args: {}; options: { requestId?: string } }
-      'audit list': { args: {}; options: { requestId?: string; action?: string; actor?: string; status?: string; from?: string; to?: string; sort: "asc" | "desc"; limit: number } }
+      'audit list': { args: {}; options: { requestId?: string; action?: string; actor?: string; status?: "success" | "failure"; from?: string; to?: string; sort: "asc" | "desc"; limit: number } }
       'audit show': { args: { id: string }; options: { requestId?: string } }
       'audit tail': { args: {}; options: { requestId?: string; limit: number } }
       'automation edit': { args: { lookup: string }; options: { requestId?: string; title?: string; activeUntil?: string; clearActiveUntil?: boolean; slug?: string; status?: "active" | "paused" | "archived"; summary?: string; tag?: string[]; tags?: string[]; supportSeriesId?: string; supportKind?: "reminder" | "check_in" | "review" | "weekly_digest"; plannedOccurrenceOffsetMs?: number; contextReference?: string[]; continuityPolicy?: "fresh" | "preserve"; triggerKind?: "at" | "every" | "cron" | "dailyLocal" | "deviceActivity"; triggerAt?: string; triggerEveryMs?: number; triggerCron?: string; triggerLocalTime?: string; triggerTimeZone?: string; deviceSource?: "whoop" | "whoop_v2"; activityKind?: string; scheduleKind?: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; scheduleTimeZone?: string; channel?: string; deliveryTarget?: string; identityId?: string; participantId?: string; threadId?: string; assistantTargetOverrideModel?: string; assistantTargetOverrideModelProvider?: string; assistantTargetOverrideReasoningEffort?: "low" | "medium" | "high" | "xhigh"; instructions?: string; clearSupportKind?: boolean; clearPlannedOccurrenceOffset?: boolean; clearContextReferences?: boolean; clearAssistantTargetOverride?: boolean } }
@@ -106,7 +106,7 @@ declare module 'incur' {
       'event exposure add': { args: {}; options: { requestId?: string; exposureType: string; substance: string; duration?: string; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event import-json': { args: {}; options: { requestId?: string; input: string } }
       'event import-jsonl': { args: {}; options: { requestId?: string; input: string; apply: boolean; sourceRawRefOnce?: string } }
-      'event list': { args: {}; options: { requestId?: string; kind?: string; from?: string; to?: string; tag?: string[]; experiment?: string; limit: number } }
+      'event list': { args: {}; options: { requestId?: string; kind?: "adverse_effect" | "body_measurement" | "clinical_assertion" | "document" | "encounter" | "exposure" | "meal" | "measurement" | "symptom" | "note" | "observation" | "experiment_event" | "experiment_context" | "immunization" | "medication_intake" | "procedure" | "supplement_intake" | "test" | "activity_session" | "sleep_session" | "intervention_session"; from?: string; to?: string; tag?: string[]; experiment?: string; limit: number } }
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
       'event observation add': { args: {}; options: { requestId?: string; metric: string; value: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
@@ -227,7 +227,7 @@ declare module 'incur' {
       'memory upsert': { args: { text: string }; options: { section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; modelProvider?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }
-      'protocol list': { args: {}; options: { requestId?: string; status?: string; commonsProtocol?: string; limit: number } }
+      'protocol list': { args: {}; options: { requestId?: string; status?: "available" | "archived"; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { requestId?: string } }
       'provider delete': { args: { id: string }; options: { requestId?: string } }
       'provider edit': { args: { id: string }; options: { requestId?: string; title?: string; slug?: string; status?: string; specialty?: string; organization?: string; location?: string; website?: string; phone?: string; note?: string; alias?: string[]; body?: string; clearSpecialty?: boolean; clearOrganization?: boolean; clearLocation?: boolean; clearWebsite?: boolean; clearPhone?: boolean; clearNote?: boolean; clearAliases?: boolean; clearBody?: boolean } }
@@ -246,7 +246,7 @@ declare module 'incur' {
       'recipe scaffold': { args: {}; options: { requestId?: string } }
       'recipe show': { args: { id: string }; options: { requestId?: string } }
       'regimen import-json': { args: {}; options: { requestId?: string; input: string } }
-      'regimen list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
+      'regimen list': { args: {}; options: { requestId?: string; status?: "active" | "paused" | "completed" | "stopped"; limit: number } }
       'regimen save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; note?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
       'regimen scaffold': { args: {}; options: { requestId?: string } }
       'regimen show': { args: { id: string }; options: { requestId?: string } }
@@ -259,15 +259,15 @@ declare module 'incur' {
       'route resolve-address': { args: { query: string }; options: { country?: string[]; language?: string } }
       'run': { args: {}; options: { requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'samples add': { args: {}; options: { requestId?: string; stream: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; unit: string; recordedAt: string; value?: number; source?: "device" | "import" | "manual" | "derived"; quality?: "raw" | "normalized" | "derived"; sourcePath?: string; batchSourceFileName?: string; batchPresetId?: string; batchDelimiter?: string; batchTimestampColumn?: string; batchValueColumn?: string; batchMetadataColumns?: string[]; stage?: "awake" | "light" | "deep" | "rem"; startAt?: string; endAt?: string; durationMinutes?: number } }
-      'samples batch list': { args: {}; options: { requestId?: string; stream?: string; from?: string; to?: string; limit: number } }
+      'samples batch list': { args: {}; options: { requestId?: string; stream?: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; from?: string; to?: string; limit: number } }
       'samples batch show': { args: { id: string }; options: { requestId?: string } }
       'samples csv import': { args: { file: string }; options: { requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string } }
       'samples csv profile': { args: { file: string }; options: { requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string; includeSummary?: boolean; summaryProfile?: "oxygen-night"; thresholdBelow?: number[]; gapSeconds?: number } }
       'samples import-csv': { args: { file: string }; options: { requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string } }
       'samples import-json': { args: {}; options: { requestId?: string; input: string } }
-      'samples list': { args: {}; options: { requestId?: string; stream?: string; from?: string; to?: string; quality?: string; limit: number } }
+      'samples list': { args: {}; options: { requestId?: string; stream?: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; from?: string; to?: string; quality?: string; limit: number } }
       'samples show': { args: { id: string }; options: { requestId?: string } }
-      'samples summarize': { args: {}; options: { requestId?: string; stream: string; from?: string; to?: string; profile?: "oxygen-night"; thresholdBelow?: number[]; gapSeconds?: number } }
+      'samples summarize': { args: {}; options: { requestId?: string; stream: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; from?: string; to?: string; profile?: "oxygen-night"; thresholdBelow?: number[]; gapSeconds?: number } }
       'scheduled-log archive': { args: { lookup: string }; options: { requestId?: string } }
       'scheduled-log import-json': { args: {}; options: { requestId?: string; input: string } }
       'scheduled-log list': { args: {}; options: { requestId?: string; status?: ("active" | "paused" | "archived")[]; text?: string; limit: number } }
@@ -283,9 +283,9 @@ declare module 'incur' {
       'social-history scaffold': { args: {}; options: { requestId?: string } }
       'status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
       'stop': { args: {}; options: { requestId?: string } }
-      'supplement compound list': { args: {}; options: { requestId?: string; limit: number; status?: string } }
-      'supplement compound show': { args: { compound: string }; options: { requestId?: string; status?: string } }
-      'supplement list': { args: {}; options: { requestId?: string; limit: number; status?: string } }
+      'supplement compound list': { args: {}; options: { requestId?: string; limit: number; status?: "active" | "paused" | "completed" | "stopped" } }
+      'supplement compound show': { args: { compound: string }; options: { requestId?: string; status?: "active" | "paused" | "completed" | "stopped" } }
+      'supplement list': { args: {}; options: { requestId?: string; limit: number; status?: "active" | "paused" | "completed" | "stopped" } }
       'supplement save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; group?: string; substance?: string; dose?: number; doseUnit?: string; brand?: string; manufacturer?: string; servingSize?: string; ingredient?: string[]; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
       'supplement search-labels': { args: { query: string }; options: { limit?: number; includeOffMarket?: boolean } }
       'supplement search-labels-batch': { args: {}; options: { query: string[]; limit?: number; includeOffMarket?: boolean } }

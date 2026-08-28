@@ -1522,6 +1522,50 @@ test('measurement import-json preserves nested links and import metadata', async
   assert.equal(shown.entity.data.timeZone, 'America/Los_Angeles')
 })
 
+test('measurement import-json rejects malformed nested values instead of saving a partial record', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-strict-input-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+  const payloadPath = path.join(parentRoot, 'measurement-invalid.json')
+  const privateInvalidValue = 'private-invalid-measurement-tag'
+  await writeFile(payloadPath, JSON.stringify({
+    occurredAt: '2026-03-16T08:00:00.000Z',
+    measurements: [{
+      metric: 'body-fat-pct',
+      value: 18.4,
+      unit: 'percent',
+      qualifiers: { device: '' },
+    }],
+    tags: ['valid-tag', { value: privateInvalidValue }],
+  }), 'utf8')
+
+  const invalid = await runInProcessJsonCli(cli, [
+    'measurement',
+    'import-json',
+    '--vault',
+    vaultRoot,
+    '--input',
+    `@${payloadPath}`,
+  ])
+
+  assert.equal(invalid.envelope.ok, false)
+  if (!invalid.envelope.ok) {
+    assert.equal(invalid.envelope.error.code, 'invalid_payload')
+    assert.equal(invalid.envelope.error.stage, 'validation')
+    assert.equal(invalid.envelope.error.retryable, false)
+    assert.equal(JSON.stringify(invalid.envelope).includes(privateInvalidValue), false)
+  }
+
+  const listed = await runInProcessJsonCli<MeasurementListResult>(cli, [
+    'measurement',
+    'list',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.deepEqual(requireData(listed.envelope).items, [])
+})
+
 test('measurement add rejects raw --input because JSON imports are explicit', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-input-flags-')
   cleanupPaths.push(parentRoot)

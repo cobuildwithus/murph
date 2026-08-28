@@ -27,12 +27,15 @@ const deviceSyncBeginConnectionResponseSchema = z
   })
   .strict()
 
+const DEFAULT_DEVICE_SYNC_REQUEST_TIMEOUT_MS = 15_000
+
 export interface DeviceSyncClientOptions {
   baseUrl?: string | null
   controlToken?: string | null
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
   openBrowser?: (url: string) => Promise<boolean>
+  timeoutMs?: number
 }
 
 export {
@@ -70,16 +73,25 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
     baseUrl,
     fetchImpl,
     controlToken,
-    createUnavailableError: ({ cause }) =>
+    timeoutMs: input.timeoutMs ?? DEFAULT_DEVICE_SYNC_REQUEST_TIMEOUT_MS,
+    createUnavailableError: ({ failureStage, method, timedOut }) =>
       new VaultCliError(
-        'device_sync_unavailable',
-        `Device sync service is unavailable at ${baseUrl}. Run \`murph device daemon start --vault <path>\` or start \`murph-device-syncd\` manually and retry.`,
+        timedOut
+          ? 'device_sync_timeout'
+          : failureStage === 'response'
+            ? 'device_sync_response_unavailable'
+            : 'device_sync_unavailable',
+        timedOut
+          ? 'Device sync service did not respond before the request deadline.'
+          : failureStage === 'response'
+            ? 'Device sync service response could not be read.'
+            : 'Device sync service is unavailable. Start it with `murph device daemon start --vault <path>` or start `murph-device-syncd` manually, then retry.',
         {
-          baseUrl,
-          cause: cause instanceof Error ? cause.message : String(cause),
+          retryable: isSafeDeviceSyncMethod(method),
+          stage: failureStage,
         },
       ),
-    createHttpError: ({ status, errorPayload }) =>
+    createHttpError: ({ method, status, errorPayload }) =>
       new VaultCliError(
         errorPayload.code ?? 'device_sync_request_failed',
         status === 401 && !controlToken
@@ -87,19 +99,19 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
           : errorPayload.message ??
               `Device sync request failed with HTTP ${status}.`,
         {
-          baseUrl,
           status,
-          details: errorPayload.details,
-          retryable: errorPayload.retryable,
+          retryable: isSafeDeviceSyncMethod(method)
+            && (errorPayload.retryable ?? isRetryableDeviceSyncStatus(status)),
+          stage: 'response',
         },
       ),
-    createInvalidResponseError: ({ path }) =>
+    createInvalidResponseError: () =>
       new VaultCliError(
         'device_sync_invalid_response',
         'Device sync service returned an invalid JSON payload.',
         {
-          baseUrl,
-          path,
+          retryable: false,
+          stage: 'response',
         },
       ),
   })
@@ -144,8 +156,7 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
           'device_sync_invalid_response',
           'Device sync service returned an invalid JSON payload.',
           {
-            baseUrl,
-            path,
+            retryable: false,
             stage: 'response',
           },
         )
@@ -207,6 +218,14 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
       )
     },
   }
+}
+
+function isSafeDeviceSyncMethod(method: string): boolean {
+  return method === 'GET' || method === 'HEAD' || method === 'OPTIONS'
+}
+
+function isRetryableDeviceSyncStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500
 }
 
 function resolveDeviceSyncControlPlane(

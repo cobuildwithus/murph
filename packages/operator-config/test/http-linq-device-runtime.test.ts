@@ -3936,9 +3936,10 @@ test('device sync client wraps transport and http failures with control-plane co
       'context' in error &&
       typeof error.context === 'object' &&
       error.context !== null &&
-      (error.context as { baseUrl?: string }).baseUrl ===
-        'http://127.0.0.1:8788' &&
-      (error.context as { cause?: string }).cause === 'connect ECONNREFUSED',
+      (error.context as { retryable?: boolean }).retryable === true &&
+      (error.context as { stage?: string }).stage === 'transport' &&
+      (error.context as { baseUrl?: string }).baseUrl === undefined &&
+      (error.context as { cause?: string }).cause === undefined,
   )
 
   const httpClient = createDeviceSyncClient({
@@ -3966,8 +3967,9 @@ test('device sync client wraps transport and http failures with control-plane co
       typeof error.context === 'object' &&
       error.context !== null &&
       (error.context as { retryable?: boolean }).retryable === true &&
-      ((error.context as { details?: { provider?: string } }).details?.provider ===
-        'oura'),
+      (error.context as { stage?: string }).stage === 'response' &&
+      (error.context as { status?: number }).status === 503 &&
+      (error.context as { details?: unknown }).details === undefined,
   )
 
   const missingTokenClient = createDeviceSyncClient({
@@ -4016,6 +4018,8 @@ test('device sync client wraps transport and http failures with control-plane co
       'context' in error &&
       typeof error.context === 'object' &&
       error.context !== null &&
-      (error.context as { path?: string }).path === '/providers',
+      (error.context as { retryable?: boolean }).retryable === false &&
+      (error.context as { stage?: string }).stage === 'response' &&
+      (error.context as { path?: string }).path === undefined,
   )
 })

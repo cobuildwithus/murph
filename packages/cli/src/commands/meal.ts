@@ -45,7 +45,10 @@ import {
   createEventBackedEntityEditCommandConfig,
   emptyToUndefined,
 } from './record-mutation-command-helpers.js'
-import { commonListLimitOptionSchema } from './command-factory-primitives.js'
+import {
+  assertOrderedDateRange,
+  commonListLimitOptionSchema,
+} from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const mealIngredientsSchema = z
@@ -627,11 +630,14 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         },
         output: mealNutritionTotalsResultSchema,
         async run({ options, requestId }) {
+          const from = typeof options.from === 'string' ? options.from : undefined
+          const to = typeof options.to === 'string' ? options.to : undefined
+          assertOrderedDateRange(from, to)
           return services.query.showMealNutritionTotals({
             vault: String(options.vault ?? ''),
             requestId: typeof requestId === 'string' ? requestId : null,
-            from: typeof options.from === 'string' ? options.from : undefined,
-            to: typeof options.to === 'string' ? options.to : undefined,
+            from,
+            to,
           })
         },
       },
@@ -652,11 +658,14 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         },
         output: mealNutrientTotalsResultSchema,
         async run({ options, requestId }) {
+          const from = typeof options.from === 'string' ? options.from : undefined
+          const to = typeof options.to === 'string' ? options.to : undefined
+          assertOrderedDateRange(from, to)
           return services.query.showMealNutrientTotals({
             vault: String(options.vault ?? ''),
             requestId: typeof requestId === 'string' ? requestId : null,
-            from: typeof options.from === 'string' ? options.from : undefined,
-            to: typeof options.to === 'string' ? options.to : undefined,
+            from,
+            to,
           })
         },
       },

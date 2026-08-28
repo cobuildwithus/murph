@@ -540,6 +540,7 @@ describe('research scout', () => {
       context: {
         failureStage: 'response',
         retryable: true,
+        stage: 'response',
         status: 429,
       },
       message: 'Exa rate-limited the research scout request.',
@@ -565,6 +566,7 @@ describe('research scout', () => {
       code: 'research_exa_rate_limited',
       message: 'Exa rate-limited the research scout request.',
       retryable: true,
+      stage: 'response',
     })
     expect(JSON.stringify(result.envelope)).not.toMatch(/private-provider-body-and-token/u)
   })
@@ -641,6 +643,7 @@ describe('research scout', () => {
         abortedByCaller: false,
         failureStage: 'response_body',
         retryable: true,
+        stage: 'response',
         status: 200,
         timedOut: false,
         transportErrorName: 'TypeError',
@@ -663,6 +666,7 @@ describe('research scout', () => {
       code: 'research_exa_unavailable',
       message: 'Exa research scout response could not be read.',
       retryable: true,
+      stage: 'response',
     })
     expect(JSON.stringify(result.envelope)).not.toMatch(
       /private-response-body-transport-marker/u,

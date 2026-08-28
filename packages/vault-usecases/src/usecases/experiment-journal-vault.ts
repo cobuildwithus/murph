@@ -2733,7 +2733,7 @@ export async function updateVaultSummary(input: {
       updated: result.updated,
     }
   } catch (error) {
-    throw toVaultCliError(error)
+    throw toVaultMetadataCliError(error)
   }
 }
 
