@@ -444,14 +444,8 @@ export class RuntimeProcessingController {
         input.input.orchestrationAttemptId,
       );
     const cooperativeMailboxOwnerHandoff =
-      (
-        activeFence.processingMode === "default"
-        && requestedProcessingMode === "system_mailbox"
-      )
-      || (
-        activeFence.processingMode === "system_mailbox"
-        && requestedProcessingMode === "default"
-      );
+      activeFence.processingMode === "system_mailbox"
+      && requestedProcessingMode === "default";
     if (activeFence.processingMode !== requestedProcessingMode) {
       if (
         activeFence.processingMode === "inbox_media_retention"

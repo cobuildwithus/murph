@@ -775,13 +775,14 @@ authoritative, while an interrupted or not-yet-checkpointed unit stays
 recoverable from the durable mailbox and its existing continuation contract.
 
 Default and `system_mailbox` remain separate bounded owners over one ordered
-mailbox. When either mode is requested behind the other, UserRunner wakes the
-exact active child, preserves its fence, and returns `retry_later`. The active
-owner finishes or checkpoints its current unit, projects any remaining work,
-and releases so ordinary reconciliation can admit the requested owner. Neither
-direction aborts canonical publication or adds a queue, scheduler,
-feature-specific mode, persisted handoff state, or same-invocation owner
-upgrade.
+mailbox, with default work retaining foreground priority. A non-direct default
+request behind `system_mailbox` wakes the exact active child, preserves its
+fence, and retries while that child checkpoints and releases. Authenticated
+Web-direct foreground work may instead preempt that exact system child through
+the existing abort seam. A `system_mailbox` request behind an active default
+owner only retries; it does not wake or interrupt the foreground child. This
+adds no queue, scheduler, feature-specific mode, persisted handoff state, or
+same-invocation owner upgrade.
 
 Web derives the generic `systemMailboxFrontier` from the exact first live row
 after `hostedMailboxSystemHandledThroughSeq` by using the same shared
@@ -805,12 +806,13 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` fence, the
-existing workspace-invocation abort seam is the sole preemption authority.
-Default versus system-mailbox work always uses the cooperative exact-child
-wake-and-checkpoint handoff above, including authenticated Web-direct requests.
-A local exact-pointer abort enters the same inactive-fence replacement path.
-The container registers the
+For foreground/default work behind an `inbox_media_retention` fence, and for
+authenticated Web-direct foreground/default work behind a `system_mailbox`
+fence, the existing workspace-invocation abort seam is the sole preemption
+authority. A non-direct default request behind system-mailbox work retains the
+exact-child wake-and-checkpoint handoff. A system-mailbox request never wakes an
+active default child. A local exact-pointer abort enters the same inactive-fence
+replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
 and an exact abort can cancel already-queued successors before runner dispatch.

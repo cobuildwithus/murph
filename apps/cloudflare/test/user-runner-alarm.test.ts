@@ -3873,7 +3873,7 @@ describe("HostedUserRunner execution coordination", () => {
     },
   );
 
-  it("wakes the active foreground owner before retrying system-mailbox work", async () => {
+  it("preserves the active foreground owner before retrying system-mailbox work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
@@ -3903,16 +3903,7 @@ describe("HostedUserRunner execution coordination", () => {
       retryAt: "2026-04-27T00:00:05.000Z",
     });
 
-    expect(ensureProcessing).toHaveBeenCalledWith({
-      activeRuntime: expect.objectContaining({
-        attemptId: token.attemptId,
-        leaseGeneration: String(token.generation),
-        processingMode: "default",
-        requestedProcessingMode: "system_mailbox",
-        userId: TEST_USER_ID,
-      }),
-      userId: TEST_USER_ID,
-    });
+    expect(ensureProcessing).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
