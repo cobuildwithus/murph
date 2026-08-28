@@ -3072,17 +3072,12 @@ snapshot concern: if a container dies before the next idle-shutdown direct-R2
 v2 snapshot, restore must still be correct from durable mailbox, exact canonical
 write receipts, transcript, and assistant runtime state even if provider-native
 resume optimization is unavailable.
-Every foreground provider turn may include bounded recent committed transcript
-history, including a primary native-resume attempt. Native resume preserves
-provider-owned thread state; the committed transcript independently preserves
-recent user-visible conversation meaning when that provider state is compacted
-or unavailable. The bounded projection drops a trailing user entry equal to the
-current prompt, so current input appears exactly once. Compound accepted inputs
-persist as separate ordered transcript entries when their normalized texts are
-available, preserving each input's receipt timestamp and per-entry truncation
-boundary. Replayed history is context only, cannot grant current effect
-authority, and must exclude runtime-owned capability URLs that were appended
-only for user delivery. Active-turn input is not serialized as provider prompt
+Fresh-thread starts and stale native-resume fallback may include bounded recent
+committed transcript history. That history is semantic assistant content and
+must exclude runtime-owned capability URLs that were appended only for user
+delivery. Primary native-resume attempts do not replay committed history into
+the provider prompt, and the provider-native turn never receives those
+runtime-appended URLs. Active-turn input is not serialized as provider prompt
 history; it is either folded in before the first provider request, steered
 through the live Codex turn, or left unaccepted for a later normal turn when it
 misses the live steering window.

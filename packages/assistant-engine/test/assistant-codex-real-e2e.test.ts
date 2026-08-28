@@ -493,92 +493,6 @@ describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
   )
 })
 
-describeRealCodex('real Codex resumed conversation reconstruction e2e', () => {
-  it(
-    'uses committed recent context missing from native provider state',
-    async () => {
-      const config = await resolveRealCodexE2eConfig()
-      const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-resumed-conversation-reconstruction-e2e-'),
-      )
-      const commonInput = {
-        channel: 'telegram' as const,
-        codexCommand:
-          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-          ?? undefined,
-        codexHome: config.codexHome,
-        deliverResponse: false,
-        executionContext: null,
-        includeEarlySessionOnboarding: false,
-        model: config.model,
-        modelProvider: config.modelProvider,
-        persistUserPromptOnFailure: false,
-        provider: 'codex-cli' as const,
-        reasoningEffort: 'low' as const,
-        sandbox: 'read-only' as const,
-        threadId: 'thread-resumed-reconstruction',
-        threadIsDirect: true,
-        turnEnvironment: {
-          currentWorkingDirectory: workingDirectory,
-          env: config.env,
-        },
-        vault: workingDirectory,
-        workingDirectory,
-      }
-
-      try {
-        await initializeVault({
-          timezone: 'America/New_York',
-          vaultRoot: workingDirectory,
-        })
-        const warmup = await sendAssistantMessageLocal({
-          ...commonInput,
-          prompt: 'Reply with exactly: WARMUP READY',
-        })
-        expect(warmup.response).toMatch(/WARMUP READY/iu)
-
-        await appendAssistantTranscriptEntries(
-          workingDirectory,
-          warmup.session.sessionId,
-          [
-            {
-              kind: 'user',
-              text: 'For the synthetic launch checklist, use the green comet label.',
-            },
-            {
-              kind: 'assistant',
-              text: 'Noted. The synthetic launch checklist uses the green comet label.',
-            },
-          ],
-        )
-
-        const resumed = await sendAssistantMessageLocal({
-          ...commonInput,
-          prompt: 'Which label did we choose for the synthetic launch checklist?',
-          sessionId: warmup.session.sessionId,
-        })
-
-        process.stdout.write(
-          `[resumed-conversation-reconstruction-e2e] ${JSON.stringify({
-            reply: resumed.response.trim(),
-            resumedSession: resumed.session.sessionId === warmup.session.sessionId,
-          })}\n`,
-        )
-        expect(resumed.response).toMatch(/green comet/iu)
-        expect(resumed.response).not.toMatch(
-          /do not (?:know|remember)|don't (?:know|remember)|no context|which label/iu,
-        )
-      } finally {
-        await removeRealCodexTemporaryPaths([
-          workingDirectory,
-          ...config.temporaryPaths,
-        ])
-      }
-    },
-    360_000,
-  )
-})
-
 describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
   it(
     'answers from the admitted voice memo transcript without claiming the memo is unavailable',
@@ -8976,6 +8890,290 @@ describeRealCodex('real Codex proactive physical-note address e2e', () => {
   )
 })
 
+describeRealCodex('real Codex physical-note image continuation e2e', () => {
+  it(
+    'keeps a physical-note address through a trusted image completion and terse approval',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-physical-note-image-continuity-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const imageBytes = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      )
+      const media = {
+        alt: 'Generated thank-you note preview',
+        contentType: 'image/png',
+        filename: 'thank-you-note.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/2026/08/thank-you-note/thank-you-note.png',
+        sha256: createHash('sha256').update(imageBytes).digest('hex'),
+        sizeBytes: imageBytes.byteLength,
+        source: 'gpt-image-2',
+      } as const
+      const originInputId = `ain_${'1'.repeat(32)}`
+      const completionInputId = `ain_${'2'.repeat(32)}`
+      const approvalInputId = `ain_${'3'.repeat(32)}`
+      const completionScope = {
+        authorizedOriginAssistantInputId: originInputId,
+        completionAssistantInputId: completionInputId,
+        exactMedia: [media] as const,
+      }
+      const launchedOperationIds: string[] = []
+      const sendRequests: unknown[] = []
+
+      try {
+        await materializePhysicalNoteSkill({ skillsRoot })
+        const imagePath = path.join(workingDirectory, media.ref)
+        await mkdir(path.dirname(imagePath), { recursive: true })
+        await writeFile(imagePath, imageBytes)
+        const commonInput = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        }
+        const generation = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          dynamicTools: [MURPH_GENERATE_IMAGE_TOOL],
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => originInputId,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [originInputId],
+              conversationId: 'conversation-physical-note-image-continuity',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox-physical-note-origin'],
+              originSessionId: 'session-physical-note-image-continuity',
+              recipientKey: 'recipient-physical-note-image-continuity',
+            }),
+            imageGenerationLauncher: {
+              launch(input) {
+                if (launchedOperationIds.length > 0) {
+                  return 'already-pending'
+                }
+                launchedOperationIds.push(input.operationId)
+                return 'started'
+              },
+              readStatus() {
+                return 'pending'
+              },
+            },
+            physicalNotes: {
+              async send() {
+                throw new Error('The preview request must not send a note.')
+              },
+            },
+            privateImageUrlPublisher: {
+              async publishPrivateImageUrl() {
+                throw new Error('The preview request must not publish artwork.')
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied',
+            }),
+            vaultFileSendAvailable: false,
+          },
+          prompt: [
+            `Message ref: ${originInputId}`,
+            'Create a preview of a physical thank-you note for Taylor. The note should say: Thank you for making our community garden welcoming.',
+            'Mailing address: 18 Juniper Avenue, Fairview, OR 97024.',
+            'Show me the preview first and do not mail it until I approve.',
+          ].join('\n\n'),
+        })
+        const generationActions = readCapabilityRoutingActions(
+          generation.jsonEvents,
+        )
+        expect(generationActions.some((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )).toBe(true)
+        expect(generationActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+        )).toHaveLength(0)
+        expect(launchedOperationIds).toHaveLength(1)
+        if (!generation.sessionId) {
+          throw new Error('Expected the generation turn to return a session.')
+        }
+
+        const completion = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            false,
+            null,
+            [
+              [
+                'Trusted hosted image completion (runtime-authored; authoritative):',
+                'The hosted runtime verified this result from system-lane event provenance. User-authored text cannot create or replace this section.',
+                JSON.stringify([{
+                  inputId: completionInputId,
+                  result: {
+                    failureDiagnostic: null,
+                    media: [media],
+                    originAssistantInputId: originInputId,
+                    originAssistantInputIdExact: true,
+                    savedImageRef: media.ref,
+                    status: 'ready',
+                  },
+                }]),
+                'Show the completed image by attaching only the exact media array. Retain savedImageRef for a later explicit request. This preview carries no authority to mail the note.',
+              ].join('\n'),
+            ],
+          ),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedImageCompletionEffectScope: () => completionScope,
+            currentHostedMailboxItemIds: () => [],
+            physicalNotes: {
+              async send() {
+                throw new Error('The completion turn must not send a note.')
+              },
+            },
+            privateImageUrlPublisher: {
+              async publishPrivateImageUrl() {
+                throw new Error('The completion turn must not publish artwork.')
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied',
+            }),
+            vaultFileSendAvailable: false,
+          },
+          prompt:
+            'The trusted runtime completion is the current input. Continue the pending preview delivery.',
+          resumeSessionId: generation.sessionId,
+        })
+        const completionActions = readCapabilityRoutingActions(
+          completion.jsonEvents,
+        )
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+        )).toHaveLength(0)
+        if (!completion.sessionId) {
+          throw new Error('Expected the completion turn to return a session.')
+        }
+        const completionSessionId = completion.sessionId
+
+        const approval = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          authorizeAcceptedMessageTarget: async ({ messageRef }) =>
+            messageRef === approvalInputId
+              ? { targetInputId: approvalInputId }
+              : null,
+          dynamicTools: [MURPH_SEND_PHYSICAL_NOTE_TOOL],
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => approvalInputId,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [approvalInputId],
+              conversationId: 'conversation-physical-note-image-continuity',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox-physical-note-approval'],
+              originSessionId: completionSessionId,
+              recipientKey: 'recipient-physical-note-image-continuity',
+            }),
+            physicalNotes: {
+              async send(request) {
+                sendRequests.push(request)
+                return {
+                  complimentary: true,
+                  costUsdMicros: '0',
+                  physicalNoteId: 'hpn_synthetic_continuity',
+                  status: 'accepted',
+                }
+              },
+            },
+            privateImageUrlPublisher: {
+              async publishPrivateImageUrl() {
+                return {
+                  expiresAt: '2027-08-28T00:00:00.000Z',
+                  url: 'https://private-media.example.test/note',
+                }
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied',
+            }),
+            vaultFileSendAvailable: false,
+          },
+          prompt: [
+            `Message ref: ${approvalInputId}`,
+            'The preview looks right. Mail it now.',
+          ].join('\n\n'),
+          resumeSessionId: completionSessionId,
+        })
+        const approvalActions = readCapabilityRoutingActions(
+          approval.jsonEvents,
+        )
+        const sendCalls = approvalActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+        )
+
+        process.stdout.write(
+          `[physical-note-image-continuity-e2e] ${JSON.stringify({
+            completionMessage: completion.finalMessage,
+            completionMediaCount: completion.responseMedia.length,
+            finalMessage: approval.finalMessage,
+            scenario: 'details, trusted image completion, terse approval',
+            sendCount: sendRequests.length,
+          })}\n`,
+        )
+        expect(sendCalls).toHaveLength(1)
+        expect(sendRequests).toHaveLength(1)
+        expect(sendRequests[0]).toMatchObject({
+          originAssistantInputId: approvalInputId,
+          recipient: {
+            addressLine1: '18 Juniper Avenue',
+            city: 'Fairview',
+            name: 'Taylor',
+            postalCode: '97024',
+            state: 'OR',
+          },
+        })
+        expect(approval.finalMessage).toMatch(/accepted|print|printing/iu)
+        expect(approval.finalMessage).not.toMatch(
+          /address|resend|repeat|provide|what (?:is|was)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
   it(
     'keeps the final reply owner-correct and never retries a rejected note',
@@ -16498,10 +16696,12 @@ function buildHostedUsageProgressDeveloperInstructions(
 function buildDirectConversationDeveloperInstructions(
   onboardingGuidance = false,
   assistantContextSnapshotPrompt: string | null = null,
+  assistantDynamicContextPrompts: readonly string[] | null = null,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt,
+    assistantDynamicContextPrompts,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,

@@ -825,16 +825,7 @@ export async function sendAssistantMessageLocal(
           vault: input.vault,
         })
         activeTurnInputController = turnInputController
-        userTurn = await persistUserTurn(
-          input,
-          resolved,
-          {
-            persistUserPromptOnFailure:
-              sharedPlan.persistUserPromptOnFailure &&
-              (input.acceptedTurnInput?.initialInputs?.length ?? 0) === 0,
-          },
-          receipt.turnId,
-        )
+        userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
         let currentUserTurn = userTurn
         const initialAcceptedTurnInputItems = resolveInitialAcceptedTurnInputItems({
           input,
@@ -1186,46 +1177,34 @@ export async function sendAssistantMessageLocal(
           if (userPromptPersistedToTranscript) {
             return
           }
-          const transcriptRefsByInputId =
-            await appendAcceptedTurnInputTranscriptEntries({
-              acceptedInputItems: initialAcceptedTurnInputItems,
-              detail: persistInput.detail,
-              fallbackPrompt: persistInput.prompt,
-              fallbackTranscriptText: null,
-              sessionId: resolved.session.sessionId,
-              turnId: currentUserTurn.turnId,
-              vault: persistInput.vault,
-            })
-          const firstTranscriptRef =
-            initialAcceptedTurnInputItems
-              .map((item) => transcriptRefsByInputId.get(item.id) ?? null)
-              .find((ref) => ref !== null) ?? null
-          const transcriptRefUpdates = resolveAcceptedTurnInputTranscriptRefUpdates({
-            inputs: initialAcceptedTurnInputItems,
-            transcriptRefsByInputId,
+          const persisted = await appendUserTranscriptEntryForTurn({
+            contentReceivedAt: currentUserTurn.userContentReceivedAt,
+            createdAt: currentUserTurn.turnCreatedAt,
+            detail: persistInput.detail,
+            sessionId: resolved.session.sessionId,
+            text: persistInput.prompt,
+            turnId: currentUserTurn.turnId,
+            vault: persistInput.vault,
           })
-          if (initialUserPromptInputId && firstTranscriptRef) {
-            transcriptRefUpdates.push({
-              inputId: initialUserPromptInputId,
-              transcriptRef: firstTranscriptRef,
-            })
-          }
-          if (transcriptRefUpdates.length > 0) {
-            await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
-              refs: transcriptRefUpdates,
-              turnId: currentUserTurn.turnId,
-            })
-          }
-          const persistedAt =
-            firstTranscriptRef?.entryCreatedAt ?? currentUserTurn.turnCreatedAt
           currentUserTurn = {
             ...currentUserTurn,
-            turnCreatedAt: persistedAt,
-            userTranscriptRef: firstTranscriptRef,
+            turnCreatedAt: persisted.createdAt,
+            userTranscriptRef: persisted.transcriptRef,
             userPersisted: true,
           }
           userTurn = currentUserTurn
           userPromptPersistedToTranscript = true
+          if (initialUserPromptInputId) {
+            await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
+              refs: [
+                {
+                  inputId: initialUserPromptInputId,
+                  transcriptRef: persisted.transcriptRef,
+                },
+              ],
+              turnId: currentUserTurn.turnId,
+            })
+          }
         }
         const persistAcceptedActiveTurnInputTranscripts = async (persistInput: {
           acceptedInput: Extract<
@@ -1235,11 +1214,9 @@ export async function sendAssistantMessageLocal(
           acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
         }) => {
           const transcriptRefsByInputId =
-            await appendAcceptedTurnInputTranscriptEntries({
+            await appendAcceptedActiveTurnInputTranscriptEntries({
+              acceptedInput: persistInput.acceptedInput,
               acceptedInputItems: persistInput.acceptedInputItems,
-              detail: 'accepted active-turn input persisted for provider request',
-              fallbackPrompt: persistInput.acceptedInput.prompt,
-              fallbackTranscriptText: persistInput.acceptedInput.transcriptText,
               sessionId: resolved.session.sessionId,
               turnId: currentUserTurn.turnId,
               vault: currentInput.vault,
@@ -1254,13 +1231,6 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
             })
           }
-        }
-        if (sharedPlan.persistUserPromptOnFailure) {
-          await persistInitialUserPromptToTranscriptIfNeeded({
-            detail: 'user prompt persisted before provider execution',
-            prompt: currentInput.prompt,
-            vault: currentInput.vault,
-          })
         }
         const acceptActiveTurnInput = async (acceptanceInput: {
           activeTurnInput: Extract<
@@ -1919,11 +1889,6 @@ export async function sendAssistantMessageLocal(
                 usageAttribution: providerOutcome.usageAttribution,
                 workingDirectory: sharedPlan.requestedWorkingDirectory,
               }
-              await persistInitialUserPromptToTranscriptIfNeeded({
-                detail: 'user prompt persisted before recovered no-reply completion',
-                prompt: currentInput.prompt,
-                vault: currentInput.vault,
-              })
               const turnArtifactsStartedAt = Date.now()
               const session = await finalizeAssistantTurnArtifacts({
                 assistantTranscriptText: null,
@@ -2355,11 +2320,6 @@ export async function sendAssistantMessageLocal(
         const assistantTranscriptText = resolveAssistantProviderTranscriptText({
           media: providerResult.responseMedia,
           response: transcriptResponseText,
-        })
-        await persistInitialUserPromptToTranscriptIfNeeded({
-          detail: 'user prompt persisted before turn completion',
-          prompt: currentInput.prompt,
-          vault: currentInput.vault,
         })
         const turnArtifactsStartedAt = Date.now()
         const session = await finalizeAssistantTurnArtifacts({
@@ -2951,62 +2911,39 @@ function shouldUsePhoneCallManualAcceptedTurnInputId(
     input.executionContext?.hosted?.phoneCalls != null
 }
 
-async function appendAcceptedTurnInputTranscriptEntries(input: {
+async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
+  acceptedInput: Extract<
+    AssistantActiveTurnInputAdmissionResult,
+    { kind: 'accepted' }
+  >
   acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
-  detail: string
-  fallbackPrompt: string
-  fallbackTranscriptText?: string | null
   sessionId: string
   turnId: string
   vault: string
 }): Promise<Map<string, AssistantAcceptedTurnInputTranscriptRef>> {
-  const transcriptPlans = resolveAcceptedTurnTranscriptAppendPlans({
+  const transcriptPlans = resolveAcceptedActiveTurnTranscriptAppendPlans({
+    acceptedInput: input.acceptedInput,
     acceptedInputItems: input.acceptedInputItems,
-    fallbackPrompt: input.fallbackPrompt,
-    fallbackTranscriptText: input.fallbackTranscriptText,
   })
   const refsByInputId = new Map<string, AssistantAcceptedTurnInputTranscriptRef>()
-  const contentReceivedAtByPlan = await Promise.all(
-    transcriptPlans.map(async (plan) =>
-      await resolveAcceptedInputContentReceivedAt({
-        inputs: input.acceptedInputItems.filter((item) =>
-          plan.inputIds.includes(item.id)
-        ),
-        vault: input.vault,
-      })
-    ),
-  )
-  const appended = await appendAssistantTranscriptEntriesWithRefs(
-    input.vault,
-    input.sessionId,
-    transcriptPlans.map((plan, index) => ({
-      ...(contentReceivedAtByPlan[index]
-        ? { contentReceivedAt: contentReceivedAtByPlan[index] }
-        : {}),
-      kind: 'user' as const,
+  for (const plan of transcriptPlans) {
+    const contentReceivedAt = await resolveAcceptedInputContentReceivedAt({
+      inputs: input.acceptedInputItems.filter((item) =>
+        plan.inputIds.includes(item.id)
+      ),
+      vault: input.vault,
+    })
+    const persisted = await appendUserTranscriptEntryForTurn({
+      contentReceivedAt,
+      detail:
+        'accepted active-turn input persisted for provider request',
+      sessionId: input.sessionId,
       text: plan.text,
-    })),
-  )
-  const persistedAt = appended.entries[0]?.createdAt ?? new Date().toISOString()
-  await appendAssistantTurnReceiptEvent({
-    vault: input.vault,
-    turnId: input.turnId,
-    kind: 'user.persisted',
-    detail: input.detail,
-    at: persistedAt,
-  })
-  for (const [planIndex, plan] of transcriptPlans.entries()) {
-    const transcriptRef =
-      appended.refs[planIndex] ??
-      ({
-        entryCreatedAt:
-          appended.entries[planIndex]?.createdAt ?? persistedAt,
-        entryIndex: null,
-        entryKind: 'user',
-        sessionId: input.sessionId,
-      } satisfies AssistantAcceptedTurnInputTranscriptRef)
+      turnId: input.turnId,
+      vault: input.vault,
+    })
     for (const inputId of plan.inputIds) {
-      refsByInputId.set(inputId, transcriptRef)
+      refsByInputId.set(inputId, persisted.transcriptRef)
     }
   }
   return refsByInputId
@@ -3042,10 +2979,12 @@ async function resolveAcceptedInputContentReceivedAt(input: {
   return earliestMs === null ? null : new Date(earliestMs).toISOString()
 }
 
-function resolveAcceptedTurnTranscriptAppendPlans(input: {
+function resolveAcceptedActiveTurnTranscriptAppendPlans(input: {
+  acceptedInput: Extract<
+    AssistantActiveTurnInputAdmissionResult,
+    { kind: 'accepted' }
+  >
   acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
-  fallbackPrompt: string
-  fallbackTranscriptText?: string | null
 }): Array<{
   inputIds: readonly string[]
   text: string
@@ -3054,11 +2993,11 @@ function resolveAcceptedTurnTranscriptAppendPlans(input: {
     const text = normalizeNullableString(item.promptFallbackText)
     return text ? [{ inputIds: [item.id], text }] : []
   })
-  if (itemPlans.length === input.acceptedInputItems.length) {
+  if (itemPlans.length > 0) {
     return itemPlans
   }
 
-  const directText = normalizeNullableString(input.fallbackTranscriptText)
+  const directText = normalizeNullableString(input.acceptedInput.transcriptText)
   if (directText) {
     return [
       {
@@ -3071,7 +3010,7 @@ function resolveAcceptedTurnTranscriptAppendPlans(input: {
   return [
     {
       inputIds: input.acceptedInputItems.map((item) => item.id),
-      text: input.fallbackPrompt,
+      text: input.acceptedInput.prompt,
     },
   ]
 }

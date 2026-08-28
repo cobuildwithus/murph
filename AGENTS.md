@@ -21,6 +21,13 @@ prove behavior at that boundary. Self-reported metadata, echoed configuration,
 and duplicate checks inside one trust domain are diagnostics, not security
 guarantees. Delete them when they add brittleness without reducing real risk.
 
+Do not treat a validated runtime-authored continuation as a new trust domain
+merely because it arrives asynchronously. Preserve Codex's ordinary native
+capabilities across that continuation and constrain only the external effect at
+its existing authority owner. Do not toggle process-wide capabilities to narrow
+one turn unless an independent security, privacy, or authorization boundary
+requires it.
+
 ## Purpose
 
 This file is the compact routing map for agent work in this repository.

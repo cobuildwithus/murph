@@ -5146,7 +5146,7 @@ describe('assistant Codex turn planning', () => {
     expect(plan.assistantContractFingerprint).not.toBe(oldToolContractFingerprint)
   })
 
-  it('keeps bounded history when the automation descriptor compacts and then resumes', async () => {
+  it('replays bounded history once when the automation descriptor compacts, then resumes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -5272,8 +5272,7 @@ describe('assistant Codex turn planning', () => {
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
         .toBe('thread-compact-automation-schema')
-      expect(resumedPlan.conversationHistoryMessages)
-        .toEqual(transitionPlan.conversationHistoryMessages)
+      expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
     } finally {
@@ -5393,8 +5392,7 @@ describe('assistant Codex turn planning', () => {
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
         .toBe('thread-expired-compact-automation-schema')
-      expect(resumedPlan.conversationHistoryMessages)
-        .toEqual(transitionPlan.conversationHistoryMessages)
+      expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
     } finally {
@@ -6971,7 +6969,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('replays bounded committed transcript messages alongside native resume', async () => {
+  it('does not replay committed transcript messages for native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -7013,19 +7011,11 @@ describe('assistant Codex turn planning', () => {
       await appendAssistantTranscriptEntries(vault, session.sessionId, [
         {
           kind: 'user',
-          text: `Background result: ${'x'.repeat(4_500)}`,
+          text: 'Earlier protocol context.',
         },
         {
           kind: 'assistant',
           text: 'Got it.',
-        },
-        {
-          kind: 'user',
-          text: 'Fresh detail: use the green comet label.',
-        },
-        {
-          kind: 'assistant',
-          text: 'I will keep that fresh detail.',
         },
         {
           kind: 'user',
@@ -7054,28 +7044,7 @@ describe('assistant Codex turn planning', () => {
       })
 
       expect(plan.resume?.codexThreadId).toBe('thread-resume')
-      expect(plan.conversationHistoryMessages).toHaveLength(5)
-      expect(plan.conversationHistoryMessages?.[0]).toEqual({
-        content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
-        role: 'assistant',
-      })
-      expect(plan.conversationHistoryMessages?.[1]).toMatchObject({
-        role: 'user',
-      })
-      const boundedBackground =
-        plan.conversationHistoryMessages?.[1]?.content
-      expect(typeof boundedBackground).toBe('string')
-      if (typeof boundedBackground !== 'string') {
-        throw new Error('Expected bounded text conversation history.')
-      }
-      expect(Buffer.byteLength(boundedBackground, 'utf8'))
-        .toBeLessThanOrEqual(4_000)
-      expect(JSON.stringify(plan.conversationHistoryMessages)).toContain(
-        'Fresh detail: use the green comet label.',
-      )
-      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
-        'What supported experiment protocols do we have?',
-      )
+      expect(plan.conversationHistoryMessages).toBeUndefined()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -7152,7 +7121,7 @@ describe('assistant Codex turn planning', () => {
     expect(switchedPlan.conversationHistoryMessages).toBeUndefined()
   })
 
-  it('replays bounded committed transcript messages for notification native resume', async () => {
+  it('does not replay committed transcript messages for notification native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -7223,16 +7192,7 @@ describe('assistant Codex turn planning', () => {
       })
 
       expect(plan.resume?.codexThreadId).toBe('thread-resume')
-      expect(plan.conversationHistoryMessages).toEqual([
-        {
-          content: 'Prior sensitive context.',
-          role: 'user',
-        },
-        {
-          content: 'Prior assistant context.',
-          role: 'assistant',
-        },
-      ])
+      expect(plan.conversationHistoryMessages).toBeUndefined()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

@@ -1133,8 +1133,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         })
       : null
   const resumeCodexThreadId = candidateResumeCodexThreadId
-  const conversationHistoryMessages =
-    await resolveCommittedTranscriptHistoryMessages()
+  const conversationHistoryMessages = resumeCodexThreadId === null
+    ? await resolveCommittedTranscriptHistoryMessages()
+    : []
   const shouldInjectBootstrapContext = resumeCodexThreadId === null
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
   const actualAssistantCliContract = shouldPrepareBootstrapContext

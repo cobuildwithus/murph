@@ -2568,14 +2568,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         assistantAutoReplyGroupItemFromInputCandidate(candidate),
       )
     )
-    if (latePromptInputs.some((promptInput) =>
-      promptInput.trustedHostedImageCompletion !== null
-    )) {
-      // Trusted completion data belongs in the engine-owned turn-context layer.
-      // Leave it queued for the next normal turn instead of steering the raw
-      // system event through user-message content.
-      return { kind: 'no-new-input' }
-    }
     const firstLatePromptInput = latePromptInputs[0] ?? null
     const lateExplicitReplyContext =
       selectionContext.firstItem.summary.groupRoomBatchingEligible &&

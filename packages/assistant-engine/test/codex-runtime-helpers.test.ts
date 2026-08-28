@@ -4361,7 +4361,7 @@ describe('Codex assistant registry helpers', () => {
     expect(appServerInput?.ephemeral).toBeUndefined()
   })
 
-  it('includes bounded committed history in a native resume attempt', async () => {
+  it('does not replay committed history after stale native resume fails', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
 
     codexAppServerMocks.executeCodexAppServerTurn
@@ -4415,22 +4415,15 @@ describe('Codex assistant registry helpers', () => {
       resumeSessionId: 'stale-thread',
     })
     expect(primaryAppServerInput?.prompt).not.toContain('Active turn so far:')
-    expect(primaryAppServerInput?.prompt).toContain(
+    expect(primaryAppServerInput?.prompt).not.toContain(
       'Recent conversation history for context only; do not answer these prior messages:',
     )
-    expect(primaryAppServerInput?.prompt).toContain(
-      'earlier committed user context',
-    )
-    expect(primaryAppServerInput?.prompt).toContain(
-      'earlier committed assistant context',
-    )
-    expect(primaryAppServerInput?.prompt.match(/late follow up/gu)).toHaveLength(1)
     expect(findProviderPromptSizeTraceRawEvent(
       traceEvents,
       'primary',
     )).toMatchObject({
-      conversationHistoryCount: 2,
-      conversationHistoryPresent: true,
+      conversationHistoryCount: 0,
+      conversationHistoryPresent: false,
       providerPromptDiagnosticKind: 'primary',
       resumeCodexThreadIdPresent: true,
     })

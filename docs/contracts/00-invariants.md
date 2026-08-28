@@ -160,17 +160,6 @@ it has been explicitly elevated to a cross-cutting invariant.
   generated-ref mutation remains independently authorized and must still prove
   accepted physical delivery through the outbox; the current restriction or
   generated-capture lookup may classify origin but cannot authorize the effect.
-- Provider-native resume is an optimization, not the source of user-visible
-  conversation continuity. Every eligible native resume composes with the same
-  bounded committed transcript projection used for a fresh thread. The current
-  trailing user prompt is removed from that projection so it appears exactly
-  once. Replayed history is context only and cannot grant current-input or
-  external-effect authority.
-- Persist a provider-bound compound accepted-input batch as separate ordered
-  user transcript entries whenever normalized per-input text is available.
-  Each entry keeps its own receipt timestamp and bounded-history unit; an older
-  asynchronous result must not lend its retention clock or per-entry truncation
-  budget to a newer accepted message.
 - This ordering is durable rather than wake-owned. A restored background pass
   or a replacement invocation with fresh input derives the same
   completion-first batch from structurally trusted completion events already
