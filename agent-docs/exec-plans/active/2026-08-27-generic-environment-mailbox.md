@@ -250,6 +250,13 @@ Updated: 2026-08-28
     exactly one foreground assistant pass.
   - The existing operator migration signal remains the required release
     boundary for old workflow runs.
+  - The private worker now distinguishes an actual model-free mailbox wake
+    from an independent explicit assistant wake instead of treating the
+    mailbox frontier as authority over every workspace wake.
+  - The default owner records a prepared mailbox row before starting unrelated
+    scheduled assistant work. That existing checkpoint exposes the successor
+    frontier to the correct owner without another queue, mode, or persisted
+    handoff field.
 - Composed proof:
   - `pnpm hosted-local e2e foreground-reply-priority` was attempted. The branch
     predates the bundle baseline already merged on `main`; after temporarily

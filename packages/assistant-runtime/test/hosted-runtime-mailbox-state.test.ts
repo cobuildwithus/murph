@@ -517,25 +517,40 @@ describe("hosted runtime system mailbox state", () => {
 
   it("uses the selected model-free frontier as mailbox wake authority", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const earlierDefaultOwned = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_earlier_default_owned",
+      mailboxDedupeKey: "runtime-control:codex-auth:connect",
+      mailboxLaneSeq: "1",
+      wakeKind: "runtime.codex-auth-requested",
+    });
     const browserVaultRefresh = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_browser_vault_refresh",
       mailboxDedupeKey: "runtime-control:browser-vault-refresh:frontier",
-      mailboxLaneSeq: "1",
+      mailboxLaneSeq: "2",
       wakeKind: "runtime.browser-vault-refresh-requested",
     });
     const laterDefaultOwned = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_default_owned",
       mailboxDedupeKey: "runtime-control:codex-auth:disconnect",
-      mailboxLaneSeq: "2",
+      mailboxLaneSeq: "3",
       wakeKind: "runtime.codex-auth-requested",
     });
 
     try {
       await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [browserVaultRefresh, laterDefaultOwned],
+        pending: [earlierDefaultOwned, browserVaultRefresh, laterDefaultOwned],
       }));
 
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        at: "2026-04-27T00:00:00.000Z",
+        executionClass: "default_owned",
+        reason: "assistant",
+      });
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        excludeItemId: earlierDefaultOwned.itemId,
         now: () => "2026-04-27T00:00:00.000Z",
         vaultRoot,
       })).resolves.toEqual({

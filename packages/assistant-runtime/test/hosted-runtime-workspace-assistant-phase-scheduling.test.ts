@@ -1648,6 +1648,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
       async (input) => {
+        if (input?.excludeItemId) {
+          return {
+            at: dueAt,
+            executionClass: "model_free",
+            reason: "mailbox",
+          };
+        }
         if (
           (input?.allowedRouteActions?.length ?? 0) > 0
           || (input?.allowedWakeKinds?.length ?? 0) > 0
@@ -1698,6 +1705,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: predecessorAt,

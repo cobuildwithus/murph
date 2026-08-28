@@ -6272,6 +6272,28 @@ async function runSystemMailboxMaintenancePhase(input: {
     phaseInput,
     state: systemAssistantCronWakeState,
   });
+  const systemMailboxSuccessorWake = systemAssistantCronWakeState.dueNow
+    && !foregroundCausalAttempted
+    && !hasBackgroundSelection
+    && !hasExclusiveSelection
+    && !shouldContinueAssistantLaneAfterSystemMailboxPreparation(
+      systemMailboxPreparation,
+    )
+    && "item" in systemMailboxPreparation
+    && (
+      systemMailboxPreparation.status === "processed"
+      || systemMailboxPreparation.status === "recording"
+    )
+    ? await resolveHostedSystemMailboxNextWakeCandidate({
+        excludeItemId: systemMailboxPreparation.item.itemId,
+        vaultRoot: phaseInput.restored.vaultRoot,
+      })
+    : null;
+  const modelFreeSystemMailboxSuccessorOwnerDue =
+    hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      systemMailboxSuccessorWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    );
   const dirtyDeviceSyncWake = dirtyDeviceSyncMetrics
     ? selectHostedRuntimeWakeCandidate([
         createHostedRuntimeWakeCandidate(
@@ -6366,6 +6388,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     continueAssistantLane: phaseInput.foregroundCausalOnly === true
       ? false
       : !modelFreeSystemMailboxOwnerDue
+        && !modelFreeSystemMailboxSuccessorOwnerDue
         && !foregroundCausalDeliveryOwnsThisPass
         && (
           foregroundCausalAttempted

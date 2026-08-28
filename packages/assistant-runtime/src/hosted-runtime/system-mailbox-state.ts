@@ -360,6 +360,7 @@ export async function resolveHostedSystemMailboxNextWakeAt(input: {
 export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
+  excludeItemId?: string | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedSystemMailboxWakeCandidate> {
@@ -368,12 +369,19 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
     await readHostedSystemMailboxState(input.vaultRoot),
     now,
   );
+  const remainingState = input.excludeItemId
+    ? {
+        pending: state.pending.filter((item) =>
+          item.itemId !== input.excludeItemId
+        ),
+      }
+    : state;
   const modelFreeProjectedState = shouldProjectHostedSystemMailboxModelFreeFrontier({
     allowedRouteActions: input.allowedRouteActions ?? null,
     allowedWakeKinds: input.allowedWakeKinds ?? null,
   })
-    ? projectHostedSystemMailboxModelFreeFrontier(state)
-    : state;
+    ? projectHostedSystemMailboxModelFreeFrontier(remainingState)
+    : remainingState;
   const selectionState = input.allowedWakeKinds == null
     ? modelFreeProjectedState
     : {
