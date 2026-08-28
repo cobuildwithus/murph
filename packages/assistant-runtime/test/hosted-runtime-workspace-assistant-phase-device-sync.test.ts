@@ -1215,14 +1215,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     expect(result.invocationLocalAssistantWakeAt).toBe(retryWakeAt);
   });
 
-  it("labels an exact scheduled cron retry as invocation-local work", async () => {
-    const retryWakeAt = "2026-04-27T00:00:30.000Z";
+  it("carries an exact scheduled cron retry independently of aggregate wake provenance", async () => {
+    const unrelatedWakeAt = "2026-04-27T00:00:20.000Z";
+    const retryObligation = {
+      jobId: "canonical-retry-job",
+      retryAt: "2026-04-27T00:00:30.000Z",
+    };
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationCronRetryWakeAt: retryWakeAt,
+      assistantAutomationCronRetryObligation: retryObligation,
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
-      nextWakeAt: retryWakeAt,
+      nextWakeAt: unrelatedWakeAt,
       redactedLogEntries: [],
     });
 
@@ -1233,8 +1237,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       workspace: null,
     }));
 
-    expect(result.nextWakeAt).toBe(retryWakeAt);
-    expect(result.invocationLocalAssistantWakeAt).toBe(retryWakeAt);
+    expect(result.nextWakeAt).toBe(unrelatedWakeAt);
+    expect(result).not.toHaveProperty("invocationLocalAssistantWakeAt");
+    expect(result.assistantCronRetryObligation).toEqual(retryObligation);
     expect(logRequests
       .flatMap((request) => request.entries)
       .find((entry) => entry.eventCode === "assistant.pass_finished"))

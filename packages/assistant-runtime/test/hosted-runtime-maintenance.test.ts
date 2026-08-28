@@ -5984,15 +5984,20 @@ describe("runHostedAssistantAutomationLane", () => {
       assistantAutomationSelectedInputWakeAt: null,
       nextWakeAt: reminderWakeAt,
     }));
-    expect(result).not.toHaveProperty("assistantAutomationCronRetryWakeAt");
+    expect(result).not.toHaveProperty(
+      "assistantAutomationCronRetryObligation",
+    );
   });
 
-  it("preserves exact scheduled cron retry provenance through hosted metrics", async () => {
-    const retryWakeAt = "2026-04-08T00:00:30.000Z";
+  it("preserves an exact scheduled cron retry obligation through hosted metrics", async () => {
+    const retryObligation = {
+      jobId: "canonical-retry-job",
+      retryAt: "2026-04-08T00:00:30.000Z",
+    };
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
       cronProcessed: 1,
-      cronRetryWakeAt: retryWakeAt,
-      nextWakeAt: retryWakeAt,
+      cronRetryObligation: retryObligation,
+      nextWakeAt: retryObligation.retryAt,
       progressed: true,
       replies: {
         considered: 0,
@@ -6032,8 +6037,8 @@ describe("runHostedAssistantAutomationLane", () => {
     });
 
     expect(result).toEqual(expect.objectContaining({
-      assistantAutomationCronRetryWakeAt: retryWakeAt,
-      nextWakeAt: retryWakeAt,
+      assistantAutomationCronRetryObligation: retryObligation,
+      nextWakeAt: retryObligation.retryAt,
     }));
   });
 

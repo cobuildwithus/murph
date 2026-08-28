@@ -4,6 +4,7 @@ import {
   type AssistantAutomationOperationScope,
   type AssistantAutoReplyHistoryMetrics,
   type AssistantBeforeProviderAcceptedInputsHook,
+  type AssistantCronRetryObligation,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
@@ -156,6 +157,7 @@ export async function runHostedAssistantAutomationLane(input: {
   runtimeAttemptId?: string | null;
   preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
+  assistantCronRetryObligation?: AssistantCronRetryObligation | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
@@ -216,6 +218,12 @@ export async function runHostedAssistantAutomationLane(input: {
         }),
         {
           ...(input.operationScope ? { operationScope: input.operationScope } : {}),
+          ...(input.assistantCronRetryObligation
+            ? {
+                assistantCronRetryObligation:
+                  input.assistantCronRetryObligation,
+              }
+            : {}),
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
@@ -239,6 +247,9 @@ export async function runHostedAssistantAutomationLane(input: {
     : {
         currentTurnDeliveryIntentIds: [],
         cronProcessed: 0,
+        ...(input.assistantCronRetryObligation
+          ? { cronRetryObligation: input.assistantCronRetryObligation }
+          : {}),
         nextWakeAt: null,
         progressed: false,
         redactedLogEntries: [],
@@ -265,8 +276,12 @@ export async function runHostedAssistantAutomationLane(input: {
       : {}),
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationCronProcessed: assistantResult.cronProcessed,
-    ...(assistantResult.cronRetryWakeAt
-      ? { assistantAutomationCronRetryWakeAt: assistantResult.cronRetryWakeAt }
+    ...(input.assistantCronRetryObligation
+      || Object.hasOwn(assistantResult, "cronRetryObligation")
+      ? {
+          assistantAutomationCronRetryObligation:
+            assistantResult.cronRetryObligation ?? null,
+        }
       : {}),
     assistantAutomationCronStatusDeferred:
       assistantResult.timings?.cronStatusDeferred ?? null,
@@ -302,6 +317,7 @@ export async function runHostedAssistantAutomation(
   turnEnvironment?: AssistantTurnEnvironment | null,
   options?: {
     operationScope?: AssistantAutomationOperationScope | null;
+    assistantCronRetryObligation?: AssistantCronRetryObligation | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     commitTimeoutMs?: number | null;
     idleCheckpointDelayMs?: number | null;
@@ -316,7 +332,7 @@ export async function runHostedAssistantAutomation(
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
   cronProcessed: number;
-  cronRetryWakeAt?: string;
+  cronRetryObligation?: AssistantCronRetryObligation;
   nextWakeAt: string | null;
   outboxOnlyNextWakeAt?: string;
   progressed: boolean;
@@ -595,6 +611,9 @@ export async function runHostedAssistantAutomation(
       vaultServices,
       maxPerScan,
       requestId,
+      ...(options?.assistantCronRetryObligation
+        ? { cronRetryObligation: options.assistantCronRetryObligation }
+        : {}),
       shouldDeferCron,
       signal,
       shouldYieldBackgroundMaintenance: options?.shouldYieldBackgroundMaintenance ?? null,
@@ -660,8 +679,8 @@ export async function runHostedAssistantAutomation(
     return {
       currentTurnDeliveryIntentIds,
       cronProcessed: result.cronProcessed,
-      ...(result.cronRetryWakeAt
-        ? { cronRetryWakeAt: result.cronRetryWakeAt }
+      ...(result.cronRetryObligation
+        ? { cronRetryObligation: result.cronRetryObligation }
         : {}),
       nextWakeAt,
       ...(result.outboxOnlyNextWakeAt
@@ -706,6 +725,9 @@ export async function runHostedAssistantAutomation(
       return {
         currentTurnDeliveryIntentIds: [],
         cronProcessed: 0,
+        ...(options?.assistantCronRetryObligation
+          ? { cronRetryObligation: options.assistantCronRetryObligation }
+          : {}),
         nextWakeAt,
         progressed: true,
         redactedLogEntries,
@@ -963,15 +985,14 @@ function resolveHostedAssistantAutomationNextWakeAt(input: {
     };
   };
 }): string | null {
-  return earliestHostedMaintenanceWakeAt(
-    normalizeHostedFutureWakeAt(
-      input.resultNextWakeAt,
-      input.nowMs,
-    ),
-    input.inferBacklogFromSaturation
-      ? resolveHostedAssistantBacklogWakeAt(input)
-      : null,
+  const resultNextWakeAt = normalizeHostedFutureWakeAt(
+    input.resultNextWakeAt,
+    input.nowMs,
   );
+  return resultNextWakeAt
+    ?? (input.inferBacklogFromSaturation
+      ? resolveHostedAssistantBacklogWakeAt(input)
+      : null);
 }
 
 function resolveHostedMaintenanceWakeNowMs(wake: HostedRuntimeEvent): number {
@@ -1198,16 +1219,4 @@ export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
     parserProcessed: 0,
     postCheckpointRecord: null,
   };
-}
-
-
-function earliestHostedMaintenanceWakeAt(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  return Date.parse(left) <= Date.parse(right) ? left : right;
 }

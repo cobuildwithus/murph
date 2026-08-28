@@ -99,9 +99,14 @@ export interface AssistantAutomationScanResult {
   routing: AssistantInboxScanResult
 }
 
+export interface AssistantCronRetryObligation {
+  jobId: string
+  retryAt: string
+}
+
 export interface AssistantAutomationPassResult {
   cronProcessed: number
-  cronRetryWakeAt?: string
+  cronRetryObligation?: AssistantCronRetryObligation
   currentTurnDeliveryIntentIds: string[]
   nextWakeAt: string | null
   outboxOnlyNextWakeAt?: string

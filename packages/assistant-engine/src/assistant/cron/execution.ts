@@ -49,6 +49,7 @@ import {
 } from '../automation/failure-observability.js'
 import {
   computeAssistantAutomationRetryAt,
+  type AssistantCronRetryObligation,
   type AssistantRunEvent,
 } from '../automation/shared.js'
 import {
@@ -406,6 +407,85 @@ export async function claimNextDueAssistantCronJob(
   })
 }
 
+export async function claimAssistantCronRetryObligation(
+  paths: AssistantStatePaths,
+  vault: string,
+  obligation: AssistantCronRetryObligation,
+  runtimeScopeInput: AssistantCronRunnableProjectionInput = {},
+): Promise<ResolvedAssistantCronJob | null> {
+  return withAssistantCronWriteLock(paths, async () => {
+    const retryAtMs = Date.parse(obligation.retryAt)
+    const now = new Date().toISOString()
+    if (!Number.isFinite(retryAtMs) || retryAtMs > Date.parse(now)) {
+      return null
+    }
+    const retryAt = new Date(retryAtMs).toISOString()
+    const [store, canonicalRecords, runtimeStore] = await Promise.all([
+      readAssistantCronStore(paths),
+      listCanonicalAssistantCronRecords(vault, ['active']),
+      readAssistantCronCanonicalRuntimeStore(paths),
+    ])
+    const projection = buildRunnableAssistantCronJobProjection({
+      canonicalRecords,
+      localStore: store,
+      runtimeScopeInput,
+      runtimeStore,
+    })
+    const localJob = projection.visibleLocalStore.jobs.find(
+      (job) => job.jobId === obligation.jobId,
+    )
+    if (localJob) {
+      if (
+        localJob.state.nextRunAt !== retryAt
+        || localJob.state.lastFailedAt === null
+        || localJob.state.consecutiveFailures === 0
+        || localJob.updatedAt !== localJob.state.lastFailedAt
+        || !isAssistantCronJobDue(localJob, now)
+      ) {
+        return null
+      }
+
+      const resolved: ResolvedAssistantCronJob = {
+        kind: 'local',
+        job: localJob,
+      }
+      return claimResolvedAssistantCronJob({
+        paths,
+        job: resolved,
+      })
+    }
+
+    const canonicalEntry = projection.canonicalEntries.find(
+      (entry) => entry.job.jobId === obligation.jobId,
+    )
+    if (
+      !canonicalEntry
+      || canonicalEntry.runtimeState.state.retryAfterAt !== retryAt
+      || canonicalEntry.runtimeState.state.lastFailedAt === null
+      || canonicalEntry.runtimeState.state.consecutiveFailures === 0
+      || canonicalEntry.runtimeState.updatedAt
+        !== canonicalEntry.runtimeState.state.lastFailedAt
+      || Date.parse(canonicalEntry.source.updatedAt)
+        > Date.parse(canonicalEntry.runtimeState.state.lastFailedAt)
+      || !isAssistantCronJobDue(canonicalEntry.job, now)
+    ) {
+      return null
+    }
+
+    const resolved: ResolvedAssistantCronJob = {
+      kind: 'canonical',
+      source: canonicalEntry.source,
+      runtimeState: canonicalEntry.runtimeState,
+      job: canonicalEntry.job,
+    }
+    return claimResolvedAssistantCronJob({
+      paths,
+      job: resolved,
+      occurrenceFallbackAt: retryAt,
+    })
+  })
+}
+
 export function assertAssistantCronJobRunnableInRuntime(input: {
   job: ResolvedAssistantCronJob
 } & AssistantCronRuntimeScopeInput): void {
@@ -508,7 +588,7 @@ interface ExecuteClaimedAssistantCronJobInput {
 interface AssistantCronRunExecutionResult {
   job: AssistantCronJob
   removedAfterRun: boolean
-  retryWakeAt: string | null
+  retryObligation: AssistantCronRetryObligation | null
   run: AssistantCronRunRecord
   runErrorCode: string | null
   runFailureContext: Record<string, AssistantSafeFailureContextValue> | null
@@ -1284,7 +1364,7 @@ export async function executeClaimedAssistantCronJob(
         return {
           job: claimedJob,
           removedAfterRun: true,
-          retryWakeAt: null,
+          retryObligation: null,
         }
       }
 
@@ -1318,7 +1398,7 @@ export async function executeClaimedAssistantCronJob(
       return {
         job: finalizedJob,
         removedAfterRun,
-        retryWakeAt: resolveScheduledCodexConnectionRetryWakeAt({
+        retryObligation: resolveScheduledCodexConnectionRetryObligation({
           failureConsumesOccurrence,
           finalizedJob,
           foregroundYielded,
@@ -1345,7 +1425,7 @@ export async function executeClaimedAssistantCronJob(
           runtimeState: currentRuntimeState,
         }),
         removedAfterRun: false,
-        retryWakeAt: null,
+        retryObligation: null,
       }
     }
     await appendAssistantCronRun(input.paths, run)
@@ -1436,7 +1516,7 @@ export async function executeClaimedAssistantCronJob(
     return {
       job: persistedJob,
       removedAfterRun,
-      retryWakeAt: resolveScheduledCodexConnectionRetryWakeAt({
+      retryObligation: resolveScheduledCodexConnectionRetryObligation({
         failureConsumesOccurrence,
         finalizedJob: persistedJob,
         foregroundYielded,
@@ -1459,7 +1539,7 @@ export async function executeClaimedAssistantCronJob(
   return {
     job: finalized.job,
     removedAfterRun: finalized.removedAfterRun,
-    retryWakeAt: finalized.retryWakeAt,
+    retryObligation: finalized.retryObligation,
     run,
     // Typed failure class (e.g. ASSISTANT_CODEX_USAGE_LIMIT) for runtime-log
     // observability; the persisted run record keeps only the error text.
@@ -1492,7 +1572,7 @@ function resolveAssistantCronFailureContext(
   return Object.keys(codexContext).length > 0 ? codexContext : null
 }
 
-function resolveScheduledCodexConnectionRetryWakeAt(input: {
+function resolveScheduledCodexConnectionRetryObligation(input: {
   failureConsumesOccurrence: boolean
   finalizedJob: AssistantCronJob
   foregroundYielded: boolean
@@ -1500,7 +1580,7 @@ function resolveScheduledCodexConnectionRetryWakeAt(input: {
   run: AssistantCronRunRecord
   runErrorCode: string | null
   trigger: AssistantCronTrigger
-}): string | null {
+}): AssistantCronRetryObligation | null {
   if (
     input.trigger !== 'scheduled' ||
     input.run.outcome !== 'failed' ||
@@ -1513,7 +1593,13 @@ function resolveScheduledCodexConnectionRetryWakeAt(input: {
     return null
   }
 
-  return input.finalizedJob.state.nextRunAt
+  const retryAt = input.finalizedJob.state.nextRunAt
+  return retryAt
+    ? {
+        jobId: input.finalizedJob.jobId,
+        retryAt,
+      }
+    : null
 }
 
 async function resolveResearchOrientedManagedAutomationOnboardingSkipError(input: {

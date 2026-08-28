@@ -79,6 +79,7 @@ const runLoopMocks = vi.hoisted(() => ({
   maintainAssistantAutoReplyRouteState: vi.fn(),
   maybeRunAssistantRuntimeMaintenance: vi.fn(),
   maybeThrowInjectedAssistantFault: vi.fn(),
+  processAssistantCronRetryObligation: vi.fn(),
   processDueAssistantCronJobs: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   recordAssistantDiagnosticEvent: vi.fn(),
@@ -188,6 +189,8 @@ vi.mock('@murphai/vault-usecases/vault-services', () => ({
 
 vi.mock('../src/assistant/cron.ts', () => ({
   getAssistantCronStatus: runLoopMocks.getAssistantCronStatus,
+  processAssistantCronRetryObligation:
+    runLoopMocks.processAssistantCronRetryObligation,
   processDueAssistantCronJobsLocal: runLoopMocks.processDueAssistantCronJobs,
 }))
 
@@ -1135,8 +1138,17 @@ beforeEach(() => {
     .mockResolvedValue({ changed: false, trusted: true })
   runLoopMocks.maybeRunAssistantRuntimeMaintenance.mockReset().mockResolvedValue(undefined)
   runLoopMocks.maybeThrowInjectedAssistantFault.mockReset().mockImplementation(() => {})
+  runLoopMocks.processAssistantCronRetryObligation
+    .mockReset()
+    .mockResolvedValue({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
+    })
   runLoopMocks.processDueAssistantCronJobs.mockReset().mockResolvedValue({
+    failed: 0,
     processed: 0,
+    succeeded: 0,
   })
   runLoopMocks.readAssistantAutomationState
     .mockReset()
@@ -13810,29 +13822,131 @@ describe('assistant automation run loop', () => {
     )
   })
 
-  it('preserves the exact scheduled cron retry wake through the automation pass', async () => {
-    const retryWakeAt = '2026-04-08T00:00:30.000Z'
+  it('preserves the exact scheduled cron retry obligation through the automation pass', async () => {
+    const obligation = {
+      jobId: 'canonical-retry-job',
+      retryAt: '2026-04-08T00:00:30.000Z',
+    }
     runLoopMocks.processDueAssistantCronJobs.mockResolvedValueOnce({
       failed: 1,
       processed: 1,
-      retryWakeAt,
+      retryObligation: obligation,
       succeeded: 0,
     })
     runLoopMocks.getAssistantCronStatus.mockResolvedValueOnce({
-      nextRunAt: retryWakeAt,
+      nextRunAt: obligation.retryAt,
     })
     const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
       '../src/assistant/automation/run-loop.ts',
     )
 
     await expect(runLoop.runAssistantAutomationPass({
-      requestId: 'request-scheduled-cron-retry-wake',
+      requestId: 'request-scheduled-cron-retry-obligation',
       vault: '/tmp/assistant-automation-vault',
     })).resolves.toMatchObject({
       cronProcessed: 1,
-      cronRetryWakeAt: retryWakeAt,
-      nextWakeAt: retryWakeAt,
+      cronRetryObligation: obligation,
+      nextWakeAt: obligation.retryAt,
     })
+  })
+
+  it('does not let unrelated aggregate cron work replace a future exact retry obligation', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T00:00:20.000Z'))
+    const retryingJobA = {
+      jobId: 'canonical-retry-job-a',
+      retryAt: '2026-04-08T00:00:30.000Z',
+    }
+    runLoopMocks.processDueAssistantCronJobs.mockResolvedValueOnce({
+      failed: 1,
+      processed: 1,
+      retryObligation: {
+        jobId: 'canonical-unrelated-job-b',
+        retryAt: '2026-04-08T00:00:50.000Z',
+      },
+      succeeded: 0,
+    })
+    runLoopMocks.getAssistantCronStatus.mockResolvedValueOnce({
+      nextRunAt: '2026-04-08T00:00:25.000Z',
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const result = await runLoop.runAssistantAutomationPass({
+      cronRetryObligation: retryingJobA,
+      requestId: 'request-unrelated-cron-before-exact-retry',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.processAssistantCronRetryObligation).not.toHaveBeenCalled()
+    expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
+    expect(result.cronRetryObligation).toEqual(retryingJobA)
+  })
+
+  it('executes a due exact cron retry without scanning aggregate due jobs', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T00:00:30.000Z'))
+    const obligation = {
+      jobId: 'canonical-retry-job',
+      retryAt: '2026-04-08T00:00:30.000Z',
+    }
+    runLoopMocks.processAssistantCronRetryObligation.mockResolvedValueOnce({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const result = await runLoop.runAssistantAutomationPass({
+      cronRetryObligation: obligation,
+      requestId: 'request-exact-scheduled-cron-retry',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.processAssistantCronRetryObligation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        obligation,
+        vault: '/tmp/assistant-automation-vault',
+      }),
+    )
+    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+    expect(result.cronProcessed).toBe(1)
+    expect(result).not.toHaveProperty('cronRetryObligation')
+  })
+
+  it('keeps a due exact cron retry pending while fresh input defers cron work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T00:00:30.000Z'))
+    const obligation = {
+      jobId: 'canonical-retry-job',
+      retryAt: '2026-04-08T00:00:30.000Z',
+    }
+    const shouldDeferCron = vi.fn(() => true)
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const result = await runLoop.runAssistantAutomationPass({
+      cronRetryObligation: obligation,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-fresh-input-before-exact-cron-retry',
+      shouldDeferCron,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(shouldDeferCron).toHaveBeenCalled()
+    expect(runLoopMocks.processAssistantCronRetryObligation).not.toHaveBeenCalled()
+    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+    expect(result.cronRetryObligation).toEqual(obligation)
   })
 
   it('marks the selected wake as outbox-only unless model-capable work ties it', async () => {

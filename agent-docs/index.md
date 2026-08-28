@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-27
+Last verified: 2026-08-28
 
 ## Purpose
 
@@ -29,6 +29,10 @@ reuse, and focused proof are specified by
 
 Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
 expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
+
+Hosted scheduled connection-loss retries keep one ephemeral exact-job obligation
+independent from aggregate assistant wakes; deadline revalidation and stale no-op
+behavior are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
 Kernel browser-session authority is independent of the optional Live View
 capability. Web-owned automation may continue when that viewer cannot be safely

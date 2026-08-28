@@ -8,7 +8,9 @@ import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import {
   getAssistantCronStatus,
+  processAssistantCronRetryObligation,
   processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
+  type AssistantCronRetryObligation,
 } from '../cron.js'
 import {
   appendAssistantHostedDynamicContextPrompt,
@@ -105,6 +107,7 @@ export interface RunAssistantAutomationInput {
   operationScope?: AssistantAutomationOperationScope | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
+  cronRetryObligation?: AssistantCronRetryObligation | null
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   inboxServices?: InboxServices
   maxPerScan?: number
@@ -1164,25 +1167,49 @@ export async function runAssistantAutomationPass(
     input.shouldDeferCron?.() === true
   const shouldDeferCron =
     shouldDeferCronAfterHostedReply || shouldDeferCronByCaller
-  const cronResult = applyCanonicalWrites && !shouldDeferCron
-    ? await processDueAssistantCronJobs({
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        executionContext,
-        onEvent: input.onEvent,
-        onTraceEvent: input.onTraceEvent,
-        shouldYield: input.shouldDeferCron ?? null,
-        vault: input.vault,
-        signal: input.signal,
-        shouldYieldBackgroundMaintenance:
-          input.shouldYieldBackgroundMaintenance ?? null,
-        turnEnvironment: input.turnEnvironment ?? null,
-        limit: input.maxPerScan,
+  let cronRetryObligation = normalizeAssistantCronRetryObligation(
+    input.cronRetryObligation ?? null,
+  )
+  const shouldRunCron = applyCanonicalWrites && !shouldDeferCron
+  const dueCronRetryObligation =
+    shouldRunCron
+    && cronRetryObligation !== null
+    && Date.parse(cronRetryObligation.retryAt) <= Date.now()
+      ? cronRetryObligation
+      : null
+  const ranExactRetry = dueCronRetryObligation !== null
+  const cronInput = {
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    executionContext,
+    onEvent: input.onEvent,
+    onTraceEvent: input.onTraceEvent,
+    shouldYield: input.shouldDeferCron ?? null,
+    vault: input.vault,
+    signal: input.signal,
+    shouldYieldBackgroundMaintenance:
+      input.shouldYieldBackgroundMaintenance ?? null,
+    turnEnvironment: input.turnEnvironment ?? null,
+  }
+  const cronResult = ranExactRetry
+    ? await processAssistantCronRetryObligation({
+        ...cronInput,
+        obligation: dueCronRetryObligation,
       })
-    : {
-        failed: 0,
-        processed: 0,
-        succeeded: 0,
-      }
+    : shouldRunCron
+      ? await processDueAssistantCronJobs({
+          ...cronInput,
+          limit: input.maxPerScan,
+        })
+      : {
+          failed: 0,
+          processed: 0,
+          succeeded: 0,
+        }
+  if (ranExactRetry) {
+    cronRetryObligation = cronResult.retryObligation ?? null
+  } else if (!cronRetryObligation && cronResult.retryObligation) {
+    cronRetryObligation = cronResult.retryObligation
+  }
 
   const skipStatusRefresh =
     executionContext?.hosted != null
@@ -1249,8 +1276,8 @@ export async function runAssistantAutomationPass(
 
   return {
     cronProcessed: cronResult.processed,
-    ...(cronResult.retryWakeAt
-      ? { cronRetryWakeAt: cronResult.retryWakeAt }
+    ...(cronRetryObligation
+      ? { cronRetryObligation }
       : {}),
     currentTurnDeliveryIntentIds:
       scanResult.currentTurnDeliveryIntentIds,
@@ -1261,6 +1288,22 @@ export async function runAssistantAutomationPass(
     progressed,
     replies,
     routing: scanResult.routing,
+  }
+}
+
+function normalizeAssistantCronRetryObligation(
+  obligation: AssistantCronRetryObligation | null,
+): AssistantCronRetryObligation | null {
+  if (!obligation || obligation.jobId.length === 0) {
+    return null
+  }
+  const retryAtMs = Date.parse(obligation.retryAt)
+  if (!Number.isFinite(retryAtMs)) {
+    return null
+  }
+  return {
+    jobId: obligation.jobId,
+    retryAt: new Date(retryAtMs).toISOString(),
   }
 }
 

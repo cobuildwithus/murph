@@ -177,6 +177,7 @@ import {
   listAssistantCronJobs,
   listAssistantCronPendingDeliveryIntentIds,
   listAssistantCronRuns,
+  processAssistantCronRetryObligation,
   processDueAssistantCronJobsLocal,
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
@@ -7625,7 +7626,7 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-connection-retry-wake-',
     )
-    await addAssistantCronJob({
+    const job = await addAssistantCronJob({
       channel: 'telegram',
       deliveryTarget: 'room-1',
       name: 'connection retry reminder',
@@ -7660,10 +7661,188 @@ describe('assistant cron runtime orchestration', () => {
       processed: 1,
       succeeded: 0,
     })
-    expect(summary).toHaveProperty(
-      'retryWakeAt',
-      '2026-04-08T09:05:30.000Z',
+    expect(summary.retryObligation).toEqual({
+      jobId: job.jobId,
+      retryAt: '2026-04-08T09:05:30.000Z',
+    })
+  })
+
+  it('runs the exact canonical retry after earlier unrelated work without executing another due job', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:05:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-exact-retry-ordering-',
     )
+    const retryingJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-a',
+      name: 'retrying job a',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Run exact job A.',
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      },
+      vault: vaultRoot,
+    })
+    await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-b',
+      name: 'normal job b',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Run normal job B.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T09:05:20.000Z',
+      },
+      vault: vaultRoot,
+    })
+    await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-c',
+      name: 'unrelated due job c',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Run unrelated job C.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T09:05:25.000Z',
+      },
+      vault: vaultRoot,
+    })
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(
+      createCodexConnectionLostError(),
+    )
+
+    const failed = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+    expect(failed.retryObligation).toEqual({
+      jobId: retryingJob.jobId,
+      retryAt: '2026-04-08T09:05:30.000Z',
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T09:05:20.000Z'))
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(readScheduledProviderInstructions()).toEqual([
+      expect.stringContaining('Run exact job A.'),
+      expect.stringContaining('Run normal job B.'),
+    ])
+
+    vi.setSystemTime(new Date('2026-04-08T09:05:30.000Z'))
+    await expect(processAssistantCronRetryObligation({
+      obligation: failed.retryObligation!,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(readScheduledProviderInstructions()).toEqual([
+      expect.stringContaining('Run exact job A.'),
+      expect.stringContaining('Run normal job B.'),
+      expect.stringContaining('Run exact job A.'),
+    ])
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(readScheduledProviderInstructions().at(-1)).toContain(
+      'Run unrelated job C.',
+    )
+  })
+
+  it('no-ops a disabled exact canonical retry obligation', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:05:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-exact-retry-disabled-',
+    )
+    const { job, obligation } = await createCanonicalConnectionLostRetry({
+      name: 'disabled retry job',
+      vaultRoot,
+    })
+    vi.setSystemTime(new Date('2026-04-08T09:05:10.000Z'))
+    await setAssistantCronJobEnabled(vaultRoot, job.jobId, false)
+    vi.setSystemTime(new Date(obligation.retryAt))
+
+    await expect(processAssistantCronRetryObligation({
+      obligation,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+  })
+
+  it('no-ops an exact canonical retry obligation after the job changes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:05:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-exact-retry-changed-',
+    )
+    const { job, obligation } = await createCanonicalConnectionLostRetry({
+      name: 'changed retry job',
+      vaultRoot,
+    })
+    vi.setSystemTime(new Date('2026-04-08T09:05:10.000Z'))
+    await setAssistantCronJobTarget({
+      channel: 'telegram',
+      deliveryTarget: 'replacement-room',
+      job: job.jobId,
+      vault: vaultRoot,
+    })
+    vi.setSystemTime(new Date(obligation.retryAt))
+
+    await expect(processAssistantCronRetryObligation({
+      obligation,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+  })
+
+  it('no-ops a stale exact canonical retry timestamp', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:05:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-exact-retry-stale-',
+    )
+    const { obligation } = await createCanonicalConnectionLostRetry({
+      name: 'stale retry job',
+      vaultRoot,
+    })
+    vi.setSystemTime(new Date(obligation.retryAt))
+
+    await expect(processAssistantCronRetryObligation({
+      obligation: {
+        ...obligation,
+        retryAt: '2026-04-08T09:05:29.000Z',
+      },
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
   })
 
   it('clears retry provenance when that job retries successfully in the same scan', async () => {
@@ -13226,6 +13405,71 @@ async function createCanonicalJob(
     },
     threadIsDirect: true,
     vault: vaultRoot,
+  })
+}
+
+function createCodexConnectionLostError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_CODEX_CONNECTION_LOST',
+    'Codex app-server lost its connection while waiting for the model.',
+    {
+      codexErrorInfo: 'responseStreamDisconnected',
+      codexErrorInfoPresent: true,
+      connectionLost: true,
+      recoverableConnectionLoss: true,
+      retryable: true,
+    },
+  )
+}
+
+async function createCanonicalConnectionLostRetry(input: {
+  name: string
+  vaultRoot: string
+}): Promise<{
+  job: AssistantCronJob
+  obligation: { jobId: string; retryAt: string }
+}> {
+  const job = await addAssistantCronJob({
+    channel: 'telegram',
+    deliveryTarget: 'room-1',
+    name: input.name,
+    now: new Date('2026-04-08T08:00:00.000Z'),
+    prompt: `Run ${input.name}.`,
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '09:00',
+    },
+    vault: input.vaultRoot,
+  })
+  cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(
+    createCodexConnectionLostError(),
+  )
+  const summary = await processDueAssistantCronJobsLocal({
+    limit: 1,
+    vault: input.vaultRoot,
+  })
+  expect(summary).toMatchObject({
+    failed: 1,
+    processed: 1,
+    succeeded: 0,
+  })
+  expect(summary.retryObligation).toEqual({
+    jobId: job.jobId,
+    retryAt: '2026-04-08T09:05:30.000Z',
+  })
+  if (!summary.retryObligation) {
+    throw new Error('Expected a canonical connection-loss retry obligation.')
+  }
+  return {
+    job,
+    obligation: summary.retryObligation,
+  }
+}
+
+function readScheduledProviderInstructions(): string[] {
+  return cronMocks.sendAssistantMessageLocal.mock.calls.map((call) => {
+    const input = call[0] as { instructions?: string }
+    return input.instructions ?? ''
   })
 }
 

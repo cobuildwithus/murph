@@ -41,10 +41,12 @@ The live ownership split is:
   invocation and passes the single `idleCheckpointDelayMs` runtime policy knob.
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
-  assistant phase may run before that floor without checkpointing, and when the
-  same phase proves one later exact scheduled connection-loss retry behind an
-  earlier invocation-local assistant wake, that retry may remain as the single
-  projected successor after the earlier wake is serviced. The
+  assistant phase may run before that floor without checkpointing. Separately,
+  the runtime may carry one ephemeral scheduled connection-loss retry obligation
+  containing the existing cron job id and persisted retry time. Fresh
+  conversation work stays first; at the deadline the cron owner revalidates that
+  exact job and executes only it, while stale, disabled, changed, completed, or
+  running obligations no-op. The
   exact phone-call-result, usage-referral-reward, legacy `aask_done_*`, and
   current `aask_private_*` private
   Assistant Ask notification families may also run queue-only through their
@@ -3206,12 +3208,16 @@ In production, the configured idle checkpoint delay is at least 180 seconds,
 and every dirty foreground pass restarts that hard lower bound. The exact
 assistant wake projected directly by the current foreground assistant phase may
 run before that boundary against the warm projected state, without entering
-maintenance or publishing a snapshot. When that same phase proves one later
-exact scheduled connection-loss retry behind an earlier invocation-local
-assistant wake, servicing the earlier wake preserves that retry as the single
-projected hot successor; no aggregate future cron wake inherits this provenance.
-A no-progress hot attempt preserves its exact wake without replaying it again in
-the same invocation; a dirty progressed attempt restarts the full idle window.
+maintenance or publishing a snapshot. Independently, one ephemeral scheduled
+connection-loss retry obligation carries the existing cron job id plus its
+persisted retry time. An earlier selected-input or aggregate assistant wake does
+not consume or replace that obligation. Fresh conversation input stays first;
+at the retry deadline the existing cron owner revalidates the exact job and
+executes only it. Removed, disabled, changed, already-completed, running, and
+stale obligations no-op, and unrelated aggregate cron jobs do not run merely
+because the exact retry wake fired. A no-progress hot attempt preserves its
+exact wake without replaying it again in the same invocation; a dirty progressed
+attempt restarts the full idle window.
 Mailbox budget exhaustion, pending durable checkpoint effects, staged durable
 follow-ups, and inherited, committed, or otherwise unproven wake keys remain
 checkpoint-first and do not shorten the routine floor. Shutdown does not use the

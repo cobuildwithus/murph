@@ -41,6 +41,7 @@ import type {
 import {
   assertAssistantCronJobRunnableInRuntime,
   buildRunnableAssistantCronJobProjection,
+  claimAssistantCronRetryObligation,
   claimNextDueAssistantCronJob,
   claimResolvedAssistantCronJob,
   computeAssistantCronBackgroundMaintenanceYieldRetryAt,
@@ -50,6 +51,7 @@ import {
 } from './cron/execution.ts'
 import {
   earliestAssistantAutomationWakeAt,
+  type AssistantCronRetryObligation,
   type AssistantRunEvent,
 } from './automation/shared.ts'
 import {
@@ -111,6 +113,7 @@ export {
 export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
 export type {
   AddAssistantCronJobInput,
+  AssistantCronRetryObligation,
   InstallAssistantCronPresetInput,
   InstallAssistantCronPresetResult,
   UpsertAssistantCronAutomationInput,
@@ -146,7 +149,7 @@ export interface AssistantCronTargetMutationResult {
 export interface AssistantCronProcessDueResult {
   failed: number
   processed: number
-  retryWakeAt?: string
+  retryObligation?: AssistantCronRetryObligation
   succeeded: number
 }
 
@@ -170,6 +173,13 @@ export interface ProcessDueAssistantCronJobsInput {
   shouldYieldBackgroundMaintenance?: (() => boolean) | null
   turnEnvironment?: AssistantTurnEnvironment | null
   vault: string
+}
+
+export type ProcessAssistantCronRetryObligationInput = Omit<
+  ProcessDueAssistantCronJobsInput,
+  'limit'
+> & {
+  obligation: AssistantCronRetryObligation
 }
 
 export interface SetAssistantCronJobTargetInput extends AssistantCronTargetInput {
@@ -637,8 +647,11 @@ export async function processDueAssistantCronJobsLocal(
     succeeded: 0,
     failed: 0,
   }
-  const retryWakeAtByJobId = new Map<string, string>()
-  if (input.shouldYield?.() === true) {
+  const retryObligationsByJobId = new Map<
+    string,
+    AssistantCronRetryObligation
+  >()
+  if (input.signal?.aborted || input.shouldYield?.() === true) {
     return summary
   }
 
@@ -706,43 +719,129 @@ export async function processDueAssistantCronJobsLocal(
 
       throw error
     }
-    summary.processed += 1
-
-    if (assistantCronRunCountsAsProcessSuccess(result.run)) {
-      summary.succeeded += 1
-    } else if (result.run.outcome === 'failed') {
-      summary.failed += 1
-    }
-    if (result.retryWakeAt) {
-      retryWakeAtByJobId.set(result.job.jobId, result.retryWakeAt)
-    } else {
-      retryWakeAtByJobId.delete(result.job.jobId)
-    }
-    const retryWakeAt = earliestAssistantAutomationWakeAt(
-      ...retryWakeAtByJobId.values(),
-    )
-    if (retryWakeAt) {
-      summary.retryWakeAt = retryWakeAt
-    } else {
-      delete summary.retryWakeAt
-    }
-    emitAssistantCronJobCompletedEvent({
-      errorCode: result.runErrorCode,
-      errorMessage: result.run.error,
-      errorPresent: result.run.error !== null,
-      failureContext: result.runFailureContext,
-      job: result.job,
+    recordAssistantCronProcessedJob({
+      claimed,
+      executionContext: input.executionContext,
       onEvent: input.onEvent,
-      routeValidationProfile:
-        assistantCronDeliveryRouteValidationProfileForExecutionContext(
-          input.executionContext,
-        ),
-      runOutcome: result.run.outcome,
-      sourceKind: claimed.kind === 'canonical' ? claimed.source.kind : 'local',
+      result,
+      summary,
     })
+    if (result.retryObligation) {
+      retryObligationsByJobId.set(result.job.jobId, result.retryObligation)
+    } else {
+      retryObligationsByJobId.delete(result.job.jobId)
+    }
+    const retryObligation = [...retryObligationsByJobId.values()].sort(
+      (left, right) => Date.parse(left.retryAt) - Date.parse(right.retryAt),
+    )[0]
+    if (retryObligation) {
+      summary.retryObligation = retryObligation
+    } else {
+      delete summary.retryObligation
+    }
   }
 
   return summary
+}
+
+export async function processAssistantCronRetryObligation(
+  input: ProcessAssistantCronRetryObligationInput,
+): Promise<AssistantCronProcessDueResult> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantCronState(paths)
+  const summary: AssistantCronProcessDueResult = {
+    processed: 0,
+    succeeded: 0,
+    failed: 0,
+  }
+  if (input.signal?.aborted || input.shouldYield?.() === true) {
+    return {
+      ...summary,
+      retryObligation: input.obligation,
+    }
+  }
+
+  const claimed = await claimAssistantCronRetryObligation(
+    paths,
+    input.vault,
+    input.obligation,
+    {
+      executionContext: input.executionContext,
+      shouldYieldBackgroundMaintenance:
+        input.shouldYieldBackgroundMaintenance ?? null,
+      turnEnvironment: input.turnEnvironment ?? null,
+    },
+  )
+  if (!claimed) {
+    return summary
+  }
+
+  let result: Awaited<ReturnType<typeof executeClaimedAssistantCronJob>>
+  try {
+    result = await executeClaimedAssistantCronJob({
+      deliveryDispatchMode: input.deliveryDispatchMode,
+      executionContext: input.executionContext,
+      job: claimed,
+      onEvent: input.onEvent,
+      onTraceEvent: input.onTraceEvent,
+      paths,
+      shouldYield: input.shouldYield ?? null,
+      shouldYieldBackgroundMaintenance:
+        input.shouldYieldBackgroundMaintenance ?? null,
+      signal: input.signal,
+      trigger: 'scheduled',
+      turnEnvironment: input.turnEnvironment ?? null,
+      vault: input.vault,
+    })
+  } catch (error) {
+    if (isAssistantCronBackgroundMaintenanceYieldError(error)) {
+      summary.processed = 1
+      return summary
+    }
+    throw error
+  }
+
+  recordAssistantCronProcessedJob({
+    claimed,
+    executionContext: input.executionContext,
+    onEvent: input.onEvent,
+    result,
+    summary,
+  })
+  if (result.retryObligation) {
+    summary.retryObligation = result.retryObligation
+  }
+  return summary
+}
+
+function recordAssistantCronProcessedJob(input: {
+  claimed: ResolvedAssistantCronJob
+  executionContext?: AssistantExecutionContext | null
+  onEvent?: (event: AssistantRunEvent) => void
+  result: Awaited<ReturnType<typeof executeClaimedAssistantCronJob>>
+  summary: AssistantCronProcessDueResult
+}): void {
+  input.summary.processed += 1
+  if (assistantCronRunCountsAsProcessSuccess(input.result.run)) {
+    input.summary.succeeded += 1
+  } else if (input.result.run.outcome === 'failed') {
+    input.summary.failed += 1
+  }
+  emitAssistantCronJobCompletedEvent({
+    errorCode: input.result.runErrorCode,
+    errorMessage: input.result.run.error,
+    errorPresent: input.result.run.error !== null,
+    failureContext: input.result.runFailureContext,
+    job: input.result.job,
+    onEvent: input.onEvent,
+    routeValidationProfile:
+      assistantCronDeliveryRouteValidationProfileForExecutionContext(
+        input.executionContext,
+      ),
+    runOutcome: input.result.run.outcome,
+    sourceKind:
+      input.claimed.kind === 'canonical' ? input.claimed.source.kind : 'local',
+  })
 }
 
 function assistantCronRunCountsAsProcessSuccess(

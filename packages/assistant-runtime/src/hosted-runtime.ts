@@ -62,6 +62,7 @@ import {
   readAssistantProviderStartMonotonicTickMs,
   recordAssistantRuntimeIssueInputsBestEffort,
   resolveAssistantDiagnosticsPolicy,
+  type AssistantCronRetryObligation,
   type AssistantProviderStartCriticalPathContext,
 } from "@murphai/assistant-engine";
 import {
@@ -3522,6 +3523,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         unservicedRecheckWakeKeys.add(wakeKey);
       }
     };
+    let assistantCronRetryObligation: AssistantCronRetryObligation | null = null;
     let runtimePassOrdinal = 0;
     const runWorkspaceForegroundPass = async (passInput: {
       foregroundCausalOnly?: boolean;
@@ -3637,10 +3639,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     },
                   }
                 : foregroundRuntime;
-              return await (
+              const assistantPhaseResult = await (
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
+                ...(assistantCronRetryObligation
+                  ? { assistantCronRetryObligation }
+                  : {}),
                 foregroundCausalOnly:
                   passInput.foregroundCausalOnly === true,
                 currentAssistantInputId: () => currentAssistantInputId,
@@ -3717,6 +3722,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                 signal: passSignal,
               });
+              if (
+                Object.hasOwn(
+                  assistantPhaseResult,
+                  "assistantCronRetryObligation",
+                )
+                || assistantCronRetryObligation === null
+              ) {
+                return assistantPhaseResult;
+              }
+              return {
+                ...assistantPhaseResult,
+                assistantCronRetryObligation,
+              };
             } finally {
               currentAssistantInputId = null;
               // A reply can acquire terminal evidence before a later phase error.
@@ -3860,7 +3878,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     // checkpointed and serviced.
     let pendingWakeAfterDueAssistantService: HostedRuntimeHeldDurableWake | null = null;
     let invocationLocalProjectedAssistantWakeKey: string | null = null;
-    let projectedAssistantCronRetrySuccessorWakeKey: string | null = null;
     let hotProjectedAssistantWakeAttemptedKey: string | null = null;
     let durableCheckpointFollowUpPending = false;
     let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> =
@@ -4161,7 +4178,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         nextWakeReason: workspace.nextWakeReason ?? null,
       };
       invocationLocalProjectedAssistantWakeKey = null;
-      projectedAssistantCronRetrySuccessorWakeKey = null;
       redactedStatus = workspace.redactedStatus
         ?? omitHostedCanonicalWriteReceiptLogStatusFields(redactedStatus)
         ?? {};
@@ -4210,7 +4226,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
         : null;
       invocationLocalProjectedAssistantWakeKey = null;
-      projectedAssistantCronRetrySuccessorWakeKey = null;
       durableCheckpointFollowUpPending = true;
       runtimeStateDirty = true;
       ensureIdleCheckpointStartBy(Date.now());
@@ -4873,9 +4888,17 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const checkpointPendingBeforePass = runtimeStateDirty;
         const previousInvocationLocalProjectedAssistantWakeKey =
           invocationLocalProjectedAssistantWakeKey;
-        const previousCronRetrySuccessorWakeKey =
-          projectedAssistantCronRetrySuccessorWakeKey;
         const previousPendingWakeKey = buildHostedRuntimeWakeKey(previousPendingWake);
+        if (
+          passResult.assistantPhaseResult !== null
+          && Object.hasOwn(
+            passResult.assistantPhaseResult,
+            "assistantCronRetryObligation",
+          )
+        ) {
+          assistantCronRetryObligation =
+            passResult.assistantPhaseResult.assistantCronRetryObligation ?? null;
+        }
         pendingDurableCheckpointEffects.push(...passResult.afterDurableCheckpoint);
         if (passResult.runtimeStateDirty) {
           markIdleCheckpointTimerAfterDirtyWork();
@@ -4885,19 +4908,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           result: passResult,
           workspace: passWorkspace,
         });
-        const assistantContinuationWakeAt =
-          passResult.assistantPhaseResult?.nextWakeAt ?? null;
-        const assistantContinuationWake =
-          assistantContinuationWakeAt !== null
-          && hostedRuntimeWakeReasonIsAssistant(
-            passResult.assistantPhaseResult?.nextWakeReason ?? null,
-          )
-            ? {
-                nextWakeAt: assistantContinuationWakeAt,
-                nextWakeReason:
-                  passResult.assistantPhaseResult?.nextWakeReason ?? null,
-              }
-            : null;
         const passWake = resolveHostedWorkspaceRunNextWake({
           assistantPhaseResult: passResult.assistantPhaseResult,
           committedWorkspace: committedPassWorkspace,
@@ -4918,18 +4928,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             ? buildHostedRuntimeWakeKey({
                 nextWakeAt: invocationLocalAssistantWakeAt,
                 nextWakeReason: passResult.assistantPhaseResult.nextWakeReason ?? null,
-              })
-            : null;
-        const invocationLocalAssistantCronRetrySuccessorWakeAt =
-          passResult.assistantPhaseResult?.invocationLocalAssistantCronRetrySuccessorWakeAt ?? null;
-        const passCronRetrySuccessorWakeKey =
-          passProjectedAssistantWakeKey !== null
-          && invocationLocalAssistantCronRetrySuccessorWakeAt !== null
-          && Date.parse(invocationLocalAssistantCronRetrySuccessorWakeAt)
-            > Date.parse(invocationLocalAssistantWakeAt ?? "")
-            ? buildHostedRuntimeWakeKey({
-                nextWakeAt: invocationLocalAssistantCronRetrySuccessorWakeAt,
-                nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
               })
             : null;
         const passProducedDefaultWake =
@@ -4959,37 +4957,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           nowMs: Date.now(),
         });
         pendingWake = wakeResolution.pendingWake;
-        // The older due token remains checkpoint authority until its hot
-        // service attempt is committed. Retain a distinct later assistant
-        // obligation in the existing successor slot instead of dropping it.
-        if (
-          checkpointPendingBeforePass
-          && presentedProjectedAssistantWakeKey === null
-          && assistantContinuationWake !== null
-          && hotProjectedAssistantWakeAttemptedKey !== null
-          && buildHostedRuntimeWakeKey(previousPendingWake)
-            === hotProjectedAssistantWakeAttemptedKey
-          && previousPendingWake.nextWakeAt !== null
-          && hostedRuntimeWakeReasonIsAssistant(previousPendingWake.nextWakeReason)
-          && hostedRuntimeWakeIsDue(previousPendingWake.nextWakeAt)
-          && Date.parse(assistantContinuationWake.nextWakeAt)
-            > Date.parse(previousPendingWake.nextWakeAt)
-          && hostedRuntimePendingWakeMatches(pendingWake, previousPendingWake)
-        ) {
-          pendingWakeAfterDueAssistantService = {
-            durableWake: selectEarliestHostedRuntimeWake([
-              {
-                at: pendingWakeAfterDueAssistantService?.durableWake.nextWakeAt ?? null,
-                reason:
-                  pendingWakeAfterDueAssistantService?.durableWake.nextWakeReason ?? null,
-              },
-              {
-                at: assistantContinuationWake.nextWakeAt,
-                reason: assistantContinuationWake.nextWakeReason,
-              },
-            ]),
-          };
-        }
         if (passProducedDefaultWake && passWake.nextWakeAt !== null) {
           recordUnservicedRecheckWake(passWake);
         }
@@ -5009,13 +4976,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && pendingWakeKey !== null
           && pendingWakeKey === passProjectedAssistantWakeKey
           && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason);
-        const promotedCronRetrySuccessor =
-          presentedProjectedAssistantWakeKey !== null
-          && presentedProjectedAssistantWakeKey
-            === previousInvocationLocalProjectedAssistantWakeKey
-          && previousCronRetrySuccessorWakeKey !== null
-          && pendingWakeKey === previousCronRetrySuccessorWakeKey
-          && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason);
         if (passProjectedAssistantWake) {
           const preservesUnprovenPreviousWake =
             pendingWakeKey === previousPendingWakeKey
@@ -5026,20 +4986,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               && !preservesUnprovenPreviousWake
               ? pendingWakeKey
               : null;
-          projectedAssistantCronRetrySuccessorWakeKey =
-            invocationLocalProjectedAssistantWakeKey !== null
-              ? passCronRetrySuccessorWakeKey
-              : null;
-        } else if (promotedCronRetrySuccessor) {
-          invocationLocalProjectedAssistantWakeKey =
-            previousCronRetrySuccessorWakeKey;
-          projectedAssistantCronRetrySuccessorWakeKey = null;
-          // The first projected wake has been serviced. Allow only its exact
-          // same-pass successor to reuse the hot gate before the idle floor.
-          hotProjectedAssistantWakeAttemptedKey = null;
         } else if (pendingWakeKey !== invocationLocalProjectedAssistantWakeKey) {
           invocationLocalProjectedAssistantWakeKey = null;
-          projectedAssistantCronRetrySuccessorWakeKey = null;
         }
         redactedStatus = mergeHostedWorkspaceInvocationRedactedStatus(
           redactedStatus,
@@ -5633,8 +5581,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         wakeAtMs: number;
       } | null => {
         if (
-          hotProjectedAssistantWakeAttemptedKey !== null
-          || !runtimeStateDirty
+          !runtimeStateDirty
           || invocationStatus === "budget_exhausted"
           || mailboxBudgetExhausted()
           || options.shutdownSignal?.aborted === true
@@ -5648,7 +5595,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const pendingWakeKey = buildHostedRuntimeWakeKey(pendingWake);
         if (
           pendingWakeKey === null
-          || pendingWakeKey !== invocationLocalProjectedAssistantWakeKey
+          || pendingWakeKey === hotProjectedAssistantWakeAttemptedKey
           || !hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
         ) {
           return null;
@@ -5663,8 +5610,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
 
         const wakeAtMs = Date.parse(pendingWake.nextWakeAt ?? "");
+        const exactRetryAtMs = Date.parse(
+          assistantCronRetryObligation?.retryAt ?? "",
+        );
+        const isInvocationLocalWake =
+          pendingWakeKey === invocationLocalProjectedAssistantWakeKey;
+        const isEarlierAggregateWake =
+          assistantCronRetryObligation !== null
+          && Number.isFinite(exactRetryAtMs)
+          && Number.isFinite(wakeAtMs)
+          && wakeAtMs < exactRetryAtMs;
         if (
-          !Number.isFinite(wakeAtMs)
+          (!isInvocationLocalWake && !isEarlierAggregateWake)
+          || !Number.isFinite(wakeAtMs)
           || idleCheckpointStartByMs === null
           || wakeAtMs >= idleCheckpointStartByMs
           || Date.now() >= idleCheckpointStartByMs
@@ -5675,6 +5633,33 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           key: pendingWakeKey,
           wakeAtMs,
         };
+      };
+      const resolveHotAssistantCronRetry = (): {
+        wakeAtMs: number;
+      } | null => {
+        if (
+          assistantCronRetryObligation === null
+          || !runtimeStateDirty
+          || invocationStatus === "budget_exhausted"
+          || mailboxBudgetExhausted()
+          || options.shutdownSignal?.aborted === true
+          || pendingDurableCheckpointEffects.length > 0
+          || durableCheckpointFollowUpPending
+          || committedWorkspace === null
+        ) {
+          return null;
+        }
+
+        const wakeAtMs = Date.parse(assistantCronRetryObligation.retryAt);
+        if (
+          !Number.isFinite(wakeAtMs)
+          || idleCheckpointStartByMs === null
+          || wakeAtMs >= idleCheckpointStartByMs
+          || Date.now() >= idleCheckpointStartByMs
+        ) {
+          return null;
+        }
+        return { wakeAtMs };
       };
 
       result = await runForegroundPass({
@@ -5788,9 +5773,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
         }
         const hotProjectedAssistantWake = resolveHotProjectedAssistantWake();
+        const hotAssistantCronRetry = resolveHotAssistantCronRetry();
         if (
           hotProjectedAssistantWake !== null
           && hotProjectedAssistantWake.wakeAtMs <= Date.now()
+          && (
+            hotAssistantCronRetry === null
+            || hotProjectedAssistantWake.wakeAtMs
+              < hotAssistantCronRetry.wakeAtMs
+            || (
+              hotProjectedAssistantWake.wakeAtMs
+                === hotAssistantCronRetry.wakeAtMs
+              && hotProjectedAssistantWake.key
+                === invocationLocalProjectedAssistantWakeKey
+            )
+          )
         ) {
           hotProjectedAssistantWakeAttemptedKey = hotProjectedAssistantWake.key;
           await runForegroundPass({
@@ -5802,9 +5799,30 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           continue;
         }
+        if (
+          hotAssistantCronRetry !== null
+          && hotAssistantCronRetry.wakeAtMs <= Date.now()
+        ) {
+          // The exact owner obligation, not the aggregate timestamp, selects
+          // this pass. Clear aggregate hot provenance without presenting or
+          // consuming that wake; it may belong to an unrelated due job.
+          invocationLocalProjectedAssistantWakeKey = null;
+          await runForegroundPass({
+            latencySeed: null,
+            requestIdKind: "idle-wake",
+          });
+          pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
+          continue;
+        }
+        const hotAssistantWakeAtMs = [
+          hotProjectedAssistantWake?.wakeAtMs ?? null,
+          hotAssistantCronRetry?.wakeAtMs ?? null,
+        ]
+          .filter((wakeAtMs): wakeAtMs is number => wakeAtMs !== null)
+          .sort((left, right) => left - right)[0] ?? null;
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
           idleCheckpointStartByMs,
-          projectedAssistantWakeAtMs: hotProjectedAssistantWake?.wakeAtMs ?? null,
+          projectedAssistantWakeAtMs: hotAssistantWakeAtMs,
           runtimeAbortSignal: runtimeAbortController.signal,
           runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           shutdownSignal: options.shutdownSignal ?? null,
