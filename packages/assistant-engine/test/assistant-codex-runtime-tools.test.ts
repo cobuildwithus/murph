@@ -100,6 +100,21 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
               },
             }),
           )
+
+          const progressMessages = await waitForRpcMessages(child, 5)
+          expect(progressMessages[4]).toEqual({
+            id: 99,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'tool was not offered for this turn',
+                },
+              ],
+            },
+          })
+
           child.stdout.write(
             jsonLine({
               id: 99,
@@ -943,7 +958,7 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
     })
   })
 
-  it('returns unavailable for progress tool calls when no progress sink exists', async () => {
+  it('rejects unoffered progress and assistant-style calls at the canonical turn boundary', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-disabled-')
 
     codexMocks.spawn.mockImplementation(() => {
@@ -991,10 +1006,23 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
               },
             }),
           )
+          child.stdout.write(
+            jsonLine({
+              id: 100,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'assistant_style',
+                arguments: {
+                  action: 'show',
+                },
+              },
+            }),
+          )
 
-          const messages = await waitForRpcMessages(child, 5)
-          expect(messages[4]).toEqual({
-            id: 99,
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[5]).toEqual({
+            id: 100,
             result: {
               success: false,
               contentItems: [
@@ -1025,7 +1053,7 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
 
     await expect(
       executeCodexAppServerTurn({
-        prompt: 'try disabled progress tool',
+        prompt: 'try disabled tools',
         workingDirectory,
       }),
     ).resolves.toMatchObject({

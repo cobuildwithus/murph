@@ -36,6 +36,7 @@ import {
   vaultCliBatchResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import { readVaultRawTolerant } from '@murphai/query'
+import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import {
   logLiveWorkoutSet,
   saveWorkoutFormat,
@@ -64,6 +65,7 @@ import {
 } from '../src/assistant-ask.ts'
 import {
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
@@ -2986,6 +2988,90 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
       }
     },
     480_000,
+  )
+})
+
+describeRealCodex('real Codex assistant-style boundary e2e', () => {
+  it(
+    'executes one offered style update and persists the requested setting',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-assistant-style-boundary-e2e-'),
+      )
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_ASSISTANT_STYLE_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Set your humor level to 2 for this conversation, then briefly confirm the new setting.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const styleActions = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ASSISTANT_STYLE_TOOL.name
+        )
+        const personality = await showAssistantPersonality(workingDirectory)
+
+        process.stdout.write(
+          `[assistant-style-boundary-e2e] ${JSON.stringify({
+            reply: result.finalMessage,
+            styleActions,
+          })}\n`,
+        )
+
+        expect(styleActions).toEqual([
+          expect.objectContaining({
+            argumentsValue: {
+              action: 'set',
+              setting: 'humor',
+              value: 2,
+            },
+            success: true,
+            tool: MURPH_ASSISTANT_STYLE_TOOL.name,
+          }),
+        ])
+        expect(
+          actions.filter((action) => action.kind === 'command'),
+          'no shell command should bypass the offered style tool',
+        ).toEqual([])
+        expect(personality.settings.humor).toEqual({
+          source: 'custom',
+          value: 2,
+        })
+        expect(result.finalMessage).toMatch(/humor/iu)
+        expect(result.finalMessage).toMatch(/2/iu)
+        expect(result.finalMessage).not.toMatch(
+          /app[- ]server|availability|guard|internal|tool call/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 })
 
