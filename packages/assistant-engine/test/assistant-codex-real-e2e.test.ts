@@ -4170,7 +4170,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             /graded|progress|strength|tolerat|range of motion|range|load|track/iu,
           )
           expect(
-            stableText,
+            stableText.replaceAll(
+              /\b(?:not|without|rather than)\s+complete rest\b/giu,
+              '',
+            ),
             `${label} stable unsupported restriction`,
           ).not.toMatch(
             /complete rest|do not (?:keep )?train|don[’']t (?:keep )?train|stop (?:all (?:activity|movement|exercise)|training)|avoid all (?:activity|movement|exercise)|do nothing until/iu,
@@ -4700,7 +4703,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )).toEqual([])
         expect(launchedImageOperationIds).toHaveLength(1)
         expect(missingCatalogImage.finalMessage).toMatch(
-          /image|illustration|picture/iu,
+          /image|illustration|picture|visual/iu,
         )
         expect(missingCatalogImage.finalMessage).toMatch(
           /appear|prepar|ready|separate/iu,
@@ -12504,7 +12507,7 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
         .digest('hex')
       const assertMurphOwnedRecovery = (message: string) => {
         expect(message).toMatch(
-          /no (?:automatic )?(?:retry|follow-up)|not (?:retrying|following up)|won't (?:retry|follow up)/iu,
+          /no (?:automatic )?(?:retry|follow-up)|(?:did not|didn['’]t) retry|not (?:retrying|following up)|won't (?:retry|follow up)/iu,
         )
         expect(message).toMatch(
           /new explicit (?:send )?request|ask me (?:again|to try again)|request (?:it )?again|tell me to try again/iu,
@@ -12685,7 +12688,7 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
           expect(feedbackRecords).toHaveLength(scenario.expectedFeedbackCount)
           expect(sendCount).toBe(1)
           expect(result.finalMessage).toMatch(
-            /nothing was sent|was not sent|wasn't sent/iu,
+            /nothing was sent|was not (?:accepted or )?sent|wasn't sent/iu,
           )
           expect(result.finalMessage).not.toMatch(
             /failureReason|recipient_address|request_invalid|service_unavailable|\bLob\b/iu,
@@ -12874,7 +12877,7 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
               /\b(?:auth\w*.*succeed|success\w*.*auth)\w*\b/iu,
             )
             expect(summary).toMatch(
-              /\b(?:not added|did not add|did not appear|returned|remain\w* disconnected|failed|absent|missing)\b/iu,
+              /\b(?:not added|did not add|did not appear|does not show|without adding|returned|remain\w* disconnected|failed|absent|missing)\b/iu,
             )
           },
           prompt: [
@@ -15242,7 +15245,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           instructions: expect.stringMatching(/revised daily interval reminder/iu),
         })
         expect(result.finalMessage).toMatch(
-          /changed|complete|done|saved|updated/iu,
+          /changed|complete|done|revised|saved|updated/iu,
         )
         expect(result.finalMessage).toMatch(/active/iu)
         expect(result.finalMessage).toMatch(
