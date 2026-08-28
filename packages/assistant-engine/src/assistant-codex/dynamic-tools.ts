@@ -940,6 +940,14 @@ const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
   'startUrl',
 ] as const
 
+const COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS = Object.keys(
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema.properties,
+)
+const computerPauseForUserValidationPaths =
+  collectSafeJsonSchemaValidationPaths(
+    MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema,
+  )
+
 const computerNavigationUrlSchema = z
   .string()
   .trim()
@@ -2033,6 +2041,8 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerPauseForUserArgumentsSchema,
         schemaName: 'murph.computer_pause_for_user.input',
+        schemaPaths: computerPauseForUserValidationPaths,
+        schemaRootKeys: COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS,
         toolName: 'murph.computer_pause_for_user',
       })
       return parsed.ok
@@ -2138,10 +2148,7 @@ function readGeneratedImageToolCallId(
 export async function executeMurphDynamicToolRequest(input: {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
-  assistantStyleSettingsAvailable?: boolean | null
-  groupRoomModelAvailable?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
-  memberMemoryAvailable?: boolean | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -2409,7 +2416,6 @@ export async function executeMurphDynamicToolRequest(input: {
     }
     case 'group-room-model':
       return await executeGroupRoomModelDynamicTool({
-        available: input.groupRoomModelAvailable === true,
         managedMaintenanceAuthorized:
           input.groupRoomModelMaintenanceAuthorized === true,
         request: input.request,
@@ -2419,7 +2425,6 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'member-memory':
       return await executeMemberMemoryDynamicTool({
-        available: input.memberMemoryAvailable === true,
         managedMaintenanceAuthorized:
           input.memberMemoryMaintenanceAuthorized === true,
         request: input.request,
@@ -2475,7 +2480,6 @@ export async function executeMurphDynamicToolRequest(input: {
         authority: resolveHostedAssistantPersonalizationToolAuthority(
           hostedToolContext,
         ),
-        available: input.assistantStyleSettingsAvailable === true,
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
           hostedToolContext?.personalizationTool ?? null,
@@ -4582,14 +4586,14 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
-    response.action === 'handoff'
+    (response.action === 'ask' || response.action === 'handoff')
     && response.result.status === 'accepted'
   ) {
     return {
-      ...response,
+      action: response.action,
       result: {
-        ...response.result,
-        status: 'queued',
+        status: 'queued' as const,
+        targetLabel: response.result.targetLabel,
       },
     }
   }
@@ -7648,6 +7652,7 @@ function parseComputerArguments<TArgs>(input: {
   argumentsValue: unknown
   schema: z.ZodType<TArgs> & { shape?: Record<string, unknown> }
   schemaName: string
+  schemaPaths?: readonly string[]
   schemaRootKeys?: readonly string[]
   toolName: string
 }):
@@ -7661,6 +7666,7 @@ function parseComputerArguments<TArgs>(input: {
         error: parsed.error,
         rawInput: input.argumentsValue,
         schemaName: input.schemaName,
+        schemaPaths: input.schemaPaths,
         schemaRootKeys: input.schemaRootKeys ?? readZodObjectRootKeys(input.schema),
         toolName: input.toolName,
       }),

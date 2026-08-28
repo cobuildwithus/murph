@@ -2707,7 +2707,7 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual({
       action: "ask",
-      result: { status: "accepted", targetLabel: "Morning Movers" },
+      result: { status: "queued", targetLabel: "Morning Movers" },
     });
     expect(groupRequest).toHaveBeenCalledWith({
       action: "ask",

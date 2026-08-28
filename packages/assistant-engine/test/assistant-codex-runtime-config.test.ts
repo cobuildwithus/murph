@@ -184,7 +184,7 @@ describe('assistant codex runtime', () => {
 
   it('puts instructions and dynamic tools on thread start but keeps resume and turn input scoped', () => {
     const baseInput = {
-      approvalPolicy: 'never',
+      approvalPolicy: 'never' as const,
       baseInstructions: 'Do not use this in normal Murph config.',
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,

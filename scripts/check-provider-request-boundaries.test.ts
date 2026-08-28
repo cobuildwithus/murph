@@ -364,7 +364,6 @@ describe("check-provider-request-boundaries", () => {
       "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts",
       "packages/operator-config/src/linq-runtime.ts",
       "scripts/linq-typing-repro.ts",
-      "scripts/native-ios-hosted-e2e-identity.mjs",
     ]));
   });
 

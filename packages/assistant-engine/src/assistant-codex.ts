@@ -63,7 +63,6 @@ import {
   buildCodexThreadStartParams,
   buildCodexTurnSteerParams,
   buildCodexTurnStartParams,
-  mapCodexAppServerApprovalPolicy,
   mapCodexAppServerSandboxMode,
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
@@ -81,9 +80,6 @@ import type {
   MurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
 import {
-  MURPH_ASSISTANT_STYLE_TOOL,
-  MURPH_GROUP_ROOM_MODEL_TOOL,
-  MURPH_MEMBER_MEMORY_TOOL,
   type AssistantStyleTurnSettingsOverlay,
 } from './assistant-codex/dynamic-tool-catalog.js'
 import type {
@@ -306,7 +302,11 @@ type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
   coldStartReason: CodexAppServerColdStartReason
 }
 
-type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
+type CodexAppServerPreparedTurnInput = Omit<
+  CodexAppServerTurnInput,
+  'approvalPolicy'
+> & {
+  approvalPolicy: 'never'
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
@@ -494,7 +494,7 @@ export interface CodexAppServerTurnInput {
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
-  approvalPolicy?: string
+  approvalPolicy?: string | null
   configOverrides?: readonly string[]
   codexCommand?: string
   codexHome?: string | null
@@ -4775,23 +4775,8 @@ async function runCodexAppServerTurnOnProcess(
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,
           assistantStyleSettingsOverlay,
-          assistantStyleSettingsAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
-              tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
-          ),
-          groupRoomModelAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_GROUP_ROOM_MODEL_TOOL.namespace &&
-              tool.name === MURPH_GROUP_ROOM_MODEL_TOOL.name,
-          ),
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
-          memberMemoryAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_MEMBER_MEMORY_TOOL.namespace &&
-              tool.name === MURPH_MEMBER_MEMORY_TOOL.name,
-          ),
           memberMemoryMaintenanceAuthorized:
             input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
@@ -6490,7 +6475,7 @@ function assertCodexResumeContextMatches(input: {
     ],
     [
       'approvalPolicy',
-      mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
+      input.input.approvalPolicy,
       asCodexString(result?.approvalPolicy),
     ],
     ['cwd', input.input.workingDirectory, actualCwd ? path.resolve(actualCwd) : null],

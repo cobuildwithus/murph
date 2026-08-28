@@ -277,11 +277,6 @@ describe("murph.group parser-first family compatibility", () => {
       action: "future_group_action",
     }))).toMatchObject({ kind: "invalid-group-arguments" });
 
-    expect(readMurphDynamicToolRequest(groupToolCall("group_consult", {
-      action: "message_current_sender",
-      message_ref: MESSAGE_REF,
-    }))).toMatchObject({ kind: "invalid-group-arguments" });
-
     expect(readMurphDynamicToolRequest(groupToolCall("group_membership", {
       action: "read_current",
     }))).toMatchObject({

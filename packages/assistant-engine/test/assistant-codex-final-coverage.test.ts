@@ -973,7 +973,7 @@ describe('Codex model catalog', () => {
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.providerConfig).toMatchObject({
       approvalPolicy: 'never',
-      sandbox: 'read-only',
+      sandbox: null,
     })
     expect(providerInput?.codexConfigOverrides).toEqual([
       'features.shell_tool=true',

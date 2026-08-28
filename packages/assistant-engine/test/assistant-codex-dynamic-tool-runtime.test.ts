@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexMocks = vi.hoisted(() => ({
   dynamicToolCalls: [] as Array<{
-    assistantStyleSettingsAvailable?: boolean
     deliveryContextOrdinal: number | null
     generateSongTurnState?: unknown
     kind: string
@@ -38,12 +37,6 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
         input: Parameters<typeof actual.executeMurphDynamicToolRequest>[0],
       ): Promise<Awaited<ReturnType<typeof actual.executeMurphDynamicToolRequest>>> => {
         codexMocks.dynamicToolCalls.push({
-          ...(input.request.kind === 'assistant-style'
-            ? {
-                assistantStyleSettingsAvailable:
-                  input.assistantStyleSettingsAvailable === true,
-              }
-            : {}),
           deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
           ...(input.request.kind === 'generate-song'
             ? {
@@ -361,7 +354,6 @@ describe('Codex dynamic tool runtime routing', () => {
         voiceMemoRuntime,
       },
       {
-        assistantStyleSettingsAvailable: true,
         deliveryContextOrdinal: 1,
         kind: 'assistant-style',
         voiceMemoRuntime: null,

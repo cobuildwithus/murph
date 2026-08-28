@@ -6,6 +6,7 @@ import path from "node:path";
 import { initializeVault } from "@murphai/core";
 import {
   buildHostedExecutionAssistantAskRequestedWake,
+  type HostedExecutionAssistantAskRequestedPayload,
 } from "@murphai/hosted-execution";
 import type {
   HostedMailboxFetchRequest,
@@ -49,12 +50,25 @@ const TEST_NOW = "2036-08-22T19:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_delegated_owner";
 
 describe("hosted runtime delegated foreground owner", () => {
-  test("upgrades a delegated ask ahead of older device work", async () => {
+  test.each([
+    {
+      askSeq: "2",
+      deviceSeq: "1",
+      label: "a delegated ask ahead of older device work",
+      targetKind: "current_sender_personal" as const,
+    },
+    {
+      askSeq: "1",
+      deviceSeq: null,
+      label: "an ordinary consented ask once it reaches the durable head",
+      targetKind: "consented_member" as const,
+    },
+  ])("upgrades $label", async ({ askSeq, deviceSeq, targetKind }) => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-delegated-owner-"),
     );
-    const delegated = createDelegatedAskItem("2");
-    const device = createDeviceItem("1");
+    const delegated = createDelegatedAskItem(askSeq, targetKind);
+    const device = deviceSeq === null ? null : createDeviceItem(deviceSeq);
     const snapshotRef = createWorkspaceSnapshotV2Ref();
     let delegatedConsumptionCount = 0;
     let assistantPhaseCalls = 0;
@@ -70,7 +84,7 @@ describe("hosted runtime delegated foreground owner", () => {
       });
       await updateHostedSystemMailboxState(
         vaultRoot,
-        () => ({ pending: [device, delegated] }),
+        () => ({ pending: [...(device ? [device] : []), delegated] }),
         { now: () => TEST_NOW },
       );
       await writeHostedMailboxImportState({
@@ -126,8 +140,8 @@ describe("hosted runtime delegated foreground owner", () => {
             return { progressed: false };
           }
           assert.equal(
-            pending.pending.some((item) => item.itemId === device.itemId),
-            true,
+            pending.pending.some((item) => item.itemId === device?.itemId),
+            device !== null,
           );
           delegatedConsumptionCount += 1;
           await removeHostedSystemMailboxPendingItem({
@@ -147,7 +161,7 @@ describe("hosted runtime delegated foreground owner", () => {
       });
 
       const finalPending = (await readHostedSystemMailboxState(vaultRoot)).pending;
-      expect(finalPending).toEqual([device]);
+      expect(finalPending).toEqual(device ? [device] : []);
       expect(assistantPhaseCalls).toBe(1);
       expect(delegatedConsumptionCount).toBe(1);
       expect(result.status).toBe("idle");
@@ -203,29 +217,48 @@ function createDeviceItem(mailboxLaneSeq: string): HostedSystemMailboxPendingIte
 
 function createDelegatedAskItem(
   mailboxLaneSeq: string,
+  targetKind: "consented_member" | "current_sender_personal",
 ): HostedSystemMailboxPendingItem {
   const eventId = `assistant.ask.requested:synthetic-${mailboxLaneSeq}`;
+  const ask: HostedExecutionAssistantAskRequestedPayload =
+    targetKind === "consented_member"
+      ? {
+          expiresAt: "2036-08-22T19:10:00.000Z",
+          origin: {
+            assistantInputId: `ain_${"a".repeat(32)}`,
+            kind: "accepted_input",
+            sessionId: "session_synthetic_delegated_owner",
+          },
+          question: "What synthetic fact should be shared?",
+          target: {
+            grantId: "grant_synthetic",
+            kind: targetKind,
+            membershipId: "membership_synthetic",
+            permissionDigest: "d".repeat(64),
+          },
+        }
+      : {
+          expiresAt: "2036-08-22T19:10:00.000Z",
+          origin: {
+            assistantInputId: `ain_${"a".repeat(32)}`,
+            kind: "accepted_input",
+            sessionId: "session_synthetic_delegated_owner",
+          },
+          question: "What synthetic fact should be shared?",
+          resultDestination: { kind: "origin_context" },
+          target: {
+            groupRuntimeMemberId: "member_group_synthetic",
+            kind: targetKind,
+            permissionDigest: "d".repeat(64),
+          },
+        };
   return createBaseItem({
-    itemId: `ask_current_sender_personal_${mailboxLaneSeq}`,
+    itemId: `ask_${targetKind}_${mailboxLaneSeq}`,
     mailboxDedupeKey: eventId,
     mailboxLaneSeq,
     routeAction: "run-assistant-ask",
     wake: buildHostedExecutionAssistantAskRequestedWake({
-      ask: {
-        expiresAt: "2036-08-22T19:10:00.000Z",
-        origin: {
-          assistantInputId: `ain_${"a".repeat(32)}`,
-          kind: "accepted_input",
-          sessionId: "session_synthetic_delegated_owner",
-        },
-        question: "What synthetic fact should be shared?",
-        resultDestination: { kind: "origin_context" },
-        target: {
-          groupRuntimeMemberId: "member_group_synthetic",
-          kind: "current_sender_personal",
-          permissionDigest: "d".repeat(64),
-        },
-      },
+      ask,
       eventId,
       memberId: TEST_USER_ID,
       occurredAt: TEST_NOW,

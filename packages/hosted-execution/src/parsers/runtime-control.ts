@@ -6702,7 +6702,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(provider, "admissionMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "preProviderSetupMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "providerPlanAndGateMs", providerLabel),
-      ...requireOptionalNonNegativeInteger(provider, "linqEgressGuardMs", providerLabel),
     };
   }
 
