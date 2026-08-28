@@ -4458,6 +4458,233 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps an ordinary production-shaped scheduled exercise cue natural and attaches reviewed media',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-scheduled-exercise-cue-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        await Promise.all([
+          materializeRoutinePresentationVaultCli(binDirectory),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'mobility-posture',
+          }),
+          materializeAssistantSkillAsset({
+            relativePath: path.join(
+              'shared',
+              'exercise-catalog-runtime.md',
+            ),
+            skillsRoot,
+          }),
+        ])
+        const savedInstructions = [
+          'Send the saved two-minute non-pain mobility break now.',
+          'Alternate 30 seconds of Ankle circles (MB101) with 30 seconds of Torso turns (MB102), repeated twice.',
+          'Use stable support and skip any movement that causes pain.',
+        ].join(' ')
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: savedInstructions,
+          now: new Date('2026-08-28T12:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: 'synthetic-mobility-reminder',
+            identityId: null,
+            participantId: null,
+            threadId: 'synthetic-mobility-reminder',
+            threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '14:00' },
+          slug: 'synthetic-mobility-reminder',
+          status: 'active',
+          tags: [],
+          title: 'Synthetic mobility reminder',
+          vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory),
+          createdAutomation.record.automationId,
+        )
+        expect(source?.kind).toBe('automation')
+        if (!source || source.kind !== 'automation') {
+          throw new Error('Expected the canonical reminder automation source.')
+        }
+        expect(source.supportKind).toBeNull()
+        const jobId = resolveCanonicalAssistantCronJobId(source)
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: '2026-08-28T12:00:00.000Z',
+        })
+        const instructions = buildAssistantCronExecutionInstructions(
+          {
+            job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+            kind: 'canonical',
+            runtimeState,
+            source,
+          },
+          { automationId: null, contextReferences: [] },
+        )
+        const occurrenceAt = '2026-08-28T18:00:00.000Z'
+        const notificationInput = {
+          instructions,
+          outboxAutomationAuthority: {
+            automationId: createdAutomation.record.automationId,
+            expectedUpdatedAt: createdAutomation.record.updatedAt,
+          },
+          recurringReminderConversation: true,
+          scheduledAutomationScheduleKind: source.schedule.kind,
+          scheduledInvocationAuthority: {
+            automationId: createdAutomation.record.automationId,
+            occurrenceAt,
+          },
+          turnTrigger: 'automation-cron',
+          vault: workingDirectory,
+          workingDirectory,
+        } satisfies AssistantNotificationInput
+        const preparedInput = await prepareAssistantCronNotificationInput(
+          notificationInput,
+          { sessionId: 'session-synthetic-mobility-reminder' },
+        )
+
+        expect(preparedInput.instructions).toContain(savedInstructions)
+        expect(preparedInput.instructions).toContain(
+          'read the matching movement skill and its shared exercise-catalog reference',
+        )
+        expect(preparedInput.instructions.indexOf(savedInstructions)).toBeLessThan(
+          preparedInput.instructions.indexOf(
+            'read the matching movement skill and its shared exercise-catalog reference',
+          ),
+        )
+
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: preparedInput.instructions,
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') {
+          throw new Error('Expected the scheduled exercise cue to send.')
+        }
+
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const movementSkillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('mobility-posture/SKILL.md')
+        )
+        const catalogReferenceRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('shared/exercise-catalog-runtime.md')
+        )
+        const ankleShow = actions.find((action) =>
+          action.kind === 'command'
+          && /vault-cli exercise show (?:ankle-circles|MB101) --format json/iu
+            .test(action.command)
+        )
+        const torsoShow = actions.find((action) =>
+          action.kind === 'command'
+          && /vault-cli exercise show (?:torso-turns|MB102) --format json/iu
+            .test(action.command)
+        )
+        const mediaCalls = actions.filter(
+          (action): action is Extract<
+            CapabilityRoutingAction,
+            { kind: 'dynamic' }
+          > =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
+        )
+
+        expect(movementSkillRead, 'movement skill read').toBeDefined()
+        expect(catalogReferenceRead, 'catalog reference read').toBeDefined()
+        expect(ankleShow, 'ankle catalog show').toBeDefined()
+        expect(torsoShow, 'torso catalog show').toBeDefined()
+        expect(mediaCalls, 'response-media calls').toHaveLength(1)
+        expect(
+          catalogReferenceRead?.eventIndex,
+          'catalog guidance before catalog lookup',
+        ).toBeLessThan(ankleShow?.eventIndex ?? -1)
+        expect(ankleShow?.eventIndex, 'catalog lookup before attachment')
+          .toBeLessThan(mediaCalls[0]?.eventIndex ?? -1)
+        expect(torsoShow?.eventIndex, 'catalog lookup before attachment')
+          .toBeLessThan(mediaCalls[0]?.eventIndex ?? -1)
+        expect(mediaCalls[0]?.argumentsValue).toMatchObject({
+          media: [
+            {
+              alt: 'Person making a small ankle circle while standing with support.',
+              source: 'exercise_catalog:MB101:1',
+              url: 'https://cdn.example.test/ankle-circles.png',
+            },
+            {
+              alt: 'Person turning the torso gently while standing.',
+              source: 'exercise_catalog:MB102:1',
+              url: 'https://cdn.example.test/torso-turns.png',
+            },
+          ],
+        })
+        expect(result.responseMedia).toEqual([
+          expect.objectContaining({
+            source: 'exercise_catalog:MB101:1',
+            url: 'https://cdn.example.test/ankle-circles.png',
+          }),
+          expect.objectContaining({
+            source: 'exercise_catalog:MB102:1',
+            url: 'https://cdn.example.test/torso-turns.png',
+          }),
+        ])
+        expect(decision.text).toMatch(/ankle circles/iu)
+        expect(decision.text).toMatch(/torso turns/iu)
+        expect(decision.text).not.toMatch(
+          /MB101|MB102|ankle-circles|torso-turns|exercise_catalog/iu,
+        )
+        process.stdout.write(
+          `[real-codex scheduled exercise cue] ${JSON.stringify({
+            mediaCount: result.responseMedia.length,
+            reply: decision.text.replaceAll(/\s+/gu, ' ').trim(),
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps exercise ids private, uses catalog media, and generates only when catalog media is missing',
     async () => {
       const config = await resolveRealCodexE2eConfig()
