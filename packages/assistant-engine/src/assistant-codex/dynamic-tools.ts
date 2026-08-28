@@ -4657,14 +4657,14 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
-    response.action === 'handoff'
+    (response.action === 'ask' || response.action === 'handoff')
     && response.result.status === 'accepted'
   ) {
     return {
-      ...response,
+      action: response.action,
       result: {
-        ...response.result,
-        status: 'queued',
+        status: 'queued' as const,
+        targetLabel: response.result.targetLabel,
       },
     }
   }
