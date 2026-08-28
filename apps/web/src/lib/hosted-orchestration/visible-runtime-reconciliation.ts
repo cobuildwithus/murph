@@ -16,8 +16,12 @@ import {
 } from "../hosted-onboarding/recognized-inbound-access";
 import {
   buildInactiveMemberAccessNoticeResponse,
-  buildSignupLinkResponse,
+  buildFallbackSignupLinkResponse,
 } from "../hosted-onboarding/webhook-provider-linq-shared";
+import {
+  readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots,
+} from "../hosted-onboarding/hosted-member-routing-store";
+import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import {
   drainHostedLinqSideEffectsDirect,
 } from "../hosted-onboarding/webhook-transport";
@@ -109,26 +113,35 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
   }
 
   if (isHostedLinqConversationMessageWake(wake)) {
+    const memberPhone = normalizePhoneNumber(wake.message.linqMessage.from);
+    const [homeRoute] =
+      await readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots({
+        memberIds: [input.userId],
+        prisma,
+      });
+    const assignedPhone = normalizePhoneNumber(homeRoute?.linqRecipientPhone);
+    if (!memberPhone || !assignedPhone) {
+      return facts;
+    }
+
     const plan = access.kind === "access_notice"
       ? buildInactiveMemberAccessNoticeResponse({
-          chatId: wake.message.linqMessage.chatId,
+          assignedPhone,
           memberId: input.userId,
+          memberPhone,
           message: access.message,
-          messageId: wake.message.linqMessage.messageId,
           noticeCode: access.noticeCode,
           occurredAt: wake.occurredAt,
           sourceEventId: wake.eventId,
         })
-      : buildSignupLinkResponse({
-          chatId: wake.message.linqMessage.chatId,
+      : buildFallbackSignupLinkResponse({
+          assignedPhone,
           inviteCode: access.inviteCode,
           inviteId: access.inviteId,
           memberId: input.userId,
-          messageId: wake.message.linqMessage.messageId,
+          memberPhone,
           occurredAt: wake.occurredAt,
-          service: wake.message.linqMessage.service ?? null,
           sourceEventId: wake.eventId,
-          threadIsDirect: true,
         });
     await drainHostedLinqSideEffectsDirect({
       prisma,

@@ -408,24 +408,38 @@ export const HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON: Record<
  * mailbox writes, mirroring the home-redirect plan's shape.
  */
 export function buildInactiveMemberAccessNoticeResponse(input: {
-  chatId: string;
   memberId: string;
   message: string;
-  messageId: string;
   noticeCode: HostedRuntimeAiAccessNoticeCode;
   occurredAt: string;
   sourceEventId: string;
-}): HostedOnboardingLinqDirectPlan {
+} & (
+  | {
+      assignedPhone: string;
+      memberPhone: string;
+    }
+  | {
+      chatId: string;
+      messageId: string;
+    }
+)): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
-        chatId: input.chatId,
+        ...("assignedPhone" in input
+          ? {
+              assignedRecipientPhone: input.assignedPhone,
+              memberPhone: input.memberPhone,
+            }
+          : {
+              chatId: input.chatId,
+              replyToMessageId: input.messageId,
+            }),
         claimToken: null,
         memberId: input.memberId,
         message: input.message,
         noticeCode: input.noticeCode,
         occurredAt: input.occurredAt,
-        replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "ai_usage_quota",
       }),

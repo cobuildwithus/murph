@@ -738,15 +738,10 @@ async function revalidatePreparedHostedLinqDirectRoutingTx(input: {
     throw hostedLinqDirectMailboxPreparationRequired("member");
   }
 
-  // The caller already owns the control-root authority and member row. Match
-  // the durable route-binding order for the remaining home/chat authorities.
+  // The caller already owns the chat, control-root, and member authorities.
   await acquireHostedMemberHomeLinqRouteLockTx({
     memberId: input.memberId,
     prisma: input.prisma,
-  });
-  await acquireHostedLinqChatOwnershipLockTx({
-    chatId: input.chatId,
-    tx: input.prisma,
   });
 
   const routingRecord = await readHostedMemberRoutingRecord({
@@ -936,6 +931,11 @@ export async function planHostedLinqMessageEditedWebhook(input: {
     return buildIgnoredHostedLinqMessageEditPlan("outbound-message-edit");
   }
 
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: event.data.chat.id,
+    tx: input.prisma,
+  });
+
   const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
     event.data.id,
   );
@@ -1090,10 +1090,6 @@ export async function planHostedLinqMessageEditedWebhook(input: {
       );
     }
   } else {
-    await acquireHostedLinqChatOwnershipLockTx({
-      chatId: event.data.chat.id,
-      tx: input.prisma,
-    });
     const authorityNow = input.now ?? new Date();
     const senderMemberId = originalWake.message.senderMemberId
       ?? (
@@ -1351,6 +1347,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
     recipientPhoneNumber,
     summary,
   } = context;
+
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: summary.chatId,
+    tx: input.prisma,
+  });
 
   const directMailboxPreparationProvided = Object.prototype.hasOwnProperty.call(
     input,
@@ -3050,12 +3051,6 @@ async function planHostedLinqExistingThreadRouteWebhook(input: {
       httpStatus: 503,
       message: "Hosted thread delivery-route preparation is required.",
       retryable: true,
-    });
-  }
-  if (isHostedLinqGroupChat(messageEvent)) {
-    await acquireHostedLinqChatOwnershipLockTx({
-      chatId: summary.chatId,
-      tx: input.prisma,
     });
   }
   const lockedInboundParticipant =
