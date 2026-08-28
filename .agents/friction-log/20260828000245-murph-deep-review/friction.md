@@ -1,6 +1,7 @@
 ---
 title: 'murph-deep-review skill references removed coordination ledger'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2481'
 ---
 
 ## Expected Behavior
