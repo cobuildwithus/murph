@@ -75,7 +75,6 @@ export function readMemberMemoryDynamicToolRequest(input: {
 }
 
 export async function executeMemberMemoryDynamicTool(input: {
-  available: boolean
   managedMaintenanceAuthorized: boolean
   request: Extract<MemberMemoryDynamicToolRequest, { kind: 'member-memory' }>
   vaultRoot: string | null
@@ -85,7 +84,7 @@ export async function executeMemberMemoryDynamicTool(input: {
     success: boolean
   }
 }> {
-  if (!input.available || !input.managedMaintenanceAuthorized) {
+  if (!input.managedMaintenanceAuthorized) {
     return memberMemoryTextResult(
       false,
       'member-memory maintenance is unavailable for this turn',

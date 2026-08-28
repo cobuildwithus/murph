@@ -237,7 +237,6 @@ describe('member-memory maintenance boundary', () => {
   it('rejects calls without exact managed-maintenance authority', async () => {
     const vaultRoot = await makeVaultRoot()
     const result = await executeMemberMemoryDynamicTool({
-      available: true,
       managedMaintenanceAuthorized: false,
       request: {
         args: {
@@ -287,7 +286,6 @@ async function execute(
   >['args'],
 ): Promise<Awaited<ReturnType<typeof executeMemberMemoryDynamicTool>>> {
   return await executeMemberMemoryDynamicTool({
-    available: true,
     managedMaintenanceAuthorized: true,
     request: { args, kind: 'member-memory' },
     vaultRoot,

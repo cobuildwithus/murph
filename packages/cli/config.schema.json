@@ -5964,7 +5964,7 @@
                           "minLength": 1
                         },
                         "exercise": {
-                          "description": "Initial exercise grammar: name=... with optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/mode/unitOverride/note. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
+                          "description": "Initial exercise grammar: name=...;mode=... with required mode and optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/unitOverride/note. weight_reps also requires unitOverride unless targetWeightUnit is present. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
                           "maxItems": 100,
                           "type": "array",
                           "items": {
@@ -6078,7 +6078,8 @@
                                     "weighted_bodyweight",
                                     "duration",
                                     "cardio"
-                                  ]
+                                  ],
+                                  "description": "Required result family for the native workout editor."
                                 },
                                 "unitOverride": {
                                   "type": "string",

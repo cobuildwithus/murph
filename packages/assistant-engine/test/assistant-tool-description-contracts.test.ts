@@ -88,13 +88,44 @@ describe("assistant tool description call contracts", () => {
   });
 
   it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("handoff");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Named group: use groupLabel; never list",
+      "title=groupLabel",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      'Before unnamed handoff, vault-cli memory show; fallback "a member"',
+      "ask=group answer; handoff=tell/post/share",
     );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "people/count=participantTarget",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "names not groupLabel; no list",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("memory show");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "Handoff identity-neutral; host labels",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "accepted=queued/pending, never sent/shared",
+    );
+  });
+
+  it("keeps private-to-group handoff context identity-neutral", () => {
+    const contextDescription = MURPH_GROUP_TOOL_PROPERTIES.context.description;
+
+    expect(contextDescription).toContain(
+      "written in identity-neutral third person",
+    );
+    expect(contextDescription).toContain(
+      "the host supplies any group-safe attribution separately",
+    );
+    expect(contextDescription).not.toContain("memory show");
+    expect(contextDescription).toContain(
+      "Never write the member's actions, claims, or experiences as if Murph did, said, or experienced them",
+    );
+  });
+
+  it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "ask_current_sender=group",
     );
@@ -102,38 +133,13 @@ describe("assistant tool description call contracts", () => {
       "ask_current_sender_privately=private",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "clarify_current_sender=genuine ambiguity",
+      "clarify=destination only",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "continuations resume",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Handoff accepted=queued, not sent/shared",
+      "resume continuations",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
       "message_current_sender",
     );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("room-vault");
-    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
-      "host-mediated bridge",
-    );
   });
-
-  it("keeps member attribution explicit in private-to-group handoffs", () => {
-    const contextDescription = MURPH_GROUP_TOOL_PROPERTIES.context.description;
-
-    expect(contextDescription).toContain(
-      "Attribute member actions, claims, and experiences in third person to their memory-backed preferred display name",
-    );
-    expect(contextDescription).toContain(
-      "which joined groups already receive",
-    );
-    expect(contextDescription).toContain(
-      'run `vault-cli memory show`; use "a member" only when canonical memory has no preferred name',
-    );
-    expect(contextDescription).toContain(
-      "Never write them as if Murph did, said, or experienced them",
-    );
-  });
-
 });

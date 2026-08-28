@@ -2875,10 +2875,10 @@ describe('assistant Murph onboarding guidance', () => {
       "The user's immediate health or safety need still comes first.",
     )
     expect(prompt).toContain(
-      'before advancing, declining, or completing onboarding',
+      'before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding',
     )
     expect(prompt).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion.',
     )
     expect(prompt).toContain(
       'During discovery, a stated health goal is context, not an action request.',
@@ -2895,8 +2895,11 @@ describe('assistant Murph onboarding guidance', () => {
     expect(prompt).toContain(
       'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
     )
-    expect(prompt).toContain('Honor pause, defer, skip, and decline.')
     expect(prompt).toContain(
+      'Once a data source is identified, postponing only its optional connection does not pause onboarding. Do not issue or reissue a link; acknowledge the choice, continue to the next unresolved foundation beat unless the user explicitly pauses onboarding itself, and never imply the connection exists until visible evidence proves it.',
+    )
+    expect(prompt).not.toContain('Honor pause, defer, skip, and decline.')
+    expect(prompt).not.toContain(
       'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
     )
     expect(prompt).toContain(
@@ -3001,7 +3004,7 @@ describe('assistant conversation scope', () => {
       'they do not grant direct room-vault access or private-state inspection',
     )
     expect(groupPrompt).toContain(
-      "Use only the exact accepted `message_ref` printed beside that sender's request or clarification answer.",
+      "Use only the exact accepted `message_ref` printed beside that sender's complete request or destination answer",
     )
     expect(groupPrompt).toContain(
       'Infer only the requested answer audience from ordinary conversation',
@@ -3013,21 +3016,24 @@ describe('assistant conversation scope', () => {
       '`ask_current_sender_privately` for an explicit private answer',
     )
     expect(groupPrompt).toContain(
-      '`clarify_current_sender` only when the destination is genuinely ambiguous',
+      '`clarify_current_sender` only when the answer destination is genuinely ambiguous',
     )
     expect(groupPrompt).toContain(
       'After `clarify_current_sender` returns `clarification_required`, ask one concise natural question in that same turn about whether the answer should be shared in this group or sent privately, without prescribing a reply format. Do not finish that turn silently.',
     )
     expect(groupPrompt).toContain(
-      "After the same sender answers naturally, use the matching continuation action with that answer's exact ref",
+      "Use the matching continuation action only when the same sender's next reply solely selects the group or private destination",
     )
+    expect(groupPrompt).toContain('If that reply adds or changes substance')
     expect(groupPrompt).toContain(
       'the host reloads the Message and remains authoritative for identity, route existence, authorization, required notice, replay safety, and the fixed destination',
     )
     expect(groupPrompt).toContain(
-      'only for that explicit current-sender consultation, not account/settings actions, other participants, or unsolicited disclosure',
+      'This lane is only for current-sender consultation, not account/settings actions, other participants, or unsolicited disclosure',
     )
-    expect(directPrompt).not.toContain('search/load deferred `murph.group_consult`')
+    expect(directPrompt).toContain(
+      'From this private conversation, you can ask or hand off to a group only when Murph has already joined it',
+    )
     expect(groupEmailPrompt).not.toContain('search/load deferred `murph.group_consult`')
     expect(restrictedGroupPrompt).not.toContain(
       'search/load deferred `murph.group_consult`',

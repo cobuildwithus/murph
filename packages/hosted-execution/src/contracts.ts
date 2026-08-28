@@ -289,6 +289,7 @@ export interface HostedExecutionPrivateAssistantAskCompletionNotification {
 export interface HostedExecutionGroupContextHandoffNotification {
   membershipId: string;
   originAssistantInputId: string;
+  sourceDisplayName?: string | null;
 }
 
 export interface HostedExecutionOperatorTaskNotification {

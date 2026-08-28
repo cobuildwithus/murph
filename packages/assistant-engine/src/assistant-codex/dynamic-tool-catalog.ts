@@ -1009,7 +1009,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
         description:
-          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs. Attribute member actions, claims, and experiences in third person to their memory-backed preferred display name, which joined groups already receive. If the name is not established in the current conversation, run `vault-cli memory show`; use "a member" only when canonical memory has no preferred name. Never write them as if Murph did, said, or experienced them. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
+          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs, written in identity-neutral third person. Do not look up, infer, or include the member\'s name; the host supplies any group-safe attribution separately. Never write the member\'s actions, claims, or experiences as if Murph did, said, or experienced them. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
       },
       question: {
         type: 'string',
@@ -1287,11 +1287,11 @@ type MurphGroupConsultAction =
 
 const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
   ask: {
-    optional: ['groupLabel'],
+    optional: ['groupLabel', 'participantTarget'],
     required: ['question'],
   },
   handoff: {
-    optional: ['groupLabel'],
+    optional: ['groupLabel', 'participantTarget'],
     required: ['context'],
   },
   ask_current_sender: {
@@ -1390,7 +1390,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'Ask/hand off; host binds. Named group: use groupLabel; never list. Before unnamed handoff, vault-cli memory show; fallback "a member". Sender intent: ask_current_sender=group, ask_current_sender_privately=private, clarify_current_sender=genuine ambiguity; continuations resume. Handoff accepted=queued, not sent/shared.',
+    'ask=group answer; handoff=tell/post/share. title=groupLabel; people/count=participantTarget; names not groupLabel; no list. ask_current_sender=group; ask_current_sender_privately=private; clarify=destination only; resume continuations. Handoff identity-neutral; host labels. accepted=queued/pending, never sent/shared.',
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 

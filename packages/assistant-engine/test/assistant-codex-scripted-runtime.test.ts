@@ -3554,12 +3554,19 @@ text(result.output);
     })
     expect(currentSpeaker.session.sessionId).toBe(resolved.session.sessionId)
     expect(currentSpeaker.session.binding.actorId).toBe(laterParticipantId)
+    const canCommit = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false)
+    const canFinalize = vi.fn(() => true)
 
     const result = await sendAssistantAskContinuationLocal({
       actorId: currentSpeaker.session.binding.actorId,
       answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
       bindingDeliveryTarget: threadId,
-      canCommit: () => true,
+      canCommit,
+      canFinalize,
       channel: 'telegram',
       conversation: conversationRefFromBinding(currentSpeaker.session.binding),
       deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
@@ -3593,6 +3600,8 @@ text(result.output);
       response: 'First reviewed fact.\n---\nSecond reviewed fact.',
       status: 'completed',
     })
+    expect(canCommit).toHaveBeenCalledTimes(3)
+    expect(canFinalize).toHaveBeenCalledOnce()
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
     expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       expect.objectContaining({

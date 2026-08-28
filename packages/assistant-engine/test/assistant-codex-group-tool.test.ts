@@ -296,6 +296,18 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("advertises family-bounded schemas", () => {
+    const groupConsultTool = MURPH_GROUP_FAMILY_TOOLS.find(
+      (tool) => tool.name === "group_consult",
+    );
+    expect(groupConsultTool?.description)
+      .toContain("ask=group answer; handoff=tell/post/share");
+    expect(groupConsultTool?.description)
+      .toContain("title=groupLabel");
+    expect(groupConsultTool?.description)
+      .toContain("people/count=participantTarget");
+    expect(groupConsultTool?.description)
+      .toContain("names not groupLabel");
+
     const expectedRootKeys = {
       group_consult: [
         "action", "context", "grantId", "groupLabel", "message_ref",
@@ -2582,7 +2594,7 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual({
       action: "handoff",
-      result: { status: "accepted", targetLabel: "Lifting Club" },
+      result: { status: "queued", targetLabel: "Lifting Club" },
     });
     expect(groupRequest).toHaveBeenCalledWith({
       action: "handoff",
@@ -2707,7 +2719,7 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual({
       action: "ask",
-      result: { status: "accepted", targetLabel: "Morning Movers" },
+      result: { status: "queued", targetLabel: "Morning Movers" },
     });
     expect(groupRequest).toHaveBeenCalledWith({
       action: "ask",

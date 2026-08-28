@@ -300,7 +300,7 @@ printf 'ZIP: %s (%s bytes)\n' "$zip_path" "$(wc -c < "$zip_path" | tr -d ' ')"
       'product-experience-review.md',
       'prompt-review.md',
       'frontend-review.md',
-      'coverage-write.md',
+      'coverage-review.md',
     ]) {
       writeHarnessFile(
         harnessRoot,
