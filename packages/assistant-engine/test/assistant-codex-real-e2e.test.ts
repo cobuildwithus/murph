@@ -11214,14 +11214,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          configOverrides: filesystemAccess
+          threadConfig: filesystemAccess
             ? undefined
-            : [
-                'features.shell_tool=false',
-                'features.multi_agent=false',
-                'features.multi_agent_v2=false',
-                'features.tool_suggest=false',
-              ],
+            : {
+                'features.multi_agent': false,
+                'features.multi_agent_v2': false,
+                'features.shell_tool': false,
+                'features.tool_suggest': false,
+              },
           developerInstructions:
             buildHostedUsageProgressDeveloperInstructions(channel),
           dynamicTools: [MURPH_GROUP_USAGE_TOOL],
@@ -11316,6 +11316,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(response.finalMessage).not.toMatch(
           /messages? left|remaining percent|\b0% left\b|\bexhausted\b|\bout of usage\b/iu,
         )
+        if (!filesystemAccess && usageResult === 64) {
+          process.stdout.write(
+            `group-email-thread-config-e2e ${JSON.stringify({
+              actionCount: actions.length,
+              reply: response.finalMessage.trim(),
+            })}\n`,
+          )
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

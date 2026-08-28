@@ -2555,10 +2555,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       input: expect.objectContaining({
-        codexConfigOverrides: [
-          'memories.use_memories=false',
-          'memories.generate_memories=false',
-        ],
         maintenanceProfile: 'member-memory',
         prompt: expect.stringContaining(
           '## Conversation evidence (engine-supplied, bounded, last 7 days)',

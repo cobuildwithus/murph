@@ -184,11 +184,6 @@ const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
 }
-const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-] as const
-
 export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
@@ -1569,8 +1564,6 @@ function buildAssistantNotificationMessageInput(
   // cannot drift across caller-specific configuration.
   const executionOverlay = maintenanceTurn
     ? {
-        codexConfigOverrides:
-          ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
     : scheduledOccurrence

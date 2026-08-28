@@ -44,6 +44,26 @@ const EXPECTED_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG = {
   ...EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
   ...EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
 } as const
+const EXPECTED_READ_ONLY_AUTOMATION_THREAD_CONFIG = {
+  'features.apps': false,
+  'features.browser_use': false,
+  'features.enable_mcp_apps': false,
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.plugins': false,
+  'features.standalone_web_search': false,
+  'features.tool_suggest': false,
+  'features.web_search_request': false,
+  'memories.generate_memories': false,
+  web_search: 'disabled',
+  ...EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+} as const
+const EXPECTED_GROUP_EMAIL_THREAD_CONFIG = {
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.shell_tool': false,
+  'features.tool_suggest': false,
+} as const
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
   resolveCodexAssistantCapabilities: vi.fn(),
@@ -848,10 +868,6 @@ describe('Codex model catalog', () => {
       providerOptions: route.providerOptions,
     })
     const input = {
-      codexConfigOverrides: [
-        'features.shell_tool=true',
-        'features.apps=true',
-      ],
       prompt: 'Format an untrusted provider result.',
       vault: '/vaults/test',
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
@@ -955,10 +971,7 @@ describe('Codex model catalog', () => {
       approvalPolicy: 'never',
       sandbox: null,
     })
-    expect(providerInput?.codexConfigOverrides).toEqual([
-      'features.shell_tool=true',
-      'features.apps=true',
-    ])
+    expect(providerInput).not.toHaveProperty('codexConfigOverrides')
     expect(providerInput?.codexThreadConfig).toEqual(
       EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
     )
@@ -1029,12 +1042,6 @@ describe('Codex model catalog', () => {
       registerLiveProviderTurn: vi.fn(() => vi.fn()),
     } satisfies AssistantActiveTurnLiveProviderSteering
     const input = {
-      codexConfigOverrides: [
-        'features.shell_tool=true',
-        'features.apps=true',
-        'memories.use_memories=true',
-        'web_search="live"',
-      ],
       hostedImageCompletionEffectRestriction: restriction,
       prompt: 'Complete the trusted image turn.',
       vault: '/vaults/test',
@@ -1132,9 +1139,7 @@ describe('Codex model catalog', () => {
       sandbox: 'danger-full-access',
     })
     expect(completionProviderInput?.codexThreadConfig).toBeNull()
-    expect(completionProviderInput?.codexConfigOverrides).toEqual(
-      input.codexConfigOverrides,
-    )
+    expect(completionProviderInput).not.toHaveProperty('codexConfigOverrides')
     expect(completionProviderInput?.activeTurnSteering).toBe(activeTurnSteering)
     expect(completionProviderInput?.environments).toEqual([
       { PRIVATE_ENVIRONMENT: 'must-not-pass' },
@@ -1176,9 +1181,7 @@ describe('Codex model catalog', () => {
     })
     expect(foregroundProviderInput?.codexThreadConfig).toBeNull()
     expect(foregroundProviderInput?.activeTurnSteering).toBe(activeTurnSteering)
-    expect(foregroundProviderInput?.codexConfigOverrides).toEqual(
-      input.codexConfigOverrides,
-    )
+    expect(foregroundProviderInput).not.toHaveProperty('codexConfigOverrides')
     expect(foregroundProviderInput?.environments).toEqual([
       { PRIVATE_ENVIRONMENT: 'must-not-pass' },
     ])
@@ -1231,10 +1234,6 @@ describe('Codex model catalog', () => {
       providerOptions: route.providerOptions,
     })
     const input = {
-      codexConfigOverrides: [
-        'features.shell_tool=true',
-        'features.apps=true',
-      ],
       prompt: 'Generate one sponsor song from untrusted creative material.',
       vault: '/vaults/test',
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
@@ -1337,10 +1336,7 @@ describe('Codex model catalog', () => {
       approvalPolicy: 'never',
       sandbox: 'read-only',
     })
-    expect(providerInput?.codexConfigOverrides).toEqual([
-      'features.shell_tool=true',
-      'features.apps=true',
-    ])
+    expect(providerInput).not.toHaveProperty('codexConfigOverrides')
     expect(providerInput?.codexThreadConfig).toEqual(
       EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
     )
@@ -1588,9 +1584,8 @@ describe('Codex model catalog', () => {
         ?.codexThreadConfig,
     ).toHaveProperty('features.shell_tool', false)
     expect(
-      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-        ?.codexConfigOverrides,
-    ).toBeNull()
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0],
+    ).not.toHaveProperty('codexConfigOverrides')
     expect(
     providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
@@ -1607,6 +1602,117 @@ describe('Codex model catalog', () => {
       requireHostedPrivateImageDelivery: false,
       runtimeWorkspaceRoots: ['/vaults/member'],
     }))
+  })
+
+  it('keeps Habitat memory isolation on the thread without changing process lifetime', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const executionContext = {
+      hosted: {
+        memberId: 'member-habitat-maintenance',
+        userEnvKeys: [],
+      },
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      sendVaultFile: vi.fn(),
+      vaultFileSendAvailable: false,
+    }
+    const input = {
+      executionContext,
+      maintenanceProfile: 'habitat-voice' as const,
+      prompt: 'Maintain Habitat state.',
+      vault: '/vaults/member',
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext,
+      hostedToolContext,
+      input,
+      profile: {
+        promptProfile: 'maintenance',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-25',
+        currentTimeZone: 'America/New_York',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      progressDelivery: null,
+      turnId: 'turn-habitat-maintenance',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint: 'a'.repeat(64),
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'linq',
+        },
+        dynamicTools: [],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: 'Habitat maintenance prompt.',
+        turnContextPrompt: null,
+        workingDirectory: '/vaults/member',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'maintenance',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-25T08:00:00.000Z',
+      turnId: 'turn-habitat-maintenance',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.codexThreadConfig).toEqual({
+      'memories.generate_memories': false,
+      'memories.use_memories': false,
+    })
+    expect(providerInput).not.toHaveProperty('codexConfigOverrides')
+    expect(providerInput).not.toHaveProperty('processLifetime')
+    expect(providerInput).toMatchObject({
+      hostedToolContext,
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: ['/vaults/member'],
+    })
   })
 
   it('keeps onboarding goal check-ins on a vault-readable but mutation-denied turn', async () => {
@@ -1726,21 +1832,8 @@ describe('Codex model catalog', () => {
       approvalPolicy: 'never',
       sandbox: 'read-only',
     })
-    expect(providerInput?.codexConfigOverrides).toEqual(
-      expect.arrayContaining([
-        'memories.generate_memories=false',
-        'web_search="disabled"',
-        'features.apps=false',
-        'features.browser_use=false',
-        'features.plugins=false',
-        'features.multi_agent=false',
-      ]),
-    )
-    expect(providerInput?.codexConfigOverrides).not.toContain(
-      'features.shell_tool=false',
-    )
     expect(providerInput?.codexThreadConfig).toEqual(
-      EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+      EXPECTED_READ_ONLY_AUTOMATION_THREAD_CONFIG,
     )
     expect(providerInput?.codexThreadConfig).not.toHaveProperty(
       'features.shell_tool',
@@ -1773,7 +1866,6 @@ describe('Codex model catalog', () => {
     })
     const sharedPlan = createGroupEmailSharedPlan()
     const input = {
-      codexConfigOverrides: ['features.shell_tool=true'],
       prompt: 'Reply to the group email.',
       vault: '/vaults/group',
     }
@@ -1849,13 +1941,10 @@ describe('Codex model catalog', () => {
     expect(providerInput?.providerConfig).toMatchObject({
       sandbox: 'read-only',
     })
-    expect(providerInput?.codexConfigOverrides).toEqual([
-      'features.shell_tool=true',
-      'features.shell_tool=false',
-      'features.multi_agent=false',
-      'features.multi_agent_v2=false',
-      'features.tool_suggest=false',
-    ])
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_GROUP_EMAIL_THREAD_CONFIG,
+    )
+    expect(providerInput).not.toHaveProperty('codexConfigOverrides')
     expect(providerInput?.groupConversation).toBe(true)
   })
 
