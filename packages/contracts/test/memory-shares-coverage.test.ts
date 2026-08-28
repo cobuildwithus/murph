@@ -149,7 +149,7 @@ describe("memory parse and render coverage", () => {
           '{"id":}',
         ),
       }),
-    ).toThrow("Memory record metadata comment is invalid.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -159,7 +159,7 @@ describe("memory parse and render coverage", () => {
           "",
         ),
       }),
-    ).toThrow("Memory record metadata comment is required.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -169,7 +169,7 @@ describe("memory parse and render coverage", () => {
           "mem_0123456789abcdef",
         ),
       }),
-    ).toThrow("Memory record metadata comment is invalid.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -179,7 +179,7 @@ describe("memory parse and render coverage", () => {
           '"createdAt":null',
         ),
       }),
-    ).toThrow("Memory record metadata comment is invalid.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -189,7 +189,7 @@ describe("memory parse and render coverage", () => {
           "",
         ),
       }),
-    ).toThrow("Memory record metadata comment is invalid.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -207,7 +207,7 @@ describe("memory parse and render coverage", () => {
           "- should fail",
         ].join("\n"),
       }),
-    ).toThrow('Unknown memory section "Unknown".');
+    ).toThrow("Canonical memory document bank/memory.md:9 is invalid.");
 
     expect(() =>
       upsertMemoryRecord(createEmptyMemoryDocument(), {

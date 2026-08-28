@@ -464,6 +464,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
+      repostOriginAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "post_join_offer",
@@ -472,6 +473,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
+      repostOriginAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
@@ -515,14 +517,14 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "ask",
-      groupLabel: "Morning Movers",
+      membershipId: "hgm_private_member",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "ask",
-      groupLabel: "Morning Movers",
+      membershipId: "hgm_private_member",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",
@@ -1180,6 +1182,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await expect(groupTool.request({
       action: "ask",
+      membershipId: "hgm_private_member",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",

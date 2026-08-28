@@ -52,10 +52,10 @@ export async function listAudits(
 ): Promise<AuditCommandListItem[]> {
   await assertInitializedVaultRoot(vaultRoot)
   const query = await loadQueryRuntime()
-  const records = await query.listCanonicalEntities(vaultRoot, {
-    family: 'audit',
-    limit: null,
-  })
+  const records = await query.readCanonicalEntityFamilySource(
+    vaultRoot,
+    'audit',
+  )
   const sorted = records
     .filter((record) => matchesOptionalString(firstString(record.attributes, ['action']), options.action))
     .filter((record) => matchesOptionalString(firstString(record.attributes, ['actor']), options.actor))

@@ -12,7 +12,6 @@ import {
 } from '@murphai/contracts'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
 } from '@murphai/hosted-execution/contracts'
 import {
   HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
@@ -28,6 +27,8 @@ import {
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -278,11 +279,11 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_response_card',
   description:
-    'For daily_nutrition cards and numeric nutrition targets, use the member request plus context already known in the conversation or vault. Do not run a universal medical-history or measurement checklist. A routine card with complete accepted goals needs no repeated screening unless new context raises a concern. Before proposing or changing numeric targets, if current known context has not established suitability, ask one compact question covering every unresolved category: age under 18; pregnancy or breastfeeding; eating-disorder or number-sensitive tracking; underweight, frailty, or malnutrition; glucose-lowering or other nutrition-target-changing medication; kidney disease, advanced liver disease, significant heart disease, or relevant endocrine disease; post-bariatric care; or clinician-managed constraints that materially change calorie or macro targets. Apply safety at the narrowest relevant scope: a health-context fact blocks only the numeric target or advice it materially affects, not benign totals, logging, education, or unrelated low-risk work. An allergy, intolerance, dietary restriction, or clinician-directed diet is not by itself a reason to suppress the five totals or an accepted compatible target bundle. If known current context makes self-directed numeric guidance unsuitable—including underage, pregnancy or breastfeeding, eating-disorder or number-sensitive tracking context, underweight, frailty or malnutrition, glucose-lowering medication, kidney disease, advanced liver disease, significant heart disease, relevant endocrine disease, post-bariatric care, or documented clinician-managed constraints that materially change or conflict with the card targets—use helpful non-numeric text for the affected guidance, make no Goal mutation, and attach no card. Read only the context needed to resolve a concrete concern. A missing unrelated fact or failed unrelated read does not block a routine card. A scheduled occurrence with unresolved suitability uses ordinary non-numeric closeout with no proposal, Goal mutation, question, or card. A scheduled occurrence never activates provisional targets. Treat a calorie target below 1,200 kcal/day as unsuitable; do not floor it upward. ' +
+    'For daily_nutrition cards and numeric nutrition targets, use the member request plus context already known in the conversation or vault. Do not run a universal medical-history or measurement checklist. A routine card with complete accepted goals needs no repeated screening unless new context raises a concern. Before treating suitability as unresolved, asking, or proposing or changing targets, inspect the current conversation and run vault-cli memory show --format json once for the canonical Identity, Preferences, Instructions, and Context record. Do not re-ask or recite established categories. Treat this known-context suitability check as workflow eligibility, not public health Q&A: never search Health Commons to decide or merely restate it. If suitability is clear, proceed and state only the request-relevant outcome. Otherwise ask one compact question covering every unresolved category: age under 18; pregnancy or breastfeeding; eating-disorder or number-sensitive tracking; underweight, frailty, or malnutrition; glucose-lowering or other nutrition-target-changing medication; kidney disease, advanced liver disease, significant heart disease, or relevant endocrine disease; post-bariatric care; or clinician-managed constraints that materially change calorie or macro targets. Apply safety at the narrowest relevant scope: a health-context fact blocks only the numeric target or advice it materially affects, not benign totals, logging, education, or unrelated low-risk work. An allergy, intolerance, dietary restriction, or clinician-directed diet is not by itself a reason to suppress the five totals or an accepted compatible target bundle. If known current context makes self-directed numeric guidance unsuitable—including underage, pregnancy or breastfeeding, eating-disorder or number-sensitive tracking context, underweight, frailty or malnutrition, glucose-lowering medication, kidney disease, advanced liver disease, significant heart disease, relevant endocrine disease, post-bariatric care, or documented clinician-managed constraints that materially change or conflict with the card targets—use helpful non-numeric text for the affected guidance, make no Goal mutation, and attach no card. Read another clinical record family only when the conversation or canonical memory raises one concrete concern. A missing unrelated fact or failed unrelated read does not block a routine card. A scheduled occurrence with unresolved suitability uses ordinary non-numeric closeout with no proposal, Goal mutation, question, or card. A scheduled occurrence never activates provisional targets. Treat a calorie target below 1,200 kcal/day as unsuitable; do not floor it upward. ' +
     'Workout footers span native and static cards; never promise native-only taps. ' +
     'For a tracked workout, attempt the complete verified card and let input validation decide whether its actual encoded envelope fits; never refuse from an estimated exercise or set count or ask the member to simplify saved workout data. If validation rejects the complete envelope, use the full deterministic text recovery. ' +
     'Attach one private-direct response card when the current accepted member message or the saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent, during managed meal closeout, for the verified initial card after starting or exact-reading one canonical workout, or for an unambiguous update to its established workout card, including the just-completed final snapshot. Occurrence authority alone is not card intent. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For routine daily_nutrition, including an authorized meal estimate, use one workflow and end with one card or concise fallback. Never narrate safety, totals, estimation, or target resolution. ' +
-    'Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json. If it returns 200 records, fail closed with ordinary text, no Goal or measurement mutation, and no card. Otherwise run vault-cli goal show <goal-id> --format json for every returned active Goal whose list item reports a nonzero data.metricTargetsCount; never select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix. Resolve metric identity, unit, comparator, effective date, conflicts, and the 1,200-kcal boundary only after inspecting that complete detail set. Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal; neither read substitutes for the other. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only. ' +
+    'Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json. If it returns 200 records, fail closed with ordinary text, no Goal or measurement mutation, and no card. Otherwise run vault-cli goal show <goal-id> --format json for every returned active Goal whose list item reports a nonzero data.metricTargetsCount; never select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix. Resolve metric identity, unit, comparator, effective date, conflicts, and the 1,200-kcal boundary only after inspecting that complete detail set. Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal; neither read substitutes for the other. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. Only on a member-explicit interactive daily-card or daily-summary request, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before attaching a card. Default attachment intent after a meal mutation does not authorize reading, editing, or asking about another meal; when fresh totals remain incomplete, use the short food-journal fallback with no card. Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone. If recovery still needs identity or amount, ask one compact question and stop without a card; after the answer, edit and read back the exact existing meal and rerun fresh totals. Do not ask merely to enable numbers when numeric presentation is suppressed. A partial card is only for an explicit request to see the currently available partial data after the limitation is clear, not the normal interactive closeout. Scheduled closeout keeps automatic-meal-capture\'s existing question authority. New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only. ' +
     'For the exact card localDate, require the containing active Goal window and each target\'s optional startAt/targetAt interval to include that date, with inclusive boundaries; use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up, or the explicitly requested date, never wall-clock today. Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them. Require one unambiguous applicable exact-point target per card unit: canonical dietary-calories in kcal plus protein-grams, carbs-grams, fat-grams, and fiber-grams in g, across active Goals. Author only dietary-calories. When exactly one compatible canonical calorie owner exists, use it and ignore every globally ambiguous calories target. Only without a canonical owner may targetId daily-calories with metric calories and unit kcal substitute, and only when its same containing Goal owns the complete compatible historical set: daily-protein / protein-grams / g, daily-carbohydrates / carbs-grams / g, daily-fat / fat-grams / g, and daily-fiber / fiber-grams / g. Any other calories target is not dietary authority even when co-located with all four nutrition metrics. Never combine the historical set with another Goal or managed proposal, and never infer ownership from title, slug, domain, or description. Multiple qualifying historical sets or ambiguity inside one means no card. Never mutate a Goal to repair its key. Apply the 1,200-kcal boundary and residual math to resolved calories. ' +
     'Each target must be an exact card point with comparator between and identical numeric value and highValue. Accept selected-value evaluation normally. The complete same-Goal historical daily-* nutrition set above has one read-only display-compatibility path when every target instead uses rolling-window evaluation with statistic mean plus selectionPolicyOverride kind daily-aggregate with statistic mean: copy each unchanged point bound into the card for the selected localDate, preserve the Goal, and never extend this exception to another identity or workflow. A mixed evaluation bundle or any other rolling-window statistic or daily-aggregate statistic is incompatible. A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible: never expose, compare, copy, or derive from its bound or create, replace, or remove a managed target around it; use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout. A target in another unit likewise remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value. If a daily_nutrition call is rejected for malformed arguments, use the returned validation paths to correct only invalid fields and retry this tool once with the same verified totals and targets; if that retry fails, use the truthful text fallback without narrating tool or schema mechanics. An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use. When any target is missing, follow nutrition-strategy/references/daily-nutrition-card-goals.md: hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write; an infeasible bundle means ordinary text and no mutation. Save one paused canonical proposal, explain its values, reasoning, and effective date in ordinary text with no card, and activate it only after member acceptance. On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default. Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date. Any derived target addition or change atomically pauses the complete managed bundle until acceptance. A scheduled closeout never asks for inputs or activates provisional targets. ' +
     'On the first eligible managed closeout only, if the complete all-status Goal read proves the stable managed slug has never existed and already-known inputs pass the known-context suitability and derivation rules, create and explain one paused proposal in ordinary text with no card; once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it. Without a complete accepted bundle or that one first-run proposal path, use ordinary closeout text and no card. When an explicit card request caused the proposal, its next unambiguous acceptance may complete that pending request only after reapplying the known-context suitability rule, then activation and readback, and a fresh same-date totals read; corrections, declines, ambiguous replies, target-setting-only requests, and compound requests remain text-only. Explicit active targets win metric by metric; conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs mean ordinary text or one consolidated question, never a goal-less card. Freeze each exact point target and Murph\'s context-aware status without a universal threshold. Use compact_table for an explicit table or structured-tracker request, a structured plan or schedule that the table alone can fully represent within its bounds, that verified initial live-workout card, or an unambiguous update to the same exact open or just-finished workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout and re-read it successfully. A structured workout card has exactly kind compact_table, version 1, title, subtitle null, footer, tracking with kind workout plus the exact evt_<ULID> entityId, and workout; never add rowHeader, columns, or rows. The runtime records tracking snapshotAt. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
@@ -300,7 +301,7 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_exercise_routine_card',
   description:
-    'Attach one complete Telegram exercise routine Rich Message when this tool is available and its exercise layout, optional catalog images, or both make the answer clearer. Use it for current movement instruction, an exact scheduled occurrence that teaches the saved routine now, or a request to repeat or improve an earlier routine. This card is one useful presentation option, not the only valid rich layout. Use attach_telegram_rich_content when a custom or mixed layout is clearer. The card must completely answer the request and replaces final text. Represent every named movement as its own card.exercises item, even when the routine groups movements under phases. A phase is not an exercise. Example: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) becomes four exercise items in one card, not two. An exercise list result is not enough: run vault-cli exercise show for every named movement before attaching the card. Include useful returned catalog images when they are available and help explain the movement; images are recommended, not required. In a multi-movement routine, put each useful returned image on its matching movement item. Keep the card at eight images or fewer. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language when it helps. Never promise images for an exercise that has none. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. If validation rejects the card, correct the reported fields and retry this tool once. On that retry, preserve every valid movement, instruction, and image; change only the reported invalid fields. Do not switch to separate response media on Telegram. If the corrected retry is also rejected, use one complete attach_telegram_rich_content card without images and keep every named movement separate. After either card tool succeeds, stop and send no final text. The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap. Do not combine this card with response media.',
+    'Attach one complete Telegram exercise routine Rich Message when this tool is available and its exercise layout, optional catalog images, or both make the answer clearer. Use it for current movement instruction, an exact scheduled occurrence that teaches the saved routine now, or a request to repeat or improve an earlier routine. This card is one useful presentation option, not the only valid rich layout. Use attach_telegram_rich_content when a custom or mixed layout is clearer. The card must completely answer the request and replaces final text. Represent every named movement as its own card.exercises item, even when the routine groups movements under phases. A phase is not an exercise. Example: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) becomes four exercise items in one card, not two. An exercise list result is not enough: run vault-cli exercise show for every named movement before attaching the card. Include useful returned catalog images when they are available and help explain the movement; images are recommended, not required. In a multi-movement routine, put each useful returned image on its matching movement item. Keep the card at eight images or fewer. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Safety is required: write one scenario-specific stop condition in at most 160 characters. Omit subtitle or footer when it adds nothing; the runtime records null. Never promise images for an exercise that has none. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. If validation rejects the card, correct the reported fields and retry this tool once. On that retry, preserve every valid movement, instruction, and image; change only the reported invalid fields. Do not switch to separate response media on Telegram. If the corrected retry is also rejected, use one complete attach_telegram_rich_content card without images and keep every named movement separate. After either card tool succeeds, stop and send no final text. The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap. Do not combine this card with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -396,7 +397,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.`,
+    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports an input-schema rejection, accepted, already accepted, unavailable, or callback failure. An input-schema rejection includes value-free validation issues. Accepted, already accepted, unavailable, and callback-failure results are terminal.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -878,7 +879,7 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share. For offer_access, include it only when the group explicitly asks to repost the native access message; the trusted host binds the replacement to that exact request. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
 } as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
@@ -891,6 +892,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'ask',
     'handoff',
     'ask_current_sender',
+    'ask_current_sender_privately',
     'clarify_current_sender',
     'continue_current_sender_in_group',
     'continue_current_sender_privately',
@@ -1003,7 +1005,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
         description:
-          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs. Attribute member actions, claims, and experiences in third person to their memory-backed preferred display name, which joined groups already receive. If the name is not established in the current conversation, run `vault-cli memory show`; use "a member" only when canonical memory has no preferred name. Never write them as if Murph did, said, or experienced them. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
+          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs, written in identity-neutral third person. Do not look up, infer, or include the member\'s name; the host supplies any group-safe attribution separately. Never write the member\'s actions, claims, or experiences as if Murph did, said, or experienced them. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
       },
       question: {
         type: 'string',
@@ -1044,13 +1046,6 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         description:
           'Required only for action="arm_usage_referral". Send one exact set containing only available policies the current sender explicitly selected.',
       },
-      groupLabel: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-        description:
-          'Optional only for action="ask" or action="handoff". A visible group name the member would recognize, used only to disambiguate among joined groups; never an internal identifier.',
-      },
       displayName: {
         type: 'string',
         minLength: 1,
@@ -1058,11 +1053,26 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         description:
           'Group display name. Required for action="update_display_name"; optional for action="offer_access" only when it is the name the group chose or the exact name from the immediately preceding read_chat_name result.',
       },
+      cursor: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+        description:
+          'Optional only for action="list_memberships". Pass the exact opaque nextCursor from the immediately preceding page; never guess, edit, or take it from the user.',
+      },
+      disclosureGrantCursor: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+        description:
+          'Optional only for action="read_current" or action="list_memberships". Pass the exact opaque nextDisclosureGrantCursor from the immediately preceding disclosure-grant page; never guess, edit, or take it from the user.',
+      },
       membershipId: {
         type: 'string',
         minLength: 1,
+        maxLength: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
         description:
-          'Required only for action="leave_membership". Use the exact opaque membershipId from the immediately preceding list_memberships result; never guess it or take it from the user.',
+          'Required for action="ask", action="handoff", or action="leave_membership". Use the exact opaque membershipId from list_memberships in this conversation; never expose it, guess it, edit it, or take it from the member.',
       },
       avatarPrompt: {
         type: 'string',
@@ -1198,13 +1208,15 @@ type MurphGroupToolPropertyName = keyof typeof MURPH_GROUP_TOOL_PROPERTIES
 
 const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   group_consult: [
-    'context', 'grantId', 'groupLabel', 'message_ref', 'question',
+    'context', 'grantId', 'membershipId', 'message_ref', 'question',
   ],
   group_data: [
     'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
     'permissionText', 'projectionScopes', 'standaloneLink', 'unit', 'value',
   ],
-  group_membership: ['membershipId', 'setup'],
+  group_membership: [
+    'cursor', 'disclosureGrantCursor', 'membershipId', 'setup',
+  ],
   group_usage: ['message_ref', 'policyCode', 'policyCodes'],
   group_chat: [
     'alt', 'avatarPrompt', 'avatarSource', 'displayName', 'imageRef',
@@ -1215,6 +1227,74 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
   readonly MurphGroupToolPropertyName[]
 >
+
+type MurphGroupConsultAction =
+  (typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult)[number]
+
+const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
+  ask: {
+    optional: [],
+    required: ['membershipId', 'question'],
+  },
+  handoff: {
+    optional: [],
+    required: ['context', 'membershipId'],
+  },
+  ask_current_sender: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  ask_current_sender_privately: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  clarify_current_sender: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  continue_current_sender_in_group: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  continue_current_sender_privately: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  ask_member: {
+    optional: [],
+    required: ['grantId', 'question'],
+  },
+} as const satisfies Record<
+  MurphGroupConsultAction,
+  {
+    optional: readonly MurphGroupToolPropertyName[]
+    required: readonly MurphGroupToolPropertyName[]
+  }
+>
+
+function buildMurphGroupConsultInputSchema() {
+  return {
+    oneOf: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult.map((action) => {
+      const actionProperties = MURPH_GROUP_CONSULT_ACTION_PROPERTIES[action]
+      const propertyNames: readonly MurphGroupToolPropertyName[] = [
+        ...actionProperties.required,
+        ...actionProperties.optional,
+      ]
+      return {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { type: 'string', enum: [action] },
+          ...Object.fromEntries(propertyNames.map((propertyName) => [
+            propertyName,
+            MURPH_GROUP_TOOL_PROPERTIES[propertyName],
+          ])),
+        },
+        required: ['action', ...actionProperties.required],
+      }
+    }),
+  } as const
+}
 
 function buildMurphGroupFamilyInputSchema<
   const Name extends keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
@@ -1251,11 +1331,14 @@ function buildMurphGroupFamilyTool<
   } as const
 }
 
-export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
+export const MURPH_GROUP_CONSULT_TOOL = {
+  namespace: 'murph',
   name: 'group_consult',
+  deferLoading: true,
   description:
-    'Ask or hand off; the host binds group/member/sender authority. Use message_current_sender for a complete private current-sender request. Call clarify_current_sender before a needed follow-up. Use continue_current_sender_privately or continue_current_sender_in_group only for a later reply to that clarification, never a fresh request. Accepted handoff is queued, not sent; never say told, shared, or posted.',
-})
+    'ask=group answer; handoff=tell/post/share via exact ID after exhausting list_memberships pages; clarify; hide IDs. ask_current_sender=group; ask_current_sender_privately=private; clarify=destination only; resume continuations. Handoff identity-neutral; host labels. accepted=queued/pending, never sent/shared.',
+  inputSchema: buildMurphGroupConsultInputSchema(),
+} as const
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
@@ -1298,7 +1381,10 @@ export const MURPH_GROUP_FAMILY_TOOLS = [
 
 export const MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME = {
   group: ['action', ...Object.keys(MURPH_GROUP_TOOL_PROPERTIES)],
-  group_consult: Object.keys(MURPH_GROUP_CONSULT_TOOL.inputSchema.properties),
+  group_consult: [
+    'action',
+    ...MURPH_GROUP_TOOL_FAMILY_PROPERTIES.group_consult,
+  ],
   group_data: Object.keys(MURPH_GROUP_DATA_TOOL.inputSchema.properties),
   group_membership: Object.keys(MURPH_GROUP_MEMBERSHIP_TOOL.inputSchema.properties),
   group_usage: Object.keys(MURPH_GROUP_USAGE_TOOL.inputSchema.properties),
@@ -1468,7 +1554,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'One bounded Playwright macro-step in current authorized run; returns state. No missing or sensitive input or final confirmation. Before browser call two this turn, call send_progress_update if available and not yet sent. Failure leaves outcome uncertain; call computer_open before retry/next action.',
+    'Bounded Playwright macro-step in current authorized run; returns state. Allows specifically authorized non-credential identity/health input and approved final terms. Never invent data, enter credentials/OTP/payment, bypass CAPTCHA, accept material consent, or retry unknown effects. After failure, call computer_open.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 

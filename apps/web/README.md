@@ -292,6 +292,18 @@ The Overview Personal Patterns section also uses the encrypted browser-vault rep
   usage-credit reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 
+Hosted Stripe receipt reconciliation emits one failure-only structured log per
+failed attempt. Its closed `stage` vocabulary is `event_retrieval`,
+`event_application`, `post_commit`, and `receipt_finalization`. The payload keeps
+the existing bounded event suffix and may add only a bounded sanitized error
+name, stable error code, sanitized top-level error message, and the existing
+Stripe-safe type, raw type, code, decline code, parameter, status, and validated
+opaque request-id projection. A top-level retry wrapper may inspect only its
+direct cause for those same Stripe-safe fields. The log never includes a raw
+error, stack, provider object or payload, member/customer/subscription/payment
+identifiers, submitted values, credentials, URLs, paths, or message content;
+Stripe request ids are correlation-only.
+
 ## Non-goals
 
 - canonical health-data storage
@@ -765,7 +777,12 @@ preserve representative choice and canonical diversity across the established
 5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
 within the admitted set; it is intentionally not an exhaustive whole-catalog
 ranking. Exact IDs and UPCs continue to use direct lookup
-paths.
+paths. On `foods_api_failed` failures from private food lookup, including exact
+ID/UPC dispatch and ranked search, the existing safe structured log adds only
+the closed `failureStage` value `search_rows` or `contaminant_summary`;
+PostgreSQL error codes remain in the existing safe error fields, and SQL/query
+text, search values, product data, rows, identifiers, raw error messages, and
+stacks remain excluded. No success event is added.
 
 For an existing labels database, run
 `psql -f sql/foods/private-search-indexes.sql` with the labels schema owner to
@@ -861,9 +878,20 @@ Hosted onboarding extras:
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
   uses it for metadata-only alerts when a provider rejection aborts a complete
   billing action, for new verified payment-failure events, and for the first
-  failed reconciliation attempt. Both website and iMessage Assistant billing
-  use the same Web-owned Stripe services, so there is no separate
-  channel-specific configuration.
+  failed reconciliation attempt. Every verified positive subscription invoice
+  or fulfilled usage-credit payment also sends one metadata-only notification
+  through this channel. Production must configure all three values: a missing
+  configuration or provider failure keeps that payment's existing receipt
+  retryable while its already-committed billing result remains intact. Both
+  website and iMessage Assistant billing use the same Web-owned Stripe
+  services, so there is no separate channel-specific configuration.
+- `HOSTED_WEB_VERCEL_ALERT_WEBHOOK_SECRET` enables the signed
+  `alerts.triggered` receiver at
+  `/api/internal/vercel-alerts/webhook`. Vercel owns platform usage/error
+  anomaly detection and grouping; Web verifies the exact raw body before
+  parsing it and sends only bounded aggregate metrics through the shared
+  operational Resend channel. Leave the variable unset until the matching
+  Vercel account webhook and its secret are ready together.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
 - `PRIVY_CUSTOM_AUTH_DOMAIN`
@@ -1340,12 +1368,25 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   The time zone is the monitor opt-in: without it the monitor stays disabled;
   with it, incomplete Resend email config or an invalid time zone fails the
   cron visibly. The latency path has no Linq/iMessage fallback.
+- To receive Vercel usage/error anomaly emails through Resend, configure
+  `HOSTED_WEB_VERCEL_ALERT_WEBHOOK_SECRET` together with the same
+  `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`, and
+  `HOSTED_LINQ_ALERT_EMAILS`, then subscribe the production project to the
+  Vercel account-webhook event `alerts.triggered` at
+  `https://www.withmurph.ai/api/internal/vercel-alerts/webhook`. The webhook
+  secret shown by Vercel must match the Production environment value. A valid
+  unsupported event is acknowledged without email; an invalid signature,
+  malformed alert, incomplete email configuration, or failed Resend request
+  returns non-2xx so Vercel retains retry ownership.
 - The same `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`, and
-  `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts. No
-  time-zone setting is required for Stripe alerts. Confirm that the Stripe
-  webhook endpoint subscribes to `checkout.session.async_payment_failed`,
-  `payment_intent.payment_failed`, `invoice.payment_failed`, and
-  `invoice.finalization_failed`. Checkout action owners cover mandatory
+  `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts and
+  positive-payment notifications. No time-zone setting is required. Confirm
+  that the Stripe webhook endpoint subscribes to positive `invoice.paid`,
+  `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  and `payment_intent.succeeded` events as well as
+  `checkout.session.async_payment_failed`, `payment_intent.payment_failed`,
+  `invoice.payment_failed`, and `invoice.finalization_failed`. Checkout action
+  owners cover mandatory
   price reads, customer provisioning, saved-card preparation, and Checkout
   Session create/resume. Paid-plan upgrades, paid-trial transitions, and
   scheduled plan switches use the same complete-action ownership. An owner
@@ -1365,6 +1406,17 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   is dependency-free so production migration line sync and standalone Stripe
   tooling can continue importing the general onboarding runtime under ordinary
   Node conditions.
+  Positive invoice and fulfilled usage-credit events send one privacy-safe
+  operator email from the existing receipt after canonical reconciliation.
+  An activation attempt retains its exact mailbox pointers on that receipt in
+  the same transaction as activation. Every positive-payment attempt restores
+  and hands those pointers to the existing runtime-wake owner before
+  notification work, including a retry where the email sent marker already
+  exists. Provider, configuration, sent-marker, or receipt-completion failure
+  can therefore leave delivery pending without losing the activation retry
+  target. The receipt-local sent marker plus provider idempotency prevents a
+  later replay from sending twice. Deploy the additive
+  `payment_notification_email_sent_at` column before or with the Web build.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
@@ -1433,9 +1485,14 @@ pnpm --dir apps/web release:production:contract-migrate
 ```
 
 Use `prisma:validate` for focused schema verification. It checks the schema
-without rewriting it. Run `prisma format` only when a repository-wide schema
-layout change is intentional, and review that mechanical diff separately from
-the migration change.
+without rewriting it. The hosted-Web Prisma config rejects `prisma format` by
+default because Prisma formats the entire schema rather than one edited model.
+For an intentional repository-wide schema layout change, opt in explicitly and
+review that mechanical diff separately from the migration change:
+
+```bash
+MURPH_ALLOW_FULL_PRISMA_FORMAT=1 pnpm --dir apps/web exec prisma format
+```
 
 The checked-in Vercel build command runs the guarded production migration
 wrapper before building. That wrapper generates the Prisma client because the
@@ -1490,29 +1547,34 @@ roll back independently because final provider authorization remains Web-owned.
 exact SQL transition, while `production-migration-guard.test.ts` pins the
 production-alias proof, drain, second alias proof, and migration-owner order.
 
-The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
-`HostedThreadRoute.accountLookupKey` and its index; old application code remains
-compatible if the build fails after migration. Once the replacement build is
-live, a count-and-decrypt dry run may begin. Before applying, prove the
-production alias points at the replacement build, wait the configured
-`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and prove
-the alias again. Then repeat bounded projection batches until readiness:
+### Production-secret boundary for maintenance
 
-```bash
-NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
-  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --batch-size 50
+Murph's production `DATABASE_URL` and `DIRECT_DATABASE_URL` are Vercel
+Sensitive values. Their values are non-readable after creation, so
+`vercel env run` is not a production database credential source even when the
+variable names appear in `vercel env ls`.
 
-NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
-  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --apply --batch-size 50
+Local agents and local commands must treat every production secret value and
+protected production identity as unavailable. Maintenance-script `--help`
+examples are local/test commands only; their caller must provide an approved
+non-production `DATABASE_URL` directly.
 
-NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
-  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --check
-```
+If a maintenance task requires a production credential or protected identity,
+stop before implementation or execution. Explain the exact operation, the
+required secret class, and the safety gates that must remain intact, then
+discuss the decision with the user. Do not invent a workflow or endpoint,
+duplicate a secret, download a Vercel environment file, or begin the rollout
+while waiting. Any user-authorized hosted or protected execution path is a
+separate reviewed change.
 
-The command decrypts only through the existing thread-delivery-route owner,
+The Linq weighted-capacity rollout requires both production database access and
+hosted crypto authority, so it has no approved local execution path. Do not
+start its backfill or rollout freeze from a local agent session. The eventual
+user-authorized path must preserve the exact deployed-build proof, configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function drain, second alias
+proof, bounded dry-run/apply batches, and terminal readiness check.
+
+The backfill decrypts only through the existing thread-delivery-route owner,
 emits aggregate counts only, and updates rows with an optimistic authority
 check. Do not run `--apply` before the final alias proof and prior-function
 drain, do not treat a dry-run as readiness, and do not drop the legacy
@@ -1720,37 +1782,41 @@ the skew window.
 ### Hosted phone-call private-content migration
 
 The phone-call private-content rollout is an expand-and-scrub hard cut with no
-plaintext dual-write. Deploy the additive migration first: it adds nullable
-`brief_encrypted` and `result_encrypted` columns and makes the legacy brief JSON
-nullable, so the previously deployed web remains compatible. The replacement
-web encrypts every new brief/result before the guarded database write, reads
-ciphertext first, and falls back to legacy JSON only when ciphertext is null;
-this keeps both old calls and new calls usable while the scrub runs.
+plaintext dual-write. It requires both production database access and hosted
+crypto authority, so it has no approved local execution path. Stop before any
+production migration, deployment, deploy freeze, dry run, or protected alias
+proof, and discuss the required operation and execution owner with the user. Do
+not run the script locally against production or invent a workflow, endpoint,
+or credential path.
 
-Freeze production deploys and rollbacks before promoting the replacement web,
-then record its exact commit. Preliminary count-only dry runs may start once
-that deployment is live, but no applying backfill is safe yet: an invocation
-of the previous web can still finish later and require or write plaintext.
-Prove the production alias points at the replacement commit with
+Any later user-authorized path must deploy the additive migration first. It
+adds nullable `brief_encrypted` and `result_encrypted` columns and makes the
+legacy brief JSON nullable, so the previously deployed web remains compatible.
+The path must then freeze production deploys and rollbacks before promoting the
+replacement web and record its exact commit. The replacement web encrypts every
+new brief/result before the guarded database write, reads ciphertext first, and
+falls back to legacy JSON only when ciphertext is null; this keeps both old
+calls and new calls usable while the scrub runs.
+
+After that deployment is live, the authorized path may begin preliminary
+count-only dry runs, but no applying backfill is safe yet: an invocation of the
+previous web can still finish later and require or write plaintext. It must
+prove the production alias points at the replacement commit with
 `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the secure
-`HOSTED_WEB_VERCEL_*` operator environment, then wait the configured
-`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval.
-Resolve the alias again after the drain. If it changed, select the replacement
-or a newer compatible commit and restart the full drain.
+`HOSTED_WEB_VERCEL_*` operator environment, wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and
+resolve the alias again. If the alias changed, it must select the replacement or
+a newer compatible commit and restart the full drain.
 
-Before the final alias proof and prior-function drain, only count-only dry runs
-are safe; do not use `--apply` because it scrubs plaintext that a warm previous
-function may still need. Only after that final alias proof, run
-`pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` through
-the production environment wrapper shown by the script's `--help`. Review the
-count-only dry run, add `--apply`, and repeat bounded batches while `hasMore` is
-true or `selectedRows` is nonzero. Rerun the dry run and record the zero-row
-result as the authoritative scrub proof. Apply encrypts and round-trips missing
-ciphertext, proves any existing ciphertext equals the legacy value, and scrubs
-plaintext in one compare-and-set write; conflicts are safe to rerun. Output
-never contains row ids, member ids, plaintext, or ciphertext. Record the
-replacement commit, both alias proofs, elapsed drain, batch summaries, and
-final zero-row dry run before ending the deploy freeze.
+The authorized path must preserve count-only dry-run before apply, the final
+alias proof and prior-function drain, bounded apply batches until `hasMore` is
+false and `selectedRows` is zero, and a final zero-row dry run.
+Apply encrypts and round-trips missing ciphertext, proves any existing
+ciphertext equals the legacy value, and scrubs plaintext in one compare-and-set
+write; conflicts are safe to rerun. Output never contains row ids, member ids,
+plaintext, or ciphertext. Record the replacement commit, both alias proofs,
+elapsed drain, batch summaries, and final zero-row dry run before ending any
+later authorized deploy freeze.
 
 Live Retell consultation decrypts under one 10-second deadline spanning token
 exchange and KMS, while honoring an earlier caller abort. This path does not
@@ -1985,6 +2051,11 @@ Notes:
 - `/api/internal/hosted-runtime/latency-alert/cron` scans existing Web-owned
   latency and durable mailbox-progress facts every five minutes. It does not
   signal Temporal, wake Cloudflare, or participate in message processing.
+- `/api/internal/vercel-alerts/webhook` receives event-driven Vercel usage and
+  error anomalies. It is not a cron and adds no steady-state five-minute
+  invocation. The route bounds the raw body at 64 KiB, verifies
+  `x-vercel-signature`, and sends one aggregate-only Resend email using a
+  stable event-derived idempotency key.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
   managed-user crypto provisioning. Later successful invoices for an already
@@ -2072,6 +2143,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-onboarding/stripe/cron`
 - `GET /api/internal/hosted-growth/usage-referral/cron`
 - `GET /api/internal/hosted-runtime/latency-alert/cron`
+- `POST /api/internal/vercel-alerts/webhook`
 
 The signed device-sync reconcile request includes only `connectionId`. Web
 places the request on the existing manual-reconcile wake and carries no

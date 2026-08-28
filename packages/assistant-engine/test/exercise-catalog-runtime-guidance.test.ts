@@ -17,7 +17,34 @@ describe('exercise catalog runtime guidance', () => {
     const compact = raw.replace(/\s+/gu, ' ')
 
     expect(compact).toContain(
-      'Exercise images are optional, but use them when available and helpful, especially for unfamiliar or technique-sensitive movements.',
+      'For a setup-only workout activation or logging turn, member-supplied exercise names are authoritative log input, not catalog selections.',
+    )
+    expect(compact).toContain(
+      'Preserve every distinct supplied name and follow the canonical workout owner without running `exercise list` or `exercise show`.',
+    )
+    expect(compact).toContain(
+      'A missing catalog match must never block, rename, merge, omit, or substitute a member-supplied exercise in the workout.',
+    )
+    expect(compact).toContain(
+      'Exercise images are optional generally, but use them when available and helpful, especially for unfamiliar or technique-sensitive movements.',
+    )
+    expect(compact).toContain(
+      'a just-in-time scheduled movement instruction or an explicit request to see the exercise must attach the smallest useful returned catalog image set with `murph.attach_response_media` when one exists.',
+    )
+    expect(compact).toContain(
+      'A request for a missing exercise picture is a presentation repair. Look up the exercise and use returned catalog media when available.',
+    )
+    expect(compact).toContain(
+      'Do not call `murph.generate_image` as a substitute for useful catalog media.',
+    )
+    expect(compact).toContain(
+      'If the exercise has no useful catalog image, generate an instructional image when it would help; also generate one when the user explicitly asks for a new or custom image.',
+    )
+    expect(compact).toContain(
+      'In the generation prompt and visible reply, use the natural exercise name rather than a catalog id or slug.',
+    )
+    expect(compact).toContain(
+      'never append a catalog id in parentheses or expose a source token.',
     )
     expect(compact).toContain(
       'Choose the smallest useful set and keep the complete response at eight images or fewer.',
@@ -40,5 +67,8 @@ describe('exercise catalog runtime guidance', () => {
     expect(compact).toContain(
       'If an important movement has no useful image, keep the written cue clear and never imply that an image was attached.',
     )
+    expect(compact).not.toContain('Complete that repair in the current turn')
+    expect(compact).not.toContain('Distinguish that specific delivered image')
+    expect(compact).not.toContain('provenance of an earlier image')
   })
 })

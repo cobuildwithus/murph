@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   applyLiveWorkoutMemberAction: vi.fn(),
   readLiveWorkoutCardSnapshot: vi.fn(),
+  setWorkoutUnitPreferences: vi.fn(),
 }));
 
 vi.mock("@murphai/vault-usecases/workouts", () => ({
   applyLiveWorkoutMemberAction: mocks.applyLiveWorkoutMemberAction,
   readLiveWorkoutCardSnapshot: mocks.readLiveWorkoutCardSnapshot,
+  setWorkoutUnitPreferences: mocks.setWorkoutUnitPreferences,
 }));
 
 import {
@@ -18,6 +20,7 @@ describe("hosted member action runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.applyLiveWorkoutMemberAction.mockResolvedValue({ status: "applied" });
+    mocks.setWorkoutUnitPreferences.mockResolvedValue({ updated: true });
     mocks.readLiveWorkoutCardSnapshot.mockResolvedValue({
       result: {
         cardUrl: "https://www.withmurph.ai/#murph-card=card",
@@ -26,6 +29,101 @@ describe("hosted member action runtime", () => {
       },
       status: "unchanged",
     });
+  });
+
+  it.each(["applied", "unchanged"] as const)(
+    "persists a preference-only unit selection after canonical %s validation",
+    async (status) => {
+      mocks.applyLiveWorkoutMemberAction.mockResolvedValueOnce({ status });
+      const action = {
+        expectedWorkout: {
+          actionBinding: "a".repeat(64),
+          exercises: [{ name: "Bench press", sets: [{ logged: false }] }],
+        },
+        kind: "workout.live.apply" as const,
+        mutations: [],
+        version: 1 as const,
+        weightUnitPreference: "kg" as const,
+      };
+
+      const outcome = await executeHostedMemberActionWake({
+        vaultRoot: "/vault",
+        wake: {
+          eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+          kind: "member.action.requested",
+          occurredAt: "2026-08-26T05:45:00.000Z",
+          request: {
+            action,
+            actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+            requestedAt: "2026-08-26T05:45:00.000Z",
+            schemaVersion: 1,
+          },
+          userId: "member-1",
+        },
+      });
+
+      expect(mocks.applyLiveWorkoutMemberAction).toHaveBeenCalledWith({
+        acceptedAt: "2026-08-26T05:45:00.000Z",
+        action,
+        actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+        vault: "/vault",
+      });
+      expect(mocks.setWorkoutUnitPreferences).toHaveBeenCalledWith({
+        recordedAt: "2026-08-26T05:45:00.000Z",
+        vault: "/vault",
+        weight: "kg",
+      });
+      expect(outcome.postCheckpointRecord).toMatchObject({
+        outcome: { status },
+      });
+    },
+  );
+
+  it("retries preference persistence after the canonical action marker commits", async () => {
+    const action = {
+      expectedWorkout: {
+        actionBinding: "a".repeat(64),
+        exercises: [{ name: "Bench press", sets: [{ logged: false }] }],
+      },
+      kind: "workout.live.apply" as const,
+      mutations: [],
+      version: 1 as const,
+      weightUnitPreference: "kg" as const,
+    };
+    const wake = {
+      eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+      kind: "member.action.requested" as const,
+      occurredAt: "2026-08-26T05:45:00.000Z",
+      request: {
+        action,
+        actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+        requestedAt: "2026-08-26T05:45:00.000Z",
+        schemaVersion: 1 as const,
+      },
+      userId: "member-1",
+    };
+    mocks.applyLiveWorkoutMemberAction
+      .mockResolvedValueOnce({ status: "applied" })
+      .mockResolvedValueOnce({ status: "unchanged" });
+    mocks.setWorkoutUnitPreferences
+      .mockRejectedValueOnce(new Error("preference write failed"))
+      .mockResolvedValueOnce({ updated: true });
+
+    await expect(executeHostedMemberActionWake({
+      vaultRoot: "/vault",
+      wake,
+    })).rejects.toThrow("preference write failed");
+    await expect(executeHostedMemberActionWake({
+      vaultRoot: "/vault",
+      wake,
+    })).resolves.toMatchObject({
+      postCheckpointRecord: {
+        outcome: { status: "unchanged" },
+      },
+    });
+
+    expect(mocks.applyLiveWorkoutMemberAction).toHaveBeenCalledTimes(2);
+    expect(mocks.setWorkoutUnitPreferences).toHaveBeenCalledTimes(2);
   });
 
   it("applies the typed action directly without an assistant turn", async () => {
@@ -176,18 +274,12 @@ describe("hosted member action runtime", () => {
           action: {
             expectedWorkout: {
               actionBinding: "a".repeat(64),
-              exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+              exercises: [{ name: "Bench press", sets: [{ logged: false }] }],
             },
             kind: "workout.live.apply",
-            mutations: [{
-              exerciseName: "Leg press",
-              exercisePosition: 1,
-              expectedResult: null,
-              kind: "set.put",
-              result: { kind: "reps", reps: 8 },
-              setPosition: 1,
-            }],
+            mutations: [],
             version: 1,
+            weightUnitPreference: "kg",
           },
           actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
           requestedAt: "2026-08-12T15:00:00.000Z",
@@ -204,6 +296,7 @@ describe("hosted member action runtime", () => {
         status: "rejected",
       },
     });
+    expect(mocks.setWorkoutUnitPreferences).not.toHaveBeenCalled();
   });
 
   it("records the authenticated read-only workout snapshot result", async () => {
@@ -287,6 +380,7 @@ describe("hosted member action runtime", () => {
           setPosition: 1,
         }],
         version: 1 as const,
+        weightUnitPreference: "kg" as const,
       };
 
       const outcome = await executeHostedMemberActionWake({
@@ -317,6 +411,11 @@ describe("hosted member action runtime", () => {
         action,
         actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
         vault: "/vault",
+      });
+      expect(mocks.setWorkoutUnitPreferences).toHaveBeenCalledWith({
+        recordedAt: "2026-08-12T15:00:00.000Z",
+        vault: "/vault",
+        weight: "kg",
       });
     },
   );

@@ -163,6 +163,113 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("rechecks exact Web ownership after the model and before turn commit", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-turn-commit-authority-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const authorityError = Object.assign(
+      new Error("Web already answered the exact inbound"),
+      {
+        code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+        retryable: false,
+      },
+    );
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      const persisted = await upsertAssistantInputEvent({
+        event: {
+          content: {
+            text: "hello",
+            transcriptText: "hello",
+            userMessageContent: [{ text: "hello", type: "text" as const }],
+          },
+          conversation: {
+            accountId: `hid_${"1".repeat(32)}`,
+            actorId: `hid_${"2".repeat(32)}`,
+            actorIsSelf: false,
+            source: "linq",
+            threadId: `hid_${"3".repeat(32)}`,
+            threadIsDirect: true,
+          },
+          occurredAt: "2026-04-27T00:00:00.000Z",
+          receivedAt: "2026-04-27T00:00:00.500Z",
+          replyTarget: {
+            channel: "linq",
+            messageId: "linq_message_first_turn",
+            threadId: "linq_chat_first_turn",
+          },
+          sourceMetadata: {
+            externalThreadRouteAuthorityPresent: false,
+            kind: "linq" as const,
+            partCount: 0,
+            reactionEligible: false,
+            replyToMessageId: null,
+            senderHandle: "+15555550123",
+            service: "iMessage",
+          },
+          sourceRef: {
+            dedupeKey: "dedupe_first_turn",
+            eventId: "event_first_turn",
+            itemId: "mailbox_item_first_turn",
+            kind: "hosted-mailbox" as const,
+            lane: "conversation" as const,
+            laneSeq: "1",
+            payloadSchema: "murph.hosted-mailbox-payload.v1",
+            payloadSource: "inline" as const,
+            source: "hosted-mailbox" as const,
+            wakeSchema: "murph.hosted-execution-wake.v1",
+          },
+        },
+        vault: vaultRoot,
+      });
+      const assistantAutomation = await vi.importActual<
+        typeof import("@murphai/assistant-engine/assistant-automation")
+      >("@murphai/assistant-engine/assistant-automation");
+      mocks.readAssistantInputEvent.mockImplementation(
+        assistantAutomation.readAssistantInputEvent,
+      );
+      mocks.assertHostedAssistantLinqTurnCommitAuthority
+        .mockRejectedValueOnce(authorityError);
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        const assertTurnCommitAuthority =
+          laneInput.executionContext.hosted?.assertTurnCommitAuthority;
+        if (!assertTurnCommitAuthority) {
+          throw new Error("Expected hosted turn commit authority.");
+        }
+        await assertTurnCommitAuthority({
+          acceptedInputs: [{
+            id: persisted.inputId,
+            source: "assistant-input",
+          }],
+          turnId: "turn_first_contact",
+        });
+        throw new Error("Expected turn commit authority to reject.");
+      });
+
+      await expect(runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [persisted.inputId],
+        importedCount: 1,
+        vaultRoot,
+      }))).rejects.toMatchObject({
+        code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+      });
+      expect(
+        mocks.assertHostedAssistantLinqTurnCommitAuthority,
+      ).toHaveBeenCalledWith(expect.objectContaining({
+        linqDeliveryContexts: [expect.objectContaining({
+          replyToMessageId: "linq_message_first_turn",
+          target: "linq_chat_first_turn",
+          threadIsDirect: true,
+        })],
+      }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("starts the assistant lane before a scheduled group operation lazily reads the Web-owned shared snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
     const sequence: string[] = [];
@@ -1324,7 +1431,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       status: "processed",
     });
-
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
     }));
@@ -1410,6 +1516,291 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs a selected model-free mailbox row before already-due cron work", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    mocks.getAssistantCronStatus.mockResolvedValue({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: dueAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) => {
+        if (
+          (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+        ) {
+          return { at: null, executionClass: null, reason: null };
+        }
+        return {
+          at: dueAt,
+          executionClass: "model_free",
+          reason: "mailbox",
+        };
+      },
+    );
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      workspace: createDueAssistantWorkspace({ nextWakeAt: dueAt }),
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+      progressed: false,
+    }));
+  });
+
+  it("rechecks foreground ownership before handing a due model-free row to the system owner", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    let foregroundConversationWorkObserved = false;
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) => {
+        if (
+          (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+        ) {
+          return { at: null, executionClass: null, reason: null };
+        }
+        foregroundConversationWorkObserved = true;
+        return {
+          at: dueAt,
+          executionClass: "model_free",
+          reason: "mailbox",
+        };
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      shouldYieldBackgroundMaintenance: () => foregroundConversationWorkObserved,
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      progressed: false,
+    }));
+    expect(result.nextWakeReason).toBeUndefined();
+  });
+
+  it("delivers a ready outbox before handing a due model-free row to the system owner", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    const deliveryEffect = createDeliveryEffect();
+    mocks.resolveHostedAssistantOutboxNextWakeAt
+      .mockResolvedValueOnce(dueAt)
+      .mockResolvedValue(null);
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) =>
+        (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+          ? { at: null, executionClass: null, reason: null }
+          : {
+              at: dueAt,
+              executionClass: "model_free",
+              reason: "mailbox",
+            },
+    );
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: dueAt,
+        nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      }),
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+    }));
+  });
+
+  it("keeps fresh conversation input ahead of a due model-free mailbox row", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) =>
+        (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+          ? { at: null, executionClass: null, reason: null }
+          : {
+              at: dueAt,
+              executionClass: "model_free",
+              reason: "mailbox",
+            },
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => dueAt,
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+      progressed: true,
+    }));
+  });
+
+  it("hands a due model-free mailbox row off after a foreground reply", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    const deliveryEffect = createDeliveryEffect();
+    mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(dueAt);
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) =>
+        (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+          ? { at: null, executionClass: null, reason: null }
+          : {
+              at: dueAt,
+              executionClass: "model_free",
+              reason: "mailbox",
+            },
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      nextWakeAt: dueAt,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => dueAt,
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+      progressed: true,
+    }));
+  });
+
+  it("preserves model-free ownership after recording a default-owned predecessor", async () => {
+    const predecessorAt = "2026-04-27T00:00:00.000Z";
+    const dueAt = "2026-04-27T00:00:01.000Z";
+    const nowAt = "2026-04-27T00:00:02.000Z";
+    let predecessorRecorded = false;
+    mocks.getAssistantCronStatus.mockResolvedValue({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: predecessorAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) => {
+        if (input?.excludeItemId) {
+          return {
+            at: dueAt,
+            executionClass: "model_free",
+            reason: "mailbox",
+          };
+        }
+        if (
+          (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+        ) {
+          return { at: null, executionClass: null, reason: null };
+        }
+        return !predecessorRecorded
+          ? {
+              at: predecessorAt,
+              executionClass: "default_owned",
+              reason: "assistant",
+            }
+          : {
+              at: dueAt,
+              executionClass: "model_free",
+              reason: "mailbox",
+            };
+      },
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_default_owned",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementationOnce(async () => {
+      predecessorRecorded = true;
+      return {
+        failed: 0,
+        nextWakeAt: dueAt,
+        nextWakeReason: "mailbox",
+        recorded: 1,
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => nowAt,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: predecessorAt,
+        nextWakeReason: "mailbox",
+      }),
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: predecessorAt,
+      progressed: true,
+    }));
+    await expect(result.afterCheckpoint?.()).resolves.toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+    }));
   });
 
   it("does not treat a running cron job's past nextRunAt as runnable due work", async () => {

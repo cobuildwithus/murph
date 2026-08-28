@@ -4,6 +4,7 @@ import {
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import {
+  classifyHostedSystemMailboxExecutionClass,
   isHostedSystemMailboxModelFreeNotification,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -47,7 +48,7 @@ import {
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
-  type HostedRuntimeWakeCandidate,
+  type HostedSystemMailboxWakeCandidate,
 } from "./wake-candidates.ts";
 
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA = "murph.hosted-system-mailbox-state.v1";
@@ -359,24 +360,32 @@ export async function resolveHostedSystemMailboxNextWakeAt(input: {
 export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
+  excludeItemId?: string | null;
   now?: () => string;
   vaultRoot: string;
-}): Promise<HostedRuntimeWakeCandidate> {
+}): Promise<HostedSystemMailboxWakeCandidate> {
   const now = (input.now ?? (() => new Date().toISOString()))();
   const state = excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
     await readHostedSystemMailboxState(input.vaultRoot),
     now,
   );
-  const notificationProjectedState = shouldProjectHostedSystemMailboxModelFreeNotifications({
+  const remainingState = input.excludeItemId
+    ? {
+        pending: state.pending.filter((item) =>
+          item.itemId !== input.excludeItemId
+        ),
+      }
+    : state;
+  const modelFreeProjectedState = shouldProjectHostedSystemMailboxModelFreeFrontier({
     allowedRouteActions: input.allowedRouteActions ?? null,
     allowedWakeKinds: input.allowedWakeKinds ?? null,
   })
-    ? projectHostedSystemMailboxModelFreeNotificationFrontier(state)
-    : state;
+    ? projectHostedSystemMailboxModelFreeFrontier(remainingState)
+    : remainingState;
   const selectionState = input.allowedWakeKinds == null
-    ? notificationProjectedState
+    ? modelFreeProjectedState
     : {
-        pending: notificationProjectedState.pending.filter((item) =>
+        pending: modelFreeProjectedState.pending.filter((item) =>
           input.allowedWakeKinds?.includes(item.wake.kind)
         ),
       };
@@ -389,25 +398,27 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
     now,
     state: selectionState,
   });
-  if (
-    input.allowedRouteActions == null
-    && input.allowedWakeKinds == null
-    && readyItem !== null
-    && isHostedApprovedContinuationSystemMailboxItem(readyItem)
-  ) {
-    return createHostedRuntimeWakeCandidate(
-      resolveSystemMailboxItemNextWakeAt(readyItem, now),
-      "assistant",
-    );
+  if (readyItem !== null) {
+    return {
+      ...createHostedRuntimeWakeCandidate(
+        resolveSystemMailboxItemNextWakeAt(readyItem, now),
+        resolveHostedSystemMailboxItemWakeReason(readyItem),
+      ),
+      executionClass: readyItem.mailboxLaneSeq !== null
+        && isHostedSystemMailboxModelFreeFrontierItem(readyItem)
+        ? "model_free"
+        : "default_owned",
+    };
   }
-  return selectHostedRuntimeWakeCandidate(
-    items.map((item) =>
+  return {
+    ...selectHostedRuntimeWakeCandidate(items.map((item) =>
       createHostedRuntimeWakeCandidate(
         resolveSystemMailboxItemNextWakeAt(item, now),
         resolveHostedSystemMailboxItemWakeReason(item),
       )
-    ),
-  );
+    )),
+    executionClass: null,
+  };
 }
 
 export function findNextHostedSystemMailboxQueueItem(input: {
@@ -475,9 +486,8 @@ function findNextHostedSystemMailboxQueueItemByOrder(input: {
 export function isHostedApprovedContinuationSystemMailboxItem(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
-  // The system-mailbox runner uses this predicate to decide whether its
-  // model-free invocation must upgrade to the ordinary assistant path. Keep
-  // that decision derived from the exact local wake instead of adding another
+  // Approved continuations belong to the ordinary assistant owner. Keep that
+  // handoff derived from the exact local wake instead of adding another
   // orchestration or persisted-state owner.
   return isHostedPendingEffectsContinuationSystemMailboxItem(item)
     || isHostedUserInvokedDelegatedSystemMailboxItem(item);
@@ -585,6 +595,34 @@ export function isHostedSystemMailboxModelFreeExactNotificationItem(
       dedupeKey: item.mailboxDedupeKey,
       kind: item.wake.kind,
     });
+}
+
+export function isHostedSystemMailboxModelFreeFrontierItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  if (
+    classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: item.mailboxDedupeKey,
+      kind: item.wake.kind,
+    }) !== "model_free"
+  ) {
+    return false;
+  }
+
+  return item.wake.kind !== "assistant.notification.requested"
+    || isHostedSystemMailboxModelFreeExactNotificationItem(item);
+}
+
+export function projectHostedSystemMailboxModelFreeFrontier(
+  state: HostedSystemMailboxState,
+): HostedSystemMailboxState {
+  const durableFrontier = findHostedSystemMailboxDurableFrontierItem(state.pending);
+  return {
+    pending: durableFrontier
+      && isHostedSystemMailboxModelFreeFrontierItem(durableFrontier)
+      ? [durableFrontier]
+      : [],
+  };
 }
 
 export function projectHostedSystemMailboxModelFreeNotificationFrontier(
@@ -1037,7 +1075,7 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   return items;
 }
 
-function shouldProjectHostedSystemMailboxModelFreeNotifications(input: {
+function shouldProjectHostedSystemMailboxModelFreeFrontier(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds: readonly HostedExecutionSystemWake["kind"][] | null;
 }): boolean {
@@ -1053,7 +1091,7 @@ function shouldProjectHostedSystemMailboxModelFreeNotifications(input: {
     ) === true;
 }
 
-function findHostedSystemMailboxDurableFrontierItem(
+export function findHostedSystemMailboxDurableFrontierItem(
   pending: readonly HostedSystemMailboxPendingItem[],
 ): HostedSystemMailboxPendingItem | null {
   let frontier: HostedSystemMailboxPendingItem | null = null;
@@ -1138,8 +1176,12 @@ function resolveSystemMailboxItemNextWakeAt(
 function resolveHostedSystemMailboxItemWakeReason(
   item: HostedSystemMailboxPendingItem,
 ): string {
-  return item.routeAction === "run-device-sync-wake"
-    ? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+  if (item.routeAction === "run-device-sync-wake") {
+    return HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON;
+  }
+
+  return isHostedSystemMailboxModelFreeFrontierItem(item)
+    ? "mailbox"
     : HOSTED_ASSISTANT_WAKE_REASON;
 }
 

@@ -2,7 +2,6 @@ import {
   parseHostedRuntimeReconciliationFactsRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
-  HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
   projectHostedRuntimeReconciliationFactsWireResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 
@@ -46,11 +45,7 @@ export const GET = withJsonError(async (
     factsRequest,
   );
 
-  return jsonOk(projectHostedRuntimeReconciliationFactsWireResponse(
-    facts,
-    new URL(request.url).search
-      === HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
-  ));
+  return jsonOk(projectHostedRuntimeReconciliationFactsWireResponse(facts));
 });
 
 function assertHostedOrchestrationUserMatches(input: {

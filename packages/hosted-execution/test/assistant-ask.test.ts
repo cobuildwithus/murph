@@ -24,6 +24,9 @@ import {
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
 } from "../src/parsers.ts";
+import {
+  HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX,
+} from "../src/runtime-control.ts";
 
 const ORIGIN_ASSISTANT_INPUT_ID = "ain_0123456789abcdef0123456789abcdef";
 const ORIGIN_SESSION_ID = "session_private";
@@ -238,31 +241,48 @@ describe("hosted Assistant Ask runtime control", () => {
   it("parses the trusted group-tool ask wire arm and bounded outcomes", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "ask",
-      groupLabel: "  100 Club  ",
+      membershipId: "  membership_100_club  ",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       originSessionId: ORIGIN_SESSION_ID,
       question: "  What is today's workout?  ",
     })).toEqual({
       action: "ask",
-      groupLabel: "100 Club",
+      membershipId: "membership_100_club",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       originSessionId: ORIGIN_SESSION_ID,
       question: "What is today's workout?",
     });
-    expect(parseHostedRuntimeGroupToolRequest({
-      action: "ask",
-      groupLabel: null,
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-      originSessionId: ORIGIN_SESSION_ID,
-      question: "What is today's workout?",
-    })).toMatchObject({ groupLabel: null });
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "ask",
-      membershipId: "model_selected_membership",
+      groupLabel: "100 Club",
+      membershipId: "membership_100_club",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      question: "What did we decide?",
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "handoff",
+      context: "A member completed the planned activity.",
+      membershipId: "membership_100_club",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      participantTarget: {
+        participants: [{ emailParticipant: false }],
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask",
+      membershipId: "membership_100_club",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      question: "What did we decide?",
+      route: "model-controlled",
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       originSessionId: ORIGIN_SESSION_ID,
       question: "What is today's workout?",
-    })).toThrow(/not allowed/u);
+    })).toThrow(/membershipId/u);
 
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask",
@@ -274,12 +294,25 @@ describe("hosted Assistant Ask runtime control", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask",
       result: {
-        groupLabels: ["100 Club", "Wednesday Training"],
+        groupLabels: Array.from(
+          { length: HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX },
+          (_, index) => `Group ${index + 1}`,
+        ),
         status: "clarification_required",
       },
     })).toMatchObject({
       result: { status: "clarification_required" },
     });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "ask",
+      result: {
+        groupLabels: Array.from(
+          { length: HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX + 1 },
+          (_, index) => `Group ${index + 1}`,
+        ),
+        status: "clarification_required",
+      },
+    })).toThrow(/between 1 and 64 entries/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask",
       result: { status: "no_groups" },

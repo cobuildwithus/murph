@@ -1,5 +1,5 @@
 import { Errors, middleware } from 'incur'
-import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
+import { projectVaultCliError } from './vault-cli-error-projection.js'
 
 export const incurErrorBridge = middleware(async (_context, next) => {
   try {

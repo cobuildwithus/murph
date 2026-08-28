@@ -19,6 +19,10 @@ const retryReasonsSql = readFileSync(
   new URL("../scripts/runtime-retry-reasons.sql", import.meta.url),
   "utf8",
 );
+const cloudflareReadme = readFileSync(
+  new URL("../README.md", import.meta.url),
+  "utf8",
+);
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof =
   process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -35,9 +39,37 @@ describe("hosted runtime operational report contracts", () => {
       `blob1 = '${HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA}'`,
     );
     expect(retryReasonsSql).toContain("index1 AS reason");
+    expect(retryReasonsSql).toContain(
+      "if(blob3 = '', 'unattributed', blob3) AS stage",
+    );
     expect(retryReasonsSql).toContain("SUM(_sample_interval * double1)");
     expect(retryReasonsSql).toContain("SUM(_sample_interval * double2)");
+    expect(retryReasonsSql).toContain("GROUP BY index1, stage");
     expect(retryReasonsSql).toContain("INTERVAL '1' DAY");
+    expect(retryReasonsSql).toContain(
+      "timestamp >= toDateTime('YYYY-MM-DD HH:MM:SS', 'Etc/UTC')",
+    );
+    expect(retryReasonsSql).toContain(
+      "timestamp < toDateTime('YYYY-MM-DD HH:MM:SS', 'Etc/UTC')",
+    );
+    expect(retryReasonsSql).not.toMatch(/blob3\s*(?:!=|<>)/u);
+  });
+
+  it("documents the bounded optional container-busy stage contract", () => {
+    for (const stage of [
+      "non_runtime_write_fence",
+      "active_runtime_contention",
+      "cooperative_handoff_pending",
+      "background_preemption_unavailable",
+      "background_preemption_not_accepted",
+      "stopped_container_record_pending",
+    ]) {
+      expect(cloudflareReadme).toContain(`\`${stage}\``);
+    }
+    expect(cloudflareReadme).toContain("optional `blob3`");
+    expect(cloudflareReadme).toContain("`unattributed`");
+    expect(cloudflareReadme).toContain("`runtimeProcessingRetryStage`");
+    expect(cloudflareReadme).toContain("`index1` is the sole index");
   });
 
   it("keeps direct cold starts causal and phase samples chronology-safe", () => {
@@ -52,6 +84,28 @@ describe("hosted runtime operational report contracts", () => {
       "direct_orchestration_attempt_id = runtime_orchestration_attempt_id",
     );
     expect(coldStartReportSql).not.toContain("abs(route_received_ms");
+    expect(coldStartReportSql).toContain(
+      "route_received_ms <= runner_constructor_started_ms",
+    );
+    expect(coldStartReportSql).toContain(
+      "runner_constructor_started_ms <= runner_constructor_finished_ms",
+    );
+    expect(coldStartReportSql).toContain(
+      "runner_constructor_finished_ms <= runner_first_ensure_ms",
+    );
+    expect(coldStartReportSql).toContain(
+      "runner_first_ensure_ms = runner_rpc_started_ms",
+    );
+    expect(coldStartReportSql).toContain("activation_matches_current_request");
+    expect(coldStartReportSql).toContain(
+      "Cloudflare route -> UserRunner constructor start",
+    );
+    expect(coldStartReportSql).toContain(
+      "UserRunner constructor start -> finish",
+    );
+    expect(coldStartReportSql).toContain(
+      "UserRunner constructor finish -> first ensure instruction",
+    );
     expect(coldStartReportSql).toContain(
       "runner_job_accepted_at >= accepted_at",
     );
@@ -117,16 +171,25 @@ describe.skipIf(!runPostgresProof)(
         expect(stdout).toContain("temporal_only,1,4.000,4.000,4.000");
         expect(stdout).toContain("temporal_recovery,1,30.000,30.000,30.000");
         expect(stdout).toContain("legacy_unclassified,1,5.000,5.000,5.000");
-        expect(stdout).toContain("web_direct_cold,2,6.000,6.900,7.000");
+        expect(stdout).toContain("web_direct_cold,4,6.000,6.850,7.000");
         expect(stdout).not.toContain("web_direct_existing_runtime");
         expect(stdout).toContain(
-          "Cloudflare route -> UserRunner RPC,1,100.0,100.0,100.0",
+          "Cloudflare route -> UserRunner constructor start,1,50.0,50.0,50.0",
+        );
+        expect(stdout).toContain(
+          "UserRunner constructor start -> finish,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain(
+          "UserRunner constructor finish -> first ensure instruction,1,40.0,40.0,40.0",
+        );
+        expect(stdout).toContain(
+          "Cloudflare route -> UserRunner RPC,3,100.0,145.0,150.0",
         );
         expect(stdout).toContain(
           "Health-data admission callback,1,100.0,100.0,100.0",
         );
         expect(stdout).toContain(
-          "Accepted -> runner job,2,6000.0,6900.0,7000.0",
+          "Accepted -> runner job,4,6000.0,6850.0,7000.0",
         );
       } finally {
         await runPsql(connection, [
@@ -579,6 +642,9 @@ function createFixtureSql(schemaName: string): string {
         'directEnsureOrchestrationAttemptId', 'web-ingress-causal',
         'cloudflareRouteReceivedAtEpochMs', base_ms + 1600,
         'runtimeInvocationOrchestrationAttemptId', 'web-ingress-causal',
+        'userRunnerConstructorStartedAtEpochMs', base_ms + 1650,
+        'userRunnerConstructorFinishedAtEpochMs', base_ms + 1660,
+        'userRunnerFirstEnsureRuntimeProcessingAtEpochMs', base_ms + 1700,
         'userRunnerRpcStartedAtEpochMs', base_ms + 1700,
         'runtimeConsentLockAcquiredAtEpochMs', base_ms + 1800,
         'healthDataAdmissionReadStartedAtEpochMs', base_ms + 1810,
@@ -608,8 +674,48 @@ function createFixtureSql(schemaName: string): string {
         'directEnsureOrchestrationAttemptId', 'web-ingress-reversed',
         'cloudflareRouteReceivedAtEpochMs', base_ms + 2600,
         'runtimeInvocationOrchestrationAttemptId', 'web-ingress-reversed',
+        'userRunnerConstructorStartedAtEpochMs', base_ms + 2300,
+        'userRunnerConstructorFinishedAtEpochMs', base_ms + 2310,
+        'userRunnerFirstEnsureRuntimeProcessingAtEpochMs', base_ms + 2350,
         'userRunnerRpcStartedAtEpochMs', base_ms + 2550,
         'freshStartRequestedAtEpochMs', base_ms + 2800
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'direct-warm-activation',
+      t0 + INTERVAL '5 seconds',
+      t0 + INTERVAL '11 seconds',
+      'attempt-direct-warm-activation',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 5500,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 5700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-warm-activation',
+        'cloudflareRouteReceivedAtEpochMs', base_ms + 5600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-warm-activation',
+        'userRunnerConstructorStartedAtEpochMs', base_ms + 5650,
+        'userRunnerConstructorFinishedAtEpochMs', base_ms + 5660,
+        'userRunnerFirstEnsureRuntimeProcessingAtEpochMs', base_ms + 5700,
+        'userRunnerRpcStartedAtEpochMs', base_ms + 5750,
+        'freshStartRequestedAtEpochMs', base_ms + 5800
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'direct-legacy-activation-fields-absent',
+      t0 + INTERVAL '9 seconds',
+      t0 + INTERVAL '15 seconds',
+      'attempt-direct-legacy-activation-fields-absent',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 9500,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 9700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-legacy-activation-fields-absent',
+        'cloudflareRouteReceivedAtEpochMs', base_ms + 9600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-legacy-activation-fields-absent',
+        'userRunnerRpcStartedAtEpochMs', base_ms + 9700,
+        'freshStartRequestedAtEpochMs', base_ms + 9800
       ))
     FROM fixture
     UNION ALL

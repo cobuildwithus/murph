@@ -178,6 +178,24 @@ export function computeAssistantCronNextRunAt(
   }
 }
 
+/** True only when a recurring schedule names one local clock time per eligible day. */
+export function assistantCronScheduleHasSingleDailyTime(
+  schedule: AssistantCronSchedule,
+): boolean {
+  if (schedule.kind === 'dailyLocal') {
+    return true
+  }
+  if (schedule.kind !== 'cron') {
+    return false
+  }
+
+  const parsed = parseAssistantCronExpression(schedule.expression)
+  return (
+    resolveParsedCronFieldValues(parsed.minute, 0, 59).length === 1
+    && resolveParsedCronFieldValues(parsed.hour, 0, 23).length === 1
+  )
+}
+
 export function computeAssistantCronFirstRunAfterCurrentLocalDay(input: {
   after: Date
   schedule: {

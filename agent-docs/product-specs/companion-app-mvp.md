@@ -75,26 +75,35 @@ current Privy session. The smallest honest implementation is:
    /api/device-sync/companion/imessage-mini-app/enrollment`. The server verifies
    the bounded request body, verifies the identity token, then serializes with
    account deletion on the hosted-member lock while re-checking active access
-   and launch consent. It returns a random 24-hour Messages-only bearer only
-   after atomically rotating one deterministic Messages-owned session row in
-   that same transaction. Repeated enrollment replaces the lookup hash and
-   invalidates the prior bearer while keeping storage bounded to one Messages
-   row per member and leaving ordinary device-agent rows untouched.
-4. The containing app writes only that derived bearer to an explicitly
+   and launch consent. It returns a renewable Messages-only lifecycle
+   credential plus a 24-hour action bearer only after atomically rotating one
+   deterministic Messages-owned session row in that same transaction. Repeated
+   enrollment replaces both domain-separated lookup hashes and invalidates the
+   prior lifecycle while keeping storage bounded to one Messages row per member
+   and leaving ordinary device-agent rows untouched.
+4. The containing app writes only that derived credential pair to an explicitly
    addressed shared Keychain access group. Privy's own access, refresh, and
-   identity tokens remain in Privy's host-app-private storage.
+   identity tokens remain in Privy's host-app-private storage. After this one
+   setup, the extension renews its action bearer directly; the containing app
+   does not need to be running or reopened for ordinary authenticated card use.
 5. The extension calls `POST
    /api/device-sync/companion/imessage-mini-app/member-actions` with the derived
-   bearer and a closed, bounded, versioned action envelope. The server derives
-   the member, re-checks active access and historical launch consent, and
-   appends the request to the existing encrypted mailbox before returning
-   `202 Accepted`. The runtime dispatches it directly to the existing domain
-   use case with no assistant turn. Workout is the first action family; future
+   action bearer and a closed, bounded, versioned action envelope. At expiry,
+   the extension calls the closed renewal route with the lifecycle bearer; the
+   server serializes concurrent renewals on the same member lock, re-checks
+   active access and historical launch consent, and returns one deterministic
+   replacement action bearer without consulting Privy. The member-action route
+   independently derives the member, repeats those authority checks, and
+   appends the request to the existing encrypted mailbox before returning `202
+   Accepted`. The runtime dispatches it directly to the existing domain use
+   case with no assistant turn. Workout is the first action family; future
    editors extend the closed union rather than gaining arbitrary patch or tool
    authority.
 6. Disabling the feature or signing out calls `DELETE
    /api/device-sync/companion/imessage-mini-app/enrollment` best-effort and
-   always clears the local derived bearer, even if the network revoke fails.
+   always clears the local derived credential pair, even if the network revoke
+   fails. Either exact bearer may revoke the current lifecycle, while stale or
+   replaced generations cannot revoke their replacement.
 
 Privy Swift 2.12.0 is intentionally absent from the extension target: its
 binary references app-only lifecycle APIs, is not marked app-extension-safe,
@@ -496,39 +505,19 @@ licensing unresolved.
 
 ## Automated hosted/native E2E acceptance
 
-The required automated acceptance lane for companion auth/control/device-sync
-changes is documented in `agent-docs/references/testing-ci-map.md`. It supersedes
-any plan language that treats mocked or hermetic native/client flow as acceptance
-proof; lower-level route, SDK-wrapper, hosted-local, and fixture tests cannot
-satisfy this gate.
+The automated production canary for companion auth/control/device-sync is
+documented in `agent-docs/references/testing-ci-map.md`. Protected default-branch
+Actions runs it every six hours after `main` advances, using the exact deployed
+production Web SHA and committed immutable native source policy. The private
+lane runs the normally compiled app on an Apple simulator through the existing
+canary identity, companion onboarding/legal consent/sign-in-token persistence,
+real Junction/Vital Health SDK connection, the real iOS HealthKit permission
+UI, sign-out, and returning sign-in. The public controller creates no candidate
+deployment and owns no database, Privy, or Junction reset authority.
 
-For a selected PR, trusted default-branch Actions code deploys the exact PR SHA
-as a normal minified build into Vercel custom environment `native-ios-e2e`, using
-an isolated real database, the dedicated real non-production Privy app/test
-credential, and a real Junction sandbox API key/team dedicated exclusively to
-this lane. Trusted orchestration proves the exact candidate origin is publicly
-reachable without a Vercel bypass or login before native dispatch. The private
-lane runs the normally compiled app on an Apple simulator through fresh Privy OTP signup,
-companion onboarding/legal consent/sign-in-token persistence, real Junction/Vital
-Health SDK connection and the real iOS HealthKit permission UI, sign-out, and
-returning sign-in. No synthetic token, fake provider, fixture transport, local
-hosted substitute, or product test bypass is allowed. Native completion alone is
-not acceptance: before cleanup, trusted orchestration must re-read the fixed
-Privy principal and prove it was created inside this run, then resolve the
-corresponding real Junction sandbox user and require a connected
-`apple_health_kit` provider.
-
-Fresh-signup reset is `orchestrator_owned_reset` and fail-closed: before and
-after the PR lane it retires only lane-owned E2E deployments, deleting aliases
-enumerated from each exact validated deployment before the deployment itself.
-It then enumerates the lane-exclusive Junction sandbox team, rejects more than
-one or any unexpected user, deletes the production-derived user when the
-isolated member exists or the sole orphan when that member is already absent,
-proves the team empty, resets only the explicitly E2E-named isolated database
-through the real Prisma migration toolchain, and deletes only the fixed Privy
-test user. This does not add or restore an internal/admin member-reset route.
-Production canary mode keeps an existing identity and performs no destructive
-cleanup.
+Lower-level route, SDK-wrapper, hosted-local, fixture, and deterministic PR
+tests remain required for changed behavior; they supplement but do not replace
+the deployed production canary.
 
 The main repo consumes only the exact private workflow run status/conclusion.
 Auth, OTP, legal/HealthKit consent, and provider-token stages must not export

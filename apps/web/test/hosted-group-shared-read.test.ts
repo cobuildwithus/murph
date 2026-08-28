@@ -691,6 +691,43 @@ describe("heart-rate-zones-days.v0 snapshot bounds", () => {
 });
 
 describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
+  it("reads only group-safe profile names when no health scopes are requested", async () => {
+    const profile = snapshot({
+      id: "share_profile_a",
+      memberId: "member_a",
+      projectionScope: PROFILE_SCOPE,
+      records: [{
+        data: { displayName: "Member Delta" },
+        occurredAt: new Date().toISOString(),
+        recordKey: "profile-name",
+      }],
+    });
+    installCiphertexts({ profile });
+    const { deviceConnectionFindMany, prisma } = createPrisma({
+      shares: [
+        shareRow({
+          ciphertext: "profile",
+          id: "share_profile_a",
+          memberId: "member_a",
+          projectionScope: PROFILE_SCOPE,
+        }),
+      ],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.requestedProjectionScopeKeys).toEqual([]);
+    expect(result.members.find((member) => member.memberId === "member_a"))
+      .toMatchObject({ displayName: "Member Delta", projections: [] });
+    expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+  });
+
   it("reads source-recorded sleep times from the encrypted replacement snapshot", async () => {
     const memberId = "member_projected_sleep";
     const date = new Date(Date.now() - 24 * 60 * 60 * 1_000)

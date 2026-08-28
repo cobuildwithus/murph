@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-24
+Last verified: 2026-08-27
 
 ## Decision
 
@@ -766,50 +766,36 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-If a `system_mailbox` invocation owns the active fence when authenticated Web
-direct foreground/default work arrives, the runner preempts that exact child,
-clears its fence by identity, and starts the foreground request. Preemption
-authority requires both the server-derived Web-direct marker and its valid
-direct-ingress attempt identity; a Temporal or scheduled default request still
-wakes the system child, leaves its fence intact, and retries cooperatively.
-System-mailbox mode may import and run one bounded model-free device-sync,
-operator-maintenance, or browser-vault refresh item. Already committed web
-updates remain authoritative, while an interrupted or not-yet-checkpointed unit
-stays recoverable from the durable system mailbox and its existing continuation
-contract. Other system items remain pending for their default owner. A
-system-mailbox request behind an active default runtime remains deferred and
-cannot broaden that child's admission authority.
-An `environment_interview` request behind an active default runtime is the
-narrow exception: UserRunner wakes the exact default child but returns
-`retry_later`, because that child accepted only a wake, not Environment-mode
-ownership. The dirty default runtime preserves fresh conversation priority,
-classifies the durable mailbox prefix, and, when it sees an Environment item,
-shortens its existing idle checkpoint window to zero. It skips optional
-compaction and post-checkpoint work, returns `immediateRecheckRequested`, and
-leaves the Environment row pending for the dedicated model-free invocation.
-This handoff never aborts a foreground turn and adds no queue, scheduler, or
-persisted mode state.
-The handoff is bidirectional. When fresh foreground/default work arrives behind
-an active `environment_interview` invocation, UserRunner wakes that exact
-child and returns `retry_later` without clearing or replacing its fence. The
-Environment child completes or checkpoints its current model-free unit, sees
-the wake, and releases; ordinary reconciliation then admits the pending
-foreground pass before re-admitting background Environment work. This preserves
-foreground authority without aborting canonical publication midway or creating
-a competing queue.
+`system_mailbox` runs one bounded model-free item only when that item is the
+exact first live durable system frontier. The shared classifier admits
+device-sync, operator maintenance, browser-vault refresh, Environment
+completion, and the narrow exact-notification cases; an earlier default-owned
+row remains a hard ordering barrier. Already committed Web updates remain
+authoritative, while an interrupted or not-yet-checkpointed unit stays
+recoverable from the durable mailbox and its existing continuation contract.
 
-Web projects `environmentInterviewPending` only when the signed Temporal facts
-request uses the exact `?includeEnvironmentInterviewPending=1` compatibility
-search. The legacy no-search response keeps omitting that key because a still-
-routable immutable reader rejects unknown reconciliation keys. The new private
-worker opts in and selects `environment_interview` only when the fact is true
-and no runnable foreground/default work is due; older workflow histories retain
-their former `system_mailbox` command shape behind the private worker's Temporal
-patch marker. The public
-`@murphai/hosted-execution` package version containing both the fact and mode
-must be released before the private worker adopts them. Source links across the
-public/private repository boundary are development proof only and are never a
-deployment contract.
+Default and `system_mailbox` remain separate bounded owners over one ordered
+mailbox, with default work retaining foreground priority. A non-direct default
+request behind `system_mailbox` wakes the exact active child, preserves its
+fence, and retries while that child checkpoints and releases. Authenticated
+Web-direct foreground work may instead preempt that exact system child through
+the existing abort seam. A `system_mailbox` request behind an active default
+owner only retries; it does not wake or interrupt the foreground child. This
+adds no queue, scheduler, feature-specific mode, persisted handoff state, or
+Environment-specific promotion rule. An already-default-owned assistant queue
+head may reuse the runtime's existing foreground phase inside a
+`system_mailbox` invocation, preserving the generic assistant anti-starvation
+behavior without changing the controller fence or persisting a mode switch.
+`assistantExecutionBlocked` remains a hard boundary: that invocation retains
+the assistant wake for a later allowed foreground owner instead of promoting
+it.
+
+Web derives the generic `systemMailboxFrontier` from the exact first live row
+after `hostedMailboxSystemHandledThroughSeq` by using the same shared
+classifier. Environment's pending-row query remains owned by its product status
+route and is not an orchestration-priority fact. Temporal stays generic: its
+existing `model_free` branch requests `system_mailbox`, and the runtime decides
+which exact handler the row requires.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -829,11 +815,10 @@ starts still use the current versioned container resolver.
 For foreground/default work behind an `inbox_media_retention` fence, and for
 authenticated Web-direct foreground/default work behind a `system_mailbox`
 fence, the existing workspace-invocation abort seam is the sole preemption
-authority. UserRunner sends that exact abort directly instead of spending
-foreground command budget on a non-authoritative liveness preflight. A
-non-direct default request behind system-mailbox work retains the exact-child
-wake-and-checkpoint handoff. A local exact-pointer abort enters the same
-inactive-fence replacement path. The container registers the
+authority. A non-direct default request behind system-mailbox work retains the
+exact-child wake-and-checkpoint handoff. A system-mailbox request never wakes an
+active default child. A local exact-pointer abort enters the same inactive-fence
+replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
 and an exact abort can cancel already-queued successors before runner dispatch.
@@ -896,12 +881,19 @@ route authority, reloads the exact source, and prevents a replay from changing
 the already-fixed result destination.
 
 `murph.group_consult(action="ask")` is admitted only from a fresh authenticated private
-input. The runtime calls `assistantAskPort.request`; the signed
+input. The runtime first calls the paged `list_memberships` action with the
+inventory-v2 query capability. Each returned membership carries its opaque row
+id, safe existing title, Murph member count, and an independently available
+live participant roster summary. The model may clarify naturally using safe
+titles, real human participant counts, requester-authorized Contacts names,
+masked phone hints, and generic email markers, but it passes only the exact
+opaque `membershipId` returned in that conversation. It never exposes, invents,
+edits, derives, or accepts that id from the member. The signed
 `POST /api/internal/hosted-execution/assistant-asks/runtime` Web control owner
-resolves the current `HostedGroupMember` row and synthetic group runtime from
-the caller plus an optional exact visible label. Models never supply member,
-membership, runtime, mailbox, callback, session, or return-route ids. Web
-derives one stable request identity, pins the origin, destination, membership
+locks and revalidates the current `HostedGroupMember` row, signed requester,
+synthetic group runtime, and route. Models never supply member, runtime,
+mailbox, callback, session, or return-route ids. Web derives one stable request
+identity, pins the origin, destination, membership
 generation, and ten-minute expiry, appends one encrypted
 `assistant.ask.requested` item, then signals the existing group runtime. Exact
 retry reuses that item and cannot resolve a different target. Once Temporal
@@ -1023,8 +1015,10 @@ follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools. Once Temporal accepts the completion's
 pointer-only signal, Web starts the same payloadless direct ensure so an active
 private runtime can import it immediately. A typed `cannot_answer` bypasses the
-private provider continuation and queues the fixed unavailable-evidence response
-exactly; it cannot be paraphrased into an expiry or execution-failure claim.
+private provider continuation and queues one fixed, self-contained
+earlier-question failure response exactly; it cannot be paraphrased into an
+expiry or execution-failure claim. The completion mailbox outcome carries that
+new intent id into the same foreground-causal collection pass.
 
 If that joined-group completion and private input are both pending, the
 completion uses the existing foreground-causal mailbox lane only when its
@@ -1070,6 +1064,17 @@ In a private runtime, the existing `list_memberships` response also exposes
 that member's active grants as a top-level additive `disclosureGrants` array;
 older Web responses without the field normalize to an empty array. Revocation
 may select only an exact id from that private read.
+
+Inventory-v2 membership responses additionally expose a `participantRoster`
+result on each entry. Available rosters report the real human chat count,
+including the requester, and safe labels for the other people. Missing routes,
+unsupported providers, incomplete rosters, and provider failures are scoped to
+one unavailable entry; optional Contacts failure falls back to masked hints.
+The query capability is an expand/contract boundary: new runners send
+`membershipInventoryProtocol=v2` and accept old Web omissions as
+`participant_roster_not_reported`; new Web omits the field for callers without
+that exact query value so old strict response parsers keep working. Deploy and
+recycle Cloudflare/runner before Web, and roll back Web before the runner.
 
 For `murph.group_consult(action="ask_member")`, trusted runtime code injects one origin:
 either the current accepted non-direct group input and signed route or one
@@ -1229,7 +1234,16 @@ health values include source names and that sleep-stage values also include each
 source's recorded time. The same source-aware meaning applies to existing health
 scope keys and active grants; there is no separate source-details permission.
 A fresh request returns `sent` only after the provider send succeeds and its
-message binding is durably recorded.
+message binding is durably recorded. When the room explicitly asks to repost,
+the semantic `offer_access` action carries the exact current accepted Message
+ref. Assistant Engine verifies that ref in the current group turn and maps it to
+an additive request identity; Web uses it in provider idempotency and bypasses
+covering-offer reuse for that request only. Web reads the locked current policy
+and join code without creating or replacing group configuration; omitted scopes
+therefore retain the exact current permission set, while conflicting supplied
+scopes fail closed. Exact replay remains one send. After the replacement
+binding commits, Web revokes older active offers in the same transaction; send
+or binding failure leaves them active.
 
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
@@ -1587,10 +1601,52 @@ does not select a mailbox owner, create a write fence, wait for health
 readiness, or invoke workspace work. Withdrawal and account deletion consume
 the reserved exact target, and `destroyInstance()` supersedes an in-progress
 hint before stopping that container. A denied admission starts nothing. The
-active-member replan durably
-appends the original conversation item and Web awaits that conversation-mailbox
-Temporal signal; only then may the ordinary Linq direct ensure start and own
-readiness plus all runtime authority. The shell hint does not read the persisted
+  active-member replan durably
+appends the original conversation item. For an exact model-approved instant
+start, Web may already have a bounded tool-free Murph result generated beside
+admission and enrollment after the exact chat/event acquired its delivery-ledger
+claim. Once planning converges, only an exact model-approved active direct wake
+keeps that claim for Web delivery. Every completed non-instant plan marks the
+same row skipped before its fallback side effect. A caught planning failure
+also skips an attempted claim before rethrowing; provider-started or encrypted
+  ambiguous states remain final to that skip operation. Settlement reads only
+  the exact existing event row under the chat lock and does not depend on the
+  request-local generation promise, so exact replay can finish a rolled-back
+  settlement without creating a skipped row when no claim exists. An unavailable
+  result leaves the original conversation checkpoint unchanged. The eligibility request
+  keeps source-part cardinality, so only one actual text part can use this path,
+  and records whether the normalized source exceeded the classifier's bound so
+  a partial representation cannot become a user-facing reply. A definite
+  pre-provider route-read or projection failure confirms the attempted row was
+  skipped before fallback; an unconfirmed skip stays retryable and suppresses
+  the activation wake. A
+skipped row or failed row with no encrypted payload remains terminal on exact
+webhook replay; a failed row with retained payload may recover only that exact
+body. An accepted result instead
+passes through the existing
+Linq delivery ledger, then Web atomically appends its ordinary self-authored
+conversation row, stamps the original inbound and that outbound row consumed,
+clears the encrypted pending body, and substitutes the outbound checkpoint for
+the handoff. Web awaits that conversation-mailbox Temporal signal; only then
+may the ordinary Linq direct ensure start and own readiness plus all runtime
+authority. The runtime imports both consumed rows as context with null reply
+targets, so the first exchange is available to later normal turns without
+  answering the original inbound again. A different message or group transition
+  waits while this exact delivery obligation remains unresolved. Runtime Linq
+  provider entry carries the already validated mailbox event identity to the
+  existing chat-locked Web egress transaction and resolves that exact instant
+  row before claiming its own provider effect. Attempted, provider-started, or
+  encrypted failed rows defer; any provider-correlated row ends the stale
+  runtime send as already answered; absent and definitive uncorrelated
+  failed-without-payload rows allow the ordinary runtime path. Provider
+  acceptance remains irreversible sender ownership even when it observes a
+  buffered failed receipt, and later receipts cannot transfer the inbound to a
+  second sender. Already-answered terminally supersedes
+  the stale runtime outbox intent without a retry, failure input, or recovery
+  wake while retaining the exact reason for diagnostics. An ambiguous provider
+  outcome starts no runtime wake and retains the exact encrypted reply for
+  same-event recovery. The
+shell hint does not read the persisted
 container state; it delegates the already-running check and concurrent-start
 coalescing to Cloudflare's `Container.start()`. Concurrent shell hints coalesce.
 Authoritative readiness aborts an in-progress hint before entering the container
@@ -1699,6 +1755,22 @@ without reaching the provider, later provider starts retain the canonical path
 but omit the subdivision so earlier group work and pass-shared history scans are
 not misattributed; the scan-nesting statement applies only to an emitted complete
 subdivision.
+
+The UserRunner Durable Object records optional constructor-start,
+constructor-finish, and first-`ensureRuntimeProcessingForUser` epoch-millisecond
+facts in the existing in-memory orchestration phase. Production runner
+construction occurs between the two constructor stamps; recording and
+propagation add no request, storage write, provider call, awaited logging step,
+or second logging system. These are facts about the Durable Object instance
+activation, not about every request, so a warm request can carry stamps older
+than its Cloudflare route timestamp. The identifier-free cold-start report emits
+the route-to-constructor, constructor-initialization, and
+constructor-to-first-ensure slices only when
+`route <= constructor start <= constructor finish <= first ensure` and the
+instance's first-ensure stamp equals the current RPC-entry stamp. Warm or
+otherwise ambiguous chronology remains eligible for the existing route-to-RPC
+aggregate but emits none of the three activation-only slices.
+
 Because Web strictly parses phase-breakdown leaves, roll this telemetry out
 Web-first so its reader accepts the additive fields before a runner emits them;
 during rollback, remove the runner/Cloudflare emitter before rolling Web back.
@@ -3099,6 +3171,29 @@ state untouched for the next foreground-safe opportunity. Timeout, source
 change, publication conflict, generic failure, and an oversized replica
 terminally record the current item without a future retry; a later browser
 freshness request may enqueue new work after the underlying state changes.
+A timeout result also carries the closed refresh-stage vocabulary
+`initial_source_hash`, `replica_construction`, `replica_serialization`,
+`second_source_hash`, `replica_write`, or `ref_publication`; the
+`replica_serialization` value covers cooperative serialization and byte
+measurement. The existing hosted phase log emits that value only as
+`details.browserVaultRefreshStage`. Once the initial source hash finishes, the
+same deferred result and log retain the existing numeric source file-count and
+byte-total summary; before then both remain zero. The closed stage is the only
+new production log value. These details never include paths, filenames, source
+hashes, content, messages, prompts, transcripts, health values, member or
+workspace identifiers, credentials, provider payloads, raw errors, or
+distinctive private scenarios.
+
+A later bounded production query filters
+`details.browserVaultRefreshStatus = deferred_timeout`, aggregates only
+`details.browserVaultRefreshStage` by count and, when already available, the
+existing bounded duration bucket, then compares those counts with privacy-safe
+Web aggregates for refresh-requested state, replica-age bucket, and next-wake
+presence. Use natural traffic only; do not issue synthetic production refresh
+requests for this diagnosis. This additive field ships through the normal
+protected Cloudflare runner-bundle deployment, has no Web deployment ordering
+or persisted compatibility floor, and rolls back with the prior runner bundle.
+
 Fresh work and recording items that own post-checkpoint effects retain their
 existing pre-effect preparation checkpoint. Missing optional publication
 support and missing workspace context remain explicit terminal no-op

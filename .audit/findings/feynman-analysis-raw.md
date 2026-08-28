@@ -83,3 +83,35 @@ database boundary.
 All High and Medium hypotheses proceeded to code-trace plus regression-test
 verification. FF-010 additionally proceeded through the real installed
 PostgreSQL migration and account-deletion sequence.
+
+## Group cardinality audit addendum
+
+### Function-state matrix
+
+| Entry point / owner | Bounded work | Product state | Failure question |
+| --- | --- | --- | --- |
+| exact named group ask/handoff | slim membership labels | all active memberships | Was the label matched before or after a summary page limit? |
+| `list_memberships` | 25 detailed summaries per response | all active memberships | Can a later page still expose exact membership, permission, and funding identifiers? |
+| disclosure projection reads | 25 decrypted grants per response | all active and historical permission generations | Does a read bound prevent future grants or revocations? |
+| vault-share delivery | 25 encrypted replacements per request | all active destinations for an exact scope | Can retries advance after a partial deadline without weakening generation proof? |
+| recent-date backfill | 25 stale rows per grantor pass | every stale generation | Does the outer continuation remain true when only the inner page has more work? |
+
+### Raw hypotheses
+
+| ID | Initial severity | Concrete pre-fix failure |
+| --- | --- | --- |
+| GC-001 | High | Exact named routing checked the 25-row summary boundary before exact normalized-label resolution and returned ambiguity for a unique later membership. |
+| GC-002 | Medium | Detailed membership row 26 and later had no cursor, making assistant leave, permission, and funding actions unreachable. |
+| GC-003 | High | Disclosure history and active-count checks reused a 25-row prompt bound as lifetime admission, permanently refusing new authority after enough prior use. |
+| GC-004 | High | Vault-share admission refused destination 26 even though 25 was only needed to bound sequential encryption and replacement work. |
+| GC-005 | High | Naive vault-share pagination could restart at the first page after every deadline and starve later destinations unless successful replacements persisted progress for the exact source version. |
+| GC-006 | Medium | Recent-date generation backfill could process 25 rows but report no continuation when a 26th stale row existed. |
+| GC-007 | High | If the full generation token and delivery page came from separate database reads, could revoke/regrant bind an old token to a new share generation between those reads? |
+
+The audit also challenged every nearby literal 25. Join-confirmation draining and
+first-materialization selection already represented resumable work batches, not
+product cardinality, so deleting those bounds would increase operational risk
+without restoring any user capability. Separate 200-member shared-read and
+100-recipient email bounds depend on immutable authority snapshots and recipient
+batching; they were recorded as distinct architecture work rather than changed
+speculatively in this patch.

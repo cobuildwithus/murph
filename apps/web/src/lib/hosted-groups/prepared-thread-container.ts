@@ -57,6 +57,7 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   accountLookupKeys?: readonly string[];
   fallbackOwnerMemberId?: string | null;
   linqService: string | null;
+  initialGroupDisplayName?: string | null;
   mailboxDedupeKey: string;
   occurredAt: Date;
   participantMemberIds: readonly string[];
@@ -131,6 +132,9 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
       ? { accountLookupKeys: input.accountLookupKeys }
       : {}),
     channel: "linq",
+    ...(input.initialGroupDisplayName
+      ? { initialGroupDisplayName: input.initialGroupDisplayName }
+      : {}),
     ...(initialGroupRoomModelMarkdown
       ? { initialGroupRoomModelMarkdown }
       : {}),

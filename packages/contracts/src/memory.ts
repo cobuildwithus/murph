@@ -5,7 +5,10 @@ import {
   FRONTMATTER_DOC_TYPES,
   ID_PREFIXES,
 } from "./constants.ts";
-import { parseFrontmatterDocument } from "./frontmatter.ts";
+import {
+  parseFrontmatterDocument,
+  type FrontmatterParseProblem,
+} from "./frontmatter.ts";
 import {
   generateContractId,
   isContractId,
@@ -110,6 +113,50 @@ export interface ParseMemoryDocumentInput {
   text: string;
 }
 
+export type MemoryDocumentParseIssue =
+  | "frontmatter_invalid"
+  | "frontmatter_contract_invalid"
+  | "memory_section_invalid"
+  | "record_metadata_missing"
+  | "record_metadata_invalid"
+  | "record_invalid";
+
+export class MemoryDocumentParseError extends Error {
+  readonly code = "MEMORY_DOCUMENT_INVALID";
+  readonly details: {
+    field?: string;
+    issue: MemoryDocumentParseIssue;
+    lineNumber?: number;
+    sourcePath: string;
+  };
+
+  constructor(input: {
+    field?: string;
+    issue: MemoryDocumentParseIssue;
+    lineNumber?: number;
+    sourcePath: string;
+  }) {
+    const sourcePath = normalizeMemorySourcePath(input.sourcePath);
+    const lineNumber = Number.isSafeInteger(input.lineNumber) && (input.lineNumber ?? 0) > 0
+      ? input.lineNumber
+      : undefined;
+    super(
+      lineNumber === undefined
+        ? `Canonical memory document ${sourcePath} is invalid.`
+        : `Canonical memory document ${sourcePath}:${lineNumber} is invalid.`,
+    );
+    this.name = "MemoryDocumentParseError";
+    this.details = {
+      sourcePath,
+      issue: input.issue,
+      ...(lineNumber === undefined ? {} : { lineNumber }),
+      ...(input.field && /^[A-Za-z_][A-Za-z0-9_.-]{0,79}$/u.test(input.field)
+        ? { field: input.field }
+        : {}),
+    };
+  }
+}
+
 export interface RenderMemoryDocumentInput {
   document: MemoryDocument;
 }
@@ -163,12 +210,28 @@ export function createEmptyMemoryDocument(now = new Date()): MemoryDocument {
 }
 
 export function parseMemoryDocument(input: ParseMemoryDocumentInput): MemoryDocument {
-  const parsed = parseFrontmatterDocument(input.text);
-  const frontmatter = memoryDocumentFrontmatterSchema.parse(parsed.attributes);
-  const records = parseMemoryDocumentBody(parsed.body, input.sourcePath ?? "bank/memory.md");
+  const sourcePath = input.sourcePath ?? memoryDocumentRelativePath;
+  const parsed = parseFrontmatterDocument(input.text, {
+    createError: (problem: FrontmatterParseProblem) =>
+      new MemoryDocumentParseError({
+        issue: "frontmatter_invalid",
+        sourcePath,
+        ...(problem.index === undefined ? {} : { lineNumber: problem.index + 2 }),
+      }),
+  });
+  const frontmatterResult = memoryDocumentFrontmatterSchema.safeParse(parsed.attributes);
+  if (!frontmatterResult.success) {
+    throw new MemoryDocumentParseError({
+      issue: "frontmatter_contract_invalid",
+      sourcePath,
+      field: frontmatterResult.error.issues[0]?.path.map(String).join("."),
+    });
+  }
+  const bodyStartLine = resolveMemoryBodyStartLine(input.text);
+  const records = parseMemoryDocumentBody(parsed.body, sourcePath, bodyStartLine);
 
   return {
-    frontmatter,
+    frontmatter: frontmatterResult.data,
     records,
   };
 }
@@ -413,7 +476,11 @@ export function hasMemoryDisplayNameEvidence(input: MemoryDocument): boolean {
   );
 }
 
-function parseMemoryDocumentBody(body: string, sourcePath: string): MemoryRecord[] {
+function parseMemoryDocumentBody(
+  body: string,
+  sourcePath: string,
+  bodyStartLine: number,
+): MemoryRecord[] {
   const lines = body.replace(/\r\n/gu, "\n").split("\n");
   const records: MemoryRecord[] = [];
   let activeSection: MemorySection | null = null;
@@ -422,7 +489,11 @@ function parseMemoryDocumentBody(body: string, sourcePath: string): MemoryRecord
     const line = lines[index] ?? "";
     const headingMatch = /^##\s+(.+)$/u.exec(line);
     if (headingMatch?.[1]) {
-      activeSection = normalizeMemorySection(headingMatch[1]);
+      activeSection = normalizeMemorySection(
+        headingMatch[1],
+        sourcePath,
+        bodyStartLine + index,
+      );
       continue;
     }
 
@@ -435,6 +506,7 @@ function parseMemoryDocumentBody(body: string, sourcePath: string): MemoryRecord
       line: bulletMatch[1],
       section: activeSection,
       sourceLine: index + 1,
+      diagnosticLine: bodyStartLine + index,
       sourcePath,
     });
     if (parsed) {
@@ -449,6 +521,7 @@ function parseMemoryRecordLine(input: {
   line: string;
   section: MemorySection;
   sourceLine: number;
+  diagnosticLine: number;
   sourcePath: string;
 }): MemoryRecord | null {
   const match = /^(?<text>.*?)(?:\s+<!--\s*murph-memory:(?<metadata>\{.*\})\s*-->)?$/u.exec(
@@ -458,10 +531,24 @@ function parseMemoryRecordLine(input: {
     return null;
   }
 
-  const text = normalizeMemoryText(match.groups.text);
-  const metadata = parseMemoryRecordMetadata(match.groups.metadata);
+  let text: string;
+  try {
+    text = normalizeMemoryText(match.groups.text);
+  } catch {
+    throw new MemoryDocumentParseError({
+      issue: "record_invalid",
+      sourcePath: input.sourcePath,
+      lineNumber: input.diagnosticLine,
+      field: "text",
+    });
+  }
+  const metadata = parseMemoryRecordMetadata(
+    match.groups.metadata,
+    input.sourcePath,
+    input.diagnosticLine,
+  );
 
-  return memoryRecordSchema.parse({
+  const record = memoryRecordSchema.safeParse({
     id: metadata.id,
     section: input.section,
     text,
@@ -470,6 +557,15 @@ function parseMemoryRecordLine(input: {
     sourceLine: input.sourceLine,
     sourcePath: input.sourcePath,
   });
+  if (!record.success) {
+    throw new MemoryDocumentParseError({
+      issue: "record_invalid",
+      sourcePath: input.sourcePath,
+      lineNumber: input.diagnosticLine,
+      field: record.error.issues[0]?.path.map(String).join("."),
+    });
+  }
+  return record.data;
 }
 
 function renderMemoryDocumentBody(records: readonly MemoryRecord[]): string {
@@ -522,25 +618,77 @@ function renderMemoryFrontmatterValue(value: string): string {
   return JSON.stringify(value);
 }
 
-function parseMemoryRecordMetadata(value: string | undefined): MemoryRecordMetadata {
+function parseMemoryRecordMetadata(
+  value: string | undefined,
+  sourcePath: string,
+  lineNumber: number,
+): MemoryRecordMetadata {
   if (value === undefined) {
-    throw new Error("Memory record metadata comment is required.");
+    throw new MemoryDocumentParseError({
+      issue: "record_metadata_missing",
+      sourcePath,
+      lineNumber,
+      field: "metadata",
+    });
   }
 
   try {
     return memoryRecordMetadataSchema.parse(JSON.parse(value));
-  } catch (error) {
-    throw new Error("Memory record metadata comment is invalid.", { cause: error });
+  } catch {
+    throw new MemoryDocumentParseError({
+      issue: "record_metadata_invalid",
+      sourcePath,
+      lineNumber,
+      field: "metadata",
+    });
   }
 }
 
-function normalizeMemorySection(value: string): MemorySection {
+function normalizeMemorySection(
+  value: string,
+  sourcePath: string,
+  lineNumber: number,
+): MemorySection {
   const normalized = value.trim();
   if (memorySectionValues.includes(normalized as MemorySection)) {
     return normalized as MemorySection;
   }
 
-  throw new Error(`Unknown memory section "${value}".`);
+  throw new MemoryDocumentParseError({
+    issue: "memory_section_invalid",
+    sourcePath,
+    lineNumber,
+    field: "section",
+  });
+}
+
+function resolveMemoryBodyStartLine(text: string): number {
+  const lines = text.replace(/\r\n/gu, "\n").split("\n");
+  if (lines[0] !== "---") {
+    return 1;
+  }
+  const closingIndex = lines.indexOf("---", 1);
+  return closingIndex < 0 ? 1 : closingIndex + 2;
+}
+
+function normalizeMemorySourcePath(value: string): string {
+  if (
+    value.length === 0
+    || value.length > 160
+    || value.includes("\\")
+    || value.startsWith("/")
+    || /^[A-Za-z][A-Za-z\d+.-]*:/u.test(value)
+    || /[\u0000-\u001F\u007F]/u.test(value)
+  ) {
+    return memoryDocumentRelativePath;
+  }
+
+  const segments = value.split("/");
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    return memoryDocumentRelativePath;
+  }
+
+  return value;
 }
 
 function normalizeMemoryRecordId(

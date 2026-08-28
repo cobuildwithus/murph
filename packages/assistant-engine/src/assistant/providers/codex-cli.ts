@@ -16,9 +16,6 @@ import {
   createAnalyzeVideoToolRuntimeFromEnv,
 } from '../../assistant-codex/analyze-video-tool.js'
 import {
-  resolveSupportedCodexAppServerApprovalPolicy,
-} from '../../assistant-codex/app-server-requests.js'
-import {
   resolveStrictAssistantCodexModelProvider,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -208,9 +205,6 @@ export async function executeCodexAssistantTurnAttempt(
             process.env[modelProviderConfig.envKey],
         )
       : null
-  const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(
-    providerConfig.policy.approvalPolicy,
-  )
   const developerInstructions = normalizeNullableString(input.developerInstructions)
 
   const voiceMemoRuntime = createVoiceMemoToolRuntimeFromEnv({
@@ -237,11 +231,12 @@ export async function executeCodexAssistantTurnAttempt(
     ...codexProcessLaunchInput,
     abortSignal: input.abortSignal,
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
+    analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
     automationRelativeDateReferenceWindow:
       input.automationRelativeDateReferenceWindow ?? null,
     authorizeAcceptedMessageTarget:
       input.authorizeAcceptedMessageTarget ?? null,
-    approvalPolicy,
+    approvalPolicy: providerConfig.policy.approvalPolicy,
     baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
     developerInstructions,
     dynamicTools: input.dynamicTools,

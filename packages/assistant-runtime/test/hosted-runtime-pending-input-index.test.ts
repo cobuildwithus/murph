@@ -10,6 +10,7 @@ import {
   readHostedMailboxAssistantInputItemDetails,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
+  type AssistantInputAttachmentEvidenceItem,
 } from "@murphai/assistant-engine";
 import {
   createAssistantOutboxIntent,
@@ -41,10 +42,12 @@ import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   inspectHostedPendingAssistantInputWakeCandidate,
+  isHostedAssistantInputAttachmentEvidenceSettled,
   readHostedPendingAssistantImageCompletionRecoveryInputIds,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantImageCompletionHintPath,
   resolveHostedPendingAssistantInputStatePath,
+  requiresHostedAssistantInputAttachmentEvidence,
   runHostedPendingAssistantInputContentRetention,
   selectHostedConversationMailboxHandledItemBatch,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -68,6 +71,58 @@ afterEach(async () => {
 });
 
 describe("hosted pending assistant input index", () => {
+  it("requires attachment evidence only when persisted projection was elected", () => {
+    expect(requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: 1,
+      projectionStatus: "not_attempted",
+    })).toBe(false);
+    expect(requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: 1,
+      projectionStatus: "pending",
+    })).toBe(true);
+    expect(requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: 1,
+      projectionStatus: "succeeded",
+    })).toBe(true);
+    expect(requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: 0,
+      projectionStatus: "pending",
+    })).toBe(false);
+  });
+
+  it("admits attachment evidence only after parser work settles", () => {
+    const attachment: AssistantInputAttachmentEvidenceItem = {
+      byteSize: 128,
+      derived: null,
+      descriptorAttachmentId: "descriptor_voice_1",
+      fileName: "voice-note.m4a",
+      inlineFragments: [],
+      kind: "audio",
+      mime: "audio/mp4",
+      ordinal: 1,
+      parseState: "pending",
+      raw: null,
+      sourceAttachmentId: "attachment_voice_1",
+    };
+
+    expect(isHostedAssistantInputAttachmentEvidenceSettled({
+      attachments: [attachment],
+      status: "available",
+    })).toBe(false);
+    expect(isHostedAssistantInputAttachmentEvidenceSettled({
+      attachments: [{ ...attachment, parseState: "running" }],
+      status: "partial",
+    })).toBe(false);
+    expect(isHostedAssistantInputAttachmentEvidenceSettled({
+      attachments: [{ ...attachment, parseState: "succeeded" }],
+      status: "available",
+    })).toBe(true);
+    expect(isHostedAssistantInputAttachmentEvidenceSettled({
+      attachments: [],
+      status: "failed",
+    })).toBe(true);
+  });
+
   it("rotates bounded exact handled-item batches without starving the tail", () => {
     const candidates = Array.from({ length: 258 }, (_, index) => ({
       inputId: `input-${index + 1}`,
@@ -162,6 +217,54 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       inputId,
     ]);
+  });
+
+  it("keeps indexed self-authored Linq input non-runnable and unhandled without terminal evidence", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const selfAuthored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorIsSelf: true,
+        dedupeKey: "dedupe_self_authored_partial",
+        eventId: "evt_self_authored_partial",
+        itemId: "item_self_authored_partial",
+        laneSeq: "1",
+        messageId: "msg_self_authored_partial",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "self-authored partial input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: selfAuthored.inputId,
+      vaultRoot,
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: selfAuthored.inputId,
+      mailboxItemId: "item_self_authored_partial",
+      vault: vaultRoot,
+    });
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([]);
+    await expect(compactHostedConversationMailboxHandledItemSelection({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual({
+      frontierSelected: false,
+      itemIds: [],
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([selfAuthored.inputId]);
   });
 
   it("keeps the legacy value shape while appending before v2 compaction", async () => {
@@ -2157,6 +2260,7 @@ async function writeTerminalEvidence(input: {
 }
 
 function createAssistantInputEvent(input: {
+  actorIsSelf?: boolean;
   dedupeKey: string;
   eventId: string;
   itemId: string;
@@ -2194,7 +2298,7 @@ function createAssistantInputEvent(input: {
     conversation: {
       accountId: "acct_1",
       actorId: "actor_1",
-      actorIsSelf: false,
+      actorIsSelf: input.actorIsSelf ?? false,
       source,
       threadId: "thread_1",
       threadIsDirect: true,

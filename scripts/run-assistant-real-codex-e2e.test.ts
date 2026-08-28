@@ -200,6 +200,7 @@ describe('assistant real Codex local runner', () => {
 
   it('routes one explicit subscription home through preflight and the live journey', () => {
     const requests: AssistantRealCodexCommandRequest[] = []
+    const output: string[] = []
     const status = executeAssistantRealCodexRun(
       parseAssistantRealCodexRunArgs([
         'adaptive wearable',
@@ -225,7 +226,7 @@ describe('assistant real Codex local runner', () => {
           PATH: '/usr/bin:/bin',
         },
         writeStderr: () => undefined,
-        writeStdout: () => undefined,
+        writeStdout: (value) => output.push(value),
       },
     )
 
@@ -252,6 +253,9 @@ describe('assistant real Codex local runner', () => {
     expect(requests[2]?.env.CODEX_HOME).toBeUndefined()
     expect(requests[2]?.args).toContain(
       '^real Codex adaptive wearable journey$',
+    )
+    expect(output.join('')).toContain(
+      'use a dedicated home for production-like evidence',
     )
   })
 

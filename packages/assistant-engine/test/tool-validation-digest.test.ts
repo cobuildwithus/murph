@@ -44,7 +44,7 @@ describe('buildSafeToolCallValidationDigest', () => {
     })
     const feedback = buildToolCallValidationFeedback(
       digest,
-      { error: 'invalid_synthetic_arguments' },
+      'invalid_synthetic_arguments',
     )
 
     expect(JSON.parse(feedback)).toMatchObject({
@@ -64,7 +64,7 @@ describe('buildSafeToolCallValidationDigest', () => {
 
     const reconstructedFeedback = buildToolCallValidationFeedback(
       structuredClone(digest),
-      { error: 'invalid_synthetic_arguments' },
+      'invalid_synthetic_arguments',
     )
     expect(JSON.parse(reconstructedFeedback)).toMatchObject({
       error: 'invalid_synthetic_arguments',
@@ -100,7 +100,7 @@ describe('buildSafeToolCallValidationDigest', () => {
     })
     const feedback = buildToolCallValidationFeedback(
       digest,
-      { error: 'invalid_synthetic_arguments' },
+      'invalid_synthetic_arguments',
     )
 
     expect(JSON.parse(feedback)).toMatchObject({
@@ -168,7 +168,7 @@ describe('buildSafeToolCallValidationDigest', () => {
         schemaRootKeys: ['value'],
         toolName: 'murph.synthetic',
       }),
-      { error: 'invalid_synthetic_arguments' },
+      'invalid_synthetic_arguments',
     )
 
     expect(Buffer.byteLength(feedback, 'utf8')).toBeLessThanOrEqual(60_000)

@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local runner bundle exceeds committed byte budget'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2375'
 ---
 
 ## Expected Behavior

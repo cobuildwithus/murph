@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
-import { createReadStream, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
-import { createInterface } from "node:readline";
 
 import {
   CURRENT_VAULT_FORMAT_VERSION,
@@ -18,6 +17,10 @@ import {
 import { emitAuditRecord } from "./audit.ts";
 import { REQUIRED_DIRECTORIES, VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
+import {
+  listEventLedgerShardPaths,
+  readEventLedgerShardRows,
+} from "./event-ledger-storage.ts";
 import { ensureVaultDirectory, pathExists, walkVaultFiles } from "./fs.ts";
 import {
   MAX_INTEGRATION_EVIDENCE_PART_BYTES,
@@ -1101,7 +1104,7 @@ async function scanEventShardsForMigration({
   state,
   vaultRoot,
 }: EventShardMigrationScanInput): Promise<EventShardMigrationScanResult> {
-  const relativePaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, { extension: ".jsonl" });
+  const relativePaths = await listEventLedgerShardPaths(vaultRoot);
   const eventShards: EventShardSnapshot[] = [];
   const outputRolesByBundle = new Map<string, Map<string, Set<string>>>();
   const referencedRowsByBundle = new Map<string, Set<string>>();
@@ -1170,30 +1173,10 @@ async function* readEventRecordsFromShard(
   vaultRoot: string,
   relativePath: string,
 ): AsyncGenerator<{ index: number; record: EventRecord }> {
-  const absolutePath = resolveVaultPath(vaultRoot, relativePath).absolutePath;
-  const lines = createInterface({
-    crlfDelay: Infinity,
-    input: createReadStream(absolutePath, { encoding: "utf8" }),
-  });
   let index = 0;
 
-  for await (const line of lines) {
-    if (!line) {
-      continue;
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(line);
-    } catch (error) {
-      throw new VaultError("VAULT_INVALID_JSONL", `Invalid JSON on line ${index + 1}.`, {
-        relativePath,
-        lineNumber: index + 1,
-        cause: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    const parsed = eventRecordSchema.safeParse(raw);
+  for (const row of await readEventLedgerShardRows({ vaultRoot, relativePath })) {
+    const parsed = eventRecordSchema.safeParse(row.value);
     if (!parsed.success) {
       throw new VaultError(
         "EVENT_INVALID",
@@ -1328,7 +1311,7 @@ async function hasLegacyIntegrationFiles(vaultRoot: string): Promise<boolean> {
 }
 
 async function hasLegacyIntegrationEventReferences(vaultRoot: string): Promise<boolean> {
-  const relativePaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, { extension: ".jsonl" });
+  const relativePaths = await listEventLedgerShardPaths(vaultRoot);
   for (const relativePath of relativePaths.sort()) {
     for await (const { record } of readEventRecordsFromShard(vaultRoot, relativePath)) {
       if (record.rawRefs?.some((rawRef) => rawRef.startsWith(`${LEGACY_INTEGRATION_ROOT}/`))) {

@@ -368,6 +368,11 @@ describe('assistant response cards', () => {
         version: { const: 1 },
       },
     })
+    expect(exerciseRoutineResponseCardJsonSchema.required).not.toContain('footer')
+    expect(exerciseRoutineResponseCardJsonSchema.required).not.toContain(
+      'subtitle',
+    )
+    expect(exerciseRoutineResponseCardJsonSchema.required).toContain('safety')
     expect(assistantResponseCardSchema.parse(ROUTINE_CARD)).toEqual(ROUTINE_CARD)
     expect(assistantResponseCardSchema.parse({
       ...ROUTINE_CARD,
@@ -873,7 +878,7 @@ describe('assistant response cards', () => {
       },
     })
     expect(buildLinqIMessageAppFallbackText(COMPLETE_CARD_V2)).toBe(
-      'Your daily nutrition. Ask Murph for this card in text',
+      'Your daily nutrition.',
     )
     const completeCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD)
     const goalCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD_V2)

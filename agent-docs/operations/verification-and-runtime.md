@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-26
+Last verified: 2026-08-27
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -164,58 +164,48 @@ narrow injected boundaries and prove acquisition ordering, success, relevant
 failure exits, exactly-once release, and awaited cleanup. Text inspection may
 supplement that proof, but it cannot establish runtime cleanup behavior.
 
-Native companion auth/control/device-sync PRs additionally use the applicable
-`Native iOS hosted E2E` and `Native Android hosted E2E` statuses described in
-`agent-docs/references/testing-ci-map.md`.
-A canceled native workflow must not be rerun directly because the rerun retains
-its original queue identity. Manual native retry is infrastructure-only. From
-an authenticated operator checkout, use
-`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code xcodebuild_failed`
-only for the explicit allowlisted iOS `xcodebuild_failed` infrastructure
-failure, after inspecting and recording that closed failure code from the
-private run. The supplied failure code is an operator attestation: the helper
-validates the allowlisted literal but does not discover or verify its run
-provenance. When the Android controller reports that a direct workflow rerun
-could not enter the live queue, its status supplies the corresponding
-attestation; use
-`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code android_workflow_rerun`.
-Non-allowlisted journey, product, legacy-contract, and workflow-contract
-literals are rejected. The helper requires the PR to remain ready and
-revalidates the open same-repository human-authored PR and exact current head
-before rerunning a successful exact-head Repo Hygiene owner. Its completion
-creates a fresh applicable iOS and Android waiter without widening the
-protected environment or secret boundary.
-A status description that records a real pass is production-shaped evidence:
-exact hosted PR Web deployment plus real Privy/Junction and HealthKit or Health
-Connect native flow.
-Path-filtered informational success explicitly records that no real journey ran
-and must not become a required-check substitute. UI completion is not enough;
-trusted orchestration must also prove the exact candidate is anonymously reachable,
-a freshly created fixed Privy principal exists, and a connected real Junction
-`apple_health_kit` or `health_connect` provider exists before cleanup. Local
-mocked or hosted-local tests do not replace it. Runtime credentials stay in the dedicated Vercel
-custom environment; the cleanup/dispatch credentials stay only in protected
-Actions environments. Junction cleanup completely enumerates the configured
-sandbox team, validates every returned team id, and deletes at most one user in
-the lane's explicit client-user-id namespace before touching the isolated
-database; unrelated sandbox users are never cleanup targets. Because a Junction
-Team API key still has full team data access, a shared team is allowed only for
-disposable sandbox identities and never for staging, production, or real-person
-data.
-PR reset ownership is `orchestrator_owned_reset`, while production canary mode
-is non-destructive and receives none of that authority. Controller child
-commands and direct PostgreSQL reads are explicitly time-bounded.
-The Android controller additionally binds the exact private Android commit to
-an immutable lightweight tag and a short dispatch lease. It mints short-lived
-GitHub App installation credentials inside the existing protected controller
-owner and refreshes them before expiry; the App private key is removed from the
-process environment before any child command. If a dispatch receipt is
-uncertain, or a known run cannot be proven terminal after cancellation, cleanup
-remains fenced through the lease, the private job timeout, and a terminal grace
-window. Raw Android
-instrumentation output and provider prose are never uploaded or published;
-only the private workflow's closed allowlisted stage summary may reach Actions
-output. See `agent-docs/operations/native-android-hosted-e2e.md`.
+Native iOS and Android hosted E2E are production canaries, not pull-request
+statuses. The trusted default-branch controllers run on staggered six-hour
+schedules: iOS at minute 17 and Android at minute 47. Each cheap selection job
+reads the latest completed scheduled outcome for its own workflow and skips the
+native job only when that outcome succeeded at the current protected-`main`
+SHA. Missing history, a newer SHA, or a latest failure admits the canary. An
+explicit rerun of the same trusted schedule attempt bypasses the no-change
+skip. Reviewed native source pins live in
+`.github/native-hosted-e2e-controller.json`, so a source rotation advances the
+protected-main checkpoint.
+
+Neither controller admits `workflow_run`, `deployment_status`, or
+branch-selectable `workflow_dispatch` events, and neither publishes a commit
+status. Fixed non-canceling workflow concurrency bounds each platform to one
+running and one pending controller. The workflows do not receive the destructive
+PR database, Privy, Junction-namespace, or candidate-deployment authority.
+
+A scheduled native pass is production-shaped evidence for the current
+protected-`main` checkpoint and the exact deployed Web SHA it dispatches.
+Trusted orchestration proves the scheduled revision remains in `main` history,
+then resolves the current production alias. When the alias trails `main`, the
+existing Vercel build classifier must prove the complete intervening diff is
+eligible dated release notes; otherwise the controller fails before paid
+dispatch and retries. It dispatches that deployed SHA with the reviewed
+immutable iOS or Android source in `production_canary` mode. The private journey uses
+`non_destructive_existing_identity`; local mocked or hosted-local tests do not
+replace it. The iOS and Android production environments remain separate and
+contain only their repository dispatch credentials plus production-alias proof
+authority. Source refs and SHAs are committed policy, not environment values.
+
+Controller child commands are time-bounded. Android additionally binds the
+private commit to an immutable lightweight tag and a short dispatch lease,
+refreshes repository-scoped GitHub App credentials before expiry, and removes
+the App private key from the process environment before child work. If a
+dispatch receipt is uncertain, or a known run cannot be proven terminal after
+cancellation, execution remains fenced through the lease, private-job timeout,
+and terminal grace window. Raw native instrumentation and provider prose are
+never uploaded; only closed allowlisted stage summaries may reach Actions
+output. Deterministic workflow and dispatcher proof is owned by
+`node --test scripts/native-ios-hosted-e2e.test.mjs` and
+`node --test scripts/native-android-hosted-e2e.test.mjs`. See
+`agent-docs/operations/native-android-hosted-e2e.md`.
 
 ## Expensive And Stochastic Proof Order
 
@@ -258,21 +248,25 @@ reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
-If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT` before
-any provider action, this repository grants standing authorization to discover
-alternate local Codex homes by directory and non-empty auth-file presence only,
-select one already-authenticated home that has not been used for that focused
-journey, and rerun the same journey once with
-`--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. Never read, print, copy, or move
-auth material. Do not cycle through additional homes. If no authenticated
-alternate is available, or if that one alternate is also blocked, record
-`Hold`.
+If the default subscription home cannot run the focused journey before any
+provider action because of authentication, quota, startup, or connection
+failure, this repository grants standing authorization to try every available
+authenticated local Codex home without asking for approval between attempts.
+Discover candidates by directory and non-empty auth-file presence only, order
+them by absolute path, and run the same journey at most once per unused home
+with `--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. Never read, print, copy, or
+move auth material. Stop rotating homes as soon as one run reaches a provider
+action or passes. If a run reaches a provider action but misses the behavior or
+reply bar, fix the owning boundary and rerun on that same home instead of trying
+another subscription. Record `Hold` only when every available authenticated
+home is blocked before provider action.
 
 Assistant Engine's lower-level opt-in live Codex journeys still use
 `MURPH_RUN_REAL_CODEX_E2E=1`; provider-key mode requires a supported provider
 credential, while explicit subscription mode uses the normal local Codex home
-by default and may select one alternate local home for auth. It remains
-developer-local rather than hermetic CI evidence. The
+by default and may try each available authenticated local home once under the
+bounded fallback contract above. It remains developer-local rather than
+hermetic CI evidence. The
 generated-image avatar journey must exercise the production tool contracts in
 three natural turns: launch with a truthful wait acknowledgement, trusted
 completion media attachment with no group mutation, and a later explicit
@@ -1068,6 +1062,7 @@ the advisory budget.
 - `pnpm test:packages`: uses the same incremental contracts prerequisite and bounded root multi-project Vitest suite as `pnpm test`, without fixture smoke. It covers every root-wired package project plus all nine CLI buckets, with the four independent CLI buckets sharing one phase and the five explicit serial buckets retaining separate phases. It leaves app verification and prepared CLI package-shape acceptance to their dedicated commands.
 - `pnpm test:apps`: holds one parent artifact lock, prepares Health Commons output and the hosted-web Prisma client once, then executes `apps/web verify` and `apps/cloudflare verify` concurrently by default locally (serially in CI unless overridden). Both children consume the prepared inputs instead of racing their own generation and therefore realize the intended parallel app lane. Their existing internal parallelism, app-local worker caps, and acceptance skip flags remain unchanged.
 - `pnpm test:packages:coverage`: prepares the built CLI/runtime inputs, enforces each package's coverage command, and runs built package-boundary checks. One release-verification plan classifies every `packages/*` workspace owner: assigned packages must declare `test:coverage`, exclusions require a non-empty reason, and any new, stale, duplicate, or unassigned package fails before coverage starts. `MURPH_PACKAGE_COVERAGE_SHARD` selects one non-empty named shard only for the standalone `test:packages:coverage` command while the default remains the complete plan; aggregate coverage and acceptance commands reject subset selection, and the canonical static-SSH profile continues to force the complete plan. Standalone local outer fanout is CPU-aware and capped at six processes; the default per-process Vitest cap is the available CPU count divided by that outer fanout, avoiding the former multiplication of six 75%-of-machine pools. The capable-host acceptance composition protects subprocess-heavy CLI coverage with four workers and one concurrent two-worker package process, then refills to at most five two-worker package processes after CLI releases the two app pools. On the standard 16-vCPU profile that bounds the scheduled Vitest total at 14 workers after the protected phase instead of multiplying per-process percentages. On a resource-qualified static worker, the executor-owned profile instead protects CLI coverage with three workers and one concurrent two-worker package process, then refills to three two-worker package processes. Smaller or memory-unobservable static workers retain the two-process, two-worker serial fallback. Source environment overrides cannot change either static plan. CI remains one outer process with a 50% inner cap inside each isolated job. `MURPH_PACKAGE_COVERAGE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS`, and `MURPH_PACKAGE_COVERAGE_CLI_VITEST_MAX_WORKERS` remain explicit overrides for the default profile. Contracts and CLI artifact ordering, failure aggregation, and prepared acceptance behavior are unchanged.
+- During composed refill, Hosted Local Harness runs after every unrelated package owner and waits while Assistant Engine remains active, so those child-runtime-heavy owners never overlap without reducing earlier package refill.
 - `pnpm test:coverage`: runs the explicit coverage-focused acceptance lane: repo/doc/artifact guards, prepared package coverage, scenario-integrity coverage, and app verification. Standalone local package coverage uses CPU-aware outer fanout capped at six processes and divides the worker budget across them; CI remains serial by default. The capable-host acceptance composition starts Web tests, lint, and dev smoke with package coverage under bounded worker budgets. CLI completion releases the hosted-web Next build and Cloudflare's serial app tests and independently releases package coverage from its protected phase into its full refill. Every ordinary package coverage owner, including Assistant Engine, retains the caller's Node heap; the CLI keeps only its existing prepared-runtime environment. Standalone coverage prepares its own generated inputs; `pnpm verify:acceptance` reuses the preceding typecheck's guards, contracts output, Health Commons catalog, and Prisma client. On a static worker with at least 10 logical CPUs and 24 GiB of detected physical memory, the executor-owned profile overlaps package coverage, fixture verification, and both apps. It gives each ordinary package two workers, the CLI three workers, and each app Vitest pool one worker; CLI completion still gates the Next build, Cloudflare tests, and the package refill from two to three processes. Smaller or memory-unobservable static workers retain the prior serial two-process/two-worker plan. The static profile ignores caller worker and overlap controls. The existing lane-parallelism, retry, and coverage-budget environment overrides remain available to the default and CI profiles, and source-artifact hygiene continues to reject private env files and generated residue.
 - `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI default-profile hosts with at least 12 logical CPUs, including a locally forced Codex/shared-host execution and the Blacksmith Testbox, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized bootstrap does not set an app-step policy for that default profile; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. Static SSH is resource-qualified by construction: its entrypoint selects `profile=static-ssh`, and the verifier admits composition only with at least 10 logical CPUs and 24 GiB of detected physical memory. The `resources` line reports those measurements and the effective worker/overlap plan. Smaller or memory-unobservable static workers retain the serial fallback. Standalone `pnpm test:coverage`, smaller default-profile hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
 - `pnpm zip:src` and `scripts/package-audit-context.sh`: shell through `pnpm no-js`, which first prunes untracked generated JS/declaration sidecars that sit next to tracked TypeScript source files and then runs the tracked-artifact hygiene guard, before building the source/review bundle from git-visible files while scanning `config/**` alongside app/package code and filtering blocked local residue such as `.env` / `.env.*`, `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, `*.tsbuildinfo`, and `packages/health-commons/generated/**` paths out of the manifest. This keeps ignored local artifacts out of the upload bundle without requiring a clean development worktree, while raw clone archives remain unsafe. PR-bound `scripts/package-audit-context-full.sh` additionally requires explicit `--zip`, refuses repo-visible candidates under the canonical `review-gpt-pr-context/**` namespace before producing an artifact, owns one private context directory and collision-resistant default ZIP prefix per invocation, then appends only the selected packet under that stable archive prefix; simultaneous preliminary and final packaging therefore shares neither cleanup state nor an intermediate filename and requires no lock.

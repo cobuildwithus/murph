@@ -399,6 +399,9 @@ WITH direct_rows AS (
     accepted_ms,
     EXTRACT(EPOCH FROM (runner_job_accepted_at - TIMESTAMP '1970-01-01')) * 1000 AS runner_job_accepted_ms,
     route_received_ms,
+    (orchestration ->> 'userRunnerConstructorStartedAtEpochMs')::double precision AS runner_constructor_started_ms,
+    (orchestration ->> 'userRunnerConstructorFinishedAtEpochMs')::double precision AS runner_constructor_finished_ms,
+    (orchestration ->> 'userRunnerFirstEnsureRuntimeProcessingAtEpochMs')::double precision AS runner_first_ensure_ms,
     (orchestration ->> 'userRunnerRpcStartedAtEpochMs')::double precision AS runner_rpc_started_ms,
     (orchestration ->> 'runtimeConsentLockAcquiredAtEpochMs')::double precision AS consent_lock_acquired_ms,
     (orchestration ->> 'healthDataAdmissionReadStartedAtEpochMs')::double precision AS admission_started_ms,
@@ -415,14 +418,38 @@ WITH direct_rows AS (
     (orchestration ->> 'freshStartInvocationAcceptedAtEpochMs')::double precision AS fresh_start_invocation_accepted_ms
   FROM direct_causal_candidates
   WHERE causal_candidate_count = 1
+), activation_stamps AS (
+  SELECT
+    stamps.*,
+    CASE
+      WHEN route_received_ms <= runner_constructor_started_ms
+        AND runner_constructor_started_ms <= runner_constructor_finished_ms
+        AND runner_constructor_finished_ms <= runner_first_ensure_ms
+        AND runner_first_ensure_ms = runner_rpc_started_ms
+      THEN true
+      ELSE false
+    END AS activation_matches_current_request
+  FROM stamps
 ), phase_samples AS (
   SELECT
     phase.name,
     phase.duration_ms
-  FROM stamps
+  FROM activation_stamps
   CROSS JOIN LATERAL (
     VALUES
       ('Accepted -> Cloudflare route', route_received_ms - accepted_ms),
+      ('Cloudflare route -> UserRunner constructor start', CASE
+        WHEN activation_matches_current_request
+        THEN runner_constructor_started_ms - route_received_ms
+      END),
+      ('UserRunner constructor start -> finish', CASE
+        WHEN activation_matches_current_request
+        THEN runner_constructor_finished_ms - runner_constructor_started_ms
+      END),
+      ('UserRunner constructor finish -> first ensure instruction', CASE
+        WHEN activation_matches_current_request
+        THEN runner_first_ensure_ms - runner_constructor_finished_ms
+      END),
       ('Cloudflare route -> UserRunner RPC', runner_rpc_started_ms - route_received_ms),
       ('UserRunner RPC -> consent lock', consent_lock_acquired_ms - runner_rpc_started_ms),
       ('Health-data admission callback', admission_finished_ms - admission_started_ms),
@@ -452,20 +479,23 @@ GROUP BY name
 ORDER BY min(
   CASE name
     WHEN 'Accepted -> Cloudflare route' THEN 1
-    WHEN 'Cloudflare route -> UserRunner RPC' THEN 2
-    WHEN 'UserRunner RPC -> consent lock' THEN 3
-    WHEN 'Health-data admission callback' THEN 4
-    WHEN 'Admission complete -> controller' THEN 5
-    WHEN 'Runner state bind' THEN 6
-    WHEN 'Runner state read' THEN 7
-    WHEN 'State ready -> fresh start request' THEN 8
-    WHEN 'Fresh start request -> fence bound' THEN 9
-    WHEN 'Fence bound -> container ready' THEN 10
-    WHEN 'Fence bound -> invocation prepared' THEN 11
-    WHEN 'Fresh-start parallel preparation' THEN 12
-    WHEN 'Parallel preparation -> invocation launched' THEN 13
-    WHEN 'Invocation launched -> runner job accepted' THEN 14
-    WHEN 'Cloudflare route -> fresh start request' THEN 15
-    ELSE 16
+    WHEN 'Cloudflare route -> UserRunner constructor start' THEN 2
+    WHEN 'UserRunner constructor start -> finish' THEN 3
+    WHEN 'UserRunner constructor finish -> first ensure instruction' THEN 4
+    WHEN 'Cloudflare route -> UserRunner RPC' THEN 5
+    WHEN 'UserRunner RPC -> consent lock' THEN 6
+    WHEN 'Health-data admission callback' THEN 7
+    WHEN 'Admission complete -> controller' THEN 8
+    WHEN 'Runner state bind' THEN 9
+    WHEN 'Runner state read' THEN 10
+    WHEN 'State ready -> fresh start request' THEN 11
+    WHEN 'Fresh start request -> fence bound' THEN 12
+    WHEN 'Fence bound -> container ready' THEN 13
+    WHEN 'Fence bound -> invocation prepared' THEN 14
+    WHEN 'Fresh-start parallel preparation' THEN 15
+    WHEN 'Parallel preparation -> invocation launched' THEN 16
+    WHEN 'Invocation launched -> runner job accepted' THEN 17
+    WHEN 'Cloudflare route -> fresh start request' THEN 18
+    ELSE 19
   END
 );

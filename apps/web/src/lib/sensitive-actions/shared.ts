@@ -1,5 +1,7 @@
 export const SETTINGS_SENSITIVE_ACTION_KINDS = [
   "vault.export",
+  // Legacy-only admission for Settings pages loaded before the deletion change.
+  // The account-deletion route does not consume this authorization.
   "account.delete",
 ] as const;
 

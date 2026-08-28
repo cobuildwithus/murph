@@ -11,6 +11,16 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       value INTEGER NOT NULL
     )
   `);
+
+  const storedVersion = readRunnerStateSchemaVersion(sql);
+  assertRunnerStateSchemaVersionSupported({
+    observedVersion: storedVersion,
+    supportedVersion: RUNNER_STATE_SCHEMA_VERSION,
+  });
+  if (storedVersion === RUNNER_STATE_SCHEMA_VERSION) {
+    return;
+  }
+
   sql.exec(`
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -32,7 +42,6 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     )
   `);
 
-  assertStoredRunnerStateSchemaVersionSupported(sql);
   for (const [columnName, definition] of Object.entries({
     active_attempt_id: "TEXT",
     active_generation: "INTEGER NOT NULL DEFAULT 0",
@@ -77,15 +86,6 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   });
 }
 
-function assertStoredRunnerStateSchemaVersionSupported(
-  sql: DurableObjectSqlStorageLike,
-): void {
-  assertRunnerStateSchemaVersionSupported({
-    observedVersion: readRunnerStateSchemaVersion(sql),
-    supportedVersion: RUNNER_STATE_SCHEMA_VERSION,
-  });
-}
-
 export function assertRunnerStateSchemaVersionSupported(input: {
   observedVersion: number;
   supportedVersion: number;
@@ -98,11 +98,6 @@ export function assertRunnerStateSchemaVersionSupported(input: {
 }
 
 function markRunnerStateSchemaVersion(sql: DurableObjectSqlStorageLike): void {
-  const version = readRunnerStateSchemaVersion(sql);
-  if (version >= RUNNER_STATE_SCHEMA_VERSION) {
-    return;
-  }
-
   sql.exec(
     `INSERT INTO runner_schema_meta (key, value)
      VALUES ('runner_state_schema_version', ${RUNNER_STATE_SCHEMA_VERSION})

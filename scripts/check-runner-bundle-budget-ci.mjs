@@ -131,6 +131,16 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
       'base_sha="$(git -C candidate rev-parse HEAD^1)"',
       "The workflow must derive the exact first parent directly from the candidate.",
     );
+    if (
+      budgetJob.includes("EXPECTED_PR_BASE_SHA") ||
+      budgetJob.includes("github.event.pull_request.base.sha")
+    ) {
+      issues.push({
+        code: "stale-event-base-comparison",
+        message:
+          "The exact candidate's first parent must own the bundle baseline; the pull-request event base can lag GitHub's candidate merge commit.",
+      });
+    }
     requireText(
       budgetJob,
       "missing-base-checkout",

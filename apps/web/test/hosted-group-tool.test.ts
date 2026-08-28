@@ -47,6 +47,8 @@ const mocks = vi.hoisted(() => ({
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
+  readHostedGroupMembershipParticipantRosters: vi.fn(),
+  readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId: vi.fn(),
   readHostedGroupFundingRecoveryStatus: vi.fn(),
@@ -134,7 +136,15 @@ vi.mock("@/src/lib/hosted-groups/participant-member", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+vi.mock("@/src/lib/hosted-groups/group-membership-participants", () => ({
+  readHostedGroupMembershipParticipantRosters:
+    mocks.readHostedGroupMembershipParticipantRosters,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/linq-client")
+  >()),
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
   getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
@@ -220,6 +230,8 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   prepareHostedGroupJoinOfferPostTx: mocks.prepareHostedGroupJoinOfferPostTx,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId: mocks.readHostedGroupIdByRuntimeMemberId,
+  readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx:
+    mocks.readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
   readHostedGroupMembershipsForMember: mocks.readHostedGroupMembershipsForMember,
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId:
     mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
@@ -344,6 +356,7 @@ import {
   resolveHostedGroupAccessOfferProjectionScopes,
 } from "@/src/lib/hosted-groups/join-policy";
 
+const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const GROUP_SUMMARY = {
   displayName: "Sunday sleep crew",
   id: "hgrp_123",
@@ -351,13 +364,13 @@ const GROUP_SUMMARY = {
   memberCount: 3,
   members: [],
   requestedVaultShareProjectionKinds: ["sleep-times.v0" as const],
+  requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
   status: "active",
 };
 const RENAMED_GROUP_SUMMARY = {
   ...GROUP_SUMMARY,
   displayName: "Weekly Health Crew",
 };
-const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
 const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
 const DEEP_SLEEP_SOURCES_SCOPE = {
@@ -561,8 +574,19 @@ describe("handleHostedRuntimeGroupTool", () => {
         role: "member",
         runtimeMemberId: "member_group_runtime",
       }],
+      nextCursor: null,
       truncated: false,
     });
+    mocks.readHostedGroupMembershipParticipantRosters.mockResolvedValue(
+      new Map([["membership_runners", {
+        participantCount: 3,
+        participantLabels: [
+          { displayName: "Taylor" },
+          { phoneHint: { areaCode: "415", lastFour: "9876" } },
+        ],
+        status: "available",
+      }]]),
+    );
     mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
@@ -605,6 +629,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       group: GROUP_SUMMARY,
       joinCode: "abc123",
     });
+    mocks.readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx.mockResolvedValue({
+      group: GROUP_SUMMARY,
+      joinCode: "abc123",
+    });
     mocks.prepareHostedGroupJoinOfferPostTx.mockResolvedValue({
       joinCode: "abc123",
       kind: "post",
@@ -622,8 +650,18 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValue({
       kind: "recorded",
     });
-    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue([]);
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([]);
+    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue({
+      grants: [],
+      kind: "ok",
+      nextCursor: null,
+      truncated: false,
+    });
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue({
+      grants: [],
+      kind: "ok",
+      nextCursor: null,
+      truncated: false,
+    });
     mocks.revokeHostedGroupDisclosureGrantForMemberTx.mockResolvedValue({
       kind: "revoked",
       revokedAt: new Date("2026-07-16T12:00:00Z"),
@@ -879,7 +917,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_self",
       request: {
         action: "ask",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
         originSessionId: "session_private",
         question: "What is today's workout?",
@@ -891,8 +929,8 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.requestHostedGroupAssistantAsk).toHaveBeenCalledWith({
-      groupLabel: "100 Club",
       memberId: "member_self",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
       originSessionId: "session_private",
       question: "What is today's workout?",
@@ -918,7 +956,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       request: {
         action: "handoff",
         context: "The member set a personal record today.",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
       },
       scheduleMailboxWake,
@@ -929,8 +967,8 @@ describe("handleHostedRuntimeGroupTool", () => {
 
     expect(mocks.requestHostedGroupContextHandoff).toHaveBeenCalledWith({
       context: "The member set a personal record today.",
-      groupLabel: "100 Club",
       memberId: "member_self",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
     });
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
@@ -955,7 +993,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_self",
       request: {
         action: "ask",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
         originSessionId: "session_private",
         question: "What is today's workout?",
@@ -1289,11 +1327,16 @@ describe("handleHostedRuntimeGroupTool", () => {
 
   it("lists the current member's group grants without exposing a member-held invite link", async () => {
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
-    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue([{
-      grantId: "grant_sleep",
-      groupLabel: "Fun-loving runners",
-      permissionText: "Recent sleep timing and duration",
-    }]);
+    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue({
+      grants: [{
+        grantId: "grant_sleep",
+        groupLabel: "Fun-loving runners",
+        permissionText: "Recent sleep timing and duration",
+      }],
+      kind: "ok",
+      nextCursor: "disclosure_page_2",
+      truncated: true,
+    });
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_self",
       request: { action: "list_memberships" },
@@ -1305,6 +1348,7 @@ describe("handleHostedRuntimeGroupTool", () => {
           groupLabel: "Fun-loving runners",
           permissionText: "Recent sleep timing and duration",
         }],
+        disclosureGrantsTruncated: true,
         memberships: [{
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
@@ -1314,6 +1358,14 @@ describe("handleHostedRuntimeGroupTool", () => {
           kind: "friends",
           memberCount: 7,
           membershipId: "membership_runners",
+          participantRoster: {
+            participantCount: 3,
+            participantLabels: [
+              { displayName: "Taylor" },
+              { phoneHint: { areaCode: "415", lastFour: "9876" } },
+            ],
+            status: "available",
+          },
           permissionsUrl: null,
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
@@ -1324,6 +1376,8 @@ describe("handleHostedRuntimeGroupTool", () => {
             /^https:\/\/www\.withmurph\.ai\/groups\/fund\/gf1\./u,
           ),
         }],
+        nextCursor: null,
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
         truncated: false,
       },
@@ -1333,8 +1387,34 @@ describe("handleHostedRuntimeGroupTool", () => {
       expect.objectContaining({ memberId: "member_self" }),
     );
     expect(mocks.readActiveHostedGroupDisclosureGrantsForMember).toHaveBeenCalledWith(
-      expect.objectContaining({ memberId: "member_self" }),
+      expect.objectContaining({ cursor: null, memberId: "member_self" }),
     );
+  });
+
+  it("keeps the legacy membership response shape for callers without inventory v2", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+
+    const response = await handleHostedRuntimeGroupTool({
+      includeParticipantRosters: false,
+      memberId: "member_self",
+      request: { action: "list_memberships" },
+    });
+
+    expect(response).toMatchObject({
+      action: "list_memberships",
+      result: { status: "ok" },
+    });
+    if (
+      response.action !== "list_memberships"
+      || response.result.status !== "ok"
+    ) {
+      throw new TypeError("Expected a successful membership inventory.");
+    }
+    expect(response.result.memberships[0]).not.toHaveProperty(
+      "participantRoster",
+    );
+    expect(mocks.readHostedGroupMembershipParticipantRosters)
+      .not.toHaveBeenCalled();
   });
 
   it("returns an existing join link as a permissions URL only to the group owner", async () => {
@@ -1351,6 +1431,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         role: "owner",
         runtimeMemberId: "member_group_runtime",
       }],
+      nextCursor: null,
       truncated: false,
     });
 
@@ -1445,19 +1526,28 @@ describe("handleHostedRuntimeGroupTool", () => {
       }],
     };
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(currentGroup);
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([{
-      grantId: "grant_calendar",
-      groupLabel: "Sunday sleep crew",
-      memberId: "member_grantor",
-      permissionText: "Calendar availability for coordinating a call",
-    }]);
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue({
+      grants: [{
+        grantId: "grant_calendar",
+        groupLabel: "Sunday sleep crew",
+        memberId: "member_grantor",
+        permissionText: "Calendar availability for coordinating a call",
+      }],
+      kind: "ok",
+      nextCursor: "group_disclosure_page_2",
+      truncated: true,
+    });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: { action: "read_current" },
+      request: {
+        action: "read_current",
+        disclosureGrantCursor: "group_disclosure_page_1",
+      },
     })).resolves.toEqual({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...currentGroup,
           members: [{
@@ -1471,6 +1561,7 @@ describe("handleHostedRuntimeGroupTool", () => {
             disclosureGrants: [],
           }],
         },
+        nextDisclosureGrantCursor: "group_disclosure_page_2",
         status: "ok",
       },
     });
@@ -1479,6 +1570,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       runtimeMemberId: "member_group_runtime",
     });
     expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
+      cursor: "group_disclosure_page_1",
       groupId: GROUP_SUMMARY.id,
     });
   });
@@ -3211,7 +3303,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       messageLookupKey: "hbidx:linq-message:v1:offer",
       projectionKinds: ["sleep-times.v0"],
     });
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([]);
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue({
+      grants: [],
+      kind: "ok",
+      nextCursor: null,
+      truncated: false,
+    });
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
@@ -3567,56 +3664,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
-  });
-
-  it("does not send a fresh disclosure request when permission history is full", async () => {
-    mocks.admitHostedGroupDisclosurePermissionAppendTx.mockResolvedValueOnce({
-      kind: "limit_reached",
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: {
-        action: "post_disclosure_request",
-        linqThread: LINQ_THREAD,
-        originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
-        permissionText: "Recent sleep timing and duration",
-      },
-    })).resolves.toEqual({
-      action: "post_disclosure_request",
-      result: {
-        status: "unavailable",
-        unavailableReason: "permission_history_limit_reached",
-      },
-    });
-
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupDisclosurePermissionTx).not.toHaveBeenCalled();
-  });
-
-  it("reports a binding-time permission history race after the inert provider send", async () => {
-    mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValueOnce({
-      kind: "limit_reached",
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: {
-        action: "post_disclosure_request",
-        linqThread: LINQ_THREAD,
-        originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
-        permissionText: "Recent sleep timing and duration",
-      },
-    })).resolves.toEqual({
-      action: "post_disclosure_request",
-      result: {
-        status: "unavailable",
-        unavailableReason: "permission_history_limit_reached",
-      },
-    });
-
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedGroupDisclosurePermissionTx).toHaveBeenCalledTimes(1);
   });
 
   it("rechecks the current Linq route immediately before sending disclosure consent", async () => {
@@ -4011,6 +4058,159 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("posts a request-bound replacement for an explicit consent resend", async () => {
+    const requestedScopes = [SLEEP_SCOPE];
+    const repostOriginAssistantInputId = `ain_${"a".repeat(32)}`;
+    mocks.prepareHostedGroupJoinOfferPostTx.mockResolvedValueOnce({
+      joinCode: "abc123",
+      kind: "post",
+      offerGeneration: OFFER_GENERATION_A,
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        linqThread: LINQ_THREAD,
+        repostOriginAssistantInputId,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { offerState: "posted", status: "sent" },
+    });
+
+    expect(
+      mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
+    ).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
+    ).toHaveBeenCalledWith({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_container",
+      tx: fakeTx,
+    });
+    expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      now: expect.any(Date),
+      projectionScopes: requestedScopes,
+      replaceActiveOffer: true,
+      tx: fakeTx,
+    });
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
+      groupId: GROUP_SUMMARY.id,
+      message: { channel: "linq", messageId: "msg_offer_1" },
+      postedAt: expect.any(Date),
+      projectionScopes: requestedScopes,
+      replaceActiveOffersAt: expect.any(Date),
+      tx: fakeTx,
+    });
+
+    const ordinaryKey = buildHostedGroupJoinOfferProviderIdempotencyKey({
+      groupId: GROUP_SUMMARY.id,
+      joinCode: "abc123",
+      offerGeneration: OFFER_GENERATION_A,
+      projectionScopes: requestedScopes,
+    });
+    const repostKey = mocks.sendHostedLinqChatMessage.mock.calls[0]?.[0]
+      .idempotencyKey;
+    expect(repostKey).not.toBe(ordinaryKey);
+    expect(buildHostedGroupJoinOfferProviderIdempotencyKey({
+      groupId: GROUP_SUMMARY.id,
+      joinCode: "abc123",
+      offerGeneration: OFFER_GENERATION_A,
+      projectionScopes: requestedScopes,
+      repostOriginAssistantInputId,
+    })).toBe(repostKey);
+    expect(buildHostedGroupJoinOfferProviderIdempotencyKey({
+      groupId: GROUP_SUMMARY.id,
+      joinCode: "abc123",
+      offerGeneration: OFFER_GENERATION_A,
+      projectionScopes: requestedScopes,
+      repostOriginAssistantInputId: `ain_${"b".repeat(32)}`,
+    })).not.toBe(repostKey);
+  });
+
+  it("rejects a scope change disguised as a consent resend", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          projectionScopes: [{ projectionKind: "steps-days.v0" }],
+        },
+        linqThread: LINQ_THREAD,
+        repostOriginAssistantInputId: `ain_${"a".repeat(32)}`,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "repost_scope_change_unavailable",
+      },
+    });
+
+    expect(mocks.prepareHostedGroupJoinOfferPostTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps the prior offer when an explicit resend fails at the provider", async () => {
+    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(
+      new Error("synthetic provider failure"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        linqThread: LINQ_THREAD,
+        repostOriginAssistantInputId: `ain_${"a".repeat(32)}`,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    });
+
+    expect(
+      mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("retires the prior offer only inside a successful replacement binding", async () => {
+    mocks.recordHostedGroupJoinOfferTx.mockRejectedValueOnce(
+      new Error("synthetic binding failure"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        linqThread: LINQ_THREAD,
+        repostOriginAssistantInputId: `ain_${"a".repeat(32)}`,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        status: "unavailable",
+        unavailableReason: "offer_binding_failed",
+      },
+    });
+
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
+      groupId: GROUP_SUMMARY.id,
+      message: { channel: "linq", messageId: "msg_offer_1" },
+      postedAt: expect.any(Date),
+      projectionScopes: [SLEEP_SCOPE],
+      replaceActiveOffersAt: expect.any(Date),
+      tx: fakeTx,
+    });
   });
 
   it("posts an explicit offer when every current member already grants every requested scope", async () => {

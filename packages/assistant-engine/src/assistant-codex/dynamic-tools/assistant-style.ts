@@ -92,7 +92,6 @@ export function readAssistantStyleDynamicToolRequest(input: {
 
 export async function executeAssistantStyleDynamicTool(input: {
   authority: HostedRuntimeAssistantPersonalizationToolAuthority | null
-  available: boolean
   hosted: boolean
   hostedPersonalizationTool: {
     request(
@@ -109,13 +108,6 @@ export async function executeAssistantStyleDynamicTool(input: {
     success: boolean
   }
 }> {
-  if (!input.available) {
-    return assistantStyleTextResult(
-      false,
-      'assistant style settings are unavailable for this conversation',
-    )
-  }
-
   try {
     const { args } = input.request
     if (!input.vaultRoot) {

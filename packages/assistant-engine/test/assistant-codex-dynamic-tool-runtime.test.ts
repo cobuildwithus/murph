@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexMocks = vi.hoisted(() => ({
   dynamicToolCalls: [] as Array<{
-    assistantStyleSettingsAvailable?: boolean
     deliveryContextOrdinal: number | null
     generateSongTurnState?: unknown
     kind: string
@@ -18,6 +17,7 @@ const codexMocks = vi.hoisted(() => ({
   onDynamicToolCall: null as null | ((input: {
     kind: string
     styleValue: number | null
+    videoQuestion: string | null
   }) => Promise<void>),
   spawn: vi.fn(),
 }))
@@ -37,12 +37,6 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
         input: Parameters<typeof actual.executeMurphDynamicToolRequest>[0],
       ): Promise<Awaited<ReturnType<typeof actual.executeMurphDynamicToolRequest>>> => {
         codexMocks.dynamicToolCalls.push({
-          ...(input.request.kind === 'assistant-style'
-            ? {
-                assistantStyleSettingsAvailable:
-                  input.assistantStyleSettingsAvailable === true,
-              }
-            : {}),
           deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
           ...(input.request.kind === 'generate-song'
             ? {
@@ -60,6 +54,10 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
             input.request.kind === 'assistant-style' &&
             input.request.args.action === 'set'
               ? input.request.args.value
+              : null,
+          videoQuestion:
+            input.request.kind === 'analyze-video'
+              ? input.request.args.question
               : null,
         })
         return {
@@ -356,7 +354,6 @@ describe('Codex dynamic tool runtime routing', () => {
         voiceMemoRuntime,
       },
       {
-        assistantStyleSettingsAvailable: true,
         deliveryContextOrdinal: 1,
         kind: 'assistant-style',
         voiceMemoRuntime: null,
@@ -462,6 +459,79 @@ describe('Codex dynamic tool runtime routing', () => {
         kind: 'send-progress-update',
         voiceMemoRuntime: null,
       },
+    ])
+  })
+
+  it.each([
+    {
+      name: 'exact repeated request',
+      secondQuestion: 'Count the visible push-ups.',
+    },
+    {
+      name: 'distinct later request',
+      secondQuestion: 'Check whether the hips rise first.',
+    },
+  ])('serializes overlapping analyze-video calls for an $name', async ({
+    secondQuestion,
+  }) => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-video-order-work-',
+    )
+    const codexHome = await createTempDir('assistant-codex-video-order-home-')
+    const firstStarted = createDeferred<void>()
+    const releaseFirst = createDeferred<void>()
+    const executionOrder: string[] = []
+    codexMocks.onDynamicToolCall = async ({ kind, videoQuestion }) => {
+      if (kind !== 'analyze-video' || videoQuestion === null) {
+        return
+      }
+      executionOrder.push(videoQuestion)
+      if (executionOrder.length === 1) {
+        firstStarted.resolve()
+        await releaseFirst.promise
+      }
+    }
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedOverlappingAnalyzeVideoTurn(child, secondQuestion)
+      })
+      return child
+    })
+
+    const turn = executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      dynamicTools: resolveMurphDynamicTools({
+        analyzeVideoAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      prompt: 'Analyze the video twice.',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    await firstStarted.promise
+    await Promise.resolve()
+    const orderWhileFirstWasPending = [...executionOrder]
+    releaseFirst.resolve()
+
+    await expect(turn).resolves.toMatchObject({
+      finalMessage: 'analyze video ordered',
+      threadId: 'thread-video-order',
+      turnId: 'turn-video-order',
+    })
+    expect(orderWhileFirstWasPending).toEqual([
+      'Count the visible push-ups.',
+    ])
+    expect(executionOrder).toEqual([
+      'Count the visible push-ups.',
+      secondQuestion,
     ])
   })
 
@@ -767,6 +837,68 @@ async function runScriptedOverlappingPendingVaultFilesTurn(
     method: 'turn/completed',
     params: {
       turn: { id: 'turn-pending-file-order', status: 'completed' },
+    },
+  }))
+}
+
+async function runScriptedOverlappingAnalyzeVideoTurn(
+  child: MockChildProcess,
+  secondQuestion: string,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-video-order' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-video-order' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-video-order' } },
+  }))
+
+  const inputId = `ain_${'7'.repeat(32)}`
+  for (const [id, question] of [
+    [51, 'Count the visible push-ups.'],
+    [52, secondQuestion],
+  ] as const) {
+    child.stdout.write(jsonLine({
+      id,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          message_ref: inputId,
+          question,
+        },
+        callId: `call-${id}`,
+        namespace: 'murph',
+        threadId: 'thread-video-order',
+        tool: 'analyze_video',
+        turnId: 'turn-video-order',
+      },
+    }))
+  }
+  await child.waitForRpcId(51)
+  await child.waitForRpcId(52)
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'assistant-video-order',
+        text: 'analyze video ordered',
+        type: 'agentMessage',
+      },
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-video-order', status: 'completed' },
     },
   }))
 }

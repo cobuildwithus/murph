@@ -5,6 +5,8 @@ import {
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
@@ -992,8 +994,10 @@ describe("parseHostedRuntimeGroupTool", () => {
   it("parses read, join-link, and join-offer requests and rejects other mutations", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_current",
+      disclosureGrantCursor: "disclosure_page_2",
     })).toEqual({
       action: "read_current",
+      disclosureGrantCursor: "disclosure_page_2",
     });
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_current",
@@ -1004,6 +1008,21 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "list_memberships",
     });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "list_memberships",
+      cursor: "membership_page_64",
+      disclosureGrantCursor: "disclosure_page_2",
+    })).toEqual({
+      action: "list_memberships",
+      cursor: "membership_page_64",
+      disclosureGrantCursor: "disclosure_page_2",
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_current",
+      disclosureGrantCursor: "x".repeat(
+        HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS + 1,
+      ),
+    })).toThrow(/disclosureGrantCursor/u);
     expect(parseHostedRuntimeGroupToolRequest({
       action: "leave_membership",
       membershipId: "hgm_self_123",
@@ -1080,6 +1099,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           "  React here to join. Shares {{share_scope}}. Page: {{join_url}}.  ",
         projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
+      repostOriginAssistantInputId: `ain_${"a".repeat(32)}`,
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
@@ -1088,6 +1108,7 @@ describe("parseHostedRuntimeGroupTool", () => {
         projectionKinds: null,
         projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
+      repostOriginAssistantInputId: `ain_${"a".repeat(32)}`,
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
@@ -1303,6 +1324,12 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",
+        repostOriginAssistantInputId: "provider-message-id",
+      })
+    ).toThrow(/repostOriginAssistantInputId/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
         joinOffer: { intro: "Like this to join us." },
       })
     ).toThrow(/not allowed/u);
@@ -1407,7 +1434,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/senderHandle is invalid/u);
   });
 
-  it("parses bounded self-membership responses without accepting roster fields", () => {
+  it("parses bounded self-membership responses with per-group participant rosters", () => {
     const response = {
       action: "list_memberships",
       result: {
@@ -1416,6 +1443,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           groupLabel: "Fun-loving runners",
           permissionText: "Recent sleep timing and duration",
         }],
+        disclosureGrantsTruncated: true,
         memberships: [{
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
@@ -1430,6 +1458,15 @@ describe("parseHostedRuntimeGroupTool", () => {
           kind: "friends",
           memberCount: 7,
           membershipId: "hgm_self_123",
+          participantRoster: {
+            participantCount: 4,
+            participantLabels: [
+              { displayName: "Taylor" },
+              { phoneHint: { areaCode: "415", lastFour: "9876" } },
+              { emailParticipant: true },
+            ],
+            status: "available",
+          },
           permissionsUrl: "https://example.com/groups/join/abc123",
           sponsorshipUrl: "https://example.com/groups/fund/funding-locator",
           requestedVaultShareProjectionScopes: [
@@ -1442,12 +1479,36 @@ describe("parseHostedRuntimeGroupTool", () => {
           ],
           role: "member",
         }],
+        nextCursor: "membership_page_64",
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
         truncated: false,
       },
     };
 
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const {
+      participantRoster: _omittedParticipantRoster,
+      ...legacyMembershipWithoutRoster
+    } = response.result.memberships[0];
+    void _omittedParticipantRoster;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [legacyMembershipWithoutRoster],
+        status: "ok",
+        truncated: false,
+      },
+    })).toMatchObject({
+      result: {
+        memberships: [{
+          participantRoster: {
+            status: "unavailable",
+            unavailableReason: "participant_roster_not_reported",
+          },
+        }],
+      },
+    });
     const {
       sponsorshipUrl: _omittedSponsorshipUrl,
       ...legacyMembershipWithoutSponsorship
@@ -1564,7 +1625,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "list_memberships",
       result: {
         memberships: Array.from(
-          { length: 26 },
+          { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1 },
           () => response.result.memberships[0],
         ),
         status: "ok",
@@ -1961,6 +2022,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...GROUP_SUMMARY,
           members: [
@@ -1985,11 +2047,13 @@ describe("parseHostedRuntimeGroupTool", () => {
             },
           ],
         },
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
       },
     })).toEqual({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...GROUP_SUMMARY,
           members: [
@@ -2014,6 +2078,7 @@ describe("parseHostedRuntimeGroupTool", () => {
             },
           ],
         },
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
       },
     });

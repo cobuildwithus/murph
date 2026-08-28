@@ -245,8 +245,7 @@ function createHostedGeminiVideoAnalysisRequestBody(
       role: "user",
     }],
     generationConfig: {
-      maxOutputTokens: 1_800,
-      thinkingConfig: { thinkingLevel: "low" },
+      thinkingConfig: { thinkingLevel: "medium" },
     },
     systemInstruction: {
       parts: [{ text: HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION }],
@@ -723,6 +722,39 @@ describe("hostedRunnerIntercept", () => {
       userId: "member_123",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("hard-cuts the retired generated-image upload route through the generic effects-port fallback", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://results.worker/generated-images", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({ validateRuntimeWriteFence }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          hostKind: "effects_port",
+          method: "POST",
+          operation: "effects_port",
+          responseStatus: 404,
+        }),
+        level: "warn",
+        message: "Hosted runner internal outbound response completed.",
+        phase: "wake.running",
+      }),
+    );
   });
 
   it("rejects internal virtual-host requests without a runtime write fence", async () => {
@@ -2493,7 +2525,7 @@ describe("hostedRunnerIntercept", () => {
                   data: Buffer.from("video-bytes").toString("base64"),
                   mimeType: "video/mp4",
                 },
-                videoMetadata: { fps: 5 },
+                videoMetadata: { fps: 2 },
               },
               { text: "Count reps." },
             ],

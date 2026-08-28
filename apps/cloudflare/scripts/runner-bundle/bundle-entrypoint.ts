@@ -301,9 +301,18 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // reviewed Junction daily-alias repair measured a 1,739,005B entry and an
 // 8,571,156B static closure in exact macOS production assembly on 2026-08-21.
 // Ratchet both integrated baselines and retain the same platform tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_393_617;
+// The Web-owned first-turn delivery handoff extends the existing Assistant
+// Engine and pending-input paths without adding a forbidden boot input. Exact
+// macOS production assembly measured an 8,683,649B static closure and
+// 11,409,047B total on 2026-08-26. Ratchet those integrated baselines and
+// retain the fixed 96KB static and 32KB total cross-platform allowances.
+// Event-ledger gzip compatibility extends existing Core/query read and canonical
+// write paths without adding a forbidden boot input. Exact Linux production
+// assembly measured 11,457,689B total on 2026-08-28. Ratchet that baseline and
+// retain the fixed 32KB total cross-platform allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_457_689 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_739_005;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_571_156;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_683_649;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

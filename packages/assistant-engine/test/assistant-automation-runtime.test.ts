@@ -10435,7 +10435,7 @@ describe('assistant auto-reply runtime', () => {
       })
       expect(acceptedB).toMatchObject({
         prompt: expect.stringContaining(
-          'Sender: +15552220000\n\nAddress-book name (display only): \"Actor B\"',
+          'Sender: +15552220000\n\nAddress-book name: \"Actor B\"',
         ),
       })
       expect(acceptedB).toMatchObject({
@@ -10456,7 +10456,7 @@ describe('assistant auto-reply runtime', () => {
       })
       expect(acceptedA).toMatchObject({
         prompt: expect.stringContaining(
-          'Sender: +15551110000\n\nProfile name (display only): \"Actor A\"',
+          'Sender: +15551110000\n\nProfile name: \"Actor A\"',
         ),
       })
       expect(acceptedA).toMatchObject({
@@ -10478,9 +10478,9 @@ describe('assistant auto-reply runtime', () => {
         kind: 'accepted',
         prompt: expect.stringContaining('Sender: +15553330000'),
       })
-      expect(JSON.stringify(acceptedC)).not.toContain('Profile name (display only)')
+      expect(JSON.stringify(acceptedC)).not.toContain('Profile name:')
       expect(JSON.stringify(acceptedC)).not.toContain(
-        'Address-book name (display only)',
+        'Address-book name:',
       )
 
       const acceptedCLater = await input.activeTurnInput?.({
@@ -10497,7 +10497,7 @@ describe('assistant auto-reply runtime', () => {
         prompt: expect.stringContaining('Sender: +15553330000'),
       })
       expect(JSON.stringify(acceptedCLater)).not.toContain(
-        'Profile name (display only)',
+        'Profile name:',
       )
 
       await input.activeTurnCheckpoint?.({
@@ -10587,7 +10587,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining(
-          'Sender: +15551110000\n\nProfile name (display only): "Actor A"',
+          'Sender: +15551110000\n\nProfile name: "Actor A"',
         ),
       }),
     )
@@ -15246,7 +15246,72 @@ describe('assistant automation run loop', () => {
     expect(events).toContainEqual({
       type: 'daemon.failed',
       details: 'daemon down',
+      errorCode: 'daemon_failed',
+      failureContext: {
+        retryable: false,
+      },
+      safeErrorMessage: 'daemon down',
     })
+    expect(result.lastFailure).toEqual({
+      phase: 'daemon',
+      code: 'daemon_failed',
+      retryable: false,
+      message: 'daemon down',
+    })
+  })
+
+  it('returns a bounded safe partial-failure summary for one-shot scans', async () => {
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(
+      async (input: {
+        onEvent?: (event: Record<string, unknown>) => void
+      }) => {
+        input.onEvent?.({
+          type: 'input.reply-failed',
+          details: 'private provider response must not escape',
+          errorCode: 'PROVIDER_TEMPORARY_FAILURE',
+          failureContext: {
+            retryable: true,
+          },
+          safeErrorMessage: 'The provider was temporarily unavailable.',
+        })
+        return {
+          routing: {
+            considered: 0,
+            failed: 0,
+            nextWakeAt: null,
+            noAction: 0,
+            routed: 0,
+            skipped: 0,
+          },
+          replies: {
+            considered: 1,
+            failed: 1,
+            nextWakeAt: null,
+            replied: 0,
+            skipped: 0,
+          },
+        }
+      },
+    )
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const result = await runLoop.runAssistantAutomation({
+      once: true,
+      startDaemon: false,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.reason).toBe('completed')
+    expect(result.replyFailed).toBe(1)
+    expect(result.lastFailure).toEqual({
+      phase: 'reply',
+      code: 'PROVIDER_TEMPORARY_FAILURE',
+      retryable: true,
+      message: 'The provider was temporarily unavailable.',
+    })
+    expect(JSON.stringify(result)).not.toContain('private provider response')
   })
 
   it('rethrows scan failures after recording the last error and releasing the lock', async () => {

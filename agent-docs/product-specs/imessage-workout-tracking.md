@@ -20,7 +20,8 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
   from canonical state; the sent bubble and offline fallback remain unchanged.
 - The Messages extension has no vault credential, Privy dependency, cache, or
   canonical persistence. It may read only the narrow Messages-scoped credential
-  enrolled by the containing app.
+  pair enrolled once by the containing app, then renew its short action bearer
+  directly without requiring that app to be open.
 - An editor for one exact workout submits a closed, bounded member action
   directly. The existing hosted mailbox delivers it to the canonical workout
   owner with no assistant turn; the immutable card remains presentation, not
@@ -58,15 +59,15 @@ supported note, reps, or weight/reps family; duration, distance, RPE,
 bodyweight, assistance, added-load, or mixed-result sets keep their original
 readable actual on V4 instead of entering a lossy editor. Duration, cardio,
 assisted-bodyweight, and weighted-bodyweight exercise modes remain V4 even
-before a result is logged because V6 cannot produce their native set shape. A read failure,
-mismatch, completed workout, hidden or unsupported result, or oversized V6
+before a result is logged because the direct editor cannot produce their native
+set shape. A read failure, mismatch, completed workout, or hidden or unsupported result
 leaves the card as the existing readable V4 snapshot.
 
 Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The
-installed native editor uses schema version 6, which adds that compact typed
-projection and one opaque 64-character workout-revision binding while still
-staying under the existing 2,048-character URL ceiling. The revision binds the
+installed native editor keeps schema version 6, whose compact typed projection
+and opaque 64-character bindings stay under the existing 2,048-character URL
+ceiling. The revision binds the
 canonical workout identity to its ordered hidden exercise/set-slot identity and
 last applied member-action generation without exposing any of those values.
 Mutable set results and annotations are intentionally excluded so their closed
@@ -87,7 +88,10 @@ note/reps/weight-reps tuple, while a pending set carries `null`. Native derives
 display and optimistic preconditions from that typed tuple. Removing repeated
 wire keys keeps realistic six-exercise, four-set initial and late-active
 snapshots below the same URL ceiling without adding another projection owner;
-completed cards remain V4/read-only.
+completed cards remain V4/read-only. Exact canonical pending plans remain in
+the bounded V6 target string, while completed actuals retain their typed tuple.
+The native form recognizes only the producer's exact numeric weight/reps or
+reps target grammar and keeps every other target display-only.
 
 ## Static fallback
 
@@ -97,9 +101,10 @@ generic-table balloon. Provider chrome is intentionally bounded to the title
 plus derived progress for structured workouts; it does not repeat the image's
 sets below the balloon. Generic-table provider chrome likewise retains only the
 title instead of repeating the image's subtitle, rows, or footer. The complete
-semantic text renderer remains the recovery owner, and the value-free fallback
-identifies the message as the member's workout or summary before telling them
-how to request that complete text without exposing its values outside the card.
+semantic text renderer remains the recovery owner. The value-free fallback only
+identifies the message as the member's workout or summary without exposing its
+values outside the card; capability failure or definitive pre-acceptance
+rejection still uses the existing automatic text-only recovery.
 
 The bitmap remains rectangular because Messages owns the outer mask and
 caption. Because the provider request omits an App Store id, the app-absent
@@ -201,6 +206,14 @@ repeated compact exercise values. The canonical event is valid before its one
 creation write; Murph never starts an empty event and appends the initial
 exercises. Exact member-stated repetitions for every set of an exercise are
 stored on that exercise in that creation write.
+
+Every newly authored ad-hoc exercise also carries one explicit result family.
+Resistance exercises carry `weight_reps` plus an lb/kg editor hint from the
+member's current request or saved strength-unit preference, even when the load
+itself is still unknown; the unknown load remains empty. Unloaded bodyweight
+work carries `bodyweight` and no resistance-unit hint. The targeted start and
+exercise-add commands reject missing result metadata before canonical
+persistence instead of emitting an ambiguous native result field.
 
 Murph verifies the successful creation result before issuing the exact old
 workout delete with the proposal-time lifecycle revision. It never deletes
@@ -306,11 +319,16 @@ reinterpreted as a new-routine completion.
 ## Direct action loop
 
 The expanded native editor derives one bounded expected shape from the visible
-V6 workout snapshot and emits only closed `exercise.append`, `set.put`,
-`set.append`, and `set.remove` mutations. `set.put` addresses an original or
-in-batch exercise-placeholder coordinate. `set.append` addresses the contiguous
-final positions after all original-coordinate edits and descending removals,
-so deletion and creation never share one positional identity. A destructive
+V6 workout snapshot and emits only closed `exercise.append`, `exercise.rename`,
+`set.put`, `set.append`, and `set.remove` mutations. `exercise.rename` targets
+one existing presentation position with a bounded replacement name; the
+expected workout and any same-batch set mutations retain the original name.
+`set.put` addresses an original or in-batch exercise-placeholder coordinate.
+`set.append` addresses the contiguous final positions after all
+original-coordinate edits and descending removals, so deletion and creation
+never share one positional identity. The canonical owner applies all set
+mutations before renames in the same write and rejects a rename that would make
+future exercise coordinates ambiguous. A destructive
 batch also carries one opaque SHA-256 binding over the canonical workout id and
 complete ordered exercise/set state. The canonical owner recomputes that binding
 under its existing lock before removing a set, so any concurrent type, note,
@@ -447,6 +465,39 @@ final balloon, image-failure behavior, accessibility behavior, and App Store
 affordance. Provider acceptance, direct route renders, and delivery receipts do
 not prove those device behaviors.
 
+## Backward-compatible exact-plan rollout
+
+This is Product-level UX work because one member request crosses assistant
+interpretation, canonical workout persistence, V6 presentation, the closed
+member action, and the native editor. Release proof covers an exact ad-hoc
+plan, saved-routine target ownership, historical V4/V6 cards, stale actions,
+preference-only and mixed submissions, localized partial input, and all
+unfinished rows changing units together. The exact-plan release remains on
+Product UX Hold until the real assistant successfully creates the requested
+canonical plan and a physical Messages-extension smoke confirms the native
+flow; deterministic contract and simulator proof do not replace those gates.
+
+Workout cards continue to emit the permanent V6 editor wire. Exact ad-hoc
+planned weight and repetitions are canonical fields on the workout exercise and
+render deterministically into each pending V6 target as `<weight> <unit> ×
+<reps>`. Current native readers recognize only that exact bounded grammar as an
+incomplete default; ranges, qualitative instructions, AMRAP, and unknown target
+text remain display-only. Completed results still use the existing typed V6
+tuple, and V4 remains the complete read-only/static fallback.
+
+This preserves every installed V6 reader without device-version negotiation,
+rollout flags, or a second protocol. Deploy all current server readers and the
+optional unit-preference action consumer before releasing the new iOS behavior.
+Old clients then continue sending the historical V6 action shape, while the new
+client may add `weightUnitPreference`. The producer never emits a new schema.
+
+The canonical workout-event rollback floor still applies. All strict event
+readers must understand the optional planned-load fields before the first such
+event is written; after that write, recovery requires a compatible reader or a
+forward fix. Focused proof must pin the exact V6 TypeScript/Swift fixture,
+exercise-reorder continuity, incompatible-unit rejection, planned defaults as
+incomplete until explicit completion, and preference-only/mixed action outcomes.
+
 ## V4/V6 live refresh
 
 Live refresh preserves the permanent card-reader contract: no new workout-card
@@ -497,7 +548,7 @@ may advance stale progress before it emits a replacement card.
 The extension renders the embedded card immediately, keeps one transient
 selected-message session, and replaces that session only while its entire draft
 equals the card baseline, no admitted request exists, and submission state is
-idle. Network, credential, decode, non-unique-target, structural, or size
+idle. Network, credential-renewal, decode, non-unique-target, structural, or size
 failure leaves the complete embedded card and any local state unchanged. The
 extension performs no background refresh and stores no result. An oversized V4
 result or a V4/read-only returned result cannot continue refreshing because it

@@ -458,7 +458,6 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           EXPECTED_CANDIDATE_SHA: ${{ github.sha }}
-          EXPECTED_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EXPECTED_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         shell: bash
         run: |
@@ -467,7 +466,6 @@ jobs:
           base_sha="$(git -C candidate rev-parse HEAD^1)"
           test "$candidate_sha" = "$EXPECTED_CANDIDATE_SHA"
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            test "$base_sha" = "$EXPECTED_PR_BASE_SHA"
             test "$(git -C candidate rev-parse HEAD^2)" = "$EXPECTED_PR_HEAD_SHA"
           fi
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
