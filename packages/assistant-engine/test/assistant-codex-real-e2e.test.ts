@@ -4458,7 +4458,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'keeps a production-shaped scheduled exercise cue natural and attaches reviewed media',
+    'keeps an ordinary production-shaped scheduled exercise cue natural and attaches reviewed media',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -4506,7 +4506,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           schedule: { kind: 'dailyLocal', localTime: '14:00' },
           slug: 'synthetic-mobility-reminder',
           status: 'active',
-          supportKind: 'reminder',
           tags: [],
           title: 'Synthetic mobility reminder',
           vaultRoot: workingDirectory,
@@ -4519,6 +4518,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         if (!source || source.kind !== 'automation') {
           throw new Error('Expected the canonical reminder automation source.')
         }
+        expect(source.supportKind).toBeNull()
         const jobId = resolveCanonicalAssistantCronJobId(source)
         const runtimeState = createAssistantCronCanonicalRuntimeRecord({
           jobId,

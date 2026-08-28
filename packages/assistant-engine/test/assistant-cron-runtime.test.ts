@@ -4207,6 +4207,48 @@ describe('assistant cron runtime orchestration', () => {
     },
   )
 
+  it('passes exercise cue guidance into an ordinary independent automation after its saved task', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-independent-exercise-cue-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'independent-exercise-cue',
+    )
+    const canonicalAutomation = findCanonicalAutomation(
+      vaultRoot,
+      canonicalJob.jobId,
+    )
+    expect(canonicalAutomation).toBeDefined()
+    if (!canonicalAutomation) {
+      throw new Error('Expected the canonical automation to exist.')
+    }
+    const savedInstructions =
+      'Send the saved mobility cue using Ankle circles (MB101).'
+    canonicalAutomation.instructions = savedInstructions
+    canonicalAutomation.supportKind = null
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).toContain(
+      'Independent automation authority (engine-supplied):',
+    )
+    expect(providerInput?.instructions).toContain(
+      'read the matching movement skill and its shared exercise-catalog reference',
+    )
+    expect(providerInput?.instructions?.indexOf(savedInstructions)).toBeLessThan(
+      providerInput?.instructions?.indexOf(
+        'read the matching movement skill and its shared exercise-catalog reference',
+      ) ?? -1,
+    )
+  })
+
   it('omits the support-scope override for weekly_digest consent metadata', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-weekly-digest-prompt-only-',
@@ -4263,6 +4305,9 @@ describe('assistant cron runtime orchestration', () => {
     )
     expect(providerInput?.instructions).not.toContain(
       'surprise accountability, repair, or coaching question',
+    )
+    expect(providerInput?.instructions).not.toContain(
+      'read the matching movement skill and its shared exercise-catalog reference',
     )
   })
 
@@ -4329,6 +4374,12 @@ describe('assistant cron runtime orchestration', () => {
           'Recurring reminder conversation (engine-supplied',
         ),
       }),
+    )
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).not.toContain(
+      'read the matching movement skill and its shared exercise-catalog reference',
     )
   })
 
