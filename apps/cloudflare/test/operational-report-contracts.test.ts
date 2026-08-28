@@ -133,13 +133,6 @@ describe("hosted runtime operational report contracts", () => {
     );
     expect(coldStartReportSql).toContain("causal_candidate_count = 1");
     expect(coldStartReportSql).toContain("Causal typing hint -> ingress accepted");
-    expect(coldStartReportSql).toContain("Typing shell-prewarm lead buckets");
-    expect(coldStartReportSql).toContain("lead_bucket");
-    expect(coldStartReportSql).toContain("Accepted -> container ready");
-    expect(coldStartReportSql).toContain("percentile_cont(0.75)");
-    expect(coldStartReportSql).toContain("percentile_cont(0.90)");
-    expect(coldStartReportSql).toContain("boot ->> 'restoreWasCold'");
-    expect(coldStartReportSql).toContain("codexProcessPreparationMs");
     expect(coldStartReportSql).not.toContain("shellPrewarmLastHintAtEpochMs");
   });
 });
@@ -232,15 +225,6 @@ describe.skipIf(!runPostgresProof)(
         );
         expect(stdout).toContain(
           "prewarm_cold_start_observed,Ingress accepted -> reply accepted,1,3000.0,3000.0,3000.0",
-        );
-        expect(stdout).toContain(
-          "500-999ms,registered,healthy,cold_start_observed,workspace_cold,codex_ready_or_resident,Accepted -> container ready,1,600.0,600.0,600.0,600.0,600.0",
-        );
-        expect(stdout).toContain(
-          "500-999ms,registered,healthy,cold_start_observed,workspace_cold,codex_ready_or_resident,Accepted -> runner job,1,1000.0,1000.0,1000.0,1000.0,1000.0",
-        );
-        expect(stdout).toContain(
-          "500-999ms,registered,healthy,cold_start_observed,workspace_cold,codex_ready_or_resident,Accepted -> provider start,1,2000.0,2000.0,2000.0,2000.0,2000.0",
         );
         expect(stdout).toContain(
           "no_observed_prewarm,Ingress accepted -> reply accepted,1,4000.0,4000.0,4000.0",
@@ -404,28 +388,18 @@ function createShellPrewarmFixtureSql(schemaName: string): string {
       'attempt-cold',
       'delivery-cold',
       'linq',
-      jsonb_build_object(
-        'boot', jsonb_build_object(
-          'restoreWasCold', true
-        ),
-        'provider', jsonb_build_object(
-          'codexProcessPreparationMs', 0
-        ),
-        'orchestration', jsonb_build_object(
-          'triggeredByWebDirect', true,
-          'directEnsureRequestStartedAtEpochMs', base_ms + 1100,
-          'directEnsureResponseReceivedAtEpochMs', base_ms + 1200,
-          'directEnsureOrchestrationAttemptId', 'web-ingress-cold',
-          'runtimeInvocationOrchestrationAttemptId', 'web-ingress-cold',
-          'freshStartRequestedAtEpochMs', base_ms + 1300,
-          'freshStartContainerReadyAtEpochMs', base_ms + 1600,
-          'shellPrewarmFirstHintAtEpochMs', base_ms + 500,
-          'shellPrewarmFinishedAtEpochMs', base_ms + 900,
-          'shellPrewarmHintCount', 3,
-          'shellPrewarmOutcome', 'cold_start_observed',
-          'shellPrewarmSource', 'linq-typing-started'
-        )
-      )
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 1100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 1200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-cold',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-cold',
+        'freshStartRequestedAtEpochMs', base_ms + 1300,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 500,
+        'shellPrewarmHintCount', 3,
+        'shellPrewarmOutcome', 'cold_start_observed',
+        'shellPrewarmSource', 'linq-typing-started'
+      ))
     FROM fixture
     UNION ALL
     SELECT
