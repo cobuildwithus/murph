@@ -38,9 +38,6 @@ import {
   writeRunnerRuntimeWriteFenceHeaders,
 } from "../../src/runner-outbound/write-fence.ts";
 import {
-  handleRunnerGeneratedImageUploadRequest,
-} from "../../src/runner-outbound/generated-images.ts";
-import {
   DatabaseHealthDurableObject,
 } from "../../src/worker/database-health-durable-object.ts";
 import {
@@ -360,13 +357,6 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     return Response.json(await measureRunnerLeaseLatency(request));
   }
 
-  if (
-    url.pathname === "/__test/generated-images/upload-handler-signal"
-    && request.method === "POST"
-  ) {
-    return Response.json(await exerciseGeneratedImageUploadTombstone());
-  }
-
   if (url.pathname === "/__test/alarm" && request.method === "POST") {
     const body = await request.json() as { userId?: unknown };
 
@@ -541,39 +531,6 @@ async function measureRunnerLeaseLatency(request: Request): Promise<{
     iterations,
     liveLease: summarizeLatency(liveLeaseSamples),
     warmupIterations,
-  };
-}
-
-async function exerciseGeneratedImageUploadTombstone(): Promise<{
-  status: number;
-}> {
-  const userId = `member_generated_image_upload_worker_${Date.now()}`;
-  await getUserRunnerStub(userId).bindUser(userId);
-  const lease = await getUserRunnerStub(userId).beginWriteFenceForTest({
-    userId,
-    workspaceVersion: "7",
-  });
-  const headers = new Headers({
-    "content-type": "application/json; charset=utf-8",
-  });
-  writeRunnerRuntimeWriteFenceHeaders(headers, {
-    attemptId: lease.attemptId,
-    generation: lease.leaseGeneration,
-    workspaceVersion: lease.workspaceVersion ?? "7",
-  });
-
-  const uploadRequest = new Request("http://results.worker/generated-images", {
-    headers,
-    method: "POST",
-  });
-  const response = await handleRunnerGeneratedImageUploadRequest({
-    env: readWorkerEnvironmentSource(),
-    request: uploadRequest,
-    userId,
-  });
-
-  return {
-    status: response.status,
   };
 }
 
