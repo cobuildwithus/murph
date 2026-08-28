@@ -52,7 +52,8 @@ Updated: 2026-08-27
    from unsupported prompt surfaces.
 3. Risk: overlapping work in PR #2456 could be accidentally co-authored.
    Mitigation: keep this task on its own worktree and branch, inspect overlap,
-   and do not edit or push the existing PR branch.
+   do not edit or push the existing PR branch, then rebase after that PR merges
+   and preserve both focused journey sets.
 
 ## Tasks
 
@@ -83,6 +84,22 @@ Updated: 2026-08-27
   explicit distinction (joined groups are reachable; unjoined device chats are
   not) and one domain-specific deferred-discovery rule. Keep all authority and
   effects with the existing tool and Web owner.
+- PR #2456 merged independently. This branch is rebased on its action-specific
+  deferred schema, and the conflict resolution preserves all three of its
+  current-sender journeys plus this separate private-capability journey.
+
+## Product UX walkthrough
+
+- A member asks broadly from a private Murph chat: Murph answers yes only for a
+  group it has already joined, says unjoined chats are unavailable, and makes
+  no group action. Result: Ready.
+- A member names or describes a joined group for an actual ask or handoff: the
+  existing deferred tool, host targeting, clarification, and authorization
+  owners remain unchanged. Result: Ready based on the existing composed
+  contract and neighboring live journeys.
+- A participant speaking inside a group, a group-email sender, and an
+  unverified external group do not receive the private-chat guidance. Result:
+  Ready from negative prompt assertions.
 
 ## Verification
 
@@ -97,6 +114,7 @@ Updated: 2026-08-27
   the ambiguity-focused run omitted the joined-only boundary and failed the
   UX assertion. This isolates the missing capability distinction rather than a
   deterministic runtime outage.
-- Post-fix evidence so far: the 18-test deterministic prompt suite passes; the
-  focused Terra journey returned a truthful joined-only answer with zero group
-  effects and was reviewed `Ready`; Assistant Engine typecheck passes.
+- Post-fix evidence on the rebased combined head: the 18-test deterministic
+  prompt suite passes; Assistant Engine typecheck passes; the focused Terra
+  journey returned a truthful joined-only answer with zero group effects and
+  was reviewed `Ready`; `git diff --check` passes.
