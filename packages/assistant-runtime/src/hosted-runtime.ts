@@ -1632,7 +1632,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         preCheckpointExternalCompletionImported = true;
       }
     };
-    let assistantProviderHandoffRequested = false;
+    let runtimeOwnerHandoffRequested = false;
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
         item,
@@ -3446,7 +3446,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (liveAssistantProvider === invocationAssistantProvider) {
         return "current";
       }
-      assistantProviderHandoffRequested = true;
+      runtimeOwnerHandoffRequested = true;
       return "handoff";
     };
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
@@ -3862,7 +3862,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     const markIdleCheckpointTimerAfterDirtyWork = () => {
       setIdleCheckpointStartBy(
-        Date.now() + (assistantProviderHandoffRequested ? 0 : idleCheckpointDelayMs),
+        Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
       );
     };
     if (runtimeStateDirty) {
@@ -4913,6 +4913,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && pendingWake.nextWakeReason === "mailbox"
           && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt, nowMs)
         ) {
+          // The assistant phase returns this fresh mailbox wake only when the
+          // classified durable frontier belongs to the model-free owner.
+          runtimeOwnerHandoffRequested ||=
+            passResult.assistantPhaseResult.nextWakeReason === "mailbox"
+            && hostedRuntimeWakeIsDue(
+              passResult.assistantPhaseResult.nextWakeAt ?? null,
+              nowMs,
+            );
           setIdleCheckpointStartBy(nowMs);
         }
         // The older due token remains checkpoint authority until its hot
@@ -5087,13 +5095,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         await flushImageGenerationWork();
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
         let rerunAssistantInputBatch =
-          assistantProviderHandoffRequested
+          runtimeOwnerHandoffRequested
             ? null
             : prependReadyImageCompletionInputs(
                 resolveForegroundRerunAssistantInputBatch(passResult),
               );
         let continueForegroundCausalPass =
-          !assistantProviderHandoffRequested
+          !runtimeOwnerHandoffRequested
           && shouldContinueForegroundCausalPass(passResult);
         while (
           options.shutdownSignal?.aborted !== true
@@ -5131,13 +5139,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
           await flushImageGenerationWork();
           rerunAssistantInputBatch =
-            assistantProviderHandoffRequested
+            runtimeOwnerHandoffRequested
               ? null
               : prependReadyImageCompletionInputs(
                   resolveForegroundRerunAssistantInputBatch(passResult),
                 );
           continueForegroundCausalPass =
-            !assistantProviderHandoffRequested
+            !runtimeOwnerHandoffRequested
             && shouldContinueForegroundCausalPass(passResult);
         }
         return passResult;
@@ -5153,7 +5161,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         signal?: AbortSignal;
         systemMailboxAdmission: "all" | "pre_checkpoint_safe";
       }): Promise<boolean> => {
-        if (assistantProviderHandoffRequested) {
+        if (runtimeOwnerHandoffRequested) {
           return false;
         }
         // Graceful shutdown hands staged work to the durable checkpoint before
@@ -5475,7 +5483,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         await flushImageGenerationWork();
         if (
           latencySeed !== null
-          && !assistantProviderHandoffRequested
+          && !runtimeOwnerHandoffRequested
           && !runtimeAbortController.signal.aborted
           && options.shutdownSignal?.aborted !== true
         ) {
@@ -5491,7 +5499,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
         }
         if (
-          !assistantProviderHandoffRequested
+          !runtimeOwnerHandoffRequested
           && options.shutdownSignal?.aborted !== true
           && !runtimeAbortController.signal.aborted
           && (wakeOptions.shouldContinue?.() ?? true)
@@ -5621,7 +5629,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       runtimeStateDirty ||= runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
       if (runtimeDirtyAfterForeground) {
         ensureIdleCheckpointStartBy(
-          Date.now() + (assistantProviderHandoffRequested ? 0 : idleCheckpointDelayMs),
+          Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
         );
       } else if (committedInboxMediaRetentionWakeDue) {
         setIdleCheckpointStartBy(Date.now());
@@ -5802,7 +5810,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           checkpointWakeLatencySeed ??= pendingWakeLatencySeed;
         }
         const idleMaintenancePendingWork =
-          assistantProviderHandoffRequested
+          runtimeOwnerHandoffRequested
           || pendingDurableCheckpointEffects.length > 0
           || durableCheckpointFollowUpPending
           || invocationStatus === "budget_exhausted"
@@ -5969,7 +5977,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           createHostedRuntimeCheckpointWakeInterruption({
             enabled:
               idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
-              && !assistantProviderHandoffRequested,
+              && !runtimeOwnerHandoffRequested,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           });
         try {
@@ -6111,7 +6119,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const mayRunPostCheckpointWork = (): boolean =>
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
           && options.shutdownSignal?.aborted !== true
-          && !assistantProviderHandoffRequested;
+          && !runtimeOwnerHandoffRequested;
         const postCheckpointWorkSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
@@ -6462,7 +6470,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           idleMaintenance.nextWakeReason === "inbox_media_retention"
           && idleMaintenance.nextWakeAt !== null;
         const immediateRecheckCandidate =
-          assistantProviderHandoffRequested
+          runtimeOwnerHandoffRequested
           || immediateDefaultWakeWasNotPresented
           || immediateRetentionContinuationProduced;
         const checkpointReturnWake = selectEarliestHostedRuntimeWake([
@@ -6478,7 +6486,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           },
         ]);
         const immediateRecheckRequested =
-          assistantProviderHandoffRequested
+          runtimeOwnerHandoffRequested
           || (
             immediateRecheckCandidate
             && !isHostedRuntimeFutureMailboxContinuation({

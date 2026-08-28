@@ -438,6 +438,11 @@ export class RuntimeProcessingController {
     }
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
+    const triggeredByTrustedWebDirect =
+      input.input.orchestration?.triggeredByWebDirect === true
+      && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+        input.input.orchestrationAttemptId,
+      );
     const cooperativeMailboxOwnerHandoff =
       (
         activeFence.processingMode === "default"
@@ -450,6 +455,11 @@ export class RuntimeProcessingController {
     if (activeFence.processingMode !== requestedProcessingMode) {
       if (
         activeFence.processingMode === "inbox_media_retention"
+        || (
+          activeFence.processingMode === "system_mailbox"
+          && requestedProcessingMode === "default"
+          && triggeredByTrustedWebDirect
+        )
       ) {
         return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({
           activeFence,

@@ -3645,6 +3645,7 @@ describe("HostedUserRunner execution coordination", () => {
   it.each([
     ["retention-only", "default", "inbox_media_retention", undefined, false],
     ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox", false],
+    ["system-mailbox", "default", "system_mailbox", undefined, true],
   ] as const)(
     "preempts active %s work before starting %s processing",
     async (
@@ -3814,14 +3815,6 @@ describe("HostedUserRunner execution coordination", () => {
       {
         orchestration: { triggeredByWebDirect: true },
         orchestrationAttemptId: "web-ingress-direct-test",
-      },
-    ],
-    [
-      "validated Web-direct default processing",
-      {
-        orchestration: { triggeredByWebDirect: true },
-        orchestrationAttemptId:
-          "web-ingress-33333333-3333-4333-8333-333333333333",
       },
     ],
   ] as const)(

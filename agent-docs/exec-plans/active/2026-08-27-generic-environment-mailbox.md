@@ -206,15 +206,38 @@ Updated: 2026-08-28
   - Current local proof passes: the 20 collapse invariants and 54 assistant
     scheduling tests (74 total), the assistant-runtime package typecheck, and
     `git diff --check`.
+  - The paired Linux foreground-priority journey then exposed the remaining
+    two owner-boundary regressions. A validated Web-direct foreground reply no
+    longer used the runner's existing graceful background preemption, so a
+    held system-mailbox checkpoint could consume the wake without transferring
+    ownership. In the opposite direction, a default pass could return a fresh
+    due model-free mailbox wake yet continue through default-owner work after
+    the already-immediate checkpoint deadline was selected.
+  - The smallest correction restores the existing trusted Web-direct
+    preemption path and generalizes the existing provider-handoff flag into one
+    invocation-local runtime-owner handoff flag. The latter is set only from a
+    fresh due mailbox wake returned by the assistant phase; carried mailbox
+    retries and empty wake probes do not request an owner transfer. No durable
+    state, queue, Temporal mode, feature classifier, or additional filesystem
+    read is introduced.
+  - Current local proof passes: all 157 Cloudflare runner coordination tests,
+    the four focused assistant owner-ordering tests, both affected package
+    typechecks, and `git diff --check`. The broader assistant diff suite has a
+    pre-existing timing failure in the no-progress checkpoint assertion that
+    reproduces unchanged at public head `f02a364fea`; the umbrella lane was
+    stopped after it produced additional unrelated timing failures.
   - The private Temporal proof passes: 181 workflow-machine tests, the replay
     suite across all recorded histories with the exact pre-patch mailbox fact,
     and the private package typecheck. The existing operator migration signal
     is the required release boundary for old workflow runs.
 - Composed proof:
-  - `pnpm hosted-local e2e foreground-reply-priority` was attempted, but the
-    runner's fixed macOS total-byte ceiling stopped bundle assembly before the
-    scenario started. The current Linux CI owner compares the exact base and
-    candidate; repository friction is recorded separately.
+  - `pnpm hosted-local e2e foreground-reply-priority` was attempted. The branch
+    predates the bundle baseline already merged on `main`; after temporarily
+    using that exact base-only budget locally, bundle assembly passed but the
+    existing Docker smoke environment repeatedly cancelled runner startup and
+    restarted MinIO before the scenario began. The base-only budget line was
+    restored and is not part of the candidate. The exact paired Linux workflow
+    remains the authoritative composed proof.
 - Remaining gates:
   - Corrected exact-head final ReviewGPT, public CI, private Linux composed E2E,
     and post-deploy smoke. The preliminary specialists requested the composed
