@@ -37,12 +37,12 @@ under the worktree's `.tmp/`, and never coordinates by symlinking
 `apps/cloudflare/.dev.vars`.
 
 Before root-profile startup, the harness makes one best-effort cleanup pass over
-all local runner builds. It removes stopped runner containers and their attached
-anonymous volumes. It also removes stale generated runner images without forcing
-removal, while preserving images used by running containers and the current
-build. Isolated worktree startup limits the pass to stopped current-build
-containers and their anonymous volumes. It continues to skip broad stale-image
-cleanup. Cleanup failures do not block startup. Neither path prunes named
+all root-worker runner builds. It removes stopped runner containers and their
+attached anonymous volumes. It also removes stale root-worker runner images
+without forcing removal, while preserving images used by running containers and
+the current build. Isolated worktree startup limits the pass to stopped
+current-build containers and their anonymous volumes. It continues to skip
+broad stale-image cleanup. Cleanup failures do not block startup. Neither path prunes named
 volumes, build cache, unrelated containers, or unrelated images.
 
 ## Worktree Helper

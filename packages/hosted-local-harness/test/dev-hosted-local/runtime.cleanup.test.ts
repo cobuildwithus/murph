@@ -736,6 +736,8 @@ describe("cleanupHostedRunnerImages", () => {
       "{{.Repository}}:{{.Tag}}\t{{.ID}}",
       "--filter",
       "label=murph.hosted.local-build-id",
+      "--filter",
+      "label=murph.hosted.local-worker-name=murph-hosted",
     ]);
     expect(spawn.mock.calls[1]?.[1]).toEqual([
       "ps",
@@ -748,6 +750,35 @@ describe("cleanupHostedRunnerImages", () => {
       "-f",
       "cloudflare-dev/runnercontainer:old",
       "murph-cloudflare-runner:latest",
+    ]);
+  });
+
+  it("scopes all-build image cleanup to the current worktree worker namespace", async () => {
+    const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerImages({
+      cwd: "/tmp",
+      env: {
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
+      },
+      scope: "all-builds",
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn.mock.calls[0]?.[1]).toEqual([
+      "images",
+      "--format",
+      "{{.Repository}}:{{.Tag}}\t{{.ID}}",
+      "--filter",
+      "label=murph.hosted.local-build-id",
+      "--filter",
+      expect.stringMatching(
+        /^label=murph\.hosted\.local-worker-name=murph-worktree-[a-f0-9]{24}$/u,
+      ),
     ]);
   });
 

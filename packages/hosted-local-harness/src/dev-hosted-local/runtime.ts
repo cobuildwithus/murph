@@ -57,6 +57,7 @@ interface BoundedCommandResult {
 }
 
 const HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL = "murph.hosted.local-build-id";
+const HOSTED_RUNNER_LOCAL_WORKER_NAME_LABEL = "murph.hosted.local-worker-name";
 const HOSTED_RUNNER_LOCAL_IMAGE_REPOSITORIES = [
   "cloudflare-dev/deploysmokerunnercontainer",
   "cloudflare-dev/runnercontainer",
@@ -826,6 +827,7 @@ async function listHostedRunnerImageRefs(input: {
   const localBuildId = input.scope === "all-builds"
     ? null
     : resolveHostedRunnerCleanupLocalBuildId(input.env);
+  const workerName = resolveWranglerLocalDevWorkerName(input.env ?? {});
 
   if (!localBuildId && input.scope !== "all-builds") {
     return {
@@ -849,7 +851,12 @@ async function listHostedRunnerImageRefs(input: {
           "--filter",
           `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}=${localBuildId}`,
         ]
-        : ["--filter", `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}`]),
+        : [
+          "--filter",
+          `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}`,
+          "--filter",
+          `label=${HOSTED_RUNNER_LOCAL_WORKER_NAME_LABEL}=${workerName}`,
+        ]),
     ],
     command: "docker",
     cwd: input.cwd,

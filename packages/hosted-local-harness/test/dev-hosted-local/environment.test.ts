@@ -1651,6 +1651,7 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(container.image_vars).toEqual({
       HOSTED_RUNNER_CONTAINER_CLASS: "RunnerContainer",
       HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+      HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
     });
     expect(smokeContainer).toMatchObject({
       image: container.image,
@@ -1662,6 +1663,7 @@ describe("buildWranglerLocalDevConfig", () => {
       image_vars: {
         HOSTED_RUNNER_CONTAINER_CLASS: "DeploySmokeRunnerContainer",
         HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+        HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
       },
       max_instances: 1,
     });
@@ -1674,9 +1676,16 @@ describe("buildWranglerLocalDevConfig", () => {
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
     };
     const workerName = resolveWranglerLocalDevWorkerName(source);
+    const config = buildWranglerLocalDevConfig(source);
+    const containers = config.containers as Array<{
+      image_vars: Record<string, string>;
+    }>;
 
     expect(workerName).toMatch(/^murph-worktree-[a-f0-9]{24}$/u);
     expect(workerName.startsWith("murph-hosted-")).toBe(false);
+    expect(containers.every((container) =>
+      container.image_vars.HOSTED_RUNNER_LOCAL_WORKER_NAME === workerName
+    )).toBe(true);
     expect(buildWranglerEnvFileText(source)).not.toContain("MURPH_DEV_WORKTREE_SCOPE");
     expect(buildWranglerVarArgs(source).join("\n")).not.toContain("MURPH_DEV_WORKTREE_SCOPE");
   });
@@ -1768,6 +1777,7 @@ describe("buildWranglerLocalDevConfig", () => {
       expect(container.image_vars).toEqual({
         HOSTED_RUNNER_CONTAINER_CLASS: container.class_name,
         HOSTED_RUNNER_LOCAL_BUILD_ID: buildHostedRunnerLocalBuildId("stack-test-build-id"),
+        HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
       });
     }
     expect(
