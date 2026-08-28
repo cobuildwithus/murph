@@ -72,7 +72,7 @@ Updated: 2026-08-27
 2. [completed] Invoke it from the existing hosted idle archive slice with the
    same pending-work, wake, shutdown, and total-time budget as current archive
    maintenance; emit bounded aggregate diagnostics.
-3. [in progress] Add focused core and hosted-runtime proof, update live owner docs,
+3. [completed] Add focused core and hosted-runtime proof, update live owner docs,
    and update the existing smaller-checkpoints changelog item.
 4. [in progress] Run local proof, push a draft PR, complete preliminary and final
    ReviewGPT gates plus exact-head CI, merge, and retire the task worktree.
