@@ -4161,6 +4161,236 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps exercise ids private, uses catalog media, and generates only when catalog media is missing',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-linq-exercise-media-repair-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          dynamicTools: [
+            MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+            MURPH_GENERATE_IMAGE_TOOL,
+          ],
+          env: {
+            ...config.env,
+            OPENAI_API_KEY: '',
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const scheduled = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({
+              channel: 'linq',
+              scheduledOccurrenceAt: '2026-08-12T11:30:00.000Z',
+            }),
+            exerciseGuidance,
+          ].join('\n\n'),
+          prompt: [
+            'Teach the saved one-movement doorway stretch routine now.',
+            'Use 8 repetitions over 60 seconds and stop if pain increases.',
+          ].join(' '),
+        })
+        const scheduledDecision = parseAssistantNotificationDecision(
+          scheduled.finalMessage,
+        )
+        expect(scheduledDecision.kind).toBe('send_message')
+        if (scheduledDecision.kind !== 'send_message') {
+          throw new Error('Expected the scheduled exercise cue to send.')
+        }
+
+        const repaired = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({
+              channel: 'linq',
+            }),
+            exerciseGuidance,
+          ].join('\n\n'),
+          prompt: [
+            'Recent conversation history for context only; do not answer these prior messages:',
+            'Assistant: Doorway stretch — 8 comfortable repetitions over 60 seconds. Stop if pain increases.',
+            '',
+            'User message:',
+            'The exercise picture is missing. Please show it.',
+          ].join('\n'),
+        })
+        const launchedImageOperationIds: string[] = []
+        const missingCatalogImage = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({
+              channel: 'linq',
+            }),
+            exerciseGuidance,
+          ].join('\n\n'),
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => `ain_${'9'.repeat(32)}`,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            imageGenerationLauncher: {
+              launch(input) {
+                launchedImageOperationIds.push(input.operationId)
+                return 'started'
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          } satisfies AssistantHostedToolContext,
+          prompt: [
+            'Teach the saved one-movement standing reach routine now and show the exercise.',
+            'Use 6 comfortable repetitions and stop if pain increases.',
+          ].join(' '),
+        })
+
+        const journeys = [
+          {
+            actions: readCapabilityRoutingActions(scheduled.jsonEvents),
+            label: 'scheduled cue',
+            media: scheduled.responseMedia,
+            text: scheduledDecision.text,
+          },
+          {
+            actions: readCapabilityRoutingActions(repaired.jsonEvents),
+            label: 'missing-media repair',
+            media: repaired.responseMedia,
+            text: repaired.finalMessage,
+          },
+        ]
+
+        process.stdout.write(
+          `[linq-exercise-media-repair-e2e] ${JSON.stringify({
+            missingCatalogImageReply: missingCatalogImage.finalMessage,
+            repairReply: repaired.finalMessage,
+            scheduledReply: scheduledDecision.text,
+          })}\n`,
+        )
+
+        for (const journey of journeys) {
+          const showAction = journey.actions.find((action) =>
+            action.kind === 'command'
+            && /vault-cli exercise show (?:doorway-stretch|ST170) --format json/iu
+              .test(action.command)
+          )
+          const dynamicActions = journey.actions.filter((action) =>
+            action.kind === 'dynamic'
+          )
+          const mediaCalls = dynamicActions.filter((action) =>
+            action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+          )
+          const generationCalls = dynamicActions.filter((action) =>
+            action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+          )
+
+          expect(showAction, `${journey.label} catalog show`).toBeDefined()
+          expect(mediaCalls, `${journey.label} media calls`).toHaveLength(1)
+          expect(
+            mediaCalls[0]?.argumentsValue,
+            `${journey.label} exact catalog media`,
+          ).toMatchObject({
+            media: [{
+              alt: 'Person with a forearm resting on a door frame.',
+              source: 'exercise_catalog:ST170:1',
+              url: 'https://cdn.example.test/doorway-stretch.png',
+            }],
+          })
+          expect(
+            generationCalls,
+            `${journey.label} generated substitutes`,
+          ).toEqual([])
+          expect(
+            showAction?.eventIndex,
+            `${journey.label} lookup before attachment`,
+          ).toBeLessThan(mediaCalls[0]?.eventIndex ?? -1)
+          expect(journey.media, `${journey.label} delivered media`).toEqual([
+            expect.objectContaining({
+              alt: 'Person with a forearm resting on a door frame.',
+              source: 'exercise_catalog:ST170:1',
+              url: 'https://cdn.example.test/doorway-stretch.png',
+            }),
+          ])
+          if (journey.text.trim().length > 0) {
+            expect(
+              journey.text,
+              `${journey.label} natural exercise name`,
+            ).toMatch(/doorway|stretch/iu)
+          }
+          expect(journey.text, `${journey.label} internal catalog data`).not.toMatch(
+            /ST170|doorway-stretch|exercise_catalog/iu,
+          )
+        }
+        expect(scheduledDecision.text).toMatch(/doorway|stretch/iu)
+        expect(scheduledDecision.text).toMatch(/8/iu)
+        expect(scheduledDecision.text).toMatch(/60|minute/iu)
+        expect(scheduledDecision.text).toMatch(/pain/iu)
+
+        const missingImageActions = readCapabilityRoutingActions(
+          missingCatalogImage.jsonEvents,
+        )
+        expect(missingImageActions).toContainEqual(expect.objectContaining({
+          command: expect.stringMatching(
+            /vault-cli exercise show (?:standing-reach|NR250) --format json/iu,
+          ),
+          kind: 'command',
+        }))
+        const missingImageGenerationCalls = missingImageActions.filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_GENERATE_IMAGE_TOOL.name,
+        )
+        expect(missingImageGenerationCalls).toHaveLength(1)
+        expect(missingImageActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+        )).toEqual([])
+        expect(launchedImageOperationIds).toHaveLength(1)
+        expect(missingCatalogImage.finalMessage).toMatch(
+          /image|illustration|picture/iu,
+        )
+        expect(missingCatalogImage.finalMessage).toMatch(
+          /appear|prepar|ready|separate/iu,
+        )
+        expect(missingCatalogImage.finalMessage).not.toMatch(
+          /NR250|standing-reach|exercise_catalog/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps phase-grouped Telegram movements through bounded card repair',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -6607,6 +6837,104 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     480_000,
+  )
+
+  it(
+    'recognizes private access to joined group chats before denying it',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-capability-e2e-'),
+      )
+      type GroupRequest = Parameters<
+        NonNullable<AssistantHostedToolContext['groupTool']>['request']
+      >[0]
+      const groupRequests: GroupRequest[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [
+            MURPH_GROUP_CONSULT_TOOL,
+            MURPH_GROUP_MEMBERSHIP_TOOL,
+          ],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_capability',
+              recipientKey: 'recipient_private_group_capability',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_capability'],
+              conversationId: 'conversation_private_group_capability',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_capability'],
+              originSessionId: 'session_private_group_capability',
+              recipientKey: 'recipient_private_group_capability',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                throw new Error('No group action is expected for this question.')
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'While we are talking privately, can you interact with my group conversations?',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(
+          `[private-group-capability-e2e] ${JSON.stringify({
+            groupActions: groupRequests.map((request) => request.action),
+            reply,
+          })}\n`,
+        )
+
+        expect(groupRequests).toEqual([])
+        expect(reply).toMatch(
+          /\byes\b[^.?!]{0,160}\b(?:joined|added|already in)\b/iu,
+        )
+        expect(reply).toMatch(
+          /(?:\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!]{0,120}\b(?:unjoined|not\s+joined)\b|\bunjoined\b[^.?!]{0,120}\b(?:are|remain)\s+(?:unavailable|inaccessible)\b)/iu,
+        )
+        expect(reply).toMatch(/\b(?:ask|check|consult|message|post|share|tell)\b/iu)
+        expect(reply).not.toMatch(
+          /can(?:not|'t) (?:access|message|reach)(?: or (?:access|message|reach))? (?:your )?(?:other )?group chats? from (?:this|here)|add me .* (?:and|then) (?:tag|ask)|tag me there/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 
   it(
@@ -21045,10 +21373,13 @@ async function materializeRoutinePresentationVaultCli(
       '    printf \'%s\\n\' \'{"items":[]}\'',
       '    ;;',
       '  *"exercise list"*)',
-      '    printf \'%s\\n\' \'{"items":[{"id":"ST170","slug":"doorway-stretch","name":"Doorway stretch"},{"id":"MB101","slug":"ankle-circles","name":"Ankle circles"},{"id":"MB102","slug":"torso-turns","name":"Torso turns"},{"id":"BL201","slug":"tandem-stand","name":"Tandem stand"},{"id":"BL202","slug":"side-to-side-weight-shifts","name":"Side-to-side weight shifts"}]}\'',
+      '    printf \'%s\\n\' \'{"items":[{"id":"ST170","slug":"doorway-stretch","name":"Doorway stretch"},{"id":"NR250","slug":"standing-reach","name":"Standing reach"},{"id":"MB101","slug":"ankle-circles","name":"Ankle circles"},{"id":"MB102","slug":"torso-turns","name":"Torso turns"},{"id":"BL201","slug":"tandem-stand","name":"Tandem stand"},{"id":"BL202","slug":"side-to-side-weight-shifts","name":"Side-to-side weight shifts"}]}\'',
       '    ;;',
       '  "exercise show doorway-stretch --format json"|"exercise show ST170 --format json")',
       '    printf \'%s\\n\' \'{"id":"ST170","name":"Doorway stretch","level":"beginner","instructions":["Take a small step forward.","Keep the ribs quiet."],"images":[{"url":"https://cdn.example.test/doorway-stretch.png","alt":"Person with a forearm resting on a door frame.","step":"Setup"}],"safetyNotes":["Stop if pain increases."]}\'',
+      '    ;;',
+      '  "exercise show standing-reach --format json"|"exercise show NR250 --format json")',
+      '    printf \'%s\\n\' \'{"id":"NR250","name":"Standing reach","level":"beginner","instructions":["Stand tall.","Reach one arm overhead."],"images":[],"safetyNotes":["Stop if pain increases."]}\'',
       '    ;;',
       '  "exercise show ankle-circles --format json"|"exercise show MB101 --format json")',
       '    printf \'%s\\n\' \'{"id":"MB101","name":"Ankle circles","level":"beginner","instructions":["Stand supported.","Draw small circles."],"images":[{"url":"https://cdn.example.test/ankle-circles.png","alt":"Person making a small ankle circle while standing with support.","step":"Movement"}],"safetyNotes":["Use a comfortable range."]}\'',

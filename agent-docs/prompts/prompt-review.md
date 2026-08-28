@@ -14,7 +14,7 @@ Mode:
 - Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
 - Do not claim to have implemented, landed, or committed changes. Report findings only.
 - Follow the unified ReviewGPT preset's evidence, finding, output, and stop
-  contract. Do not request or create a patch artifact for prompt findings.
+  contract.
 
 Required source:
 - Before every review, read the current official GPT-5.6 prompt guidance:
@@ -62,8 +62,8 @@ Output requirements:
 - If no evidence-backed findings remain, state that explicitly and list only material residual prompt-behavior or evaluation risk.
 
 Response format:
-- Return findings through the unified ReviewGPT preset, not patch attachments
-  and not follow-on prompts for more agents.
+- Return findings through the unified ReviewGPT preset, not follow-on prompts
+  for more agents.
 - Keep the focus on concrete prompt behavior risks and the smallest wording, deletion, merge, or structure change that fixes each one.
 
 Stop rule:
