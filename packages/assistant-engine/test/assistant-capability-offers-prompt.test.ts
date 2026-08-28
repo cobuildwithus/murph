@@ -301,6 +301,15 @@ describe('assistant capability-offers prompt contract', () => {
       'give every candidate its own real participant count or other safe label',
     )
     expect(directSection).toContain('paste-or-screenshot fallback')
+    expect(directSection).toContain(
+      "If the member's cue matches only unavailable entries, or a selected Ask or handoff returns unavailable",
+    )
+    expect(directSection).toContain(
+      'always name the safe title, say explicitly that the chat cannot be used right now and nothing was queued',
+    )
+    expect(directSection).toContain(
+      'never select an unrelated group or expose identifiers, provider details, or the internal reason',
+    )
     expect(directSection).toContain('Never expose, quote, edit, infer')
     expect(directSection).toContain('never guess among unresolved entries or fan out')
     expect(directSection).toContain('Track each cursor chain separately')

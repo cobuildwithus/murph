@@ -88,6 +88,7 @@ import {
   lockHostedThreadRouteByThreadIdentityTx,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
+  retireHostedLinqThreadRouteForRemovedAccountTx,
 } from "@/src/lib/hosted-routing/thread-route-store";
 import type {
   HostedLinqParticipantChangedEvent,
@@ -652,6 +653,70 @@ function observeHostedThreadRouteLockAttempt(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Linq participant-addition PostgreSQL ordering",
   () => {
+    it("retires only a route that was not refreshed after the removal event", async () => {
+      const fixture = await createRouteFixture();
+      const accountLookupKey = `test-route-account-${randomUUID()}`;
+      const removedAt = new Date("2026-08-28T12:00:00.000Z");
+      try {
+        await fixture.observer.hostedThreadRoute.update({
+          data: {
+            accountLookupKey,
+            updatedAt: new Date("2026-08-28T12:00:01.000Z"),
+          },
+          where: {
+            channel_threadIdentityLookupKey: {
+              channel: "linq",
+              threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+            },
+          },
+        });
+
+        await expect(fixture.observer.$transaction((tx) =>
+          retireHostedLinqThreadRouteForRemovedAccountTx({
+            accountLookupKeys: [accountLookupKey],
+            containerMemberId: fixture.containerMemberId,
+            prisma: tx,
+            removedAt,
+            threadId: fixture.threadId,
+          })
+        )).resolves.toBe(false);
+        await expect(fixture.observer.hostedThreadRoute.count({
+          where: {
+            channel: "linq",
+            threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+          },
+        })).resolves.toBe(1);
+
+        await fixture.observer.hostedThreadRoute.update({
+          data: { updatedAt: removedAt },
+          where: {
+            channel_threadIdentityLookupKey: {
+              channel: "linq",
+              threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+            },
+          },
+        });
+
+        await expect(fixture.observer.$transaction((tx) =>
+          retireHostedLinqThreadRouteForRemovedAccountTx({
+            accountLookupKeys: [accountLookupKey],
+            containerMemberId: fixture.containerMemberId,
+            prisma: tx,
+            removedAt,
+            threadId: fixture.threadId,
+          })
+        )).resolves.toBe(true);
+        await expect(fixture.observer.hostedThreadRoute.count({
+          where: {
+            channel: "linq",
+            threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+          },
+        })).resolves.toBe(0);
+      } finally {
+        await cleanupRouteFixture(fixture);
+      }
+    });
+
     it("serializes mixed-version Telegram creators on the raw external thread", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
@@ -869,6 +934,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             role: "owner",
             runtimeMemberId: containerMemberIds[0],
           }],
+          nextCursor: null,
           truncated: false,
         });
         await expectCanonicalOwnerActionAuthority({
