@@ -1,8 +1,8 @@
 # Restore private-to-joined-group deferred-tool discovery
 
-Status: active
+Status: completed
 Created: 2026-08-27
-Updated: 2026-08-27
+Updated: 2026-08-28
 
 ## Goal
 
@@ -127,3 +127,4 @@ Updated: 2026-08-27
   an explicit unjoined-chat denial, and zero group effects. The deterministic
   18-test suite and Assistant Engine typecheck pass after remediation. Product
   UX revalidation is not required because only test proof changed.
+Completed: 2026-08-28
