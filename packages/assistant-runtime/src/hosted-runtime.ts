@@ -4913,14 +4913,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && pendingWake.nextWakeReason === "mailbox"
           && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt, nowMs)
         ) {
-          // The assistant phase returns this fresh mailbox wake only when the
-          // classified durable frontier belongs to the model-free owner.
-          runtimeOwnerHandoffRequested ||=
-            passResult.assistantPhaseResult.nextWakeReason === "mailbox"
-            && hostedRuntimeWakeIsDue(
-              passResult.assistantPhaseResult.nextWakeAt ?? null,
-              nowMs,
-            );
+          // A due mailbox wake is the classified model-free owner frontier,
+          // whether this pass discovered it or preserved it while servicing
+          // newer foreground input.
+          runtimeOwnerHandoffRequested = true;
           setIdleCheckpointStartBy(nowMs);
         }
         // The older due token remains checkpoint authority until its hot
@@ -7291,6 +7287,9 @@ function resolvePendingWakeAfterForegroundPass(input: {
   const carriedWakeIsDue =
     input.previousPendingWake.nextWakeAt !== null
     && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs);
+  const carriedModelFreeOwnerWakeIsDue =
+    carriedWakeIsDue
+    && input.previousPendingWake.nextWakeReason === "mailbox";
   const freshDueMailboxOwnerSupersedesCarriedBackground =
     carriedWakeIsDue
     && !input.previousPendingWakeIsForeground
@@ -7333,6 +7332,15 @@ function resolvePendingWakeAfterForegroundPass(input: {
   };
 
   if (input.replaceWake) {
+    if (
+      carriedModelFreeOwnerWakeIsDue
+      && hostedRuntimeWakeReasonIsAssistant(input.passWake.nextWakeReason)
+    ) {
+      return {
+        pendingWake: copyHostedRuntimePendingWake(input.previousPendingWake),
+        preservedDueAssistantWakeOnNoProgress: false,
+      };
+    }
     return {
       pendingWake: copyHostedRuntimePendingWake(input.passWake),
       preservedDueAssistantWakeOnNoProgress: false,

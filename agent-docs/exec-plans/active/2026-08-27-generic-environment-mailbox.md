@@ -226,6 +226,20 @@ Updated: 2026-08-28
     pre-existing timing failure in the no-progress checkpoint assertion that
     reproduces unchanged at public head `f02a364fea`; the umbrella lane was
     stopped after it produced additional unrelated timing failures.
+  - The exact paired Linux run on public head `8bf4482c36` proved that the
+    foreground reply now preempted and completed, but the restored default
+    owner replaced the already-due model-free mailbox wake with its ordinary
+    assistant continuation. The Environment row remained durably imported and
+    unhandled behind the default fence; no data was lost.
+  - The correction keeps the resolved owner wake authoritative across that
+    progressed foreground pass. A due `mailbox` wake is preserved ahead of an
+    ordinary assistant continuation, requests the existing invocation-local
+    owner handoff, and starts the existing checkpoint immediately. It adds no
+    state, read, scheduler, queue, or Temporal mode.
+  - Current local proof passes: the new exact outer-loop regression, all 21
+    collapse invariants, the four focused assistant owner-ordering tests, all
+    157 Cloudflare runner coordination tests, the assistant-runtime typecheck,
+    and `git diff --check`.
   - The private Temporal proof passes: 181 workflow-machine tests, the replay
     suite across all recorded histories with the exact pre-patch mailbox fact,
     and the private package typecheck. The existing operator migration signal
@@ -245,8 +259,8 @@ Updated: 2026-08-28
   - The first exact private Linux run disproved default-owner in-place draining,
     and the second exposed the stale wake-label mismatch after strict ownership
     was restored. The current correction keeps the two existing owners and one
-    ordered queue, with no new mode or persisted state. It still needs a fresh
-    exact-head Linux run.
+    ordered queue, with no new mode or persisted state. It needs a fresh
+    exact-head Linux run after the carried-owner-wake correction.
 - Required outcomes:
   - Exact first-frontier classification, no leapfrogging, no model call for
     Environment completion, safe cooperative owner yield in both directions,
