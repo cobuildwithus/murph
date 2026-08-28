@@ -2166,10 +2166,11 @@ Last verified: 2026-08-23
   not another feedback or delivery-state owner. The ten-minute cron does no
   work outside the 6pm Eastern hour, derives the prior 6pm-to-6pm window with
   time-zone-aware day boundaries, and renders only the three allowlisted
-  product-feedback kinds. Displayed linked rows are grouped by member id with
-  their fixed kind labels nested inside; unlinked groupchat and anonymous rows
-  are held for one final section. The grouped aggregate retains truthful
-  per-kind totals independently of presentation.
+  product-feedback kinds. Displayed linked rows are grouped by member id but
+  rendered under neutral ordinal headings with their fixed kind labels nested
+  inside; the member id does not enter the body. Unlinked groupchat and
+  anonymous rows are held for one final section. The grouped aggregate retains
+  truthful per-kind totals independently of presentation.
   The summary read is bounded independently of row volume by a fixed row cap
   with deterministic ordering, and overflow is reported by kind without
   attributing unread rows to a member instead of growing the email or

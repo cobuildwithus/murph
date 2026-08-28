@@ -1454,11 +1454,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   6pm Eastern hour and sends one daily internal product-feedback digest through
   that existing Resend transport. Web reads its owned
   `HostedProductFeedback` rows from the prior 6pm-to-6pm window for the three
-  server-allowlisted product-feedback kinds. It groups displayed private rows
-  under their server-controlled internal member id, nests the fixed kind
-  labels within each member, and moves every unlinked groupchat or anonymous
-  row into one final section. A grouped aggregate retains truthful per-kind
-  totals, while the deterministically ordered row read stays capped at a fixed
+  server-allowlisted product-feedback kinds. It uses each displayed private
+  row's server-controlled internal member id only as an in-memory grouping key,
+  renders neutral ordinal member headings with fixed kind labels nested inside,
+  and moves every unlinked groupchat or anonymous row into one final section.
+  The member ids themselves never enter the email body. A grouped aggregate
+  retains truthful per-kind totals, while the deterministically ordered row read stays capped at a fixed
   limit and reports omitted remainders by kind without trying to attribute
   unread rows to a member. Both indexed queries share one window filter, and
   the row read selects only kind, member id, and summary; it never reads the

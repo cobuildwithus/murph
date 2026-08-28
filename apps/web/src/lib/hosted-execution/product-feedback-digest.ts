@@ -220,9 +220,9 @@ function formatHostedProductFeedbackDigest(
     rowsByMemberId.set(row.memberId, memberRows);
   }
 
-  const sections = [...rowsByMemberId.entries()].map(([memberId, rows]) =>
+  const sections = [...rowsByMemberId.values()].map((rows, index) =>
     formatHostedProductFeedbackDigestGroup({
-      heading: `Member ID: ${memberId}`,
+      heading: `Member ${index + 1}`,
       labels,
       rows,
     })

@@ -778,8 +778,9 @@ cron allowlist, Prisma schema/migration inventory, and Web typecheck. The
 service proof must exercise the Eastern daily window across both DST
 transitions, the dedicated recipient list, fixed empty digest, day-keyed
 idempotency key, the bounded three-kind summary read that selects only the
-kind, member-id, and summary columns with deterministic ordering, member-first
-grouping with unlinked groupchat/anonymous feedback last, and truthful grouped
+kind, member-id, and summary columns with deterministic ordering, neutral
+member grouping without identifier disclosure and with unlinked
+groupchat/anonymous feedback last, and truthful grouped
 per-kind totals with explicit unattributed omitted-remainder lines past the row
 cap, observable missing configuration, and a
 bounded same-hour retry. The

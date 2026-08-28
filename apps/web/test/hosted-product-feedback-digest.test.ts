@@ -114,7 +114,7 @@ describe("hosted product feedback digest", () => {
       idempotencyKey: "hosted-product-feedback-digest/2026-07-30",
       subject: "Murph feedback — 2026-07-30",
       text: [
-        "Member ID: member_alpha",
+        "Member 1",
         "",
         "Feature requests (1)",
         "- Wants a weekly training summary email.",
@@ -122,7 +122,7 @@ describe("hosted product feedback digest", () => {
         "Product frustrations (1)",
         "- Reminder cadence felt too frequent this week.",
         "",
-        "Member ID: member_beta",
+        "Member 2",
         "",
         "Feature requests (1)",
         "- Asked for treadmill workout support.",
@@ -134,6 +134,8 @@ describe("hosted product feedback digest", () => {
       ].join("\n"),
       to: ["product@example.test", "founder@example.test"],
     });
+    expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("member_alpha");
+    expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("member_beta");
   });
 
   it("fails missing configuration before reading and still sends an empty digest", async () => {
@@ -266,7 +268,7 @@ describe("hosted product feedback digest", () => {
 
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       text: [
-        "Member ID: member_alpha",
+        "Member 1",
         "",
         "Feature requests (1)",
         "- Wants a weekly training summary email.",
@@ -393,9 +395,10 @@ describe("hosted product feedback digest", () => {
       HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
     );
 
-    const sendEmail = vi.fn(async () => ({
-      providerMessageId: "email_1",
-    }));
+    const sendEmail = vi.fn(async (input: { text: string }) => {
+      expect(input.text).toBeTypeOf("string");
+      return { providerMessageId: "email_1" };
+    });
     await expect(runHostedProductFeedbackDigest({
       env: feedbackDigestEnv,
       now: new Date("2026-07-30T22:00:30.000Z"),
@@ -406,7 +409,8 @@ describe("hosted product feedback digest", () => {
     });
 
     const sentText = sendEmail.mock.calls[0]?.[0]?.text;
-    expect(sentText).toContain("Member ID: member_alpha");
+    expect(sentText).toContain("Member 1");
+    expect(sentText).not.toContain("member_alpha");
     expect(sentText).toContain(
       `Feature requests (${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS})`,
     );
@@ -428,9 +432,10 @@ describe("hosted product feedback digest", () => {
       summary,
     })));
 
-    const sendEmail = vi.fn(async () => ({
-      providerMessageId: "email_1",
-    }));
+    const sendEmail = vi.fn(async (input: { text: string }) => {
+      expect(input.text).toBeTypeOf("string");
+      return { providerMessageId: "email_1" };
+    });
     await expect(runHostedProductFeedbackDigest({
       env: feedbackDigestEnv,
       now: new Date("2026-07-30T22:00:30.000Z"),
@@ -526,7 +531,7 @@ describe("hosted product feedback digest", () => {
         from: "Murph Alerts <alerts@example.test>",
         subject: "Murph feedback — 2026-07-30",
         text: [
-          "Member ID: member_alpha",
+          "Member 1",
           "",
           "Feature requests (2)",
           "- Wants a weekly training summary email.",

@@ -374,7 +374,8 @@ Hosted product-feedback digest coverage is Web-owned and provider-free.
 across both DST transitions, dedicated recipients, fixed empty digest,
 day-keyed Resend idempotency, the bounded allowlisted-kind summary read that
 selects only kind, member id, and summary with deterministic ordering,
-member-first grouping with unlinked groupchat/anonymous feedback last,
+neutral member grouping without identifier disclosure and with unlinked
+groupchat/anonymous feedback last,
 truthful grouped per-kind totals with explicit unattributed omitted-remainder
 lines past the row cap, observable missing configuration, and
 same-hour
