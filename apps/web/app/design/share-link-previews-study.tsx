@@ -4,12 +4,22 @@ import { ConnectShareCard, CONNECT_OG_ALT } from "@/app/(dashboard)/connect/conn
 import { ApproveShareCard, APPROVE_OG_ALT } from "@/app/approve/[approvalId]/approve-share-card";
 import { GroupFundShareCard, GROUP_FUND_OG_ALT } from "@/app/groups/fund/[joinCode]/group-fund-share-card";
 import { ReferralShareCard, REFERRAL_OG_ALT } from "@/app/r/[referralCode]/referral-share-card";
+import { CalendarShareCard, CALENDAR_OG_ALT } from "@/app/calendar/calendar-share-card";
 
 import { ScaledSharePreview } from "./scaled-share-preview";
 
 import "./share-preview-fonts.css";
 
 const PREVIEWS = [
+  {
+    frameId: "calendar",
+    route: "/calendar/[payload]",
+    note:
+      "The calendar link Murph sends in a private iMessage. The preview names "
+      + "the action without exposing the event title, time, location, or notes.",
+    alt: CALENDAR_OG_ALT,
+    card: <CalendarShareCard logoDataUri="/logo.svg" />,
+  },
   {
     frameId: "approve",
     route: "/approve/[approvalId]",

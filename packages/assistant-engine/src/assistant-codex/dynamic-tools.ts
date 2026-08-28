@@ -4,6 +4,7 @@ import {
   compactTableWorkoutResponseCardAuthoringV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   isStrictIsoDate,
+  type CalendarEventV1,
 } from '@murphai/contracts'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
@@ -283,6 +284,11 @@ import {
   MURPH_ANALYZE_VIDEO_TOOL,
   parseAnalyzeVideoArguments,
 } from './dynamic-tools/analyze-video.js'
+import {
+  executeCreateCalendarLinkDynamicTool,
+  MURPH_CREATE_CALENDAR_LINK_TOOL,
+  parseCreateCalendarLinkArguments,
+} from './dynamic-tools/calendar-link.js'
 import type {
   AskGrokToolArgs,
   AskGrokToolRuntime,
@@ -1331,6 +1337,10 @@ export type MurphDynamicToolRequest =
       args: AnalyzeVideoToolArgs
     }
   | {
+      kind: 'create-calendar-link'
+      event: CalendarEventV1
+    }
+  | {
       kind: 'ask-grok'
       args: AskGrokToolArgs
     }
@@ -1385,6 +1395,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-analyze-video-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-calendar-link-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1815,6 +1829,19 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'analyze-video',
         args: parsed.args,
+      }
+    }
+    case MURPH_CREATE_CALENDAR_LINK_TOOL.name: {
+      const parsed = parseCreateCalendarLinkArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-calendar-link-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'create-calendar-link',
+        event: parsed.args,
       }
     }
     case MURPH_ASK_GROK_TOOL.name: {
@@ -3509,6 +3536,9 @@ export async function executeMurphDynamicToolRequest(input: {
         turnState: input.analyzeVideoTurnState ?? null,
         vaultRoot: input.vaultRoot ?? null,
       })
+    }
+    case 'create-calendar-link': {
+      return executeCreateCalendarLinkDynamicTool(input.request.event)
     }
     case 'ask-grok': {
       return await executeAskGrokDynamicTool({

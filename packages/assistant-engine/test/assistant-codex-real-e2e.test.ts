@@ -7,10 +7,12 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import {
+  CALENDAR_LINK_URL_PREFIX,
   eventRecordSchema,
   experimentFrontmatterSchema,
   experimentProgressSnapshotSchema,
   goalMetricTargetSchema,
+  parseCalendarEventPayload,
   regimenFrontmatterSchema,
   workoutSessionSchema,
 } from '@murphai/contracts'
@@ -101,6 +103,7 @@ import {
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+  MURPH_CREATE_CALENDAR_LINK_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
   MURPH_GROUP_DATA_TOOL,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
@@ -13129,6 +13132,118 @@ describeRealCodex('real Codex physical-note stuck recovery e2e', () => {
     360_000,
   )
 })
+
+describeRealCodex('real Codex stateless calendar link e2e', () => {
+  it(
+    'returns one truthful calendar link from explicit details',
+    async () => {
+      const result = await runRealCodexCalendarLinkTurn([
+        'Make an Add to Calendar link using these exact details.',
+        'Use the title "Care appointment".',
+        'It starts at 2026-10-14T14:30:00-04:00 and ends at 2026-10-14T15:15:00-04:00.',
+        'The location is "Downtown Clinic".',
+      ].join(' '))
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const calendarActions = actions.filter((action) =>
+        action.kind === 'dynamic'
+        && action.tool === MURPH_CREATE_CALENDAR_LINK_TOOL.name
+      )
+
+      expect(calendarActions.length).toBeGreaterThan(0)
+      expect(actions).toEqual(calendarActions)
+      for (const action of calendarActions) {
+        expect(action).toMatchObject({
+          argumentsValue: {
+            endsAt: '2026-10-14T15:15:00-04:00',
+            location: 'Downtown Clinic',
+            startsAt: '2026-10-14T14:30:00-04:00',
+            title: 'Care appointment',
+          },
+          success: true,
+        })
+      }
+
+      console.info(
+        `[real-codex calendar-link explicit] ${result.finalMessage.replace(/https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u, '<calendar-link>').replaceAll(/\s+/gu, ' ').trim()}`,
+      )
+      const url = result.finalMessage.match(
+        /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u,
+      )?.[0]
+      expect(url?.startsWith(CALENDAR_LINK_URL_PREFIX)).toBe(true)
+      expect(new Set(calendarActions.map((action) => {
+        if (action.kind !== 'dynamic') {
+          return null
+        }
+        return (JSON.parse(action.output) as { url?: string }).url ?? null
+      }))).toEqual(new Set([url]))
+      expect(result.finalMessage.trim().endsWith(url ?? '<missing>')).toBe(true)
+      expect(result.finalMessage).not.toMatch(/(?:has been|was|is now) added/iu)
+      expect(parseCalendarEventPayload(
+        url?.slice(CALENDAR_LINK_URL_PREFIX.length) ?? '',
+      )).toEqual({
+        endsAt: '2026-10-14T15:15:00-04:00',
+        location: 'Downtown Clinic',
+        startsAt: '2026-10-14T14:30:00-04:00',
+        title: 'Care appointment',
+      })
+    },
+    360_000,
+  )
+
+  it(
+    'asks for missing appointment details before creating a calendar link',
+    async () => {
+      const result = await runRealCodexCalendarLinkTurn(
+        'Make an Add to Calendar link for a care appointment next Wednesday afternoon.',
+      )
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+
+      expect(actions).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/(?:what time|start|date)/iu)
+      expect(result.finalMessage).toMatch(/(?:end time|duration|how long)/iu)
+      expect(result.finalMessage).toMatch(/(?:time zone|timezone|UTC offset)/iu)
+      expect(result.finalMessage).not.toContain(CALENDAR_LINK_URL_PREFIX)
+      expect(result.finalMessage).not.toMatch(/(?:has been|was|is now) added/iu)
+      console.info(
+        `[real-codex calendar-link incomplete] ${result.finalMessage.replaceAll(/\s+/gu, ' ').trim()}`,
+      )
+    },
+    360_000,
+  )
+})
+
+async function runRealCodexCalendarLinkTurn(prompt: string) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-calendar-link-e2e-'),
+  )
+
+  try {
+    return await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: buildDirectConversationDeveloperInstructions(),
+      dynamicTools: [MURPH_CREATE_CALENDAR_LINK_TOOL],
+      env: config.env,
+      excludeResumeTurns: true,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      prompt,
+      reasoningEffort: 'low',
+      sandbox: 'read-only',
+      workingDirectory,
+    })
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
 
 const PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH =
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.properties.summary.maxLength

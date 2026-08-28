@@ -1072,6 +1072,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
           userActionAcceptedInputIds.length > 0 &&
           typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
+        calendarLinkAvailable:
+          privateInteractiveProviderTurn &&
+          currentAudienceDeliveryFields.channel === 'linq' &&
+          currentAudienceDeliveryFields.threadIsDirect === true &&
+          userActionAcceptedInputIds.length > 0,
         analyzeVideoAvailable:
           (privateInteractiveProviderTurn || authenticatedGroupProviderTurn) &&
           userActionAcceptedInputIds.length > 0 &&
