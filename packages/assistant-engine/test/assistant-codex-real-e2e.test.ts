@@ -153,6 +153,9 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+} from '../src/assistant/onboarding-followup-automation.ts'
+import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
   buildAssistantCronExecutionInstructions,
@@ -1264,6 +1267,57 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
     },
     360_000,
   )
+})
+
+describeRealCodex('real Codex email onboarding follow-up e2e', () => {
+  it('renders the finite onboarding continuation as one reply-oriented email question', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await prepareRealCodexOnboardingDirectory()
+
+    try {
+      await writeRealCodexOnboardingResumeContext(
+        workingDirectory,
+        'missing_identity',
+      )
+      const turnInput = buildRealCodexOnboardingTurnInput({
+        config,
+        workingDirectory,
+      })
+      const result = await executeRealCodexAppServerTurn({
+        ...turnInput,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions(
+          'direct',
+          'none',
+          'email',
+        ),
+        prompt: [
+          MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+          'Trusted context for this occurrence:',
+          '- This is the first available day in the finite follow-up window.',
+          '- No earlier follow-up question is unanswered.',
+          '- Recent messages contain no answer, defer, decline, or newer topic.',
+        ].join('\n\n'),
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') {
+        throw new Error('Expected the email onboarding follow-up to send.')
+      }
+      expect(decision.text.match(/\?/gu) ?? []).toHaveLength(1)
+      expect(decision.text).not.toMatch(
+        /automation|follow-up window|internal state|setup completion|final attempt/iu,
+      )
+      process.stdout.write(
+        `[real-codex email onboarding follow-up] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
 })
 
 describe('onboarding policy read detection', () => {
@@ -21637,6 +21691,7 @@ function buildScheduledAutomationDeveloperInstructions(
     | 'families'
     | 'shared_read'
     | 'none' = 'families',
+  channel: 'email' | 'linq' = 'linq',
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -21645,7 +21700,7 @@ function buildScheduledAutomationDeveloperInstructions(
     assistantHostedDeviceConnectProviders: [],
     assistantHostedGroupToolSurface,
     assistantKnowledgeToolsAvailable: false,
-    channel: 'linq',
+    channel,
     cliAccess: {
       rawCommand: 'vault-cli',
       setupCommand: 'murph',

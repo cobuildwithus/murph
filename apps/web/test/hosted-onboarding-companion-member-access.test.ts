@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedMemberMessagingSetupState: vi.fn(),
   retryPendingHostedStarterUsageActivationRuntimeWake: vi.fn(),
   remapHostedPrivyCompletionLagError: vi.fn((error: unknown) => error),
   resolveHostedPrivySessionFromBearerToken: vi.fn(),
@@ -52,6 +53,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed:
     mocks.assertActiveHostedMemberAccessAllowed,
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberMessagingSetupState:
+    mocks.readHostedMemberMessagingSetupState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
@@ -167,6 +173,10 @@ describe("native companion hosted member admission", () => {
     });
     mocks.retryPendingHostedStarterUsageActivationRuntimeWake
       .mockResolvedValue(null);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: "hbidx:phone:v1:member" },
+      routing: null,
+    });
   });
 
   afterEach(() => {
@@ -456,6 +466,49 @@ describe("native companion hosted member admission", () => {
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+  });
+
+  it("synchronizes a newly linked channel for an active email-only member", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: null,
+    });
+    mocks.completeHostedPrivyVerification.mockResolvedValue(
+      completion(HostedBillingStatus.active),
+    );
+
+    await expect(ensureHostedCompanionMemberId({
+      identity,
+      prisma,
+    })).resolves.toBe(activeMember.id);
+
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      identity,
+      now: expect.any(Date),
+      prisma,
+    });
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("keeps an active email-only member on the read path until Privy has a linked channel", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: null,
+    });
+
+    await expect(ensureHostedCompanionMemberId({
+      identity: emailIdentity,
+      prisma,
+    })).resolves.toBe(activeMember.id);
+
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
   });
 
   it("returns retryable admission until a pending activation wake is accepted", async () => {

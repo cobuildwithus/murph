@@ -51,7 +51,7 @@ export async function assertHostedMemberBillingStartMessagingReady(input: {
   throw hostedOnboardingError({
     code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
     message:
-      "Verify a phone number or email address, or connect Telegram before checkout so Murph can message you.",
+      "Verify a phone number or connect Telegram before checkout so Murph can message you.",
     httpStatus: 409,
   });
 }

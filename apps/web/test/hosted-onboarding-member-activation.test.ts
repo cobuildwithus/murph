@@ -700,8 +700,8 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
         kind: "member.activated",
         memberChannels: {
@@ -709,7 +709,16 @@ describe("hosted onboarding member activation", () => {
           linq: false,
           telegram: false,
         },
-        signupWelcome: null,
+        onboardingFollowupRoute: expect.objectContaining({
+          channel: "email",
+          delivery: {
+            kind: "explicit",
+            target: "member@example.com",
+          },
+        }),
+        signupWelcome: expect.objectContaining({
+          route: expect.objectContaining({ channel: "email" }),
+        }),
       }),
       tx: expect.anything(),
     });
@@ -1073,7 +1082,7 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
-  it("does not enqueue a proactive Telegram welcome for email-linked phone-less members", async () => {
+  it("enqueues the welcome and follow-up on an established Telegram route", async () => {
     const member = makeMemberSnapshot({
       emailAuthorization: {
         directPublicSender: null,
@@ -1122,6 +1131,19 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    const telegramRoute = buildHostedMemberActivationOnboardingFollowupRoute({
+      emailAddress: "member@example.com",
+      emailLookupKey: "hbidx:email:v1:lookup",
+      linqChatId: null,
+      linqContactLookupKey: "hbidx:email:v1:lookup",
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      memberPhoneNumber: null,
+      phoneLookupKey: null,
+      telegramThreadId:
+        "telegram_user_123:business:biz-42:dm-topic:9",
+      telegramUserId: "telegram_user_123",
+    });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
         kind: "member.activated",
@@ -1131,26 +1153,15 @@ describe("hosted onboarding member activation", () => {
           telegram: true,
         },
         onboardingFollowupEnrollment: true,
-        onboardingFollowupRoute:
-          buildHostedMemberActivationOnboardingFollowupRoute({
-            linqChatId: null,
-            linqContactLookupKey: "hbidx:email:v1:lookup",
-            linqRecipientPhone: null,
-            memberId: "member_123",
-            memberPhoneNumber: null,
-            phoneLookupKey: null,
-            telegramThreadId:
-              "telegram_user_123:business:biz-42:dm-topic:9",
-            telegramUserId: "telegram_user_123",
-          }),
-        signupWelcome: null,
+        onboardingFollowupRoute: telegramRoute,
+        signupWelcome: expect.objectContaining({ route: telegramRoute }),
       }),
       tx: expect.anything(),
     });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
-  it("does not build a proactive Telegram welcome route", () => {
+  it("builds a proactive Telegram welcome route after an inbound thread exists", () => {
     expect(buildHostedMemberActivationWelcomeRoute({
       linqChatId: null,
       linqRecipientPhone: null,
@@ -1159,7 +1170,33 @@ describe("hosted onboarding member activation", () => {
       phoneLookupKey: null,
       telegramThreadId: "telegram_user_456:business:biz-42:dm-topic:9",
       telegramUserId: "telegram_user_456",
-    })).toBeNull();
+    })).toMatchObject({
+      channel: "telegram",
+      delivery: {
+        kind: "thread",
+        target: "telegram_user_456:business:biz-42:dm-topic:9",
+      },
+    });
+  });
+
+  it("builds a verified-email welcome fallback with blinded identity", () => {
+    expect(buildHostedMemberActivationWelcomeRoute({
+      emailAddress: "member@example.test",
+      emailLookupKey: "hbidx:email:v1:member",
+      linqChatId: null,
+      memberId: "member_email_route",
+      phoneLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    })).toMatchObject({
+      channel: "email",
+      delivery: {
+        kind: "explicit",
+        target: "member@example.test",
+      },
+      identityId: expect.stringMatching(/^hid_/u),
+      threadIsDirect: true,
+    });
   });
 
   it("builds a Linq participant welcome route when activation only knows the chosen home line", () => {

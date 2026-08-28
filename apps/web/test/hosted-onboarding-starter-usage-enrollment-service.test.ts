@@ -444,7 +444,7 @@ describe("Starter usage enrollment owner", () => {
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
       .toHaveBeenCalledOnce();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
-      .not.toHaveBeenCalled();
+      .toHaveBeenCalledOnce();
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
       activationSurface: "mobile_app",
       memberIds: [memberState.id],
@@ -636,7 +636,7 @@ describe("Starter usage enrollment owner", () => {
         memberId: memberState.id,
       }));
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
-      .not.toHaveBeenCalled();
+      .toHaveBeenCalledOnce();
   });
 
   it("commits companion activation but requires retry when the runtime wake is not accepted", async () => {
@@ -666,7 +666,7 @@ describe("Starter usage enrollment owner", () => {
     expect(activationWritten).toBe(true);
     expect(grantState).not.toBeNull();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
-      .not.toHaveBeenCalled();
+      .toHaveBeenCalledOnce();
   });
 
   it("re-signals only the exact pending Starter activation mailbox item", async () => {

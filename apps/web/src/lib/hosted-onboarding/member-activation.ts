@@ -344,7 +344,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     );
   const signupWelcomeRoute = input.suppressSignupWelcome
     ? null
-    : resolvedLinqRoute;
+    : onboardingFollowupRoute;
   const activationWake = buildHostedMemberActivationWakeForMember({
     emailLinked: input.emailLinked ?? resolveHostedMemberActivationEmailLinked(currentMember),
     member: currentMember,
@@ -399,6 +399,8 @@ async function prewarmHostedMemberActivationWriteDomainRoots(input: {
 }
 
 export function buildHostedMemberActivationWelcomeRoute(input: {
+  emailAddress?: string | null;
+  emailLookupKey?: string | null;
   linqChatId: string | null;
   linqContactLookupKey?: string | null;
   linqRecipientPhone?: string | null;
@@ -412,12 +414,12 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
   telegramThreadId: string | null;
   telegramUserId: string | null;
 }): HostedExecutionAssistantNotificationRoute | null {
-  const route = buildHostedMemberActivationOnboardingFollowupRoute(input);
-
-  return route?.channel === "linq" ? route : null;
+  return buildHostedMemberActivationOnboardingFollowupRoute(input);
 }
 
 export function buildHostedMemberActivationOnboardingFollowupRoute(input: {
+  emailAddress?: string | null;
+  emailLookupKey?: string | null;
   linqChatId: string | null;
   linqContactLookupKey?: string | null;
   linqRecipientPhone?: string | null;
@@ -432,6 +434,8 @@ export function buildHostedMemberActivationOnboardingFollowupRoute(input: {
   telegramUserId: string | null;
 }): HostedExecutionAssistantNotificationRoute | null {
   return resolveHostedMemberAssistantNotificationRoute({
+    emailAddress: input.emailAddress ?? null,
+    emailLookupKey: input.emailLookupKey ?? null,
     linqChatId: input.linqChatId,
     linqContactLookupKey: input.linqContactLookupKey,
     linqRecipientPhone: input.linqRecipientPhone ?? null,
@@ -456,6 +460,8 @@ function buildHostedMemberActivationOnboardingFollowupRouteForMember(
   member: HostedMemberActivationSnapshot,
 ): HostedExecutionAssistantNotificationRoute | null {
   return buildHostedMemberActivationOnboardingFollowupRoute({
+    emailAddress: member.emailAuthorization?.verifiedEmail?.address ?? null,
+    emailLookupKey: member.emailAuthorization?.verifiedEmail?.lookupKey ?? null,
     linqChatId: member.routing?.linqChatId ?? null,
     linqContactLookupKey:
       member.identity?.phoneLookupKey

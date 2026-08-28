@@ -1,6 +1,6 @@
 # Native Companion Apps (Health Sync)
 
-Last verified: 2026-08-15
+Last verified: 2026-08-28
 
 Current iOS distribution status: approved for the App Store. The canonical
 public listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
@@ -182,10 +182,12 @@ attested direct message can bind the contacted managed line when the existing
 reply-egress policy permits it, including at-risk and delivery-warning lines
 that cannot initiate outreach. Unmanaged, disabled, ambiguous, or unsafe lines
 cannot establish that exact-line authority; ordinary fallback selection still
-fails closed when no eligible line exists. A successfully delivered welcome uses the existing finite
-unfinished-onboarding continuation: at most one low-pressure opportunity on
-each of the next three local days, with the ordinary stop rules. Companion
-admission does not also send the signup welcome email. A committed activation
+fails closed when no eligible line exists. A successfully delivered assistant
+welcome uses the existing finite unfinished-onboarding continuation: at most
+one low-pressure opportunity on each of the next three local days, with the
+ordinary stop rules. A verified email also receives the separate founder
+welcome email; email remains a valid assistant delivery fallback when
+activation has no established phone or Telegram thread. A committed activation
 whose runtime wake is not accepted stays on the retryable account gate; retry
 re-signals only the exact pending Starter activation mailbox item. Canonical starter-usage activation, active-access
 proof, and the internal `member.activated` fact remain intact. Existing

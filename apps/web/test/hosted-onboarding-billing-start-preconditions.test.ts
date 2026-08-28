@@ -32,7 +32,7 @@ describe("hosted billing messaging readiness", () => {
     expect(prisma.hostedMemberEmailAuthorization.findUnique).not.toHaveBeenCalled();
   });
 
-  it("accepts a verified email when no phone or Telegram route exists", async () => {
+  it("requires a conversational channel even when email is verified", async () => {
     const verifiedAt = new Date("2026-07-31T10:00:00.000Z");
     const prisma = makePrisma(verifiedAt);
 
@@ -43,7 +43,9 @@ describe("hosted billing messaging readiness", () => {
       },
       prisma: prisma as never,
       routing: null,
-    })).resolves.toBeUndefined();
+    })).rejects.toMatchObject({
+      code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
+    });
 
     expect(prisma.hostedMemberEmailAuthorization.findUnique).toHaveBeenCalledWith({
       select: {
@@ -69,7 +71,7 @@ describe("hosted billing messaging readiness", () => {
       code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
       httpStatus: 409,
       message:
-        "Verify a phone number or email address, or connect Telegram before checkout so Murph can message you.",
+        "Verify a phone number or connect Telegram before checkout so Murph can message you.",
     });
   });
 
