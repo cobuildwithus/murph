@@ -53,6 +53,7 @@ import {
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
+  type CodexAppServerTurnResult,
   waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
 import {
@@ -190,6 +191,7 @@ import type {
 import {
   createVersionedAutomationPatchFixture,
 } from './support/automation-live-fixture.ts'
+import { createDeferred } from './test-helpers.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
@@ -13214,6 +13216,55 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
   })
 })
 
+describeRealCodex('real Codex latest-context nutrition-card e2e', () => {
+  it('attaches a fresh nutrition card for the latest live-steered request', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'legacy',
+        initialPrompt: 'Help me review my meals for 2026-07-30.',
+        liveSteerPrompt: [
+          'Send my daily nutrition card for 2026-07-30 instead.',
+          'The meal totals and my accepted targets are already saved.',
+          'Do not create, rename, or change a Goal.',
+        ].join(' '),
+      })
+
+      expect(result.card).toMatchObject({
+        goals: { calories: { target: 1_800 } },
+        kind: 'daily_nutrition',
+        localDate: '2026-07-30',
+        version: 2,
+      })
+      if (!result.card) {
+        throw new Error('Expected the latest steered context to attach a card.')
+      }
+      expect(result.attachCallCount).toBe(1)
+      expect(result.deliveryContextOrdinal).toBe(1)
+      expect(result.finalMessage).toBe(
+        renderAssistantResponseCardText(result.card),
+      )
+      expect(result.finalMessage).not.toMatch(/unavailable|failed to attach/iu)
+      expect(result.progressUpdates).toEqual([])
+      expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
+
+      process.stdout.write(
+        `[latest-context-nutrition-card-e2e] ${JSON.stringify({
+          deliveryContextOrdinal: result.deliveryContextOrdinal,
+          reply: result.finalMessage,
+        })}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  })
+})
+
 async function materializeAutomaticMealCloseoutVaultCli(input: {
   binDirectory: string
   commandLogPath: string
@@ -14988,9 +15039,14 @@ async function runRealNutritionCardAuthorityScenario(input: {
   config: RealCodexE2eConfig
   conditionRecovery: NutritionConditionRecovery
   goalScenario: NutritionGoalScenario
+  initialPrompt?: string
+  liveSteerPrompt?: string
 }): Promise<{
-  card: unknown
+  attachCallCount: number
+  card: CodexAppServerTurnResult['responseCard']
   commands: string[]
+  deliveryContextOrdinal: number
+  finalMessage: string
   progressUpdates: string[]
 }> {
   const workingDirectory = await mkdtemp(
@@ -15021,6 +15077,13 @@ async function runRealNutritionCardAuthorityScenario(input: {
 
     const progressUpdates: string[] = []
     const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const liveSteer = input.liveSteerPrompt
+      ? createDeferred<void>()
+      : null
+    const liveSteerOutcome = liveSteer?.promise.then(
+      () => null,
+      (error: unknown) => error,
+    )
     const result = await executeRealCodexAppServerTurn({
       ...REAL_NUTRITION_CARD_CONVERSATION_INPUT,
       approvalPolicy: 'never',
@@ -15066,26 +15129,46 @@ async function runRealNutritionCardAuthorityScenario(input: {
       excludeResumeTurns: true,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
+      onLiveTurn: input.liveSteerPrompt
+        ? (turn) => {
+            void turn.steer({ prompt: input.liveSteerPrompt ?? '' }).then(
+              () => liveSteer?.resolve(),
+              (error) => liveSteer?.reject(error),
+            )
+          }
+        : undefined,
       progressDelivery: {
         async send(text) {
           progressUpdates.push(text)
           return { kind: 'sent', source: 'model' }
         },
       },
-      prompt: [
-        'Send my daily nutrition card for 2026-07-30.',
-        'The meal totals and my accepted targets are already saved.',
-        'Do not create, rename, or change a Goal.',
-      ].join(' '),
+      prompt: input.initialPrompt ?? [
+          'Send my daily nutrition card for 2026-07-30.',
+          'The meal totals and my accepted targets are already saved.',
+          'Do not create, rename, or change a Goal.',
+        ].join(' '),
       reasoningEffort: 'medium',
       sandbox: 'workspace-write',
       workingDirectory,
     })
+    const liveSteerError = await liveSteerOutcome
+    if (liveSteerError) {
+      throw liveSteerError
+    }
     const commandText = (await readFile(commandLog, 'utf8')).trim()
+    const attachCallCount = readCapabilityRoutingActions(result.jsonEvents)
+      .filter((action) =>
+        action.kind === 'dynamic'
+        && action.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name
+      ).length
 
     return {
+      attachCallCount,
       card: result.responseCard,
       commands: commandText === '' ? [] : commandText.split('\n'),
+      deliveryContextOrdinal: result.responseDeliveryContextOrdinal,
+      finalMessage: result.finalMessage,
       progressUpdates,
     }
   } finally {

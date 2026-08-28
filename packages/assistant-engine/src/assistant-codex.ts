@@ -4103,10 +4103,7 @@ async function runCodexAppServerTurnOnProcess(
     card: AssistantResponseCard,
     deliveryContextOrdinal: number,
   ): void => {
-    if (
-      deliveryContextOrdinal !== 0 ||
-      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
-    ) {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
         'A response card cannot attach after accepted input advances the response context.',
@@ -4149,10 +4146,7 @@ async function runCodexAppServerTurnOnProcess(
     card: CompactTableWorkoutResponseCardV1,
     deliveryContextOrdinal: number,
   ): void => {
-    if (
-      deliveryContextOrdinal !== 0 ||
-      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
-    ) {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
         'Response card text recovery cannot attach after accepted input advances the response context.',
