@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type {
+  AssistantHostedDeviceToolRequest,
+} from '../src/assistant/execution-context.js'
 import {
   createDeviceTurnState,
   executeDeviceDynamicTool,
@@ -90,39 +93,85 @@ async function executeDeviceFailure(
 }
 
 describe('hosted device dynamic tool recovery', () => {
-  it('replays the first connect result for later device calls in the same turn', async () => {
-    const request = vi.fn(async () => ({
-      action: 'connect' as const,
-      link: {
-        authorizationUrl: 'https://example.test/connect#claim=synthetic',
-        connectUrl: 'https://example.test/connect#claim=synthetic',
-        expiresAt: '2026-08-28T12:00:00.000Z',
-        provider: 'synthetic-provider',
-        providerLabel: 'Synthetic',
-      },
-    }))
+  it('replays only duplicate connects for the same accepted input and provider', async () => {
+    const request = vi.fn(async (
+      deviceRequest: AssistantHostedDeviceToolRequest,
+    ) => deviceRequest.action === 'connect'
+      ? {
+          action: 'connect' as const,
+          link: {
+            authorizationUrl:
+              `https://example.test/connect#provider=${deviceRequest.provider}`,
+            connectUrl:
+              `https://example.test/connect#provider=${deviceRequest.provider}`,
+            expiresAt: '2026-08-28T12:00:00.000Z',
+            provider: deviceRequest.provider,
+            providerLabel: deviceRequest.provider,
+          },
+        }
+      : {
+          accounts: [],
+          action: 'list_accounts' as const,
+          provider: deviceRequest.action === 'list_accounts'
+            ? deviceRequest.provider ?? null
+            : null,
+          sourceProvider: null,
+        })
     const turnState = createDeviceTurnState()
     const deviceTool = { request }
+    const firstInput = { assistantInputId: 'accepted-input-1' }
 
     const connect = await executeDeviceDynamicTool({
+      acceptedInputAuthority: firstInput,
       deviceTool,
       request: {
         kind: 'device',
-        request: { action: 'connect', provider: 'synthetic-provider' },
+        request: { action: 'connect', provider: 'garmin' },
+      },
+      turnState,
+    })
+    const duplicate = await executeDeviceDynamicTool({
+      acceptedInputAuthority: firstInput,
+      deviceTool,
+      request: {
+        kind: 'device',
+        request: { action: 'connect', provider: 'garmin' },
       },
       turnState,
     })
     const laterRead = await executeDeviceDynamicTool({
+      acceptedInputAuthority: firstInput,
       deviceTool,
       request: {
         kind: 'device',
-        request: { action: 'list_accounts', provider: 'synthetic-provider' },
+        request: { action: 'list_accounts', provider: 'garmin' },
+      },
+      turnState,
+    })
+    const otherProvider = await executeDeviceDynamicTool({
+      acceptedInputAuthority: firstInput,
+      deviceTool,
+      request: {
+        kind: 'device',
+        request: { action: 'connect', provider: 'oura' },
+      },
+      turnState,
+    })
+    const laterInput = await executeDeviceDynamicTool({
+      acceptedInputAuthority: { assistantInputId: 'accepted-input-2' },
+      deviceTool,
+      request: {
+        kind: 'device',
+        request: { action: 'connect', provider: 'garmin' },
       },
       turnState,
     })
 
-    expect(request).toHaveBeenCalledTimes(1)
-    expect(laterRead).toEqual(connect)
+    expect(request).toHaveBeenCalledTimes(4)
+    expect(duplicate).toEqual(connect)
+    expect(laterRead.rpcResult.contentItems[0]?.text).toContain('list_accounts')
+    expect(otherProvider.requiredFinalResponseSuffix).toContain('provider=oura')
+    expect(laterInput.requiredFinalResponseSuffix).toContain('provider=garmin')
   })
 
   for (const testCase of [
@@ -436,9 +485,9 @@ describe('hosted device dynamic tool recovery', () => {
       })
       if (testCase.action === 'connect') {
         expect(wire.memberReply).toEqual(expect.any(String))
-        expect(result.requiredFinalResponseText).toBe(wire.memberReply)
+        expect(result.requiredFinalResponseReplacement).toBe(wire.memberReply)
       } else {
-        expect(result.requiredFinalResponseText).toBeUndefined()
+        expect(result.requiredFinalResponseReplacement).toBeUndefined()
       }
       expect(text).not.toContain(PRIVATE_HOSTED_DEVICE_SENTINEL)
     })

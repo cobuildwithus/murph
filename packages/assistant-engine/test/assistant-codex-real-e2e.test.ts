@@ -7537,7 +7537,7 @@ describeRealCodex('real Codex capability questions e2e', () => {
           deniedSupport:
             /\b(?:cannot|can['’]?t|unable to)\b[^.!?\n]{0,80}\bconnect\b[^.!?\n]{0,40}\bgarmin\b|\bgarmin\b[^.!?\n]{0,80}\b(?:not supported|unavailable)\b/iu,
           expectedSupport:
-            /\b(?:i\s+)?support(?:s|ed)?\b[^.!?\n]{0,40}\bgarmin connections?\b|\bi can\b[^.!?\n]{0,100}(?:\bconnect\b[^.!?\n]{0,40}\bgarmin\b|\bgarmin\b[^.!?\n]{0,40}\bconnect)\b/iu,
+            /\b(?:i\s+)?support(?:s|ed)?\b[^.!?\n]{0,40}(?:\bgarmin connections?\b|\bconnect(?:ing)?\s+garmin\b)|\bi can\b[^.!?\n]{0,100}(?:\bconnect\b[^.!?\n]{0,40}\bgarmin\b|\bgarmin\b[^.!?\n]{0,40}\bconnect)\b/iu,
           prompt: 'Do you support Garmin connections?',
         },
         {
@@ -7664,6 +7664,29 @@ describeRealCodex('real Codex capability questions e2e', () => {
           expect(reply, inquiry.capability).toMatch(inquiry.expectedSupport)
           expect(reply, inquiry.capability).not.toMatch(inquiry.deniedSupport)
         }
+
+        const mixedProviderInquiry = await executeProbe({
+          prompt:
+            'Do you currently support direct connections for both Garmin and Oura?',
+        })
+        const mixedProviderActions = readCapabilityRoutingActions(
+          mixedProviderInquiry.jsonEvents,
+        )
+        const mixedProviderReply = mixedProviderInquiry.finalMessage.trim()
+
+        process.stdout.write(
+          `[mixed-provider-capability-e2e] ${JSON.stringify({
+            actions: mixedProviderActions,
+            reply: mixedProviderReply,
+          })}\n`,
+        )
+        expect(mixedProviderActions).toEqual([])
+        expect(mixedProviderReply).toMatch(
+          /(?:\byes\b[^.!?\n]{0,120}\bgarmin\b|\bgarmin\b[^.!?\n]{0,100}\b(?:available|connections?|supports?)\b)/iu,
+        )
+        expect(mixedProviderReply).toMatch(
+          /(?:\boura\b[^.!?\n]{0,120}\b(?:isn['’]?t|is not|not currently|not supported|unavailable)\b|\b(?:cannot|can['’]?t|do not|don['’]?t)\b[^.!?\n]{0,100}\boura\b)/iu,
+        )
 
         for (const request of incompleteRequests) {
           const result = await executeProbe({ prompt: request.prompt })
@@ -7850,7 +7873,8 @@ describeRealCodex('real Codex capability questions e2e', () => {
               status: 403,
               statusCode: 403,
             },
-            expectedRecovery: /\b(?:ask again|continue|try again)\b/iu,
+            expectedRecovery:
+              /\b(?:ask (?:again|me there)|continue|try again)\b/iu,
             expectedState: /\bprivate\b/iu,
             forbiddenState: /\b(?:connected successfully|connection (?:link )?is ready)\b/iu,
             name: 'private conversation required',

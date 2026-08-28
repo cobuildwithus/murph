@@ -721,6 +721,25 @@ function appendRequiredVaultFileApprovalUrls(
   ].filter((part): part is string => part !== null).join('\n\n')
 }
 
+function appendRequiredFinalResponseSuffix(
+  message: string | null,
+  suffix: string | null,
+): string | null {
+  const normalizedSuffix = normalizeNullableString(suffix)
+  if (normalizedSuffix === null) {
+    return message
+  }
+  const normalizedMessage = normalizeNullableString(message)
+  const messageWithoutSuffix = normalizedMessage === null
+    ? null
+    : normalizeNullableString(
+        normalizedMessage.replaceAll(normalizedSuffix, ''),
+      )
+  return [messageWithoutSuffix, normalizedSuffix]
+    .filter((part): part is string => part !== null)
+    .join('\n\n')
+}
+
 interface RequiredAutomationLocalAtClarification {
   code: 'local_at_fold' | 'local_at_gap'
   resolvedLocalDate: string
@@ -3374,8 +3393,11 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
-  let requiredFinalResponseFallback: string | null = null
-  let requiredFinalResponseText: string | null = null
+  const requiredFinalResponses = new Map<number, {
+    fallback: string | null
+    replacement: string | null
+    suffix: string | null
+  }>()
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
     new Map<string, RequiredAutomationLocalAtClarification>()
@@ -3484,10 +3506,13 @@ async function runCodexAppServerTurnOnProcess(
         .map((entry) => entry.deliveryContextOrdinal),
     )].sort((left, right) => left - right)
 
-  const hasRequiredUserVisibleOutput = (): boolean =>
+  const hasRequiredUserVisibleOutput = (
+    deliveryContextOrdinal?: number,
+  ): boolean =>
     computerToolsLockedAfterUserPause ||
-    requiredFinalResponseText !== null ||
-    requiredFinalResponseFallback !== null ||
+    (deliveryContextOrdinal === undefined
+      ? requiredFinalResponses.size > 0
+      : requiredFinalResponses.has(deliveryContextOrdinal)) ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
 
@@ -4878,22 +4903,32 @@ async function runCodexAppServerTurnOnProcess(
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
-      if (dynamicToolRequest.kind === 'analyze-video') {
-        const analyzeVideoFallback = normalizeNullableString(
-          result.requiredFinalResponseFallback,
-        )
-        if (analyzeVideoFallback !== null) {
-          requiredFinalResponseFallback = analyzeVideoFallback
-        }
-      }
-      const finalResponseText = normalizeNullableString(
-        result.requiredFinalResponseText,
+      const finalResponseFallback = normalizeNullableString(
+        result.requiredFinalResponseFallback,
+      )
+      const finalResponseReplacement = normalizeNullableString(
+        result.requiredFinalResponseReplacement,
+      )
+      const finalResponseSuffix = normalizeNullableString(
+        result.requiredFinalResponseSuffix,
       )
       if (
-        finalResponseText !== null &&
-        requiredFinalResponseText === null
+        finalResponseFallback !== null ||
+        finalResponseReplacement !== null ||
+        finalResponseSuffix !== null
       ) {
-        requiredFinalResponseText = finalResponseText
+        const currentRequiredResponse =
+          requiredFinalResponses.get(dynamicToolRequestDeliveryContextOrdinal)
+        requiredFinalResponses.set(dynamicToolRequestDeliveryContextOrdinal, {
+          fallback:
+            finalResponseFallback ?? currentRequiredResponse?.fallback ?? null,
+          replacement:
+            finalResponseReplacement ??
+            currentRequiredResponse?.replacement ??
+            null,
+          suffix:
+            finalResponseSuffix ?? currentRequiredResponse?.suffix ?? null,
+        })
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -6087,7 +6122,9 @@ async function runCodexAppServerTurnOnProcess(
     )
   }
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
-  const requiredUserVisibleOutput = hasRequiredUserVisibleOutput()
+  const requiredUserVisibleOutput = hasRequiredUserVisibleOutput(
+    finalDeliveryContextOrdinal,
+  )
   const noReplySelected =
     finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
@@ -6097,8 +6134,12 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
+  const requiredFinalResponse =
+    requiredFinalResponses.get(finalDeliveryContextOrdinal) ?? null
+  const requiredFinalResponseReplacement =
+    requiredFinalResponse?.replacement ?? null
   const semanticFinalMessage =
-    requiredFinalResponseText ??
+    requiredFinalResponseReplacement ??
     (finalResponseCard
       ? renderAssistantResponseCardText(finalResponseCard)
       : finalResponseCardTextFallback
@@ -6106,6 +6147,10 @@ async function runCodexAppServerTurnOnProcess(
         : modelFinalMessage)
   const normalizedSemanticFinalMessage =
     normalizeNullableString(semanticFinalMessage)
+  const requiredFinalResponseFallback =
+    requiredFinalResponse?.fallback ?? null
+  const requiredFinalResponseSuffix =
+    requiredFinalResponse?.suffix ?? null
   const requiredSemanticFinalMessage =
     normalizedSemanticFinalMessage ??
     requiredFinalResponseFallback ??
@@ -6116,15 +6161,18 @@ async function runCodexAppServerTurnOnProcess(
     requiredAutomationLocalAtClarificationsInOrder.length === 0
       ? finalResponseCard
       : null
-  const finalMessage = appendRequiredVaultFileApprovalUrls(
-    appendRequiredAutomationLocalAtClarification(
-      requiredSemanticFinalMessage,
-      requiredAutomationLocalAtClarificationsInOrder,
+  const finalMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredVaultFileApprovalUrls(
+      appendRequiredAutomationLocalAtClarification(
+        requiredSemanticFinalMessage,
+        requiredAutomationLocalAtClarificationsInOrder,
+      ),
+      requiredVaultFileApprovalUrls,
     ),
-    requiredVaultFileApprovalUrls,
-  )
+    requiredFinalResponseSuffix,
+  ) ?? ''
   const semanticTranscriptMessage =
-    requiredFinalResponseText ??
+    requiredFinalResponseReplacement ??
     (finalResponseCard
       ? requiredAutomationLocalAtClarificationsInOrder.length === 0
         ? renderAssistantResponseCardTranscriptText(finalResponseCard)
@@ -6135,11 +6183,14 @@ async function runCodexAppServerTurnOnProcess(
           )
         : normalizeNullableString(modelFinalMessage) ??
           (finalResponseMedia.length > 0 ? '' : null))
-  const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    normalizeNullableString(semanticTranscriptMessage) ??
-      requiredFinalResponseFallback ??
-      semanticTranscriptMessage,
-    requiredAutomationLocalAtClarificationsInOrder,
+  const transcriptMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredAutomationLocalAtClarification(
+      normalizeNullableString(semanticTranscriptMessage) ??
+        requiredFinalResponseFallback ??
+        semanticTranscriptMessage,
+      requiredAutomationLocalAtClarificationsInOrder,
+    ),
+    requiredFinalResponseSuffix,
   )
   if (
     noReplySelected &&

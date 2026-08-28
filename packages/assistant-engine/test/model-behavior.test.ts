@@ -1254,17 +1254,17 @@ describe('assistant execution prompt contract', () => {
     const composedPrompt = `${MURPH_CODEX_BASE_INSTRUCTIONS}\n${developerPrompt}`
 
     expect(composedPrompt).toContain(
-      'Capability inquiry alone permits no probe',
+      'Capability questions may inspect runtime/provider context and deferred catalog',
     )
     expect(composedPrompt).toContain(
-      'Missing content, topic, or message is material: ask before calling tools; never invent it',
+      'Use supplied inputs; ask before tools for missing content, topic, or message; never invent it',
     )
     expect(composedPrompt).toContain(
-      'search deferred tools via `tool_search` or code-mode `ALL_TOOLS`',
+      '`tool_search` or code-mode `ALL_TOOLS`',
     )
     expect(
       composedPrompt.split(
-        'Capability inquiry alone permits no probe',
+        'Capability questions may inspect runtime/provider context',
       ),
     ).toHaveLength(2)
     expect(developerPrompt).not.toContain('authorize a probe')

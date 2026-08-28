@@ -1395,10 +1395,16 @@ describe('hosted domain dynamic tools', () => {
       /at most once for that message; after any result, do not retry/u,
     )
     expect(MURPH_DEVICE_TOOL.description).toContain(
-      'Capability questions are inspection-only: answer from this description without calling.',
+      'For capability questions, use the current projected provider context and read-only deferred catalog; never call list_accounts or another device action to test support.',
     )
     expect(MURPH_DEVICE_TOOL.description).toContain(
-      'For one connection request, call connect at most once; after success, send the returned connectUrl unchanged on the final line without calling a device action again.',
+      'list_accounts returns matching accountId, provider, status, last sync, and safe error context for an actual account-state request.',
+    )
+    expect(MURPH_DEVICE_TOOL.description).toContain(
+      'For one accepted member input, call connect at most once per requested provider; after success, send the returned connectUrl unchanged on the final line.',
+    )
+    expect(MURPH_DEVICE_TOOL.description).toContain(
+      'Do not repeat that connect effect, but honor a later accepted member input or a different requested device action.',
     )
     expect(MURPH_DEVICE_TOOL.description).toContain(
       'Its short-lived browser claim is authorized for delivery to the current private member; it is not a provider credential.',
@@ -1925,9 +1931,9 @@ describe('hosted domain dynamic tools', () => {
     expect(readResultPayload(result)).toEqual({
       action: 'connect',
       connectUrl: 'https://connect.example.test/start',
-      hint: 'Send connectUrl unchanged on the final line. Its short-lived browser claim is authorized for delivery to this current private member; it is not a provider credential. Success is terminal; do not call a device action again for this request.',
+      hint: 'Send connectUrl unchanged on the final line. Its short-lived browser claim is authorized for delivery to this current private member; it is not a provider credential. Do not repeat this connect effect for the same accepted input and provider.',
     })
-    expect(result.requiredFinalResponseText).toBe(
+    expect(result.requiredFinalResponseSuffix).toBe(
       'https://connect.example.test/start',
     )
 

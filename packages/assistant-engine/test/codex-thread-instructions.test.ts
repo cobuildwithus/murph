@@ -61,31 +61,31 @@ describe('Codex thread instructions', () => {
       'one-time codes, CAPTCHA, new consent',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Honor tool outcomes and required recovery; never genericize success, failure, or retry',
+      'Honor tool outcomes/recovery; never generalize success, failure, or retry',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Repeat effects only if their result permits it',
+      'Repeat effects only when permitted',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain('connected sources')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'search deferred tools via `tool_search`',
+      'deferred catalog (`tool_search`',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'code-mode `ALL_TOOLS`',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'eager absence or a failed probe is not proof',
+      'absence or failed probing is not proof',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Capability inquiry alone permits no probe',
+      'call no capability tool, even a read, to test support',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'use supplied inputs and current source guidance',
+      'Use supplied inputs; ask before tools',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Missing content, topic, or message is material: ask before calling tools; never invent it',
+      'missing content, topic, or message; never invent it',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       'A bare `Can you...?`',

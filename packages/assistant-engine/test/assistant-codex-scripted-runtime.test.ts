@@ -61,6 +61,9 @@ import {
   MURPH_MEMBER_MEMORY_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
+  MURPH_DEVICE_TOOL,
+} from '../src/assistant-codex/dynamic-tools/device.ts'
+import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GROUP_FAMILY_TOOLS,
@@ -85,6 +88,7 @@ import {
 } from '../src/assistant/hosted-tool-context.ts'
 import type {
   AssistantHostedAutomationToolRequest,
+  AssistantHostedDeviceToolRequest,
 } from '../src/assistant/execution-context.ts'
 import {
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
@@ -7437,6 +7441,61 @@ if (!tool) {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
+  it('inspects a deferred capability without executing its effect', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({ model: 'gpt-5.4' })
+    scenario.stub.captureProviderRequestDiagnostics()
+    const groupRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'Murph ask or hand off to a joined group from private chat',
+        },
+      },
+      {
+        text:
+          'Yes—I can ask or hand off to group chats Murph has already joined. I cannot access an unjoined chat.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [...MURPH_GROUP_FAMILY_TOOLS],
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async (request) => {
+          groupRequests.push(request)
+          throw new Error('A capability question must not execute the group tool.')
+        }),
+        currentUserActionScope: () => ({
+          acceptedInputIds: [`ain_${'5'.repeat(32)}`],
+          conversationId: 'conversation-capability-inspection',
+          conversationScope: 'direct',
+          inboundMailboxItemIds: ['mailbox-capability-inspection'],
+          originSessionId: 'session-capability-inspection',
+          recipientKey: 'member:current',
+        }),
+      },
+      prompt:
+        'Can you interact with group chats Murph has already joined from here?',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesGroup: false,
+      includesToolSearch: true,
+    })
+    expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"group_consult"',
+    )
+    expect(groupRequests).toEqual([])
+    expect(result.finalMessage).toContain(
+      'group chats Murph has already joined',
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('discovers a group handoff and reports accepted as queued', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -9440,6 +9499,255 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('preserves the requested handoff and media before an exact device link suffix', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const acceptedInputId = `ain_${'1'.repeat(32)}`
+    const connectUrl =
+      'https://www.withmurph.ai/connect#deviceConnectIntent=dc_scripted_garmin&connectSource=garmin&connectProvider=garmin'
+    const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+    const songGenerations: unknown[] = []
+    const providerMessage =
+      'This opens Garmin’s secure connection flow. Come back here when you’re done and I’ll continue with you.'
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { action: 'connect', provider: 'garmin' },
+          name: MURPH_DEVICE_TOOL.name,
+          namespace: MURPH_DEVICE_TOOL.namespace,
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            durationSeconds: 10,
+            instrumental: true,
+            prompt: 'A brief bright connection chime.',
+          },
+          name: 'generate_song',
+          namespace: 'murph',
+        },
+      },
+      { text: providerMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: resolveMurphDynamicTools({
+        deviceAvailable: true,
+        progressUpdatesAvailable: false,
+        voiceMemoGenerationAvailable: true,
+      }),
+      groupConversation: false,
+      hostedToolContext: createScriptedDeviceToolContext({
+        currentAssistantInputId: () => acceptedInputId,
+        request: async (request) => {
+          deviceRequests.push(request)
+          if (request.action !== 'connect') {
+            throw new Error('Expected one device connect request.')
+          }
+          return {
+            action: 'connect',
+            link: {
+              authorizationUrl: connectUrl,
+              connectUrl,
+              expiresAt: '2026-08-28T13:00:00.000Z',
+              provider: request.provider,
+              providerLabel: 'Garmin',
+            },
+          }
+        },
+      }),
+      prompt:
+        'Connect Garmin, briefly explain what happens next, remind me to return here, and attach a short instrumental chime.',
+      voiceMemoRuntime: createScriptedSongRuntime(songGenerations),
+    })
+
+    expect(deviceRequests).toEqual([
+      { action: 'connect', provider: 'garmin' },
+    ])
+    expect(songGenerations).toHaveLength(1)
+    expect(result.providerAuthoredFinalMessage).toBe(providerMessage)
+    expect(result.finalMessage).toBe(`${providerMessage}\n\n${connectUrl}`)
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.responseMedia).toEqual([
+      {
+        filename: 'explicit-group-song.mp3',
+        kind: 'voice_memo',
+        transcript: null,
+        transport: {
+          attachmentId: 'attachment_explicit_group_song',
+          kind: 'linq_attachment',
+        },
+      },
+    ])
+    expect(result.finalMessage.match(/https:\/\//gu) ?? []).toHaveLength(1)
+    expect(result.finalMessage.endsWith(connectUrl)).toBe(true)
+  })
+
+  it.each([
+    {
+      expected:
+        'Device connection links are temporarily unavailable. Please ask me again later.',
+      modelText:
+        'I could not retrieve the connection link. Please generate a new one.',
+      name: 'instead of generic model prose',
+    },
+    {
+      expected:
+        'Device connection links are temporarily unavailable. Please ask me again later.',
+      modelText: '',
+      name: 'trusted fallback',
+    },
+  ])('keeps the state-specific device failure $name at the final response boundary', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ expected, modelText }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { action: 'connect', provider: 'garmin' },
+          name: MURPH_DEVICE_TOOL.name,
+          namespace: MURPH_DEVICE_TOOL.namespace,
+        },
+      },
+      { text: modelText },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        deviceAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: createScriptedDeviceToolContext({
+        currentAssistantInputId: () => `ain_${'2'.repeat(32)}`,
+        request: async (request) => {
+          deviceRequests.push(request)
+          throw {
+            code: 'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE',
+            context: {
+              retryable: true,
+              status: 503,
+              statusCode: 503,
+            },
+            forwardedFromWeb: true,
+            name: 'HostedWebControlPlaneResponseError',
+            retryable: true,
+            status: 503,
+            statusCode: 503,
+          }
+        },
+      }),
+      prompt: 'connect garmin and keep the reply casual and lowercase.',
+    })
+
+    expect(deviceRequests).toEqual([
+      { action: 'connect', provider: 'garmin' },
+    ])
+    expect(result.providerAuthoredFinalMessage).toBe(modelText)
+    expect(result.finalMessage).toBe(expected)
+    expect(result.transcriptMessage).toBe(expected)
+    expect(result.finalMessage).not.toContain('https://')
+  })
+
+  it('keeps device connect effects and required links scoped across a live steer', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const firstInputId = `ain_${'3'.repeat(32)}`
+    const secondInputId = `ain_${'4'.repeat(32)}`
+    let currentInputId = firstInputId
+    let releaseFirstDeviceRequest: (() => void) | null = null
+    const firstDeviceRequest = new Promise<void>((resolve) => {
+      releaseFirstDeviceRequest = resolve
+    })
+    const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+    const connectUrl = (provider: string): string =>
+      `https://www.withmurph.ai/connect#deviceConnectIntent=dc_scripted_${provider}&connectSource=${provider}&connectProvider=${provider}`
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { action: 'connect', provider: 'garmin' },
+          name: MURPH_DEVICE_TOOL.name,
+          namespace: MURPH_DEVICE_TOOL.namespace,
+        },
+      },
+      {
+        delayMs: 2_000,
+        text: 'The Garmin link is ready.',
+      },
+      {
+        functionCall: {
+          arguments: { action: 'connect', provider: 'oura' },
+          name: MURPH_DEVICE_TOOL.name,
+          namespace: MURPH_DEVICE_TOOL.namespace,
+        },
+      },
+      { text: 'I switched the request to Oura.' },
+    )
+
+    let steered: Promise<void> | null = null
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        deviceAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: createScriptedDeviceToolContext({
+        currentAssistantInputId: () => currentInputId,
+        request: async (request) => {
+          deviceRequests.push(request)
+          releaseFirstDeviceRequest?.()
+          if (request.action !== 'connect') {
+            throw new Error('Expected one connect action per accepted input.')
+          }
+          return {
+            action: 'connect',
+            link: {
+              authorizationUrl: connectUrl(request.provider),
+              connectUrl: connectUrl(request.provider),
+              expiresAt: '2026-08-28T13:00:00.000Z',
+              provider: request.provider,
+              providerLabel: request.provider,
+            },
+          }
+        },
+      }),
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = firstDeviceRequest
+          .then(() => delay(500))
+          .then(() => {
+            currentInputId = secondInputId
+            return turn.steer({
+              prompt: 'Actually connect Oura instead and send that link.',
+            })
+          })
+      },
+      prompt: 'Connect Garmin and send me the link.',
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(deviceRequests).toEqual([
+      { action: 'connect', provider: 'garmin' },
+      { action: 'connect', provider: 'oura' },
+    ])
+    expect(result.providerAuthoredFinalMessage).toBe(
+      'I switched the request to Oura.',
+    )
+    expect(result.finalMessage).toBe(
+      `I switched the request to Oura.\n\n${connectUrl('oura')}`,
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.finalMessage).not.toContain(connectUrl('garmin'))
+  })
+
   it('enforces the murph.ask_grok per-turn provider-call ceiling through the real tool loop', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -9567,6 +9875,31 @@ function createScriptedGroupToolContext(
     groupTool: { request },
     sendVaultFile: async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
+    },
+    vaultFileSendAvailable: false,
+  }
+}
+
+function createScriptedDeviceToolContext(input: {
+  currentAssistantInputId: () => string
+  request: NonNullable<AssistantHostedToolContext['deviceTool']>['request']
+}): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentInvocationScope: () => ({
+      conversationScope: 'direct',
+      origin: {
+        assistantInputId: input.currentAssistantInputId(),
+        kind: 'accepted_input',
+        sessionId: 'session_scripted_device',
+      },
+      originSessionId: 'session_scripted_device',
+    }),
+    deviceTool: { request: input.request },
+    sendVaultFile: async () => {
+      throw new Error('Vault file sends are unavailable in this test.')
     },
     vaultFileSendAvailable: false,
   }

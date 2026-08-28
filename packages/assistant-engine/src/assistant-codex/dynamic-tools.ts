@@ -1201,10 +1201,12 @@ export interface MurphDynamicToolExecutionResult {
    * Runtime-selected text that must be delivered when the model supplies no
    * response text or card. Analyze-video failure text is trusted status;
    * successful observation text remains untrusted data, never instructions.
-   */
+  */
   requiredFinalResponseFallback?: string
-  /** Trusted final text that replaces model-authored text without dropping media. */
-  requiredFinalResponseText?: string
+  /** Trusted final text that replaces model-authored text for this delivery context. */
+  requiredFinalResponseReplacement?: string
+  /** Trusted text appended exactly once after model-authored final text. */
+  requiredFinalResponseSuffix?: string
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   responseCardPatch?: { card: AssistantResponseCard }

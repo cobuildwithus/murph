@@ -15,7 +15,7 @@ const DEVICE_TOOL_RESULT_MAX_BYTES = 60_000
 const CONNECT_FRESH_REQUEST_SUFFIX =
   'Do not call connect again for this member request. Wait for a fresh member request before another connect attempt.'
 const CONNECT_SUCCESS_HINT =
-  'Send connectUrl unchanged on the final line. Its short-lived browser claim is authorized for delivery to this current private member; it is not a provider credential. Success is terminal; do not call a device action again for this request.'
+  'Send connectUrl unchanged on the final line. Its short-lived browser claim is authorized for delivery to this current private member; it is not a provider credential. Do not repeat this connect effect for the same accepted input and provider.'
 const NO_DATA_OUTREACH_EFFECT_ONCE_HINT =
   'Do not retry this request. Wait for a fresh private member instruction before another no-data outreach change.'
 
@@ -60,7 +60,7 @@ export const MURPH_DEVICE_TOOL = {
   namespace: 'murph',
   name: 'device',
   description:
-    'Work with the current authenticated member’s wearable and health-device accounts. Capability questions are inspection-only: answer from this description without calling. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived first-party connectUrl for a supported provider. For one connection request, call connect at most once; after success, send the returned connectUrl unchanged on the final line without calling a device action again. Its short-lived browser claim is authorized for delivery to the current private member; it is not a provider credential. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin check-in timing while Garmin is the supported no-data-outreach source: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, provider access tokens, delivery routes, or generic commands.',
+    'Work with the current authenticated member’s wearable and health-device accounts. For capability questions, use the current projected provider context and read-only deferred catalog; never call list_accounts or another device action to test support. list_accounts returns matching accountId, provider, status, last sync, and safe error context for an actual account-state request. connect returns a short-lived first-party connectUrl for a supported provider. For one accepted member input, call connect at most once per requested provider; after success, send the returned connectUrl unchanged on the final line. Do not repeat that connect effect, but honor a later accepted member input or a different requested device action. Its short-lived browser claim is authorized for delivery to the current private member; it is not a provider credential. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin check-in timing while Garmin is the supported no-data-outreach source: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, provider access tokens, delivery routes, or generic commands.',
   inputSchema: z.toJSONSchema(deviceArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -75,7 +75,8 @@ export type DeviceDynamicToolRequest =
     }
 
 export interface DeviceDynamicToolExecutionResult {
-  requiredFinalResponseText?: string
+  requiredFinalResponseReplacement?: string
+  requiredFinalResponseSuffix?: string
   rpcResult: {
     contentItems: Array<{ text: string; type: 'inputText' }>
     success: boolean
@@ -83,11 +84,14 @@ export interface DeviceDynamicToolExecutionResult {
 }
 
 export interface DeviceTurnState {
-  connectAttempt: Promise<DeviceDynamicToolExecutionResult> | null
+  connectAttemptsByInputId: Map<
+    string,
+    Map<string, Promise<DeviceDynamicToolExecutionResult>>
+  >
 }
 
 export function createDeviceTurnState(): DeviceTurnState {
-  return { connectAttempt: null }
+  return { connectAttemptsByInputId: new Map() }
 }
 
 export function readDeviceDynamicToolRequest(input: {
@@ -131,14 +135,21 @@ interface ExecuteDeviceDynamicToolInput {
 export async function executeDeviceDynamicTool(
   input: ExecuteDeviceDynamicToolInput,
 ): Promise<DeviceDynamicToolExecutionResult> {
-  const turnState = input.turnState ?? null
-  if (turnState?.connectAttempt) {
-    return await turnState.connectAttempt
-  }
-
-  if (input.request.request.action === 'connect' && turnState) {
+  const request = input.request.request
+  const inputId = input.acceptedInputAuthority?.assistantInputId ?? null
+  if (request.action === 'connect' && input.turnState && inputId) {
+    let attemptsByProvider =
+      input.turnState.connectAttemptsByInputId.get(inputId)
+    if (!attemptsByProvider) {
+      attemptsByProvider = new Map()
+      input.turnState.connectAttemptsByInputId.set(inputId, attemptsByProvider)
+    }
+    const previousAttempt = attemptsByProvider.get(request.provider)
+    if (previousAttempt) {
+      return await previousAttempt
+    }
     const attempt = executeDeviceDynamicToolOnce(input)
-    turnState.connectAttempt = attempt
+    attemptsByProvider.set(request.provider, attempt)
     return await attempt
   }
 
@@ -176,7 +187,7 @@ async function executeDeviceDynamicToolOnce(
       ? {
           ...deviceTextResult(true, text),
           ...(response.action === 'connect'
-            ? { requiredFinalResponseText: response.link.connectUrl }
+            ? { requiredFinalResponseSuffix: response.link.connectUrl }
             : {}),
         }
       : deviceToolErrorResult(
@@ -535,7 +546,7 @@ function deviceToolErrorResult(
   return {
     ...deviceTextResult(false, serializeDeviceToolError(projection)),
     ...(projection.memberReply
-      ? { requiredFinalResponseText: projection.memberReply }
+      ? { requiredFinalResponseReplacement: projection.memberReply }
       : {}),
   }
 }
