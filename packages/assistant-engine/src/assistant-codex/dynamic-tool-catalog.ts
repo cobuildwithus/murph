@@ -1390,7 +1390,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'Exact title=groupLabel; people/count=participantTarget. Participant name is not groupLabel; no list. Unnamed: vault-cli memory show, else "a member". ask_current_sender=group; ask_current_sender_privately=private; clarify_current_sender=genuine ambiguity; continuations resume. handoff accepted=queued, not sent/shared.',
+    'ask=group answer; handoff=tell/post/share. title=groupLabel; people/count=participantTarget; names not groupLabel; no list. Unnamed: memory show, else "a member". ask_current_sender=group; ask_current_sender_privately=private; clarify=genuine ambiguity; continuations resume. accepted=queued, not sent/shared.',
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 

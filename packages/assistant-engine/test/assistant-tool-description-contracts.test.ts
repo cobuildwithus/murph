@@ -90,16 +90,19 @@ describe("assistant tool description call contracts", () => {
   it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("handoff");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Exact title=groupLabel",
+      "ask=group answer; handoff=tell/post/share",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "title=groupLabel",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "people/count=participantTarget",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Participant name is not groupLabel; no list",
+      "names not groupLabel; no list",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      'Unnamed: vault-cli memory show, else "a member"',
+      'Unnamed: memory show, else "a member"',
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "ask_current_sender=group",
@@ -108,7 +111,7 @@ describe("assistant tool description call contracts", () => {
       "ask_current_sender_privately=private",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "clarify_current_sender=genuine ambiguity",
+      "clarify=genuine ambiguity",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "continuations resume",
