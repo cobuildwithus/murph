@@ -44,3 +44,19 @@ request belongs to an older context.
   latest live-steered request"` — passed with one card attached at delivery
   context ordinal 1 and the complete deterministic nutrition-card reply.
 - `pnpm --dir apps/web test -- changelog-page.test.tsx` — passed (9 tests).
+- `pnpm --dir packages/assistant-engine exec vitest run --config
+  vitest.config.ts --no-coverage test/assistant-codex-runtime-steering.test.ts
+  -t "lets the latest steered context replace an earlier response card|renders
+  oversized card recovery for the latest steered context|rejects an in-flight
+  response card after accepted input advances"` — passed (4 tests).
+- `pnpm --dir packages/assistant-engine typecheck` after specialist remediation
+  — passed.
+
+## Review
+
+- Final ReviewGPT round 1: `ROUND_OUTCOME: PASS`; no qualifying findings.
+- Preliminary specialists: accepted one coverage finding for the retained stale
+  in-flight attachment guard. Added one shared deferred test arrangement for a
+  normal card and oversized-card text recovery; both reject the stale request
+  after accepted input advances. No Product UX, prompt, or frontend findings
+  remain.

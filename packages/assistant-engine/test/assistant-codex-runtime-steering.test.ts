@@ -46,6 +46,10 @@ import {
 describe('steered final segments', () => {
   type ScriptedSteeredFinalStep =
     | {
+        kind: 'callback'
+        run: () => Promise<void> | void
+      }
+    | {
         kind?: 'event'
         event: Record<string, unknown>
       }
@@ -58,6 +62,7 @@ describe('steered final segments', () => {
       }
     | {
         card: AssistantResponseCard
+        deferResponse?: boolean
         expectedSuccess?: boolean
         expectedText: string
         id: number
@@ -120,6 +125,12 @@ describe('steered final segments', () => {
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'attach-response-media' }> {
     return 'kind' in step && step.kind === 'attach-response-media'
+  }
+
+  function isCallbackStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'callback' }> {
+    return 'kind' in step && step.kind === 'callback'
   }
 
   function isAttachResponseCardStep(
@@ -218,6 +229,7 @@ describe('steered final segments', () => {
 
       queueMicrotask(() => {
         void (async () => {
+          const deferredCardResponses: Promise<unknown>[] = []
           const initialize = await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
@@ -250,6 +262,11 @@ describe('steered final segments', () => {
           }))
 
           for (const step of steps) {
+            if (isCallbackStep(step)) {
+              await step.run()
+              continue
+            }
+
             if (isAttachResponseCardStep(step)) {
               child.stdout.write(jsonLine({
                 id: step.id,
@@ -263,7 +280,9 @@ describe('steered final segments', () => {
                   turnId: 'turn-steered-finals',
                 },
               }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+              const responseAssertion = expect(
+                waitForRpcResponse(child, step.id),
+              ).resolves.toEqual({
                 id: step.id,
                 result: {
                   success: step.expectedSuccess ?? true,
@@ -275,6 +294,11 @@ describe('steered final segments', () => {
                   ],
                 },
               })
+              if (step.deferResponse === true) {
+                deferredCardResponses.push(responseAssertion)
+              } else {
+                await responseAssertion
+              }
               continue
             }
 
@@ -516,6 +540,8 @@ describe('steered final segments', () => {
 
             child.stdout.write(jsonLine(normalizeScriptedSteeredFinalEvent(step)))
           }
+
+          await Promise.all(deferredCardResponses)
 
           child.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -1260,6 +1286,71 @@ describe('steered final segments', () => {
       'Complete combined nutrition answer.',
     )
   })
+
+  it.each([
+    {
+      card: DAILY_NUTRITION_RESPONSE_CARD,
+      label: 'normal card',
+    },
+    {
+      card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+      label: 'oversized card text recovery',
+    },
+  ] satisfies Array<{ card: AssistantResponseCard; label: string }>)(
+    'rejects an in-flight response card after accepted input advances ($label)',
+    async ({ card }) => {
+      const executionStarted = createDeferred<void>()
+      const releaseExecution = createDeferred<void>()
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        completedItemEvent({
+          id: 'user-before-in-flight-card',
+          type: 'user_message',
+          message: 'Send the response card',
+        }),
+        {
+          card,
+          deferResponse: true,
+          expectedSuccess: false,
+          expectedText: 'response card unavailable for this final response',
+          id: 861,
+          kind: 'attach-response-card',
+        },
+        completedItemEvent({
+          id: 'user-after-in-flight-card',
+          type: 'user_message',
+          message: 'Answer this newer request instead',
+        }),
+        {
+          kind: 'callback',
+          run: async () => {
+            await executionStarted.promise
+            await Promise.resolve()
+            releaseExecution.resolve()
+          },
+        },
+        completedItemEvent({
+          id: 'assistant-after-in-flight-card',
+          type: 'assistant_message',
+          message: 'Latest-context answer.',
+        }),
+      ], {
+        hostedToolContext: createHostedToolContext({
+          beforeToolExecution: async (deliveryContextOrdinal) => {
+            expect(deliveryContextOrdinal).toBe(0)
+            executionStarted.resolve()
+            await releaseExecution.promise
+          },
+        }),
+        responseCardsAvailable: true,
+      })
+
+      expect(result.responseCard).toBeNull()
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseDeliveryContextOrdinal).toBe(1)
+      expect(result.finalMessage).toBe('Latest-context answer.')
+      expect(result.providerAuthoredFinalMessage).toBe('Latest-context answer.')
+    },
+  )
 
   it('keeps independent last-successful reply and reaction targets per steered segment', async () => {
     const firstReplyRef = `ain_${'1'.repeat(32)}`
