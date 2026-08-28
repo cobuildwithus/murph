@@ -470,8 +470,9 @@ one-hop low-level transports while the sole xAI exception proves the direct
 runtime URL and closed request syntax.
 
 Private generated-image failure diagnostics, their failure-only scope,
-untrusted-provider-text boundary, and reader-first hosted compatibility
-contract are jointly specified by `ARCHITECTURE.md`,
+untrusted-provider-text boundary, reader-first hosted compatibility contract,
+and the retired public-upload hard cut with generic effects-port 404
+diagnostics are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
