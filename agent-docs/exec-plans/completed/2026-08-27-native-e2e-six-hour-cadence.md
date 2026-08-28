@@ -1,6 +1,6 @@
 # Throttle native E2E to six-hour main cadence
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-28
 
@@ -141,3 +141,23 @@ Updated: 2026-08-28
     private dispatch/privacy boundaries.
   - The PR head is green, review findings are resolved, and both controllers
     are active only after the scheduled version lands on `main`.
+
+## Outcome
+
+- Cleared every actionable native controller and companion run; the remaining
+  GitHub records are zero-job platform tombstones that GitHub refuses to cancel,
+  force-cancel, or delete.
+- Replaced per-merge and per-deployment admission with staggered six-hour
+  schedules that run only after protected `main` changes, retry failures, and
+  reuse the latest same-SHA success without paid work.
+- Deleted the unused pull-request candidate lifecycle, destructive identity
+  reset path, and mutable source-pin configuration. The resulting patch removes
+  4,517 lines while adding 1,002 lines, including tests and owner docs.
+- Focused native tests passed (24/24), repository policy tests passed (34/34),
+  workflow lint and diff checks passed, and the final full ReviewGPT audit
+  returned `ROUND_OUTCOME: PASS` with no qualifying findings.
+- The reviewed patch remained byte-for-byte unchanged across the conflict-free
+  `main` refresh. Required exact-head CI, merge, controller re-enablement, and
+  clean worktree retirement remain operational completion steps outside the
+  implementation record.
+Completed: 2026-08-28
