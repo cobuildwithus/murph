@@ -18,8 +18,8 @@ rename, merge, omit, or substitute a member-supplied exercise in the workout.
    useful match exists, say so and use only a simple conservative description.
    Returned ids, slugs, and `exercise_catalog:*` source values are tool-routing
    data, not member-facing labels. Use them only where a command or media-tool
-   schema requires them. In visible text and alt text, use the natural exercise
-   name; never append a catalog id in parentheses or expose a source token.
+   schema requires them. In visible text, use the natural exercise name; never
+   append a catalog id in parentheses or expose a source token.
 2. Decide likely familiarity per movement from the current conversation and
    durable context. Strong familiarity signals include stated experience in the
    relevant training modality, correct movement-specific language, prior logged

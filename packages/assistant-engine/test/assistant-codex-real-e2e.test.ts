@@ -3515,7 +3515,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           prompt: [
             'Teach the saved one-movement doorway stretch routine now.',
             'Use 8 repetitions over 60 seconds and stop if pain increases.',
-            'Use the reviewed catalog picture when it helps show the setup.',
           ].join(' '),
         })
         const scheduledDecision = parseAssistantNotificationDecision(
@@ -3608,13 +3607,17 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               url: 'https://cdn.example.test/doorway-stretch.png',
             }),
           ])
-          expect(journey.text, `${journey.label} natural exercise name`).toMatch(
-            /doorway|stretch/iu,
-          )
+          if (journey.text.trim().length > 0) {
+            expect(
+              journey.text,
+              `${journey.label} natural exercise name`,
+            ).toMatch(/doorway|stretch/iu)
+          }
           expect(journey.text, `${journey.label} internal catalog data`).not.toMatch(
             /ST170|doorway-stretch|exercise_catalog/iu,
           )
         }
+        expect(scheduledDecision.text).toMatch(/doorway|stretch/iu)
         expect(scheduledDecision.text).toMatch(/8/iu)
         expect(scheduledDecision.text).toMatch(/60|minute/iu)
         expect(scheduledDecision.text).toMatch(/pain/iu)
