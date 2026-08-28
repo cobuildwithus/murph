@@ -1,6 +1,6 @@
 # Hosted Local Worktree Dev
 
-Last verified: 2026-08-20
+Last verified: 2026-08-28
 
 ## Purpose
 
@@ -35,6 +35,13 @@ the helper below. That profile scopes runner cleanup to the slug-derived local
 build id, skips broad image cleanup, keeps generated hosted-local crypto state
 under the worktree's `.tmp/`, and never coordinates by symlinking
 `apps/cloudflare/.dev.vars`.
+
+Before startup, the harness makes one best-effort cleanup pass over its runner
+resources. It removes stopped runner containers and their attached anonymous
+volumes. It also removes stale generated runner images without forcing removal,
+while preserving images used by running containers and the current build.
+Cleanup failures do not block startup. The pass does not prune named volumes,
+build cache, unrelated containers, or unrelated images.
 
 ## Worktree Helper
 

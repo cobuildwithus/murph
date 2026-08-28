@@ -656,6 +656,7 @@ export async function cleanupHostedRunnerContainers(input: {
   env?: NodeJS.ProcessEnv;
   ignoreErrors?: boolean;
   scope?: HostedRunnerContainerCleanupScope;
+  stoppedOnly?: boolean;
   timeoutMs?: number;
 }): Promise<void> {
   const timeoutMs = input.timeoutMs ?? 15_000;
@@ -663,6 +664,7 @@ export async function cleanupHostedRunnerContainers(input: {
     cwd: input.cwd,
     env: input.env,
     scope: input.scope,
+    stoppedOnly: input.stoppedOnly,
     timeoutMs,
   });
 
@@ -684,7 +686,7 @@ export async function cleanupHostedRunnerContainers(input: {
   }
 
   const removed = await runBoundedCommand({
-    args: ["rm", "-f", ...containerIds],
+    args: ["rm", "-f", "-v", ...containerIds],
     command: "docker",
     cwd: input.cwd,
     env: input.env,
@@ -699,6 +701,7 @@ export async function cleanupHostedRunnerContainers(input: {
       cwd: input.cwd,
       env: input.env,
       scope: input.scope,
+      stoppedOnly: input.stoppedOnly,
       timeoutMs: Math.min(timeoutMs, 3_000),
     });
     if (disappeared || input.ignoreErrors) {
@@ -708,7 +711,7 @@ export async function cleanupHostedRunnerContainers(input: {
     throw new Error(
       [
         "Failed to remove stale local Cloudflare runner containers.",
-        formatBoundedCommandResult(`docker rm -f (${containerIds.length})`, removed),
+        formatBoundedCommandResult(`docker rm -f -v (${containerIds.length})`, removed),
       ].join("\n"),
     );
   }
@@ -717,7 +720,9 @@ export async function cleanupHostedRunnerContainers(input: {
 export async function cleanupHostedRunnerImages(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  force?: boolean;
   ignoreErrors?: boolean;
+  preserveCurrentBuild?: boolean;
   scope?: HostedRunnerContainerCleanupScope;
   timeoutMs?: number;
 }): Promise<void> {
@@ -725,6 +730,7 @@ export async function cleanupHostedRunnerImages(input: {
   const listed = await listHostedRunnerImageRefs({
     cwd: input.cwd,
     env: input.env,
+    preserveCurrentBuild: input.preserveCurrentBuild,
     scope: input.scope,
     timeoutMs,
   });
@@ -748,7 +754,7 @@ export async function cleanupHostedRunnerImages(input: {
 
   for (const batch of chunk(imageRefs, HOSTED_RUNNER_IMAGE_RM_BATCH_SIZE)) {
     const removed = await runBoundedCommand({
-      args: ["image", "rm", "-f", ...batch],
+      args: ["image", "rm", ...(input.force === false ? [] : ["-f"]), ...batch],
       command: "docker",
       cwd: input.cwd,
       env: input.env,
@@ -798,6 +804,7 @@ export async function cleanupHostedRunnerContainerLocalState(input: {
 async function listHostedRunnerImageRefs(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  preserveCurrentBuild?: boolean;
   scope?: HostedRunnerContainerCleanupScope;
   timeoutMs: number;
 }): Promise<{
@@ -884,10 +891,66 @@ async function listHostedRunnerImageRefs(input: {
       .map((row) => row.id),
   );
 
+  const preservedImageIds = new Set<string>();
+  if (input.preserveCurrentBuild) {
+    const currentBuildId = resolveHostedRunnerCleanupLocalBuildId(input.env);
+    if (currentBuildId) {
+      const currentBuildImages = await listHostedRunnerImageIdsByLocalBuildId({
+        cwd: input.cwd,
+        env: input.env,
+        localBuildId: currentBuildId,
+        timeoutMs: input.timeoutMs,
+      });
+      if (
+        currentBuildImages.result.timedOut
+        || currentBuildImages.result.exitCode !== 0
+      ) {
+        return {
+          imageRefs: [],
+          result: currentBuildImages.result,
+        };
+      }
+      for (const imageId of currentBuildImages.imageIds) {
+        preservedImageIds.add(imageId);
+      }
+    }
+  }
+
   return {
     imageRefs: uniqueStrings(rows
-      .filter((row) => !runningImageIds.has(row.id))
+      .filter((row) => (
+        !runningImageIds.has(row.id) && !preservedImageIds.has(row.id)
+      ))
       .map((row) => row.ref)),
+    result,
+  };
+}
+
+async function listHostedRunnerImageIdsByLocalBuildId(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  localBuildId: string;
+  timeoutMs: number;
+}): Promise<{
+  imageIds: string[];
+  result: BoundedCommandResult;
+}> {
+  const result = await runBoundedCommand({
+    args: [
+      "images",
+      "--format",
+      "{{.ID}}",
+      "--filter",
+      `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}=${input.localBuildId}`,
+    ],
+    command: "docker",
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return {
+    imageIds: parseWhitespaceSeparatedDockerIds(result.stdout),
     result,
   };
 }
@@ -925,6 +988,7 @@ async function listHostedRunnerContainerIds(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   scope?: HostedRunnerContainerCleanupScope;
+  stoppedOnly?: boolean;
   timeoutMs: number;
 }): Promise<{
   containerIds: string[];
@@ -936,6 +1000,7 @@ async function listHostedRunnerContainerIds(input: {
       env: input.env,
       namePrefix: HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX,
       requireLocalBuildLabel: true,
+      stoppedOnly: input.stoppedOnly,
       timeoutMs: input.timeoutMs,
     });
     if (listed.result.timedOut || listed.result.exitCode !== 0) {
@@ -949,6 +1014,7 @@ async function listHostedRunnerContainerIds(input: {
       env: input.env,
       namePrefix: HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX,
       requireLocalBuildLabel: false,
+      stoppedOnly: input.stoppedOnly,
       timeoutMs: input.timeoutMs,
     });
     if (proxies.result.timedOut || proxies.result.exitCode !== 0) {
@@ -969,6 +1035,7 @@ async function listHostedRunnerContainerIds(input: {
       containers: listed.containers,
       cwd: input.cwd,
       env: input.env,
+      stoppedOnly: input.stoppedOnly,
       timeoutMs: input.timeoutMs,
     });
     if (proxyResult !== null) {
@@ -990,6 +1057,7 @@ async function listHostedRunnerContainerIds(input: {
       env: input.env,
       namePrefix: resolveHostedRunnerContainerNamePrefix(input.env),
       requireLocalBuildLabel: true,
+      stoppedOnly: input.stoppedOnly,
       timeoutMs: input.timeoutMs,
     });
     if (listed.result.timedOut || listed.result.exitCode !== 0) {
@@ -1005,6 +1073,7 @@ async function listHostedRunnerContainerIds(input: {
       containers: listed.containers,
       cwd: input.cwd,
       env: input.env,
+      stoppedOnly: input.stoppedOnly,
       timeoutMs: input.timeoutMs,
     });
     if (proxyResult !== null) {
@@ -1037,6 +1106,7 @@ async function listHostedRunnerContainerIds(input: {
     cwd: input.cwd,
     env: input.env,
     localBuildId,
+    stoppedOnly: input.stoppedOnly,
     timeoutMs: input.timeoutMs,
   });
   if (labeled.result.timedOut || labeled.result.exitCode !== 0) {
@@ -1051,6 +1121,7 @@ async function listHostedRunnerContainerIds(input: {
     containers: labeled.containers,
     cwd: input.cwd,
     env: input.env,
+    stoppedOnly: input.stoppedOnly,
     timeoutMs: input.timeoutMs,
   });
   if (proxyResult !== null) {
@@ -1063,6 +1134,7 @@ async function listHostedRunnerContainerIds(input: {
     containerIds,
     cwd: input.cwd,
     env: input.env,
+    stoppedOnly: input.stoppedOnly,
     timeoutMs: input.timeoutMs,
   });
   if (orphanProxyResult !== null) {
@@ -1082,6 +1154,7 @@ async function listHostedRunnerContainersByNamePrefix(input: {
   env?: NodeJS.ProcessEnv;
   namePrefix: string;
   requireLocalBuildLabel: boolean;
+  stoppedOnly?: boolean;
   timeoutMs: number;
 }): Promise<{
   containers: Array<{ id: string; name: string }>;
@@ -1098,6 +1171,7 @@ async function listHostedRunnerContainersByNamePrefix(input: {
       ...(input.requireLocalBuildLabel
         ? ["--filter", `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}`]
         : []),
+      ...buildStoppedContainerStatusFilters(input.stoppedOnly),
     ],
     command: "docker",
     cwd: input.cwd,
@@ -1115,6 +1189,7 @@ async function listHostedRunnerContainersByLocalBuildId(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   localBuildId: string;
+  stoppedOnly?: boolean;
   timeoutMs: number;
 }): Promise<{
   containers: Array<{ id: string; name: string }>;
@@ -1128,6 +1203,7 @@ async function listHostedRunnerContainersByLocalBuildId(input: {
       "{{.ID}} {{.Names}}",
       "--filter",
       `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}=${input.localBuildId}`,
+      ...buildStoppedContainerStatusFilters(input.stoppedOnly),
     ],
     command: "docker",
     cwd: input.cwd,
@@ -1146,6 +1222,7 @@ async function addHostedRunnerProxyContainerIds(input: {
   containers: ReadonlyArray<{ id: string; name: string }>;
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  stoppedOnly?: boolean;
   timeoutMs: number;
 }): Promise<BoundedCommandResult | null> {
   for (const container of input.containers) {
@@ -1155,6 +1232,7 @@ async function addHostedRunnerProxyContainerIds(input: {
         "-aq",
         "--filter",
         `name=${container.name}-proxy`,
+        ...buildStoppedContainerStatusFilters(input.stoppedOnly),
       ],
       command: "docker",
       cwd: input.cwd,
@@ -1176,6 +1254,7 @@ async function addCurrentHostedLocalIsolatedRunnerProxyContainerIds(input: {
   containerIds: Set<string>;
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  stoppedOnly?: boolean;
   timeoutMs: number;
 }): Promise<BoundedCommandResult | null> {
   const namePrefix = resolveHostedRunnerContainerNamePrefix(input.env);
@@ -1188,6 +1267,7 @@ async function addCurrentHostedLocalIsolatedRunnerProxyContainerIds(input: {
     env: input.env,
     namePrefix,
     requireLocalBuildLabel: false,
+    stoppedOnly: input.stoppedOnly,
     timeoutMs: input.timeoutMs,
   });
   if (proxies.result.timedOut || proxies.result.exitCode !== 0) {
@@ -1204,6 +1284,21 @@ async function addCurrentHostedLocalIsolatedRunnerProxyContainerIds(input: {
   }
 
   return null;
+}
+
+function buildStoppedContainerStatusFilters(stoppedOnly: boolean | undefined): string[] {
+  if (!stoppedOnly) {
+    return [];
+  }
+
+  return [
+    "--filter",
+    "status=created",
+    "--filter",
+    "status=exited",
+    "--filter",
+    "status=dead",
+  ];
 }
 
 function parseHostedRunnerContainerIdNameRows(
@@ -1307,6 +1402,7 @@ async function waitForHostedRunnerContainersToDisappear(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   scope?: HostedRunnerContainerCleanupScope;
+  stoppedOnly?: boolean;
   timeoutMs: number;
 }): Promise<boolean> {
   const startedAt = Date.now();
@@ -1316,6 +1412,7 @@ async function waitForHostedRunnerContainersToDisappear(input: {
       cwd: input.cwd,
       env: input.env,
       scope: input.scope,
+      stoppedOnly: input.stoppedOnly,
       timeoutMs: Math.min(input.timeoutMs, 1_000),
     });
     if (!listed.result.timedOut && listed.result.exitCode === 0 && listed.containerIds.length === 0) {
