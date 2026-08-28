@@ -354,23 +354,17 @@ privacy, signed-device, and paired-ECG gates pass.
 
 ### Automated native acceptance
 
-Auth/control/device-sync changes use the protected cross-repository acceptance
-lane documented in `agent-docs/references/testing-ci-map.md`. The required PR
-proof runs the normally compiled iOS app on an Apple simulator against the exact
-PR SHA deployed as a real hosted/minified Web build, with the dedicated real
-non-production Privy test account/OTP, real companion admission/legal consent and
-sign-in-token persistence, real Junction sandbox SDK calls, and the real iOS
-HealthKit permission UI. Mocked, fixture, hosted-local, or hermetic coverage
-cannot replace that gate. Native completion alone is insufficient: before
-cleanup, trusted orchestration proves the fixed Privy principal was created in
-this run and the corresponding real Junction sandbox user reports a connected
-`apple_health_kit` provider. Before native dispatch it also proves the exact
-candidate origin succeeds anonymously without deployment-protection credentials.
-The protected runner owns `orchestrator_owned_reset`: retire only lane-owned E2E
-deployments, enumerate the lane-exclusive Junction sandbox team, delete its sole
-production-derived or orphaned lane user and prove the team empty, reset only the
-isolated E2E database, then delete only the fixed Privy user. Production canary
-mode uses an existing identity and is non-destructive.
+Auth/control/device-sync changes retain deterministic PR coverage, while the
+protected cross-repository production canary documented in
+`agent-docs/references/testing-ci-map.md` runs every six hours after `main`
+advances. It runs the normally compiled iOS app on an Apple simulator against
+the exact deployed production Web SHA with immutable reviewed native source,
+existing canary identity, real companion admission/legal consent and
+sign-in-token persistence, real Junction SDK calls, and the real iOS HealthKit
+permission UI. The canary is non-destructive and owns no candidate deployment,
+database reset, or provider-identity cleanup authority. Mocked, fixture,
+hosted-local, and hermetic coverage supplement but do not replace this deployed
+production evidence.
 
 ### App Store review requirements (verified June 2026)
 

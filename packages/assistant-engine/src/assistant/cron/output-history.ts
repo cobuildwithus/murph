@@ -10,6 +10,9 @@ import type {
 
 import type { AssistantNotificationInput } from '../notification-turn.js'
 import { resolveAssistantStatePaths } from '../store/paths.js'
+import {
+  ASSISTANT_CRON_RECURRING_REMINDER_CADENCE_INSTRUCTIONS,
+} from './recurring-reminder-conversation.js'
 import { readAssistantCronRuns } from './store.js'
 
 const ASSISTANT_CRON_OUTPUT_HISTORY_LIMIT = 20
@@ -39,26 +42,32 @@ export async function prepareAssistantCronNotificationInput(
     return input
   }
 
-  const historyPrompt = buildAssistantCronOutputHistoryPrompt(
-    selectAssistantCronRecentOutputs(
-      await readAssistantCronRuns(
-        resolveAssistantStatePaths(input.vault),
-        scope.automationId,
-      ),
-      {
-        sessionId: selection.sessionId,
-        startedAtOrAfter: scope.updatedAt,
-      },
+  const outputs = selectAssistantCronRecentOutputs(
+    await readAssistantCronRuns(
+      resolveAssistantStatePaths(input.vault),
+      scope.automationId,
     ),
+    {
+      sessionId: selection.sessionId,
+      startedAtOrAfter: scope.updatedAt,
+    },
   )
+  const historyPrompt = buildAssistantCronOutputHistoryPrompt(outputs)
   if (!historyPrompt) {
     return input
   }
 
+  const enrichmentPrompt = input.recurringReminderConversation
+    ? [
+        historyPrompt,
+        ASSISTANT_CRON_RECURRING_REMINDER_CADENCE_INSTRUCTIONS,
+      ].join('\n\n')
+    : historyPrompt
+
   return {
     ...input,
     instructions: appendAssistantCronOutputHistoryPrompt({
-      historyPrompt,
+      historyPrompt: enrichmentPrompt,
       instructions: input.instructions,
     }),
   }

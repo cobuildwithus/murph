@@ -136,6 +136,13 @@ describe("system mailbox delegated direction state", () => {
       now: OCCURRED_AT,
       state: { pending: [device, consented] },
     })).toEqual(device);
+
+    const laterDevice = createDeviceItem("3");
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: null,
+      now: OCCURRED_AT,
+      state: { pending: [consented, laterDevice] },
+    })).toEqual(consented);
   });
 
   it("excludes an expired handoff from selection, wakes, and handled blocking, then prunes it on mutation", async () => {

@@ -136,6 +136,7 @@ type HostedSystemMailboxPreparationSelection =
 
 export async function claimHostedSystemMailboxItem(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[];
+  itemId?: string | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedSystemMailboxPendingItem | null> {
@@ -146,6 +147,7 @@ export async function claimHostedSystemMailboxItem(input: {
   return await updateHostedSystemMailboxState(input.vaultRoot, (state) => {
     const firstAllowed = state.pending.find((item) =>
       input.allowedRouteActions.includes(item.routeAction)
+      && (input.itemId == null || item.itemId === input.itemId)
     ) ?? null;
     if (!firstAllowed || firstAllowed.status === "recording") {
       return { result: null, state };
@@ -155,7 +157,13 @@ export async function claimHostedSystemMailboxItem(input: {
       : findNextHostedSystemMailboxQueueItem({
           allowedRouteActions: input.allowedRouteActions,
           now: startedAt,
-          state,
+          state: input.itemId == null
+            ? state
+            : {
+                pending: state.pending.filter((item) =>
+                  item.itemId === input.itemId
+                ),
+              },
         });
     if (!pending) {
       return { result: null, state };
