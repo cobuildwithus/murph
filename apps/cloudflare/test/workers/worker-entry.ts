@@ -558,7 +558,7 @@ async function exerciseGeneratedImageUploadTombstone(): Promise<{
   });
   writeRunnerRuntimeWriteFenceHeaders(headers, {
     attemptId: lease.attemptId,
-    generation: lease.leaseGeneration,
+    generation: lease.generation,
     workspaceVersion: lease.workspaceVersion ?? "7",
   });
 
@@ -591,7 +591,7 @@ function createWriteFenceLatencyRequest(lease: RunnerWriteFenceToken): Request {
   const headers = new Headers();
   writeRunnerRuntimeWriteFenceHeaders(headers, {
     attemptId: lease.attemptId,
-    generation: lease.leaseGeneration,
+    generation: lease.generation,
     workspaceVersion: lease.workspaceVersion ?? "7",
   });
   return new Request("http://results.worker/__test/lease-latency", {

@@ -245,7 +245,7 @@ describe("runtime invocation transport failure fence handling", () => {
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
-        leaseGeneration: token.leaseGeneration,
+        leaseGeneration: token.generation,
         userId: TEST_USER_ID,
       }),
     });
@@ -287,7 +287,7 @@ describe("runtime invocation transport failure fence handling", () => {
         readActiveRuntimeUserFence: async (token) => ({
           active: true,
           attemptId: token.attemptId,
-          leaseGeneration: token.leaseGeneration,
+          leaseGeneration: token.generation,
           userId: TEST_USER_ID,
         }),
       });
@@ -336,7 +336,7 @@ describe("runtime invocation transport failure fence handling", () => {
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
-        leaseGeneration: token.leaseGeneration,
+        leaseGeneration: token.generation,
         userId: TEST_USER_ID,
       }),
     });
@@ -610,7 +610,7 @@ describe("runtime invocation transport failure fence handling", () => {
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
-        leaseGeneration: token.leaseGeneration,
+        leaseGeneration: token.generation,
         userId: "member_999",
       }),
     });
@@ -682,7 +682,7 @@ describe("runtime invocation transport failure fence handling", () => {
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
-        leaseGeneration: token.leaseGeneration,
+        leaseGeneration: token.generation,
         userId: TEST_USER_ID,
       }),
     });
