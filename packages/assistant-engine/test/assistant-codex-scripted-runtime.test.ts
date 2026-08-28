@@ -3554,12 +3554,19 @@ text(result.output);
     })
     expect(currentSpeaker.session.sessionId).toBe(resolved.session.sessionId)
     expect(currentSpeaker.session.binding.actorId).toBe(laterParticipantId)
+    const canCommit = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false)
+    const canFinalize = vi.fn(() => true)
 
     const result = await sendAssistantAskContinuationLocal({
       actorId: currentSpeaker.session.binding.actorId,
       answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
       bindingDeliveryTarget: threadId,
-      canCommit: () => true,
+      canCommit,
+      canFinalize,
       channel: 'telegram',
       conversation: conversationRefFromBinding(currentSpeaker.session.binding),
       deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
@@ -3593,6 +3600,8 @@ text(result.output);
       response: 'First reviewed fact.\n---\nSecond reviewed fact.',
       status: 'completed',
     })
+    expect(canCommit).toHaveBeenCalledTimes(3)
+    expect(canFinalize).toHaveBeenCalledOnce()
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
     expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       expect.objectContaining({
@@ -7452,9 +7461,18 @@ if (!tool) {
       {
         functionCall: {
           arguments: {
+            action: 'list_memberships',
+          },
+          name: 'group_membership',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
             action: 'handoff',
             context: 'I finished the race.',
-            groupLabel: 'Running Club',
+            membershipId: 'membership_running_club',
           },
           name: 'group_consult',
           namespace: 'murph',
@@ -7469,6 +7487,32 @@ if (!tool) {
       hostedToolContext: {
         ...createScriptedGroupToolContext(async (request) => {
           groupRequests.push(request)
+          if (request.action === 'list_memberships') {
+            return {
+              action: 'list_memberships',
+              result: {
+                disclosureGrants: [],
+                memberships: [{
+                  displayName: 'Running Club',
+                  grantedVaultShareProjectionScopes: [],
+                  kind: 'friends',
+                  memberCount: 2,
+                  membershipId: 'membership_running_club',
+                  participantRoster: {
+                    participantCount: 3,
+                    participantLabels: [{ displayName: 'Taylor' }, { phoneHint: { areaCode: '415', lastFour: '9876' } }],
+                    status: 'available',
+                  },
+                  permissionsUrl: null,
+                  requestedVaultShareProjectionScopes: [],
+                  role: 'member',
+                  sponsorshipUrl: null,
+                }],
+                status: 'ok',
+                truncated: false,
+              },
+            }
+          }
           return {
             action: 'handoff',
             result: { status: 'accepted', targetLabel: 'Running Club' },
@@ -7491,16 +7535,17 @@ if (!tool) {
       '"name":"group_consult"',
     )
     expect(groupRequests).toEqual([
+      { action: 'list_memberships' },
       expect.objectContaining({
         action: 'handoff',
         context: 'I finished the race.',
-        groupLabel: 'Running Club',
+        membershipId: 'membership_running_club',
       }),
     ])
     expect(result.finalMessage).toBe(
       'I queued that for Running Club; it has not been sent yet.',
     )
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
   it('keeps physical-note recovery deferred until an explicit request discovers it', {

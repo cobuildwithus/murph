@@ -340,7 +340,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("accepts three ordered edit contenders across two stale snapshots", async () => {
+    it("serializes edit contenders and preserves the newest revision", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const firstBlocker = createPrismaClient({ databaseUrl, poolMax: 1 });
       const retryBlocker = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -522,11 +522,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         releaseRetryBlocker.resolve();
         const plans = await Promise.all(editRequests);
 
-        expect(plans.map((plan) => plan.response.reason)).toEqual([
+        const secondReason = plans[1]?.response.reason;
+        expect(plans[0]?.response.reason).toBe("wake-appended-message-edit");
+        expect([
           "wake-appended-message-edit",
-          "wake-appended-message-edit",
-          "wake-appended-message-edit",
-        ]);
+          "message-edit-revision-stale",
+        ]).toContain(secondReason);
+        expect(plans[2]?.response.reason).toBe("wake-appended-message-edit");
+        if (secondReason === "message-edit-revision-stale") {
+          expect(plans[1]?.wakeHandoffs).toBeUndefined();
+        }
         expect(plans[2]?.wakeHandoffs).toEqual([
           expect.objectContaining({
             eventId: events[2]?.event_id,
@@ -537,12 +542,23 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           prisma: observer,
           sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
         });
-        await expect(observer.$transaction((tx) =>
+        const finalEntries = await observer.$transaction((tx) =>
           readHostedMailboxSourceConversationEntriesTx({
             preparation: finalPreparation,
             sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
             tx,
-          }), transactionOptions)).resolves.toHaveLength(4);
+          }), transactionOptions);
+        expect(finalEntries).toHaveLength(
+          secondReason === "wake-appended-message-edit" ? 4 : 3,
+        );
+        expect(finalEntries.at(-1)?.wake).toMatchObject({
+          eventId: events[2]?.event_id,
+          message: {
+            linqMessage: {
+              parts: [{ type: "text", value: "Corrected wording 3" }],
+            },
+          },
+        });
       } finally {
         releaseFirstBlocker.resolve();
         releaseRetryBlocker.resolve();

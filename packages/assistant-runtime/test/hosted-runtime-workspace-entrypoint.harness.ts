@@ -1713,6 +1713,25 @@ function createConsentedMemberAssistantAskRequestedWake(input: {
   };
 }
 
+function createOperatorTaskAssistantAskRequestedWake(input: {
+  eventId: string;
+}): HostedExecutionAssistantAskRequestedWake {
+  return {
+    ask: {
+      expiresAt: "2026-04-27T00:10:00.000Z",
+      question: "Inspect the selected synthetic runtime state.",
+      target: {
+        kind: "operator_task",
+        taskId: "opt_synthetic_entrypoint_ask",
+      },
+    },
+    eventId: input.eventId,
+    kind: "assistant.ask.requested",
+    occurredAt: TEST_NOW,
+    userId: TEST_USER_ID,
+  };
+}
+
 function createPrivateCurrentSenderAssistantAskRequestedWake(input: {
   eventId: string;
 }): HostedExecutionAssistantAskRequestedWake {
@@ -2557,6 +2576,7 @@ export {
   createMailboxItem,
   createMailboxPort,
   createOpenAiProbeCertificateFiles,
+  createOperatorTaskAssistantAskRequestedWake,
   createPlatform,
   createPrivateCurrentSenderAssistantAskRequestedWake,
   createResolvedAssistantAskSystemMailboxItem,

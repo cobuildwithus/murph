@@ -7,10 +7,10 @@ import {
 
 import type {
   HostedRuntimeReconciliationBlockedReason,
+  HostedRuntimeSystemMailboxFrontierClass,
 } from "./reconciliation-facts-wire.ts";
 
 export {
-  HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
   projectHostedRuntimeReconciliationFactsWireResponse,
@@ -76,6 +76,7 @@ export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMod
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
+  "environment-interview.completed",
   "runtime.browser-vault-refresh-requested",
   "runtime.maintenance-requested",
 ] as const satisfies readonly HostedMailboxKind[];
@@ -98,6 +99,26 @@ export function isHostedSystemMailboxModelFreeNotification(input: {
   return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES.some(
     (prefix) => dedupeKey.length > prefix.length && dedupeKey.startsWith(prefix),
   );
+}
+
+export function classifyHostedSystemMailboxExecutionClass(input: {
+  dedupeKey: string | null | undefined;
+  kind: string;
+}): HostedRuntimeSystemMailboxFrontierClass {
+  if (
+    isHostedSystemMailboxModelFreeNotification({
+      dedupeKey: input.dedupeKey,
+      kind: input.kind,
+    })
+  ) {
+    return "model_free";
+  }
+
+  return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.some((kind) =>
+    kind === input.kind && kind !== "assistant.notification.requested"
+  )
+    ? "model_free"
+    : "default_owned";
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {

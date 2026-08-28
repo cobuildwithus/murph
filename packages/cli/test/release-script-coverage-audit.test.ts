@@ -55,6 +55,15 @@ const hostedWebPackageJson = JSON.parse(
 }
 const auditZipEntryListMaxBufferBytes = 16 * 1024 * 1024
 
+function expectCoverageAdmissionRule(content: string): void {
+  expect(content).toMatch(
+    /tests,\s+fixtures,\s+or\s+direct-proof\s+infrastructure\s+are\s+a\s+primary\s+PR\s+outcome/u,
+  )
+  expect(content).toMatch(
+    /changed\s+behavior\s+makes\s+a\s+material\s+proof\s+claim\s+that\s+ordinary\s+focused\s+owner\s+tests\s+cannot\s+establish\s+at\s+a\s+stable\s+boundary/u,
+  )
+}
+
 type BrowserCommand = {
   listPollCount: number
   method: string
@@ -1327,13 +1336,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.138')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.139')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.138'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.139'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -2004,7 +2013,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionSpecialistsPrompt).toContain(
       'current writer, current consumer',
     )
-    expect(completionSpecialistsPrompt).toContain('`reviewgpt-coverage.patch`')
+    expect(completionSpecialistsPrompt).not.toContain('reviewgpt-coverage.patch')
+    expect(completionSpecialistsPrompt).toContain('Return one plain-text final message.')
     expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: PASS`')
     expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: FINDINGS`')
     expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: INVALID`')
@@ -2087,13 +2097,13 @@ describe('monorepo release flow coverage audit', () => {
       /A preliminary specialist result does not end the active task turn/u,
     )
     expect(prReviewGptLoop).toMatch(
-      /After the\s+parent reports the result and dispositions as a progress update, it may inspect\s+an attached coverage artifact and remediate accepted findings/u,
+      /After the\s+parent reports the result and dispositions as a progress update, it may\s+remediate accepted findings/u,
     )
     expect(prReviewGptLoop).toMatch(
       /A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause/u,
     )
-    expect(prReviewGptLoop).toContain(
-      'that stricter pause\nalso blocks pending specialist-driven mutation',
+    expect(prReviewGptLoop).toMatch(
+      /that stricter pause\s+also blocks pending specialist-driven\s+mutation/u,
     )
     expect(prReviewGptLoop).toMatch(
       /A validated final\s+`ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly/u,
@@ -2121,7 +2131,7 @@ describe('monorepo release flow coverage audit', () => {
       'A `FINDINGS` result needs no review rerun',
     )
     expect(prReviewGptLoop).toContain(
-      'continue with accepted remediation or artifact inspection without\na user-resume pause',
+      'continue with accepted remediation without\na user-resume pause',
     )
     expect(prReviewGptLoop).toMatch(/non-obvious\s+affected\s+surfaces/iu)
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
@@ -2184,7 +2194,7 @@ describe('monorepo release flow coverage audit', () => {
       'Prompt-primary PRs still run the preliminary specialist prompt',
     )
     expect(agentsGuide).toMatch(
-      /One preliminary `completion-specialists` ReviewGPT pass\s+applies the relevant Product UX, prompt, frontend, and coverage lenses together/u,
+      /One review-only preliminary `completion-specialists` ReviewGPT pass\s+applies the relevant Product UX, prompt, frontend, and coverage lenses together/u,
     )
     expect(agentsGuide).toContain(
       'Agents may reject speculative, unproven, or disproportionate fixes',
@@ -2216,8 +2226,6 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'verification-and-runtime.md'),
       'utf8',
     )
-    const coverageAdmissionRule =
-      /diff changes executable behavior or changes\s+the tests,\s+fixtures,\s+configuration,\s+or direct-proof scaffolding that\s+establishes its proof/u
     expect(agentsGuide).toContain(
       'do not require local `pnpm test:diff`, `pnpm test`, `pnpm test:coverage`, or `pnpm verify:acceptance`',
     )
@@ -2231,13 +2239,13 @@ describe('monorepo release flow coverage audit', () => {
       /run\s+`pnpm verify:acceptance` once for that direct-push attempt/u,
     )
     expect(completionSpecialistsPrompt).toMatch(
-      /Applicability does not depend on a local coverage\s+umbrella command/u,
+      /It does not apply merely because executable behavior or proof\s+files changed/u,
     )
-    expect(completionSpecialistsPrompt).toMatch(coverageAdmissionRule)
-    expect(prReviewGptLoop).toMatch(coverageAdmissionRule)
-    expect(completionWorkflow).toMatch(coverageAdmissionRule)
-    expect(completionSpecialistsPrompt).toMatch(
-      /push\s+it through required exact-head CI/u,
+    expectCoverageAdmissionRule(completionSpecialistsPrompt)
+    expectCoverageAdmissionRule(prReviewGptLoop)
+    expectCoverageAdmissionRule(completionWorkflow)
+    expect(completionSpecialistsPrompt).toContain(
+      'This is review-only: do not',
     )
     expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
     expect(verificationAndRuntime).toContain('### Required post-landing trust-root proof')
@@ -2319,7 +2327,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('direct journey proof')
     expect(completionWorkflow).toContain('Add a **Risks** section only when')
     expect(completionWorkflow).toContain('## Preliminary Specialist Applicability')
-    expect(completionWorkflow).toContain('`reviewgpt-coverage.patch`')
+    expect(completionWorkflow).not.toContain('reviewgpt-coverage.patch')
     expect(completionWorkflow).toContain(
       'the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to that corrected pushed head',
     )
@@ -2333,7 +2341,7 @@ describe('monorepo release flow coverage audit', () => {
     const completionAuditPrompts = [
       'prompt-review.md',
       'frontend-review.md',
-      'coverage-write.md',
+      'coverage-review.md',
     ].map((fileName) =>
       readFileSync(
         path.join(repoRoot, 'agent-docs', 'prompts', fileName),
@@ -2362,9 +2370,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[2]).not.toContain(
       'Do not use `review:gpt`',
     )
-    expect(completionAuditPrompts[2]).toContain('Optional patch artifact:')
-    expect(completionAuditPrompts[2]).toContain('`reviewgpt-coverage.patch`')
-    expect(completionAuditPrompts[2]).toMatch(coverageAdmissionRule)
+    expect(completionAuditPrompts[2]).toContain('Use this review-only lens')
+    expect(completionAuditPrompts[2]).not.toContain('reviewgpt-coverage.patch')
+    expectCoverageAdmissionRule(completionAuditPrompts[2])
     expect(
       existsSync(
         path.join(
@@ -3306,9 +3314,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       '`Product UX review` for materially changed user-facing behavior',
     )
     expect(agentWorkflowRouting).not.toContain('trivial static copy')
-    expect(completionWorkflow).toMatch(
-      /coverage lens applies when the diff changes executable behavior/u,
-    )
+    expectCoverageAdmissionRule(completionWorkflow)
     expect(frontendReview).toContain(
       'Meaning-preserving tiny static-copy corrections',
     )
@@ -4642,7 +4648,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       )
       writeHarnessFile(
         harnessRoot,
-        'agent-docs/prompts/coverage-write.md',
+        'agent-docs/prompts/coverage-review.md',
         'coverage lens\n',
       )
       writeHarnessFile(
@@ -4854,7 +4860,7 @@ printf 'ZIP: %s (%s bytes)\n' \
           'agent-docs/prompts/prompt-review.md',
           'agent-docs/prompts/frontend-review.md',
           '.crabbox.yaml',
-          'agent-docs/prompts/coverage-write.md',
+          'agent-docs/prompts/coverage-review.md',
           '.agents/skills/verify-murph-assistant/SKILL.md',
           packagedEvidencePath,
           supplementalSkillPath,
@@ -5583,7 +5589,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(leanEntries).toContain('docs/contracts/00-invariants.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
-      expect(leanEntries).not.toContain('agent-docs/prompts/coverage-write.md')
+      expect(leanEntries).not.toContain('agent-docs/prompts/coverage-review.md')
       expect(leanEntries).not.toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(leanEntries).not.toContain('apps/web/test/device-sync-http.test.ts')
       expect(leanEntries).not.toContain('docs/device-sync-hosted-control-plane.md')
@@ -5602,7 +5608,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')
       expect(fullEntries).toContain('.github/workflows/release.yml')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
-      expect(fullEntries).toContain('agent-docs/prompts/coverage-write.md')
+      expect(fullEntries).toContain('agent-docs/prompts/coverage-review.md')
       expect(fullEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
       expect(fullEntries).toContain('PRODUCT.md')
       expect(fullEntries).toContain('DESIGN.md')

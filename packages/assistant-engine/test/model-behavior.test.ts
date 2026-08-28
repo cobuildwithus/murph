@@ -3004,7 +3004,7 @@ describe('assistant conversation scope', () => {
       'they do not grant direct room-vault access or private-state inspection',
     )
     expect(groupPrompt).toContain(
-      "Use only the exact accepted `message_ref` printed beside that sender's request or clarification answer.",
+      "Use only the exact accepted `message_ref` printed beside that sender's complete request or destination answer",
     )
     expect(groupPrompt).toContain(
       'Infer only the requested answer audience from ordinary conversation',
@@ -3016,22 +3016,23 @@ describe('assistant conversation scope', () => {
       '`ask_current_sender_privately` for an explicit private answer',
     )
     expect(groupPrompt).toContain(
-      '`clarify_current_sender` only when the destination is genuinely ambiguous',
+      '`clarify_current_sender` only when the answer destination is genuinely ambiguous',
     )
     expect(groupPrompt).toContain(
       'After `clarify_current_sender` returns `clarification_required`, ask one concise natural question in that same turn about whether the answer should be shared in this group or sent privately, without prescribing a reply format. Do not finish that turn silently.',
     )
     expect(groupPrompt).toContain(
-      "After the same sender answers naturally, use the matching continuation action with that answer's exact ref",
+      "Use the matching continuation action only when the same sender's next reply solely selects the group or private destination",
     )
+    expect(groupPrompt).toContain('If that reply adds or changes substance')
     expect(groupPrompt).toContain(
       'the host reloads the Message and remains authoritative for identity, route existence, authorization, required notice, replay safety, and the fixed destination',
     )
     expect(groupPrompt).toContain(
-      'only for that explicit current-sender consultation, not account/settings actions, other participants, or unsolicited disclosure',
+      'This lane is only for current-sender consultation, not account/settings actions, other participants, or unsolicited disclosure',
     )
     expect(directPrompt).toContain(
-      'From this private conversation, you can ask or hand off to a group only when Murph has already joined it',
+      'From this private conversation, joined-group consultation is available only for groups Murph has already joined',
     )
     expect(groupEmailPrompt).not.toContain('search/load deferred `murph.group_consult`')
     expect(restrictedGroupPrompt).not.toContain(

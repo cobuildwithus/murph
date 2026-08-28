@@ -5808,8 +5808,11 @@ function buildTrustedHostedImageCompletionEffectRestriction(
   }
 }
 
-function buildTrustedHostedImageCompletionTurnContext(
-  inputs: readonly AssistantAutoReplyPromptInput[],
+export function buildTrustedHostedImageCompletionTurnContext(
+  inputs: readonly Pick<
+    AssistantAutoReplyPromptInput,
+    'inputId' | 'trustedHostedImageCompletion'
+  >[],
 ): string | null {
   const completions = inputs.flatMap((input) =>
     input.trustedHostedImageCompletion == null

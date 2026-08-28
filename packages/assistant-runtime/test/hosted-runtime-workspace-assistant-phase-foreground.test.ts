@@ -1462,7 +1462,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
   });
 
   it(
-    "falls back to oldest-first device maintenance when no post-checkpoint causal wake is ready",
+    "hands oldest model-free device maintenance to its owner after causal work",
     async () => {
       const now = "2026-04-27T00:00:00.000Z";
       const parentRoot = await mkdtemp(
@@ -1511,19 +1511,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
           vaultRoot,
         }));
 
-        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
-        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0])
-          .not.toHaveProperty("allowedRouteActions");
-        expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+        expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
         expect(result).toEqual(expect.objectContaining({
-          checkpointReason: "system_mailbox_receipt",
-          progressed: true,
+          nextWakeAt: now,
+          nextWakeReason: "device-sync.reconcile",
+          progressed: false,
         }));
 
         await result.afterCheckpoint?.();
 
         expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({
-          pending: [],
+          pending: [expect.objectContaining({
+            itemId: expect.stringContaining("device"),
+            status: "pending",
+          })],
         });
       } finally {
         await rm(parentRoot, { force: true, recursive: true });
@@ -1531,7 +1533,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     },
   );
 
-  it("drains every approved continuation before older device maintenance", async () => {
+  it("drains approved continuations before handing device maintenance to its owner", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     vi.useFakeTimers();
     vi.setSystemTime(new Date(now));
@@ -1722,14 +1724,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
 
       expect(events).toEqual([
         ...effectIds.map((effectId) => `delivery:${effectId}`),
-        "device-sync",
       ]);
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      expect(deviceResult).toEqual(expect.objectContaining({
+        nextWakeAt: now,
+        nextWakeReason: "device-sync.reconcile",
+        progressed: false,
+      }));
       await deviceResult.afterCheckpoint?.();
       expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([
         expect.objectContaining({
           itemId: codexRetryItem.itemId,
           nextAttemptAt: codexRetryAt,
           status: "recording",
+        }),
+        expect.objectContaining({
+          itemId: expect.stringContaining("durable_device"),
+          status: "pending",
+          wake: deviceWake,
         }),
       ]);
     } finally {
@@ -3097,6 +3109,66 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     expect(
       mocks.resolveHostedPendingAssistantInputWakeAt.mock.calls[0]?.[0].now(),
     ).toBe("2026-04-27T00:10:00.000Z");
+  });
+
+  it("keeps pending input ahead when recording exposes an older model-free wake", async () => {
+    const foregroundWakeAt = "2026-04-27T00:10:00.000Z";
+    const systemWakeAt = "2026-04-27T00:09:59.000Z";
+    let systemItemRecorded = false;
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(foregroundWakeAt);
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) => {
+        if (
+          (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+        ) {
+          return { at: null, executionClass: null, reason: null };
+        }
+        return systemItemRecorded
+          ? {
+              at: systemWakeAt,
+              executionClass: "model_free",
+              reason: "mailbox",
+            }
+          : { at: null, executionClass: null, reason: null };
+      },
+    );
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementationOnce(
+      async () => {
+        systemItemRecorded = true;
+        return {
+          failed: 0,
+          nextWakeAt: systemWakeAt,
+          nextWakeReason: "mailbox",
+          recorded: 1,
+        };
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => foregroundWakeAt,
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(result.afterCheckpointKeepsForegroundImportLoop).toBe(true);
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      nextWakeAt: foregroundWakeAt,
+      nextWakeReason: "assistant",
+    }));
   });
 
   it("probes pending input when imported conversations have no eligible foreground ids", async () => {

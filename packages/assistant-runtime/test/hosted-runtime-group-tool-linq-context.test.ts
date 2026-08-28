@@ -517,14 +517,14 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "ask",
-      groupLabel: "Morning Movers",
+      membershipId: "hgm_private_member",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "ask",
-      groupLabel: "Morning Movers",
+      membershipId: "hgm_private_member",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",
@@ -1182,6 +1182,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await expect(groupTool.request({
       action: "ask",
+      membershipId: "hgm_private_member",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",

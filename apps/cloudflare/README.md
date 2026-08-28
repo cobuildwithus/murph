@@ -92,7 +92,7 @@ The usage-record callback may also transport one bounded Linq group delivery
 target captured from the accepted mailbox input. The target includes the
 existing thread-route authority and is advisory to web-owned accounting; the
 Worker does not resolve, persist, or authorize an alternate recipient.
-The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native child-process integrations for OpenAI, Exa, Mapbox, `murph_data_api`, and `workers_ai_transcribe` receive a runner-scoped signed Murph provider credential in the provider's native credential slot; the Worker verifies that credential as `provider + user + runner`, asks UserRunner whether the same runner currently has an active runtime for that user/provider, then injects the real Worker-owned credential only into the upstream request. Runtime-controlled provider calls may instead carry exact write-fence headers or a provider-egress token; there is no tokenless active-user-fence provider authorization path. Delivery providers (Linq and Telegram) and ElevenLabs continue to require exact write-fence headers or a provider-egress token, because those effects must stay behind recipient binding, journaling, and idempotency. The Worker constrains Codex-native managed OpenAI search to exact `POST /v1/alpha/search`, constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Telegram to its explicit operation allowlist, including `sendRichMessage`, constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through the runner-scoped provider credential path, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. The legacy write-fenced `results.worker/generated-images` route returns `410 Gone` so older warm runners fall back to text instead of creating public objects. Runner container names identify the runner for server-side validation; `ctx.containerId` is not provider-egress authorization. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation. Updating the Codex pin additionally requires a source-manifest review: required CI resolves `rust-v<version>` from OpenAI, verifies its exact commit and `codex-rs/codex-api/src` tree, and then uses native binary scanning only as cross-platform corroboration. The test-only inventory cannot generate or widen the Worker policy.
+The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native child-process integrations for OpenAI, Exa, Mapbox, `murph_data_api`, and `workers_ai_transcribe` receive a runner-scoped signed Murph provider credential in the provider's native credential slot; the Worker verifies that credential as `provider + user + runner`, asks UserRunner whether the same runner currently has an active runtime for that user/provider, then injects the real Worker-owned credential only into the upstream request. Runtime-controlled provider calls may instead carry exact write-fence headers or a provider-egress token; there is no tokenless active-user-fence provider authorization path. Delivery providers (Linq and Telegram) and ElevenLabs continue to require exact write-fence headers or a provider-egress token, because those effects must stay behind recipient binding, journaling, and idempotency. The Worker constrains Codex-native managed OpenAI search to exact `POST /v1/alpha/search`, constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Telegram to its explicit operation allowlist, including `sendRichMessage`, constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through the runner-scoped provider credential path, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. Runner container names identify the runner for server-side validation; `ctx.containerId` is not provider-egress authorization. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation. Updating the Codex pin additionally requires a source-manifest review: required CI resolves `rust-v<version>` from OpenAI, verifies its exact commit and `codex-rs/codex-api/src` tree, and then uses native binary scanning only as cross-platform corroboration. The test-only inventory cannot generate or widen the Worker policy.
 Venice joins that same Worker-owned credential boundary for core inference.
 The Worker permits only `POST /api/v1/responses` and
 `POST /api/v1/responses/compact`, accepts only canonical Luna/Terra/Sol request
@@ -417,16 +417,41 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
 identifier-free data point only after UserRunner has decided to return
-`retry_later`. `index1` and `blob2` are the bounded retry reason, `blob1` is the
-schema `murph.hosted-runtime-retry.v1`, `double1` is the event count, and
-`double2` is the selected retry delay in milliseconds. The write is immediate,
-unawaited, best-effort, and absent from successful processing. Run
+`retry_later`. `index1` is the sole index and `blob2` repeats the bounded retry
+reason, `blob1` is the schema `murph.hosted-runtime-retry.v1`, `double1` is the
+event count, and `double2` is the selected retry delay in milliseconds. For
+`container_busy` only, optional `blob3` records one of these closed control-path
+stages:
+
+- `non_runtime_write_fence`: the active write fence is not runtime-owned.
+- `active_runtime_contention`: an active runtime fence remains contended after
+  the liveness check.
+- `cooperative_handoff_pending`: the active child accepted a release wake but
+  has not handed off yet.
+- `background_preemption_unavailable`: the active container exposes no
+  background-abort capability.
+- `background_preemption_not_accepted`: background abort returned a bounded
+  non-accepted, non-failure status.
+- `stopped_container_record_pending`: a destroyed pending stop target could not
+  yet be cleared from the runner record.
+
+The stage is a finite mechanism label, not a processing mode, scenario name,
+identifier, free-text value, or private-state projection. Other retry reasons
+must omit it. This is an optional-field evolution of the existing v1 point:
+historical points have no `blob3`, and the report groups them explicitly as
+`unattributed`. The write remains exactly one immediate, unawaited,
+best-effort point per existing retry and is absent from successful processing.
+Run
 [`scripts/runtime-retry-reasons.sql`](./scripts/runtime-retry-reasons.sql)
 through the private Cloudflare Analytics Engine SQL API or dashboard to get a
-sampling-corrected 24-hour reason breakdown.
-The corresponding Workers structured log includes the bounded retry reason and
-`orchestrationAttemptId` for request-level joins. That identifier is never
-copied into Analytics Engine blobs, indexes, or doubles.
+sampling-corrected reason-plus-stage breakdown. It defaults to the trailing 24
+hours; for later two-hour comparisons, replace its first timestamp predicate
+with the commented half-open fixed UTC bounds and run once for each adjacent
+window. The corresponding Workers structured log includes the bounded retry
+reason, `runtimeProcessingRetryStage` for `container_busy`, and the existing
+`orchestrationAttemptId` for request-level joins. No identifier or user,
+workspace, message, command, provider, health, path, content, credential, or
+raw-error value is copied into Analytics Engine blobs, indexes, or doubles.
 
 For the primary production control database, run the identifier-free cold-start
 report through the read-only helper:

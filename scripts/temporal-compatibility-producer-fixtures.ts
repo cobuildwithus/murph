@@ -20,7 +20,6 @@ export function buildTemporalCompatibilityProducerFixtures():
   return [
     projectHostedRuntimeReconciliationFactsWireResponse({
       blocked: null,
-      environmentInterviewPending: false,
       mailboxLag: [],
       workspace: null,
     }),
@@ -31,7 +30,6 @@ export function buildTemporalCompatibilityProducerFixtures():
           reason,
           retryAt: index % 2 === 0 ? "2026-01-01T00:02:00.000Z" : null,
         },
-        environmentInterviewPending: index % 2 === 1,
         mailboxLag: [{
           importedSeq: String(index),
           lag: String(index + 1),

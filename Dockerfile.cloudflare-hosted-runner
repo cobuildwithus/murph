@@ -32,8 +32,10 @@ COPY --from=runner-app-permissions --chown=root:root /app/ /app/
 USER runner
 
 ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local
+ARG HOSTED_RUNNER_LOCAL_WORKER_NAME=murph-hosted
 
 LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"
+LABEL murph.hosted.local-worker-name="${HOSTED_RUNNER_LOCAL_WORKER_NAME}"
 
 # Differentiates the per-class image config so sibling container classes built
 # from this shared Dockerfile (RunnerContainer, DeploySmokeRunnerContainer)

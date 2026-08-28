@@ -547,6 +547,10 @@
     {
       "issue": "cobuildwithus/murph#2377",
       "path": ".agents/friction-log/20260826015901-prisma-format-rewrites/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2388",
+      "path": ".agents/friction-log/20260826170418-reviewgpt-attachment-capture/friction.md"
     }
   ],
   "version": 1

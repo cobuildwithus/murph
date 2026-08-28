@@ -1,15 +1,18 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { classifyCurrentVercelBuild } from "./ci-markdown-docs-scope.mjs";
+
 export const NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION = "3";
-export const NATIVE_IOS_HOSTED_E2E_VERCEL_TARGET = "native-ios-e2e";
-export const NATIVE_IOS_HOSTED_E2E_LANE_MARKER = "native-ios-hosted-e2e";
 export const HTTP_TIMEOUT_MS = 15_000;
 export const POLL_MS = 5_000;
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const PROCESS_GROUP_POLL_MS = 25;
+const PRODUCTION_ALIAS_MAX_OUTPUT_CHARS = 200;
+const PRODUCTION_ALIAS_TIMEOUT_MS = 2 * 60_000;
 
 export function requiredEnv(name) {
   const value = process.env[name]?.trim();
@@ -42,6 +45,76 @@ export function assertRecord(value, label) {
   if (!isRecord(value)) throw new Error(`${label} was not an object.`);
 }
 
+export function safeNativeTag(value, label) {
+  assertSafeId(value, label, 180, /^[A-Za-z0-9._/-]+$/u);
+  if (
+    value.startsWith("refs/")
+    || value.startsWith("/")
+    || value.endsWith("/")
+    || value.includes("..")
+    || value.includes("//")
+    || value.includes("@{")
+    || value.endsWith(".lock")
+  ) {
+    throw new Error(`${label} must be a safe lightweight tag name.`);
+  }
+  return value;
+}
+
+export function inspectNativeE2EControllerPolicy(raw) {
+  assertRecord(raw, "native E2E controller policy");
+  if (raw.contractVersion !== 1) {
+    throw new Error("native E2E controller policy version is invalid.");
+  }
+  return {
+    android: inspectNativeSource(raw.android, "Android"),
+    ios: inspectNativeSource(raw.ios, "iOS"),
+  };
+}
+
+export async function readNativeE2EControllerPolicy(filePath) {
+  return inspectNativeE2EControllerPolicy(JSON.parse(await readFile(filePath, "utf8")));
+}
+
+export function selectProductionCanaryWebSha(
+  currentProductionSha,
+  scheduledMainSha,
+  { classifyBuild = classifyCurrentVercelBuild } = {},
+) {
+  assertSha(currentProductionSha, "current production alias SHA");
+  assertSha(scheduledMainSha, "scheduled main SHA");
+  if (currentProductionSha === scheduledMainSha) return currentProductionSha;
+
+  const classification = classifyBuild({
+    env: {
+      VERCEL_ENV: "production",
+      VERCEL_GIT_COMMIT_REF: "main",
+      VERCEL_GIT_COMMIT_SHA: scheduledMainSha,
+      VERCEL_GIT_PREVIOUS_SHA: currentProductionSha,
+    },
+  });
+  if (classification.skipBuild !== true) {
+    throw new Error("Production alias differs from scheduled main by a runtime-relevant change.");
+  }
+  return currentProductionSha;
+}
+
+export async function resolveProductionCanaryWebSha({
+  env,
+  scheduledMainSha,
+}) {
+  const currentProductionSha = (await runBoundedCommand({
+    argv: ["--dir", "apps/web", "exec", "tsx", "scripts/resolve-vercel-production-alias-sha.ts"],
+    captureStdout: true,
+    command: "pnpm",
+    env,
+    label: "Production alias verification",
+    maxOutputChars: PRODUCTION_ALIAS_MAX_OUTPUT_CHARS,
+    timeoutMs: PRODUCTION_ALIAS_TIMEOUT_MS,
+  })).trim();
+  return selectProductionCanaryWebSha(currentProductionSha, scheduledMainSha);
+}
+
 export function normalizeHttpsOrigin(value) {
   let url;
   try {
@@ -53,6 +126,19 @@ export function normalizeHttpsOrigin(value) {
     throw new Error("web base URL must be an origin-only HTTPS URL.");
   }
   return url.origin;
+}
+
+function inspectNativeSource(raw, platform) {
+  assertRecord(raw, `${platform} controller source`);
+  const privateSha = requiredString(raw.privateSha, `${platform} controller SHA`);
+  assertSha(privateSha, `${platform} controller SHA`);
+  return {
+    privateRef: safeNativeTag(
+      requiredString(raw.privateRef, `${platform} controller ref`),
+      `${platform} controller ref`,
+    ),
+    privateSha,
+  };
 }
 
 export async function fetchJson(url, init, label) {

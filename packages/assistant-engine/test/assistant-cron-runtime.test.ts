@@ -4165,6 +4165,21 @@ describe('assistant cron runtime orchestration', () => {
         | undefined
       expect(providerInput?.instructions).toContain(expectedScope)
       expect(providerInput?.instructions).toContain(expectedBoundary)
+      if (supportKind === 'reminder') {
+        expect(providerInput?.instructions).toContain(
+          'treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data',
+        )
+        expect(providerInput?.instructions).toContain(
+          'read the matching movement skill and its shared exercise-catalog reference',
+        )
+        expect(providerInput?.instructions).toContain(
+          'attach reviewed catalog media when that reference requires it for the current channel',
+        )
+      } else {
+        expect(providerInput?.instructions).not.toContain(
+          'treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data',
+        )
+      }
       expect(providerInput?.instructions).toContain(
         `- automationId: ${canonicalAutomation.automationId}`,
       )
@@ -4191,6 +4206,48 @@ describe('assistant cron runtime orchestration', () => {
       )
     },
   )
+
+  it('passes exercise cue guidance into an ordinary independent automation after its saved task', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-independent-exercise-cue-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'independent-exercise-cue',
+    )
+    const canonicalAutomation = findCanonicalAutomation(
+      vaultRoot,
+      canonicalJob.jobId,
+    )
+    expect(canonicalAutomation).toBeDefined()
+    if (!canonicalAutomation) {
+      throw new Error('Expected the canonical automation to exist.')
+    }
+    const savedInstructions =
+      'Send the saved mobility cue using Ankle circles (MB101).'
+    canonicalAutomation.instructions = savedInstructions
+    canonicalAutomation.supportKind = null
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).toContain(
+      'Independent automation authority (engine-supplied):',
+    )
+    expect(providerInput?.instructions).toContain(
+      'read the matching movement skill and its shared exercise-catalog reference',
+    )
+    expect(providerInput?.instructions?.indexOf(savedInstructions)).toBeLessThan(
+      providerInput?.instructions?.indexOf(
+        'read the matching movement skill and its shared exercise-catalog reference',
+      ) ?? -1,
+    )
+  })
 
   it('omits the support-scope override for weekly_digest consent metadata', async () => {
     const { vaultRoot } = await createRuntimeContext(
@@ -4248,6 +4305,9 @@ describe('assistant cron runtime orchestration', () => {
     )
     expect(providerInput?.instructions).not.toContain(
       'surprise accountability, repair, or coaching question',
+    )
+    expect(providerInput?.instructions).not.toContain(
+      'read the matching movement skill and its shared exercise-catalog reference',
     )
   })
 
@@ -4314,6 +4374,12 @@ describe('assistant cron runtime orchestration', () => {
           'Recurring reminder conversation (engine-supplied',
         ),
       }),
+    )
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).not.toContain(
+      'read the matching movement skill and its shared exercise-catalog reference',
     )
   })
 
@@ -4436,36 +4502,42 @@ describe('assistant cron runtime orchestration', () => {
         'Recurring reminder conversation (engine-supplied',
       )
       expect(notificationInput.instructions).toContain(
-        'If no relevant human reply followed and that output already asked whether to keep, change, or pause these interruptions, return `skip`.',
-      )
-      expect(notificationInput.instructions).toContain(
-        'If that output is unavailable under the existing evidence-retention horizon, send the current cue normally.',
-      )
-      expect(notificationInput.instructions).toContain(
-        'In a group, address the room collectively.',
-      )
-      expect(notificationInput.instructions).toContain(
-        'The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
-      )
-      expect(notificationInput.instructions).toContain(
-        ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
-      )
-      expect(notificationInput.instructions).toContain(
-        'inside this provider request\'s engine-supplied recent-conversation-history section',
-      )
-      expect(notificationInput.instructions).toContain(
-        'That marker expires after the provider request that supplied it',
+        'Any silence-based cadence policy appended below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).not.toContain('carry-forward grace')
       if (occurrenceIndex === 0) {
         expect(notificationInput.instructions).not.toContain(
           'Recent outputs from this automation',
         )
+        expect(notificationInput.instructions).not.toContain(
+          'keep, change, or pause these interruptions',
+        )
+        expect(notificationInput.instructions).toContain(
+          'Otherwise send the current concise cue normally.',
+        )
       } else {
         expect(notificationInput.instructions).toContain(
           'Recent outputs from this automation',
         )
         expect(notificationInput.instructions).toContain('1. "Quick room reset.')
+        expect(notificationInput.instructions).toContain(
+          'If no relevant human reply followed and that output already asked whether to keep, change, or pause these interruptions, return `skip`.',
+        )
+        expect(notificationInput.instructions).toContain(
+          'If that output is unavailable under the existing evidence-retention horizon, send the current cue normally.',
+        )
+        expect(notificationInput.instructions).toContain(
+          'In a group, address the room collectively.',
+        )
+        expect(notificationInput.instructions).toContain(
+          ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+        )
+        expect(notificationInput.instructions).toContain(
+          'inside this provider request\'s engine-supplied recent-conversation-history section',
+        )
+        expect(notificationInput.instructions).toContain(
+          'That marker expires after the provider request that supplied it',
+        )
       }
       await input.onProviderRequestStarted?.()
 
@@ -4576,7 +4648,7 @@ describe('assistant cron runtime orchestration', () => {
         input as AssistantNotificationInput,
       )
       expect(notificationInput.instructions).toContain(
-        'The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+        'Any silence-based cadence policy appended below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).toContain(
         'Send those cues normally unless the direct-conversation completion rule above applies, the member explicitly changes or pauses them, or another authoritative skip condition applies.',

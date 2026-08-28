@@ -19,6 +19,10 @@ const retryReasonsSql = readFileSync(
   new URL("../scripts/runtime-retry-reasons.sql", import.meta.url),
   "utf8",
 );
+const cloudflareReadme = readFileSync(
+  new URL("../README.md", import.meta.url),
+  "utf8",
+);
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof =
   process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -35,9 +39,37 @@ describe("hosted runtime operational report contracts", () => {
       `blob1 = '${HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA}'`,
     );
     expect(retryReasonsSql).toContain("index1 AS reason");
+    expect(retryReasonsSql).toContain(
+      "if(blob3 = '', 'unattributed', blob3) AS stage",
+    );
     expect(retryReasonsSql).toContain("SUM(_sample_interval * double1)");
     expect(retryReasonsSql).toContain("SUM(_sample_interval * double2)");
+    expect(retryReasonsSql).toContain("GROUP BY index1, stage");
     expect(retryReasonsSql).toContain("INTERVAL '1' DAY");
+    expect(retryReasonsSql).toContain(
+      "timestamp >= toDateTime('YYYY-MM-DD HH:MM:SS', 'Etc/UTC')",
+    );
+    expect(retryReasonsSql).toContain(
+      "timestamp < toDateTime('YYYY-MM-DD HH:MM:SS', 'Etc/UTC')",
+    );
+    expect(retryReasonsSql).not.toMatch(/blob3\s*(?:!=|<>)/u);
+  });
+
+  it("documents the bounded optional container-busy stage contract", () => {
+    for (const stage of [
+      "non_runtime_write_fence",
+      "active_runtime_contention",
+      "cooperative_handoff_pending",
+      "background_preemption_unavailable",
+      "background_preemption_not_accepted",
+      "stopped_container_record_pending",
+    ]) {
+      expect(cloudflareReadme).toContain(`\`${stage}\``);
+    }
+    expect(cloudflareReadme).toContain("optional `blob3`");
+    expect(cloudflareReadme).toContain("`unattributed`");
+    expect(cloudflareReadme).toContain("`runtimeProcessingRetryStage`");
+    expect(cloudflareReadme).toContain("`index1` is the sole index");
   });
 
   it("keeps direct cold starts causal and phase samples chronology-safe", () => {
