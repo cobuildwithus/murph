@@ -5,7 +5,7 @@ Last verified: 2026-08-28
 ## Purpose
 
 This index is the table of contents for the current canonical docs in this repository.
-It intentionally lists live architecture, product, verification, and package-boundary docs only.
+It intentionally lists only live architecture, product, verification, and package-boundary docs.
 
 Receipt-owned positive Stripe payment notifications cover subscription starts
 and renewals, paid plan-change and recurring-usage invoices, and fulfilled
