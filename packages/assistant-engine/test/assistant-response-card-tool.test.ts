@@ -1171,6 +1171,18 @@ describe('murph.attach_response_card', () => {
       kind: 'attach-response-card',
     })
     expect(readCardToolRequest(
+      { card: { ...ROUTINE_CARD, footer: '' } },
+      'attach_exercise_routine_card',
+    )).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+    })
+    expect(readCardToolRequest(
+      { card: { ...ROUTINE_CARD, subtitle: 42 } },
+      'attach_exercise_routine_card',
+    )).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+    })
+    expect(readCardToolRequest(
       { card: CARD },
       'attach_exercise_routine_card',
     )).toMatchObject({
