@@ -502,7 +502,7 @@ test("next.config traces every selectable contact-card avatar into its route", (
     productionNextConfig.outputFileTracingIncludes?.["/api/murph-contact-card"],
     [
       "public/brand-logos/murph-logo-avatar-*.png",
-      "public/murph-headshots/*.png",
+      "public/murph-headshots/*-sm.png",
     ],
   );
 });

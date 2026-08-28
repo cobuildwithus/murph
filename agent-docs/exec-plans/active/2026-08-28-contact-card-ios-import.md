@@ -72,8 +72,10 @@ Updated: 2026-08-28
   the route's own traced assets and embeds those exact bytes in the vCard.
 - Intentional no-photo choice: `avatar=none` still creates a card without a
   `PHOTO` row.
-- Missing selected portrait: the route returns a retryable error instead of a
-  successful card that silently substitutes the initial avatar.
+- Missing selected portrait: the direct and in-app-browser actions check the
+  portrait before navigation, keep the picker open, and show a retry action
+  instead of closing onto a raw error response or silently substituting the
+  initial avatar.
 - Existing handoff, session, member routing, backup-number, and unknown-avatar
   behavior remains covered by the focused route suite.
 - Design representation: no component or visual state changed; the production
@@ -91,7 +93,14 @@ Result: ready for exact-head review.
   portrait with no loaded bytes returned HTTP 200 instead of a retryable error.
 - Focused Web tests: 94 passed across contact-card routing, vCard generation,
   real asset loading, and Next trace configuration.
+- Remediation proof first failed in three focused places: the browser handoff
+  was issued without checking its portrait, the direct picker had no retry
+  action boundary, and the trace glob included full-resolution portraits.
+- The corrected picker, route, vCard generator, real-asset, and trace suite
+  passes 113 focused tests, including direct and iOS-webview retries plus
+  Android direct navigation.
 - `pnpm --dir apps/web typecheck`: passed.
 - Targeted production Webpack build: passed and emitted the dynamic
-  `/api/murph-contact-card` route. Its route trace contains all 11 selectable
-  portrait and logo assets.
+  `/api/murph-contact-card` route. Its route trace contains exactly all 11
+  selectable portrait and logo assets, no unused full-resolution portraits,
+  and 1,685,492 traced avatar bytes instead of the prior 16,038,991.

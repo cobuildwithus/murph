@@ -106,23 +106,12 @@ export const GET = withJsonError(async (request: Request) => {
   }
 
   const [photo, backupPhoneNumber] = await Promise.all([
-    authority.avatar.src
-      ? readMurphContactCardAvatarPhoto(authority.avatar.id)
-      : Promise.resolve(null),
+    requireMurphContactCardAvatarPhoto(authority.avatar),
     resolveMurphHostedLinqContactCardBackupPhoneNumber({
       excludePhoneNumber: phoneNumber,
       prisma,
     }),
   ]);
-
-  if (authority.avatar.src && !photo) {
-    throw hostedOnboardingError({
-      code: "MURPH_CONTACT_CARD_PHOTO_UNAVAILABLE",
-      message: "Murph's contact photo is temporarily unavailable. Try saving the card again.",
-      httpStatus: 503,
-      retryable: true,
-    });
-  }
 
   const vcf = buildMurphHostedLinqContactCardVcf({
     backupPhoneNumber,
@@ -149,11 +138,12 @@ export const POST = withJsonError(async (request: Request) => {
   const payload = await readJsonObject(request, {
     limitBytes: MURPH_CONTACT_CARD_HANDOFF_BODY_LIMIT_BYTES,
   });
-  const avatarId = requireRequestedHandoffAvatarId(payload.avatar);
+  const avatar = requireRequestedHandoffAvatar(payload.avatar);
+  await requireMurphContactCardAvatarPhoto(avatar);
 
   return jsonOk({
     claim: issueMurphContactCardHandoffClaim({
-      avatarId,
+      avatarId: avatar.id,
       memberId: session.member.id,
       sessionId: session.sessionId,
     }),
@@ -189,7 +179,7 @@ function resolveRequestedAvatar(url: URL): MurphContactAvatarOption {
   );
 }
 
-function requireRequestedHandoffAvatarId(value: unknown): string {
+function requireRequestedHandoffAvatar(value: unknown): MurphContactAvatarOption {
   if (typeof value !== "string") {
     throw invalidHandoffAvatarError();
   }
@@ -199,7 +189,27 @@ function requireRequestedHandoffAvatarId(value: unknown): string {
     throw invalidHandoffAvatarError();
   }
 
-  return avatar.id;
+  return avatar;
+}
+
+async function requireMurphContactCardAvatarPhoto(
+  avatar: MurphContactAvatarOption,
+) {
+  if (!avatar.src) {
+    return null;
+  }
+
+  const photo = await readMurphContactCardAvatarPhoto(avatar.id);
+  if (!photo) {
+    throw hostedOnboardingError({
+      code: "MURPH_CONTACT_CARD_PHOTO_UNAVAILABLE",
+      message: "Murph's contact photo is temporarily unavailable. Try saving the card again.",
+      httpStatus: 503,
+      retryable: true,
+    });
+  }
+
+  return photo;
 }
 
 function invalidHandoffAvatarError(): Error {

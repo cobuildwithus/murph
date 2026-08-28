@@ -214,6 +214,21 @@ describe("murph contact card route", () => {
     });
   });
 
+  it("does not issue a browser handoff when its selected photo is unavailable", async () => {
+    mocks.readMurphContactCardAvatarPhoto.mockResolvedValue(null);
+
+    const response = await route.POST(buildIssuanceRequest("rancher"));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "MURPH_CONTACT_CARD_PHOTO_UNAVAILABLE",
+        message: "Murph's contact photo is temporarily unavailable. Try saving the card again.",
+        retryable: true,
+      },
+    });
+  });
+
   it("issues in the webview context and redeems in a cookie-empty Safari context", async () => {
     const webviewRequest = buildIssuanceRequest("gremlin");
     expect(webviewRequest.headers.get("cookie")).toBe(

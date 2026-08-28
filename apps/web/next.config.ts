@@ -73,7 +73,7 @@ const OG_SHARE_ASSET_TRACE_INCLUDES = [
 ];
 const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
   "public/brand-logos/murph-logo-avatar-*.png",
-  "public/murph-headshots/*.png",
+  "public/murph-headshots/*-sm.png",
 ];
 // The footer availability indicator reads the incident.io status-page summary
 // from the browser, so the status-page origin must be reachable client-side.
