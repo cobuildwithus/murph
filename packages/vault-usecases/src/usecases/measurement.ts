@@ -91,42 +91,40 @@ function normalizeQualifierMap(
   value: unknown,
   publicPath: readonly (string | number)[],
 ): Record<string, string | number | boolean> | undefined {
-  if (value === undefined) {
+  if (value === undefined || value === null) {
     return undefined
   }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (typeof value !== 'object' || Array.isArray(value)) {
     throw invalidStructuredMeasurementField('measurement qualifiers', publicPath)
   }
 
   const qualifierEntries: Array<[string, string | number | boolean]> = []
   for (const [rawKey, rawValue] of Object.entries(value)) {
+    const normalizedValue = typeof rawValue === 'string'
+      ? normalizeOptionalText(rawValue)
+      : rawValue
+    if (normalizedValue === undefined || normalizedValue === null) {
+      continue
+    }
+
     let key: string
     try {
       key = normalizeMetricSlug(rawKey, 'qualifier key')
     } catch {
       throw invalidStructuredMeasurementField('measurement qualifiers', publicPath)
     }
-    if (typeof rawValue === 'string') {
-      const normalizedValue = normalizeOptionalText(rawValue)
-      if (normalizedValue) {
-        qualifierEntries.push([key, normalizedValue])
-      } else {
-        throw invalidStructuredMeasurementField('measurement qualifiers', publicPath)
-      }
-      continue
+    if (
+      typeof normalizedValue !== 'string'
+      && typeof normalizedValue !== 'number'
+      && typeof normalizedValue !== 'boolean'
+    ) {
+      throw invalidStructuredMeasurementField('measurement qualifiers', publicPath)
     }
 
-    if (typeof rawValue === 'number' || typeof rawValue === 'boolean') {
-      qualifierEntries.push([key, rawValue])
-      continue
-    }
-
-    throw invalidStructuredMeasurementField('measurement qualifiers', publicPath)
+    qualifierEntries.push([key, normalizedValue])
   }
 
-  const qualifiers = Object.fromEntries(qualifierEntries)
-
-  return Object.keys(qualifiers).length > 0 ? qualifiers : undefined
+  return qualifierEntries.length > 0 ? Object.fromEntries(qualifierEntries) : undefined
 }
 
 export function normalizeMeasurementEntry(value: unknown, fieldName = 'measurement'): MeasurementEntry {
