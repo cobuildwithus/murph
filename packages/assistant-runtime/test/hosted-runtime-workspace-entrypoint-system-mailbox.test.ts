@@ -4632,6 +4632,205 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
   });
 
   test.each([
+    { approvedAskCount: 1 },
+    { approvedAskCount: 2 },
+  ])("keeps the exact durable-head ask ahead of $approvedAskCount pre-barrier approved follow-up(s) and device work", async ({
+    approvedAskCount,
+  }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const preAssistantSystemFetchStarted = createDeferred<void>();
+    const preAssistantSystemFetchRelease = createDeferred<void>();
+    const runtimeAbortController = new AbortController();
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const originalFetchSnapshot = deviceSyncPort.fetchSnapshot.bind(deviceSyncPort);
+    deviceSyncPort.fetchSnapshot = async (input) => {
+      events.push("device.snapshot");
+      return await originalFetchSnapshot(input);
+    };
+    const firstAsk = createMailboxItem({
+      dedupeKey: "assistant.ask.requested:pre-barrier-first",
+      expiresAt: "2026-04-27T00:10:00.000Z",
+      id: "mailbox_item_pre_barrier_first_ask",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:pre-barrier-device",
+      id: "mailbox_item_pre_barrier_device",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const approvedAsks = Array.from({ length: approvedAskCount }, (_, index) =>
+      createMailboxItem({
+        dedupeKey: `assistant.ask.requested:pre-barrier-approved-${index + 1}`,
+        expiresAt: "2026-04-27T00:10:00.000Z",
+        id: `mailbox_item_pre_barrier_approved_ask_${index + 1}`,
+        kind: "assistant.ask.requested",
+        lane: "system",
+        laneSeq: String(index + 3),
+      })
+    );
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedAssistantAskSystemMailboxItem(firstAsk),
+        vaultRoot,
+        wake: createConsentedMemberAssistantAskRequestedWake({
+          eventId: firstAsk.dedupeKey,
+        }),
+      });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "2";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/pre-barrier-approved-before.bundle.json",
+        vaultRoot,
+      });
+      const mailboxPort = createMailboxPort({ events, items: approvedAsks });
+      const fetchMailbox = mailboxPort.fetch.bind(mailboxPort);
+      mailboxPort.fetch = async (request) => {
+        if (
+          request.lanes.length === 1
+          && request.lanes[0]?.lane === "system"
+          && request.requestId.includes(":pre-assistant-system:")
+        ) {
+          events.push("pre-assistant-system-fetch.started");
+          preAssistantSystemFetchStarted.resolve();
+          await preAssistantSystemFetchRelease.promise;
+        }
+        return await fetchMailbox(request);
+      };
+
+      const runtimePromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_pre_barrier_approved_asks",
+            idleCheckpointDelayMs: 1,
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/pre-barrier-approved-after.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            assert.ok(approvedAsks.some((ask) => ask.id === item.item.id));
+            events.push(`ask.imported:${item.item.id}`);
+            return await enqueueHostedSystemMailboxItem({
+              item,
+              vaultRoot,
+              wake: createAssistantAskRequestedWake({
+                eventId: item.item.dedupeKey,
+              }),
+            });
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            assistantAskPort: {
+              async request(request) {
+                if (request.action === "complete") {
+                  throw new Error("Terminal startup-order asks must not complete again.");
+                }
+                events.push(`ask.prepare:${request.requestId}`);
+                return {
+                  action: "prepare",
+                  status: "terminal",
+                  terminalReason: "unavailable",
+                };
+              },
+            },
+            deviceSyncPort,
+            events,
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void runtimePromise.catch(() => undefined);
+
+      await withRealTimeout(
+        preAssistantSystemFetchStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("ask.prepare:")),
+        [],
+      );
+      preAssistantSystemFetchRelease.resolve();
+      await withRealTimeout(
+        (async () => {
+          while (
+            !events.includes(`ask.prepare:${firstAsk.dedupeKey}`)
+            || (await readHostedSystemMailboxState(vaultRoot)).pending.some(
+              (item) => item.itemId === firstAsk.id,
+            )
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+        })(),
+        15_000,
+        () => events.join(","),
+      );
+
+      const preparedRequestIds = events
+        .filter((event) => event.startsWith("ask.prepare:"))
+        .map((event) => event.slice("ask.prepare:".length));
+      assert.equal(preparedRequestIds[0], firstAsk.dedupeKey);
+      const firstAskIndex = events.indexOf(`ask.prepare:${firstAsk.dedupeKey}`);
+      for (const approvedAsk of approvedAsks) {
+        const approvedAskIndex = events.indexOf(`ask.prepare:${approvedAsk.dedupeKey}`);
+        if (approvedAskIndex >= 0) {
+          assert.ok(firstAskIndex < approvedAskIndex);
+        }
+      }
+      const deviceIndex = events.indexOf("device.snapshot");
+      if (deviceIndex >= 0) {
+        assert.ok(firstAskIndex < deviceIndex);
+      }
+      runtimeAbortController.abort(
+        new DOMException("Synthetic startup-order proof complete.", "AbortError"),
+      );
+      await runtimePromise.catch(() => undefined);
+    } finally {
+      runtimeAbortController.abort(
+        new DOMException("Synthetic test cleanup.", "AbortError"),
+      );
+      preAssistantSystemFetchRelease.resolve();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  }, 90_000);
+
+  test.each([
     { approved: false, laterKind: "ordinary" },
     { approved: true, laterKind: "approved" },
   ])("retires an unstarted exact ask across a foreground causal rerun with a $laterKind later ask", async ({
@@ -4883,7 +5082,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.ok(importedAssistantInputId, events.join(","));
       if (approved) {
-        assert.deepEqual(assistantPhaseInputIds, [[]]);
+        assert.deepEqual(assistantPhaseInputIds, [[importedAssistantInputId]]);
       } else {
         remoteItems.push(followUpConversationItem);
         runtimeWakeSignal.notify();

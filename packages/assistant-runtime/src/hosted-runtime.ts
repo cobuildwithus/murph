@@ -1662,26 +1662,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (controller) {
           if (!ordinaryConsentedAssistantAskSelected) {
             controller.kick();
-          } else {
-            const selectedItemId =
-              await selectNextApprovedDetachedAssistantAskItemId();
-            if (selectedItemId) {
-              const exactCompletion = exactDetachedAssistantAskCompletion;
-              startExactDetachedAssistantAsk = null;
-              controller.kick();
-              if (exactCompletion) {
-                void exactCompletion.then(
-                  () => {
-                    if (
-                      !runtimeAbortController.signal.aborted
-                      && options.shutdownSignal?.aborted !== true
-                    ) {
-                      controller.resume();
-                    }
-                  },
-                  () => undefined,
-                );
-              }
+          } else if (!startExactDetachedAssistantAsk) {
+            const exactCompletion = exactDetachedAssistantAskCompletion;
+            controller.kick();
+            if (exactCompletion) {
+              void exactCompletion.then(
+                () => {
+                  if (
+                    !runtimeAbortController.signal.aborted
+                    && options.shutdownSignal?.aborted !== true
+                  ) {
+                    controller.resume();
+                  }
+                },
+                () => undefined,
+              );
             }
           }
         }
@@ -2031,9 +2026,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         await barrier.drainPendingForegroundWake();
         if (barrier.foregroundConversationWorkObserved()) {
           startExactDetachedAssistantAsk = null;
+          detachedAssistantAskController?.kick();
           return;
         }
         await startExactDetachedAssistantAsk();
+        detachedAssistantAskController?.kick();
       },
       checkpointRuntimeRedactedStatus,
       checkpointRequestBuilder,
@@ -2046,11 +2043,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (!ordinaryConsentedAssistantAskSelected) {
           return;
         }
-        if (exactDetachedAssistantAskCompletion === null) {
-          startExactDetachedAssistantAsk = null;
-          return;
+        if (exactDetachedAssistantAskCompletion !== null) {
+          detachedAssistantAskController?.requestPauseAndRequeue();
         }
-        detachedAssistantAskController?.requestPauseAndRequeue();
       },
       trackDeferredUsageCapture,
       trackLocalWorkspaceMutationCompletion,
