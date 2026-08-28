@@ -1744,7 +1744,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('ships Murph onboarding as a compact progressive-disclosure skill with single-owned rules', async () => {
+  it('ships Murph onboarding as a compact progressive-disclosure skill with single-owned composed rules', async () => {
     const murphOnboardingSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'murph-onboarding',
     )
@@ -1816,6 +1816,27 @@ describe('assistant skill assets', () => {
       '## Completion',
     )
 
+    const onboardingSystemPrompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'Oura', provider: 'oura' },
+      ],
+      assistantKnowledgeToolsAvailable: false,
+      channel: 'linq',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      conversationScope: 'direct',
+      currentLocalDate: '2026-08-27',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: true,
+      turnTrigger: null,
+    })
     const ownedRules = [
       {
         owner: 'SKILL.md',
@@ -1832,6 +1853,14 @@ describe('assistant skill assets', () => {
       {
         owner: 'aspiration-foundation-delegation.md',
         rule: 'A foundation answer is still context, not permission to solve a parked thread.',
+      },
+      {
+        owner: 'system-prompt',
+        rule: 'Once a data source is identified, postponing only its optional connection does not pause onboarding. Do not issue or reissue a link; acknowledge the choice, continue to the next unresolved foundation beat unless the user explicitly pauses onboarding itself, and never imply the connection exists until visible evidence proves it.',
+      },
+      {
+        owner: 'persistence-recovery-follow-up.md',
+        rule: 'Deferring an unanswered checkpoint leaves that checkpoint open.',
       },
       {
         owner: 'persistence-recovery-follow-up.md',
@@ -1854,14 +1883,18 @@ describe('assistant skill assets', () => {
         rule: 'An experiment, plan, support loop, wearable connection, lab upload, group, or specific positive health fact is not required.',
       },
     ] as const
-    const files = new Map<string, string>([['SKILL.md', root], ...references])
+    const files = new Map<string, string>([
+      ['system-prompt', onboardingSystemPrompt],
+      ['SKILL.md', root],
+      ...references,
+    ])
     const compactFiles = new Map(
       [...files].map(([file, contents]) => [
         file,
         contents.replace(/\s+/gu, ' '),
       ]),
     )
-    const wholeSkill = [...compactFiles.values()].join('\n')
+    const composedPrompt = [...compactFiles.values()].join('\n')
 
     for (const { owner, rule } of ownedRules) {
       expect(
@@ -1869,10 +1902,15 @@ describe('assistant skill assets', () => {
         `${rule} must remain owned by ${owner}`,
       ).toContain(rule)
       expect(
-        wholeSkill.split(rule).length - 1,
-        `${rule} must have exactly one owner`,
+        composedPrompt.split(rule).length - 1,
+        `${rule} must have exactly one owner in the composed prompt`,
       ).toBe(1)
     }
+    expect(composedPrompt).not.toContain('A simple “later” remains unresolved.')
+    expect(composedPrompt).not.toContain('A deferred checkpoint remains open')
+    expect(composedPrompt).not.toContain(
+      '“Later,” “tomorrow,” or “I don\'t have it handy” leaves onboarding open.',
+    )
   })
 
   it('keeps aspiration-anchored, foundation-complete Murph onboarding details in the skill asset', async () => {
@@ -1911,6 +1949,27 @@ describe('assistant skill assets', () => {
     if (!aspirationReference || !persistenceReference || !returnReference) {
       return
     }
+    const onboardingSystemPrompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'Oura', provider: 'oura' },
+      ],
+      assistantKnowledgeToolsAvailable: false,
+      channel: 'linq',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      conversationScope: 'direct',
+      currentLocalDate: '2026-08-27',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: true,
+      turnTrigger: null,
+    })
     const raw = [root, ...references.values()].join('\n\n')
     const compact = raw.replace(/\s+/gu, ' ')
 
@@ -2176,7 +2235,7 @@ How old are you and what's your gender?
       'Do not call `murph.device` to connect Apple Health, claim permission was granted, or say steps are syncing until live evidence proves it.',
     )
     expect(compact).toContain(
-      'Declining this optional offer leaves the checkpoint resolved.',
+      'This optional offer never reopens the data-source checkpoint.',
     )
     expect(raw).toContain('2. **Movement and training.**')
     expect(raw).toContain('3. **Current protocols or experiments.**')
@@ -2501,9 +2560,16 @@ How old are you and what's your gender?
         userMessage: 'Pause for now',
       },
       {
-        contract: 'A simple “later” remains unresolved.',
+        contract:
+          'Deferring an unanswered checkpoint leaves that checkpoint open.',
         section: persistenceSection,
         userMessage: 'I can answer that later',
+      },
+      {
+        contract:
+          'Once a data source is identified, postponing only its optional connection does not pause onboarding. Do not issue or reissue a link; acknowledge the choice, continue to the next unresolved foundation beat unless the user explicitly pauses onboarding itself, and never imply the connection exists until visible evidence proves it.',
+        section: onboardingSystemPrompt,
+        userMessage: 'I will connect it later',
       },
       {
         contract:
@@ -2608,7 +2674,7 @@ How old are you and what's your gender?
       'use one short messaging bubble, usually two to four short sentences',
     )
     expect(compact).toContain(
-      '“Later,” “tomorrow,” or “I don\'t have it handy” leaves onboarding open.',
+      'Apply the defer evidence owned by `persistence-recovery-follow-up.md` before completion.',
     )
     expect(raw).toContain(
       'vault-cli assistant onboarding complete --reason user_answered',
