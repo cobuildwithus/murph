@@ -16,7 +16,7 @@ import {
   isDeletedEventSpineRecord,
   selectLatestEventSpineEntry,
 } from "../../history/event-spine.ts";
-import { readJsonlRecords } from "../../jsonl.ts";
+import { readEventLedgerShardRecords } from "../../event-ledger-storage.ts";
 import { withCanonicalWriteLock } from "../../operations/canonical-write-lock.ts";
 import {
   runCanonicalWrite,
@@ -511,7 +511,7 @@ async function readLookupEventRecords(input: {
   if (cached) {
     return cached;
   }
-  const rawRecords = await readJsonlRecords({
+  const rawRecords = await readEventLedgerShardRecords({
     relativePath: input.ledgerFile,
     vaultRoot: input.vaultRoot,
   });

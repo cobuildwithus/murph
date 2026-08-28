@@ -11,7 +11,6 @@ import { importWithMocks, mockActualModule } from "./mock-import.ts";
 const QUERY_FAMILY_ROUTES = [
   ["alg_1", "allergy"],
   ["asmt_1", "assessment"],
-  ["aud_1", "audit"],
   ["cond_1", "condition"],
   ["vault_1", "core"],
   ["core", "core"],
@@ -72,7 +71,7 @@ test("generic show derives every query family from the shared lookup registries"
   }
 });
 
-test("generic show preserves typed errors for unknown, constrained, and missing ids", async () => {
+test("generic show preserves typed errors for unsupported, constrained, and missing ids", async () => {
   const resolveCanonicalEntityInFamily = vi.fn(async () => null);
   const integratedServicesModule = await importWithMocks<
     typeof import("../src/usecases/integrated-services.ts")
@@ -88,7 +87,7 @@ test("generic show preserves typed errors for unknown, constrained, and missing 
   const services = integratedServicesModule.createIntegratedVaultServices();
 
   await assert.rejects(
-    services.query.show({ id: "unknown_1", requestId: null, vault: "/vault" }),
+    services.query.show({ id: "aud_1", requestId: null, vault: "/vault" }),
     { code: "not_found", name: "VaultCliError" },
   );
   assert.equal(resolveCanonicalEntityInFamily.mock.calls.length, 0);

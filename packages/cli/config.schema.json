@@ -5964,7 +5964,7 @@
                           "minLength": 1
                         },
                         "exercise": {
-                          "description": "Initial exercise grammar: name=... with optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/mode/unitOverride/note. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
+                          "description": "Initial exercise grammar: name=...;mode=... with required mode and optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/unitOverride/note. weight_reps also requires unitOverride unless targetWeightUnit is present. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
                           "maxItems": 100,
                           "type": "array",
                           "items": {
@@ -6078,7 +6078,8 @@
                                     "weighted_bodyweight",
                                     "duration",
                                     "cardio"
-                                  ]
+                                  ],
+                                  "description": "Required result family for the native workout editor."
                                 },
                                 "unitOverride": {
                                   "type": "string",
@@ -12814,15 +12815,32 @@
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "minLength": 1
+                            "pattern": "^(?:\\s*evt_[0-9A-HJKMNP-TV-Z]{26}\\s*|\\s+)$"
                           }
                         },
                         "stream": {
                           "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "heart_rate",
+                                  "spo2",
+                                  "hrv",
+                                  "steps",
+                                  "sleep_stage",
+                                  "respiratory_rate",
+                                  "temperature",
+                                  "glucose"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^(?:\\s*(?:heart_rate|spo2|hrv|steps|sleep_stage|respiratory_rate|temperature|glucose)\\s*|\\s+)$"
+                              }
+                            ]
                           }
                         }
                       }
@@ -12848,15 +12866,32 @@
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "minLength": 1
+                            "pattern": "^(?:\\s*evt_[0-9A-HJKMNP-TV-Z]{26}\\s*|\\s+)$"
                           }
                         },
                         "stream": {
                           "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "heart_rate",
+                                  "spo2",
+                                  "hrv",
+                                  "steps",
+                                  "sleep_stage",
+                                  "respiratory_rate",
+                                  "temperature",
+                                  "glucose"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^(?:\\s*(?:heart_rate|spo2|hrv|steps|sleep_stage|respiratory_rate|temperature|glucose)\\s*|\\s+)$"
+                              }
+                            ]
                           }
                         }
                       }
@@ -12900,7 +12935,7 @@
                   "maxLength": 128
                 },
                 "recordType": {
-                  "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
+                  "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -12986,7 +13021,7 @@
                           "minLength": 1
                         },
                         "recordType": {
-                          "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
+                          "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -13676,7 +13711,8 @@
                         "title": {
                           "description": "Optional assessment title stored on the imported record.",
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 160
                         },
                         "occurredAt": {
                           "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",

@@ -41,7 +41,7 @@ required_files=(
   "agent-docs/operations/verification-and-runtime.md"
   "agent-docs/operations/completion-workflow.md"
   "agent-docs/operations/product-ux.md"
-  "agent-docs/prompts/coverage-write.md"
+  "agent-docs/prompts/coverage-review.md"
   "agent-docs/prompts/prompt-review.md"
   "agent-docs/generated/README.md"
   "agent-docs/generated/doc-gardening-report.md"

@@ -63,6 +63,7 @@ describe("revokeHostedVaultSharesTx", () => {
     expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledWith({
       data: {
         projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         revokedAt: now,
         status: "revoked",
         updatedAt: now,
@@ -105,6 +106,7 @@ describe("revokeHostedVaultSharesTx", () => {
     expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledWith({
       data: {
         projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         revokedAt: now,
         status: "revoked",
         updatedAt: now,
@@ -160,6 +162,7 @@ describe("grantHostedVaultShareTx", () => {
         grantedAt: now,
         id: expect.stringMatching(/^hbvs_/u),
         projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         revokedAt: null,
         status: "granted",
       }),
@@ -204,7 +207,7 @@ describe("grantHostedVaultShareTx", () => {
     expect(tx.hostedVaultShare.update).not.toHaveBeenCalled();
   });
 
-  it("rejects a new grant after atomically observing 25 active grants", async () => {
+  it("admits a 26th active grant without consulting a cohort count", async () => {
     const events: string[] = [];
     const tx = createPrismaStub({
       $executeRaw: vi.fn(async () => {
@@ -216,7 +219,10 @@ describe("grantHostedVaultShareTx", () => {
           events.push("count");
           return 25;
         }),
-        create: vi.fn(),
+        create: vi.fn(async () => {
+          events.push("create");
+          return { id: "share_26" };
+        }),
         findUnique: vi.fn(async () => null),
         update: vi.fn(),
       },
@@ -228,20 +234,14 @@ describe("grantHostedVaultShareTx", () => {
       now: new Date("2026-07-02T00:00:00.000Z"),
       projectionScope: SLEEP_SCOPE,
       tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
-      httpStatus: 409,
+    })).resolves.toEqual({
+      id: "share_26",
+      requiresProjection: true,
     });
 
-    expect(events).toEqual(["lock", "count"]);
-    expect(tx.hostedVaultShare.count).toHaveBeenCalledWith({
-      where: {
-        grantorMemberId: "member_grantor",
-        projectionScopeKey: SLEEP_SCOPE_KEY,
-        status: "granted",
-      },
-    });
-    expect(tx.hostedVaultShare.create).not.toHaveBeenCalled();
+    expect(events).toEqual(["lock", "create"]);
+    expect(tx.hostedVaultShare.count).not.toHaveBeenCalled();
+    expect(tx.hostedVaultShare.create).toHaveBeenCalledOnce();
     expect(tx.hostedVaultShare.update).not.toHaveBeenCalled();
   });
 
@@ -284,6 +284,7 @@ describe("grantHostedVaultShareTx", () => {
         grantedAt: now,
         id: result.id,
         projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         revokedAt: null,
         status: "granted",
       }),

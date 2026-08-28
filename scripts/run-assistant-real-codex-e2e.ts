@@ -48,7 +48,7 @@ const USAGE = [
   '',
   'Options:',
   '  --auth subscription|provider  Use local ChatGPT auth (default) or provider env.',
-  '  --codex-home <absolute-path>   Use an explicit local Codex home for subscription auth.',
+  '  --codex-home <absolute-path>   Use a dedicated local Codex home for subscription auth.',
   '  --model <model>               Override the default gpt-5.6-terra model.',
   '  -h, --help                    Show this help.',
 ].join('\n')
@@ -290,6 +290,11 @@ export function executeAssistantRealCodexRun(
   dependencies.writeStdout(
     `Running one real Murph assistant journey with ${effectiveModel} via ${options.authMode} auth.\n`,
   )
+  if (options.authMode === 'subscription') {
+    dependencies.writeStdout(
+      'Subscription runs keep the selected Codex home configuration; use a dedicated home for production-like evidence.\n',
+    )
+  }
 
   const liveCommand = buildPnpmCommand(
     buildAssistantRealCodexVitestArgs(fullTestName),

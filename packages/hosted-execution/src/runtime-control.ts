@@ -1094,7 +1094,7 @@ export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
 export const HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS =
   HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS;
 export const HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX = 25;
-export const HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX = 25;
+export const HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS = 512;
 
 export interface HostedRuntimeGroupDisclosureGrantSummary {
   grantId: string;
@@ -1193,7 +1193,10 @@ export interface HostedRuntimeUsageReferralSourceContext {
   sourceConversation?: HostedRuntimeUsageReferralSourceConversation;
 }
 
+export const HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX = 64;
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS = 512;
+export const HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX = 8;
 
 export interface HostedRuntimeGroupMembershipSummary {
   displayName: string | null;
@@ -1459,6 +1462,22 @@ export interface HostedRuntimeGroupParticipantDisplayName {
   senderHandle: string;
 }
 
+export interface HostedRuntimeGroupParticipantPhoneHint {
+  areaCode?: string;
+  lastFour?: string;
+}
+
+export interface HostedRuntimeGroupParticipantTargetCue {
+  displayName?: string;
+  emailParticipant?: true;
+  phoneHint?: HostedRuntimeGroupParticipantPhoneHint;
+}
+
+export interface HostedRuntimeGroupParticipantTarget {
+  participantCount?: number;
+  participants?: readonly HostedRuntimeGroupParticipantTargetCue[];
+}
+
 export type HostedRuntimeGroupParticipantDisplayNamesResult =
   | {
       /**
@@ -1482,6 +1501,7 @@ export type HostedRuntimeGroupToolRequest =
       groupLabel?: string | null;
       originAssistantInputId: string;
       originSessionId: string;
+      participantTarget?: HostedRuntimeGroupParticipantTarget | null;
       question: string;
     }
   | {
@@ -1489,6 +1509,7 @@ export type HostedRuntimeGroupToolRequest =
       context: string;
       groupLabel?: string | null;
       originAssistantInputId: string;
+      participantTarget?: HostedRuntimeGroupParticipantTarget | null;
     }
   | {
       action: "ask_current_sender";
@@ -1520,7 +1541,7 @@ export type HostedRuntimeGroupToolRequest =
       permissionText: string;
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
-  | { action: "read_current" }
+  | { action: "read_current"; disclosureGrantCursor?: string }
   | {
       action: "prepare_next_group";
       setup?: HostedRuntimePendingGroupSetupInput;
@@ -1574,7 +1595,11 @@ export type HostedRuntimeGroupToolRequest =
       action: "prepare_email";
       projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
     }
-  | { action: "list_memberships" }
+  | {
+      action: "list_memberships";
+      cursor?: string;
+      disclosureGrantCursor?: string;
+    }
   | { action: "leave_membership"; membershipId: string }
   | {
       action: "update_display_name";
@@ -1678,7 +1703,12 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "read_current";
       result:
-        | { status: "ok"; group: HostedRuntimeGroupSummary }
+        | {
+            status: "ok";
+            disclosureGrantsTruncated?: boolean;
+            group: HostedRuntimeGroupSummary;
+            nextDisclosureGrantCursor?: string | null;
+          }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
@@ -1744,7 +1774,10 @@ export type HostedRuntimeGroupToolResponse =
         | {
             status: "ok";
             disclosureGrants: HostedRuntimeGroupDisclosureGrantListEntry[];
+            disclosureGrantsTruncated?: boolean;
             memberships: HostedRuntimeGroupMembershipSummary[];
+            nextDisclosureGrantCursor?: string | null;
+            nextCursor?: string | null;
             truncated: boolean;
           }
         | {
@@ -2271,8 +2304,10 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
   // Control-plane orchestration diagnostics before the runner-container DO
   // starts dispatch. Timestamps come from different hosts and are for coarse
-  // span splitting only. The two bounded ids correlate one Web direct ensure
-  // with the runtime invocation it launched.
+  // span splitting only. UserRunner constructor and first-ensure timestamps are
+  // facts about one Durable Object activation, so they can predate a warm
+  // request's route timestamp. The two bounded ids correlate one Web direct
+  // ensure with the runtime invocation it launched.
   orchestration?: {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
@@ -2292,6 +2327,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     cloudflareRouteReceivedAtEpochMs?: number;
     runtimeInvocationOrchestrationAttemptId?: string;
     triggeredByWebDirect?: boolean;
+    userRunnerConstructorStartedAtEpochMs?: number;
+    userRunnerConstructorFinishedAtEpochMs?: number;
+    userRunnerFirstEnsureRuntimeProcessingAtEpochMs?: number;
     userRunnerRpcStartedAtEpochMs?: number;
     runtimeConsentLockAcquiredAtEpochMs?: number;
     healthDataAdmissionReadStartedAtEpochMs?: number;
@@ -2394,6 +2432,12 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // provider-start path. The other leaves are nested diagnostics.
   preProvider?: {
     mailboxImportDoneToAssistantPhaseMs?: number;
+    // These adjacent nested leaves exactly partition
+    // mailboxImportDoneToAssistantPhaseMs when all are present.
+    mailboxImportDoneToForegroundPassMs?: number;
+    foregroundPassToWorkspaceForegroundPassMs?: number;
+    workspaceForegroundPassToAssistantPhaseCallbackMs?: number;
+    assistantPhaseCallbackToAssistantPhaseMs?: number;
     workspaceAssistantPreAutomationMs?: number;
     automationLaneToAssistantServiceMs?: number;
     // These adjacent nested leaves exactly partition
@@ -2454,6 +2498,76 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     preProviderSetupMs?: number;
     providerPlanAndGateMs?: number;
     linqEgressGuardMs?: number;
+  };
+}
+
+export const HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS = [
+  "mailboxImportDoneToForegroundPassMs",
+  "foregroundPassToWorkspaceForegroundPassMs",
+  "workspaceForegroundPassToAssistantPhaseCallbackMs",
+  "assistantPhaseCallbackToAssistantPhaseMs",
+] as const;
+
+type HostedRuntimeMailboxToAssistantTimingSubdivision = Required<Pick<
+  NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+  (typeof HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS)[number]
+>>;
+
+export type HostedRuntimeMailboxToAssistantTimingSubdivisionInspection =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | {
+      kind: "complete";
+      subdivision: HostedRuntimeMailboxToAssistantTimingSubdivision;
+    };
+
+export function inspectHostedRuntimeMailboxToAssistantTimingSubdivision(
+  preProvider: NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+): HostedRuntimeMailboxToAssistantTimingSubdivisionInspection {
+  const {
+    assistantPhaseCallbackToAssistantPhaseMs,
+    foregroundPassToWorkspaceForegroundPassMs,
+    mailboxImportDoneToForegroundPassMs,
+    workspaceForegroundPassToAssistantPhaseCallbackMs,
+  } = preProvider;
+  if (
+    assistantPhaseCallbackToAssistantPhaseMs === undefined
+    && foregroundPassToWorkspaceForegroundPassMs === undefined
+    && mailboxImportDoneToForegroundPassMs === undefined
+    && workspaceForegroundPassToAssistantPhaseCallbackMs === undefined
+  ) {
+    return { kind: "absent" };
+  }
+  if (
+    assistantPhaseCallbackToAssistantPhaseMs === undefined
+    || foregroundPassToWorkspaceForegroundPassMs === undefined
+    || mailboxImportDoneToForegroundPassMs === undefined
+    || workspaceForegroundPassToAssistantPhaseCallbackMs === undefined
+  ) {
+    return { kind: "invalid" };
+  }
+
+  const subdivision = {
+    mailboxImportDoneToForegroundPassMs,
+    foregroundPassToWorkspaceForegroundPassMs,
+    workspaceForegroundPassToAssistantPhaseCallbackMs,
+    assistantPhaseCallbackToAssistantPhaseMs,
+  };
+  const values = Object.values(subdivision);
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    return { kind: "invalid" };
+  }
+  const sum = values.reduce<number>((total, value) => total + value, 0);
+  if (
+    !Number.isSafeInteger(sum)
+    || !Number.isSafeInteger(preProvider.mailboxImportDoneToAssistantPhaseMs)
+    || preProvider.mailboxImportDoneToAssistantPhaseMs !== sum
+  ) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "complete",
+    subdivision,
   };
 }
 
@@ -2597,6 +2711,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "cloudflareRouteReceivedAtEpochMs",
     "runtimeInvocationOrchestrationAttemptId",
     "triggeredByWebDirect",
+    "userRunnerConstructorStartedAtEpochMs",
+    "userRunnerConstructorFinishedAtEpochMs",
+    "userRunnerFirstEnsureRuntimeProcessingAtEpochMs",
     "userRunnerRpcStartedAtEpochMs",
     "runtimeConsentLockAcquiredAtEpochMs",
     "healthDataAdmissionReadStartedAtEpochMs",
@@ -2672,6 +2789,10 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   ],
   preProvider: [
     "mailboxImportDoneToAssistantPhaseMs",
+    "mailboxImportDoneToForegroundPassMs",
+    "foregroundPassToWorkspaceForegroundPassMs",
+    "workspaceForegroundPassToAssistantPhaseCallbackMs",
+    "assistantPhaseCallbackToAssistantPhaseMs",
     "workspaceAssistantPreAutomationMs",
     "automationLaneToAssistantServiceMs",
     "automationReadinessMs",

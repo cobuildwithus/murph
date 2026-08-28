@@ -1772,6 +1772,144 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
     expect(JSON.stringify(result.runtimeIssueInputs)).not.toContain('arguments')
   })
 
+  it('persists value-free pause-tool schema rejection details', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-computer-pause-invalid-',
+    )
+    const invalidHandoffPurpose = 'private-invalid-purpose'
+    const privateRunId = 'run_private_runtime_123'
+    const privateSuggestedReply = 'private suggested reply text'
+    const privateMessage = 'private message text'
+    const privateUrl = 'https://private.example.test/handoff'
+    const unknownKey = 'privateArbitraryField'
+    const unknownValue = 'private arbitrary secret'
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: { id: 'thread-computer-pause-invalid' },
+            },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: { id: 'turn-computer-pause-invalid' },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 99,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                handoffPurpose: invalidHandoffPurpose,
+                reason: {
+                  message: privateMessage,
+                  url: privateUrl,
+                },
+                runId: privateRunId,
+                suggestedReply: privateSuggestedReply,
+                [unknownKey]: unknownValue,
+              },
+              namespace: 'murph',
+              tool: 'computer_pause_for_user',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 99)).resolves.toMatchObject({
+            id: 99,
+            result: { success: false },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-computer-pause-invalid',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'try invalid computer pause tool',
+      workingDirectory,
+    })
+    expect(result.runtimeIssueInputs).toEqual([
+      expect.objectContaining({
+        component: 'assistant.tool-validation',
+        operation: 'murph.computer_pause_for_user',
+        phase: 'tool_call',
+        issueKind: 'schema_rejection',
+        severity: 'warning',
+        errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+        summary: 'Tool input failed schema validation.',
+        details: expect.objectContaining({
+          detailsSchema: 'murph.tool-call-validation-digest.v1',
+          inputShape: [
+            'root.object.count_1_10',
+            'handoffPurpose.string.len_1_32',
+            'reason.object.count_1_10',
+            'runId.string.len_1_32',
+            'suggestedReply.string.len_1_32',
+          ],
+          invalidPaths: ['handoffPurpose', 'reason', 'root'],
+          issueCodes: ['custom'],
+          pathIssues: [
+            {
+              code: 'custom',
+              path: 'handoffPurpose',
+              received: 'string.len_1_32',
+            },
+            {
+              code: 'custom',
+              path: 'reason',
+              received: 'object.count_1_10',
+            },
+            {
+              code: 'custom',
+              path: 'root',
+              received: 'object.count_1_10',
+            },
+          ],
+          rootKeyCount: 5,
+          rootKeysPresent: [
+            'handoffPurpose',
+            'reason',
+            'runId',
+            'suggestedReply',
+          ],
+          rootType: 'object',
+          schemaName: 'murph.computer_pause_for_user.input',
+          toolName: 'murph.computer_pause_for_user',
+          unsafeRootKeyCount: 1,
+        }),
+      }),
+    ])
+    const serializedIssues = JSON.stringify(result.runtimeIssueInputs)
+    expect(serializedIssues).not.toContain(invalidHandoffPurpose)
+    expect(serializedIssues).not.toContain(privateRunId)
+    expect(serializedIssues).not.toContain(privateSuggestedReply)
+    expect(serializedIssues).not.toContain(privateMessage)
+    expect(serializedIssues).not.toContain(privateUrl)
+    expect(serializedIssues).not.toContain(unknownKey)
+    expect(serializedIssues).not.toContain(unknownValue)
+  })
+
   it('records pending-file schema rejection through the standard safe diagnostic', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-pending-file-invalid-',

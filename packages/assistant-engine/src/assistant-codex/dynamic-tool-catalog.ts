@@ -23,11 +23,16 @@ import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -300,7 +305,7 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_exercise_routine_card',
   description:
-    'Attach one complete Telegram exercise routine Rich Message when this tool is available and its exercise layout, optional catalog images, or both make the answer clearer. Use it for current movement instruction, an exact scheduled occurrence that teaches the saved routine now, or a request to repeat or improve an earlier routine. This card is one useful presentation option, not the only valid rich layout. Use attach_telegram_rich_content when a custom or mixed layout is clearer. The card must completely answer the request and replaces final text. Represent every named movement as its own card.exercises item, even when the routine groups movements under phases. A phase is not an exercise. Example: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) becomes four exercise items in one card, not two. An exercise list result is not enough: run vault-cli exercise show for every named movement before attaching the card. Include useful returned catalog images when they are available and help explain the movement; images are recommended, not required. In a multi-movement routine, put each useful returned image on its matching movement item. Keep the card at eight images or fewer. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language when it helps. Never promise images for an exercise that has none. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. If validation rejects the card, correct the reported fields and retry this tool once. On that retry, preserve every valid movement, instruction, and image; change only the reported invalid fields. Do not switch to separate response media on Telegram. If the corrected retry is also rejected, use one complete attach_telegram_rich_content card without images and keep every named movement separate. After either card tool succeeds, stop and send no final text. The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap. Do not combine this card with response media.',
+    'Attach one complete Telegram exercise routine Rich Message when this tool is available and its exercise layout, optional catalog images, or both make the answer clearer. Use it for current movement instruction, an exact scheduled occurrence that teaches the saved routine now, or a request to repeat or improve an earlier routine. This card is one useful presentation option, not the only valid rich layout. Use attach_telegram_rich_content when a custom or mixed layout is clearer. The card must completely answer the request and replaces final text. Represent every named movement as its own card.exercises item, even when the routine groups movements under phases. A phase is not an exercise. Example: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) becomes four exercise items in one card, not two. An exercise list result is not enough: run vault-cli exercise show for every named movement before attaching the card. Include useful returned catalog images when they are available and help explain the movement; images are recommended, not required. In a multi-movement routine, put each useful returned image on its matching movement item. Keep the card at eight images or fewer. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Safety is required: write one scenario-specific stop condition in at most 160 characters. Omit subtitle or footer when it adds nothing; the runtime records null. Never promise images for an exercise that has none. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. If validation rejects the card, correct the reported fields and retry this tool once. On that retry, preserve every valid movement, instruction, and image; change only the reported invalid fields. Do not switch to separate response media on Telegram. If the corrected retry is also rejected, use one complete attach_telegram_rich_content card without images and keep every named movement separate. After either card tool succeeds, stop and send no final text. The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap. Do not combine this card with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -891,6 +896,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'ask',
     'handoff',
     'ask_current_sender',
+    'ask_current_sender_privately',
     'clarify_current_sender',
     'continue_current_sender_in_group',
     'continue_current_sender_privately',
@@ -1049,7 +1055,50 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
         description:
-          'Optional only for action="ask" or action="handoff". A visible group name the member would recognize, used only to disambiguate among joined groups; never an internal identifier.',
+          'Optional only for action="ask" or action="handoff". An exact visible group title the member supplied, used only to disambiguate among joined groups; never an internal identifier. A phrase such as "my group with Jordan and Casey" is a participant description, not a groupLabel: omit groupLabel and use participantTarget.',
+      },
+      participantTarget: {
+        type: 'object',
+        additionalProperties: false,
+        minProperties: 1,
+        properties: {
+          participantCount: {
+            type: 'integer',
+            minimum: 1,
+            maximum: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+            description:
+              'Other people in the chat, excluding the requesting member. Convert a stated total chat size only when clear.',
+          },
+          participants: {
+            type: 'array',
+            maxItems: HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              minProperties: 1,
+              properties: {
+                displayName: {
+                  type: 'string',
+                  minLength: 1,
+                  maxLength:
+                    HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+                },
+                emailParticipant: { type: 'boolean', const: true },
+                phoneHint: {
+                  type: 'object',
+                  additionalProperties: false,
+                  minProperties: 1,
+                  properties: {
+                    areaCode: { type: 'string', pattern: '^\\d{3}$' },
+                    lastFour: { type: 'string', pattern: '^\\d{4}$' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        description:
+          'Optional for ask/handoff when a joined iMessage/SMS group is described by people. Include each non-requester once, using only user-supplied display names, area code/last four, or emailParticipant. Never include full handles, IDs, or guesses.',
       },
       displayName: {
         type: 'string',
@@ -1057,6 +1106,20 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
         description:
           'Group display name. Required for action="update_display_name"; optional for action="offer_access" only when it is the name the group chose or the exact name from the immediately preceding read_chat_name result.',
+      },
+      cursor: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+        description:
+          'Optional only for action="list_memberships". Pass the exact opaque nextCursor from the immediately preceding page; never guess, edit, or take it from the user.',
+      },
+      disclosureGrantCursor: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+        description:
+          'Optional only for action="read_current" or action="list_memberships". Pass the exact opaque nextDisclosureGrantCursor from the immediately preceding disclosure-grant page; never guess, edit, or take it from the user.',
       },
       membershipId: {
         type: 'string',
@@ -1198,13 +1261,16 @@ type MurphGroupToolPropertyName = keyof typeof MURPH_GROUP_TOOL_PROPERTIES
 
 const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   group_consult: [
-    'context', 'grantId', 'groupLabel', 'message_ref', 'question',
+    'context', 'grantId', 'groupLabel', 'message_ref', 'participantTarget',
+    'question',
   ],
   group_data: [
     'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
     'permissionText', 'projectionScopes', 'standaloneLink', 'unit', 'value',
   ],
-  group_membership: ['membershipId', 'setup'],
+  group_membership: [
+    'cursor', 'disclosureGrantCursor', 'membershipId', 'setup',
+  ],
   group_usage: ['message_ref', 'policyCode', 'policyCodes'],
   group_chat: [
     'alt', 'avatarPrompt', 'avatarSource', 'displayName', 'imageRef',
@@ -1215,6 +1281,74 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
   readonly MurphGroupToolPropertyName[]
 >
+
+type MurphGroupConsultAction =
+  (typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult)[number]
+
+const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
+  ask: {
+    optional: ['groupLabel', 'participantTarget'],
+    required: ['question'],
+  },
+  handoff: {
+    optional: ['groupLabel', 'participantTarget'],
+    required: ['context'],
+  },
+  ask_current_sender: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  ask_current_sender_privately: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  clarify_current_sender: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  continue_current_sender_in_group: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  continue_current_sender_privately: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  ask_member: {
+    optional: [],
+    required: ['grantId', 'question'],
+  },
+} as const satisfies Record<
+  MurphGroupConsultAction,
+  {
+    optional: readonly MurphGroupToolPropertyName[]
+    required: readonly MurphGroupToolPropertyName[]
+  }
+>
+
+function buildMurphGroupConsultInputSchema() {
+  return {
+    oneOf: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult.map((action) => {
+      const actionProperties = MURPH_GROUP_CONSULT_ACTION_PROPERTIES[action]
+      const propertyNames: readonly MurphGroupToolPropertyName[] = [
+        ...actionProperties.required,
+        ...actionProperties.optional,
+      ]
+      return {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { type: 'string', enum: [action] },
+          ...Object.fromEntries(propertyNames.map((propertyName) => [
+            propertyName,
+            MURPH_GROUP_TOOL_PROPERTIES[propertyName],
+          ])),
+        },
+        required: ['action', ...actionProperties.required],
+      }
+    }),
+  } as const
+}
 
 function buildMurphGroupFamilyInputSchema<
   const Name extends keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
@@ -1251,11 +1385,14 @@ function buildMurphGroupFamilyTool<
   } as const
 }
 
-export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
+export const MURPH_GROUP_CONSULT_TOOL = {
+  namespace: 'murph',
   name: 'group_consult',
+  deferLoading: true,
   description:
-    'Ask or hand off; the host binds group/member/sender authority. Use message_current_sender for a complete private current-sender request. Call clarify_current_sender before a needed follow-up. Use continue_current_sender_privately or continue_current_sender_in_group only for a later reply to that clarification, never a fresh request. Accepted handoff is queued, not sent; never say told, shared, or posted.',
-})
+    'ask=group answer; handoff=tell/post/share. title=groupLabel; people/count=participantTarget; names not groupLabel; no list. Unnamed: memory show, else "a member". ask_current_sender=group; ask_current_sender_privately=private; clarify=genuine ambiguity; continuations resume. accepted=queued, not sent/shared.',
+  inputSchema: buildMurphGroupConsultInputSchema(),
+} as const
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
@@ -1298,7 +1435,10 @@ export const MURPH_GROUP_FAMILY_TOOLS = [
 
 export const MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME = {
   group: ['action', ...Object.keys(MURPH_GROUP_TOOL_PROPERTIES)],
-  group_consult: Object.keys(MURPH_GROUP_CONSULT_TOOL.inputSchema.properties),
+  group_consult: [
+    'action',
+    ...MURPH_GROUP_TOOL_FAMILY_PROPERTIES.group_consult,
+  ],
   group_data: Object.keys(MURPH_GROUP_DATA_TOOL.inputSchema.properties),
   group_membership: Object.keys(MURPH_GROUP_MEMBERSHIP_TOOL.inputSchema.properties),
   group_usage: Object.keys(MURPH_GROUP_USAGE_TOOL.inputSchema.properties),
@@ -1468,7 +1608,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'One bounded Playwright macro-step in current authorized run; returns state. No missing or sensitive input or final confirmation. Before browser call two this turn, call send_progress_update if available and not yet sent. Failure leaves outcome uncertain; call computer_open before retry/next action.',
+    'Bounded Playwright macro-step in current authorized run; returns state. Allows specifically authorized non-credential identity/health input and approved final terms. Never invent data, enter credentials/OTP/payment, bypass CAPTCHA, accept material consent, or retry unknown effects. After failure, call computer_open.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 

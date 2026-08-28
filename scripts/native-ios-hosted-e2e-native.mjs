@@ -5,70 +5,32 @@ import {
   assertSafeId,
   assertSha,
   fetchJson,
-  normalizeHttpsOrigin,
   requiredEnv,
   requiredString,
   isRecord,
-  runBoundedCommand,
+  normalizeHttpsOrigin,
+  resolveProductionCanaryWebSha,
+  safeNativeTag,
   sleep,
 } from "./native-ios-hosted-e2e-support.mjs";
 
 const GITHUB_API_VERSION = "2026-03-10";
 const IOS_TIMEOUT_MS = 60 * 60_000;
-const PRODUCTION_ALIAS_TIMEOUT_MS = 2 * 60_000;
-const PRODUCTION_ALIAS_MAX_OUTPUT_CHARS = 200;
-
-export function buildDispatchInputs({ correlationId, mode, webBaseUrl, webSha }) {
+export function buildDispatchInputs({ correlationId, webBaseUrl, webSha }) {
   assertSafeId(correlationId, "correlation id", 120);
   assertSha(webSha, "web SHA");
-  const identityLifecycle = mode === "pr"
-    ? "orchestrator_owned_reset"
-    : mode === "production_canary"
-      ? "non_destructive_existing_identity"
-      : null;
-  if (!identityLifecycle) throw new Error("mode must be pr or production_canary.");
+  const normalizedWebBaseUrl = normalizeHttpsOrigin(webBaseUrl);
+  if (normalizedWebBaseUrl !== "https://www.withmurph.ai") {
+    throw new Error("Production canary requires the exact Murph production origin.");
+  }
   return {
     contract_version: NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION,
     correlation_id: correlationId,
-    identity_lifecycle: identityLifecycle,
-    mode,
-    web_base_url: normalizeHttpsOrigin(webBaseUrl),
+    identity_lifecycle: "non_destructive_existing_identity",
+    mode: "production_canary",
+    web_base_url: normalizedWebBaseUrl,
     web_sha: webSha,
   };
-}
-
-export function inspectExactPrHead(raw, { expectedSha, prNumber }) {
-  assertRecord(raw, "Web PR");
-  if (raw.number !== prNumber || !isRecord(raw.head)) {
-    throw new Error("Web PR head revalidation returned an unexpected pull request.");
-  }
-  const currentSha = requiredString(raw.head.sha, "Web PR head SHA");
-  assertSha(currentSha, "Web PR head SHA");
-  assertSha(expectedSha, "expected Web PR head SHA");
-  if (currentSha !== expectedSha) {
-    throw new Error("PR head changed before private iOS dispatch.");
-  }
-  return true;
-}
-
-export async function revalidateExactPrHead({ expectedSha, prNumber, repository, token }) {
-  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
-    throw new Error("PR number must be a positive integer.");
-  }
-  assertSafeId(
-    repository,
-    "GitHub repository",
-    200,
-    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u,
-  );
-  requiredString(token, "Web GitHub token");
-  const encodedRepository = repository.split("/").map(encodeURIComponent).join("/");
-  inspectExactPrHead(await fetchJson(
-    `https://api.github.com/repos/${encodedRepository}/pulls/${prNumber}`,
-    { headers: githubHeaders(token) },
-    "Web PR head revalidation",
-  ), { expectedSha, prNumber });
-  console.log("::notice::native-ios-e2e stage=pr_head_revalidate result=success");
 }
 
 export function inspectPrivateDispatchTag(raw, { expectedSha, ref }) {
@@ -83,13 +45,6 @@ export function inspectPrivateDispatchTag(raw, { expectedSha, ref }) {
   return sha;
 }
 
-export function inspectCurrentProductionSha(currentSha, expectedSha) {
-  assertSha(currentSha, "current production alias SHA");
-  assertSha(expectedSha, "requested production deployment SHA");
-  if (currentSha !== expectedSha) throw new Error("Production alias no longer resolves to the requested deployment SHA.");
-  return true;
-}
-
 export function inspectPrivateRun(raw, { runId, sha }) {
   assertRecord(raw, "private iOS run");
   if (raw.id !== runId || raw.event !== "workflow_dispatch" || raw.head_sha !== sha) {
@@ -101,11 +56,18 @@ export function inspectPrivateRun(raw, { runId, sha }) {
   };
 }
 
-export async function dispatchAndWait({ correlationId, mode, prHead = null, webBaseUrl, webSha }) {
+export async function dispatchAndWait(
+  { correlationId, source, webBaseUrl, webSha },
+  { resolveWebSha = resolveProductionCanaryWebSha } = {},
+) {
   const token = requiredEnv("NATIVE_IOS_E2E_GITHUB_TOKEN");
   const repository = requiredEnv("NATIVE_IOS_E2E_IOS_REPOSITORY");
   const workflow = requiredEnv("NATIVE_IOS_E2E_IOS_WORKFLOW");
-  const ref = safeTag(requiredEnv("NATIVE_IOS_E2E_IOS_REF"));
+  const ref = safeNativeTag(source?.privateRef, "private iOS tag");
+  const productionWebSha = await resolveWebSha({
+    env: withoutPrivateToken(process.env),
+    scheduledMainSha: webSha,
+  });
 
   const tag = await fetchJson(
     `https://api.github.com/repos/${repository}/git/ref/tags/${ref.split("/").map(encodeURIComponent).join("/")}`,
@@ -113,19 +75,17 @@ export async function dispatchAndWait({ correlationId, mode, prHead = null, webB
     "private iOS tag lookup",
   );
   const expectedSha = inspectPrivateDispatchTag(tag, {
-    expectedSha: requiredEnv("NATIVE_IOS_E2E_IOS_EXPECTED_SHA"),
+    expectedSha: source?.privateSha,
     ref,
   });
-  if (mode === "production_canary") await proveCurrentProductionAlias(webSha);
-  if (mode === "pr") {
-    if (!isRecord(prHead)) throw new Error("PR head revalidation inputs are required.");
-    await revalidateExactPrHead({ ...prHead, expectedSha: webSha });
-  }
 
   const receipt = await fetchJson(
     `https://api.github.com/repos/${repository}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`,
     {
-      body: JSON.stringify({ inputs: buildDispatchInputs({ correlationId, mode, webBaseUrl, webSha }), ref }),
+      body: JSON.stringify({
+        inputs: buildDispatchInputs({ correlationId, webBaseUrl, webSha: productionWebSha }),
+        ref,
+      }),
       headers: { ...githubHeaders(token), "content-type": "application/json" },
       method: "POST",
     },
@@ -144,7 +104,7 @@ export async function dispatchAndWait({ correlationId, mode, prHead = null, webB
     ), { runId, sha: expectedSha });
     if (run.complete) {
       if (run.conclusion !== "success") throw new Error(`Private iOS E2E completed with ${run.conclusion || "no conclusion"}.`);
-      console.log(`::notice::native-ios-e2e stage=ios_${mode} result=success`);
+      console.log("::notice::native-ios-e2e stage=ios_production_canary result=success");
       return;
     }
     await sleep(POLL_MS);
@@ -152,19 +112,10 @@ export async function dispatchAndWait({ correlationId, mode, prHead = null, webB
   throw new Error("Private iOS E2E timed out.");
 }
 
-async function proveCurrentProductionAlias(expectedSha) {
-  const childEnv = { ...process.env };
+function withoutPrivateToken(env) {
+  const childEnv = { ...env };
   delete childEnv.NATIVE_IOS_E2E_GITHUB_TOKEN;
-  const currentSha = (await runBoundedCommand({
-    argv: ["--dir", "apps/web", "exec", "tsx", "scripts/resolve-vercel-production-alias-sha.ts"],
-    captureStdout: true,
-    command: "pnpm",
-    env: childEnv,
-    label: "Production alias verification",
-    maxOutputChars: PRODUCTION_ALIAS_MAX_OUTPUT_CHARS,
-    timeoutMs: PRODUCTION_ALIAS_TIMEOUT_MS,
-  })).trim();
-  inspectCurrentProductionSha(currentSha, expectedSha);
+  return childEnv;
 }
 
 function githubHeaders(token) {
@@ -174,12 +125,4 @@ function githubHeaders(token) {
     "user-agent": "murph-native-ios-hosted-e2e",
     "x-github-api-version": GITHUB_API_VERSION,
   };
-}
-
-function safeTag(value) {
-  assertSafeId(value, "private iOS tag", 180, /^[A-Za-z0-9._/-]+$/u);
-  if (value.startsWith("refs/") || value.includes("..") || value.includes("//") || value.endsWith(".lock")) {
-    throw new Error("private iOS ref must be a safe lightweight tag name.");
-  }
-  return value;
 }

@@ -30,6 +30,54 @@ export interface HostedMemberActivationRuntimeWakeBestEffortResult {
 export const HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS =
   HOSTED_POST_COMMIT_TIMEOUT_MS;
 
+export function resolveHostedMemberActivationRuntimeWakeTargets(input: {
+  activatedMemberId: string | null;
+  activatedMembers?: Array<{
+    activatedMemberId: string | null;
+    hostedExecutionEventId: string | null;
+    hostedExecutionMailboxItemId?: string | null;
+  }>;
+  hostedExecutionEventId: string | null;
+  hostedExecutionMailboxItemId?: string | null;
+}): Array<{
+  hostedExecutionEventId: string;
+  hostedExecutionMailboxItemId: string | null;
+  memberId: string;
+}> {
+  const explicitTargets = (input.activatedMembers ?? [])
+    .filter((activation): activation is {
+      activatedMemberId: string;
+      hostedExecutionEventId: string;
+      hostedExecutionMailboxItemId?: string | null;
+    } =>
+      typeof activation.activatedMemberId === "string" &&
+      activation.activatedMemberId.length > 0 &&
+      typeof activation.hostedExecutionEventId === "string" &&
+      activation.hostedExecutionEventId.length > 0
+    )
+    .map((activation) => ({
+      hostedExecutionEventId: activation.hostedExecutionEventId,
+      hostedExecutionMailboxItemId:
+        activation.hostedExecutionMailboxItemId
+        ?? input.hostedExecutionMailboxItemId
+        ?? null,
+      memberId: activation.activatedMemberId,
+    }));
+
+  if (explicitTargets.length > 0) {
+    return explicitTargets;
+  }
+
+  return input.activatedMemberId && input.hostedExecutionEventId
+    ? [{
+        hostedExecutionEventId: input.hostedExecutionEventId,
+        hostedExecutionMailboxItemId:
+          input.hostedExecutionMailboxItemId ?? null,
+        memberId: input.activatedMemberId,
+      }]
+    : [];
+}
+
 export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
   input: {
     hostedExecutionEventId: string;

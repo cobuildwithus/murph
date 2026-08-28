@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   listMurphDynamicToolNames,
+  MURPH_GROUP_CONSULT_TOOL,
   MURPH_GROUP_FAMILY_TOOLS,
   MURPH_GROUP_TOOL_FAMILY_ACTIONS,
   MURPH_GROUP_TOOL_NAME,
@@ -27,6 +28,10 @@ const GROUP_ACTION_FIXTURES = {
   ask: { action: "ask", question: "What changed this week?" },
   handoff: { action: "handoff", context: "The member completed the workout." },
   ask_current_sender: { action: "ask_current_sender", message_ref: MESSAGE_REF },
+  ask_current_sender_privately: {
+    action: "ask_current_sender_privately",
+    message_ref: MESSAGE_REF,
+  },
   clarify_current_sender: {
     action: "clarify_current_sender",
     message_ref: MESSAGE_REF,
@@ -126,11 +131,27 @@ function groupToolCall(
   };
 }
 
+function schemaAdvertisesGroupConsultObjectShape(
+  argumentsValue: Record<string, unknown>,
+): boolean {
+  const branch = MURPH_GROUP_CONSULT_TOOL.inputSchema.oneOf.find(
+    (candidate) =>
+      candidate.properties.action.enum[0] === argumentsValue.action,
+  );
+  if (!branch || branch.additionalProperties !== false) {
+    return false;
+  }
+  return branch.required.every((key) => Object.hasOwn(argumentsValue, key))
+    && Object.keys(argumentsValue).every(
+      (key) => Object.hasOwn(branch.properties, key),
+    );
+}
+
 describe("murph.group parser-first family compatibility", () => {
-  it("partitions all 30 advertised actions exactly once", () => {
+  it("partitions all 31 advertised actions exactly once", () => {
     const familyActions = Object.values(GROUP_FAMILY_ACTIONS).flat();
 
-    expect(familyActions).toHaveLength(30);
+    expect(familyActions).toHaveLength(31);
     expect(new Set(familyActions).size).toBe(familyActions.length);
     expect([...familyActions].sort())
       .toEqual(Object.keys(GROUP_ACTION_FIXTURES).sort());
@@ -182,6 +203,7 @@ describe("murph.group parser-first family compatibility", () => {
 
     for (const action of [
       "ask_current_sender",
+      "ask_current_sender_privately",
       "clarify_current_sender",
       "continue_current_sender_in_group",
       "continue_current_sender_privately",
@@ -196,6 +218,50 @@ describe("murph.group parser-first family compatibility", () => {
         });
       }
     }
+  });
+
+  it("advertises strict group_consult shapes that agree with the parser", () => {
+    expect(MURPH_GROUP_CONSULT_TOOL.inputSchema.oneOf.map(
+      (branch) => branch.properties.action.enum[0],
+    )).toEqual([...GROUP_FAMILY_ACTIONS.group_consult]);
+
+    for (const action of GROUP_FAMILY_ACTIONS.group_consult) {
+      const argumentsValue = GROUP_ACTION_FIXTURES[action];
+
+      expect(
+        schemaAdvertisesGroupConsultObjectShape(argumentsValue),
+        action,
+      ).toBe(true);
+      expect(
+        readMurphDynamicToolRequest(
+          groupToolCall("group_consult", argumentsValue),
+        ),
+        action,
+      ).toMatchObject({ kind: "group" });
+    }
+
+    const crossActionArguments = {
+      action: "ask_current_sender",
+      context: "Synthetic group context.",
+      message_ref: MESSAGE_REF,
+    };
+    expect(schemaAdvertisesGroupConsultObjectShape(crossActionArguments))
+      .toBe(false);
+    expect(readMurphDynamicToolRequest(
+      groupToolCall("group_consult", crossActionArguments),
+    )).toMatchObject({
+      kind: "invalid-group-arguments",
+      validationDigest: { issueCodes: ["unrecognized_key"] },
+    });
+
+    const legacyArguments = {
+      action: "message_current_sender",
+      message_ref: MESSAGE_REF,
+    };
+    expect(schemaAdvertisesGroupConsultObjectShape(legacyArguments)).toBe(false);
+    expect(readMurphDynamicToolRequest(
+      groupToolCall("group_consult", legacyArguments),
+    )).toMatchObject({ kind: "invalid-group-arguments" });
   });
 
   it("does not treat unknown or legacy-only actions as read_current", () => {

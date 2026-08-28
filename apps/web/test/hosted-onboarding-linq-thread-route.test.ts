@@ -6702,7 +6702,10 @@ describe("Linq group chat auto-provision", () => {
     ]);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      displayName: "Weekend Warriors",
+      handleCount: 0,
       handles: [],
+      handlesComplete: true,
       isGroup: true,
     });
     vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
@@ -6732,6 +6735,15 @@ describe("Linq group chat auto-provision", () => {
         prisma,
       });
       expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+      const createdContainerMemberId = prisma.hostedThreadContainer.create
+        .mock.calls[0]?.[0].data.memberId;
+      expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+        .toHaveBeenCalledWith({
+          containerMemberId: createdContainerMemberId,
+          initialDisplayName: "Weekend Warriors",
+          now: new Date("2026-06-24T12:00:00.000Z"),
+          tx: prisma,
+        });
       expect(
         vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx)
           .mock.invocationCallOrder[0],

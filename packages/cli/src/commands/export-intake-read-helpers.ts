@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { rawImportManifestSchema } from '@murphai/contracts'
 import { z } from 'incur'
@@ -13,11 +13,22 @@ import {
   readMaterializedExportPackReceipt,
   retireMaterializedExportPack,
 } from '@murphai/vault-usecases/export-packs'
-import { materializeExportPack, resolveVaultRelativePath } from '@murphai/vault-usecases/helpers'
+import {
+  materializeExportPack,
+  resolveVaultRelativePath,
+  toVaultCliFilesystemError,
+} from '@murphai/vault-usecases/helpers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 
 type JsonObject = Record<string, unknown>
+
+interface StoredManifestRecovery {
+  subject: string
+  missingCode: string
+  invalidCode: string
+  publicFields: ReadonlySet<string>
+}
 
 const exportPackFileSchema = z
   .object({
@@ -60,6 +71,36 @@ export const exportPackManifestSchema = z
 type ExportPackManifest = z.infer<typeof exportPackManifestSchema>
 const EXPORTS_ROOT = 'exports/packs'
 const LEGACY_RAW_MANIFEST_BASENAME = 'manifest.json'
+const exportPackManifestRecovery: StoredManifestRecovery = {
+  subject: 'export pack',
+  missingCode: 'manifest_missing',
+  invalidCode: 'manifest_invalid',
+  publicFields: new Set([
+    'format',
+    'packId',
+    'generatedAt',
+    'filters',
+    'manifest',
+    'health',
+    'files',
+  ]),
+}
+const assessmentManifestRecovery: StoredManifestRecovery = {
+  subject: 'assessment raw-import',
+  missingCode: 'manifest_missing',
+  invalidCode: 'manifest_invalid',
+  publicFields: new Set([
+    'schemaVersion',
+    'importId',
+    'importKind',
+    'importedAt',
+    'source',
+    'owner',
+    'rawDirectory',
+    'artifacts',
+    'provenance',
+  ]),
+}
 
 let queryRuntimePromise: Promise<QueryRuntimeModule> | null = null
 
@@ -83,25 +124,137 @@ function packDirectory(packId: string) {
   return path.posix.join(EXPORTS_ROOT, packId)
 }
 
+function exportPackNotFoundError() {
+  return new VaultCliError(
+    'not_found',
+    'The requested export pack was not found.',
+    {
+      retryable: false,
+      stage: 'read',
+      issues: [{ code: 'custom', publicPath: ['id'] }],
+    },
+  )
+}
+
+async function storedExportPackDirectoryExists(
+  vaultRoot: string,
+  relativePackDirectory: string,
+) {
+  try {
+    return (await stat(
+      await resolveVaultRelativePath(vaultRoot, relativePackDirectory),
+    )).isDirectory()
+  } catch (error) {
+    if (readErrorCode(error) === 'ENOENT' || readErrorCode(error) === 'ENOTDIR') {
+      return false
+    }
+
+    throw toVaultCliFilesystemError(error, {
+      message: 'The stored export pack directory could not be inspected.',
+    })
+  }
+}
+
+function readErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null
+  }
+
+  return typeof error.code === 'string' ? error.code : null
+}
+
+function manifestValidationContext(
+  error: unknown,
+  publicFields: ReadonlySet<string>,
+) {
+  const issues =
+    error && typeof error === 'object' && 'issues' in error && Array.isArray(error.issues)
+      ? error.issues
+      : []
+
+  return {
+    retryable: false,
+    stage: 'read',
+    issues: issues.map((issue) => {
+      const issueRecord = issue && typeof issue === 'object' ? issue : null
+      const issueCode =
+        issueRecord && 'code' in issueRecord && typeof issueRecord.code === 'string'
+          ? safeValidationIssueCode(issueRecord.code)
+          : 'custom'
+      const issuePath =
+        issueRecord && 'path' in issueRecord && Array.isArray(issueRecord.path)
+          ? topLevelValidationPath(issueRecord.path, publicFields)
+          : []
+      const expected =
+        issueRecord
+        && 'expected' in issueRecord
+        && typeof issueRecord.expected === 'string'
+        && /^(?:array|boolean|null|number|object|string|undefined)$/u.test(issueRecord.expected)
+          ? issueRecord.expected
+          : undefined
+
+      return {
+        publicPath: issuePath,
+        code: issueCode,
+        ...(expected ? { expected } : {}),
+      }
+    }),
+  }
+}
+
+function safeValidationIssueCode(code: string) {
+  return /^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u.test(code)
+    ? code
+    : 'custom'
+}
+
+function topLevelValidationPath(
+  pathSegments: readonly unknown[],
+  publicFields: ReadonlySet<string>,
+) {
+  const topLevel = pathSegments[0]
+  return typeof topLevel === 'string' && publicFields.has(topLevel)
+    ? [topLevel]
+    : []
+}
+
 async function readJsonRelativeFile<T>(
   vaultRoot: string,
   relativePath: string,
   schema: z.ZodType<T>,
-  missingCode: string,
-  invalidCode: string,
+  recovery: StoredManifestRecovery,
 ): Promise<T> {
-  const absolutePath = await resolveVaultRelativePath(vaultRoot, relativePath)
+  let absolutePath: string
+
+  try {
+    absolutePath = await resolveVaultRelativePath(vaultRoot, relativePath)
+  } catch (error) {
+    if (error instanceof VaultCliError && error.code === 'invalid_path') {
+      throw new VaultCliError(
+        'invalid_path',
+        `The stored ${recovery.subject} manifest path is invalid.`,
+        { retryable: false, stage: 'read' },
+      )
+    }
+
+    throw error
+  }
+
   let contents: string
 
   try {
     contents = await readFile(absolutePath, 'utf8')
   } catch (error) {
+    if (readErrorCode(error) !== 'ENOENT' && readErrorCode(error) !== 'ENOTDIR') {
+      throw toVaultCliFilesystemError(error, {
+        message: `The stored ${recovery.subject} manifest could not be read.`,
+      })
+    }
+
     throw new VaultCliError(
-      missingCode,
-      `Vault file "${relativePath}" is missing.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
+      recovery.missingCode,
+      `The stored ${recovery.subject} manifest is missing.`,
+      { retryable: false, stage: 'read' },
     )
   }
 
@@ -109,12 +262,14 @@ async function readJsonRelativeFile<T>(
 
   try {
     parsed = JSON.parse(contents)
-  } catch (error) {
+  } catch {
     throw new VaultCliError(
-      invalidCode,
-      `Vault file "${relativePath}" is not valid JSON.`,
+      recovery.invalidCode,
+      `The stored ${recovery.subject} manifest is not valid JSON.`,
       {
-        cause: error instanceof Error ? error.message : String(error),
+        retryable: false,
+        stage: 'read',
+        issues: [{ code: 'invalid_format', publicPath: [] }],
       },
     )
   }
@@ -123,11 +278,9 @@ async function readJsonRelativeFile<T>(
     return schema.parse(parsed)
   } catch (error) {
     throw new VaultCliError(
-      invalidCode,
-      `Vault file "${relativePath}" does not match the expected JSON shape.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
+      recovery.invalidCode,
+      `The stored ${recovery.subject} manifest does not match the expected JSON shape.`,
+      manifestValidationContext(error, recovery.publicFields),
     )
   }
 }
@@ -151,7 +304,12 @@ async function loadAssessmentRecord(vaultRoot: string, assessmentId: string) {
   if (!record) {
     throw new VaultCliError(
       'not_found',
-      `No assessment found for "${assessmentId}".`,
+      'The requested assessment was not found.',
+      {
+        retryable: false,
+        stage: 'read',
+        issues: [{ code: 'custom', publicPath: ['id'] }],
+      },
     )
   }
 
@@ -164,7 +322,8 @@ function resolveAssessmentRawFile(record: AssessmentEntity) {
   if (!rawFile) {
     throw new VaultCliError(
       'raw_missing',
-      `Assessment "${record.entityId}" does not declare a raw artifact path.`,
+      'The stored assessment does not declare a raw artifact path.',
+      { retryable: false, stage: 'read' },
     )
   }
 
@@ -182,18 +341,37 @@ async function resolveStoredRawManifestFile(
   vaultRoot: string,
   rawDirectory: string,
 ) {
-  const absoluteDirectory = await resolveVaultRelativePath(vaultRoot, rawDirectory)
+  let absoluteDirectory: string
+
+  try {
+    absoluteDirectory = await resolveVaultRelativePath(vaultRoot, rawDirectory)
+  } catch (error) {
+    if (error instanceof VaultCliError && error.code === 'invalid_path') {
+      throw new VaultCliError(
+        'invalid_path',
+        'The stored assessment raw artifact path is invalid.',
+        { retryable: false, stage: 'read' },
+      )
+    }
+
+    throw error
+  }
+
   let entries: Dirent[]
 
   try {
     entries = await readdir(absoluteDirectory, { withFileTypes: true })
   } catch (error) {
+    if (readErrorCode(error) !== 'ENOENT' && readErrorCode(error) !== 'ENOTDIR') {
+      throw toVaultCliFilesystemError(error, {
+        message: 'The stored assessment raw-import directory could not be read.',
+      })
+    }
+
     throw new VaultCliError(
-      'manifest_missing',
-      `Raw import directory "${rawDirectory}" is missing from the vault.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
+      assessmentManifestRecovery.missingCode,
+      'The stored assessment raw-import directory is missing.',
+      { retryable: false, stage: 'read' },
     )
   }
 
@@ -208,8 +386,9 @@ async function resolveStoredRawManifestFile(
 
   if (!manifestName) {
     throw new VaultCliError(
-      'manifest_missing',
-      `Raw import directory "${rawDirectory}" does not contain a raw import manifest.`,
+      assessmentManifestRecovery.missingCode,
+      'The stored assessment raw-import manifest is missing.',
+      { retryable: false, stage: 'read' },
     )
   }
 
@@ -270,19 +449,38 @@ function matchesExportPackRange(
 }
 
 async function readStoredExportPackManifest(vaultRoot: string, packId: string) {
-  const manifestFile = path.posix.join(packDirectory(packId), 'manifest.json')
-  const manifest = await readJsonRelativeFile(
-    vaultRoot,
-    manifestFile,
-    exportPackManifestSchema,
-    'not_found',
-    'manifest_invalid',
-  )
+  const relativePackDirectory = packDirectory(packId)
+  const manifestFile = path.posix.join(relativePackDirectory, 'manifest.json')
+  let manifest: ExportPackManifest
+
+  try {
+    manifest = await readJsonRelativeFile(
+      vaultRoot,
+      manifestFile,
+      exportPackManifestSchema,
+      exportPackManifestRecovery,
+    )
+  } catch (error) {
+    if (
+      error instanceof VaultCliError
+      && error.code === exportPackManifestRecovery.missingCode
+      && !(await storedExportPackDirectoryExists(vaultRoot, relativePackDirectory))
+    ) {
+      throw exportPackNotFoundError()
+    }
+
+    throw error
+  }
 
   if (manifest.packId !== packId) {
     throw new VaultCliError(
       'manifest_invalid',
-      `Manifest "${manifestFile}" declares pack id "${manifest.packId}" instead of "${packId}".`,
+      'The stored export pack manifest does not match its directory.',
+      {
+        retryable: false,
+        stage: 'read',
+        issues: [{ code: 'custom', publicPath: ['packId'] }],
+      },
     )
   }
 
@@ -309,9 +507,15 @@ async function rebuildStoredExportPackFiles(
   manifest: ExportPackManifest,
 ) {
   const query = await loadQueryRuntime()
-  const readModel = query.readVaultTolerant
-    ? await query.readVaultTolerant(vaultRoot)
-    : await query.readVault(vaultRoot)
+  const [readModel, audits] = await Promise.all([
+    query.readVaultTolerant
+      ? query.readVaultTolerant(vaultRoot)
+      : query.readVault(vaultRoot),
+    query.readCanonicalEntityFamilySource(vaultRoot, 'audit'),
+  ])
+  readModel.entities = [...readModel.entities, ...audits].sort(
+    query.compareCanonicalEntities,
+  )
   const rebuilt = query.buildExportPack(readModel, {
     from: manifest.filters.from ?? undefined,
     to: manifest.filters.to ?? undefined,
@@ -390,7 +594,9 @@ export async function listStoredExportPacks(
     if (errorCode === 'ENOENT') {
       return []
     }
-    throw error
+    throw toVaultCliFilesystemError(error, {
+      message: 'Stored export packs could not be listed.',
+    })
   }
 
   const items = await Promise.all(
@@ -402,8 +608,7 @@ export async function listStoredExportPacks(
           vaultRoot,
           manifestFile,
           exportPackManifestSchema,
-          'not_found',
-          'manifest_invalid',
+          exportPackManifestRecovery,
         )
 
         return {
@@ -450,7 +655,14 @@ export async function materializeStoredExportPack(input: {
   const { rebuilt, files } = await loadFilesForMaterialization(input.vault, manifest)
   const outDir = input.out ?? input.vault
 
-  await materializeExportPack(outDir, files)
+  try {
+    await materializeExportPack(outDir, files)
+  } catch (error) {
+    throw toVaultCliFilesystemError(error, {
+      message: 'The export pack could not be written to the output directory.',
+      fieldPath: input.out ? 'out' : 'vault',
+    })
+  }
 
   return {
     vault: input.vault,
@@ -465,12 +677,21 @@ export async function materializeStoredExportPack(input: {
 export async function pruneStoredExportPack(vaultRoot: string, packId: string) {
   const { manifest } = await readStoredExportPackManifest(vaultRoot, packId)
   const relativePackDirectory = packDirectory(packId)
-  const receipt = await readMaterializedExportPackReceipt(vaultRoot, packId)
-  const pruned = await retireMaterializedExportPack(vaultRoot, receipt)
+  let receipt: Awaited<ReturnType<typeof readMaterializedExportPackReceipt>>
+  let pruned: boolean
+  try {
+    receipt = await readMaterializedExportPackReceipt(vaultRoot, packId)
+    pruned = await retireMaterializedExportPack(vaultRoot, receipt)
+  } catch (error) {
+    throw toVaultCliFilesystemError(error, {
+      message: 'The stored export pack could not be pruned.',
+    })
+  }
   if (!pruned) {
     throw new VaultCliError(
       'export_pack_changed',
       `Export pack "${packId}" changed before it could be pruned.`,
+      { retryable: false, stage: 'conflict' },
     )
   }
 
@@ -490,8 +711,7 @@ export async function showAssessmentManifest(vaultRoot: string, assessmentId: st
     vaultRoot,
     manifestFile,
     rawImportManifestSchema,
-    'manifest_missing',
-    'manifest_invalid',
+    assessmentManifestRecovery,
   )
 
   return {

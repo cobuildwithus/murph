@@ -1561,6 +1561,9 @@ export function isHostedPendingAssistantInputStillReplyable(input: {
   ) {
     return false;
   }
+  if (input.event.conversation?.actorIsSelf === true) {
+    return false;
+  }
   if (
     requiresHostedAssistantInputAttachmentEvidence({
       attachmentDescriptorCount:

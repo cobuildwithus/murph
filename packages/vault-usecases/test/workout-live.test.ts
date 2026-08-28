@@ -30,6 +30,43 @@ import {
 } from '../src/usecases/workout-live-state.js'
 
 describe('live workout model', () => {
+  test('keeps the resistance unit hint when every editor row is still empty', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-26T05:31:00.000Z',
+      exercises: [{
+        name: 'Chest-supported row',
+        order: 1,
+        mode: 'weight_reps',
+        unitOverride: 'kg',
+        setPlanIsFinite: true,
+        sets: [{ order: 1 }, { order: 2 }],
+      }],
+    })
+    const projected = buildLiveWorkoutCardEditor({
+      workout,
+      workoutId: 'evt_test_workout',
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Chest-supported row',
+          sets: Array.from({ length: 2 }, () => ({
+            status: 'pending' as const,
+            target: null,
+            actual: null,
+          })),
+        }],
+      },
+    })
+
+    assert.equal(projected?.editor.exercises[0]?.unitOverride, 'kg')
+    assert.deepEqual(
+      projected?.editor.exercises[0]?.sets,
+      Array.from({ length: 2 }, () => ({ logged: false, result: null })),
+    )
+  })
+
   test('projects exact ad-hoc prescriptions into every pending editor row', () => {
     const workout = workoutSessionSchema.parse({
       sourceApp: LIVE_WORKOUT_SOURCE_APP,

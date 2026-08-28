@@ -108,6 +108,7 @@ describe("hosted local computer handoff Linq roundtrip e2e", () => {
     });
     await seedHostedComputerRunForTest({
       environment: requireScenario().runtimeEnv,
+      liveViewUrl: `https://proxy.test-browser.onkernel.com:8443/live/${computerRunId}`,
       memberId,
       runId: computerRunId,
     });
