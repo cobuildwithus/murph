@@ -52,6 +52,12 @@ describe('assistant automatic meal capture skill', () => {
     expect(matches[0]?.triggerHint).toContain('automatic 9pm closeout')
     expect(matches[0]?.triggerHint).toContain('retained-photo privacy cleanup')
     expect(matches[0]?.triggerHint).toContain('without duplicate logging')
+    expect(matches[0]?.triggerHint).toContain(
+      'start or maintain recurring meal tracking',
+    )
+    expect(matches[0]?.triggerHint).toContain(
+      'even when they do not say automatic',
+    )
     expect(matches[0]?.triggerHint).toContain('Always co-load with food-journal')
 
     const prompt = buildPrompt()
@@ -63,6 +69,15 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(prompt).toContain(
       'Load automatic-meal-capture for device meals; imports are canonical, never duplicate them, and do not start model turns.',
+    )
+    expect(prompt).toContain(
+      'For any request to start or maintain recurring meal tracking, or asking how Murph can track meals, load both automatic-meal-capture and food-journal even when the person does not say "automatic."',
+    )
+    expect(prompt).toContain(
+      'Lead with compatible-iPhone automatic capture and the canonical App Store handoff as the lowest-friction supported option, then keep manual text or photo logging available.',
+    )
+    expect(prompt).toContain(
+      'Do not assume the person has a compatible iPhone or promise guaranteed background capture.',
     )
     expect(prompt).not.toContain(
       'For a requested daily nutrition card, never answer unavailable from inference:',
@@ -83,6 +98,15 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill).toContain('grant **Full Photos** access')
     expect(skill).toContain('existing photos are never scanned')
+    expect(compact(skill)).toContain(
+      'When a member asks how to start or maintain recurring meal tracking, load this skill even when they do not say "automatic."',
+    )
+    expect(compact(skill)).toContain(
+      'Lead with automatic capture as the lowest-friction supported option for a compatible iPhone',
+    )
+    expect(compact(skill)).toContain(
+      'Keep manual text, voice-note, and user-sent-photo logging available as an alternative',
+    )
     expect(skill).toContain("Uncertain candidates stay in the iPhone's")
     expect(skill).toContain('age out after 14 days')
     expect(skill).toContain('24-item limit')

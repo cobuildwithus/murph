@@ -16087,6 +16087,117 @@ describe('real Codex app-server cache usage e2e harness', () => {
   })
 })
 
+describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
+  it('offers automatic meal capture on the first recurring tracking request', {
+    timeout: 360_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-recurring-meal-tracking-setup-e2e-'),
+    )
+
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await Promise.all([
+        materializeAssistantSkill({
+          skillsRoot,
+          slug: 'automatic-meal-capture',
+        }),
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+      ])
+
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null,
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-28',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt:
+          'I want an easy way to keep a daily food log. What can Murph do?',
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const commandActions = actions.filter(
+        (action) => action.kind === 'command',
+      )
+      const commandText = commandActions
+        .map((action) => action.command)
+        .join('\n')
+      const reply = result.finalMessage.trim()
+      const normalizedReply = reply.toLowerCase()
+      const automaticIndex = normalizedReply.search(/automatic|meal capture/u)
+      const manualIndex = normalizedReply.search(
+        /you can also log manually|quick text|food photo|voice note/u,
+      )
+
+      process.stdout.write(
+        `[recurring-meal-tracking-setup-e2e] ${JSON.stringify({
+          commandCount: commandActions.length,
+          reply,
+        })}\n`,
+      )
+      expect(commandText).toContain('automatic-meal-capture')
+      expect(commandText).toContain('food-journal')
+      expect(commandText).not.toMatch(/vault-cli|meal\s+(?:add|edit|list)/iu)
+      expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+      expect(reply).toMatch(/automatic|meal capture/iu)
+      expect(reply).toMatch(/iPhone|iOS 26\.1/iu)
+      expect(reply).toContain(
+        'https://apps.apple.com/us/app/murph-ai/id6786145859',
+      )
+      expect(reply).toMatch(/Full Photos|full photo access/iu)
+      expect(reply).toMatch(
+        /best[- ]effort|may (?:be )?delay|not guaranteed|opening (?:Murph|the app)/iu,
+      )
+      expect(reply).toMatch(/quick text|text (?:me|Murph)/iu)
+      expect(reply).toMatch(/food photo|meal photo/iu)
+      expect(reply).toMatch(/voice note/iu)
+      expect(automaticIndex).toBeGreaterThanOrEqual(0)
+      expect(manualIndex).toBeGreaterThan(automaticIndex)
+      expect(reply).not.toMatch(
+        /(?:will|always) (?:capture|pick up|log) every (?:meal|food photo)/iu,
+      )
+      expect(reply.match(/\?/gu) ?? []).toHaveLength(0)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
 describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
   it('resolves an exact menu label before saving a restaurant meal', {
     timeout: 900_000,

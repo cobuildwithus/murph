@@ -6,6 +6,10 @@ import { describe, expect, it } from 'vitest'
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
+function compact(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim()
+}
+
 function buildPrompt(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -40,6 +44,9 @@ describe('assistant food journal skill', () => {
       'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation',
     )
     expect(prompt).toContain(
+      'For any request to start or maintain recurring meal tracking, or asking how Murph can track meals, load both automatic-meal-capture and food-journal even when the person does not say "automatic."',
+    )
+    expect(prompt).toContain(
       'When exact food or supplement identity, ingredients, allergens, dose, or movement instruction matters, follow the owning skill',
     )
     expect(prompt).not.toContain('vault-cli food search-labels')
@@ -64,6 +71,12 @@ describe('assistant food journal skill', () => {
 
     expect(skill).toContain(
       'Do not create a new food-journal store, observation entity, scoring model, streak, or CLI family.',
+    )
+    expect(compact(skill)).toContain(
+      'When the member asks how to start or maintain recurring meal tracking, first read `$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md` even when they do not say "automatic."',
+    )
+    expect(compact(skill)).toContain(
+      'Present its compatible-iPhone automatic path first as the lowest-friction supported option, then keep this skill\'s manual text, voice-note, and user-sent-photo capture available.',
     )
     expect(skill).toContain(
       'A photo, voice note, or rough phrase can be a complete meal log.',
