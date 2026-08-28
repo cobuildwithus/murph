@@ -3168,6 +3168,29 @@ state untouched for the next foreground-safe opportunity. Timeout, source
 change, publication conflict, generic failure, and an oversized replica
 terminally record the current item without a future retry; a later browser
 freshness request may enqueue new work after the underlying state changes.
+A timeout result also carries the closed refresh-stage vocabulary
+`initial_source_hash`, `replica_construction`, `replica_serialization`,
+`second_source_hash`, `replica_write`, or `ref_publication`; the
+`replica_serialization` value covers cooperative serialization and byte
+measurement. The existing hosted phase log emits that value only as
+`details.browserVaultRefreshStage`. Once the initial source hash finishes, the
+same deferred result and log retain the existing numeric source file-count and
+byte-total summary; before then both remain zero. The closed stage is the only
+new production log value. These details never include paths, filenames, source
+hashes, content, messages, prompts, transcripts, health values, member or
+workspace identifiers, credentials, provider payloads, raw errors, or
+distinctive private scenarios.
+
+A later bounded production query filters
+`details.browserVaultRefreshStatus = deferred_timeout`, aggregates only
+`details.browserVaultRefreshStage` by count and, when already available, the
+existing bounded duration bucket, then compares those counts with privacy-safe
+Web aggregates for refresh-requested state, replica-age bucket, and next-wake
+presence. Use natural traffic only; do not issue synthetic production refresh
+requests for this diagnosis. This additive field ships through the normal
+protected Cloudflare runner-bundle deployment, has no Web deployment ordering
+or persisted compatibility floor, and rolls back with the prior runner bundle.
+
 Fresh work and recording items that own post-checkpoint effects retain their
 existing pre-effect preparation checkpoint. Missing optional publication
 support and missing workspace context remain explicit terminal no-op

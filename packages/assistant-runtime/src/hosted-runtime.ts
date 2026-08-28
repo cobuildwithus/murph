@@ -7026,6 +7026,9 @@ function buildHostedBrowserVaultRefreshLogDetails(
     ...("maxBytes" in refresh
       ? { browserVaultReplicaMaxBytes: refresh.maxBytes }
       : {}),
+    ...(refresh.status === "deferred_timeout"
+      ? { browserVaultRefreshStage: refresh.refreshStage }
+      : {}),
     ...("source" in refresh
       ? {
           browserVaultReplicaSourceFileCount: refresh.source.fileCount,
