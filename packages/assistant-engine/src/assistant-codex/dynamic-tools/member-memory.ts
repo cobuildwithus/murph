@@ -33,7 +33,8 @@ export const MURPH_MEMBER_MEMORY_TOOL = {
   name: 'member_memory',
   description: [
     'Read, add, or update canonical saved memory during engine-authorized silent member-memory consolidation.',
-    'Call show first. Existing memory is only for deduplication and update targeting. Upsert one concise supported fact at a time; update only by an id returned by show. This tool cannot delete memory and is unavailable outside the exact managed maintenance turn.',
+    'Call show exactly once per maintenance turn and use that one result for deduplication and update targeting. Upsert one concise supported fact at a time; update only by an id returned by show. This tool cannot delete memory and is unavailable outside the exact managed maintenance turn.',
+    'A successful upsert or update result is the canonical persisted record; do not call show again merely to verify it.',
   ].join(' '),
   inputSchema: z.toJSONSchema(memberMemoryArgumentsSchema, { io: 'input' }),
 } as const
@@ -102,7 +103,17 @@ export async function executeMemberMemoryDynamicTool(input: {
       const document = await readMemoryDocument(input.vaultRoot)
       return memberMemoryTextResult(
         true,
-        JSON.stringify({ document, memory: null }),
+        JSON.stringify({
+          document: {
+            exists: document.exists,
+            records: document.records.map(({ id, section, text }) => ({
+              id,
+              section,
+              text,
+            })),
+          },
+          memory: null,
+        }),
       )
     }
 
@@ -115,8 +126,11 @@ export async function executeMemberMemoryDynamicTool(input: {
         true,
         JSON.stringify({
           created: result.created,
-          document: result.document,
-          memory: result.record,
+          memory: {
+            id: result.record.id,
+            section: result.record.section,
+            text: result.record.text,
+          },
         }),
       )
     }
@@ -130,8 +144,11 @@ export async function executeMemberMemoryDynamicTool(input: {
       true,
       JSON.stringify({
         created: false,
-        document: result.document,
-        memory: result.record,
+        memory: {
+          id: result.record.id,
+          section: result.record.section,
+          text: result.record.text,
+        },
       }),
     )
   } catch {

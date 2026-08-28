@@ -18,10 +18,12 @@ import {
   addMeal,
   initializeVault,
   readHabitatAspect,
+  readMemoryDocument,
   removeAutomaticMealPhoto,
   upsertAutomation,
   upsertGoal,
   upsertHabitatAspect,
+  upsertMemory,
 } from '@murphai/core'
 import {
   assistantOnboardingResumeContextResultSchema,
@@ -79,6 +81,7 @@ import {
   MURPH_GROUP_MEMBERSHIP_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_USAGE_TOOL,
+  MURPH_MEMBER_MEMORY_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
@@ -134,6 +137,8 @@ import type {
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
   MURPH_MANAGED_AUTOMATIONS,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
@@ -160,6 +165,9 @@ import {
 import {
   parseAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
+import {
+  buildAssistantMaintenanceConversationEvidence,
+} from '../src/assistant/maintenance-evidence.ts'
 import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
 } from '../src/assistant/shared.ts'
@@ -8990,6 +8998,263 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
       ])
     }
   }, 360_000)
+})
+
+describeRealCodex('real Codex member-memory result compaction e2e', () => {
+  it(
+    'updates one exact saved preference from a compact 24-record show result and stays silent',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-member-memory-compaction-e2e-'),
+      )
+
+      try {
+        const target = await upsertMemory(workingDirectory, {
+          now: new Date('2026-08-26T10:00:00.000Z'),
+          section: 'Preferences',
+          text: 'Weekly summaries must be one short paragraph and must not use bullets.',
+        })
+        const fixtureSections = [
+          'Identity',
+          'Preferences',
+          'Instructions',
+          'Context',
+        ] as const
+        for (let index = 1; index < 24; index += 1) {
+          await upsertMemory(workingDirectory, {
+            now: new Date(`2026-08-26T10:${String(index).padStart(2, '0')}:00.000Z`),
+            section: fixtureSections[index % fixtureSections.length] ?? 'Context',
+            text: `Synthetic maintenance fixture ${String(index).padStart(2, '0')} retained only for compact tool-result coverage.`,
+          })
+        }
+
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'linq',
+            conversationKey: 'linq:direct:member-memory-compaction',
+            delivery: null,
+            identityId: null,
+            threadId: 'thread-member-memory-compaction',
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-26T12:00:00.000Z',
+          lastTurnAt: '2026-08-26T12:01:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session-member-memory-compaction',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: config.codexHome,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'medium',
+            sandbox: 'read-only',
+          },
+          turnCount: 1,
+          updatedAt: '2026-08-26T12:01:00.000Z',
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+          [
+            {
+              createdAt: '2026-08-26T12:00:00.000Z',
+              kind: 'user',
+              text: 'Please replace my saved preference "Weekly summaries must be one short paragraph and must not use bullets.": from now on, weekly summaries must use exactly three concise bullets and no paragraph.',
+            },
+            {
+              createdAt: '2026-08-26T12:01:00.000Z',
+              kind: 'assistant',
+              text: 'Understood. Future weekly summaries will use exactly three concise bullets and no paragraph.',
+            },
+          ],
+        )
+
+        const automation = MURPH_MANAGED_AUTOMATIONS.find(
+          (candidate) =>
+            candidate.automationId
+            === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+        )
+        if (!automation) {
+          throw new Error('Expected overnight memory consolidation automation.')
+        }
+        const evidence = await buildAssistantMaintenanceConversationEvidence({
+          now: new Date('2026-08-27T12:00:00.000Z'),
+          profile: 'member-memory',
+          vault: workingDirectory,
+        })
+        const before = await readMemoryDocument(workingDirectory)
+        expect(before.records).toHaveLength(24)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+              currentLocalDate: '2026-08-27',
+              currentTimeZone: 'America/New_York',
+              profile: 'member-memory',
+            }).prompt,
+          dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
+          env: config.env,
+          ephemeral: true,
+          excludeResumeTurns: true,
+          memberMemoryMaintenanceAuthorized: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          processLifetime: 'one-shot',
+          prompt: [automation.instructions, evidence].join('\n\n'),
+          reasoningEffort: 'medium',
+          runtimeWorkspaceRoots: [workingDirectory],
+          sandbox: 'read-only',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        expect(
+          actions.filter(
+            (action) =>
+              action.kind === 'dynamic'
+              && action.tool !== MURPH_MEMBER_MEMORY_TOOL.name,
+          ),
+        ).toEqual([])
+        const memoryActions = actions.filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_MEMBER_MEMORY_TOOL.name,
+        )
+        process.stdout.write(
+          `[member-memory-result-compaction-actions] ${JSON.stringify(
+            memoryActions.map((action) => ({
+              name: action.kind === 'dynamic' ? action.tool : action.kind,
+              action: action.kind === 'dynamic'
+                ? readString(action.argumentsValue.action)
+                : null,
+              success: action.kind === 'dynamic' && action.success,
+            })),
+          )}\n`,
+        )
+        expect(memoryActions).toHaveLength(2)
+        const [showAction, updateAction] = memoryActions
+        if (showAction?.kind !== 'dynamic' || updateAction?.kind !== 'dynamic') {
+          throw new Error('Expected show then update member-memory calls.')
+        }
+        expect(showAction.eventIndex).toBeLessThan(updateAction.eventIndex)
+        expect(showAction.success).toBe(true)
+        expect(showAction.argumentsValue).toEqual({ action: 'show' })
+        expect(JSON.parse(showAction.output)).toEqual({
+          document: {
+            exists: true,
+            records: before.records.map(({ id, section, text }) => ({
+              id,
+              section,
+              text,
+            })),
+          },
+          memory: null,
+        })
+        const compactShowBytes = Buffer.byteLength(showAction.output, 'utf8')
+        const duplicatedShowBytes = Buffer.byteLength(JSON.stringify({
+          document: before,
+          memory: null,
+        }), 'utf8')
+        expect(compactShowBytes).toBeLessThan(duplicatedShowBytes)
+
+        expect(updateAction.success).toBe(true)
+        expect(updateAction.argumentsValue.action).toBe('update')
+        expect(updateAction.argumentsValue.memoryId).toBe(target.record.id)
+        expect(Object.keys(updateAction.argumentsValue).sort()).toEqual(
+          updateAction.argumentsValue.section === undefined
+            ? ['action', 'memoryId', 'text']
+            : ['action', 'memoryId', 'section', 'text'],
+        )
+        if (updateAction.argumentsValue.section !== undefined) {
+          expect(updateAction.argumentsValue.section).toBe('Preferences')
+        }
+        const updatedText = readString(updateAction.argumentsValue.text)
+        if (!updatedText) {
+          throw new Error('Expected a supported compact memory update.')
+        }
+        expect(updatedText).toMatch(/weekly summaries?/iu)
+        expect(updatedText).toMatch(/\b(?:three|3)\b/iu)
+        expect(updatedText).toMatch(/\bbullets?\b/iu)
+        expect(updatedText).not.toBe(target.record.text)
+
+        const after = await readMemoryDocument(workingDirectory)
+        const updatedRecord = after.records.find(
+          (record) => record.id === target.record.id,
+        )
+        if (!updatedRecord) {
+          throw new Error('Expected the exact saved memory id to remain present.')
+        }
+        expect(JSON.parse(updateAction.output)).toEqual({
+          created: false,
+          memory: {
+            id: target.record.id,
+            section: 'Preferences',
+            text: updatedText,
+          },
+        })
+        expect(updatedRecord).toMatchObject({
+          id: target.record.id,
+          section: 'Preferences',
+          text: updatedText,
+        })
+        expect(after.records).toHaveLength(24)
+        expect(after.records.map((record) => record.id).sort()).toEqual(
+          before.records.map((record) => record.id).sort(),
+        )
+        expect(
+          after.records
+            .filter((record) => record.id !== target.record.id)
+            .map(({ id, section, text }) => ({ id, section, text }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        ).toEqual(
+          before.records
+            .filter((record) => record.id !== target.record.id)
+            .map(({ id, section, text }) => ({ id, section, text }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        )
+
+        const decision = JSON.parse(result.finalMessage.trim())
+        expect(decision).toEqual({
+          kind: 'skip',
+          privateSummary:
+            MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+        })
+        process.stdout.write(
+          `[member-memory-result-compaction-e2e] ${JSON.stringify({
+            calls: [showAction, updateAction].map((action) =>
+              readString(action.argumentsValue.action)),
+            compactShowBytes,
+            decision: decision.kind,
+            recordCount: after.records.length,
+            updatedExactId: updatedRecord.id === target.record.id,
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
 })
 
 describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
