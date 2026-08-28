@@ -14,6 +14,7 @@ import {
   type HostedRuntimeRedactedJson,
   type HostedMailboxLane,
   type HostedWorkspaceCheckpointResponse,
+  type HostedWorkspaceInvocationProcessingMode,
   type HostedWorkspaceInvocationResult,
   type HostedWorkspaceState,
   isHostedRuntimeFutureMailboxContinuation,
@@ -801,6 +802,7 @@ export interface HostedWorkspaceRuntimeJobImportContext {
 interface HostedRuntimeWakeLatencySeed {
   foregroundWaitResolvedAtEpochMs?: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
   runtimeWakeNotifiedAtEpochMs?: number | null;
 }
 
@@ -902,6 +904,9 @@ function createHostedRuntimeWakeLatencySeed(
   return {
     foregroundWaitResolvedAtEpochMs: Date.now(),
     ...(notification.orchestration ? { orchestration: notification.orchestration } : {}),
+    ...(notification.requestedProcessingMode
+      ? { requestedProcessingMode: notification.requestedProcessingMode }
+      : {}),
     runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
   };
 }
@@ -1024,25 +1029,29 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     runtimeEnv: input.runtimeEnv,
     vaultRoot: input.vaultRoot,
   });
+  const outboxWake = createHostedRuntimeWakeCandidate(
+    outboxWakeAt,
+    HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+  );
 
   const modelFreeWake = selectEarliestHostedRuntimeWake([
     ...(input.extraCandidates ?? []),
     {
-      at: systemMailboxWake.at,
-      reason: systemMailboxWake.reason,
+      at: systemMailboxWake.executionClass === "model_free"
+        ? systemMailboxWake.at
+        : null,
+      reason: systemMailboxWake.executionClass === "model_free"
+        ? systemMailboxWake.reason
+        : null,
     },
     {
       at: input.mailboxImportRetryAt ?? null,
       reason: input.mailboxImportRetryAt ? "mailbox" : null,
     },
+    outboxWake,
   ]);
   const assistantWake = selectEarliestHostedRuntimeWake([
-    {
-      at: outboxWakeAt,
-      reason: outboxWakeAt
-        ? HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
-        : null,
-    },
+    outboxWake,
     {
       at: pendingAssistantInputWakeAt,
       reason: pendingAssistantInputWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
@@ -1056,19 +1065,25 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
       reason: assistantCronWake.reason,
     },
   ]);
-  const selectedWake = input.assistantExecutionBlocked && modelFreeWake.nextWakeAt
-    ? modelFreeWake
+  const selectedWake = input.assistantExecutionBlocked
+    ? modelFreeWake.nextWakeAt
+      ? modelFreeWake
+      : assistantWake
     : (() => {
         const selected = selectHostedRuntimeOwnerWakeCandidate({
-          backgroundCandidates: [{
-            at: assistantWake.nextWakeAt,
-            reason: assistantWake.nextWakeReason,
-          }],
-          foregroundCandidates: [
+          backgroundCandidates: [
+            {
+              at: assistantWake.nextWakeAt,
+              reason: assistantWake.nextWakeReason,
+            },
+            ...input.extraCandidates ?? [],
             createHostedRuntimeWakeCandidate(
-              outboxWakeAt,
-              HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+              input.mailboxImportRetryAt ?? null,
+              "mailbox",
             ),
+          ],
+          foregroundCandidates: [
+            outboxWake,
             createHostedRuntimeWakeCandidate(
               pendingAssistantInputWakeAt,
               HOSTED_ASSISTANT_WAKE_REASON,
@@ -2099,7 +2114,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     );
     const returnSystemMailboxBeforeInitialImport =
       systemMailboxProcessingMode
-        ? async () => {
+        ? async (
+            requestedProcessingMode: HostedWorkspaceInvocationProcessingMode | null = null,
+          ) => {
             const projectedWake = await resolveHostedSystemMailboxProcessingModeWake({
               assistantExecutionBlocked,
               mailboxImportRetryAt: null,
@@ -2108,18 +2125,23 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               runtimeEnv: invocationRuntimeEnv,
               vaultRoot: restored.vaultRoot,
             });
-            const returnedWake = selectEarliestHostedRuntimeWake([
-              {
-                at: projectedWake.nextWakeAt,
-                reason: projectedWake.nextWakeReason,
-              },
-              {
-                at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
-                reason: activeWorkspace?.inboxMediaRetentionWakeAt
-                  ? "inbox_media_retention"
-                  : null,
-              },
-            ]);
+            const returnedWake = requestedProcessingMode === "default"
+              ? {
+                  nextWakeAt: new Date(Date.now()).toISOString(),
+                  nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
+                }
+              : selectEarliestHostedRuntimeWake([
+                  {
+                    at: projectedWake.nextWakeAt,
+                    reason: projectedWake.nextWakeReason,
+                  },
+                  {
+                    at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
+                    reason: activeWorkspace?.inboxMediaRetentionWakeAt
+                      ? "inbox_media_retention"
+                      : null,
+                  },
+                ]);
             const redactedStatus = await withHostedMailboxProgressStatus({
               redactedStatus: activeWorkspace?.redactedStatus ?? null,
               vaultRoot: restored.vaultRoot,
@@ -2154,7 +2176,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       returnSystemMailboxBeforeInitialImport
       && initialPendingRuntimeWake !== null
     ) {
-      return await returnSystemMailboxBeforeInitialImport();
+      return await returnSystemMailboxBeforeInitialImport(
+        initialPendingRuntimeWake.requestedProcessingMode ?? null,
+      );
     }
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       mergeHostedRuntimeWakeLatencySeeds(
@@ -2226,7 +2250,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && options.shutdownSignal?.aborted !== true
           && error instanceof HostedRuntimeCheckpointInterruptedByWakeError
         ) {
-          return await returnSystemMailboxBeforeInitialImport();
+          return await returnSystemMailboxBeforeInitialImport(
+            notification.requestedProcessingMode ?? null,
+          );
         }
         restoreInitialMailboxFetchWake(notification);
         throw error;
@@ -2517,6 +2543,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         || hostedVaultStartupPreparation.mutated;
       let checkpointed = false;
       let foregroundWakeObserved = false;
+      let defaultOwnerWakeObserved = false;
       let assistantCronDeadlineMs: number | null = null;
       const consumeForegroundWake = (): boolean => {
         if (foregroundWakeObserved) {
@@ -2530,6 +2557,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           return false;
         }
         foregroundWakeObserved = true;
+        defaultOwnerWakeObserved =
+          notification.requestedProcessingMode === "default";
         return true;
       };
       const shouldYieldSystemMailboxWork = (): boolean =>
@@ -2797,21 +2826,35 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceInvocationResult> => {
         const projectedWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
+        const requestedDefaultOwnerWakeAt = defaultOwnerWakeObserved
+          ? new Date(Date.now()).toISOString()
+          : assistantCronDeadlineMs !== null
+              && Date.now() >= assistantCronDeadlineMs
+            ? new Date(assistantCronDeadlineMs).toISOString()
+            : null;
         const defaultOwnerDueNow =
-          hostedRuntimeWakeReasonIsAssistant(projectedWake.nextWakeReason)
-          && hostedRuntimeWakeIsDue(projectedWake.nextWakeAt);
-        const returnedWake = selectEarliestHostedRuntimeWake([
-          {
-            at: projectedWake.nextWakeAt,
-            reason: projectedWake.nextWakeReason,
-          },
-          {
-            at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
-            reason: activeWorkspace?.inboxMediaRetentionWakeAt
-              ? "inbox_media_retention"
-              : null,
-          },
-        ]);
+          requestedDefaultOwnerWakeAt !== null
+          || (
+            hostedRuntimeWakeReasonIsAssistant(projectedWake.nextWakeReason)
+            && hostedRuntimeWakeIsDue(projectedWake.nextWakeAt)
+          );
+        const returnedWake = requestedDefaultOwnerWakeAt
+          ? {
+              nextWakeAt: requestedDefaultOwnerWakeAt,
+              nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
+            }
+          : selectEarliestHostedRuntimeWake([
+              {
+                at: projectedWake.nextWakeAt,
+                reason: projectedWake.nextWakeReason,
+              },
+              {
+                at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
+                reason: activeWorkspace?.inboxMediaRetentionWakeAt
+                  ? "inbox_media_retention"
+                  : null,
+              },
+            ]);
         const invocationResult = {
           ...(foregroundWakeObserved
               || (!assistantExecutionBlocked && defaultOwnerDueNow)
@@ -3273,12 +3316,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         initialProjectedWake.assistantCronWakeAt ?? "",
       );
       assistantCronDeadlineMs = !assistantExecutionBlocked
-        && hostedRuntimeWakeReasonIsAssistant(
-          initialProjectedWake.nextWakeReason,
-        )
         && Number.isFinite(projectedAssistantCronDeadlineMs)
-        ? projectedAssistantCronDeadlineMs
-        : null;
+          ? projectedAssistantCronDeadlineMs
+          : null;
       if (
         !assistantExecutionBlocked
         && (

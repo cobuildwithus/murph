@@ -1557,6 +1557,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("hands a due model-free mailbox row off after a foreground reply", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    const deliveryEffect = createDeliveryEffect();
+    mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(dueAt);
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) =>
+        (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+          ? { at: null, executionClass: null, reason: null }
+          : {
+              at: dueAt,
+              executionClass: "model_free",
+              reason: "mailbox",
+            },
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      nextWakeAt: dueAt,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => dueAt,
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+      progressed: true,
+    }));
+  });
+
   it("yields to a model-free mailbox row after its default-owned predecessor", async () => {
     const dueAt = "2026-04-27T00:00:00.000Z";
     let unrestrictedWakeReadCount = 0;

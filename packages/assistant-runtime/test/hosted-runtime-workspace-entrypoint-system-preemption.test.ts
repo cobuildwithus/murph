@@ -168,7 +168,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           return await new Promise<HostedMailboxFetchResponse>(() => undefined);
         },
       };
-      runtimeWakeSignal.notify();
+      runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -207,6 +207,8 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         },
       );
       assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, "assistant");
       assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 0);
       assert.equal(baseDeviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.deepEqual(fetchRequests, []);

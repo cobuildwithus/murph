@@ -543,6 +543,9 @@ export class RuntimeProcessingController {
           ? { orchestration: inputAtActiveWakeStart.orchestration }
           : {}),
         processingMode: activeFence.processingMode,
+        ...(cooperativeMailboxOwnerHandoff
+          ? { requestedProcessingMode }
+          : {}),
         userId: record.userId,
       },
       commandBudget: input.commandBudget,

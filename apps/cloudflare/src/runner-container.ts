@@ -504,6 +504,7 @@ export interface RunnerRuntimeWakeInput {
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   processingMode?: RunnerRuntimeProcessingMode | null;
+  requestedProcessingMode?: RunnerRuntimeProcessingMode | null;
   userId: string;
 }
 

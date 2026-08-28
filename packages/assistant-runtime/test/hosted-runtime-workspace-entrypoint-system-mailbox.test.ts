@@ -2013,16 +2013,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       if (providerRetries) {
         assert.equal(result.status, "scheduled");
         assert.equal(result.nextWakeAt, providerRetryWakeAt);
-        assert.equal(result.nextWakeReason, "assistant");
+        assert.equal(result.nextWakeReason, "assistant_delivery");
       } else if (initialOutboxState === "retryable") {
         assert.equal(result.status, "scheduled");
         assert.equal(result.nextWakeAt, retryWakeAt);
-        assert.equal(result.nextWakeReason, "assistant");
+        assert.equal(result.nextWakeReason, "assistant_delivery");
       } else if (checkpointConversationInputAhead) {
         assert.equal(result.immediateRecheckRequested, true);
         assert.equal(result.status, "scheduled");
         assert.equal(result.nextWakeAt, TEST_NOW);
-        assert.equal(result.nextWakeReason, "assistant");
+        assert.equal(result.nextWakeReason, "mailbox");
       } else {
         assert.equal(result.status, "idle");
         assert.equal(result.nextWakeAt, null);
@@ -2167,7 +2167,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         );
         assert.equal(
           beforeRetry.checkpointRequests[0]?.nextWakeReason,
-          "assistant",
+          "assistant_delivery",
         );
         assert.equal(beforeRetry.result.status, "scheduled");
         assert.equal(beforeRetry.result.nextWakeAt, providerRetryWakeAt);

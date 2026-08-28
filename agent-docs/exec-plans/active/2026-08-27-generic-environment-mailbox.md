@@ -152,17 +152,27 @@ Updated: 2026-08-28
     sufficient: the default assistant phase could still preflight due cron,
     prepare the model-free row itself, or continue into automation after
     completing a default-owned predecessor.
+  - The latest exact Linux run on head `5160fc7540` proved that a bare
+    exact-child wake was still ambiguous: it could mean a same-owner refresh,
+    a cron interruption, or a cross-owner handoff. Both owners therefore
+    checkpointed safely but could return the wake to the owner that had just
+    yielded, leaving the requested work pending.
+  - The correction adds only transient owner intent to the existing runtime
+    wake notification when the controller is already performing a cooperative
+    default/system-mailbox handoff. The intent is not stored in Temporal, the
+    workspace, the mailbox, or the fence; ordinary and same-owner wakes remain
+    unchanged.
   - The current correction carries the frontier's execution class with its
     wake and applies one shared order: due foreground input or delivery, then
     a due model-free mailbox frontier, then ordinary background work.
     Default-owned rows retain ordinary wake ordering. The default phase now
     yields before preparing model-free work and also yields after checkpointing
     a default-owned predecessor when the next frontier is model-free.
-  - Current local proof passes: 30 mailbox-state, delegated-direction, and wake
-    selection tests; four focused Environment, approval, and owner-scheduling
-    tests; all 52 shared assistant-phase scheduling tests; the default-
-    predecessor checkpoint callback regression; assistant-runtime typecheck;
-    and `git diff --check`.
+  - Current local proof passes: all 31 system-mailbox entrypoint tests, all 24
+    system-preemption tests, all 53 assistant-phase scheduling tests, all 118
+    workspace-runner tests, all 6 generic wake-selector tests, all 51
+    Cloudflare container-entrypoint tests, all 157 Cloudflare runner alarm
+    tests, both package typechecks, and `git diff --check`.
 - Composed proof:
   - `pnpm hosted-local e2e foreground-reply-priority` was attempted, but the
     runner's fixed macOS total-byte ceiling stopped bundle assembly before the

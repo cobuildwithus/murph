@@ -697,6 +697,26 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("coalesced runtime wakes preserve the latest explicit owner request", () => {
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    runtimeWakeSignal.notify({
+      notifiedAtEpochMs: Date.parse(TEST_NOW),
+      requestedProcessingMode: "default",
+    });
+    runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+    runtimeWakeSignal.notify({
+      notifiedAtEpochMs: Date.parse(TEST_NOW) + 2,
+      requestedProcessingMode: "system_mailbox",
+    });
+
+    assert.deepEqual(runtimeWakeSignal.consumePending(), {
+      latestNotifiedAtEpochMs: Date.parse(TEST_NOW) + 2,
+      notifiedAtEpochMs: Date.parse(TEST_NOW),
+      requestedProcessingMode: "system_mailbox",
+    });
+  });
+
   test("coalesced runtime wake stays pending when its queued waiter aborts", async () => {
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const waitAbortController = new AbortController();

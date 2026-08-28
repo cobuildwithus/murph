@@ -7338,7 +7338,7 @@ async function drainHostedPostCheckpointDelivery(input: {
       canConsumeWorkspaceAssistantWake: input.canConsumeWorkspaceAssistantWake,
       phaseInput: input.input,
     });
-  const postSystemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
+  const postSystemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
     vaultRoot: input.input.restored.vaultRoot,
   });
   const postBaseNextWake = dropConsumedWorkspaceAssistantWake(
@@ -7361,21 +7361,46 @@ async function drainHostedPostCheckpointDelivery(input: {
           HOSTED_ASSISTANT_WAKE_REASON,
         )
       : null;
-  const postNextWake = selectHostedRuntimeWakeCandidate([
+  const postOutboxWake = createHostedRuntimeWakeCandidate(
+    postOutboxWakeAt,
+    HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+  );
+  const postPendingAssistantInputWake = createHostedRuntimeWakeCandidate(
+    postDeliveryPendingAssistantInputWakeAt,
+    HOSTED_ASSISTANT_WAKE_REASON,
+  );
+  const selectedForegroundInputWake = createHostedRuntimeWakeCandidate(
+    input.assistantMetrics?.assistantAutomationSelectedInputWakeAt ?? null,
+    HOSTED_ASSISTANT_WAKE_REASON,
+  );
+  const postBackgroundWakeCandidates = [
     postBaseNextWake,
     dropConsumedWorkspaceAssistantWake(postDeliveryCronWake),
     input.postDeliveryReconciliationWake,
-    createHostedRuntimeWakeCandidate(
-      postOutboxWakeAt,
-      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
-    ),
-    createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
-    createHostedRuntimeWakeCandidate(
-      postDeliveryPendingAssistantInputWakeAt,
-      "assistant",
-    ),
     providerCleanup.wake,
-  ]);
+  ];
+  const postNextWake = input.canConsumeWorkspaceAssistantWake
+    && isHostedSystemMailboxWakeCandidate(postSystemMailboxWake)
+    ? selectHostedRuntimeOwnerWakeCandidate({
+        backgroundCandidates: postBackgroundWakeCandidates,
+        foregroundCandidates: [
+          postOutboxWake,
+          postPendingAssistantInputWake,
+          selectedForegroundInputWake,
+        ],
+        nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+        systemMailboxWake: postSystemMailboxWake,
+      })
+    : selectHostedRuntimeWakeCandidate([
+        ...postBackgroundWakeCandidates,
+        postOutboxWake,
+        postPendingAssistantInputWake,
+        selectedForegroundInputWake,
+        createHostedRuntimeWakeCandidate(
+          postSystemMailboxWake.at,
+          HOSTED_ASSISTANT_WAKE_REASON,
+        ),
+      ]);
   const postNextWakeAt = postNextWake.at;
   if (input.assistantDeliveryEffects.length > 0) {
     await writeHostedOutboxDeliveryRuntimeLog({
