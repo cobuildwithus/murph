@@ -1650,10 +1650,16 @@ describe('assistant skill assets', () => {
       'a just-in-time scheduled movement instruction or an explicit request to see the exercise must attach the smallest useful returned catalog image set with `murph.attach_response_media` when one exists.',
     )
     expect(compactCatalog).toContain(
-      'A request for a missing exercise picture is a presentation repair, not a request for a newly generated substitute.',
+      'A request for a missing exercise picture is a presentation repair. Look up the exercise and use returned catalog media when available.',
     )
     expect(compactCatalog).toContain(
-      'Do not call `murph.generate_image` for that repair or as a substitute for useful catalog media unless the user explicitly asks for a new or custom image.',
+      'Do not call `murph.generate_image` as a substitute for useful catalog media.',
+    )
+    expect(compactCatalog).toContain(
+      'If the exercise has no useful catalog image, generate an instructional image when it would help; also generate one when the user explicitly asks for a new or custom image.',
+    )
+    expect(compactCatalog).toContain(
+      'In the generation prompt and visible reply, use the natural exercise name rather than a catalog id or slug.',
     )
     expect(compactCatalog).toContain(
       'Construct its source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`',

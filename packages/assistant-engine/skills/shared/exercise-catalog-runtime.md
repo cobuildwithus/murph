@@ -59,22 +59,15 @@ rename, merge, omit, or substitute a member-supplied exercise in the workout.
    Linq/iMessage, a just-in-time scheduled movement instruction or an explicit
    request to see the exercise must attach the smallest useful returned catalog
    image set with `murph.attach_response_media` when one exists. A request for a
-   missing exercise picture is a presentation repair, not a request for a newly
-   generated substitute. Complete that repair in the current turn: look up the
-   exercise, attach catalog media, and do not send only an acknowledgement. Do
-   not call `murph.generate_image` for that repair or as a substitute for useful
-   catalog media unless the user explicitly asks for a new or custom image. When
-   asked where an already-sent exercise image came from, answer from its recorded
-   media source or generation-tool evidence.
-   Distinguish that specific delivered image from other images available for the
-   same exercise. Discovering catalog alternatives does not change the
-   provenance of an earlier image or justify retracting a correct provenance
-   answer. When that distinction is all the user asked for, in visible text say
-   catalog, generated, or custom-generated naturally; do not name providers or
-   models or show media source values unless explicitly asked. This does not
-   change the exact source field required in media-tool arguments. Choose the
-   smallest useful set and keep the complete response at eight images or fewer.
-   For a card, copy each selected catalog image URL, alt, and step exactly.
+   missing exercise picture is a presentation repair. Look up the exercise and
+   use returned catalog media when available. Do not call
+   `murph.generate_image` as a substitute for useful catalog media. If the
+   exercise has no useful catalog image, generate an instructional image when it
+   would help; also generate one when the user explicitly asks for a new or
+   custom image. In the generation prompt and visible reply, use the natural
+   exercise name rather than a catalog id or slug. Choose the smallest useful
+   set and keep the complete response at eight images or fewer. For a card, copy
+   each selected catalog image URL, alt, and step exactly.
    Construct its source as
    `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>` and keep
    the returned order. For Linq/iMessage, use the existing response-media path

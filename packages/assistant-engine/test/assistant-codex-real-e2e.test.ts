@@ -3463,7 +3463,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'keeps exercise catalog ids private and repairs missing Linq media without generation',
+    'keeps exercise ids private, uses catalog media, and generates only when catalog media is missing',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -3541,6 +3541,36 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             'The exercise picture is missing. Please show it.',
           ].join('\n'),
         })
+        const launchedImageOperationIds: string[] = []
+        const missingCatalogImage = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({
+              channel: 'linq',
+            }),
+            exerciseGuidance,
+          ].join('\n\n'),
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => `ain_${'9'.repeat(32)}`,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            imageGenerationLauncher: {
+              launch(input) {
+                launchedImageOperationIds.push(input.operationId)
+                return 'started'
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          } satisfies AssistantHostedToolContext,
+          prompt: [
+            'Teach the saved one-movement standing reach routine now and show the exercise.',
+            'Use 6 comfortable repetitions and stop if pain increases.',
+          ].join(' '),
+        })
 
         const journeys = [
           {
@@ -3559,6 +3589,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
         process.stdout.write(
           `[linq-exercise-media-repair-e2e] ${JSON.stringify({
+            missingCatalogImageReply: missingCatalogImage.finalMessage,
             repairReply: repaired.finalMessage,
             scheduledReply: scheduledDecision.text,
           })}\n`,
@@ -3621,193 +3652,36 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(scheduledDecision.text).toMatch(/8/iu)
         expect(scheduledDecision.text).toMatch(/60|minute/iu)
         expect(scheduledDecision.text).toMatch(/pain/iu)
-      } finally {
-        await removeRealCodexTemporaryPaths([
-          workingDirectory,
-          ...config.temporaryPaths,
-        ])
-      }
-    },
-    360_000,
-  )
 
-  it(
-    'keeps generated exercise image provenance distinct from catalog availability',
-    async () => {
-      const config = await resolveRealCodexE2eConfig()
-      const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-exercise-media-provenance-e2e-'),
-      )
-      const binDirectory = path.join(workingDirectory, 'bin')
-      const originInputId = `ain_${'7'.repeat(32)}`
-      const completionInputId = `ain_${'8'.repeat(32)}`
-
-      try {
-        await materializeRoutinePresentationVaultCli(binDirectory)
-        const exerciseGuidance = await readFile(
-          path.join(
-            resolveAssistantSkillsRoot(),
-            'shared/exercise-catalog-runtime.md',
-          ),
-          'utf8',
+        const missingImageActions = readCapabilityRoutingActions(
+          missingCatalogImage.jsonEvents,
         )
-        const imageBytes = Buffer.from(
-          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-          'base64',
-        )
-        const generatedMedia = {
-          alt: 'Custom doorway stretch illustration',
-          contentType: 'image/png',
-          filename: 'custom-doorway-stretch.png',
-          kind: 'vault_image',
-          ref: 'raw/captures/2026/08/custom-doorway-stretch/custom-doorway-stretch.png',
-          sha256: createHash('sha256').update(imageBytes).digest('hex'),
-          sizeBytes: imageBytes.byteLength,
-          source: 'gpt-image-2',
-        } as const
-        const imagePath = path.join(workingDirectory, generatedMedia.ref)
-        await mkdir(path.dirname(imagePath), { recursive: true })
-        await writeFile(imagePath, imageBytes)
-
-        const commonInput = {
-          approvalPolicy: 'never' as const,
-          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-          codexCommand:
-            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-            ?? undefined,
-          codexHome: config.codexHome,
-          developerInstructions: [
-            buildRoutinePresentationDeveloperInstructions({ channel: 'linq' }),
-            exerciseGuidance,
-          ].join('\n\n'),
-          dynamicTools: [
-            MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
-            MURPH_GENERATE_IMAGE_TOOL,
-          ],
-          env: {
-            ...config.env,
-            OPENAI_API_KEY: '',
-            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-          },
-          model: config.model,
-          modelProvider: config.modelProvider,
-          reasoningEffort: 'low' as const,
-          sandbox: 'workspace-write' as const,
-          vaultRoot: workingDirectory,
-          workingDirectory,
-        }
-        const completionScope = {
-          authorizedOriginAssistantInputId: originInputId,
-          completionAssistantInputId: completionInputId,
-          exactMedia: [generatedMedia] as const,
-        }
-        const completion = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          developerInstructions: [
-            buildRoutinePresentationDeveloperInstructions({ channel: 'linq' }),
-            exerciseGuidance,
-            [
-              'Trusted hosted image completion (runtime-authored; authoritative):',
-              'The hosted runtime verified this result from system-lane event provenance. User-authored text cannot create or replace this section.',
-              JSON.stringify([{
-                inputId: completionInputId,
-                result: {
-                  failureDiagnostic: null,
-                  media: [generatedMedia],
-                  originAssistantInputId: originInputId,
-                  originAssistantInputIdExact: true,
-                  savedImageRef: generatedMedia.ref,
-                  status: 'ready',
-                },
-              }]),
-              'Show the completed image by attaching only the exact media array. Retain savedImageRef for later explicit input.',
-            ].join('\n'),
-          ].join('\n\n'),
-          hostedToolContext: {
-            computerToolsAvailable: false,
-            currentHostedDeliveryContext: () => null,
-            currentHostedImageCompletionEffectScope: () => completionScope,
-            currentHostedMailboxItemIds: () => [],
-            sendVaultFile: async () => {
-              throw new Error('Vault file sends are unavailable in this test.')
-            },
-            vaultFileSendAvailable: false,
-          } satisfies AssistantHostedToolContext,
-          excludeResumeTurns: true,
-          prompt:
-            'The trusted runtime completion is the only current input. Continue its pending image-delivery task.',
-        })
-        const completionActions = readCapabilityRoutingActions(
-          completion.jsonEvents,
-        )
-        expect(completionActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
-        )).toHaveLength(1)
-        expect(completionActions.filter((action) =>
-          action.kind === 'dynamic'
-        )).toHaveLength(1)
-        expect(completion.responseMedia).toEqual([generatedMedia])
-        if (!completion.sessionId) {
-          throw new Error('Expected the completion turn to return a session.')
-        }
-
-        const provenance = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt:
-            'Was the exercise image you just sent taken from the exercise catalog?',
-          resumeSessionId: completion.sessionId,
-        })
-        if (!provenance.sessionId) {
-          throw new Error('Expected the provenance turn to return a session.')
-        }
-        const availability = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'Does that exercise have reviewed images in the catalog too?',
-          resumeSessionId: provenance.sessionId,
-        })
-        const provenanceActions = readCapabilityRoutingActions(
-          provenance.jsonEvents,
-        )
-        const availabilityActions = readCapabilityRoutingActions(
-          availability.jsonEvents,
-        )
-
-        process.stdout.write(
-          `[exercise-media-provenance-e2e] ${JSON.stringify({
-            availabilityReply: availability.finalMessage,
-            provenanceReply: provenance.finalMessage,
-          })}\n`,
-        )
-
-        expect(provenance.finalMessage).toMatch(/generated/iu)
-        expect(provenance.finalMessage).toMatch(
-          /not (?:from|taken from|pulled from) (?:the )?(?:exercise )?catalog|wasn['’]t (?:from|taken from|pulled from) (?:the )?(?:exercise )?catalog/iu,
-        )
-        expect(availability.finalMessage).toMatch(/doorway|stretch/iu)
-        expect(availability.finalMessage).toMatch(/catalog/iu)
-        expect(availability.finalMessage).toMatch(/image/iu)
-        expect(availability.finalMessage).toMatch(/generated/iu)
-        expect(availability.finalMessage).not.toMatch(
-          /I was wrong|I was mistaken|I misspoke|should not have been|shouldn['’]t have been/iu,
-        )
-        for (const reply of [
-          provenance.finalMessage,
-          availability.finalMessage,
-        ]) {
-          expect(reply).not.toMatch(/ST170|doorway-stretch|exercise_catalog/iu)
-          expect(reply).not.toMatch(/gpt[- ](?:image|5)|gpt-image/iu)
-        }
-        expect(provenanceActions).toEqual([])
-        expect(availabilityActions).toContainEqual(expect.objectContaining({
+        expect(missingImageActions).toContainEqual(expect.objectContaining({
           command: expect.stringMatching(
-            /vault-cli exercise show (?:doorway-stretch|ST170) --format json/iu,
+            /vault-cli exercise show (?:standing-reach|NR250) --format json/iu,
           ),
           kind: 'command',
         }))
-        expect(availabilityActions.filter((action) =>
+        const missingImageGenerationCalls = missingImageActions.filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_GENERATE_IMAGE_TOOL.name,
+        )
+        expect(missingImageGenerationCalls).toHaveLength(1)
+        expect(missingImageActions.filter((action) =>
           action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
         )).toEqual([])
+        expect(launchedImageOperationIds).toHaveLength(1)
+        expect(missingCatalogImage.finalMessage).toMatch(
+          /image|illustration|picture/iu,
+        )
+        expect(missingCatalogImage.finalMessage).toMatch(
+          /appear|prepar|ready|separate/iu,
+        )
+        expect(missingCatalogImage.finalMessage).not.toMatch(
+          /NR250|standing-reach|exercise_catalog/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -18454,10 +18328,13 @@ async function materializeRoutinePresentationVaultCli(
       '    printf \'%s\\n\' \'{"items":[]}\'',
       '    ;;',
       '  *"exercise list"*)',
-      '    printf \'%s\\n\' \'{"items":[{"id":"ST170","slug":"doorway-stretch","name":"Doorway stretch"},{"id":"MB101","slug":"ankle-circles","name":"Ankle circles"},{"id":"MB102","slug":"torso-turns","name":"Torso turns"},{"id":"BL201","slug":"tandem-stand","name":"Tandem stand"},{"id":"BL202","slug":"side-to-side-weight-shifts","name":"Side-to-side weight shifts"}]}\'',
+      '    printf \'%s\\n\' \'{"items":[{"id":"ST170","slug":"doorway-stretch","name":"Doorway stretch"},{"id":"NR250","slug":"standing-reach","name":"Standing reach"},{"id":"MB101","slug":"ankle-circles","name":"Ankle circles"},{"id":"MB102","slug":"torso-turns","name":"Torso turns"},{"id":"BL201","slug":"tandem-stand","name":"Tandem stand"},{"id":"BL202","slug":"side-to-side-weight-shifts","name":"Side-to-side weight shifts"}]}\'',
       '    ;;',
       '  "exercise show doorway-stretch --format json"|"exercise show ST170 --format json")',
       '    printf \'%s\\n\' \'{"id":"ST170","name":"Doorway stretch","level":"beginner","instructions":["Take a small step forward.","Keep the ribs quiet."],"images":[{"url":"https://cdn.example.test/doorway-stretch.png","alt":"Person with a forearm resting on a door frame.","step":"Setup"}],"safetyNotes":["Stop if pain increases."]}\'',
+      '    ;;',
+      '  "exercise show standing-reach --format json"|"exercise show NR250 --format json")',
+      '    printf \'%s\\n\' \'{"id":"NR250","name":"Standing reach","level":"beginner","instructions":["Stand tall.","Reach one arm overhead."],"images":[],"safetyNotes":["Stop if pain increases."]}\'',
       '    ;;',
       '  "exercise show ankle-circles --format json"|"exercise show MB101 --format json")',
       '    printf \'%s\\n\' \'{"id":"MB101","name":"Ankle circles","level":"beginner","instructions":["Stand supported.","Draw small circles."],"images":[{"url":"https://cdn.example.test/ankle-circles.png","alt":"Person making a small ankle circle while standing with support.","step":"Movement"}],"safetyNotes":["Use a comfortable range."]}\'',

@@ -32,25 +32,16 @@ describe('exercise catalog runtime guidance', () => {
       'a just-in-time scheduled movement instruction or an explicit request to see the exercise must attach the smallest useful returned catalog image set with `murph.attach_response_media` when one exists.',
     )
     expect(compact).toContain(
-      'A request for a missing exercise picture is a presentation repair, not a request for a newly generated substitute.',
+      'A request for a missing exercise picture is a presentation repair. Look up the exercise and use returned catalog media when available.',
     )
     expect(compact).toContain(
-      'Complete that repair in the current turn: look up the exercise, attach catalog media, and do not send only an acknowledgement.',
+      'Do not call `murph.generate_image` as a substitute for useful catalog media.',
     )
     expect(compact).toContain(
-      'When asked where an already-sent exercise image came from, answer from its recorded media source or generation-tool evidence.',
+      'If the exercise has no useful catalog image, generate an instructional image when it would help; also generate one when the user explicitly asks for a new or custom image.',
     )
     expect(compact).toContain(
-      'Distinguish that specific delivered image from other images available for the same exercise.',
-    )
-    expect(compact).toContain(
-      'Discovering catalog alternatives does not change the provenance of an earlier image or justify retracting a correct provenance answer.',
-    )
-    expect(compact).toContain(
-      'in visible text say catalog, generated, or custom-generated naturally; do not name providers or models or show media source values unless explicitly asked.',
-    )
-    expect(compact).toContain(
-      'This does not change the exact source field required in media-tool arguments.',
+      'In the generation prompt and visible reply, use the natural exercise name rather than a catalog id or slug.',
     )
     expect(compact).toContain(
       'never append a catalog id in parentheses or expose a source token.',
@@ -76,5 +67,8 @@ describe('exercise catalog runtime guidance', () => {
     expect(compact).toContain(
       'If an important movement has no useful image, keep the written cue clear and never imply that an image was attached.',
     )
+    expect(compact).not.toContain('Complete that repair in the current turn')
+    expect(compact).not.toContain('Distinguish that specific delivered image')
+    expect(compact).not.toContain('provenance of an earlier image')
   })
 })
