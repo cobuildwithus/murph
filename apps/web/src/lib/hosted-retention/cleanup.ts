@@ -407,7 +407,13 @@ export async function retireExpiredMailboxContent(input: {
         FROM "hosted_mailbox_item"
         WHERE "content_retired_at" IS NULL
           AND (
-            "expires_at" <= ${input.now}
+            (
+              "expires_at" <= ${input.now}
+              AND NOT (
+                "kind" = 'assistant.ask.requested'
+                AND "consumed_at" IS NULL
+              )
+            )
             OR "created_at" <= ${cutoff}
           )
         ORDER BY "created_at" ASC, "id" ASC

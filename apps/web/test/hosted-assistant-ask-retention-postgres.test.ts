@@ -52,6 +52,7 @@ describe.skipIf(!runPostgresProof)(
       memberIds.push(memberId);
       const requestId = `aask_req_retention_${suffix}`;
       const completionId = `aask_done_retention_${suffix}`;
+      const createdAt = new Date("2026-07-16T12:00:00.000Z");
       const expiresAt = new Date("2026-07-16T12:10:00.000Z");
       const cleanupAt = new Date("2026-07-16T13:00:00.000Z");
 
@@ -61,6 +62,7 @@ describe.skipIf(!runPostgresProof)(
       await client.hostedMailboxItem.createMany({
         data: [
           {
+            createdAt,
             dedupeKey: requestId,
             expiresAt,
             id: requestId,
@@ -73,6 +75,7 @@ describe.skipIf(!runPostgresProof)(
             userId: memberId,
           },
           {
+            createdAt,
             dedupeKey: completionId,
             expiresAt,
             id: completionId,
@@ -104,10 +107,11 @@ describe.skipIf(!runPostgresProof)(
         prisma: client,
         signalRuntimeRecheck: async () => undefined,
       });
-      expect(cleanup.expiredMailboxContentRetired).toBeGreaterThanOrEqual(2);
+      expect(cleanup.expiredMailboxContentRetired).toBeGreaterThanOrEqual(1);
       const retiredItems = await client.hostedMailboxItem.findMany({
         select: {
           contentRetiredAt: true,
+          id: true,
           payloadInlineCiphertext: true,
           payloadRef: true,
         },
@@ -116,14 +120,20 @@ describe.skipIf(!runPostgresProof)(
       expect(retiredItems).toHaveLength(2);
       expect(retiredItems).toEqual(expect.arrayContaining([
         expect.objectContaining({
+          contentRetiredAt: null,
+          id: requestId,
+          payloadRef: `hosted-mailbox-payload:${requestId}`,
+        }),
+        expect.objectContaining({
           contentRetiredAt: cleanupAt,
+          id: completionId,
           payloadInlineCiphertext: null,
           payloadRef: null,
         }),
       ]));
       await expect(client.hostedMailboxPayload.count({
         where: { mailboxItemId: requestId },
-      })).resolves.toBe(0);
+      })).resolves.toBe(1);
 
       const delivery = {
         answeredMailboxItemIds: [completionId],
@@ -149,6 +159,25 @@ describe.skipIf(!runPostgresProof)(
           tx,
         })
       )).resolves.toBeUndefined();
+
+      const privacyDeadline = new Date(
+        createdAt.getTime() + 14 * 24 * 60 * 60 * 1_000,
+      );
+      await runHostedRetentionCleanup({
+        now: privacyDeadline,
+        prisma: client,
+        signalRuntimeRecheck: async () => undefined,
+      });
+      await expect(client.hostedMailboxItem.findUniqueOrThrow({
+        select: { contentRetiredAt: true, payloadRef: true },
+        where: { id: requestId },
+      })).resolves.toEqual({
+        contentRetiredAt: privacyDeadline,
+        payloadRef: null,
+      });
+      await expect(client.hostedMailboxPayload.count({
+        where: { mailboxItemId: requestId },
+      })).resolves.toBe(0);
     });
 
     it("records policy non-replies without advancing across a younger conversation gap", async () => {

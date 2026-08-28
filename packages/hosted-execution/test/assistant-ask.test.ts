@@ -390,6 +390,15 @@ describe("hosted Assistant Ask runtime control", () => {
       terminalReason: "expired",
     });
     expect(parseHostedRuntimeAssistantAskControlResponse({
+      action: "prepare",
+      status: "terminal",
+      terminalReason: "content_expired",
+    })).toEqual({
+      action: "prepare",
+      status: "terminal",
+      terminalReason: "content_expired",
+    });
+    expect(parseHostedRuntimeAssistantAskControlResponse({
       action: "complete",
       status: "already_completed",
     })).toEqual({ action: "complete", status: "already_completed" });
