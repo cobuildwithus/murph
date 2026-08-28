@@ -83,6 +83,7 @@ import { Client } from "pg";
 
 import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject-key";
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
+import { encryptComputerRunSecret } from "../../src/lib/computer-use/crypto";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
 import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
 
@@ -1905,15 +1906,24 @@ export async function listHostedLinqDeliveriesForTest(input: {
 export async function seedHostedComputerRunForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expiresAt?: Date;
+  kernelLiveViewUrl?: string;
   kernelSessionId?: string;
   memberId: string;
   runId: string;
 }): Promise<HostedComputerRunForTest> {
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const kernelLiveViewUrlEncrypted = await encryptComputerRunSecret({
+      field: "kernel-live-view-url",
+      memberId: input.memberId,
+      prisma: deps.prisma,
+      runId: input.runId,
+      value: input.kernelLiveViewUrl,
+    });
     const run = await deps.prisma.hostedComputerRun.create({
       data: {
         expiresAt: input.expiresAt ?? new Date(Date.now() + 60 * 60 * 1_000),
         id: input.runId,
+        kernelLiveViewUrlEncrypted,
         kernelProfileName: `hosted-local-${input.runId}`,
         kernelSessionId: input.kernelSessionId ?? `hosted-local-${input.runId}`,
         memberId: input.memberId,

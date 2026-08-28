@@ -49,7 +49,7 @@ const TEST_NOW = "2036-08-22T19:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_delegated_owner";
 
 describe("hosted runtime delegated foreground owner", () => {
-  test("upgrades a delegated ask ahead of older device work", async () => {
+  test("does not leapfrog a delegated ask ahead of older device work", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-delegated-owner-"),
     );
@@ -147,10 +147,10 @@ describe("hosted runtime delegated foreground owner", () => {
       });
 
       const finalPending = (await readHostedSystemMailboxState(vaultRoot)).pending;
-      expect(finalPending).toEqual([device]);
-      expect(assistantPhaseCalls).toBe(1);
-      expect(delegatedConsumptionCount).toBe(1);
-      expect(result.status).toBe("idle");
+      expect(finalPending).toEqual([device, delegated]);
+      expect(assistantPhaseCalls).toBe(0);
+      expect(delegatedConsumptionCount).toBe(0);
+      expect(result.status).toBe("scheduled");
     } finally {
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });

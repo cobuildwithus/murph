@@ -561,9 +561,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       BigInt(environmentCompletion.append.wake.seq),
     );
 
-    await armCheckpointPublicationBarrier(
+    await requireScenario().harness.armIdleSnapshotStartBarrierForTest(
       environmentOrderingProbe.userId,
-      "canonical",
     );
     let barrierReleased = false;
     try {

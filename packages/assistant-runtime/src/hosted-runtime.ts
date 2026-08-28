@@ -4908,6 +4908,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           nowMs,
         });
         pendingWake = wakeResolution.pendingWake;
+        if (
+          (input.request.processingMode ?? "default") === "default"
+          && pendingWake.nextWakeReason === "mailbox"
+          && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt, nowMs)
+        ) {
+          runtimeOwnerHandoffRequested = true;
+          markIdleCheckpointTimerAfterDirtyWork();
+        }
         // The older due token remains checkpoint authority until its hot
         // service attempt is committed. Retain a distinct later assistant
         // obligation in the existing successor slot instead of dropping it.
@@ -7291,6 +7299,12 @@ function resolvePendingWakeAfterForegroundPass(input: {
   const carriedWakeIsDue =
     input.previousPendingWake.nextWakeAt !== null
     && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs);
+  const presentedAssistantYieldedToDueMailbox =
+    input.presentedProjectedAssistantWakeKey !== null
+    && input.assistantProjectedWakeKey === null
+    && input.passWake.nextWakeReason === "mailbox"
+    && input.passWake.nextWakeAt !== null
+    && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs);
   const freshDueMailboxOwnerSupersedesCarriedBackground =
     carriedWakeIsDue
     && !input.previousPendingWakeIsForeground
@@ -7341,6 +7355,7 @@ function resolvePendingWakeAfterForegroundPass(input: {
 
   if (
     input.preserveDueAssistantWakeOnNoProgress
+    && !presentedAssistantYieldedToDueMailbox
     && input.presentedProjectedAssistantWakeKey !== null
     && input.assistantProjectedWakeKey === null
     && input.previousPendingWake.nextWakeAt !== null

@@ -868,7 +868,7 @@ describe("hosted detached assistant ask controller", () => {
           now: () => TEST_NOW,
           vaultRoot,
         }),
-        { at: null, reason: null },
+        { at: null, executionClass: null, reason: null },
       );
 
       const stopped = controller.closeAndRequeue().then(() => {

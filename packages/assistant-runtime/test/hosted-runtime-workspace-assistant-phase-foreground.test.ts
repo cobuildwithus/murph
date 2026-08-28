@@ -1462,7 +1462,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
   });
 
   it(
-    "falls back to oldest-first device maintenance when no post-checkpoint causal wake is ready",
+    "hands oldest model-free device maintenance to its owner after causal work",
     async () => {
       const now = "2026-04-27T00:00:00.000Z";
       const parentRoot = await mkdtemp(
@@ -1511,19 +1511,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
           vaultRoot,
         }));
 
-        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
-        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0])
-          .not.toHaveProperty("allowedRouteActions");
-        expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+        expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
         expect(result).toEqual(expect.objectContaining({
-          checkpointReason: "system_mailbox_receipt",
-          progressed: true,
+          nextWakeAt: now,
+          nextWakeReason: "device-sync.reconcile",
+          progressed: false,
         }));
 
         await result.afterCheckpoint?.();
 
         expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({
-          pending: [],
+          pending: [expect.objectContaining({
+            itemId: expect.stringContaining("device"),
+            status: "pending",
+          })],
         });
       } finally {
         await rm(parentRoot, { force: true, recursive: true });
@@ -1531,7 +1533,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     },
   );
 
-  it("drains every approved continuation before older device maintenance", async () => {
+  it("drains approved continuations before handing device maintenance to its owner", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     vi.useFakeTimers();
     vi.setSystemTime(new Date(now));
@@ -1722,14 +1724,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
 
       expect(events).toEqual([
         ...effectIds.map((effectId) => `delivery:${effectId}`),
-        "device-sync",
       ]);
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      expect(deviceResult).toEqual(expect.objectContaining({
+        nextWakeAt: now,
+        nextWakeReason: "device-sync.reconcile",
+        progressed: false,
+      }));
       await deviceResult.afterCheckpoint?.();
       expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([
         expect.objectContaining({
           itemId: codexRetryItem.itemId,
           nextAttemptAt: codexRetryAt,
           status: "recording",
+        }),
+        expect.objectContaining({
+          itemId: expect.stringContaining("durable_device"),
+          status: "pending",
+          wake: deviceWake,
         }),
       ]);
     } finally {

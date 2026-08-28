@@ -555,14 +555,31 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     }
   });
 
-  test("collapse invariant 2a: due projected assistant wake gets one hot no-progress attempt before checkpoint", async () => {
+  test.each([
+    {
+      expectedCheckpointDelayMs: 180_000,
+      expectedImmediateRecheck: undefined,
+      expectedWakeReason: "assistant",
+      mailboxWakeAt: new Date(Date.parse(TEST_NOW) + 5 * 60_000).toISOString(),
+      scenario: "retains the serviced assistant wake ahead of a future mailbox wake",
+    },
+    {
+      expectedCheckpointDelayMs: 0,
+      expectedImmediateRecheck: true,
+      expectedWakeReason: "mailbox",
+      mailboxWakeAt: TEST_NOW,
+      scenario: "hands a due mailbox wake to its owner after assistant service",
+    },
+  ])("collapse invariant 2a: $scenario", async ({
+    expectedCheckpointDelayMs,
+    expectedImmediateRecheck,
+    expectedWakeReason,
+    mailboxWakeAt,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const idleCheckpointDelayMs = 180_000;
-    const auxiliaryMailboxWakeAt = new Date(
-      Date.parse(TEST_NOW) + 5 * 60_000,
-    ).toISOString();
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let firstCheckpointStartedAtMs: number | null = null;
@@ -629,7 +646,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
 
               assistantTwoObserved.resolve();
               return {
-                nextWakeAt: auxiliaryMailboxWakeAt,
+                nextWakeAt: mailboxWakeAt,
                 nextWakeReason: "mailbox",
                 progressed: false,
                 redactedStatus: {
@@ -645,19 +662,28 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       );
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
-      await waitForFakeTimerScheduled(() => events.join(","));
+      if (expectedCheckpointDelayMs > 0) {
+        await waitForFakeTimerScheduled(() => events.join(","));
+      }
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
-      assert.equal(checkpointRequests.length, 0);
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
         "assistant.phase:1:none",
         `assistant.phase:2:${TEST_NOW}`,
       ]);
 
-      await vi.advanceTimersByTimeAsync(1);
+      if (expectedCheckpointDelayMs > 0) {
+        await vi.advanceTimersByTimeAsync(expectedCheckpointDelayMs - 1);
+        assert.equal(checkpointRequests.length, 0);
+        await vi.advanceTimersByTimeAsync(1);
+      } else {
+        await vi.runAllTimersAsync();
+      }
       const result = await resultPromise;
 
-      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.equal(
+        firstCheckpointStartedAtMs,
+        Date.parse(TEST_NOW) + expectedCheckpointDelayMs,
+      );
       assert.ok(
         requireEventIndex(events, `assistant.phase:2:${TEST_NOW}`)
           < requireEventIndex(events, "snapshot:idle_shutdown"),
@@ -667,11 +693,12 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["idle_shutdown", TEST_NOW, "assistant"],
+        ["idle_shutdown", TEST_NOW, expectedWakeReason],
       ]);
-      assert.equal(result.immediateRecheckRequested, undefined);
+      assert.equal(result.immediateRecheckRequested, expectedImmediateRecheck);
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, expectedWakeReason);
       assert.equal(assistantPhaseCalls, 2);
     } finally {
       vi.useRealTimers();

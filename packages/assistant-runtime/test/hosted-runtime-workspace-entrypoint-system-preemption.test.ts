@@ -3220,8 +3220,8 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
 
       assert.equal(
         countCheckpointExpectations() - checkpointExpectationCountAtWakeStart,
-        2,
-        "empty wake probes must not publish additional checkpoint deadlines",
+        1,
+        "dirty import publishes one deadline and empty wake probes publish none",
       );
       assert.ok(fetchRequests.length > 1);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [

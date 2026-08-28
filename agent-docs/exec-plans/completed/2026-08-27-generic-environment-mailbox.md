@@ -1,6 +1,6 @@
 # Simplify Environment mailbox scheduling
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-28
 
@@ -257,6 +257,21 @@ Updated: 2026-08-28
     scheduled assistant work. That existing checkpoint exposes the successor
     frontier to the correct owner without another queue, mode, or persisted
     handoff field.
+  - The exact paired foreground-priority run on public head `0890c61acf` and
+    private head `3f33a794c9` then exposed the last outer-loop edge: after the
+    assistant serviced its due token and explicitly yielded to a due mailbox
+    wake, the runtime could preserve the serviced assistant token and wait for
+    the ordinary idle deadline instead of checkpointing the owner change.
+  - The final correction recognizes only that explicit yielded transition,
+    starts the existing checkpoint immediately, and does not preserve the
+    serviced assistant token over the due mailbox owner. Future mailbox work
+    still retains the assistant wake and ordinary idle window. The composed
+    predecessor regression now waits at the existing idle-snapshot boundary
+    because the removed canonical-publication boundary no longer owns this
+    handoff.
+  - Current focused proof passes: 260 tests across the seven affected
+    assistant-runtime suites, the focused paired foreground predecessor E2E,
+    the assistant-runtime package typecheck, and `git diff --check`.
 - Composed proof:
   - `pnpm hosted-local e2e foreground-reply-priority` was attempted. The branch
     predates the bundle baseline already merged on `main`; after temporarily
@@ -278,3 +293,4 @@ Updated: 2026-08-28
   - Exact first-frontier classification, no leapfrogging, no model call for
     Environment completion, safe cooperative owner yield in both directions,
     durable retry after failure, and unchanged foreground reply authority.
+Completed: 2026-08-28
