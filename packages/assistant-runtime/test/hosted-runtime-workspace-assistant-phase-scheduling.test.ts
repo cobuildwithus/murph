@@ -1557,6 +1557,39 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("keeps fresh conversation input ahead of a due model-free mailbox row", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) =>
+        (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+          ? { at: null, executionClass: null, reason: null }
+          : {
+              at: dueAt,
+              executionClass: "model_free",
+              reason: "mailbox",
+            },
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => dueAt,
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+      progressed: true,
+    }));
+  });
+
   it("hands a due model-free mailbox row off after a foreground reply", async () => {
     const dueAt = "2026-04-27T00:00:00.000Z";
     const deliveryEffect = createDeliveryEffect();

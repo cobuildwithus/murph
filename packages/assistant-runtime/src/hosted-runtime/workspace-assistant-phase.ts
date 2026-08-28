@@ -2361,8 +2361,12 @@ export async function runHostedWorkspaceAssistantPhase(
       wake,
     });
     const systemMailboxMaintenanceMs = elapsedSince(systemMailboxMaintenanceStartedAt);
+    const hasAssistantInputAtPassStart =
+      hasFreshConversationInput
+      || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null;
     const systemMailboxOwnerOwnsCurrentPass =
-      systemMailboxMaintenance.continueAssistantLane === false
+      !hasAssistantInputAtPassStart
+      && systemMailboxMaintenance.continueAssistantLane === false
       && systemMailboxMaintenance.result?.nextWakeReason === "mailbox"
       && hostedRuntimeWakeCandidateIsDue(
         createHostedRuntimeWakeCandidate(
@@ -2380,9 +2384,6 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxMaintenance.deviceSyncMaintenanceRan,
       );
     }
-    const hasAssistantInputAtPassStart =
-      hasFreshConversationInput
-      || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null;
     const preManagedAutomationWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
       hasAssistantInputAtPassStart,
       input,

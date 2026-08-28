@@ -76,12 +76,12 @@ Updated: 2026-08-28
    would reorder the mailbox.
    Mitigation: centralize exact-frontier classification and add an explicit
    non-leapfrog regression.
-2. Risk: Cross-deploy skew could send the generic mode to an older Cloudflare
-   runtime.
-   Mitigation: deploy the accepting consumer before the producer and avoid new
-   negotiation state. Production provenance proves the removed private
-   Environment mode never deployed and has no rollback-eligible caller or
-   persisted fence.
+2. Risk: Existing long-lived Temporal runs recorded the old owner-selection
+   branch and cannot adopt the generic model-free owner in place.
+   Mitigation: keep the existing Temporal compatibility pin and one-time
+   operator migration signal, deploy the compatible private worker first, and
+   prove affected workflows receive new Run IDs before enabling the public
+   producer. Add no new rollout state or Environment-specific migration path.
 3. Risk: Cross-mode wakes could interrupt a reply or canonical Browser
    Vault publication.
    Mitigation: either generic owner preserves its current bounded unit, then
@@ -115,9 +115,11 @@ Updated: 2026-08-28
   CI, composed proof, and deployment.
 - Keep one durable mailbox and one existing system-mailbox execution lane. An
   Environment completion is model-free work, not a new Temporal workflow mode.
-- Require no special deploy order or rollout mode. Mixed versions leave the row
-  on the old default path or durably pending until a compatible runner arrives;
-  do not add capability negotiation or rollout state.
+- Reuse the existing Temporal compatibility release boundary and one-time
+  migration signal. Pin and deploy the compatible private worker, migrate
+  pre-patch workflow runs, and verify new Run IDs before enabling the public
+  producer. Do not add capability negotiation, rollout state, or an
+  Environment-specific migration.
 - A real-Codex semantic journey is required only if the final diff changes
   model-visible prompts, tool choice, or reply behavior. Deterministic hosted
   runtime proof is the stronger evidence for scheduling-only changes.
@@ -176,6 +178,21 @@ Updated: 2026-08-28
     workspace-runner tests, all 6 generic wake-selector tests, all 51
     Cloudflare container-entrypoint tests, all 157 Cloudflare runner alarm
     tests, both package typechecks, and `git diff --check`.
+  - The exact Linux journey then exposed two remaining generic owner-boundary
+    bugs: a due model-free row could return before fresh conversation input was
+    serviced, and the outer loop could retain the serviced foreground wake and
+    wait through the idle window instead of committing the new mailbox-owner
+    handoff.
+  - The smallest correction keeps fresh conversation input ahead of model-free
+    maintenance, lets the resulting due mailbox wake replace only a carried
+    non-foreground wake, and starts the existing checkpoint immediately for
+    that owner handoff. It adds no state owner or scheduler.
+  - Current focused proof passes: 54 assistant-phase scheduling tests, the
+    assistant-runtime package typecheck, and `git diff --check`.
+  - The private Temporal proof passes: 181 workflow-machine tests, the replay
+    suite across all recorded histories with the exact pre-patch mailbox fact,
+    and the private package typecheck. The existing operator migration signal
+    is the required release boundary for old workflow runs.
 - Composed proof:
   - `pnpm hosted-local e2e foreground-reply-priority` was attempted, but the
     runner's fixed macOS total-byte ceiling stopped bundle assembly before the

@@ -4892,17 +4892,28 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (presentedDefaultWakeKey !== null) {
           unservicedRecheckWakeKeys.delete(presentedDefaultWakeKey);
         }
+        const nowMs = Date.now();
         const wakeResolution = resolvePendingWakeAfterForegroundPass({
           assistantProjectedWakeKey: passProjectedAssistantWakeKey,
           checkpointPendingBeforePass,
           passWake,
           presentedProjectedAssistantWakeKey,
           previousPendingWake,
+          previousPendingWakeIsForeground:
+            previousPendingWakeKey !== null
+            && previousPendingWakeKey
+              === previousInvocationLocalProjectedAssistantWakeKey,
           preserveDueAssistantWakeOnNoProgress,
           replaceWake,
-          nowMs: Date.now(),
+          nowMs,
         });
         pendingWake = wakeResolution.pendingWake;
+        if (
+          pendingWake.nextWakeReason === "mailbox"
+          && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt, nowMs)
+        ) {
+          setIdleCheckpointStartBy(nowMs);
+        }
         // The older due token remains checkpoint authority until its hot
         // service attempt is committed. Retain a distinct later assistant
         // obligation in the existing successor slot instead of dropping it.
@@ -7250,6 +7261,7 @@ function resolvePendingWakeAfterForegroundPass(input: {
   passWake: HostedRuntimePendingWake;
   presentedProjectedAssistantWakeKey: string | null;
   previousPendingWake: HostedRuntimePendingWake;
+  previousPendingWakeIsForeground: boolean;
   preserveDueAssistantWakeOnNoProgress: boolean;
   replaceWake: boolean;
 }): HostedRuntimePendingWakeResolution {
@@ -7261,11 +7273,20 @@ function resolvePendingWakeAfterForegroundPass(input: {
   const carriedWakeIsDue =
     input.previousPendingWake.nextWakeAt !== null
     && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs);
-  const freshDueSupersedesCarriedDue =
+  const freshDueMailboxOwnerSupersedesCarriedBackground =
     carriedWakeIsDue
-    && !hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
+    && !input.previousPendingWakeIsForeground
+    && input.passWake.nextWakeReason === "mailbox"
     && input.passWake.nextWakeAt !== null
     && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs);
+  const freshDueSupersedesCarriedDue =
+    freshDueMailboxOwnerSupersedesCarriedBackground
+    || (
+      carriedWakeIsDue
+      && !hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
+      && input.passWake.nextWakeAt !== null
+      && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs)
+    );
   const preservePendingWakeThroughPreCheckpointPass =
     input.checkpointPendingBeforePass
     && input.presentedProjectedAssistantWakeKey === null
