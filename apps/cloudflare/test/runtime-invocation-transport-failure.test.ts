@@ -354,6 +354,7 @@ describe("runtime invocation transport failure fence handling", () => {
         attemptId: harness.token.attemptId,
         errorCode: "runtime_error",
         eventCode: "runner.accepted_attempt_failed",
+        leaseGeneration: harness.token.generation,
         redactedJson: expect.objectContaining({
           attemptStillActive: true,
           errorCode: "runtime_error",
