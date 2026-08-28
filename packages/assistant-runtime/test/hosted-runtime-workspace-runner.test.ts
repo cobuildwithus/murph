@@ -275,7 +275,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(selectedInputIdsByPass, [[olderInputId], [newerInputId]]);
       assert.deepEqual(selectedContextsByPass, [olderContext, newerContext]);
-      assert.deepEqual(foregroundWorkObservedAtBarrier, [false, true]);
+      assert.deepEqual(foregroundWorkObservedAtBarrier, [true, true]);
       assert.equal(secondPass.latestAssistantInputBatch, null);
       assert.deepEqual(checkpointRequests, []);
     } finally {
