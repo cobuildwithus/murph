@@ -5066,6 +5066,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           result: passResult,
           workspace: passWorkspace,
         });
+        const assistantContinuationWakeAt =
+          passResult.assistantPhaseResult?.nextWakeAt ?? null;
+        const assistantContinuationWake =
+          assistantContinuationWakeAt !== null
+          && hostedRuntimeWakeReasonIsAssistant(
+            passResult.assistantPhaseResult?.nextWakeReason ?? null,
+          )
+            ? {
+                nextWakeAt: assistantContinuationWakeAt,
+                nextWakeReason:
+                  passResult.assistantPhaseResult?.nextWakeReason ?? null,
+              }
+            : null;
         const passWake = resolveHostedWorkspaceRunNextWake({
           assistantPhaseResult: passResult.assistantPhaseResult,
           committedWorkspace: committedPassWorkspace,
@@ -5115,6 +5128,38 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           nowMs: Date.now(),
         });
         pendingWake = wakeResolution.pendingWake;
+        // The older due token remains checkpoint authority until its hot
+        // service attempt is committed. Retain a distinct later assistant
+        // obligation in the existing successor slot instead of dropping it.
+        if (
+          checkpointPendingBeforePass
+          && presentedProjectedAssistantWakeKey === null
+          && assistantContinuationWake !== null
+          && assistantCronRetryObligation === null
+          && hotProjectedAssistantWakeAttemptedKey !== null
+          && buildHostedRuntimeWakeKey(previousPendingWake)
+            === hotProjectedAssistantWakeAttemptedKey
+          && previousPendingWake.nextWakeAt !== null
+          && hostedRuntimeWakeReasonIsAssistant(previousPendingWake.nextWakeReason)
+          && hostedRuntimeWakeIsDue(previousPendingWake.nextWakeAt)
+          && Date.parse(assistantContinuationWake.nextWakeAt)
+            > Date.parse(previousPendingWake.nextWakeAt)
+          && hostedRuntimePendingWakeMatches(pendingWake, previousPendingWake)
+        ) {
+          pendingWakeAfterDueAssistantService = {
+            durableWake: selectEarliestHostedRuntimeWake([
+              {
+                at: pendingWakeAfterDueAssistantService?.durableWake.nextWakeAt ?? null,
+                reason:
+                  pendingWakeAfterDueAssistantService?.durableWake.nextWakeReason ?? null,
+              },
+              {
+                at: assistantContinuationWake.nextWakeAt,
+                reason: assistantContinuationWake.nextWakeReason,
+              },
+            ]),
+          };
+        }
         if (passProducedDefaultWake && passWake.nextWakeAt !== null) {
           recordUnservicedRecheckWake(passWake);
         }
