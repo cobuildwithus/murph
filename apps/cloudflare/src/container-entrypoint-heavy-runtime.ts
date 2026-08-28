@@ -9,10 +9,6 @@ import { Readable } from "node:stream";
 
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
-  stopWarmCodexAppServer,
-  waitForWarmCodexBackgroundWork,
-} from "@murphai/assistant-engine/codex-lifecycle";
-import {
   buildHostedRunnerExecutablePath,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNNER_EXECUTABLE_PATH,
@@ -84,7 +80,7 @@ export interface HostedContainerDirectR2PresignedPutSmokeResult {
   status: number;
 }
 
-export interface HostedContainerHeavyRuntime {
+export interface HostedContainerHeavyRuntimeCore {
   buildLiveModelTurnSmokeSafeText(value: string): string;
   deployLiveModelTurnSmokeModel: string;
   drainFatalRuntimeBestEffort(input: { timeoutMs: number }): Promise<void>;
@@ -101,6 +97,9 @@ export interface HostedContainerHeavyRuntime {
     signal: AbortSignal;
   }): Promise<HostedContainerLiveModelTurnSmokeResult>;
   runWorkspaceInvocation: typeof runHostedWorkspaceInvocation;
+}
+
+export interface HostedContainerHeavyRuntime extends HostedContainerHeavyRuntimeCore {
   stopWarmCodex(reason: string): Promise<void>;
   waitForBackgroundAssistantWork(signal: AbortSignal | null): Promise<void>;
 }
@@ -994,7 +993,7 @@ function copyOptionalHostedContainerSmokeEnv(
   }
 }
 
-export const hostedContainerHeavyRuntime: HostedContainerHeavyRuntime = {
+export const hostedContainerHeavyRuntime: HostedContainerHeavyRuntimeCore = {
   buildLiveModelTurnSmokeSafeText: buildHostedContainerLiveModelTurnSmokeSafeText,
   deployLiveModelTurnSmokeModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   async drainFatalRuntimeBestEffort(input) {
@@ -1016,8 +1015,4 @@ export const hostedContainerHeavyRuntime: HostedContainerHeavyRuntime = {
   runDirectR2PresignedPutSmoke: runHostedContainerDirectR2PresignedPutSmoke,
   runLiveModelTurnSmoke: runHostedContainerLiveModelTurnSmoke,
   runWorkspaceInvocation: runHostedWorkspaceInvocation,
-  stopWarmCodex: stopWarmCodexAppServer,
-  async waitForBackgroundAssistantWork(signal) {
-    await waitForWarmCodexBackgroundWork({ signal });
-  },
 };

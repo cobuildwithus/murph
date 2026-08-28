@@ -528,7 +528,6 @@ describe("startHostedContainerEntrypoint", () => {
       "node:https",
       "node:os",
       "node:stream",
-      "@murphai/assistant-engine/codex-lifecycle",
       "@murphai/assistant-runtime/hosted-invocation",
       "@murphai/assistant-runtime/hosted-runtime-contracts",
       "@murphai/contracts",
@@ -542,6 +541,10 @@ describe("startHostedContainerEntrypoint", () => {
       expect(valueImports).not.toContain(specifier);
       expect(heavyRuntimeSource).toContain(`from "${specifier}"`);
     }
+    expect(valueImports).toContain("@murphai/assistant-engine/codex-lifecycle");
+    expect(heavyRuntimeSource).not.toContain(
+      'from "@murphai/assistant-engine/codex-lifecycle"',
+    );
     expect(valueImports).toContain("./runner-job-transport.ts");
     expect(valueImports).not.toContain("./container-workspace-restore-preparation.ts");
     expect(

@@ -17,6 +17,10 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  stopWarmCodexAppServer,
+  waitForWarmCodexBackgroundWork,
+} from "@murphai/assistant-engine/codex-lifecycle";
+import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   readHostedRuntimeFailurePhaseCode,
 } from "@murphai/hosted-execution/runtime-control";
@@ -31,6 +35,7 @@ import {
 } from "./container-fatal-report.ts";
 import type {
   HostedContainerHeavyRuntime,
+  HostedContainerHeavyRuntimeCore,
 } from "./container-entrypoint-heavy-runtime.ts";
 import type {
   HostedWorkspaceRestorePreparation,
@@ -115,7 +120,7 @@ interface HostedContainerStartupConfig {
 
 interface HostedContainerRuntimeOptions {
   exitScheduler?: () => void;
-  loadHeavyRuntime?: () => Promise<HostedContainerHeavyRuntime>;
+  loadHeavyRuntime?: () => Promise<HostedContainerHeavyRuntimeCore>;
   parseRunnerJobInput?: typeof parseHostedExecutionRunnerJobInput;
   prepareWorkspaceRestore?: (input: {
     job: HostedExecutionRunnerJobInput;
@@ -1548,13 +1553,14 @@ async function loadConfiguredHostedContainerHeavyRuntime(
       runtime?.runLiveModelTurnSmoke ?? heavyRuntime.runLiveModelTurnSmoke,
     runWorkspaceInvocation:
       runtime?.runWorkspaceInvocation ?? heavyRuntime.runWorkspaceInvocation,
-    stopWarmCodex: runtime?.stopWarmCodex ?? heavyRuntime.stopWarmCodex,
+    stopWarmCodex: runtime?.stopWarmCodex ?? stopWarmCodexAppServer,
     waitForBackgroundAssistantWork:
-      runtime?.waitForBackgroundAssistantWork ?? heavyRuntime.waitForBackgroundAssistantWork,
+      runtime?.waitForBackgroundAssistantWork
+      ?? (async (signal) => await waitForWarmCodexBackgroundWork({ signal })),
   };
 }
 
-async function loadHostedContainerHeavyRuntime(): Promise<HostedContainerHeavyRuntime> {
+async function loadHostedContainerHeavyRuntime(): Promise<HostedContainerHeavyRuntimeCore> {
   const module = await import("./container-entrypoint-heavy-runtime.ts");
   return module.hostedContainerHeavyRuntime;
 }
