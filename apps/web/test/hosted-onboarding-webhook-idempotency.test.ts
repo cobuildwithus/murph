@@ -645,6 +645,55 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("retires the exact current route when the removed participant is Murph's sending account", async () => {
+    const prisma = createPrismaStub();
+    const scheduleAfterResponse = vi.fn();
+    prisma.hostedThreadRoute.findMany.mockResolvedValue([
+      buildHostedThreadRouteRow("member_group_runtime_123"),
+    ]);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          participant: {
+            handle: "+15550000000",
+            is_me: true,
+            status: "removed",
+          },
+          removed_at: "2026-03-26T12:00:00.000Z",
+        },
+        eventId: "evt_provider_removed_123",
+        eventType: "participant.removed",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "recorded-linq-provider-event:participant.removed",
+    });
+
+    expect(prisma.hostedThreadRoute.deleteMany).toHaveBeenCalledWith({
+      where: {
+        accountLookupKey: {
+          in: expect.arrayContaining([
+            createHostedPhoneLookupKey("+15550000000"),
+          ]),
+        },
+        channel: "linq",
+        containerMemberId: "member_group_runtime_123",
+        threadIdentityLookupKey: { in: expect.any(Array) },
+        updatedAt: { lte: new Date("2026-03-26T12:00:00.000Z") },
+      },
+    });
+    expect(mocks.stageHostedLinqGroupParticipantContext).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.updateMany).not.toHaveBeenCalled();
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+  });
+
   it("records unbound and chatless additions without provisioning or scheduling", async () => {
     const prisma = createPrismaStub();
     const scheduleAfterResponse = vi.fn();
@@ -2276,6 +2325,7 @@ function createPrismaStub() {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedThreadRoute: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       groupBy: vi.fn().mockResolvedValue([]),
@@ -2295,6 +2345,7 @@ function buildHostedThreadRouteRow(containerMemberId: string) {
     updatedAt: new Date("2026-03-26T00:00:00.000Z"),
   };
   return {
+    accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
     channel: "linq",
     container: {
       member: memberCore,

@@ -1023,7 +1023,9 @@ export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER =
 export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE = "v3";
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM =
   "membershipInventoryProtocol";
-export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE = "v2";
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE =
+  "v2";
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE = "v3";
 
 export function isHostedRuntimeAssistantAskDiagnosticCode(
   value: unknown,
@@ -1216,7 +1218,16 @@ export type HostedRuntimeGroupParticipantRoster =
       unavailableReason: string;
     };
 
+export type HostedRuntimeGroupMembershipAvailability =
+  | { status: "available" }
+  | {
+      status: "unavailable";
+      unavailableReason: string;
+    };
+
 export interface HostedRuntimeGroupMembershipSummary {
+  /** Omitted by Web deployments or callers from before inventory v3. */
+  availability?: HostedRuntimeGroupMembershipAvailability;
   displayName: string | null;
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;

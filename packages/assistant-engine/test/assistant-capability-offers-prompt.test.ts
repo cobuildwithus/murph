@@ -279,13 +279,19 @@ describe('assistant capability-offers prompt contract', () => {
       '`participantRoster.participantCount`, which is the real chat participant count',
     )
     expect(directSection).toContain(
+      'select only entries with `availability.status="available"`',
+    )
+    expect(directSection).toContain(
+      'an omitted field is a legacy inventory entry and remains selectable',
+    )
+    expect(directSection).toContain(
       'Never use `memberCount` for this clarification',
     )
     expect(directSection).toContain(
-      'Never treat `truncated` or one entry\'s unavailable participant roster as global unavailability',
+      'Never treat `truncated`, one unavailable entry, or one entry\'s unavailable participant roster as global unavailability',
     )
     expect(directSection).toContain(
-      'every inventory entry containing that safe label remains a candidate',
+      'every available inventory entry containing that safe label remains a candidate',
     )
     expect(directSection).toContain(
       'Do not treat people the member omitted as exclusions unless they explicitly say only',

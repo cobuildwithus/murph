@@ -1,8 +1,12 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import type {
+  HostedExecutionExternalThreadRouteAuthority,
+} from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  type HostedRuntimeGroupMembershipAvailability,
   type HostedRuntimeGroupParticipantLabel,
   type HostedRuntimeGroupParticipantRoster,
 } from "@murphai/hosted-execution/runtime-control";
@@ -43,13 +47,36 @@ interface HostedGroupMembershipParticipantContacts {
   membershipId: string;
 }
 
-export async function readHostedGroupMembershipParticipantRosters(input: {
+export interface HostedGroupMembershipInventory {
+  availabilityByMembershipId: ReadonlyMap<
+    string,
+    HostedRuntimeGroupMembershipAvailability
+  >;
+  participantRosterByMembershipId: ReadonlyMap<
+    string,
+    HostedRuntimeGroupParticipantRoster
+  >;
+}
+
+export async function readHostedGroupMembershipInventory(input: {
   memberId: string;
   memberships: readonly HostedGroupMembershipParticipantSource[];
   now: Date;
   prisma: PrismaClient;
-}): Promise<ReadonlyMap<string, HostedRuntimeGroupParticipantRoster>> {
-  const rosters = new Map<string, HostedRuntimeGroupParticipantRoster>(
+}): Promise<HostedGroupMembershipInventory> {
+  const availabilityByMembershipId = new Map<
+    string,
+    HostedRuntimeGroupMembershipAvailability
+  >(
+    input.memberships.map(({ membershipId }) => [
+      membershipId,
+      unavailableAvailability("membership_unavailable"),
+    ]),
+  );
+  const participantRosterByMembershipId = new Map<
+    string,
+    HostedRuntimeGroupParticipantRoster
+  >(
     input.memberships.map(({ membershipId }) => [
       membershipId,
       unavailableRoster("membership_unavailable"),
@@ -59,7 +86,7 @@ export async function readHostedGroupMembershipParticipantRosters(input: {
     runtimeMemberId ? [runtimeMemberId] : []
   );
   if (runtimeMemberIds.length === 0) {
-    return rosters;
+    return { availabilityByMembershipId, participantRosterByMembershipId };
   }
 
   const allowedRuntimeMemberIds = await readHostedRuntimeAiAllowedMemberIds({
@@ -71,7 +98,7 @@ export async function readHostedGroupMembershipParticipantRosters(input: {
     runtimeMemberId !== null && allowedRuntimeMemberIds.has(runtimeMemberId)
   );
   if (activeMemberships.length === 0) {
-    return rosters;
+    return { availabilityByMembershipId, participantRosterByMembershipId };
   }
 
   const providerSignal = AbortSignal.timeout(
@@ -90,7 +117,11 @@ export async function readHostedGroupMembershipParticipantRosters(input: {
       return false;
     }
     if (routes.nonLinqContainerMemberIds.has(runtimeMemberId)) {
-      rosters.set(
+      availabilityByMembershipId.set(
+        membership.membershipId,
+        availableAvailability(),
+      );
+      participantRosterByMembershipId.set(
         membership.membershipId,
         unavailableRoster("participant_roster_not_supported"),
       );
@@ -100,26 +131,39 @@ export async function readHostedGroupMembershipParticipantRosters(input: {
       routes.unavailableContainerMemberIds.has(runtimeMemberId)
       || !routes.authorities.has(runtimeMemberId)
     ) {
-      rosters.set(
+      availabilityByMembershipId.set(
+        membership.membershipId,
+        unavailableAvailability("group_route_unavailable"),
+      );
+      participantRosterByMembershipId.set(
         membership.membershipId,
         unavailableRoster("group_route_unavailable"),
       );
       return false;
     }
+    // The durable exact route is usable unless a current provider roster
+    // affirmatively shows that its sending account has departed. A transient
+    // roster read must not turn an otherwise authorized group into a false
+    // negative.
+    availabilityByMembershipId.set(
+      membership.membershipId,
+      availableAvailability(),
+    );
     return true;
   });
   if (readableMemberships.length === 0) {
-    return rosters;
+    return { availabilityByMembershipId, participantRosterByMembershipId };
   }
 
   const contactsByMembership = await readParticipantContacts({
+    availabilityByMembershipId,
     memberships: readableMemberships,
-    rosters,
+    participantRosterByMembershipId,
     routes: routes.authorities,
     signal: providerSignal,
   });
   if (contactsByMembership.length === 0) {
-    return rosters;
+    return { availabilityByMembershipId, participantRosterByMembershipId };
   }
 
   let memberIdsByHandle: ReadonlyMap<string, string | null>;
@@ -133,12 +177,12 @@ export async function readHostedGroupMembershipParticipantRosters(input: {
     });
   } catch {
     for (const { membershipId } of contactsByMembership) {
-      rosters.set(
+      participantRosterByMembershipId.set(
         membershipId,
         unavailableRoster("participant_identity_unavailable"),
       );
     }
-    return rosters;
+    return { availabilityByMembershipId, participantRosterByMembershipId };
   }
 
   const participantsByMembership = contactsByMembership.flatMap((entry) => {
@@ -147,7 +191,7 @@ export async function readHostedGroupMembershipParticipantRosters(input: {
         memberIdsByHandle.get(value) === input.memberId
       )
     ) {
-      rosters.set(
+      participantRosterByMembershipId.set(
         entry.membershipId,
         unavailableRoster("requester_not_in_roster"),
       );
@@ -183,7 +227,7 @@ export async function readHostedGroupMembershipParticipantRosters(input: {
   }
 
   for (const entry of participantsByMembership) {
-    rosters.set(entry.membershipId, {
+    participantRosterByMembershipId.set(entry.membershipId, {
       participantCount: entry.contacts.length,
       participantLabels: entry.participants.map((participant) =>
         createParticipantLabel({ advisoryNames, participant })
@@ -191,12 +235,43 @@ export async function readHostedGroupMembershipParticipantRosters(input: {
       status: "available",
     });
   }
-  return rosters;
+  return { availabilityByMembershipId, participantRosterByMembershipId };
+}
+
+export async function isHostedGroupConsultRouteAvailable(input: {
+  routeAuthority: HostedExecutionExternalThreadRouteAuthority;
+  signal?: AbortSignal;
+}): Promise<boolean> {
+  if (input.routeAuthority.channel !== "linq") {
+    return true;
+  }
+  try {
+    const summary = await getHostedLinqChatSummary({
+      chatId: input.routeAuthority.threadId,
+      signal: input.signal ?? AbortSignal.timeout(
+        HOSTED_GROUP_PARTICIPANT_PROVIDER_DEADLINE_MS,
+      ),
+    });
+    const inventory = readCompleteParticipantContacts({
+      ...summary,
+      accountLookupKey: input.routeAuthority.accountLookupKey,
+    });
+    return inventory?.availability.status !== "unavailable";
+  } catch {
+    return true;
+  }
 }
 
 async function readParticipantContacts(input: {
+  availabilityByMembershipId: Map<
+    string,
+    HostedRuntimeGroupMembershipAvailability
+  >;
   memberships: readonly HostedGroupMembershipParticipantSource[];
-  rosters: Map<string, HostedRuntimeGroupParticipantRoster>;
+  participantRosterByMembershipId: Map<
+    string,
+    HostedRuntimeGroupParticipantRoster
+  >;
   routes: ReadonlyMap<string, {
     accountLookupKey?: string | null;
     threadId: string;
@@ -220,13 +295,24 @@ async function readParticipantContacts(input: {
         const membership = input.memberships[nextIndex++];
         const runtimeMemberId = membership?.runtimeMemberId;
         const route = runtimeMemberId ? input.routes.get(runtimeMemberId) : null;
-        if (!membership || !runtimeMemberId || !route || input.signal.aborted) {
+        if (!membership || !runtimeMemberId || !route) {
           if (membership) {
-            input.rosters.set(
+            input.availabilityByMembershipId.set(
+              membership.membershipId,
+              unavailableAvailability("group_route_unavailable"),
+            );
+            input.participantRosterByMembershipId.set(
               membership.membershipId,
               unavailableRoster("participant_roster_unavailable"),
             );
           }
+          continue;
+        }
+        if (input.signal.aborted) {
+          input.participantRosterByMembershipId.set(
+            membership.membershipId,
+            unavailableRoster("participant_roster_unavailable"),
+          );
           continue;
         }
         try {
@@ -234,23 +320,27 @@ async function readParticipantContacts(input: {
             chatId: route.threadId,
             signal: input.signal,
           });
-          const contacts = readCompleteParticipantContacts({
+          const inventory = readCompleteParticipantContacts({
             ...summary,
             accountLookupKey: route.accountLookupKey,
           });
-          if (!contacts) {
-            input.rosters.set(
+          if (!inventory) {
+            input.participantRosterByMembershipId.set(
               membership.membershipId,
               unavailableRoster("participant_roster_unavailable"),
             );
             continue;
           }
+          input.availabilityByMembershipId.set(
+            membership.membershipId,
+            inventory.availability,
+          );
           contactsByMembership.set(membership.membershipId, {
-            contacts,
+            contacts: inventory.contacts,
             membershipId: membership.membershipId,
           });
         } catch {
-          input.rosters.set(
+          input.participantRosterByMembershipId.set(
             membership.membershipId,
             unavailableRoster("participant_roster_unavailable"),
           );
@@ -271,7 +361,10 @@ function readCompleteParticipantContacts(input: {
   handles: readonly HostedLinqChatHandleSummary[];
   handlesComplete?: boolean;
   isGroup: boolean | null;
-}): HostedLinqParticipantContact[] | null {
+}): {
+  availability: HostedRuntimeGroupMembershipAvailability;
+  contacts: HostedLinqParticipantContact[];
+} | null {
   if (
     input.isGroup !== true
     || input.handlesComplete !== true
@@ -279,20 +372,26 @@ function readCompleteParticipantContacts(input: {
   ) {
     return null;
   }
+  let routeAccountObserved = false;
+  let routeAccountIsActive = false;
   const contacts = input.handles.flatMap((handle) => {
-    if (!isActiveHandle(handle) || handle.isMe) {
-      return [];
-    }
     const contact = createHostedLinqParticipantContact({
       kind: handle.handle.includes("@") ? "email" : "phone",
       value: handle.handle,
     });
-    if (
-      contact
-      && input.accountLookupKey
-      && createHostedLinqParticipantContactLookupKeyReadCandidates(contact)
+    const matchesRouteAccount = contact !== null && input.accountLookupKey
+      ? createHostedLinqParticipantContactLookupKeyReadCandidates(contact)
         .includes(input.accountLookupKey)
-    ) {
+      : false;
+    if (matchesRouteAccount || (!input.accountLookupKey && handle.isMe)) {
+      routeAccountObserved = true;
+      routeAccountIsActive ||= isActiveHandle(handle);
+    }
+    const isSender = matchesRouteAccount || handle.isMe;
+    if (isSender) {
+      return [];
+    }
+    if (!isActiveHandle(handle)) {
       return [];
     }
     return [contact];
@@ -304,9 +403,14 @@ function readCompleteParticipantContacts(input: {
   ) {
     return null;
   }
-  return contacts.filter(
-    (contact): contact is HostedLinqParticipantContact => contact !== null,
-  );
+  return {
+    availability: routeAccountObserved && !routeAccountIsActive
+      ? unavailableAvailability("group_route_unavailable")
+      : availableAvailability(),
+    contacts: contacts.filter(
+      (contact): contact is HostedLinqParticipantContact => contact !== null,
+    ),
+  };
 }
 
 function isActiveHandle(handle: HostedLinqChatHandleSummary): boolean {
@@ -339,5 +443,15 @@ function createParticipantLabel(input: {
 function unavailableRoster(
   unavailableReason: string,
 ): HostedRuntimeGroupParticipantRoster {
+  return { status: "unavailable", unavailableReason };
+}
+
+function availableAvailability(): HostedRuntimeGroupMembershipAvailability {
+  return { status: "available" };
+}
+
+function unavailableAvailability(
+  unavailableReason: string,
+): HostedRuntimeGroupMembershipAvailability {
   return { status: "unavailable", unavailableReason };
 }

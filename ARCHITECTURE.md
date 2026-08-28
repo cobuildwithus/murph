@@ -383,18 +383,28 @@ a joined group Murph. `apps/web` derives the exact group runtime, membership
 generation, origin, expiry, and private return route from the signed caller and
 web-owned rows. Before an Ask or handoff, the private runtime lists the caller's
 current membership page. Each entry carries its opaque membership generation,
-existing title, Murph member count, and a separately available live chat roster
-summary: real human participant count plus requester-authorized Contacts names,
-masked phone hints, or a generic email marker. Provider handles remain transient.
-A missing route, unsupported provider, incomplete roster, provider failure, or
-optional Contacts failure is scoped to that entry; it does not hide otherwise
-usable memberships. The model reasons over those safe summaries, asks a natural
+existing title, Murph member count, per-group action availability, and an
+independently available live chat roster summary: real human participant count
+plus requester-authorized Contacts names, masked phone hints, or a generic
+email marker. Provider handles remain transient. For Linq groups, the durable
+exact route remains available unless a complete current provider roster
+affirmatively shows that the route's sending account has departed; transient
+roster reads, roster identity, and optional Contacts failures do not turn it
+into a false negative. A missing route, unsupported roster, incomplete roster,
+provider failure, or optional Contacts failure is scoped to
+that entry; it does not hide otherwise usable memberships. The model reasons
+only over available destinations and their safe summaries, asks a natural
 clarification when several entries fit, and passes only the exact returned
 `membershipId` with the bounded question or handoff context. It never exposes,
-invents, edits, or derives the identifier. Web locks and revalidates that exact
-membership belongs to the requester, is still active, points to the expected
-group runtime, and retains route authority before queueing. Leaving and rejoining
-creates a new membership id, so an older clarification is a stale generation.
+invents, edits, or derives the identifier. Before a new Ask or handoff is
+queued, Web repeats the same bounded live provider check outside the database
+transaction, then locks and revalidates that the exact membership belongs to
+the requester, is still active, points to the expected group runtime, and
+retains route authority. A confirmed sending-account removal deletes only the
+matching route whose last update does not postdate the provider event; this
+keeps delayed removal events from retiring a later rejoin. Leaving and
+rejoining creates a new membership id, so an older clarification is a stale
+generation.
 Ask and handoff replay remain pinned to the stored membership id; no title or
 participant matcher, target digest, directory, or selector state exists.
 After Temporal accepts each pointer-only mailbox signal, Web starts the

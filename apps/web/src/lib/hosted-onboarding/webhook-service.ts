@@ -157,6 +157,7 @@ import {
   assertHostedThreadRouteEgressAuthority,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
+  retireHostedLinqThreadRouteForRemovedAccountTx,
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 import {
@@ -174,6 +175,10 @@ import {
 import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
+import {
+  createHostedLinqParticipantContact,
+  createHostedLinqParticipantContactLookupKeyReadCandidates,
+} from "./linq-participant-contact";
 import {
   projectHostedMemberRoutingState,
   readHostedMemberRoutingRecord,
@@ -1981,6 +1986,32 @@ export async function applyHostedLinqParticipantChangeToRouteTx(input: {
     return;
   }
   await lockHostedMemberRow(input.prisma, input.route.owner.id);
+  if (input.event.event_type === "participant.removed") {
+    const participant = createHostedLinqParticipantContact({
+      kind: input.event.data.participant.handle.includes("@")
+        ? "email"
+        : "phone",
+      value: input.event.data.participant.handle,
+    });
+    const accountLookupKeys = participant
+      ? createHostedLinqParticipantContactLookupKeyReadCandidates(participant)
+      : [];
+    if (
+      input.route.accountLookupKey
+      && accountLookupKeys.includes(input.route.accountLookupKey)
+      && await retireHostedLinqThreadRouteForRemovedAccountTx({
+        accountLookupKeys,
+        containerMemberId: input.route.containerMemberId,
+        prisma: input.prisma,
+        removedAt: new Date(
+          input.event.data.removed_at ?? input.event.created_at,
+        ),
+        threadId: chatId,
+      })
+    ) {
+      return;
+    }
+  }
   if (input.event.event_type === "participant.added") {
     await markHostedLinqThreadRouteParticipantAdditionPendingTx({
       containerMemberId: input.route.containerMemberId,

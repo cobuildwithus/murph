@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
   assertHostedThreadRouteEgressAuthority: vi.fn(),
   bindHostedAssistantNotificationDestination: vi.fn(),
+  isHostedGroupConsultRouteAvailable: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
@@ -52,6 +53,11 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   assertHostedThreadRouteEgressAuthority:
     mocks.assertHostedThreadRouteEgressAuthority,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-membership-participants", () => ({
+  isHostedGroupConsultRouteAvailable:
+    mocks.isHostedGroupConsultRouteAvailable,
 }));
 
 import {
@@ -333,6 +339,7 @@ describe("Hosted group Assistant Ask admission", () => {
       destination.bound,
     );
     mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue({});
+    mocks.isHostedGroupConsultRouteAvailable.mockResolvedValue(true);
     mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementation(
       async (input: {
         append: (prepared: object) => Promise<unknown>;
@@ -698,6 +705,7 @@ describe("Hosted private-to-group context handoff admission", () => {
       destination.bound,
     );
     mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue({});
+    mocks.isHostedGroupConsultRouteAvailable.mockResolvedValue(true);
     mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementation(
       async (input: {
         append: (prepared: object) => Promise<unknown>;
@@ -911,6 +919,34 @@ describe("Hosted private-to-group context handoff admission", () => {
         status: "unavailable",
         unavailableReason: "group_route_unavailable",
       },
+    });
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto)
+      .not.toHaveBeenCalled();
+  });
+
+  it("fails before mailbox crypto when Murph is no longer active in the provider chat", async () => {
+    mocks.isHostedGroupConsultRouteAvailable.mockResolvedValue(false);
+    const { prisma } = createPrisma();
+
+    await expect(requestHostedGroupContextHandoff({
+      context: "A bounded fact.",
+      memberId: ORIGIN_MEMBER_ID,
+      membershipId: "membership-one",
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      },
+    });
+    expect(mocks.isHostedGroupConsultRouteAvailable).toHaveBeenCalledWith({
+      routeAuthority: expect.objectContaining({
+        containerMemberId: TARGET_RUNTIME_MEMBER_ID,
+        threadId: "linq-group-chat",
+      }),
     });
     expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto)
       .not.toHaveBeenCalled();

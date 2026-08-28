@@ -7343,7 +7343,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'keeps an exact private-to-group handoff identity-neutral without listing memberships',
+    'skips an unavailable joined group and keeps the handoff identity-neutral',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -7400,25 +7400,48 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                     action: 'list_memberships',
                     result: {
                       disclosureGrants: [],
-                      memberships: [{
-                        displayName: 'Trail Crew',
-                        grantedVaultShareProjectionScopes: [],
-                        kind: 'friends',
-                        memberCount: 8,
-                        membershipId: 'membership_trail_crew',
-                        participantRoster: {
-                          participantCount: 9,
-                          participantLabels: [
-                            { displayName: 'Taylor' },
-                            { phoneHint: { areaCode: '415', lastFour: '9876' } },
-                          ],
-                          status: 'available',
+                      memberships: [
+                        {
+                          availability: {
+                            status: 'unavailable',
+                            unavailableReason: 'group_route_unavailable',
+                          },
+                          displayName: 'Former Trail Crew',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 4,
+                          membershipId: 'membership_former_trail_crew',
+                          participantRoster: {
+                            participantCount: 5,
+                            participantLabels: [{ displayName: 'Taylor' }],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
                         },
-                        permissionsUrl: null,
-                        requestedVaultShareProjectionScopes: [],
-                        role: 'member',
-                        sponsorshipUrl: null,
-                      }],
+                        {
+                          availability: { status: 'available' },
+                          displayName: 'Trail Crew',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 8,
+                          membershipId: 'membership_trail_crew',
+                          participantRoster: {
+                            participantCount: 9,
+                            participantLabels: [
+                              { displayName: 'Taylor' },
+                              { phoneHint: { areaCode: '415', lastFour: '9876' } },
+                            ],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
+                        },
+                      ],
                       status: 'ok',
                       truncated: false,
                     },
@@ -7441,7 +7464,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt:
-            'Tell Trail Crew that I completed the synthetic mobility session as planned.',
+            'Tell my group with Taylor that I completed the synthetic mobility session as planned.',
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           vaultRoot: workingDirectory,

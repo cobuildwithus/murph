@@ -249,6 +249,41 @@ export async function markHostedLinqThreadRouteParticipantAdditionPendingTx(inpu
   });
 }
 
+export async function retireHostedLinqThreadRouteForRemovedAccountTx(input: {
+  accountLookupKeys: readonly string[];
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  removedAt: Date;
+  threadId: string;
+}): Promise<boolean> {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.threadId,
+    });
+  const accountLookupKeys = [...new Set(input.accountLookupKeys)];
+  if (
+    accountLookupKeys.length === 0
+    || threadIdentityLookupKeys.length === 0
+    || !Number.isFinite(input.removedAt.getTime())
+  ) {
+    return false;
+  }
+
+  const retired = await input.prisma.hostedThreadRoute.deleteMany({
+    where: {
+      accountLookupKey: { in: accountLookupKeys },
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadIdentityLookupKey: { in: threadIdentityLookupKeys },
+      // A delayed removal must not retire a route refreshed by a later add or
+      // inbound event for the same provider chat.
+      updatedAt: { lte: input.removedAt },
+    },
+  });
+  return retired.count > 0;
+}
+
 export async function consumeHostedLinqThreadRouteParticipantAdditionPendingTx(input: {
   containerMemberId: string;
   prisma: Prisma.TransactionClient;

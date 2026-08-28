@@ -3,6 +3,7 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
@@ -102,6 +103,7 @@ describe("hosted group tool route", () => {
       maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
     });
     expect(mocks.handleTool).toHaveBeenCalledWith({
+      includeMembershipAvailability: false,
       includeParticipantRosters: false,
       memberId: "member_group_runtime",
       request: body,
@@ -140,6 +142,37 @@ describe("hosted group tool route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
+      includeMembershipAvailability: true,
+      includeParticipantRosters: true,
+      request: body,
+    }));
+  });
+
+  it("keeps roster-only inventory v2 compatible during rollout", async () => {
+    const body = { action: "list_memberships" };
+    mocks.handleTool.mockResolvedValueOnce({
+      action: "list_memberships",
+      result: {
+        disclosureGrants: [],
+        memberships: [],
+        status: "ok",
+        truncated: false,
+      },
+    });
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?${HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM}=${HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE}`,
+      {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
+      includeMembershipAvailability: false,
       includeParticipantRosters: true,
       request: body,
     }));
@@ -182,6 +215,7 @@ describe("hosted group tool route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.handleTool).toHaveBeenCalledWith({
+      includeMembershipAvailability: false,
       includeParticipantRosters: false,
       memberId: "member_group_runtime",
       request: body,
@@ -400,6 +434,7 @@ describe("hosted group tool route", () => {
 
       expect(response.status).toBe(200);
       expect(mocks.handleTool).toHaveBeenCalledWith({
+        includeMembershipAvailability: false,
         includeParticipantRosters: false,
         memberId: "member_group_runtime",
         request: expectedRequest,
