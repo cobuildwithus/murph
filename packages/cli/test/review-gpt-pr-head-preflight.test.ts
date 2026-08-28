@@ -27,27 +27,11 @@ function createHarness() {
   const binDir = path.join(harnessRoot, 'bin')
   const capturePath = path.join(harnessRoot, 'review-gpt-invocation.txt')
   harnessRoots.push(harnessRoot)
-  mkdirSync(path.join(harnessRoot, 'scripts', 'chatgpt-review-presets'), {
-    recursive: true,
-  })
+  mkdirSync(path.join(harnessRoot, 'scripts'), { recursive: true })
   mkdirSync(binDir, { recursive: true })
   cpSync(
     path.join(repoRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'),
     path.join(harnessRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'),
-  )
-  cpSync(
-    path.join(
-      repoRoot,
-      'scripts',
-      'chatgpt-review-presets',
-      'completion-specialists.md',
-    ),
-    path.join(
-      harnessRoot,
-      'scripts',
-      'chatgpt-review-presets',
-      'completion-specialists.md',
-    ),
   )
   writeFileSync(path.join(harnessRoot, 'tracked.txt'), 'tracked\n', 'utf8')
   writeExecutable(
@@ -120,22 +104,21 @@ afterEach(() => {
 })
 
 describe('ReviewGPT PR context guard', () => {
-  it.each([
-    ['completion-specialists', 'preliminary'],
-    ['pr-review', 'final'],
-    ['--preset=specialist-review', 'preliminary'],
-  ])('derives exact PR context for %s', (preset, expectedPhase) => {
-    const harness = createHarness()
-    const result = runHarness(harness, [preset, '--dry-run'])
+  it.each(['pr-review', '--preset=pr-deep-review'])(
+    'derives exact PR context for %s',
+    (preset) => {
+      const harness = createHarness()
+      const result = runHarness(harness, [preset, '--dry-run'])
 
-    expect(result.status, result.stderr).toBe(0)
-    expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      `pr=42\nphase=${expectedPhase}\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m ${preset} --dry-run\n`,
-    )
-    expect(result.stdout).toContain(
-      `ReviewGPT PR attachment preflight passed for 42 at ${harness.head}.`,
-    )
-  })
+      expect(result.status, result.stderr).toBe(0)
+      expect(readFileSync(harness.capturePath, 'utf8')).toBe(
+        `pr=42\nphase=final\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m ${preset} --dry-run\n`,
+      )
+      expect(result.stdout).toContain(
+        `ReviewGPT PR attachment preflight passed for 42 at ${harness.head}.`,
+      )
+    },
+  )
 
   it('leaves generic presets outside the PR workflow', () => {
     const harness = createHarness()
@@ -147,61 +130,6 @@ describe('ReviewGPT PR context guard', () => {
     )
   })
 
-  it('rejects an explicit phase that conflicts with the selected preset', () => {
-    const harness = createHarness()
-    const result = runHarness(harness, ['completion-specialists'], {
-      REVIEW_GPT_REVIEW_PHASE: 'final',
-    })
-
-    expect(result.status).toBe(64)
-    expect(result.stderr).toContain(
-      'REVIEW_GPT_REVIEW_PHASE=final conflicts with the selected preliminary PR review preset',
-    )
-    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
-  })
-
-  it('rejects mixed preliminary and final presets before invoking ReviewGPT', () => {
-    const harness = createHarness()
-    const result = runHarness(harness, ['completion-specialists,pr-review'])
-
-    expect(result.status).toBe(64)
-    expect(result.stderr).toContain(
-      'preliminary and final PR ReviewGPT presets cannot run together',
-    )
-    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
-  })
-
-  it('enforces the specialist prompt budget when options precede the positional preset', () => {
-    const harness = createHarness()
-    const result = runHarness(harness, [
-      '--prompt',
-      'x'.repeat(1_000),
-      'completion-specialists',
-    ])
-
-    expect(result.status).toBe(1)
-    expect(result.stderr).toContain('assembled completion-specialists prompt is')
-    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
-  })
-
-  it.each([
-    ['--idle-draft-timeout', '30m'],
-    ['--idleDraftTimeout', '30m'],
-  ])('keeps PR context guarded when %s precedes the preset', (option, value) => {
-    const harness = createHarness()
-    const result = runHarness(harness, [
-      option,
-      value,
-      'completion-specialists',
-      '--dry-run',
-    ])
-
-    expect(result.status).toBe(0)
-    expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m ${option} ${value} completion-specialists --dry-run\n`,
-    )
-  })
-
   it.each([
     ['--minimum-marked-response-time', '5m'],
     ['--minimumMarkedResponseTime', '5m'],
@@ -210,7 +138,7 @@ describe('ReviewGPT PR context guard', () => {
     const result = runHarness(harness, [
       option,
       value,
-      'completion-specialists',
+      'pr-review',
       '--dry-run',
     ])
 
@@ -221,25 +149,10 @@ describe('ReviewGPT PR context guard', () => {
     expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
   })
 
-  it('counts the accepted camelCase promptFile spelling in the specialist budget', () => {
-    const harness = createHarness()
-    const promptPath = path.join(harness.harnessRoot, 'oversized-prompt.md')
-    writeFileSync(promptPath, 'x'.repeat(1_000), 'utf8')
-    const result = runHarness(harness, [
-      'completion-specialists',
-      '--promptFile',
-      promptPath,
-    ])
-
-    expect(result.status).toBe(1)
-    expect(result.stderr).toContain('assembled completion-specialists prompt is')
-    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
-  })
-
   it('rejects dirty or stale PR heads before invoking ReviewGPT', () => {
     const dirtyHarness = createHarness()
     writeFileSync(path.join(dirtyHarness.harnessRoot, 'untracked.txt'), 'dirty\n', 'utf8')
-    const dirtyResult = runHarness(dirtyHarness, ['completion-specialists'])
+    const dirtyResult = runHarness(dirtyHarness, ['pr-review'])
     expect(dirtyResult.status).toBe(1)
     expect(dirtyResult.stderr).toContain('requires a clean worktree')
     expect(() => readFileSync(dirtyHarness.capturePath, 'utf8')).toThrow()
