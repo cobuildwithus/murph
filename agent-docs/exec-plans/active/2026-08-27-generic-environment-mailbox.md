@@ -189,6 +189,23 @@ Updated: 2026-08-28
     that owner handoff. It adds no state owner or scheduler.
   - Current focused proof passes: 54 assistant-phase scheduling tests, the
     assistant-runtime package typecheck, and `git diff --check`.
+  - The exact paired Linux run on public head `273acac3ce` and private head
+    `a0e12977cd` then proved that the owner wake itself was correct but its
+    checkpoint sequencing was not. A progressed default-owned predecessor
+    selected the due mailbox owner, then a duplicate idle-timer reset moved
+    that checkpoint back to the ordinary coalescing deadline. Separately,
+    post-checkpoint wake handling admitted generic system work before an
+    already-due committed assistant turn, so the foreground reply remained
+    pending without a provider request.
+  - The correction stays inside the existing checkpoint owner: a progressed
+    due mailbox handoff retains its immediate checkpoint deadline, while
+    no-progress and budget-exhausted mailbox work keep the normal idle window;
+    post-checkpoint mailbox inspection is limited to the existing causal-safe
+    subset while a committed assistant wake is due. No new scheduler, state,
+    mode, or rollout requirement is introduced.
+  - Current local proof passes: the 20 collapse invariants and 54 assistant
+    scheduling tests (74 total), the assistant-runtime package typecheck, and
+    `git diff --check`.
   - The private Temporal proof passes: 181 workflow-machine tests, the replay
     suite across all recorded histories with the exact pre-patch mailbox fact,
     and the private package typecheck. The existing operator migration signal

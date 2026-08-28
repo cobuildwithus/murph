@@ -4909,7 +4909,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         });
         pendingWake = wakeResolution.pendingWake;
         if (
-          pendingWake.nextWakeReason === "mailbox"
+          passResult.assistantPhaseResult?.progressed === true
+          && pendingWake.nextWakeReason === "mailbox"
           && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt, nowMs)
         ) {
           setIdleCheckpointStartBy(nowMs);
@@ -5535,6 +5536,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         shouldContinue: () => boolean;
         signal: AbortSignal;
       }): Promise<boolean> => {
+        const committedAssistantWakeIsDue =
+          hostedRuntimeWakeReasonIsAssistant(
+            committedWorkspace?.nextWakeReason ?? null,
+          )
+          && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null);
         return await runForegroundMailboxWakeIfWork({
           latencySeed: input.latencySeed,
           rearmIdleCheckpointAfterEmptyProbe: false,
@@ -5542,7 +5548,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           initialMailboxPrefetch: input.initialMailboxPrefetch ?? null,
           shouldContinue: input.shouldContinue,
           signal: input.signal,
-          systemMailboxAdmission: "all",
+          systemMailboxAdmission: committedAssistantWakeIsDue
+            ? "pre_checkpoint_safe"
+            : "all",
         });
       };
       const resolveHotProjectedAssistantWake = (): {
@@ -5612,7 +5620,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         || hostedVaultStartupPreparation.mutated;
       runtimeStateDirty ||= runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
       if (runtimeDirtyAfterForeground) {
-        markIdleCheckpointTimerAfterDirtyWork();
+        ensureIdleCheckpointStartBy(
+          Date.now() + (assistantProviderHandoffRequested ? 0 : idleCheckpointDelayMs),
+        );
       } else if (committedInboxMediaRetentionWakeDue) {
         setIdleCheckpointStartBy(Date.now());
       }
