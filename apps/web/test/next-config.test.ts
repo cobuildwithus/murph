@@ -497,6 +497,16 @@ test("next.config traces bundled image assets for the iMessage nutrition route",
   );
 });
 
+test("next.config traces every selectable contact-card avatar into its route", () => {
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/api/murph-contact-card"],
+    [
+      "public/brand-logos/murph-logo-avatar-*.png",
+      "public/murph-headshots/*.png",
+    ],
+  );
+});
+
 test("next.config disables the Turbopack dev filesystem cache by default and honors explicit opt-in", () => {
   const previousValue = process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
 

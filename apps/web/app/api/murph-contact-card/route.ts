@@ -15,10 +15,8 @@ import {
 } from "@/src/lib/hosted-onboarding/http";
 import {
   buildMurphHostedLinqContactCardVcf,
-  fetchMurphHostedLinqContactCardVcfPhoto,
   MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
   MURPH_CONTACT_CARD_VCF_FILE_NAME,
-  resolveMurphContactCardAssetUrl,
   resolveMurphHostedLinqContactCardBackupPhoneNumber,
 } from "@/src/lib/hosted-onboarding/linq-contact-card";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -34,6 +32,8 @@ import {
   type MurphContactAvatarOption,
 } from "@/src/lib/murph-contact-avatars";
 import { getPrisma } from "@/src/lib/prisma";
+
+import { readMurphContactCardAvatarPhoto } from "./avatar-photo";
 
 const MURPH_CONTACT_CARD_HANDOFF_BODY_LIMIT_BYTES = 512;
 
@@ -107,15 +107,22 @@ export const GET = withJsonError(async (request: Request) => {
 
   const [photo, backupPhoneNumber] = await Promise.all([
     authority.avatar.src
-      ? fetchMurphHostedLinqContactCardVcfPhoto({
-          imageUrl: resolveMurphContactCardAssetUrl(authority.avatar.src),
-        })
+      ? readMurphContactCardAvatarPhoto(authority.avatar.id)
       : Promise.resolve(null),
     resolveMurphHostedLinqContactCardBackupPhoneNumber({
       excludePhoneNumber: phoneNumber,
       prisma,
     }),
   ]);
+
+  if (authority.avatar.src && !photo) {
+    throw hostedOnboardingError({
+      code: "MURPH_CONTACT_CARD_PHOTO_UNAVAILABLE",
+      message: "Murph's contact photo is temporarily unavailable. Try saving the card again.",
+      httpStatus: 503,
+      retryable: true,
+    });
+  }
 
   const vcf = buildMurphHostedLinqContactCardVcf({
     backupPhoneNumber,
