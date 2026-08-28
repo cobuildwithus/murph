@@ -1,6 +1,6 @@
 # Send Vercel usage anomalies through Resend
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-28
 
@@ -173,3 +173,12 @@ Updated: 2026-08-28
 - Final ReviewGPT round 1 at the immutable first-reviewed head: pass with no
   qualifying cross-cutting findings. A substantive round 2 is required for the
   behavior-bearing specialist remediation.
+- Final ReviewGPT round 2 at the corrected head: pass with no qualifying
+  findings. The original same-thread capture became unavailable after its
+  bounded wait and recovery retries, so the same substantive round completed
+  as a fresh full-snapshot audit on a different healthy browser lane without
+  advancing the round counter.
+- Required GitHub checks at the corrected production head: passed.
+- Current-base `git merge-tree --write-tree`: passed without conflicts after a
+  fresh fetch of `origin/main`.
+Completed: 2026-08-28
