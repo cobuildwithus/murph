@@ -61,7 +61,7 @@ describe('Codex thread instructions', () => {
       'one-time codes, CAPTCHA, new consent',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Treat ordinary tool friction as recoverable: inspect state and exhaust the owner's bounded safe recovery",
+      'Recover ordinary tool friction: inspect state and exhaust bounded safe recovery',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain('connected sources')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
@@ -73,7 +73,16 @@ describe('Codex thread instructions', () => {
       'code-mode `ALL_TOOLS`',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'eager absence is not proof',
+      'eager absence or a failed probe is not proof',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'A bare `Can you...?` is capability-only',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Answer from tool descriptions; never call it or invent a demo',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Act only when the request includes the concrete task or content',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Continue from runtime summaries without restarting completed work',
@@ -85,19 +94,16 @@ describe('Codex thread instructions', () => {
       'Use commentary for brief progress',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'An answer, explanation, review, diagnosis, plan—including "build me a plan"—or content request does not authorize implementation or external or saved-state changes',
+      'Answers, explanations, reviews, diagnoses, plans, and content do not authorize execution or saved/external changes',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Murph instructions or a selected skill may define a narrow internal canonical write',
+      'Murph instructions/skills may define a narrow canonical write',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'subject to user opt-out or a narrower owner rule',
+      'subject to opt-out and owner rules',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Otherwise mutate state only when explicitly asked',
-    )
-    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Outside the explicit task authority above',
+      'Otherwise mutate only on explicit request',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       'not unrelated mutations',

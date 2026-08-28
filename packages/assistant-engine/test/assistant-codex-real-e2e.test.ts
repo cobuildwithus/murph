@@ -7510,6 +7510,104 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 })
 
+describeRealCodex('real Codex capability questions e2e', () => {
+  it(
+    'answers capability questions without executing the capability',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const probes = [
+        {
+          capability: 'voice memos',
+          expectedTopic: /\b(?:voice|audio|record|say)\b/iu,
+          prompt: 'Can you send me a voice memo?',
+        },
+        {
+          capability: 'music generation',
+          expectedTopic: /\b(?:song|music|lyrics|style|mood)\b/iu,
+          prompt: 'Can you make an original song for me?',
+        },
+        {
+          capability: 'wearable connection',
+          expectedTopic: /\b(?:garmin|wearable|connect|data)\b/iu,
+          prompt: 'Can you connect to my Garmin and use the data?',
+        },
+        {
+          capability: 'lab discovery',
+          expectedTopic:
+            /\b(?:lab|test|panel|cholesterol|hormone|nutrient|blood sugar|wellness)\b/iu,
+          prompt: 'Can you help me find lab tests?',
+        },
+      ] as const
+      const dynamicTools = resolveMurphDynamicTools({
+        deviceAvailable: true,
+        labsAvailable: true,
+        voiceMemoGenerationAvailable: true,
+      })
+
+      try {
+        for (const probe of probes) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), 'murph-capability-question-e2e-'),
+          )
+          try {
+            const result = await executeRealCodexAppServerTurn({
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildDirectConversationDeveloperInstructions(false, null, [
+                  { label: 'Garmin', provider: 'garmin' },
+                ]),
+              dynamicTools,
+              env: config.env,
+              excludeResumeTurns: true,
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const actions = readCapabilityRoutingActions(result.jsonEvents)
+            const capabilityCalls = actions.filter((action) =>
+              action.kind === 'dynamic'
+            )
+            const reply = result.finalMessage.trim()
+
+            process.stdout.write(
+              `[capability-question-e2e] ${JSON.stringify({
+                capability: probe.capability,
+                reply,
+                toolCallCount: capabilityCalls.length,
+              })}\n`,
+            )
+            expect(
+              capabilityCalls,
+              `${probe.capability} capability question must not execute a tool`,
+            ).toEqual([])
+            expect(reply, probe.capability).toMatch(/\b(?:yes|sure|can)\b/iu)
+            expect(reply, probe.capability).toMatch(probe.expectedTopic)
+            expect(reply, probe.capability).not.toMatch(
+              /\b(?:cannot|can['’]?t|unable|unavailable)\b/iu,
+            )
+            if (probe.capability === 'wearable connection') {
+              expect(reply).not.toMatch(/\bsettings\b/iu)
+            }
+          } finally {
+            await removeRealCodexTemporaryPaths([workingDirectory])
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    900_000,
+  )
+})
+
 describeRealCodex('real Codex generated-music fallback e2e', () => {
   it(
     'honors an explicit request without turning unrelated context into provider input',
