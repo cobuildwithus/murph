@@ -4003,6 +4003,60 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     )
   })
 
+  it('keeps one resident process while thread-scoped config and working directories change', async () => {
+    const codexHome = await createTempDir('assistant-codex-stable-launch-home-')
+    const ordinaryWorkingDirectory = await createTempDir(
+      'assistant-codex-stable-launch-ordinary-',
+    )
+    const restrictedWorkingDirectory = await createTempDir(
+      'assistant-codex-stable-launch-restricted-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+    const env = {
+      CODEX_HOME: codexHome,
+      PATH: '/usr/bin',
+    }
+
+    await executeCodexAppServerTurn({
+      env,
+      prompt: 'ordinary turn before restricted work',
+      workingDirectory: ordinaryWorkingDirectory,
+    })
+    await executeCodexAppServerTurn({
+      env,
+      prompt: 'restricted background turn',
+      threadConfig: {
+        'features.shell_tool': false,
+        'memories.use_memories': false,
+      },
+      workingDirectory: restrictedWorkingDirectory,
+    })
+    await executeCodexAppServerTurn({
+      env,
+      prompt: 'ordinary turn after restricted work',
+      workingDirectory: ordinaryWorkingDirectory,
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    const threadStarts = child.stdin.writes
+      .flatMap((write) => write.split('\n'))
+      .filter(Boolean)
+      .map((line) => asRecord(JSON.parse(line)))
+      .filter((message) => message.method === 'thread/start')
+    expect(threadStarts).toHaveLength(3)
+    expect(threadStarts.map((message) => asRecord(message.params).cwd)).toEqual([
+      path.resolve(ordinaryWorkingDirectory),
+      path.resolve(restrictedWorkingDirectory),
+      path.resolve(ordinaryWorkingDirectory),
+    ])
+    expect(asRecord(threadStarts[1]?.params).config).toEqual({
+      'features.shell_tool': false,
+      'memories.use_memories': false,
+    })
+  })
+
   it.each([
     {
       name: 'PATH',

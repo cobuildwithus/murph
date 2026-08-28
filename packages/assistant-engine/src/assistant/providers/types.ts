@@ -148,7 +148,6 @@ export interface AssistantProviderTurn {
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
-  codexConfigOverrides?: readonly string[] | null
   codexThreadConfig?: Readonly<Record<string, unknown>> | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null

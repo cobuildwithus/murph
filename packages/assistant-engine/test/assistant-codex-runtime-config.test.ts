@@ -228,6 +228,18 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
+        threadConfig: {
+          'features.shell_tool': false,
+        },
+      }),
+    ).toMatchObject({
+      config: {
+        'features.shell_tool': false,
+      },
+    })
+    expect(
+      buildCodexThreadStartParams({
+        ...baseInput,
       }),
     ).toMatchObject({
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
@@ -282,6 +294,28 @@ describe('assistant codex runtime', () => {
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
       threadId: 'thread-1',
+    })
+    expect(
+      buildCodexThreadResumeParams({
+        input: {
+          ...baseInput,
+          threadConfig: {
+            'features.shell_tool': false,
+          },
+        },
+        codexThreadId: 'thread-restricted-resume',
+      }),
+    ).toEqual({
+      approvalPolicy: 'never',
+      config: {
+        'features.shell_tool': false,
+      },
+      cwd: '/workspace',
+      excludeTurns: true,
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      sandbox: 'workspace-write',
+      threadId: 'thread-restricted-resume',
     })
     expect(
       buildCodexThreadResumeParams({
