@@ -84,7 +84,6 @@ export function readGroupRoomModelDynamicToolRequest(input: {
 }
 
 export async function executeGroupRoomModelDynamicTool(input: {
-  available: boolean
   request: Extract<
     GroupRoomModelDynamicToolRequest,
     { kind: 'group-room-model' }
@@ -100,13 +99,10 @@ export async function executeGroupRoomModelDynamicTool(input: {
   }
 }> {
   if (
-    !input.available ||
+    input.managedMaintenanceAuthorized !== true &&
     (
-      input.managedMaintenanceAuthorized !== true &&
-      (
-        input.userActionScope?.conversationScope !== 'group' ||
-        input.userActionScope.acceptedInputIds.length === 0
-      )
+      input.userActionScope?.conversationScope !== 'group' ||
+      input.userActionScope.acceptedInputIds.length === 0
     )
   ) {
     return groupRoomModelTextResult(

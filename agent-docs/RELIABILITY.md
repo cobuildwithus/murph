@@ -1676,6 +1676,12 @@ Last verified: 2026-08-28
   output-only continuation immediately; they do not wait for the routine idle
   checkpoint or a second wake. The caller Murph may compose from room context,
   but the resulting outbox intent still carries the completion id and expiry.
+  Fresh foreground input may preempt before that intent is queued. Once the
+  exact intent is durable, the short transcript/session finalization ignores a
+  new foreground yield and rechecks only the completion's remaining authority;
+  the ordinary outbox is then the sole retry owner. This prevents a replay from
+  finding an abandoned deduplicated intent and consuming the mailbox item
+  without dispatch.
   Linq and Telegram revalidate the exact completion and disclosure authority
   inside their existing Web-owned messaging-provider-entry checks. If the
   authority expires or changes after queueing, the outbox first persists the
@@ -2250,10 +2256,12 @@ Last verified: 2026-08-28
   admission, provider/Workflow, and result-ingress drain; prefer a compatible
   forward deployment. A runner rollback additionally keeps the callback-capable
   runner until every nonterminal tracked call drains.
-- A legacy joined-group `cannot_answer` queues the fixed
-  unavailable-evidence response exactly. It must not start a private provider
-  continuation that can invent an expiry, provider failure, or execution
-  failure.
+- A legacy joined-group `cannot_answer` queues the fixed, self-contained
+  earlier-question failure response exactly. It must not start a private
+  provider continuation that can invent an expiry, provider failure, or
+  execution failure. That mailbox execution returns its newly created intent
+  id to the existing foreground-causal collector, so the same pass dispatches
+  the completion before newer input can overtake it.
 - The inbound message-content deadline does not cancel accepted work invisibly. Before local content retirement, the pending-input owner writes the existing terminal suppression evidence for any still-nonterminal input; the next successful idle checkpoint carries that exact mailbox item id until Web stamps the row and advances only the contiguous conversation floor. An unimported expired conversation row is terminalized in place by Web as `policy_non_reply.content_expired`, with payload ciphertext cleared in the same retention statement. Content retirement and checkpoint retries are idempotent, future deadlines share the existing `inbox_media_retention` wake, interrupted bounded passes retry, and an exact preselection sweep prevents a restored overdue input from starting a reply.
 - Ordinary hosted inbox video bytes are transient even when accepted work still protects their warm-container paths. Every v2 archive plan excludes video paths derived from validated canonical inbox captures, and invalid capture records fail snapshot construction closed; an explicit canonical event raw reference is the only persistence exception. The idle retention pass gives unprotected video a zero-length window while leaving image and audio windows unchanged, and its existing canonical transaction keeps tombstone append plus unlink atomic. Retention remains nonblocking for foreground replies because archive exclusion independently prevents cleanup failure from republishing the bytes. Deploy the exclusion-capable runner fleet and drain older containers before applying `20260824010000_rearm_hosted_inbox_video_retention`; that migration advances snapshot-bearing workspace CAS versions without changing checkpoint time and reuses the indexed, bounded retention dispatcher. Repeatedly invoke the existing retention cron serially during rollout until the aggregate due count reaches zero rather than waiting only for hourly cadence. The rollout remains incomplete until replacement checkpoints have drained and replaced snapshot objects enter the existing orphan-cleanup lifecycle; do not add another scheduler or persistence owner.
 - Transcript rollout is two-phase because ordinary snapshot cleanup deletes settled accepted-turn journals before content retention runs. Phase one deploys the stamping-capable runner with immediate rollout, proves fleet convergence, and then re-arms every persisted snapshot once. That rearm advances the existing workspace CAS version while leaving checkpoint time unchanged: pre-rearm runtime checkpoints conflict instead of clearing the new wake, and ambiguous runtime recovery accepts progress only when both version and checkpoint time advanced. The existing hourly cron signals five snapshots per successful run, and each restored runtime scrubs every receipt-backed carrier while preserving legacy unstamped transcript entries. Before migration, compare the aggregate persisted-snapshot count and failure allowance with that capacity; if the queue cannot drain safely, stop rather than inventing a second dispatcher during the retention release. Record the convergence instant, and do not declare phase one complete until the due queue reaches zero. Phase two may begin only after 14 complete days and phase-one drain completion: a separate migration re-arms the snapshots again, and the runtime may then retire every remaining unstamped user entry without reconstructing receipt state. Do not collapse the interval, infer a receipt from projection time, or add a second receipt index.

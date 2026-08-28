@@ -1,6 +1,7 @@
 ---
 title: 'Concurrent hosted Web checks race the health-commons generated-directory swap'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2496'
 ---
 
 ## Expected Behavior

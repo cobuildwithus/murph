@@ -2219,10 +2219,7 @@ function readGeneratedImageToolCallId(
 export async function executeMurphDynamicToolRequest(input: {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
-  assistantStyleSettingsAvailable?: boolean | null
-  groupRoomModelAvailable?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
-  memberMemoryAvailable?: boolean | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -2490,7 +2487,6 @@ export async function executeMurphDynamicToolRequest(input: {
     }
     case 'group-room-model':
       return await executeGroupRoomModelDynamicTool({
-        available: input.groupRoomModelAvailable === true,
         managedMaintenanceAuthorized:
           input.groupRoomModelMaintenanceAuthorized === true,
         request: input.request,
@@ -2500,7 +2496,6 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'member-memory':
       return await executeMemberMemoryDynamicTool({
-        available: input.memberMemoryAvailable === true,
         managedMaintenanceAuthorized:
           input.memberMemoryMaintenanceAuthorized === true,
         request: input.request,
@@ -2556,7 +2551,6 @@ export async function executeMurphDynamicToolRequest(input: {
         authority: resolveHostedAssistantPersonalizationToolAuthority(
           hostedToolContext,
         ),
-        available: input.assistantStyleSettingsAvailable === true,
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
           hostedToolContext?.personalizationTool ?? null,
@@ -4663,14 +4657,14 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
-    response.action === 'handoff'
+    (response.action === 'ask' || response.action === 'handoff')
     && response.result.status === 'accepted'
   ) {
     return {
-      ...response,
+      action: response.action,
       result: {
-        ...response.result,
-        status: 'queued',
+        status: 'queued' as const,
+        targetLabel: response.result.targetLabel,
       },
     }
   }
