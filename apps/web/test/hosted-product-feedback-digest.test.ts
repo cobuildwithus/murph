@@ -63,14 +63,29 @@ describe("hosted product feedback digest", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("sends grouped kind summaries from the prior 6pm boundary", async () => {
-    const readFeedback = vi.fn(async () => createFeedbackDigestBatch({
-      feature_request: [
-        "Wants a weekly training summary email.",
-        "Asked for treadmill workout support.",
-      ],
-      frustration: ["Reminder cadence felt too frequent this week."],
-    }));
+  it("groups private feedback by member and puts groupchat feedback last", async () => {
+    const readFeedback = vi.fn(async () => createFeedbackDigestBatch([
+      {
+        kind: "frustration",
+        memberId: null,
+        summary: "Group message reactions were unreliable.",
+      },
+      {
+        kind: "feature_request",
+        memberId: "member_alpha",
+        summary: "Wants a weekly training summary email.",
+      },
+      {
+        kind: "frustration",
+        memberId: "member_alpha",
+        summary: "Reminder cadence felt too frequent this week.",
+      },
+      {
+        kind: "feature_request",
+        memberId: "member_beta",
+        summary: "Asked for treadmill workout support.",
+      },
+    ]));
     const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
 
     await expect(runHostedProductFeedbackDigest({
@@ -80,7 +95,7 @@ describe("hosted product feedback digest", () => {
       sendEmail,
     })).resolves.toMatchObject({
       dayKey: "2026-07-30",
-      feedbackCount: 3,
+      feedbackCount: 4,
       outcome: "sent",
       windowEndAt: "2026-07-30T22:00:00.000Z",
       windowStartAt: "2026-07-29T22:00:00.000Z",
@@ -99,12 +114,23 @@ describe("hosted product feedback digest", () => {
       idempotencyKey: "hosted-product-feedback-digest/2026-07-30",
       subject: "Murph feedback — 2026-07-30",
       text: [
-        "Feature requests (2)",
+        "Member ID: member_alpha",
+        "",
+        "Feature requests (1)",
         "- Wants a weekly training summary email.",
-        "- Asked for treadmill workout support.",
         "",
         "Product frustrations (1)",
         "- Reminder cadence felt too frequent this week.",
+        "",
+        "Member ID: member_beta",
+        "",
+        "Feature requests (1)",
+        "- Asked for treadmill workout support.",
+        "",
+        "Groupchat / anonymous feedback",
+        "",
+        "Product frustrations (1)",
+        "- Group message reactions were unreliable.",
       ].join("\n"),
       to: ["product@example.test", "founder@example.test"],
     });
@@ -140,17 +166,25 @@ describe("hosted product feedback digest", () => {
     }));
   });
 
-  it("reads only bounded allowlisted kind and summary columns", async () => {
+  it("reads only bounded allowlisted grouping and summary columns", async () => {
     mocks.groupBy.mockResolvedValue([
       { _count: { _all: 2 }, kind: "feature_request" },
       { _count: { _all: 1 }, kind: "frustration" },
       { _count: { _all: 1 }, kind: "unrelated_kind" },
     ]);
     mocks.findMany.mockResolvedValue([
-      { kind: "feature_request", summary: "Wants a weekly training summary email." },
-      { kind: "frustration", summary: "Reminder cadence felt too frequent this week." },
-      { kind: "feature_request", summary: "" },
-      { kind: "unrelated_kind", summary: "Must never render." },
+      {
+        kind: "feature_request",
+        memberId: "member_alpha",
+        summary: "Wants a weekly training summary email.",
+      },
+      {
+        kind: "frustration",
+        memberId: null,
+        summary: "Reminder cadence felt too frequent this week.",
+      },
+      { kind: "feature_request", memberId: "member_alpha", summary: "" },
+      { kind: "unrelated_kind", memberId: "member_alpha", summary: "Must never render." },
     ]);
 
     const batch = await readHostedProductFeedbackDigestBatch({
@@ -164,11 +198,18 @@ describe("hosted product feedback digest", () => {
         feature_request: 2,
         frustration: 1,
       },
-      summariesByKind: {
-        feature_interest: [],
-        feature_request: ["Wants a weekly training summary email."],
-        frustration: ["Reminder cadence felt too frequent this week."],
-      },
+      rows: [
+        {
+          kind: "feature_request",
+          memberId: "member_alpha",
+          summary: "Wants a weekly training summary email.",
+        },
+        {
+          kind: "frustration",
+          memberId: null,
+          summary: "Reminder cadence felt too frequent this week.",
+        },
+      ],
     });
     const digestRowFilter = {
       createdAt: {
@@ -203,15 +244,15 @@ describe("hosted product feedback digest", () => {
       ],
       select: {
         kind: true,
+        memberId: true,
         summary: true,
       },
       take: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
       where: digestRowFilter,
     });
     const querySelect = mocks.findMany.mock.calls[0]?.[0]?.select;
-    expect(Object.keys(querySelect)).toEqual(["kind", "summary"]);
+    expect(Object.keys(querySelect)).toEqual(["kind", "memberId", "summary"]);
     expect(querySelect).not.toHaveProperty("id");
-    expect(querySelect).not.toHaveProperty("memberId");
     expect(querySelect).not.toHaveProperty("member");
     expect(querySelect).not.toHaveProperty("relatedChangelogItemIdsJson");
 
@@ -225,12 +266,18 @@ describe("hosted product feedback digest", () => {
 
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       text: [
-        "Feature requests (2)",
+        "Member ID: member_alpha",
+        "",
+        "Feature requests (1)",
         "- Wants a weekly training summary email.",
-        "- (1 more not shown past the 200-item email limit)",
+        "",
+        "Groupchat / anonymous feedback",
         "",
         "Product frustrations (1)",
         "- Reminder cadence felt too frequent this week.",
+        "",
+        "Not shown past the 200-item email limit",
+        "- Feature requests: 1",
       ].join("\n"),
     }));
     expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("Must never render");
@@ -258,8 +305,9 @@ describe("hosted product feedback digest", () => {
     mocks.groupBy.mockResolvedValue([
       { _count: { _all: digestRows.length }, kind: "frustration" },
     ]);
-    mocks.findMany.mockResolvedValue(digestRows.map(({ kind, summary }) => ({
+    mocks.findMany.mockResolvedValue(digestRows.map(({ kind, memberId, summary }) => ({
       kind,
+      memberId,
       summary,
     })));
 
@@ -276,9 +324,15 @@ describe("hosted product feedback digest", () => {
     });
 
     expect(batch.counts.frustration).toBe(1);
-    expect(batch.summariesByKind.frustration).toEqual([writtenIssue]);
+    expect(batch.rows).toEqual([{
+      kind: "frustration",
+      memberId: null,
+      summary: writtenIssue,
+    }]);
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       text: [
+        "Groupchat / anonymous feedback",
+        "",
         "Product frustrations (1)",
         `- ${writtenIssue}`,
       ].join("\n"),
@@ -300,6 +354,7 @@ describe("hosted product feedback digest", () => {
     expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({
       select: {
         kind: true,
+        memberId: true,
         summary: true,
       },
       where: expect.objectContaining({
@@ -324,6 +379,7 @@ describe("hosted product feedback digest", () => {
       { length: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS },
       (_, index) => ({
         kind: "feature_request",
+        memberId: "member_alpha",
         summary: `Synthetic bounded product request ${index + 1}.`,
       }),
     ));
@@ -333,11 +389,11 @@ describe("hosted product feedback digest", () => {
       startAt: new Date("2026-07-29T22:00:00.000Z"),
     });
 
-    expect(batch.summariesByKind.feature_request).toHaveLength(
+    expect(batch.rows).toHaveLength(
       HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
     );
 
-    const sendEmail = vi.fn(async (_input: { text: string }) => ({
+    const sendEmail = vi.fn(async () => ({
       providerMessageId: "email_1",
     }));
     await expect(runHostedProductFeedbackDigest({
@@ -350,16 +406,15 @@ describe("hosted product feedback digest", () => {
     });
 
     const sentText = sendEmail.mock.calls[0]?.[0]?.text;
+    expect(sentText).toContain("Member ID: member_alpha");
     expect(sentText).toContain(
-      `Feature requests (${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 2})`,
+      `Feature requests (${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS})`,
     );
     expect(sentText).toContain(
-      `- (2 more not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit)`,
+      `Not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit`,
     );
-    expect(sentText).toContain("Product frustrations (1)");
-    expect(sentText).toContain(
-      `- (1 more not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit)`,
-    );
+    expect(sentText).toContain("- Feature requests: 2");
+    expect(sentText).toContain("- Product frustrations: 1");
   });
 
   it("does not claim omission when every summary is displayed at the cap", async () => {
@@ -367,9 +422,13 @@ describe("hosted product feedback digest", () => {
       { length: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS },
       (_, index) => `Synthetic bounded product request ${index + 1}.`,
     );
-    const batch = createFeedbackDigestBatch({ feature_request: summaries });
+    const batch = createFeedbackDigestBatch(summaries.map((summary) => ({
+      kind: "feature_request",
+      memberId: "member_alpha",
+      summary,
+    })));
 
-    const sendEmail = vi.fn(async (_input: { text: string }) => ({
+    const sendEmail = vi.fn(async () => ({
       providerMessageId: "email_1",
     }));
     await expect(runHostedProductFeedbackDigest({
@@ -385,7 +444,7 @@ describe("hosted product feedback digest", () => {
     expect(sentText).toContain(
       `Feature requests (${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS})`,
     );
-    expect(sentText).not.toContain("more not shown");
+    expect(sentText).not.toContain("Not shown past");
   });
 
   it("retries the production transport with one day key after an ambiguous failure", async () => {
@@ -393,8 +452,16 @@ describe("hosted product feedback digest", () => {
       { _count: { _all: 2 }, kind: "feature_request" },
     ]);
     mocks.findMany.mockResolvedValue([
-      { kind: "feature_request", summary: "Wants a weekly training summary email." },
-      { kind: "feature_request", summary: "Asked for treadmill workout support." },
+      {
+        kind: "feature_request",
+        memberId: "member_alpha",
+        summary: "Wants a weekly training summary email.",
+      },
+      {
+        kind: "feature_request",
+        memberId: "member_alpha",
+        summary: "Asked for treadmill workout support.",
+      },
     ]);
     const capturedRequests: CapturedResendRequest[] = [];
     const deliveredKeys = new Set<string>();
@@ -459,6 +526,8 @@ describe("hosted product feedback digest", () => {
         from: "Murph Alerts <alerts@example.test>",
         subject: "Murph feedback — 2026-07-30",
         text: [
+          "Member ID: member_alpha",
+          "",
           "Feature requests (2)",
           "- Wants a weekly training summary email.",
           "- Asked for treadmill workout support.",
@@ -502,32 +571,30 @@ type CapturedResendRequest = {
 };
 
 function createFeedbackDigestBatch(
-  overrides: Partial<{
-    feature_interest: string[];
-    feature_request: string[];
-    frustration: string[];
-  }> = {},
+  rows: Array<{
+    kind: "feature_interest" | "feature_request" | "frustration";
+    memberId: string | null;
+    summary: string;
+  }> = [],
   countOverrides: Partial<{
     feature_interest: number;
     feature_request: number;
     frustration: number;
   }> = {},
 ) {
-  const summariesByKind = {
-    feature_interest: overrides.feature_interest ?? [],
-    feature_request: overrides.feature_request ?? [],
-    frustration: overrides.frustration ?? [],
-  };
-
   return {
     counts: {
       feature_interest:
-        countOverrides.feature_interest ?? summariesByKind.feature_interest.length,
+        countOverrides.feature_interest
+        ?? rows.filter((row) => row.kind === "feature_interest").length,
       feature_request:
-        countOverrides.feature_request ?? summariesByKind.feature_request.length,
-      frustration: countOverrides.frustration ?? summariesByKind.frustration.length,
+        countOverrides.feature_request
+        ?? rows.filter((row) => row.kind === "feature_request").length,
+      frustration:
+        countOverrides.frustration
+        ?? rows.filter((row) => row.kind === "frustration").length,
     },
-    summariesByKind,
+    rows,
   };
 }
 

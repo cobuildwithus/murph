@@ -23,9 +23,15 @@ const HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV =
   "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS";
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_SUBJECT = "Murph feedback";
 
+type HostedProductFeedbackDigestRow = {
+  kind: HostedProductFeedbackKind;
+  memberId: string | null;
+  summary: string;
+};
+
 export type HostedProductFeedbackDigestBatch = {
   counts: Record<HostedProductFeedbackKind, number>;
-  summariesByKind: Record<HostedProductFeedbackKind, string[]>;
+  rows: HostedProductFeedbackDigestRow[];
 };
 
 export type HostedProductFeedbackDigestOutcome =
@@ -161,13 +167,14 @@ export async function readHostedProductFeedbackDigestBatch(input: {
     ],
     select: {
       kind: true,
+      memberId: true,
       summary: true,
     },
     take: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
     where: digestRowFilter,
   });
   const counts = createEmptyHostedProductFeedbackDigestCounts();
-  const summariesByKind = createEmptyHostedProductFeedbackDigestSummaries();
+  const feedbackRows: HostedProductFeedbackDigestRow[] = [];
 
   for (const groupedCount of groupedCounts) {
     if (isHostedProductFeedbackKind(groupedCount.kind)) {
@@ -180,11 +187,15 @@ export async function readHostedProductFeedbackDigestBatch(input: {
       typeof row.summary === "string" &&
       row.summary.length > 0
     ) {
-      summariesByKind[row.kind].push(row.summary);
+      feedbackRows.push({
+        kind: row.kind,
+        memberId: row.memberId,
+        summary: row.summary,
+      });
     }
   }
 
-  return { counts, summariesByKind };
+  return { counts, rows: feedbackRows };
 }
 
 function formatHostedProductFeedbackDigest(
@@ -195,27 +206,78 @@ function formatHostedProductFeedbackDigest(
     feature_request: "Feature requests",
     frustration: "Product frustrations",
   };
-  const sections = HOSTED_PRODUCT_FEEDBACK_KINDS.flatMap((kind) => {
-    const count = batch.counts[kind];
-    if (count === 0) {
-      return [];
+  const rowsByMemberId = new Map<string, HostedProductFeedbackDigestRow[]>();
+  const anonymousRows: HostedProductFeedbackDigestRow[] = [];
+
+  for (const row of batch.rows) {
+    if (!row.memberId) {
+      anonymousRows.push(row);
+      continue;
     }
-    const summaries = batch.summariesByKind[kind];
-    const omittedCount = count - summaries.length;
-    return [[
-      `${labels[kind]} (${count})`,
-      ...summaries.map((summary) => `- ${summary}`),
-      ...(omittedCount > 0
-        ? [`- (${omittedCount} more not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit)`]
-        : []),
-    ].join("\n")];
+
+    const memberRows = rowsByMemberId.get(row.memberId) ?? [];
+    memberRows.push(row);
+    rowsByMemberId.set(row.memberId, memberRows);
+  }
+
+  const sections = [...rowsByMemberId.entries()].map(([memberId, rows]) =>
+    formatHostedProductFeedbackDigestGroup({
+      heading: `Member ID: ${memberId}`,
+      labels,
+      rows,
+    })
+  );
+
+  if (anonymousRows.length > 0) {
+    sections.push(formatHostedProductFeedbackDigestGroup({
+      heading: "Groupchat / anonymous feedback",
+      labels,
+      rows: anonymousRows,
+    }));
+  }
+
+  const displayedCounts = createEmptyHostedProductFeedbackDigestCounts();
+  for (const row of batch.rows) {
+    displayedCounts[row.kind] += 1;
+  }
+  const omittedLines = HOSTED_PRODUCT_FEEDBACK_KINDS.flatMap((kind) => {
+    const omittedCount = batch.counts[kind] - displayedCounts[kind];
+    return omittedCount > 0
+      ? [`- ${labels[kind]}: ${omittedCount}`]
+      : [];
   });
+  if (omittedLines.length > 0) {
+    sections.push([
+      `Not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit`,
+      ...omittedLines,
+    ].join("\n"));
+  }
 
   if (sections.length === 0) {
     sections.push("- No feedback logged.");
   }
 
   return sections.join("\n\n");
+}
+
+function formatHostedProductFeedbackDigestGroup(input: {
+  heading: string;
+  labels: Record<HostedProductFeedbackKind, string>;
+  rows: readonly HostedProductFeedbackDigestRow[];
+}): string {
+  const kindSections = HOSTED_PRODUCT_FEEDBACK_KINDS.flatMap((kind) => {
+    const summaries = input.rows
+      .filter((row) => row.kind === kind)
+      .map((row) => row.summary);
+    return summaries.length > 0
+      ? [[
+          `${input.labels[kind]} (${summaries.length})`,
+          ...summaries.map((summary) => `- ${summary}`),
+        ].join("\n")]
+      : [];
+  });
+
+  return [input.heading, ...kindSections].join("\n\n");
 }
 
 function countHostedProductFeedbackDigestBatch(
@@ -235,17 +297,6 @@ function createEmptyHostedProductFeedbackDigestCounts(): Record<
     feature_interest: 0,
     feature_request: 0,
     frustration: 0,
-  };
-}
-
-function createEmptyHostedProductFeedbackDigestSummaries(): Record<
-  HostedProductFeedbackKind,
-  string[]
-> {
-  return {
-    feature_interest: [],
-    feature_request: [],
-    frustration: [],
   };
 }
 
