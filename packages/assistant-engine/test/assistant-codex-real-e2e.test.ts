@@ -15310,6 +15310,7 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
     )
     const steerCompleted = createDeferred<void>()
     let steerAcknowledgement: (() => Promise<void>) | null = null
+    let steerStarted = false
 
     try {
       const result = await executeRealCodexAppServerTurn({
@@ -15319,20 +15320,24 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
           ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: [
-          buildDirectConversationDeveloperInstructions(),
-          'When the latest user message explicitly needs no response, call finish_without_reply and emit no text.',
-        ].join('\n\n'),
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: config.env,
         excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
-        onFirstAssistantResponseCompleted: () => {
+        onTraceEvent: ({ rawEvent }) => {
+          if (
+            steerStarted ||
+            readRecord(rawEvent)?.method !== 'item/agentMessage/delta'
+          ) {
+            return
+          }
+          steerStarted = true
           const steer = steerAcknowledgement
           if (!steer) {
             steerCompleted.reject(
-              new Error('Expected a live turn before the first completed answer.'),
+              new Error('Expected a live turn before the first answer delta.'),
             )
             return
           }
@@ -15343,11 +15348,7 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
         },
         onLiveTurn: (turn) => {
           steerAcknowledgement = () => turn.steer({
-            prompt: [
-              'Thanks, that answered it.',
-              'Do not send another message.',
-              'Call finish_without_reply now and emit no text.',
-            ].join(' '),
+            prompt: 'Thanks, that answered it—no need to reply.',
           })
         },
         prompt: [
@@ -15358,6 +15359,11 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
         sandbox: 'read-only',
         workingDirectory,
       })
+      if (!steerStarted) {
+        throw new Error(
+          'Expected the acknowledgement steer to begin before the first answer completed.',
+        )
+      }
       await steerCompleted.promise
 
       const finishAttempts = readDynamicToolAttempts(result.jsonEvents).filter(
