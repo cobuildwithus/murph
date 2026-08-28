@@ -68,8 +68,8 @@ Updated: 2026-08-28
    deterministic coverage.
 2. [completed] Add or run the production-shaped Luna journey and inspect its
    visible reply and tool trace.
-3. [in_progress] Update the existing changelog outcome with this PR provenance.
-4. [pending] Run focused verification, candidate review, and the combined
+3. [completed] Update the existing changelog outcome with this PR provenance.
+4. [in_progress] Run focused verification, candidate review, and the combined
    prompt, Product UX, and coverage specialist pass.
 5. [pending] Require exact-head CI, close the plan, prove mergeability, merge,
    verify deployment, and retire the worktree.
