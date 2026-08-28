@@ -44,6 +44,10 @@ import type {
   HostedWorkspaceRuntimeJobOptions,
   RuntimeWakeSignal,
 } from "../src/hosted-runtime.ts";
+import type {
+  HostedWorkspaceRestorePreparation,
+  HostedWorkspaceRestorePreparationResult,
+} from "../src/hosted-workspace-restore-preparation.ts";
 
 const cleanupPaths: string[] = [];
 
@@ -126,6 +130,7 @@ describe("runHostedWorkspaceInvocation", () => {
     });
     expect(captured?.options.signal).toBe(abortController.signal);
     expect(captured?.options.vaultRoot).toBe(vaultRoot);
+    expect(Object.hasOwn(captured?.options ?? {}, "preparedWorkspaceRestore")).toBe(false);
 
     await expect(captured?.options.importItem(
       createMailboxImportItem(),
@@ -158,6 +163,60 @@ describe("runHostedWorkspaceInvocation", () => {
       snapshotId: "snapshot_invocation",
       userId: job.request.userId,
     }));
+  });
+
+  it("forwards the exact prepared restore handle into the in-process runtime", async () => {
+    const durableRoot = await mkdtemp(path.join(tmpdir(), "hosted-invocation-"));
+    cleanupPaths.push(durableRoot);
+    const vaultRoot = path.join(durableRoot, "durable", "vault");
+    await mkdir(vaultRoot, { recursive: true });
+    const result = {
+      nextWakeAt: null,
+      redactedStatus: null,
+      status: "idle" as const,
+    };
+    const capturedOptions: HostedWorkspaceRuntimeJobOptions[] = [];
+    mocks.runHostedWorkspaceRuntimeJobInProcess.mockImplementation(
+      async (
+        _job: HostedAssistantWorkspaceRuntimeJobInput,
+        options: HostedWorkspaceRuntimeJobOptions,
+      ) => {
+        capturedOptions.push(options);
+        return result;
+      },
+    );
+    const preparedWorkspaceRestore: HostedWorkspaceRestorePreparation = {
+      adoptRuntimeAbortGuard: vi.fn(),
+      phaseLogger: {
+        close: vi.fn(),
+        emit: vi.fn(),
+        failOpenPhases: vi.fn(() => []),
+      },
+      promise: new Promise<HostedWorkspaceRestorePreparationResult>(() => undefined),
+      runtimePhaseStartedAt: "2026-08-27T15:00:00.000Z",
+      vaultRoot,
+    };
+    const job = createWorkspaceJob();
+
+    await expect(runHostedWorkspaceInvocation({
+      job,
+      mailboxPayloadDecoder: createMailboxPayloadDecoder(),
+      platform: createRuntimePlatform(),
+      preparedWorkspaceRestore,
+      readCurrentLease: () => ({
+        attemptId: job.request.attemptId,
+        leaseGeneration: job.request.leaseGeneration,
+        providerEgressToken: job.request.providerEgressToken ?? null,
+        userId: job.request.userId,
+        workspaceVersion: job.request.workspaceVersion,
+      }),
+      runtimeWakeSignal: createTestRuntimeWakeSignal(),
+      snapshotArchiveBuilder: createSnapshotArchiveBuilder(),
+      vaultRoot,
+      waitForBackgroundAssistantWork: async () => undefined,
+    })).resolves.toBe(result);
+
+    expect(capturedOptions[0]?.preparedWorkspaceRestore).toBe(preparedWorkspaceRestore);
   });
 
   it("fails before runtime launch when the current lease reader is missing", async () => {
