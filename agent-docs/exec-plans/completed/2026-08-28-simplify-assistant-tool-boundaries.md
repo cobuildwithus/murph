@@ -1,6 +1,6 @@
 # Simplify assistant tool boundaries
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-28
 
@@ -75,3 +75,4 @@ Updated: 2026-08-28
   truthful reply in the live journey; no unoffered tool execution; unsupported
   approval policy rejected centrally; normalized `never` emitted for start and
   resume; no unresolved accepted review finding.
+Completed: 2026-08-28
