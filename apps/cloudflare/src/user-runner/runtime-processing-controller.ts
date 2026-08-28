@@ -34,6 +34,7 @@ import {
   buildRunnerRecordTimingLogDetails,
   classifyRuntimeStartFailureRetryReason,
   mapRunnerProcessingRetryReason,
+  type RuntimeProcessingRetryAttribution,
   type RuntimeProcessingRetryReason,
   type RuntimeProcessingStartFailureRetryReason,
 } from "./diagnostics.js";
@@ -211,11 +212,12 @@ export class RuntimeProcessingController {
     },
   ) {}
 
-  private createRetryLater(input: {
-    orchestrationAttemptId: string;
-    reason: RuntimeProcessingRetryReason;
-    userId: string;
-  }): HostedRuntimeEnsureProcessingResponse {
+  private createRetryLater(
+    input: RuntimeProcessingRetryAttribution & {
+      orchestrationAttemptId: string;
+      userId: string;
+    },
+  ): HostedRuntimeEnsureProcessingResponse {
     return createRuntimeProcessingRetryLaterResponse({
       ...input,
       analytics: this.input.runtimeRetryAnalytics ?? null,
@@ -433,6 +435,7 @@ export class RuntimeProcessingController {
       return this.createRetryLater({
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: "container_busy",
+        stage: "non_runtime_write_fence",
         userId: input.input.userId,
       });
     }
@@ -500,6 +503,7 @@ export class RuntimeProcessingController {
         return this.createRetryLater({
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "container_busy",
+          stage: "active_runtime_contention",
           userId: input.input.userId,
         });
       }
@@ -591,6 +595,7 @@ export class RuntimeProcessingController {
         return this.createRetryLater({
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "container_busy",
+          stage: "cooperative_handoff_pending",
           userId: input.input.userId,
         });
       }
@@ -792,6 +797,7 @@ export class RuntimeProcessingController {
         response: this.createRetryLater({
           orchestrationAttemptId: input.orchestrationAttemptId,
           reason: "container_busy",
+          stage: "background_preemption_unavailable",
           userId: input.record.userId,
         }),
       };
@@ -814,13 +820,22 @@ export class RuntimeProcessingController {
       ) {
         return { aborted: true };
       }
+      if (abortStatus === "failed") {
+        return {
+          aborted: false,
+          response: this.createRetryLater({
+            orchestrationAttemptId: input.orchestrationAttemptId,
+            reason: "container_rpc_error",
+            userId: input.record.userId,
+          }),
+        };
+      }
       return {
         aborted: false,
         response: this.createRetryLater({
           orchestrationAttemptId: input.orchestrationAttemptId,
-          reason: abortStatus === "failed"
-            ? "container_rpc_error"
-            : "container_busy",
+          reason: "container_busy",
+          stage: "background_preemption_not_accepted",
           userId: input.record.userId,
         }),
       };
@@ -986,6 +1001,7 @@ export class RuntimeProcessingController {
         return this.createRetryLater({
           orchestrationAttemptId: processingInput.orchestrationAttemptId,
           reason: "container_busy",
+          stage: "stopped_container_record_pending",
           userId: processingInput.userId,
         });
       }
