@@ -4,6 +4,10 @@ import type { ResponseCreateParamsNonStreaming } from "openai/resources/response
 import type { HostedLinqFirstContactAdmissionMode } from "./env";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
+  deleteHostedLinqInstantFirstTurnCanaryPreProviderClaimsTx,
+  type HostedLinqInstantFirstTurnCanaryResetStore,
+} from "./linq-delivery-store";
+import {
   createHostedLinqParticipantContactLookupKey,
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   type HostedLinqParticipantContact,
@@ -106,6 +110,39 @@ type HostedLinqFirstContactAdmissionBudgetStore = {
       };
     }): Promise<HostedLinqFirstContactAdmissionDecisionRecord[]>;
   };
+};
+
+type HostedLinqFirstContactAdmissionResetStore =
+  & HostedLinqInstantFirstTurnCanaryResetStore
+  & {
+    $executeRaw(
+      template: TemplateStringsArray,
+      ...values: readonly unknown[]
+    ): Promise<number>;
+    hostedLinqFirstContactAdmissionBudget: {
+      deleteMany(input: {
+        where: {
+          participantContactLookupKey: { in: string[] };
+        };
+      }): Promise<{ count: number }>;
+      findMany(input: {
+        select: { eventId: true };
+        where: {
+          participantContactLookupKey: { in: string[] };
+        };
+      }): Promise<{ eventId: string }[]>;
+    };
+    hostedLinqFirstContactAdmissionDecision: {
+      deleteMany(input: {
+        where: { eventId: { in: string[] } };
+      }): Promise<{ count: number }>;
+    };
+  };
+
+export type HostedLinqFirstContactAdmissionCanaryReset = {
+  admissionBudgetCount: number;
+  admissionDecisionCount: number;
+  deliveryClaimCount: number;
 };
 
 export type HostedLinqFirstContactAdmissionBudgetClaim =
@@ -401,17 +438,10 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     );
   }
 
-  // Per-contact advisory lock serializes concurrent distinct-event claims so
-  // the cap check and insert observe a consistent attempt count. The lock
-  // value is the version-independent `${kind}:${value}` so concurrent claims
-  // contend even across a key-version boundary. Released on transaction
-  // commit. Mirrors acquireHostedLinqRoutingWriteLockTx.
-  await input.tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(
-      hashtext(${"hosted-linq-first-contact-admission-budget"}),
-      hashtext(${`${input.participantContact.kind}:${input.participantContact.value}`})
-    )
-  `;
+  await acquireHostedLinqFirstContactAdmissionBudgetLockTx({
+    participantContact: input.participantContact,
+    tx: input.tx,
+  });
 
   const alreadyCounted = await input.tx.hostedLinqFirstContactAdmissionBudget.findFirst({
     where: {
@@ -464,6 +494,73 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     attemptCount: history.chargeableCount + 1,
     kind: "claimed",
   };
+}
+
+export async function resetHostedLinqFirstContactAdmissionForCanaryTx(input: {
+  participantContact: HostedLinqParticipantContact;
+  tx: HostedLinqFirstContactAdmissionResetStore;
+}): Promise<HostedLinqFirstContactAdmissionCanaryReset> {
+  const lookupKeyCandidates =
+    createHostedLinqParticipantContactLookupKeyReadCandidates({
+      kind: input.participantContact.kind,
+      value: input.participantContact.value,
+    });
+  if (lookupKeyCandidates.length === 0) {
+    throw new TypeError(
+      "Hosted Linq first-contact canary reset requires at least one readable lookup key.",
+    );
+  }
+
+  await acquireHostedLinqFirstContactAdmissionBudgetLockTx({
+    participantContact: input.participantContact,
+    tx: input.tx,
+  });
+
+  const budgetRows = await input.tx.hostedLinqFirstContactAdmissionBudget.findMany({
+    select: { eventId: true },
+    where: {
+      participantContactLookupKey: { in: lookupKeyCandidates },
+    },
+  });
+  const eventIds = [...new Set(budgetRows.map((row) => row.eventId))];
+  const deliveryClaimCount =
+    await deleteHostedLinqInstantFirstTurnCanaryPreProviderClaimsTx({
+      eventIds,
+      prisma: input.tx,
+    });
+  const admissionDecisionCount = eventIds.length === 0
+    ? 0
+    : (await input.tx.hostedLinqFirstContactAdmissionDecision.deleteMany({
+        where: { eventId: { in: eventIds } },
+      })).count;
+  const admissionBudgetCount = (
+    await input.tx.hostedLinqFirstContactAdmissionBudget.deleteMany({
+      where: {
+        participantContactLookupKey: { in: lookupKeyCandidates },
+      },
+    })
+  ).count;
+
+  return {
+    admissionBudgetCount,
+    admissionDecisionCount,
+    deliveryClaimCount,
+  };
+}
+
+async function acquireHostedLinqFirstContactAdmissionBudgetLockTx(input: {
+  participantContact: HostedLinqParticipantContact;
+  tx: Pick<HostedLinqFirstContactAdmissionBudgetStore, "$executeRaw">;
+}): Promise<void> {
+  // The version-independent contact value makes claims and canary resets
+  // contend even while contact-privacy keys rotate. PostgreSQL releases the
+  // lock with the surrounding transaction.
+  await input.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext(${"hosted-linq-first-contact-admission-budget"}),
+      hashtext(${`${input.participantContact.kind}:${input.participantContact.value}`})
+    )
+  `;
 }
 
 // The budget rows carry the contact key and the decision rows carry the

@@ -43,6 +43,7 @@ import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
 } from "./http";
+import { hostedOnboardingError } from "./errors";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
@@ -55,6 +56,183 @@ export const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
   "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
 export const HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE =
   "instant_first_turn_v1";
+
+type HostedLinqInstantFirstTurnCanaryResetRow = {
+  acceptedAt: Date | null;
+  deliveredAt: Date | null;
+  failedAt: Date | null;
+  id: string;
+  lastProviderEventId: string | null;
+  lastReceiptAt: Date | null;
+  messageLookupKey: string | null;
+  messages: { id: string }[];
+  payloadCiphertext: string | null;
+  payloadOwnerMemberId: string | null;
+  payloadSchema: string | null;
+  skippedAt: Date | null;
+  sourceRef: string | null;
+  status: string;
+};
+
+export type HostedLinqInstantFirstTurnCanaryResetStore = {
+  hostedLinqDelivery: {
+    deleteMany(input: {
+      where: {
+        acceptedAt: null;
+        deliveredAt: null;
+        failedAt: null;
+        id: string;
+        lastProviderEventId: null;
+        lastReceiptAt: null;
+        messageLookupKey: null;
+        messages: { none: Record<string, never> };
+        payloadCiphertext: null;
+        payloadOwnerMemberId: null;
+        payloadSchema: null;
+        skippedAt: null;
+        sourceRef: string | null;
+        status: "attempted";
+        template: typeof HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE;
+      };
+    }): Promise<{ count: number }>;
+    findMany(input: {
+      select: {
+        acceptedAt: true;
+        deliveredAt: true;
+        failedAt: true;
+        id: true;
+        lastProviderEventId: true;
+        lastReceiptAt: true;
+        messageLookupKey: true;
+        messages: {
+          select: { id: true };
+          take: 1;
+        };
+        payloadCiphertext: true;
+        payloadOwnerMemberId: true;
+        payloadSchema: true;
+        skippedAt: true;
+        sourceRef: true;
+        status: true;
+      };
+      where: {
+        sourceRef: { in: string[] };
+        template: typeof HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE;
+      };
+    }): Promise<HostedLinqInstantFirstTurnCanaryResetRow[]>;
+  };
+};
+
+export async function deleteHostedLinqInstantFirstTurnCanaryPreProviderClaimsTx(
+  input: {
+    eventIds: readonly string[];
+    prisma: HostedLinqInstantFirstTurnCanaryResetStore;
+  },
+): Promise<number> {
+  const eventIds = [...new Set(input.eventIds.filter(Boolean))];
+  if (eventIds.length === 0) {
+    return 0;
+  }
+
+  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
+    select: {
+      acceptedAt: true,
+      deliveredAt: true,
+      failedAt: true,
+      id: true,
+      lastProviderEventId: true,
+      lastReceiptAt: true,
+      messageLookupKey: true,
+      messages: {
+        select: { id: true },
+        take: 1,
+      },
+      payloadCiphertext: true,
+      payloadOwnerMemberId: true,
+      payloadSchema: true,
+      skippedAt: true,
+      sourceRef: true,
+      status: true,
+    },
+    where: {
+      sourceRef: { in: eventIds },
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    },
+  });
+
+  if (deliveries.some((delivery) =>
+    !isHostedLinqInstantFirstTurnCanaryResettable(delivery)
+    && !isHostedLinqInstantFirstTurnCanaryCompleted(delivery)
+  )) {
+    throw buildHostedLinqInstantFirstTurnCanaryResetConflict();
+  }
+
+  const resettableDeliveries = deliveries.filter(
+    isHostedLinqInstantFirstTurnCanaryResettable,
+  );
+  for (const delivery of resettableDeliveries) {
+    const deleted = await input.prisma.hostedLinqDelivery.deleteMany({
+      where: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: null,
+        id: delivery.id,
+        lastProviderEventId: null,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        messages: { none: {} },
+        payloadCiphertext: null,
+        payloadOwnerMemberId: null,
+        payloadSchema: null,
+        skippedAt: null,
+        sourceRef: delivery.sourceRef,
+        status: "attempted",
+        template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      },
+    });
+    if (deleted.count !== 1) {
+      throw buildHostedLinqInstantFirstTurnCanaryResetConflict();
+    }
+  }
+
+  return resettableDeliveries.length;
+}
+
+function isHostedLinqInstantFirstTurnCanaryCompleted(
+  delivery: HostedLinqInstantFirstTurnCanaryResetRow,
+): boolean {
+  return delivery.payloadCiphertext === null
+    && delivery.payloadOwnerMemberId === null
+    && delivery.payloadSchema === null
+    && ["accepted", "delivered", "failed", "skipped"].includes(delivery.status);
+}
+
+function isHostedLinqInstantFirstTurnCanaryResettable(
+  delivery: HostedLinqInstantFirstTurnCanaryResetRow,
+): boolean {
+  return delivery.status === "attempted"
+    && delivery.acceptedAt === null
+    && delivery.deliveredAt === null
+    && delivery.failedAt === null
+    && delivery.lastProviderEventId === null
+    && delivery.lastReceiptAt === null
+    && delivery.messageLookupKey === null
+    && delivery.messages.length === 0
+    && delivery.payloadCiphertext === null
+    && delivery.payloadOwnerMemberId === null
+    && delivery.payloadSchema === null
+    && delivery.sourceRef !== null
+    && delivery.skippedAt === null;
+}
+
+function buildHostedLinqInstantFirstTurnCanaryResetConflict() {
+  return hostedOnboardingError({
+    code: "HOSTED_LINQ_CANARY_RESET_UNSAFE_DELIVERY",
+    httpStatus: 409,
+    message: "The production canary has delivery work that cannot be reset safely.",
+    retryable: false,
+  });
+}
 type HostedLinqDeliveryProviderDispatchData = {
   attemptedAt: Date;
   failedAt: null;

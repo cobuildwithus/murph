@@ -1,0 +1,109 @@
+name: Linq Production Canary
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      deployed_sha:
+        description: Current Vercel production commit SHA to prove before the canary.
+        required: true
+        type: string
+      deployment_url:
+        description: Exact ready Vercel production deployment URL to prove.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linq-production-canary
+  cancel-in-progress: false
+
+jobs:
+  production-canary:
+    name: Exercise production iMessage journey
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment_status.description == 'Deployment has completed' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]')) }}
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.deployment.sha || inputs.deployed_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify deployed commit is from main
+        id: production-branch
+        shell: bash
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main; then
+            echo "should_run=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "should_run=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Skipping the Linq canary because the deployment is not reachable from main."
+          fi
+
+      - name: Setup pnpm
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install deps
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify current exact Vercel production deployment
+        id: current-production
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
+        shell: bash
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
+          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          HOSTED_WEB_VERCEL_DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url || inputs.deployment_url }}
+          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
+          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${HOSTED_WEB_VERCEL_TOKEN}" ] || [ -z "${HOSTED_WEB_VERCEL_PROJECT_ID}" ] || [ -z "${HOSTED_WEB_PRODUCTION_BASE_URL}" ]; then
+            echo "::error::The Vercel production verifier is not configured."
+            exit 1
+          fi
+
+          current_sha="$(pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts)"
+          if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
+            echo "should_run=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Skipping the Linq canary because a newer Vercel production deployment is current."
+            exit 0
+          fi
+
+          verified_sha="$(pnpm --dir apps/web exec tsx scripts/verify-vercel-production-deployment.ts)"
+          if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
+            echo "::error::Exact Vercel production deployment verification returned an unexpected commit."
+            exit 1
+          fi
+          echo "should_run=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Run production iMessage journey
+        if: ${{ steps.current-production.outputs.should_run == 'true' }}
+        env:
+          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET }}
+          MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER }}
+          SPECTRUM_PROJECT_ID: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_SPECTRUM_PROJECT_ID }}
+          SPECTRUM_PROJECT_SECRET: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_SPECTRUM_PROJECT_SECRET }}
+        run: pnpm --filter @murphai/hosted-web linq:production-canary

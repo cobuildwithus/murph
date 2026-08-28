@@ -31,6 +31,7 @@ import {
   claimHostedLinqFirstContactAdmissionBudget,
   readHostedLinqFirstContactAdmissionMode,
   recordHostedLinqFirstContactAdmissionDecision,
+  resetHostedLinqFirstContactAdmissionForCanaryTx,
   tryHostedLinqFirstContactAdmissionDeterministicDecision,
   type HostedLinqFirstContactAdmissionRequest,
 } from "@/src/lib/hosted-onboarding/linq-first-contact-admission";
@@ -49,6 +50,71 @@ const BASE_PARTICIPANT_CONTACT = {
   lookupKey: "blind:v1:test-contact",
   value: "+15551234567",
 };
+
+type CanaryDeliveryRow = {
+  acceptedAt: Date | null;
+  deliveredAt: Date | null;
+  failedAt: Date | null;
+  id: string;
+  lastProviderEventId: string | null;
+  lastReceiptAt: Date | null;
+  messageLookupKey: string | null;
+  messages: { id: string }[];
+  payloadCiphertext: string | null;
+  payloadOwnerMemberId: string | null;
+  payloadSchema: string | null;
+  skippedAt: Date | null;
+  sourceRef: string;
+  status: string;
+};
+
+function makeCanaryDelivery(
+  overrides: Partial<CanaryDeliveryRow> = {},
+): CanaryDeliveryRow {
+  return {
+    acceptedAt: null,
+    deliveredAt: null,
+    failedAt: null,
+    id: "delivery_canary",
+    lastProviderEventId: null,
+    lastReceiptAt: null,
+    messageLookupKey: null,
+    messages: [],
+    payloadCiphertext: null,
+    payloadOwnerMemberId: null,
+    payloadSchema: null,
+    skippedAt: null,
+    sourceRef: BASE_REQUEST.eventId,
+    status: "attempted",
+    ...overrides,
+  };
+}
+
+function makeCanaryResetTx(input: {
+  budgetRows?: { eventId: string }[];
+  deliveries?: CanaryDeliveryRow[];
+  deliveryDeleteCount?: number;
+} = {}) {
+  const budgetRows = input.budgetRows ?? [{ eventId: BASE_REQUEST.eventId }];
+  return {
+    $executeRaw: vi.fn().mockResolvedValue(0),
+    hostedLinqDelivery: {
+      deleteMany: vi.fn().mockResolvedValue({
+        count: input.deliveryDeleteCount ?? 1,
+      }),
+      findMany: vi.fn().mockResolvedValue(
+        input.deliveries ?? [makeCanaryDelivery()],
+      ),
+    },
+    hostedLinqFirstContactAdmissionBudget: {
+      deleteMany: vi.fn().mockResolvedValue({ count: budgetRows.length }),
+      findMany: vi.fn().mockResolvedValue(budgetRows),
+    },
+    hostedLinqFirstContactAdmissionDecision: {
+      deleteMany: vi.fn().mockResolvedValue({ count: budgetRows.length }),
+    },
+  };
+}
 
 function resetParticipantContactMocks() {
   mocks.participantContact.readCandidates = ["blind:v1:test-contact"];
@@ -944,6 +1010,125 @@ describe("Linq first-contact admission", () => {
     expect(lockValues).toContain(`${BASE_PARTICIPANT_CONTACT.kind}:${BASE_PARTICIPANT_CONTACT.value}`);
     // The version-independent value must not embed any key-versioned lookup key.
     expect(lockValues.some((value) => typeof value === "string" && value.includes("blind:v"))).toBe(false);
+  });
+
+  it("resets only the canary contact's joined admission state and untouched first-turn claim", async () => {
+    mocks.participantContact.readCandidates = [
+      "blind:v2:test-contact",
+      "blind:v1:test-contact",
+    ];
+    const tx = makeCanaryResetTx({
+      budgetRows: [
+        { eventId: "evt_canary_1" },
+        { eventId: "evt_canary_2" },
+      ],
+    });
+
+    await expect(resetHostedLinqFirstContactAdmissionForCanaryTx({
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      admissionBudgetCount: 2,
+      admissionDecisionCount: 2,
+      deliveryClaimCount: 1,
+    });
+    expect(tx.$executeRaw).toHaveBeenCalledOnce();
+    expect(tx.hostedLinqDelivery.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          sourceRef: { in: ["evt_canary_1", "evt_canary_2"] },
+          template: "instant_first_turn_v1",
+        },
+      }),
+    );
+    expect(tx.hostedLinqFirstContactAdmissionDecision.deleteMany)
+      .toHaveBeenCalledWith({
+        where: { eventId: { in: ["evt_canary_1", "evt_canary_2"] } },
+      });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.deleteMany)
+      .toHaveBeenCalledWith({
+        where: {
+          participantContactLookupKey: {
+            in: ["blind:v2:test-contact", "blind:v1:test-contact"],
+          },
+        },
+      });
+  });
+
+  it("keeps completed delivery evidence while resetting its joined admission state", async () => {
+    const tx = makeCanaryResetTx({
+      deliveries: [makeCanaryDelivery({
+        acceptedAt: new Date("2026-01-01T00:00:00.000Z"),
+        messageLookupKey: "blind:test-message",
+        status: "accepted",
+      })],
+    });
+
+    await expect(resetHostedLinqFirstContactAdmissionForCanaryTx({
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toMatchObject({
+      admissionBudgetCount: 1,
+      admissionDecisionCount: 1,
+      deliveryClaimCount: 0,
+    });
+    expect(tx.hostedLinqDelivery.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before clearing admission state when provider dispatch may be in flight", async () => {
+    const tx = makeCanaryResetTx({
+      deliveries: [makeCanaryDelivery({
+        payloadCiphertext: "sealed-test-payload",
+        payloadOwnerMemberId: "member_test",
+        payloadSchema: "test-schema",
+        status: "provider_dispatch_started",
+      })],
+    });
+
+    await expect(resetHostedLinqFirstContactAdmissionForCanaryTx({
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_CANARY_RESET_UNSAFE_DELIVERY",
+      httpStatus: 409,
+    });
+    expect(tx.hostedLinqDelivery.deleteMany).not.toHaveBeenCalled();
+    expect(tx.hostedLinqFirstContactAdmissionDecision.deleteMany)
+      .not.toHaveBeenCalled();
+    expect(tx.hostedLinqFirstContactAdmissionBudget.deleteMany)
+      .not.toHaveBeenCalled();
+  });
+
+  it("fails closed when an untouched delivery changes during compare-and-delete", async () => {
+    const tx = makeCanaryResetTx({ deliveryDeleteCount: 0 });
+
+    await expect(resetHostedLinqFirstContactAdmissionForCanaryTx({
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_CANARY_RESET_UNSAFE_DELIVERY",
+      httpStatus: 409,
+    });
+    expect(tx.hostedLinqFirstContactAdmissionDecision.deleteMany)
+      .not.toHaveBeenCalled();
+    expect(tx.hostedLinqFirstContactAdmissionBudget.deleteMany)
+      .not.toHaveBeenCalled();
+  });
+
+  it("treats a repeated canary reset with no admission history as a no-op", async () => {
+    const tx = makeCanaryResetTx({ budgetRows: [] });
+
+    await expect(resetHostedLinqFirstContactAdmissionForCanaryTx({
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      admissionBudgetCount: 0,
+      admissionDecisionCount: 0,
+      deliveryClaimCount: 0,
+    });
+    expect(tx.hostedLinqDelivery.findMany).not.toHaveBeenCalled();
+    expect(tx.hostedLinqFirstContactAdmissionDecision.deleteMany)
+      .not.toHaveBeenCalled();
   });
 
   it("records block decisions without storing rejected-message text", async () => {

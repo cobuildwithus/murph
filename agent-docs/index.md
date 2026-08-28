@@ -20,6 +20,14 @@ freeze, dry run, protected-identity proof, or write that depends on them. The
 canonical trust boundary and authorization requirements for any later hosted or
 protected path are specified by `agent-docs/SECURITY.md`.
 
+The fixed-identity production iMessage canary verifies the exact deployed Web
+revision before resetting its private test identity and exercising the fast
+first reply plus ordinary hosted-runtime continuation. Its fixed-target reset,
+serialization, latency, privacy, and provider-transit contracts are specified
+by `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
+`agent-docs/operations/imessage-deliverability.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 Markdown-only pull requests keep their seven existing required contexts, while
 flat, dated release-note records may use base-trusted exact-inventory receipts
 instead of runtime-heavy proof. Every other Markdown path retains full CI, and
