@@ -53,6 +53,7 @@ import {
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
+  type CodexAppServerTurnResult,
   waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
 import {
@@ -62,8 +63,8 @@ import {
   executeReadOnlyAssistantAsk,
 } from '../src/assistant-ask.ts'
 import {
-  MURPH_AUTOMATION_TOOL,
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
@@ -190,6 +191,7 @@ import type {
 import {
   createVersionedAutomationPatchFixture,
 } from './support/automation-live-fixture.ts'
+import { createDeferred } from './test-helpers.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
@@ -2325,6 +2327,324 @@ const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
   'Do not repeat completed effects or mention the draft or this instruction.',
 ].join(' ')
 
+describeRealCodex('real Codex video-analysis detail e2e', () => {
+  it.each([
+    {
+      expectedAnswerPattern: /\byes\b|moves farther outward|does flare more/iu,
+      expectedFinalPattern: /left elbow|elbow/iu,
+      expectedFps: 5,
+      expectedSamplingMode: 'detailed_motion' as const,
+      forbiddenFinalPattern:
+        /Gemini|frames per second|sampled frames|untrusted|policy|sorry/iu,
+      memberText: [
+        'Murph, please analyze this video.',
+        'Video question: During repetitions 3 through 5, does my left elbow flare more on the way down than on the way up?',
+      ].join(' '),
+      providerObservation:
+        'During repetitions 3 through 5, the left elbow moves farther outward on the way down than on the way up.',
+      providerQuestion:
+        'During repetitions 3 through 5, does my left elbow flare more on the way down than on the way up?',
+      scenarioLabel: 'private member requests constrained push-up form feedback',
+      testName:
+        'selects detailed motion for visible push-up form and answers naturally',
+    },
+    {
+      expectedAnswerPattern: /\b(?:did not|didn't|didn’t|not)\s+(?:hear|heard)\b/iu,
+      expectedFinalPattern: /rabbit|hear|heard/iu,
+      expectedFps: 1,
+      expectedSamplingMode: null,
+      forbiddenFinalPattern:
+        /Gemini|frames per second|sampled frames|untrusted|policy|sorry/iu,
+      memberText: [
+        'Murph, please analyze this video.',
+        'Video question: Did anyone say "rabbit" between 00:03 and 00:06?',
+      ].join(' '),
+      providerObservation:
+        'I did not hear the word "rabbit" between 00:03 and 00:06.',
+      providerQuestion:
+        'Did anyone say "rabbit" between 00:03 and 00:06?',
+      scenarioLabel: 'private member asks about a timed spoken phrase',
+      testName:
+        'keeps a speech question on standard sampling and calibrates an audible negative',
+    },
+    {
+      expectedAnswerPattern: /(?:could not|couldn't|couldn’t|did not|didn't|didn’t).*(?:usable|analyz|return|result)|no usable/iu,
+      expectedFinalPattern: /video|analysis|Gemini|usable|return/iu,
+      expectedFps: 1,
+      expectedSamplingMode: null,
+      forbiddenFinalPattern:
+        /no analysis ran|never analyzed|wasn't analyzed|wasn’t analyzed|frames per second|sampled frames|untrusted|policy|sorry/iu,
+      memberText: [
+        'Murph, please analyze this video.',
+        'Video question: What color is the exercise mat?',
+      ].join(' '),
+      providerObservation: null,
+      providerQuestion: 'What color is the exercise mat?',
+      scenarioLabel: 'Gemini returns no usable video observation',
+      testName:
+        'reports plainly when Gemini returns no usable video observation',
+    },
+  ] as const)(
+    '$testName',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-video-detail-e2e-'),
+      )
+      const messageRef = `ain_${'a'.repeat(32)}`
+      const rawPath = 'raw/inbox/push-up-form.mp4'
+      const videoBytes = Buffer.concat([
+        Buffer.from([0, 0, 0, 16]),
+        Buffer.from('ftyp'),
+        Buffer.from('isom'),
+        Buffer.from('synthetic-push-up-video'),
+      ])
+      const sha256 = createHash('sha256').update(videoBytes).digest('hex')
+      const providerBodies: unknown[] = []
+
+      try {
+        await mkdir(path.join(workingDirectory, path.dirname(rawPath)), {
+          recursive: true,
+        })
+        await writeFile(path.join(workingDirectory, rawPath), videoBytes)
+        const promptResult = buildAssistantAutoReplyPrompt([{
+          actorIsSelf: false,
+          attachmentDescriptors: [],
+          attachmentEvidence: {
+            attachments: [{
+              byteSize: videoBytes.byteLength,
+              derived: null,
+              descriptorAttachmentId: 'synthetic-video',
+              fileName: 'push-up-form.mp4',
+              inlineFragments: [],
+              kind: 'video',
+              mime: 'video/mp4',
+              ordinal: 1,
+              parseState: null,
+              raw: {
+                byteSize: videoBytes.byteLength,
+                kind: 'vault-relative-file',
+                mediaType: 'video/mp4',
+                path: rawPath,
+                sha256,
+              },
+              sourceAttachmentId: 'synthetic-video',
+            }],
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            source: 'manual',
+            status: 'available',
+            updatedAt: '2026-08-26T12:00:01.000Z',
+          },
+          conversation: {
+            accountId: null,
+            actorId: 'synthetic-member',
+            actorIsSelf: false,
+            source: 'telegram',
+            threadId: 'synthetic-direct-thread',
+            threadIsDirect: true,
+          },
+          inputId: messageRef,
+          occurredAt: '2026-08-26T12:00:00.000Z',
+          projection: {
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            status: 'succeeded',
+          },
+          receivedAt: '2026-08-26T12:00:01.000Z',
+          replyTarget: {
+            channel: 'telegram',
+            messageId: '101',
+            threadId: 'synthetic-direct-thread',
+          },
+          source: 'telegram',
+          sourceMetadata: {
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'telegram',
+            mediaGroupId: null,
+            replyContext: null,
+            senderDisplayName: 'Member',
+            senderHandle: 'synthetic-member',
+          },
+          telegramMetadata: null,
+          text: scenario.memberText,
+        }])
+        expect(promptResult.kind).toBe('ready')
+        if (promptResult.kind !== 'ready') {
+          throw new Error('Expected a ready direct-video prompt.')
+        }
+
+        const hostedToolContext = {
+          computerToolsAvailable: false,
+          currentAnalyzeVideoAttachmentAuthorities: () => [{
+            byteSize: videoBytes.byteLength,
+            messageRef,
+            mimeType: 'video/mp4',
+            ordinal: 1,
+            rawPath,
+            sha256,
+          }],
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: [messageRef],
+            conversationId: 'conversation-video-detail',
+            conversationScope: 'direct' as const,
+            inboundMailboxItemIds: ['mailbox-video-detail'],
+            originSessionId: 'session-video-detail',
+            recipientKey: 'recipient-video-detail',
+          }),
+          sendVaultFile: async () => ({
+            filename: 'unused',
+            status: 'denied' as const,
+          }),
+          vaultFileSendAvailable: false,
+        } satisfies AssistantHostedToolContext
+        const result = await executeRealCodexAppServerTurn({
+          analyzeVideoRuntime: {
+            apiKey: 'synthetic-gemini-key',
+            fetchImpl: async (_request, init) => {
+              providerBodies.push(JSON.parse(String(init?.body)))
+              return scenario.providerObservation === null
+                ? Response.json({
+                    candidates: [],
+                    usageMetadata: {
+                      promptTokenCount: 100,
+                      totalTokenCount: 100,
+                    },
+                  })
+                : Response.json({
+                    candidates: [{
+                      content: {
+                        parts: [{ text: scenario.providerObservation }],
+                        role: 'model',
+                      },
+                      finishReason: 'STOP',
+                    }],
+                  })
+            },
+          },
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: 'No vault command is needed for this video request.',
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'telegram',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-26',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_ANALYZE_VIDEO_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: promptResult.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+        const videoCalls = readCapabilityRoutingActions(result.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ANALYZE_VIDEO_TOOL.name
+          )
+
+        process.stdout.write(
+          `[video-detail-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            providerCallCount: providerBodies.length,
+            scenario: scenario.scenarioLabel,
+            toolCallCount: videoCalls.length,
+            toolSucceeded: videoCalls[0]?.kind === 'dynamic'
+              && videoCalls[0].success,
+          })}\n`,
+        )
+        expect(videoCalls.length).toBeGreaterThanOrEqual(1)
+        const videoCall = videoCalls[0]
+        if (videoCall?.kind !== 'dynamic') {
+          throw new Error('Expected a dynamic video-analysis call.')
+        }
+        expect(videoCall.success).toBe(scenario.providerObservation !== null)
+        expect(videoCall.output).toContain(
+          scenario.providerObservation
+          ?? 'Video analysis returned no usable answer',
+        )
+        for (const repeatedCall of videoCalls.slice(1)) {
+          expect(repeatedCall).toMatchObject({
+            kind: 'dynamic',
+            success: videoCall.success,
+          })
+          if (repeatedCall.kind === 'dynamic') {
+            expect(repeatedCall.output).toContain(
+              scenario.providerObservation
+              ?? 'Video analysis returned no usable answer',
+            )
+          }
+        }
+        expect(videoCall).toMatchObject({
+          argumentsValue: {
+            message_ref: messageRef,
+            question: scenario.providerQuestion,
+          },
+          kind: 'dynamic',
+        })
+        if (scenario.expectedSamplingMode === null) {
+          expect(videoCall.argumentsValue).not.toHaveProperty(
+            'sampling_mode',
+          )
+        } else {
+          expect(videoCall.argumentsValue).toHaveProperty(
+            'sampling_mode',
+            scenario.expectedSamplingMode,
+          )
+        }
+        expect(providerBodies).toHaveLength(1)
+        expect(providerBodies[0]).toMatchObject({
+          contents: [{
+            parts: [
+              { videoMetadata: { fps: scenario.expectedFps } },
+              { text: scenario.providerQuestion },
+            ],
+          }],
+          generationConfig: {
+            thinkingConfig: { thinkingLevel: 'medium' },
+          },
+        })
+        expect(providerBodies[0]).not.toHaveProperty(
+          'generationConfig.maxOutputTokens',
+        )
+        expect(result.finalMessage).toMatch(scenario.expectedAnswerPattern)
+        expect(result.finalMessage).toMatch(scenario.expectedFinalPattern)
+        expect(result.finalMessage).not.toMatch(scenario.forbiddenFinalPattern)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+})
+
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
     'analyzes one participant\'s group video when another participant requests it',
@@ -2555,13 +2875,29 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             toolCallCount: videoCalls.length,
           })}\n`,
         )
-        expect(videoCalls).toHaveLength(1)
-        expect(videoCalls[0]).toMatchObject({
+        expect(videoCalls.length).toBeGreaterThanOrEqual(1)
+        const firstVideoCall = videoCalls[0]
+        expect(firstVideoCall).toMatchObject({
           argumentsValue: {
             message_ref: videoMessageRef,
           },
           kind: 'dynamic',
         })
+        if (firstVideoCall?.kind !== 'dynamic') {
+          throw new Error('Expected a dynamic video-analysis call.')
+        }
+        for (const repeatedVideoCall of videoCalls.slice(1)) {
+          expect(repeatedVideoCall).toMatchObject({
+            argumentsValue: {
+              message_ref: videoMessageRef,
+            },
+            kind: 'dynamic',
+            success: firstVideoCall.success,
+          })
+          if (repeatedVideoCall.kind === 'dynamic') {
+            expect(repeatedVideoCall.output).toBe(firstVideoCall.output)
+          }
+        }
         expect(acceptedMessageAuthorizationCallCount).toBe(0)
         expect(providerCallCount).toBe(1)
         expect(result.finalMessage).toMatch(/\b(?:eight|8)\b/iu)
@@ -3273,18 +3609,21 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             channel: 'telegram' as const,
             expected: 'card' as const,
             label: 'attended Telegram',
+            minimalPresentation: true,
             scheduledOccurrenceAt: undefined,
           },
           {
             channel: 'telegram' as const,
             expected: 'card' as const,
             label: 'scheduled Telegram',
+            minimalPresentation: false,
             scheduledOccurrenceAt: '2026-08-12T11:30:00.000Z',
           },
           {
             channel: 'linq' as const,
             expected: 'media' as const,
             label: 'attended Linq',
+            minimalPresentation: false,
             scheduledOccurrenceAt: undefined,
           },
         ]
@@ -3317,8 +3656,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             model: config.model,
             modelProvider: config.modelProvider,
             prompt: scenario.scheduledOccurrenceAt
-              ? 'Teach the saved one-movement doorway stretch routine now. It is 8 repetitions over 60 seconds. Stop if pain increases.'
-              : 'Teach me a one-movement doorway stretch routine now. Use 8 repetitions over 60 seconds. Stop if pain increases.',
+              ? 'Teach the saved one-movement doorway stretch routine now with the exercise routine card. It is 8 repetitions over 60 seconds. Stop if pain increases.'
+              : scenario.expected === 'media'
+                ? 'Teach me a one-movement doorway stretch routine now. Use 8 repetitions over 60 seconds, include the catalog image as response media, and stop if pain increases.'
+                : 'Teach me a one-movement doorway stretch routine now. Use 8 repetitions over 60 seconds. Stop if pain increases. Use the exercise routine card, and keep the presentation minimal without a subtitle or footer.',
             reasoningEffort: 'low',
             sandbox: 'workspace-write',
             workingDirectory,
@@ -3338,11 +3679,24 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               safety: expect.stringMatching(/pain/iu),
               totalSeconds: 60,
             })
+            if (scenario.minimalPresentation) {
+              expect(result.responseCard, `${scenario.label} optional text`)
+                .toMatchObject({ footer: null, subtitle: null })
+            }
             expect(result.responseMedia, `${scenario.label} media`).toEqual([])
-            expect(
-              result.finalMessage.trim(),
-              `${scenario.label} duplicate text`,
-            ).toBe('')
+            if (scenario.scheduledOccurrenceAt) {
+              expect(
+                parseAssistantNotificationDecision(
+                  result.providerAuthoredFinalMessage ?? '',
+                ).kind,
+                `${scenario.label} terminal decision`,
+              ).toBe('skip')
+            } else {
+              expect(
+                result.providerAuthoredFinalMessage,
+                `${scenario.label} model text after card attachment`,
+              ).toBe('')
+            }
           } else {
             expect(
               actions.filter((action) =>
@@ -3451,7 +3805,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           totalSeconds: 60,
         })
         expect(repairedRoutine.responseMedia).toEqual([])
-        expect(repairedRoutine.finalMessage.trim()).toBe('')
+        expect(repairedRoutine.providerAuthoredFinalMessage).toBe('')
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -3459,7 +3813,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         ])
       }
     },
-    360_000,
+    720_000,
   )
 
   it(
@@ -5570,6 +5924,183 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'targets a joined group directly from requester-relative participant descriptions',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const cases = [
+        {
+          expectedNames: ['Jordan'],
+          prompt:
+            'Tell my existing group chat with Jordan that Member Echo finished the mobility set.',
+          slug: 'named-person',
+        },
+        {
+          expectedNames: ['Jordan', 'Casey'],
+          prompt:
+            'Tell my existing three-person group chat with Jordan and Casey that Member Echo finished the mobility set.',
+          slug: 'total-chat-size',
+        },
+        {
+          expectedNames: ['Jordan', 'Casey'],
+          prompt:
+            'Tell my existing group chat with me, Jordan, and Casey that Member Echo finished the mobility set.',
+          slug: 'explicit-self',
+        },
+      ] as const
+
+      try {
+        for (const testCase of cases) {
+          const workingDirectory = await mkdtemp(path.join(
+            tmpdir(),
+            `murph-private-group-participant-target-${testCase.slug}-e2e-`,
+          ))
+          type GroupRequest = Parameters<
+            NonNullable<AssistantHostedToolContext['groupTool']>['request']
+          >[0]
+          const groupRequests: GroupRequest[] = []
+
+          try {
+            const skillsRoot = path.join(workingDirectory, 'skills')
+            await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+            const result = await executeRealCodexAppServerTurn({
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildDirectConversationDeveloperInstructions(),
+              dynamicTools: [
+                MURPH_GROUP_CONSULT_TOOL,
+                MURPH_GROUP_MEMBERSHIP_TOOL,
+              ],
+              env: {
+                ...config.env,
+                [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+              },
+              excludeResumeTurns: true,
+              hostedToolContext: {
+                computerToolsAvailable: false,
+                currentHostedDeliveryContext: () => ({
+                  conversationId:
+                    `conversation_private_group_participant_${testCase.slug}`,
+                  recipientKey:
+                    `recipient_private_group_participant_${testCase.slug}`,
+                  returnContactKind: 'text',
+                }),
+                currentHostedMailboxItemIds: () => [],
+                currentUserActionScope: () => ({
+                  acceptedInputIds: [
+                    `input_private_group_participant_${testCase.slug}`,
+                  ],
+                  conversationId:
+                    `conversation_private_group_participant_${testCase.slug}`,
+                  conversationScope: 'direct',
+                  inboundMailboxItemIds: [
+                    `mailbox_private_group_participant_${testCase.slug}`,
+                  ],
+                  originSessionId:
+                    `session_private_group_participant_${testCase.slug}`,
+                  recipientKey:
+                    `recipient_private_group_participant_${testCase.slug}`,
+                }),
+                groupTool: {
+                  request: async (request) => {
+                    groupRequests.push(request)
+                    if (request.action === 'list_memberships') {
+                      return {
+                        action: 'list_memberships',
+                        result: {
+                          disclosureGrants: [],
+                          memberships: [],
+                          status: 'ok',
+                          truncated: false,
+                        },
+                      }
+                    }
+                    return {
+                      action: 'handoff',
+                      result: {
+                        status: 'accepted',
+                        targetLabel: '2 people: Jordan, Casey',
+                      },
+                    }
+                  },
+                },
+                sendVaultFile: async () => {
+                  throw new Error('Vault file sends are unavailable in this test.')
+                },
+                vaultFileSendAvailable: false,
+              },
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: testCase.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+
+            process.stdout.write(
+              `[group-handoff-participants-e2e] ${JSON.stringify({
+                reply: result.finalMessage.trim(),
+                requests: groupRequests,
+                slug: testCase.slug,
+              })}\n`,
+            )
+
+            expect(
+              groupRequests.filter(({ action }) => action === 'list_memberships'),
+              testCase.slug,
+            ).toHaveLength(0)
+            const handoffRequests = groupRequests.filter(
+              (request): request is Extract<
+                GroupRequest,
+                { action: 'handoff' }
+              > => request.action === 'handoff',
+            )
+            expect(handoffRequests, testCase.slug).toHaveLength(1)
+            expect(handoffRequests[0], testCase.slug).toMatchObject({
+              action: 'handoff',
+              participantTarget: {
+                participants: testCase.expectedNames.map((displayName) => ({
+                  displayName,
+                })),
+              },
+            })
+            expect(handoffRequests[0], testCase.slug)
+              .not.toHaveProperty('groupLabel')
+            const participantTarget = handoffRequests[0]?.participantTarget as {
+              participantCount?: number
+              participants?: Array<{ displayName?: string }>
+            }
+            expect(
+              participantTarget.participants?.some(({ displayName }) =>
+                displayName?.toLocaleLowerCase('und') === 'me'
+                || displayName?.toLocaleLowerCase('und') === 'member echo'
+              ),
+              testCase.slug,
+            ).toBe(false)
+            if (testCase.expectedNames.length === 2) {
+              expect(
+                participantTarget.participantCount === undefined
+                || participantTarget.participantCount === 2,
+                testCase.slug,
+              ).toBe(true)
+            }
+            expect(result.finalMessage, testCase.slug).toMatch(/queu/iu)
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    900_000,
   )
 
   it(
@@ -12685,6 +13216,55 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
   })
 })
 
+describeRealCodex('real Codex latest-context nutrition-card e2e', () => {
+  it('attaches a fresh nutrition card for the latest live-steered request', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'legacy',
+        initialPrompt: 'Help me review my meals for 2026-07-30.',
+        liveSteerPrompt: [
+          'Send my daily nutrition card for 2026-07-30 instead.',
+          'The meal totals and my accepted targets are already saved.',
+          'Do not create, rename, or change a Goal.',
+        ].join(' '),
+      })
+
+      expect(result.card).toMatchObject({
+        goals: { calories: { target: 1_800 } },
+        kind: 'daily_nutrition',
+        localDate: '2026-07-30',
+        version: 2,
+      })
+      if (!result.card) {
+        throw new Error('Expected the latest steered context to attach a card.')
+      }
+      expect(result.attachCallCount).toBe(1)
+      expect(result.deliveryContextOrdinal).toBe(1)
+      expect(result.finalMessage).toBe(
+        renderAssistantResponseCardText(result.card),
+      )
+      expect(result.finalMessage).not.toMatch(/unavailable|failed to attach/iu)
+      expect(result.progressUpdates).toEqual([])
+      expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
+
+      process.stdout.write(
+        `[latest-context-nutrition-card-e2e] ${JSON.stringify({
+          deliveryContextOrdinal: result.deliveryContextOrdinal,
+          reply: result.finalMessage,
+        })}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  })
+})
+
 async function materializeAutomaticMealCloseoutVaultCli(input: {
   binDirectory: string
   commandLogPath: string
@@ -14459,9 +15039,14 @@ async function runRealNutritionCardAuthorityScenario(input: {
   config: RealCodexE2eConfig
   conditionRecovery: NutritionConditionRecovery
   goalScenario: NutritionGoalScenario
+  initialPrompt?: string
+  liveSteerPrompt?: string
 }): Promise<{
-  card: unknown
+  attachCallCount: number
+  card: CodexAppServerTurnResult['responseCard']
   commands: string[]
+  deliveryContextOrdinal: number
+  finalMessage: string
   progressUpdates: string[]
 }> {
   const workingDirectory = await mkdtemp(
@@ -14492,6 +15077,13 @@ async function runRealNutritionCardAuthorityScenario(input: {
 
     const progressUpdates: string[] = []
     const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const liveSteer = input.liveSteerPrompt
+      ? createDeferred<void>()
+      : null
+    const liveSteerOutcome = liveSteer?.promise.then(
+      () => null,
+      (error: unknown) => error,
+    )
     const result = await executeRealCodexAppServerTurn({
       ...REAL_NUTRITION_CARD_CONVERSATION_INPUT,
       approvalPolicy: 'never',
@@ -14537,26 +15129,46 @@ async function runRealNutritionCardAuthorityScenario(input: {
       excludeResumeTurns: true,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
+      onLiveTurn: input.liveSteerPrompt
+        ? (turn) => {
+            void turn.steer({ prompt: input.liveSteerPrompt ?? '' }).then(
+              () => liveSteer?.resolve(),
+              (error) => liveSteer?.reject(error),
+            )
+          }
+        : undefined,
       progressDelivery: {
         async send(text) {
           progressUpdates.push(text)
           return { kind: 'sent', source: 'model' }
         },
       },
-      prompt: [
-        'Send my daily nutrition card for 2026-07-30.',
-        'The meal totals and my accepted targets are already saved.',
-        'Do not create, rename, or change a Goal.',
-      ].join(' '),
+      prompt: input.initialPrompt ?? [
+          'Send my daily nutrition card for 2026-07-30.',
+          'The meal totals and my accepted targets are already saved.',
+          'Do not create, rename, or change a Goal.',
+        ].join(' '),
       reasoningEffort: 'medium',
       sandbox: 'workspace-write',
       workingDirectory,
     })
+    const liveSteerError = await liveSteerOutcome
+    if (liveSteerError) {
+      throw liveSteerError
+    }
     const commandText = (await readFile(commandLog, 'utf8')).trim()
+    const attachCallCount = readCapabilityRoutingActions(result.jsonEvents)
+      .filter((action) =>
+        action.kind === 'dynamic'
+        && action.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name
+      ).length
 
     return {
+      attachCallCount,
       card: result.responseCard,
       commands: commandText === '' ? [] : commandText.split('\n'),
+      deliveryContextOrdinal: result.responseDeliveryContextOrdinal,
+      finalMessage: result.finalMessage,
       progressUpdates,
     }
   } finally {
@@ -18139,6 +18751,8 @@ type CapabilityRoutingAction =
       argumentsValue: Record<string, unknown>
       eventIndex: number
       kind: 'dynamic'
+      output: string
+      success: boolean
       tool: string
     }
 
@@ -18258,6 +18872,14 @@ function readCapabilityRoutingActions(
         argumentsValue: readArgumentsRecord(item?.arguments),
         eventIndex,
         kind: 'dynamic' as const,
+        output: Array.isArray(item?.contentItems)
+          ? item.contentItems.flatMap((contentItem) => {
+              const contentRecord = readRecord(contentItem)
+              const text = readString(contentRecord?.text)
+              return text ? [text] : []
+            }).join('\n')
+          : '',
+        success: item?.success === true,
         tool,
       }]
     }

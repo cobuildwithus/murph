@@ -28,6 +28,7 @@ import {
   parseHostedAddressBookMacKeyring,
   parseHostedAddressBookReplaceRequest,
   readHostedAddressBookStatus,
+  readHostedMemberAddressBookAdvisoryNames,
   readHostedOwnerAddressBookAdvisoryNames,
   replaceHostedAddressBookProjection,
 } from "@/src/lib/hosted-address-book/projection";
@@ -374,6 +375,43 @@ describe("hosted address-book projection lifecycle", () => {
       outcome: "matched",
       requestedHandleCount: 3,
     });
+  });
+
+  it("reads the requester's own projection without consulting the group owner", async () => {
+    const store = new AddressBookPrismaStub("different-group-owner");
+    const crypto = makeAddressBookCrypto();
+    await replaceHostedAddressBookProjection({
+      crypto,
+      memberId: "requesting-member",
+      now: new Date("2026-07-26T12:00:00.000Z"),
+      prisma: store as never,
+      request: parseHostedAddressBookReplaceRequest({
+        baseRevision: 0,
+        contacts: [{ advisoryName: "Taylor", phoneNumber: "+14155559876" }],
+        mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+        schemaVersion: 1,
+      }),
+      source: SOURCE,
+    });
+    const findContainer = vi.spyOn(store.hostedThreadContainer, "findUnique");
+
+    await expect(readHostedMemberAddressBookAdvisoryNames({
+      crypto,
+      memberId: "requesting-member",
+      phoneHandles: ["+14155559876"],
+      prisma: store as never,
+      source: SOURCE,
+    })).resolves.toMatchObject({
+      names: new Map([["+14155559876", "Taylor"]]),
+      outcome: "matched",
+    });
+
+    expect(findContainer).not.toHaveBeenCalled();
+    expect(accessMocks.assertHostedLaunchRequiredConsentGranted)
+      .toHaveBeenLastCalledWith({
+        memberId: "requesting-member",
+        prisma: store,
+      });
   });
 
   it("uses one bounded DB and KMS batch at advisory lookup cardinality", async () => {
@@ -927,6 +965,12 @@ class AddressBookPrismaStub {
       owner: { suspendedAt: Date | null };
       ownerMemberId: string;
     } | null>;
+  };
+  readonly hostedMember = {
+    findUnique: async (input: { where: { id: string } }) =>
+      input.where.id
+        ? { suspendedAt: null }
+        : null,
   };
   readonly hostedAddressBookProjection = {
     findUnique: async () => this.projection

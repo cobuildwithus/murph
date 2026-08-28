@@ -195,7 +195,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('to join by reacting')
   })
 
-  it('uses memberships only as bounded last-resort direct disambiguation', () => {
+  it('routes participant evidence directly and keeps memberships as a bounded last resort', () => {
     const directLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
     )
@@ -214,9 +214,9 @@ describe('assistant capability-offers prompt contract', () => {
       HOSTED_GROUPS_HEADER,
     )
 
-    expect(directLayers.prompt).toContain('last-resort disambiguation check')
+    expect(directLayers.prompt).toContain('last resort for a generic group cue')
     expect(directSection).toContain(
-      'already names a visible group',
+      'names a visible group',
     )
     expect(directSection).toContain(
       'pass that name as `groupLabel` to `murph.group_consult` without calling `list_memberships`',
@@ -227,23 +227,24 @@ describe('assistant capability-offers prompt contract', () => {
     expect(directSection).toContain(
       'use "a member" only when canonical memory has no preferred name',
     )
-    expect(directSection).toContain('possible group cue')
     expect(directSection).toContain('club, team, community, or shared challenge')
     expect(directSection).toContain(
-      '`murph.group_membership action="list_memberships"` is available',
+      'call `murph.group_consult action="ask"` or `action="handoff"` directly with `participantTarget`',
     )
-    expect(directSection).toContain('last-resort disambiguation check')
+    expect(directSection).toContain('without calling `list_memberships`')
     expect(directSection).toContain(
-      'generic group reference only when exactly one membership exists',
+      'include only other people, never the requester/self',
+    )
+    expect(directSection).toContain('convert total chat size only when clear')
+    expect(directSection).toContain(
+      'without an exact title or participant evidence',
     )
     expect(directSection).toContain(
-      'name-like reference only when one exact normalized visible label matches',
+      'Accept only one membership across the complete result or one exact normalized visible-label match',
     )
-    expect(directSection).toContain('use `murph.group_consult action="ask"`')
-    expect(directSection).toContain('With no memberships')
+    expect(directSection).toContain('ask one narrow clarification')
     expect(directSection).toContain('paste-or-screenshot fallback')
     expect(directSection).toContain('distinct nonblank visible labels')
-    expect(directSection).toContain('duplicate or unnamed labels')
     expect(directSection).toContain('Never fuzzy-match')
     expect(directSection).toContain('select by role or newness')
     expect(directSection).toContain('expose identifiers, or fan out')
@@ -255,10 +256,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(directSection).toContain(
       'ignore any renewed cursor or truncation for the exhausted chain and never restart it',
     )
-    expect(groupPrompt).not.toContain('last-resort disambiguation check')
-    expect(unverifiedPrompt).not.toContain('last-resort disambiguation check')
-    expect(groupPrompt).not.toContain('already names a visible group')
-    expect(unverifiedPrompt).not.toContain('already names a visible group')
+    expect(groupPrompt).not.toContain('last resort for a generic group cue')
+    expect(unverifiedPrompt).not.toContain('last resort for a generic group cue')
+    expect(groupPrompt).not.toContain('names a visible group')
+    expect(unverifiedPrompt).not.toContain('names a visible group')
   })
 
   it('does not fork challenge behavior into a scheduled-only prompt', () => {

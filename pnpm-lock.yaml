@@ -1024,6 +1024,9 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@murphai/core':
+        specifier: workspace:*
+        version: link:../core
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:../health-metrics

@@ -618,7 +618,7 @@ const vaultFamilyDescriptors = [
     directory: AUDIT_DIRECTORY,
     fileExtension: ".jsonl",
     shardPattern: "audit/YYYY/YYYY-MM.jsonl",
-    querySource: "jsonl-root",
+    querySource: "none",
     validation: {
       kind: "jsonl",
       issueCode: "AUDIT_INVALID",

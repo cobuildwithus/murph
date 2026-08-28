@@ -210,6 +210,12 @@ describe("murph.group dynamic tool", () => {
       .toContain('state="armed"');
     expect(GROUP_TOOL_INPUT_PROPERTIES.groupLabel.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
+    expect(
+      GROUP_TOOL_INPUT_PROPERTIES.participantTarget.properties
+        .participantCount.description,
+    ).toContain("excluding the requesting member");
+    expect(GROUP_TOOL_INPUT_PROPERTIES.participantTarget.description)
+      .toContain("Include each non-requester once");
     expect(GROUP_TOOL_INPUT_PROPERTIES.permissionText.maxLength)
       .toBe(HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS);
     expect(
@@ -292,7 +298,8 @@ describe("murph.group dynamic tool", () => {
   it("advertises family-bounded schemas", () => {
     const expectedRootKeys = {
       group_consult: [
-        "action", "context", "grantId", "groupLabel", "message_ref", "question",
+        "action", "context", "grantId", "groupLabel", "message_ref",
+        "participantTarget", "question",
       ],
       group_data: [
         "action", "audience", "date", "displayName", "grantId", "message_ref",

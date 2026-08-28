@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 50,
+  "item": {
+    "id": "faster-replies-after-idle-time",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster wake-ups for replies",
+    "summary": "When Murph's hosted assistant wakes with current local state, it now skips repeated setup checks before working on your message.",
+    "details": "Older state still receives the full compatibility checks, and a newer unsupported version still stops safely without rewriting its data.",
+    "relevanceTags": ["assistant", "performance", "reliability"],
+    "sourcePullRequests": [2462]
+  }
+}
