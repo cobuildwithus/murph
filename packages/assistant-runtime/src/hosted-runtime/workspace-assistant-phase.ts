@@ -2428,8 +2428,6 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
     }
-    let continuingSystemMailboxDrainsProviderCleanup =
-      systemMailboxMaintenance.result?.checkpointReason === "outbox_sending";
     let continuingSystemMailboxResult =
       shouldContinueAssistantLane
         ? mergeHostedAssistantPhaseResults(systemMailboxMaintenance.result, managedAutomationsResult)
@@ -2705,9 +2703,6 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
     if (deferredPendingSystemMailboxMaintenance) {
-      continuingSystemMailboxDrainsProviderCleanup =
-        continuingSystemMailboxDrainsProviderCleanup
-        || deferredPendingSystemMailboxMaintenance.result?.checkpointReason === "outbox_sending";
       continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
         continuingSystemMailboxResult,
         deferredPendingSystemMailboxMaintenance.result,
@@ -2771,9 +2766,6 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
     if (shadowedDeviceSyncMaintenance) {
-      continuingSystemMailboxDrainsProviderCleanup =
-        continuingSystemMailboxDrainsProviderCleanup
-        || shadowedDeviceSyncMaintenance.result?.checkpointReason === "outbox_sending";
       continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
         continuingSystemMailboxResult,
         shadowedDeviceSyncMaintenance.result,
@@ -3918,7 +3910,7 @@ function mergeHostedAssistantPhaseResults(
 function postCheckpointDeliveryResultOwnsProviderCleanup(
   result: HostedWorkspaceRunnerAssistantPhaseResult | null,
 ): boolean {
-  return result?.afterCheckpointKeepsForegroundImportLoop === true;
+  return result?.checkpointReason === "outbox_sending";
 }
 
 function mergePendingAssistantInputMaintenanceResult(input: {
