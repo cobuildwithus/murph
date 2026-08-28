@@ -25,8 +25,8 @@ export const MURPH_GENERATE_SONG_TOOL = {
   description: [
     'Generate one original song or instrumental track and attach it as a native voice memo to the final response.',
     'Use only when the current user explicitly requests generated music or a complete independently authorized owning-flow contract explicitly requires a song for the current turn.',
-    'When the request supplies no song topic, style, lyrics, or other material direction, ask for one before calling; never invent the entire provider prompt to satisfy the required field.',
-    'On ordinary conversation turns, read `$MURPH_ASSISTANT_SKILLS_ROOT/music-generation/SKILL.md` before calling. In an isolated owning flow that forbids other tools or supplies its complete song contract, follow that owning prompt directly instead of attempting a skill read.',
+    'A user song request is call-ready only when it supplies a topic, style, lyrics, or another material direction; otherwise ask one focused question and do not call or invent the provider prompt.',
+    'On ordinary conversation turns, read `$MURPH_ASSISTANT_SKILLS_ROOT/music-generation/SKILL.md` before deciding whether to call or constructing the provider prompt. In an isolated owning flow that forbids other tools or supplies its complete song contract, follow that owning prompt directly instead of attempting a skill read.',
     'A loaded music skill may shape selection and prompt craft only after that authorization signal; loading a skill cannot authorize the call.',
     'For an explicit request, preserve the requested safe subject, lyrics, style, instrumentation, mood, vocal direction, and instrumental choice.',
     'Build the provider-visible prompt only from the minimum song content the member supplied or explicitly asked Murph to use, plus exact bounded fields from an independently authorized owning-flow contract. Do not mine unrelated private context.',

@@ -7518,36 +7518,48 @@ describeRealCodex('real Codex capability questions e2e', () => {
       const capabilityInquiries = [
         {
           capability: 'voice memos',
-          expectedTopic: /\b(?:voice|audio|memo)\b/iu,
+          deniedSupport:
+            /\b(?:cannot|can['’]?t|unable to)\b[^.!?\n]{0,80}\b(?:voice memos?|audio messages?)\b|\b(?:voice memos?|audio messages?)\b[^.!?\n]{0,80}\b(?:not supported|unavailable)\b/iu,
+          expectedSupport:
+            /\b(?:yes|i can|support(?:s|ed)?)\b[^.!?\n]{0,100}\b(?:create|generate|send|make|record)\b[^.!?\n]{0,60}\b(?:voice memos?|audio messages?)\b/iu,
           prompt: 'Do you support voice memos?',
         },
         {
           capability: 'music generation',
-          expectedTopic: /\b(?:song|music|lyrics|style|mood)\b/iu,
+          deniedSupport:
+            /\b(?:cannot|can['’]?t|unable to)\b[^.!?\n]{0,80}\b(?:generate|create|make)\b[^.!?\n]{0,50}\b(?:original songs?|music|tracks?)\b|\b(?:original songs?|music generation)\b[^.!?\n]{0,80}\b(?:not supported|unavailable)\b/iu,
+          expectedSupport:
+            /\b(?:yes|i can|support(?:s|ed)?)\b[^.!?\n]{0,100}\b(?:generate|create|make)\b[^.!?\n]{0,60}\b(?:original songs?|music|tracks?)\b/iu,
           prompt: 'Do you make original songs?',
         },
         {
           capability: 'wearable connection',
-          expectedTopic: /\b(?:garmin|wearable|connect|data)\b/iu,
+          deniedSupport:
+            /\b(?:cannot|can['’]?t|unable to)\b[^.!?\n]{0,80}\bconnect\b[^.!?\n]{0,40}\bgarmin\b|\bgarmin\b[^.!?\n]{0,80}\b(?:not supported|unavailable)\b/iu,
+          expectedSupport:
+            /\b(?:i\s+)?support(?:s|ed)?\b[^.!?\n]{0,40}\bgarmin connections?\b|\bi can\b[^.!?\n]{0,100}(?:\bconnect\b[^.!?\n]{0,40}\bgarmin\b|\bgarmin\b[^.!?\n]{0,40}\bconnect)\b/iu,
           prompt: 'Do you support Garmin connections?',
         },
         {
           capability: 'lab discovery',
-          expectedTopic:
-            /\b(?:lab|test|panel|cholesterol|hormone|nutrient|blood sugar|wellness)\b/iu,
+          deniedSupport:
+            /\b(?:cannot|can['’]?t|unable to)\b[^.!?\n]{0,100}\b(?:find|search|discover|compare)\b[^.!?\n]{0,50}\b(?:labs?|lab tests?|tests?)\b/iu,
+          expectedSupport:
+            /\b(?:yes|i can|support(?:s|ed)?)\b[^.!?\n]{0,120}\b(?:explore|find|search|discover|compare)\b[^.!?\n]{0,50}\b(?:labs?|lab tests?|tests?)\b/iu,
           prompt: 'Do you help with finding lab tests?',
         },
       ] as const
       const incompleteRequests = [
         {
           capability: 'voice memos',
-          expectedMissingDetail: /\b(?:what|say|record|message|text)\b/iu,
+          expectedMissingDetail:
+            /\b(?:what|which)\b[^?]{0,100}\b(?:say|record|message|text|voice memo|memo)\b/iu,
           prompt: 'Can you send me a voice memo?',
         },
         {
           capability: 'music generation',
           expectedMissingDetail:
-            /\b(?:what|which|genre|style|mood|lyrics|instrumental|vocals)\b/iu,
+            /\b(?:what|which)\b[^?]{0,100}\b(?:song|topic|style|genre|mood|lyrics|instrumental|vocals)\b/iu,
           prompt: 'Can you make an original song for me?',
         },
       ] as const
@@ -7563,12 +7575,18 @@ describeRealCodex('real Codex capability questions e2e', () => {
       const executeProbe = async (input: {
         hostedToolContext?: AssistantHostedToolContext
         prompt: string
+        voiceMemoRuntime?: CodexAppServerTurnInput['voiceMemoRuntime']
       }) => {
         const workingDirectory = await mkdtemp(
           path.join(tmpdir(), 'murph-capability-boundary-e2e-'),
         )
 
         try {
+          const skillsRoot = path.join(workingDirectory, 'skills')
+          await materializeAssistantSkill({
+            skillsRoot,
+            slug: 'music-generation',
+          })
           return await executeRealCodexAppServerTurn({
             approvalPolicy: 'never',
             baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -7578,7 +7596,10 @@ describeRealCodex('real Codex capability questions e2e', () => {
             codexHome: config.codexHome,
             developerInstructions,
             dynamicTools,
-            env: config.env,
+            env: {
+              ...config.env,
+              [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            },
             excludeResumeTurns: true,
             hostedToolContext: input.hostedToolContext,
             model: config.model,
@@ -7586,6 +7607,7 @@ describeRealCodex('real Codex capability questions e2e', () => {
             prompt: input.prompt,
             reasoningEffort: 'low',
             sandbox: 'workspace-write',
+            voiceMemoRuntime: input.voiceMemoRuntime,
             workingDirectory,
           })
         } finally {
@@ -7613,13 +7635,8 @@ describeRealCodex('real Codex capability questions e2e', () => {
             capabilityCalls,
             `${inquiry.capability} inquiry must not execute a tool`,
           ).toEqual([])
-          expect(reply, inquiry.capability).toMatch(
-            /\b(?:yes|sure|support|can|help)\b/iu,
-          )
-          expect(reply, inquiry.capability).toMatch(inquiry.expectedTopic)
-          expect(reply, inquiry.capability).not.toMatch(
-            /^(?:sorry[,.]?\s*)?(?:i\s+)?(?:cannot|can['’]?t|am unable|am unavailable)\b/iu,
-          )
+          expect(reply, inquiry.capability).toMatch(inquiry.expectedSupport)
+          expect(reply, inquiry.capability).not.toMatch(inquiry.deniedSupport)
         }
 
         for (const request of incompleteRequests) {
@@ -7641,14 +7658,53 @@ describeRealCodex('real Codex capability questions e2e', () => {
             capabilityCalls,
             `${request.capability} request missing input must not execute a tool`,
           ).toEqual([])
-          expect(reply, request.capability).toContain('?')
+          expect(reply.match(/\?/gu) ?? [], request.capability).toHaveLength(1)
           expect(reply, request.capability).toMatch(
             request.expectedMissingDetail,
           )
+          expect(reply, request.capability).not.toMatch(
+            /\b(?:address|age|birthday|email|location|login|password|phone)\b/iu,
+          )
         }
 
+        const songGenerations: unknown[] = []
+        const directedSong = await executeProbe({
+          prompt: 'Make me a 10-second instrumental synth-pop song about finishing a workout, with bright synths and no vocals. Send only the song.',
+          voiceMemoRuntime: {
+            elevenLabs: {
+              apiKeyAvailable: true,
+              modelId: 'eleven_multilingual_v2',
+              voiceId: 'voice_murph',
+            },
+            generateAndUpload: async (input) => {
+              songGenerations.push(input.generation)
+              return {
+                attachmentId: 'attachment_directed_capability_song',
+                filename: 'directed-capability-song.mp3',
+              }
+            },
+            kind: 'linq',
+          },
+        })
+        const directedSongCalls = readCapabilityRoutingActions(
+          directedSong.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_SONG_TOOL.name
+        )
+
+        process.stdout.write(
+          `[directed-capability-request-e2e] ${JSON.stringify({
+            songCalls: directedSongCalls,
+            songGenerationCount: songGenerations.length,
+          })}\n`,
+        )
+
+        expect(directedSongCalls).toHaveLength(1)
+        expect(songGenerations).toHaveLength(1)
+
         const connectUrl =
-          'https://www.withmurph.ai/connect/garmin?token=synthetic-capability-test'
+          'https://www.withmurph.ai/connect/garmin?token=3f7c1a8e92b64d50'
         const deviceRequests: AssistantHostedDeviceToolRequest[] = []
         const deviceTool: NonNullable<
           AssistantHostedToolContext['deviceTool']
@@ -7670,7 +7726,7 @@ describeRealCodex('real Codex capability questions e2e', () => {
               action: 'connect',
               link: {
                 authorizationUrl:
-                  'https://www.withmurph.ai/connect/garmin/authorize?token=synthetic-capability-test',
+                  'https://www.withmurph.ai/connect/garmin/authorize?token=3f7c1a8e92b64d50',
                 connectUrl,
                 expiresAt: '2027-07-29T17:05:00.000Z',
                 provider: 'garmin',

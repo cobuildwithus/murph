@@ -17,13 +17,15 @@ argument limits, media conflicts, attempt limits, delivery, and truthful
 success or failure. This skill cannot create consent, expose private context,
 or widen route or delivery authority.
 
-When the current user explicitly requests an original song or instrumental and
-`murph.generate_song` is admitted, call it and preserve the requested safe
-subject, lyrics, style, instrumentation, mood, vocal direction, and
-instrumental choice. Build the provider-visible prompt only from the minimum
-song content the member supplied or explicitly asked Murph to use; do not mine
-unrelated private context. If the member asks for only the song, leave the
-final response text empty after successful generation.
+The public tool description owns whether a user song request is call-ready. For
+a request it marks underspecified, ask its one focused question and do not call.
+When the current user explicitly requests a call-ready original song or
+instrumental and `murph.generate_song` is admitted, call the tool and preserve
+the requested safe subject, lyrics, style, instrumentation, mood, vocal
+direction, and instrumental choice. Build the provider-visible prompt only
+from the minimum song content the member supplied or explicitly asked Murph to
+use; do not mine unrelated private context. If the member asks for only the
+song, leave the final response text empty after successful generation.
 
 A complete independently authorized owning-flow contract may also require a
 song and supply exact bounded prompt fields. This loaded skill shapes prompt
