@@ -41,6 +41,10 @@ import {
 } from "./fs.ts";
 import { VaultError } from "./errors.ts";
 import {
+  listEventLedgerShardPaths,
+  readEventLedgerShardRecords,
+} from "./event-ledger-storage.ts";
+import {
   listCanonicalExperimentDocumentPaths,
   scanExperimentStorage,
 } from "./experiment-storage.ts";
@@ -492,19 +496,18 @@ async function validateJsonlFamily({
   code,
   postValidateRecord,
 }: ValidateJsonlFamilyInput): Promise<ValidationIssue[]> {
-  const jsonlFiles = await walkVaultFiles(vaultRoot, relativeDirectory, {
-    extension: ".jsonl",
-  });
+  const jsonlFiles = relativeDirectory === VAULT_LAYOUT.eventLedgerDirectory
+    ? await listEventLedgerShardPaths(vaultRoot)
+    : await walkVaultFiles(vaultRoot, relativeDirectory, { extension: ".jsonl" });
   const issues: ValidationIssue[] = [];
 
   for (const relativePath of jsonlFiles) {
     let records: UnknownRecord[];
 
     try {
-      records = await readJsonlRecords({
-        vaultRoot,
-        relativePath,
-      });
+      records = relativeDirectory === VAULT_LAYOUT.eventLedgerDirectory
+        ? await readEventLedgerShardRecords({ vaultRoot, relativePath })
+        : await readJsonlRecords({ vaultRoot, relativePath });
     } catch (error) {
       issues.push(
         validationIssue(

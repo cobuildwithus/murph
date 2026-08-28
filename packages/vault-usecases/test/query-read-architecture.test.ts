@@ -19,11 +19,11 @@ const allowedFullVaultReaders = new Map<string, number>([
 const narrowReaderContracts = new Map<string, readonly string[]>([
   [
     "packages/cli/src/commands/audit-command-helpers.ts",
-    ["resolveCanonicalEntityInFamily", "listCanonicalEntities"],
+    ["resolveCanonicalEntityInFamily", "readCanonicalEntityFamilySource"],
   ],
   [
     "packages/cli/src/commands/export-intake-read-helpers.ts",
-    ["resolveCanonicalEntityInFamily"],
+    ["readCanonicalEntityFamilySource", "resolveCanonicalEntityInFamily"],
   ],
   [
     "packages/vault-usecases/src/usecases/capture.ts",
@@ -39,7 +39,7 @@ const narrowReaderContracts = new Map<string, readonly string[]>([
   ],
   [
     "packages/vault-usecases/src/usecases/integrated-services.ts",
-    ["resolveCanonicalEntityInFamily"],
+    ["readCanonicalEntityFamilySource", "resolveCanonicalEntityInFamily"],
   ],
   [
     "packages/vault-usecases/src/usecases/intervention-experiment-link.ts",

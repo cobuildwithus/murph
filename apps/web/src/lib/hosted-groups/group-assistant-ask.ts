@@ -13,11 +13,11 @@ import {
   createHostedExecutionAssistantAskCompletionId,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+  type HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   isHostedExecutionAssistantAskCompletedWake,
   isHostedExecutionAssistantAskCurrentSenderTarget,
   isHostedExecutionAssistantAskRequestedWake,
@@ -36,6 +36,7 @@ import {
   type HostedRuntimeAssistantAskControlResponse,
   type HostedRuntimeGroupAskResult,
   type HostedRuntimeGroupMemberAskResult,
+  type HostedRuntimeGroupParticipantTarget,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -84,6 +85,16 @@ import {
   readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx,
   type HostedGroupCurrentSenderCompletionAuthority,
 } from "./group-current-sender-assistant-ask";
+import {
+  createHostedGroupParticipantTargetDigest,
+  selectHostedGroupByParticipants,
+  type HostedGroupParticipantTargetSelection,
+} from "./group-participant-target";
+import {
+  normalizeHostedGroupTargetSelector,
+  normalizeHostedPersistedGroupTargetSelector,
+  sanitizeHostedGroupTargetDisplayLabel,
+} from "./group-target-description";
 
 const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-assistant-ask.request.v1";
@@ -91,12 +102,12 @@ const HOSTED_GROUP_CONTEXT_HANDOFF_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-context-handoff.request.v1";
 const HOSTED_GROUP_MEMBER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-member-assistant-ask.request.v2";
+const HOSTED_GROUP_PARTICIPANT_ASK_BINDING_PREFIX =
+  "participant-target-sha256:";
 const HOSTED_ASSISTANT_ASK_COMPLETION_ID_PREFIX = "aask_done_";
 const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE =
   "hosted-assistant-ask";
 const HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
-const HOSTED_ASSISTANT_ASK_UNSAFE_LABEL_PATTERN =
-  /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/gu;
 
 type HostedAssistantAskPrismaClient = Pick<PrismaClient, "$transaction">;
 
@@ -194,6 +205,12 @@ export function createHostedGroupContextHandoffEventId(input: {
     .digest("hex")}`;
 }
 
+function createHostedGroupParticipantAskBinding(
+  participantTargetDigest: string,
+): string {
+  return `${HOSTED_GROUP_PARTICIPANT_ASK_BINDING_PREFIX}${participantTargetDigest}`;
+}
+
 export function buildHostedGroupContextHandoffInstructions(input: {
   context: string;
 }): string {
@@ -251,6 +268,28 @@ export async function requestHostedGroupAssistantAsk(input: {
   now?: Date;
   originAssistantInputId: string;
   originSessionId: string;
+  participantTarget?: HostedRuntimeGroupParticipantTarget | null;
+  prisma?: PrismaClient;
+  question: string;
+}): Promise<HostedGroupAssistantAskAdmission> {
+  const participantTarget = input.participantTarget;
+  if (participantTarget) {
+    return runWithHostedDomainRootUnwrapCache(() =>
+      requestHostedGroupAssistantAskByParticipants({
+        ...input,
+        participantTarget,
+      })
+    );
+  }
+  return requestHostedGroupAssistantAskByLabel(input);
+}
+
+async function requestHostedGroupAssistantAskByLabel(input: {
+  groupLabel?: string | null;
+  memberId: string;
+  now?: Date;
+  originAssistantInputId: string;
+  originSessionId: string;
   prisma?: HostedAssistantAskPrismaClient;
   question: string;
 }): Promise<HostedGroupAssistantAskAdmission> {
@@ -261,7 +300,7 @@ export async function requestHostedGroupAssistantAsk(input: {
     maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
     value: input.question,
   });
-  const requestedLabel = normalizeHostedAssistantAskSelector(input.groupLabel);
+  const requestedLabel = normalizeHostedGroupTargetSelector(input.groupLabel);
   const originSessionId = normalizeHostedAssistantAskText({
     label: "Hosted assistant ask origin session ID",
     maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
@@ -376,12 +415,196 @@ export async function requestHostedGroupAssistantAsk(input: {
   });
 }
 
+async function requestHostedGroupAssistantAskByParticipants(input: {
+  groupLabel?: string | null;
+  memberId: string;
+  now?: Date;
+  originAssistantInputId: string;
+  originSessionId: string;
+  participantTarget: HostedRuntimeGroupParticipantTarget;
+  prisma?: PrismaClient;
+  question: string;
+}): Promise<HostedGroupAssistantAskAdmission> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const question = normalizeHostedAssistantAskText({
+    label: "Hosted assistant ask question",
+    maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+    value: input.question,
+  });
+  const requestedLabel = normalizeHostedGroupTargetSelector(input.groupLabel);
+  const originSessionId = normalizeHostedAssistantAskText({
+    label: "Hosted assistant ask origin session ID",
+    maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
+    value: input.originSessionId,
+  });
+  const requestId = createHostedAssistantAskRequestId({
+    memberId: input.memberId,
+    originAssistantInputId: input.originAssistantInputId,
+  });
+  const participantTargetDigest = createHostedGroupParticipantTargetDigest(
+    input.participantTarget,
+    requestedLabel,
+  );
+
+  const existing = await readHostedMailboxItemById({
+    mailboxItemId: requestId,
+    prisma,
+  });
+  if (existing) {
+    return prisma.$transaction(async (tx) => {
+      await acquireHostedAssistantAskLockTx(tx, requestId);
+      return replayHostedGroupAssistantAskTx({
+        existingDedupeKey: existing.dedupeKey,
+        existingKind: existing.kind,
+        existingUserId: existing.userId,
+        expiresAt: existing.expiresAt ?? null,
+        memberId: input.memberId,
+        now,
+        originAssistantInputId: input.originAssistantInputId,
+        originSessionId,
+        participantTargetDigest,
+        question,
+        requestId,
+        requestedLabel,
+        tx,
+      });
+    });
+  }
+
+  const originEligible = await prisma.$transaction((tx) =>
+    runWithHostedDomainRootProviderCallsDisabled(() =>
+      isEligiblePersonalAssistantAskCallerTx({
+        memberId: input.memberId,
+        now,
+        originAssistantInputId: input.originAssistantInputId,
+        tx,
+      })
+    )
+  );
+  if (!originEligible) {
+    return unavailableAdmission("origin_unavailable");
+  }
+
+  let selection: HostedGroupParticipantTargetSelection;
+  try {
+    selection = await selectHostedGroupByParticipants({
+      memberId: input.memberId,
+      now,
+      participantTarget: input.participantTarget,
+      prisma,
+      requestedLabel,
+    });
+  } catch {
+    return unavailableAdmission("participant_evidence_unavailable");
+  }
+  if (selection.status === "result") {
+    return { mailboxWake: null, result: selection.result };
+  }
+
+  return prisma.$transaction(async (tx) =>
+    runWithHostedDomainRootProviderCallsDisabled(async () => {
+      await acquireHostedAssistantAskLockTx(tx, requestId);
+      const racedExisting = await readHostedMailboxItemById({
+        mailboxItemId: requestId,
+        prisma: tx,
+      });
+      if (racedExisting) {
+        return replayHostedGroupAssistantAskTx({
+          existingDedupeKey: racedExisting.dedupeKey,
+          existingKind: racedExisting.kind,
+          existingUserId: racedExisting.userId,
+          expiresAt: racedExisting.expiresAt ?? null,
+          memberId: input.memberId,
+          now,
+          originAssistantInputId: input.originAssistantInputId,
+          originSessionId,
+          participantTargetDigest,
+          question,
+          requestId,
+          requestedLabel,
+          tx,
+        });
+      }
+      const authority = await readHostedAssistantAskMembershipAuthorityTx({
+        expectedOriginMemberId: input.memberId,
+        expectedTargetRuntimeMemberId: selection.targetRuntimeMemberId,
+        membershipId: selection.membershipId,
+        now,
+        originAssistantInputId: input.originAssistantInputId,
+        tx,
+      });
+      if (!authority) {
+        return unavailableAdmission("membership_unavailable");
+      }
+      try {
+        await assertHostedThreadRouteEgressAuthority({
+          authority: selection.routeAuthority,
+          prisma: tx,
+        });
+      } catch (error) {
+        if (
+          isHostedOnboardingError(error)
+          && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
+          && !error.retryable
+        ) {
+          return unavailableAdmission("group_route_unavailable");
+        }
+        throw error;
+      }
+
+      const occurredAt = now.toISOString();
+      const expiresAt = new Date(
+        now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+      ).toISOString();
+      const wake = buildHostedExecutionAssistantAskRequestedWake({
+        ask: {
+          expiresAt,
+          originAssistantInputId: input.originAssistantInputId,
+          originSessionId,
+          question,
+          target: {
+            kind: "joined_group",
+            membershipId: authority.membership.id,
+            requestedLabel: createHostedGroupParticipantAskBinding(
+              participantTargetDigest,
+            ),
+          },
+        },
+        eventId: requestId,
+        memberId: authority.targetRuntimeMemberId,
+        occurredAt,
+      });
+      const append = await appendHostedMailboxEnvelopeWithIdentityTx({
+        envelope: wake,
+        expiresAt,
+        itemId: requestId,
+        tx,
+      });
+      if (append.dedupeConflict || append.item.id !== requestId) {
+        return unavailableAdmission("request_conflict");
+      }
+      return {
+        mailboxWake: {
+          expectedUserId: authority.targetRuntimeMemberId,
+          mailboxItemId: requestId,
+        },
+        result: {
+          status: "accepted" as const,
+          targetLabel: selection.targetLabel,
+        },
+      };
+    })
+  );
+}
+
 export async function requestHostedGroupContextHandoff(input: {
   context: string;
   groupLabel?: string | null;
   memberId: string;
   now?: Date;
   originAssistantInputId: string;
+  participantTarget?: HostedRuntimeGroupParticipantTarget | null;
   prisma?: PrismaClient;
 }): Promise<HostedGroupAssistantAskAdmission> {
   return runWithHostedDomainRootUnwrapCache(() =>
@@ -395,6 +618,7 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
   memberId: string;
   now?: Date;
   originAssistantInputId: string;
+  participantTarget?: HostedRuntimeGroupParticipantTarget | null;
   prisma?: PrismaClient;
 }): Promise<HostedGroupAssistantAskAdmission> {
   const prisma = input.prisma ?? getPrisma();
@@ -404,12 +628,11 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     maxCodePoints: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
     value: input.context,
   });
-  const requestedLabel = normalizeHostedAssistantAskSelector(input.groupLabel);
+  const requestedLabel = normalizeHostedGroupTargetSelector(input.groupLabel);
   const eventId = createHostedGroupContextHandoffEventId({
     memberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
   });
-
   if (await readHostedMailboxItemById({
     mailboxItemId: eventId,
     prisma,
@@ -421,7 +644,6 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
       now,
       originAssistantInputId: input.originAssistantInputId,
       prisma,
-      requestedLabel,
     });
   }
 
@@ -432,17 +654,58 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     prisma,
   });
 
-  const preparedSelection = await prisma.$transaction((tx) =>
-    runWithHostedDomainRootProviderCallsDisabled(() =>
-      selectHostedGroupContextHandoffMembershipTx({
+  let preparedSelection: HostedGroupContextHandoffMembershipSelection;
+  if (input.participantTarget) {
+    const originEligible = await prisma.$transaction((tx) =>
+      runWithHostedDomainRootProviderCallsDisabled(() =>
+        isEligiblePersonalAssistantAskCallerTx({
+          memberId: input.memberId,
+          now,
+          originAssistantInputId: input.originAssistantInputId,
+          tx,
+        })
+      )
+    );
+    if (!originEligible) {
+      return unavailableAdmission("origin_unavailable");
+    }
+    try {
+      const participantSelection = await selectHostedGroupByParticipants({
         memberId: input.memberId,
         now,
-        originAssistantInputId: input.originAssistantInputId,
+        participantTarget: input.participantTarget,
+        prisma,
         requestedLabel,
-        tx,
-      })
-    )
-  );
+      });
+      preparedSelection = participantSelection.status === "result"
+        ? {
+            result: {
+              mailboxWake: null,
+              result: participantSelection.result,
+            },
+          }
+        : {
+            membershipId: participantSelection.membershipId,
+            routeAuthority: participantSelection.routeAuthority,
+            targetLabel: participantSelection.targetLabel,
+            targetRuntimeMemberId: participantSelection.targetRuntimeMemberId,
+          };
+    } catch {
+      return unavailableAdmission("participant_evidence_unavailable");
+    }
+  } else {
+    preparedSelection = await prisma.$transaction((tx) =>
+      runWithHostedDomainRootProviderCallsDisabled(() =>
+        selectHostedGroupContextHandoffMembershipTx({
+          memberId: input.memberId,
+          now,
+          originAssistantInputId: input.originAssistantInputId,
+          requestedLabel,
+          tx,
+        })
+      )
+    );
+  }
   if ("result" in preparedSelection) {
     return preparedSelection.result;
   }
@@ -470,6 +733,17 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     routeAuthority === null
     || boundDestination.route.threadIsDirect !== false
     || boundDestination.route.delivery.kind !== "thread"
+  ) {
+    return unavailableAdmission("group_route_unavailable");
+  }
+  if (
+    preparedSelection.routeAuthority
+    && (
+      routeAuthority.channel !== preparedSelection.routeAuthority.channel
+      || routeAuthority.containerMemberId
+        !== preparedSelection.routeAuthority.containerMemberId
+      || routeAuthority.threadId !== preparedSelection.routeAuthority.threadId
+    )
   ) {
     return unavailableAdmission("group_route_unavailable");
   }
@@ -518,7 +792,6 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
             memberId: input.memberId,
             now,
             originAssistantInputId: input.originAssistantInputId,
-            requestedLabel,
             tx,
           });
         }
@@ -576,7 +849,7 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
           },
           result: {
             status: "accepted",
-            targetLabel: authority.targetLabel,
+            targetLabel: preparedSelection.targetLabel ?? authority.targetLabel,
           },
         };
       })
@@ -597,7 +870,12 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
 
 type HostedGroupContextHandoffMembershipSelection =
   | { result: HostedGroupAssistantAskAdmission }
-  | { membershipId: string; targetRuntimeMemberId: string };
+  | {
+      membershipId: string;
+      routeAuthority?: HostedExecutionExternalThreadRouteAuthority;
+      targetLabel?: string;
+      targetRuntimeMemberId: string;
+    };
 
 async function selectHostedGroupContextHandoffMembershipTx(input: {
   memberId: string;
@@ -1777,7 +2055,6 @@ async function replayHostedGroupContextHandoff(input: {
   now: Date;
   originAssistantInputId: string;
   prisma: PrismaClient;
-  requestedLabel: string | null;
 }): Promise<HostedGroupAssistantAskAdmission> {
   const existing = await readHostedMailboxItemById({
     mailboxItemId: input.eventId,
@@ -1808,7 +2085,6 @@ async function replayHostedGroupContextHandoff(input: {
           memberId: input.memberId,
           now: input.now,
           originAssistantInputId: input.originAssistantInputId,
-          requestedLabel: input.requestedLabel,
           tx,
         });
       })
@@ -1859,7 +2135,6 @@ async function replayHostedGroupContextHandoffTx(input: {
   memberId: string;
   now: Date;
   originAssistantInputId: string;
-  requestedLabel: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupAssistantAskAdmission> {
   if (isHostedAssistantAskExpired(input.existingExpiresAt, input.now)) {
@@ -1933,14 +2208,6 @@ async function replayHostedGroupContextHandoffTx(input: {
   if (!authority) {
     return unavailableAdmission("membership_unavailable");
   }
-  if (
-    input.requestedLabel !== null
-    && normalizeHostedAssistantAskPersistedSelector(authority.targetLabel)
-      !== input.requestedLabel
-  ) {
-    return unavailableAdmission("request_conflict");
-  }
-
   try {
     await assertHostedThreadRouteEgressAuthority({
       authority: routeAuthority,
@@ -1978,6 +2245,7 @@ async function replayHostedGroupAssistantAskTx(input: {
   now: Date;
   originAssistantInputId: string;
   originSessionId: string;
+  participantTargetDigest?: string;
   question: string;
   requestId: string;
   requestedLabel: string | null;
@@ -2014,7 +2282,11 @@ async function replayHostedGroupAssistantAskTx(input: {
     wake.ask.originAssistantInputId !== input.originAssistantInputId
     || wake.ask.originSessionId !== input.originSessionId
     || wake.ask.question !== input.question
-    || wake.ask.target.requestedLabel !== input.requestedLabel
+    || wake.ask.target.requestedLabel !== (
+      input.participantTargetDigest
+        ? createHostedGroupParticipantAskBinding(input.participantTargetDigest)
+        : input.requestedLabel
+    )
     || createHostedAssistantAskRequestId({
       memberId: input.memberId,
       originAssistantInputId: wake.ask.originAssistantInputId,
@@ -2424,7 +2696,7 @@ async function readHostedAssistantAskMembershipAuthorityTx(input: {
 
   return {
     membership,
-    targetLabel: sanitizeHostedAssistantAskDisplayLabel(
+    targetLabel: sanitizeHostedGroupTargetDisplayLabel(
       membership.group.displayName,
     ),
     targetRuntimeMemberId,
@@ -2740,7 +3012,7 @@ function resolveHostedAssistantAskMembership(input: {
   }
 
   const matches = input.memberships.filter((membership) =>
-    normalizeHostedAssistantAskPersistedSelector(membership.group.displayName)
+    normalizeHostedPersistedGroupTargetSelector(membership.group.displayName)
       === input.requestedLabel
   );
   if (matches.length === 1) {
@@ -2769,10 +3041,10 @@ function readHostedAssistantAskClarificationLabels(
   const result: string[] = [];
   const seen = new Set<string>();
   for (const membership of memberships) {
-    const displayLabel = sanitizeHostedAssistantAskDisplayLabel(
+    const displayLabel = sanitizeHostedGroupTargetDisplayLabel(
       membership.group.displayName,
     );
-    const selector = normalizeHostedAssistantAskSelector(displayLabel);
+    const selector = normalizeHostedGroupTargetSelector(displayLabel);
     if (!displayLabel || !selector || seen.has(selector)) {
       continue;
     }
@@ -2861,49 +3133,6 @@ function hostedAssistantAskOriginsEqual(
       && right.kind === "automation_occurrence"
       && left.automationId === right.automationId
       && left.occurrenceAt === right.occurrenceAt;
-}
-
-function normalizeHostedAssistantAskSelector(
-  value: string | null | undefined,
-): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  const normalized = sanitizeHostedAssistantAskDisplayLabel(value);
-  if (!normalized) {
-    throw new TypeError("Hosted assistant ask group label must not be blank.");
-  }
-  if (
-    [...normalized].length
-    > HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS
-  ) {
-    throw new TypeError("Hosted assistant ask group label is too long.");
-  }
-  return normalized.toLocaleLowerCase("und");
-}
-
-function normalizeHostedAssistantAskPersistedSelector(
-  value: string | null | undefined,
-): string | null {
-  const normalized = sanitizeHostedAssistantAskDisplayLabel(value);
-  return normalized ? normalized.toLocaleLowerCase("und") : null;
-}
-
-function sanitizeHostedAssistantAskDisplayLabel(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value
-    .normalize("NFC")
-    .replace(HOSTED_ASSISTANT_ASK_UNSAFE_LABEL_PATTERN, "")
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (!normalized) {
-    return null;
-  }
-  return normalized;
 }
 
 function normalizeHostedAssistantAskText(input: {

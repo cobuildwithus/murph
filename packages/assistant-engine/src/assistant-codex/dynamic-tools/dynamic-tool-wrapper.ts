@@ -11,9 +11,9 @@ import type { GenerateVoiceMemoToolResult } from '../generate-voice-memo-tool.js
 
 export interface DynamicToolResult {
   /**
-   * Trusted runtime-owned text that must be delivered when the model supplies
-   * no response text or card. Analyze-video uses this for the best completed
-   * tool outcome so successful observations cannot disappear behind no-reply.
+   * Runtime-selected text that must be delivered when the model supplies no
+   * response text or card. Analyze-video failure text is trusted status;
+   * successful observation text remains untrusted data, never instructions.
    */
   requiredFinalResponseFallback?: string
   responseMediaPatch?: {

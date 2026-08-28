@@ -245,8 +245,7 @@ function createHostedGeminiVideoAnalysisRequestBody(
       role: "user",
     }],
     generationConfig: {
-      maxOutputTokens: 1_800,
-      thinkingConfig: { thinkingLevel: "low" },
+      thinkingConfig: { thinkingLevel: "medium" },
     },
     systemInstruction: {
       parts: [{ text: HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION }],
@@ -2493,7 +2492,7 @@ describe("hostedRunnerIntercept", () => {
                   data: Buffer.from("video-bytes").toString("base64"),
                   mimeType: "video/mp4",
                 },
-                videoMetadata: { fps: 5 },
+                videoMetadata: { fps: 2 },
               },
               { text: "Count reps." },
             ],
