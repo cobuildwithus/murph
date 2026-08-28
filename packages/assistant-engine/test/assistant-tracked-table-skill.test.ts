@@ -127,11 +127,23 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('vault-cli workout start')
     expect(skill).toContain('vault-cli workout show <evt_id> --format json')
     expect(skill).toContain('vault-cli workout exercise add')
+    expect(skill).toContain('--mode <mode>')
+    expect(skill).toContain('[--unit-override <lb|kg>]')
     expect(skill).toContain('[--sets <n>]')
     expect(skill).toContain('vault-cli workout exercise set-reps')
     expect(skill).toContain('vault-cli workout set log')
     expect(skill).toContain('vault-cli workout set clear')
     expect(skill).toContain('vault-cli workout finish --workout-id <evt_id>')
+    expect(skill).toContain(
+      'inspect the full code-mode command result rather than only `r.output`',
+    )
+    expect(skill).toContain(
+      'If it includes a `session_id`, call `write_stdin` until the command is terminal',
+    )
+    expect(skill).toContain('allow a 30-second initial yield')
+    expect(skill).toContain(
+      'Never continue, retry, or replace a workout write while its outcome is unknown',
+    )
     expect(skill).not.toContain('vault-cli workout active')
     expect(skill).toContain(
       'keep every terse or repeated set confirmation on this owner',
@@ -185,16 +197,30 @@ describe('assistant tracked workout table skill', () => {
       'Starting a new workout is independent of every older unfinished workout',
     )
     expect(skill).toContain(
-      "one repeated `--exercise 'name=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise",
+      "one repeated `--exercise 'name=...;mode=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise",
+    )
+    expect(skill).toContain('Every ad-hoc exercise must have one explicit editor mode.')
+    expect(skill).toContain(
+      'Every `weight_reps` exercise also needs an exact unit hint',
+    )
+    expect(skill).toContain(
+      'the missing load stays an empty weight field',
     )
     expect(skill).toContain(
       '`targetWeight` and `targetWeightUnit` are an optional pair for an exact ad-hoc load',
     )
-    expect(skill).toContain('An explicit unit in the current request wins.')
     expect(skill).toContain(
-      'read `vault-cli workout units show --format json` and use the saved strength unit',
+      'Use an explicit lb/kg unit from the current request when present.',
     )
-    expect(skill).toContain('when no preference exists, ask which unit they mean')
+    expect(skill).toContain(
+      'Otherwise read `vault-cli workout units show --format json` once and use the saved strength unit.',
+    )
+    expect(skill).toContain(
+      'If neither exists, ask whether the member means lb or kg',
+    )
+    expect(skill).toContain(
+      'Never put a resistance-unit hint on an unloaded `bodyweight` exercise.',
+    )
     expect(skill).not.toContain('vault-cli workout replace')
     expect(skill).not.toContain('--confirm-delete')
     expect(skill).toContain('The start command must')

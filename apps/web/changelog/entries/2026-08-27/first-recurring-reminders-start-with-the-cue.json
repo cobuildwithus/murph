@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "first-recurring-reminders-start-with-the-cue",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "First reminders start with the cue",
+    "summary": "New recurring reminders now begin with the reminder you asked for, without immediately asking whether to keep, change, or pause it.",
+    "details": "Murph asks about cadence only when a confirmed earlier cue has no relevant reply. Prescribed treatment, clinical monitoring, and safety-critical reminders keep their existing protections.",
+    "relevanceTags": ["assistant", "reminders", "reliability"],
+    "sourcePullRequests": [2472]
+  }
+}

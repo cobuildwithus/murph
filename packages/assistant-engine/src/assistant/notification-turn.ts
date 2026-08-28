@@ -292,6 +292,7 @@ export interface AssistantNotificationInput
   instructions: string
   onGroupEmailPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
+  recurringReminderConversation?: boolean | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
   scheduledAutomationScheduleKind?: AutomationScheduleKind | null
