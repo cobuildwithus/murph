@@ -302,6 +302,8 @@ the output contract below. Do not promote it to a finding merely because a
 repository preference, ideal proof standard, or broader disclosure could be
 improved.
 
+Treat Codex agents and detached subagents inside the same per-member Murph container as trusted cooperative actors; continued background execution across a foreground handoff is not itself a correctness or security finding without evidence of concrete material harm.
+
 Report only:
 
 - **Critical** or **High**: a PR-caused, production-faithful, realistically
