@@ -1,6 +1,6 @@
 # Attribute hosted container-busy retries
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-28
 
@@ -130,3 +130,4 @@ Updated: 2026-08-28
   - Non-busy telemetry remains compatible, retry responses/timing are
     unchanged, Analytics write failure is swallowed, and the updated report
     includes historical points.
+Completed: 2026-08-28
