@@ -1,6 +1,6 @@
 # Durable Object schema activation fast path
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -61,9 +61,10 @@ Updated: 2026-08-27
 3. Completed: ran the focused schema/store suite, deterministic before/after
    operation proof, Cloudflare typecheck, changelog page suite, Web typecheck,
    and diff checks.
-4. In progress: the candidate is pushed on PR #2462; complete required
-   ReviewGPT and CI gates.
-5. Merge the exact reviewed head and retire the task worktree.
+4. Completed: PR #2462 passed the Product UX/coverage specialist review, final
+   full-patch audit, and required exact-head CI with no findings or failures.
+5. In progress: merge the reviewed production candidate plus this plan-only
+   closure and retire the task worktree.
 
 ## Decisions
 
@@ -93,3 +94,4 @@ Updated: 2026-08-27
   - Changelog page suite: 9 passed.
   - Cloudflare and Web typechecks passed.
   - `git diff --check` passed.
+Completed: 2026-08-27
