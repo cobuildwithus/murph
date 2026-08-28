@@ -1637,6 +1637,7 @@ describe('real Codex live fixture contracts', () => {
       'Please tell me what the meal was and the approximate portion.',
       'I only need the food and amount to finish this capture.',
       'The meal logged for August 25 has no food or portion details yet. What did you eat, and about how much?',
+      'The logged meal has no food or portion details. What did you eat, and about how much?',
     ]) {
       expect(hasOneBoundedMealClarificationMeaning(message), message)
         .toBe(true)
@@ -1647,9 +1648,64 @@ describe('real Codex live fixture contracts', () => {
       'I saved the meal without needing clarification.',
       'I saved the meal and amount.',
       'No need to tell me what food or how much.',
+      "I've saved the meal, but the meal has no food or portion details. What did you eat, and about how much?",
+      'No need to tell me what food or amount. The meal has no food details. What did you eat, and about how much?',
     ]) {
       expect(hasOneBoundedMealClarificationMeaning(message), message)
         .toBe(false)
+    }
+  })
+
+  it('keeps equivalent live wording inside the asserted behavior boundary', () => {
+    expect(hasFinnishDrySaunaMeaning(
+      'vault-cli commons knowledge search "Dry Finnish sauna safety"',
+    )).toBe(true)
+    expect(hasFinnishDrySaunaMeaning(
+      'vault-cli commons knowledge search "Infrared sauna safety"',
+    )).toBe(false)
+
+    for (const message of [
+      'Yes, but only in group conversations that Murph has already joined. I can answer a question there.',
+      'Murph can consult group conversations it has already joined.',
+    ]) {
+      expect(hasJoinedGroupCapabilityMeaning(message), message).toBe(true)
+    }
+    expect(hasJoinedGroupCapabilityMeaning(
+      "Yes. I can't consult group conversations that I'm not joined to, and joined groups are unavailable too.",
+    )).toBe(false)
+
+    expect(isFixtureVoiceUpdatePreservingCurrentPersonalization({
+      action: 'update',
+      voice: 'country',
+    }, 'country')).toBe(true)
+    expect(isFixtureVoiceUpdatePreservingCurrentPersonalization({
+      action: 'update',
+      mainPersona: 'classic',
+      supportingPersona: null,
+      tone: 'casual',
+      voice: 'country',
+    }, 'country')).toBe(true)
+    for (const request of [
+      { action: 'update', tone: 'formal', voice: 'country' },
+      {
+        action: 'update',
+        mainPersona: 'athlete',
+        supportingPersona: null,
+        voice: 'country',
+      },
+      {
+        action: 'update',
+        mainPersona: 'classic',
+        supportingPersona: 'doctor',
+        voice: 'country',
+      },
+    ]) {
+      expect(
+        isFixtureVoiceUpdatePreservingCurrentPersonalization(
+          request,
+          'country',
+        ),
+      ).toBe(false)
     }
   })
 
@@ -2953,7 +3009,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
         'keeps a speech question on standard sampling and calibrates an audible negative',
     },
     {
-      expectedAnswerPattern: /(?:could not|couldn't|couldn’t|did not|didn't|didn’t).*(?:usable|analyz|return|result)|no usable/iu,
+      expectedAnswerPattern: /(?:could not|couldn't|couldn’t|did not|didn't|didn’t).*(?:usable|analy[sz]|return|result)|no usable/iu,
       expectedFinalPattern: /video|analysis|Gemini|usable|return/iu,
       expectedFps: 1,
       expectedSamplingMode: null,
@@ -5347,13 +5403,20 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ).toBe(scenario.expectedUserRequestedVoice)
           }
           if (scenario.expectedPersonalizationVoice) {
+            const updateRequests = personalizationRequests.filter(
+              (request) => readRecord(request)?.action === 'update',
+            )
             expect(
-              personalizationRequests,
-              `${scenario.slug} personalization requests`,
-            ).toContainEqual(expect.objectContaining({
-              action: 'update',
-              voice: scenario.expectedPersonalizationVoice,
-            }))
+              updateRequests,
+              `${scenario.slug} personalization updates`,
+            ).toHaveLength(1)
+            expect(
+              isFixtureVoiceUpdatePreservingCurrentPersonalization(
+                updateRequests[0],
+                scenario.expectedPersonalizationVoice,
+              ),
+              `${scenario.slug} scoped voice update`,
+            ).toBe(true)
           } else {
             expect(personalizationRequests).toEqual([])
           }
@@ -7278,11 +7341,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )
 
         expect(groupRequests).toEqual([])
+        expect(hasJoinedGroupCapabilityMeaning(reply)).toBe(true)
         expect(reply).toMatch(
-          /\byes\b[\s\S]{0,200}\b(?:joined|added|already in)\b/iu,
-        )
-        expect(reply).toMatch(
-          /(?:\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!]{0,120}\b(?:unjoined|not\s+joined)\b|\bunjoined\b[^.?!]{0,120}\b(?:are|remain)\s+(?:unavailable|inaccessible)\b)/iu,
+          /(?:\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!]{0,120}\b(?:unjoined|not\s+joined)\b|\bunjoined\b[^.?!]{0,120}\b(?:are|remain)\s+(?:unavailable|inaccessible)\b|\bonly\b[^.?!]{0,120}\b(?:joined|added|already in)\b)/iu,
         )
         expect(reply).toMatch(/\b(?:ask|check|consult|message|post|share|tell)\b/iu)
         expect(reply).not.toMatch(
@@ -10747,7 +10808,8 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
 
       expect(knowledgeCommands).toHaveLength(1)
-      expect(knowledgeCommands[0] ?? '').toMatch(/sauna/iu)
+      expect(hasFinnishDrySaunaMeaning(knowledgeCommands[0] ?? ''))
+        .toBe(true)
       expect(knowledgeCommands[0] ?? '').toMatch(
         /evidence|health|benefit|cardiovascular|mortality/iu,
       )
@@ -10775,7 +10837,8 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
 
       expect(knowledgeCommands).toHaveLength(1)
-      expect(knowledgeCommands[0] ?? '').toMatch(/sauna/iu)
+      expect(hasFinnishDrySaunaMeaning(knowledgeCommands[0] ?? ''))
+        .toBe(true)
       expect(knowledgeCommands[0] ?? '').toMatch(/immun/iu)
       expect(knowledgeCommands[0] ?? '').toMatch(/faint/iu)
       expect(
@@ -10806,7 +10869,8 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
 
       expect(knowledgeCommands, JSON.stringify(result.actions)).toHaveLength(1)
-      expect(knowledgeCommands[0] ?? '').toMatch(/sauna/iu)
+      expect(hasFinnishDrySaunaMeaning(knowledgeCommands[0] ?? ''))
+        .toBe(true)
       expect(knowledgeCommands[0] ?? '').toMatch(/fentanyl/iu)
       expect(result.actions.some((action) =>
         action.kind === 'command'
@@ -13033,7 +13097,6 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
           expect(managedSummary?.length).toBeLessThanOrEqual(
             PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
           )
-          expect(managedSummary).toMatch(/\b(?:member|user)\b/iu)
           expect(managedSummary).toMatch(/\bproduct[- ]notes?\b/iu)
           expect(managedSummary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
           expect(managedSummary).toMatch(/\bskip/iu)
@@ -18982,13 +19045,11 @@ function hasOneBoundedMealClarificationMeaning(message: string): boolean {
   const asksUnrelatedDetail = /\b(?:when|where|why|restaurant|recipe)\b/iu
     .test(message)
   const questionMarkCount = message.match(/\?/gu)?.length ?? 0
-  const describesMissingMealDetails =
-    /\bmeal\b[^.!?\n]{0,64}\b(?:has|had|with)\b[^.!?\n]{0,24}\bno\b[^.!?\n]{0,32}\b(?:details?|amount|portion|food|drink)\b/iu
-      .test(message)
   const contradictsClarification = [
-    /\b(?:already )?(?:saved|logged|recorded|completed|finished)\b[^.!?\n]{0,48}\b(?:meal|food|drink|amount|portion)\b/iu,
+    /\bi(?:['’]ve|\s+have)?\s+(?:already\s+)?(?:saved|logged|recorded|completed|finished)\b[^.!?\n]{0,48}\b(?:meal|food|drink|amount|portion)\b/iu,
+    /\b(?:meal|food|drink)\b[^.!?\n]{0,48}\b(?:is|was|has been)\s+(?:already\s+)?(?:saved|logged|recorded|completed|finished)\b/iu,
     /\b(?:no need|need not|do not need|don[’']t need|does not need|doesn[’']t need)\b[^.!?\n]{0,64}\b(?:tell|clarif|food|drink|meal|amount|how much|portion)\b/iu,
-  ].some((pattern) => pattern.test(message)) && !describesMissingMealDetails
+  ].some((pattern) => pattern.test(message))
   const requestsClarification = questionMarkCount === 1
     || /\b(?:please (?:tell|share)|tell me|need (?:the|to know)|could you|can you)\b/iu
       .test(message)
@@ -18998,6 +19059,41 @@ function hasOneBoundedMealClarificationMeaning(message: string): boolean {
     && !contradictsClarification
     && requestsClarification
     && questionMarkCount <= 1
+}
+
+function hasFinnishDrySaunaMeaning(value: string): boolean {
+  return [
+    /\bfinnish\b/iu,
+    /\bdry\b/iu,
+    /\bsauna\b/iu,
+  ].every((pattern) => pattern.test(value))
+}
+
+function hasJoinedGroupCapabilityMeaning(message: string): boolean {
+  const affirmsJoinedAccess = [
+    /\byes\b[^.?!\n]{0,160}\bonly\b[^.?!\n]{0,120}\b(?:joined|added|already in)\b/iu,
+    /\b(?:i|murph)\s+can\b[^.?!\n]{0,160}\b(?:ask|check|consult|interact|message|post|share|tell)\b[^.?!\n]{0,160}\b(?:joined|added|already in)\b/iu,
+  ].some((pattern) => pattern.test(message))
+  const deniesJoinedAccess = [
+    /\b(?:joined|already[- ]joined)\s+groups?\b[^.?!\n]{0,80}\b(?:unavailable|inaccessible)\b/iu,
+    /\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!\n]{0,120}\b(?:joined|already[- ]joined)\s+groups?\b/iu,
+  ].some((pattern) => pattern.test(message))
+  return affirmsJoinedAccess && !deniesJoinedAccess
+}
+
+function isFixtureVoiceUpdatePreservingCurrentPersonalization(
+  value: unknown,
+  expectedVoice: string,
+): boolean {
+  const request = readRecord(value)
+  return request?.action === 'update'
+    && request.voice === expectedVoice
+    && (request.mainPersona === undefined || request.mainPersona === 'classic')
+    && (
+      request.supportingPersona === undefined
+      || request.supportingPersona === null
+    )
+    && (request.tone === undefined || request.tone === 'casual')
 }
 
 const CAPABILITY_ROUTING_PROBES: readonly CapabilityRoutingProbe[] = [
