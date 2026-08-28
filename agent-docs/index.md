@@ -99,6 +99,14 @@ contract are specified by
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
+Member-reported workout duration defaults live in the typed canonical
+preferences owner and apply only when an ordinary workout report omits
+duration. Current explicit or ambiguous duration evidence and structured
+imports keep their existing resolution rules. A versioned compatibility bridge
+can promote one unambiguous legacy Preferences-memory value, while explicit
+clear prevents that legacy value from returning. This boundary is specified by
+`agent-docs/references/data-model-seams.md`.
+
 Private-to-joined-group ask and handoff first read the requester's paged current
 membership inventory. Each entry exposes its opaque membership generation,
 existing title, real human chat count, and an independent safe roster result.

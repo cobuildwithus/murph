@@ -443,6 +443,19 @@ export const workoutUnitPreferencesSchema = z
   })
   .strict();
 
+export const workoutDefaultDurationMinutesSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(24 * 60);
+
+export const workoutCapturePreferencesSchema = z
+  .object({
+    defaultDurationMinutes: workoutDefaultDurationMinutesSchema.optional(),
+    legacyMemoryMigrationVersion: z.literal(1).optional(),
+  })
+  .strict();
+
 export const wearablePreferenceProviderValues = ["garmin", "oura", "strava", "whoop"] as const;
 export const wearablePreferenceProviderSchema = z.enum(wearablePreferenceProviderValues);
 const wearablePreferenceProviderOrder = new Map<WearablePreferenceProvider, number>(
@@ -470,6 +483,7 @@ export const preferencesDocumentSchema = withContractMetadata(
       schemaVersion: z.literal(preferencesDocumentSchemaVersion),
       updatedAt: z.string().min(1),
       assistant: assistantPreferencesSchema.optional(),
+      workoutCapturePreferences: workoutCapturePreferencesSchema.optional(),
       workoutUnitPreferences: workoutUnitPreferencesSchema.default({}),
       wearablePreferences: wearablePreferencesSchema,
     })
@@ -479,6 +493,7 @@ export const preferencesDocumentSchema = withContractMetadata(
 );
 
 export type WorkoutUnitPreferences = z.infer<typeof workoutUnitPreferencesSchema>;
+export type WorkoutCapturePreferences = z.infer<typeof workoutCapturePreferencesSchema>;
 export type WearablePreferenceProvider = z.infer<typeof wearablePreferenceProviderSchema>;
 export type WearablePreferences = z.infer<typeof wearablePreferencesSchema>;
 export type AssistantTonePreference = z.infer<typeof assistantTonePreferenceSchema>;
@@ -558,6 +573,7 @@ export function createEmptyPreferencesDocument(now = new Date()): PreferencesDoc
   return preferencesDocumentSchema.parse({
     schemaVersion: preferencesDocumentSchemaVersion,
     updatedAt: now.toISOString(),
+    workoutCapturePreferences: {},
     workoutUnitPreferences: {},
     wearablePreferences: {
       desiredProviders: [],

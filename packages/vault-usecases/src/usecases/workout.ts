@@ -29,6 +29,7 @@ import {
   deriveDurationMinutesFromTimestamps,
 } from './workout-model.js'
 import { type ActivitySessionDraftInput, loadWorkoutCoreRuntime } from './workout-core.js'
+import { resolveWorkoutCaptureDurationDefault } from './workout-measurement.js'
 
 const MILES_TO_KM = 1.609344
 
@@ -202,6 +203,7 @@ export interface AddWorkoutRecordInput {
 export interface ResolveWorkoutCaptureInput {
   text: string
   durationMinutes?: number
+  defaultDurationMinutes?: number
   activityType?: string
   distanceKm?: number
   strengthExercises?: ActivityStrengthExercise[] | null
@@ -225,7 +227,11 @@ export function resolveWorkoutCapture(
   }
 
   const activity = resolveWorkoutActivityDescriptor(note, input.activityType)
-  const durationMinutes = resolveDurationMinutes(note, input.durationMinutes)
+  const durationMinutes = resolveDurationMinutes(
+    note,
+    input.durationMinutes,
+    input.defaultDurationMinutes,
+  )
   const distanceKm = resolveDistanceKm(note, input.distanceKm)
   const strengthExercises =
     input.strengthExercises ?? inferStrengthExercises(note, activity.activityType)
@@ -261,6 +267,7 @@ function formatSchemaIssues(issues: readonly { path: PropertyKey[]; message: str
 
 function resolveStructuredDurationMinutes(input: {
   explicitDurationMinutes?: number
+  defaultDurationMinutes?: number
   payloadDurationMinutes?: number
   structuredWorkout?: WorkoutSession
   fallbackText?: string
@@ -295,7 +302,18 @@ function resolveStructuredDurationMinutes(input: {
   }
 
   if (input.fallbackText) {
-    return resolveDurationMinutes(input.fallbackText, undefined)
+    return resolveDurationMinutes(
+      input.fallbackText,
+      undefined,
+      input.defaultDurationMinutes,
+    )
+  }
+
+  if (input.defaultDurationMinutes !== undefined) {
+    return validateDurationMinutes(
+      input.defaultDurationMinutes,
+      'Default workout duration',
+    )
   }
 
   throw new VaultCliError(
@@ -361,6 +379,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
   occurredAt?: string
   source?: AddWorkoutRecordInput['source']
   durationMinutes?: number
+  defaultDurationMinutes?: number
   activityType?: string
   distanceKm?: number
   strengthExercises?: ActivityStrengthExercise[] | null
@@ -399,6 +418,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
   const durationMinutes =
     resolveStructuredDurationMinutes({
       explicitDurationMinutes: input.durationMinutes,
+      defaultDurationMinutes: input.defaultDurationMinutes,
       payloadDurationMinutes: valueAsNumber(sourcePayload.durationMinutes),
       structuredWorkout: explicitStructuredWorkout,
       fallbackText: fallbackText ?? undefined,
@@ -510,8 +530,42 @@ export async function addStructuredWorkoutRecord(input: {
   }
 }
 
+function shouldReadWorkoutCaptureDefault(input: AddWorkoutRecordInput): boolean {
+  if (
+    input.inputFile !== undefined
+    || input.durationMinutes !== undefined
+  ) {
+    return false
+  }
+
+  if (
+    deriveDurationMinutesFromTimestamps(
+      input.workout?.startedAt,
+      input.workout?.endedAt,
+    ) !== null
+  ) {
+    return false
+  }
+
+  const captureText =
+    input.text
+      ?? input.workout?.sessionNote
+      ?? input.workout?.routineName
+      ?? ''
+  if (looksLikeSegmentedWorkout(captureText)) {
+    return false
+  }
+
+  const durationEvidence = inferDurationMinutes(captureText)
+  return durationEvidence === null
+}
+
 export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
   let draft: ActivitySessionDraft
+  const defaultDurationMinutes = shouldReadWorkoutCaptureDefault(input)
+    ? await resolveWorkoutCaptureDurationDefault(input.vault)
+      ?? undefined
+    : undefined
 
   if (typeof input.inputFile === 'string') {
     draft = buildStructuredWorkoutActivitySessionDraft({
@@ -519,6 +573,7 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
       occurredAt: input.occurredAt,
       source: input.source,
       durationMinutes: input.durationMinutes,
+      defaultDurationMinutes,
       activityType: input.activityType,
       distanceKm: input.distanceKm,
       strengthExercises: input.strengthExercises,
@@ -532,6 +587,7 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
       occurredAt: input.occurredAt,
       source: input.source,
       durationMinutes: input.durationMinutes,
+      defaultDurationMinutes,
       activityType: input.activityType ?? 'strength-training',
       distanceKm: input.distanceKm,
       strengthExercises: input.strengthExercises,
@@ -543,6 +599,7 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
     const capture = resolveWorkoutCapture({
       text: input.text ?? '',
       durationMinutes: input.durationMinutes,
+      defaultDurationMinutes,
       activityType: input.activityType,
       distanceKm: input.distanceKm,
       strengthExercises: input.strengthExercises,
@@ -905,6 +962,7 @@ function slugifyWorkoutType(value: string): string | null {
 function resolveDurationMinutes(
   text: string,
   explicitDurationMinutes: number | undefined,
+  defaultDurationMinutes: number | undefined = undefined,
 ): number {
   if (typeof explicitDurationMinutes === 'number') {
     return validateDurationMinutes(explicitDurationMinutes)
@@ -926,6 +984,13 @@ function resolveDurationMinutes(
     throw new VaultCliError(
       'invalid_option',
       'Workout duration is ambiguous. Pass --duration <minutes> to record it explicitly.',
+    )
+  }
+
+  if (defaultDurationMinutes !== undefined) {
+    return validateDurationMinutes(
+      defaultDurationMinutes,
+      'Default workout duration',
     )
   }
 

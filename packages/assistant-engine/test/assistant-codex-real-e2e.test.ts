@@ -19,6 +19,7 @@ import {
   initializeVault,
   readHabitatAspect,
   readMemoryDocument,
+  readPreferencesDocument,
   removeAutomaticMealPhoto,
   upsertAutomation,
   upsertGoal,
@@ -1845,6 +1846,138 @@ describe('real Codex live fixture contracts', () => {
       await removeRealCodexTemporaryPath(workingDirectory)
     }
   })
+})
+
+describeRealCodex('real Codex workout capture default e2e', () => {
+  it(
+    'applies a saved workout duration default on a fresh later report',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-workout-capture-default-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+
+      try {
+        await initializeVault({
+          title: 'Synthetic workout capture default proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        await materializeRealWorkoutVaultCli({
+          binDirectory,
+          commandLogPath,
+          vaultRoot: workingDirectory,
+        })
+
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout defaults set [--duration <minutes>] [--clear-duration]',
+              'vault-cli workout defaults show --format json',
+              'vault-cli workout add <text> [--duration <minutes>] --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-28',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          groupConversation: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }
+
+        const saved = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Use 60 minutes as the ongoing default for workouts I report here unless I give another duration.',
+        })
+        const savedPreferences = await readPreferencesDocument(workingDirectory)
+        expect(savedPreferences.workoutCapturePreferences).toEqual({
+          defaultDurationMinutes: 60,
+          legacyMemoryMigrationVersion: 1,
+        })
+        expect(saved.finalMessage).toMatch(/60(?:-|\s+)minute|one hour/iu)
+        expect(saved.finalMessage).not.toMatch(/\?/u)
+
+        const reported = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'I did a yoga workout this morning.',
+        })
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const workouts = vault.events.filter(
+          (event) => event.kind === 'activity_session',
+        )
+        const commands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+
+        process.stdout.write(
+          `[workout-capture-default-e2e] ${JSON.stringify({
+            durationMinutes: workouts[0]?.attributes.durationMinutes ?? null,
+            finalMessage: reported.finalMessage,
+            mutationCommands: commands.filter((command) =>
+              command.startsWith('workout defaults set ')
+              || command.startsWith('workout add ')
+            ),
+            scenario: 'fresh-later-report',
+            workoutCount: workouts.length,
+          })}\n`,
+        )
+
+        expect(workouts).toHaveLength(1)
+        expect(workouts[0]?.attributes.durationMinutes).toBe(60)
+        expect(reported.finalMessage).toMatch(/logged|saved|recorded/iu)
+        expect(reported.finalMessage).toMatch(/yoga/iu)
+        expect(reported.finalMessage).not.toMatch(/how long|duration|\?/iu)
+
+        expect(
+          commands.filter((command) => command.startsWith('workout defaults set ')),
+        ).toHaveLength(1)
+        expect(
+          commands.filter((command) => command.startsWith('workout add ')),
+        ).toHaveLength(1)
+        expect(commands.join('\n')).not.toContain('memory upsert')
+        expect(saved.runtimeIssueInputs).toEqual([])
+        expect(reported.runtimeIssueInputs).toEqual([])
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
 })
 
 describeRealCodex('real Codex coordinated workout exercise e2e', () => {

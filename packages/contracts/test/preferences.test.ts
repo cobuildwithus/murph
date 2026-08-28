@@ -146,6 +146,24 @@ describe("assistant personality preference contracts", () => {
     expect(
       preferencesDocumentSchema.parse({
         ...oldDocument,
+        workoutCapturePreferences: {
+          defaultDurationMinutes: 60,
+        },
+      }).workoutCapturePreferences,
+    ).toEqual({
+      defaultDurationMinutes: 60,
+    });
+    expect(
+      preferencesDocumentSchema.safeParse({
+        ...oldDocument,
+        workoutCapturePreferences: {
+          defaultDurationMinutes: 0,
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      preferencesDocumentSchema.parse({
+        ...oldDocument,
         assistant: {
           ...oldDocument.assistant,
           personality: {

@@ -22,6 +22,7 @@ import {
   pathSchema,
   showResultSchema,
   workoutAddResultSchema,
+  workoutCapturePreferencesResultSchema,
   workoutFormatListResultSchema,
   workoutFormatSaveResultSchema,
   workoutImportCsvResultSchema,
@@ -52,7 +53,9 @@ import {
   inspectWorkoutCsvImport,
 } from '@murphai/vault-usecases/workouts'
 import {
+  setWorkoutCapturePreferences,
   setWorkoutUnitPreferences,
+  showWorkoutCapturePreferences,
   showWorkoutUnitPreferences,
 } from '@murphai/vault-usecases/workouts'
 import {
@@ -385,7 +388,7 @@ export function registerWorkoutCommands(
 ) {
   const workout = Cli.create('workout', {
     description:
-      'Workout façade commands over activity sessions, workout-format docs, CSV import, and saved unit preferences.',
+      'Workout façade commands over activity sessions, workout-format docs, CSV import, and saved preferences.',
   })
 
   registerWorkoutLiveCommands(workout)
@@ -858,6 +861,58 @@ export function registerWorkoutCommands(
       })
     },
   })
+
+  const defaults = Cli.create('defaults', {
+    description:
+      'Canonical defaults for subsequently reported workout capture.',
+  })
+
+  defaults.command('show', {
+    description: 'Show saved defaults for subsequently reported workouts.',
+    args: z.object({}),
+    options: withBaseOptions(),
+    output: workoutCapturePreferencesResultSchema,
+    async run({ options }) {
+      return showWorkoutCapturePreferences(options.vault)
+    },
+  })
+
+  defaults.command('set', {
+    description:
+      'Set or clear the default duration for subsequently reported workouts.',
+    args: z.object({}),
+    options: withBaseOptions({
+      duration: z
+        .number()
+        .int()
+        .positive()
+        .max(24 * 60)
+        .optional()
+        .describe('Default duration in minutes when a reported workout omits it.'),
+      clearDuration: z
+        .boolean()
+        .optional()
+        .describe('Clear the saved workout duration default.'),
+      recordedAt: isoTimestampSchema
+        .optional()
+        .describe('Optional preferences update timestamp override in ISO 8601 form.'),
+    }),
+    output: workoutCapturePreferencesResultSchema,
+    async run({ options }) {
+      return setWorkoutCapturePreferences({
+        vault: options.vault,
+        durationMinutes:
+          typeof options.duration === 'number' ? options.duration : undefined,
+        clearDuration: options.clearDuration === true,
+        recordedAt:
+          typeof options.recordedAt === 'string'
+            ? options.recordedAt
+            : undefined,
+      })
+    },
+  })
+
+  workout.command(defaults)
 
   const units = Cli.create('units', {
     description:

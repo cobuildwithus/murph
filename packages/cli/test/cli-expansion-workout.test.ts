@@ -10,6 +10,7 @@ import {
   listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
   readStoredWriteOperation,
+  upsertMemory,
 } from '@murphai/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
@@ -45,6 +46,14 @@ interface WorkoutAddEnvelope {
   distanceKm: number | null
   workout: Record<string, unknown> | null
   note: string
+}
+
+interface WorkoutCaptureDefaultsEnvelope {
+  captureDefaults: {
+    durationMinutes: number | null
+  }
+  recordedAt: string | null
+  updated: boolean
 }
 
 interface ShowEnvelope {
@@ -1389,6 +1398,265 @@ test(
     }
   },
 )
+
+test('workout capture defaults apply only when a reported workout omits duration', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+
+  try {
+    await initializeVault({
+      title: 'Synthetic workout defaults',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+
+    const initial = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'show',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initial.ok, true)
+    assert.deepEqual(requireData(initial).captureDefaults, {
+      durationMinutes: null,
+    })
+
+    const missingSelection = await runCli([
+      'workout',
+      'defaults',
+      'set',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingSelection.ok, false)
+    assert.equal(missingSelection.error.code, 'invalid_option')
+
+    const conflictingSelection = await runCli([
+      'workout',
+      'defaults',
+      'set',
+      '--duration',
+      '60',
+      '--clear-duration',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(conflictingSelection.ok, false)
+    assert.equal(conflictingSelection.error.code, 'invalid_option')
+
+    const initiallyMissing = await runCli([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initiallyMissing.ok, false)
+    assert.match(
+      initiallyMissing.error.message ?? '',
+      /Workout duration is missing/u,
+    )
+
+    const saved = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--duration',
+      '60',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(saved.ok, true)
+    assert.equal(requireData(saved).updated, true)
+    assert.deepEqual(requireData(saved).captureDefaults, {
+      durationMinutes: 60,
+    })
+
+    const defaulted = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Evening yoga session.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(defaulted.ok, true)
+    assert.equal(requireData(defaulted).durationMinutes, 60)
+
+    const textOverride = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      '20-minute walk.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(textOverride.ok, true)
+    assert.equal(requireData(textOverride).durationMinutes, 20)
+
+    const flagOverride = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Morning row.',
+      '--duration',
+      '35',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(flagOverride.ok, true)
+    assert.equal(requireData(flagOverride).durationMinutes, 35)
+
+    const ambiguous = await runCli([
+      'workout',
+      'add',
+      'Run for 20 or 30 minutes.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(ambiguous.ok, false)
+    assert.match(ambiguous.error.message ?? '', /duration is ambiguous/iu)
+
+    const segmented = await runCli([
+      'workout',
+      'add',
+      'Morning run followed by a swim.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(segmented.ok, false)
+    assert.match(segmented.error.message ?? '', /multiple activities or segments/iu)
+
+    const importPayloadPath = path.join(vaultRoot, 'missing-duration.json')
+    await writeFile(
+      importPayloadPath,
+      JSON.stringify({
+        activityType: 'strength-training',
+        note: 'Imported strength session.',
+        title: 'Imported strength session',
+      }),
+      'utf8',
+    )
+    const importedWithoutDuration = await runCli([
+      'workout',
+      'import-json',
+      '--input',
+      `@${importPayloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(importedWithoutDuration.ok, false)
+    assert.match(
+      importedWithoutDuration.error.message ?? '',
+      /Workout duration is missing/u,
+    )
+
+    const cleared = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--clear-duration',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(cleared.ok, true)
+    assert.deepEqual(requireData(cleared).captureDefaults, {
+      durationMinutes: null,
+    })
+
+    const missing = await runCli([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missing.ok, false)
+    assert.match(missing.error.message ?? '', /Workout duration is missing/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('workout capture promotes one explicit legacy default and rejects conflicts', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+
+  try {
+    await initializeVault({
+      title: 'Synthetic legacy workout defaults',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+    await upsertMemory(vaultRoot, {
+      section: 'Preferences',
+      text: 'Workouts reported here default to 45 minutes unless another duration is stated.',
+    })
+    const conflictingPreference = await upsertMemory(vaultRoot, {
+      section: 'Preferences',
+      text: 'When workout duration is omitted, the default is 30 minutes.',
+    })
+
+    const conflicting = await runCli([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(conflicting.ok, false)
+    assert.match(conflicting.error.message ?? '', /Workout duration is missing/u)
+
+    await upsertMemory(vaultRoot, {
+      recordId: conflictingPreference.record.id,
+      section: 'Preferences',
+      text: 'When workout duration is omitted, the default is 45 minutes.',
+    })
+
+    const migrated = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Afternoon Pilates session.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(migrated.ok, true)
+    assert.equal(requireData(migrated).durationMinutes, 45)
+
+    const migratedPreferences = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'show',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(migratedPreferences.ok, true)
+    assert.deepEqual(requireData(migratedPreferences).captureDefaults, {
+      durationMinutes: 45,
+    })
+
+    const cleared = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--clear-duration',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(cleared.ok, true)
+    assert.deepEqual(requireData(cleared).captureDefaults, {
+      durationMinutes: null,
+    })
+
+    const afterClear = await runCli([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(afterClear.ok, false)
+    assert.match(afterClear.error.message ?? '', /Workout duration is missing/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
 
 test(
   'workout add surfaces invalid timestamps without needing a custom workout read surface',

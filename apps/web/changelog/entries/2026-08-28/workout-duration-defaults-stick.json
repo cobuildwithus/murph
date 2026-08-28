@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-28",
+  "order": 90,
+  "item": {
+    "id": "workout-duration-defaults-stick",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Workout duration defaults stick",
+    "summary": "When a member saves an ongoing duration for workouts they report, Murph now applies it to later workout reports that omit duration instead of asking again.",
+    "details": "A duration stated in the current report still wins. Ambiguous reports still need clarification, and one clear preference saved before this improvement can be carried forward automatically.",
+    "relevanceTags": ["assistant", "reliability", "workouts"],
+    "sourcePullRequests": []
+  }
+}

@@ -1435,6 +1435,27 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).not.toContain('book another dentist appointment')
   })
 
+  it('routes ongoing workout duration defaults through the typed capture owner', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('`vault-cli workout defaults set --duration <minutes>`')
+    expect(prompt).toContain(
+      'Later `vault-cli workout add` calls apply that default when the reported workout omits duration',
+    )
+    expect(prompt).toContain(
+      'An explicit duration in the current report always wins',
+    )
+    expect(prompt).toContain(
+      'Do not duplicate this typed default into freeform memory',
+    )
+    expect(prompt).toContain(
+      'The add command also promotes one explicit, unambiguous legacy memory preference into the typed default when needed',
+    )
+    expect(prompt).toContain(
+      'Never infer a default from workout history, a past workout, or conflicting memory',
+    )
+  })
+
   it('guides automation continuity policy by task size', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
