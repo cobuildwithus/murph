@@ -340,11 +340,11 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
     };
   } catch (error) {
     if (error instanceof HostedBrowserVaultRefreshDeferredError) {
-      const source = error.source ?? {
-        fileCount: 0,
-        totalBytes: 0,
-      };
       if (error.status === "deferred_timeout") {
+        const source = error.source ?? {
+          fileCount: 0,
+          totalBytes: 0,
+        };
         return {
           refreshStage: error.refreshStage,
           source,
@@ -352,7 +352,10 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
         };
       }
       return {
-        source,
+        source: {
+          fileCount: 0,
+          totalBytes: 0,
+        },
         status: error.status,
       };
     }

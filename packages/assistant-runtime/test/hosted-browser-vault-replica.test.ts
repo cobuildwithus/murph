@@ -1342,8 +1342,64 @@ describe("hosted browser-vault replica refresh preparation", () => {
         workspace,
       });
 
-      expect(result).toMatchObject({
+      expect(result).toEqual({
+        source: {
+          fileCount: 0,
+          totalBytes: 0,
+        },
         status: "deferred_runtime_wake",
+      });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("retains the zero source summary when externally aborted after source hashing", async () => {
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const controller = new AbortController();
+    const workspace = createWorkspaceState({
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-10T00:00:00.000Z",
+    });
+    const publishRef = vi.fn(async (input: { replicaRef: HostedBrowserVaultReplicaRef }) => ({
+      published: true,
+      workspace: {
+        ...workspace,
+        browserVaultReplicaRef: input.replicaRef,
+      },
+    }));
+    const write = vi.fn(async (input: { replica: unknown }) => {
+      controller.abort(new DOMException("Foreground work took priority.", "AbortError"));
+      return createReplicaRefFromReplica(input.replica);
+    });
+
+    try {
+      await writeBrowserVaultStageSource(vaultRoot);
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        signal: controller.signal,
+        vaultRoot,
+        workspace,
+      });
+
+      expect(result).toEqual({
+        source: {
+          fileCount: 0,
+          totalBytes: 0,
+        },
+        status: "deferred_aborted",
       });
       expect(write).toHaveBeenCalledOnce();
       expect(publishRef).not.toHaveBeenCalled();
@@ -1413,7 +1469,11 @@ describe("hosted browser-vault replica refresh preparation", () => {
         workspace,
       });
 
-      expect(result).toMatchObject({
+      expect(result).toEqual({
+        source: {
+          fileCount: 0,
+          totalBytes: 0,
+        },
         status: "deferred_runtime_wake",
       });
       expect(write).toHaveBeenCalledOnce();
