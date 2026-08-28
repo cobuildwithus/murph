@@ -289,6 +289,14 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("advertises family-bounded schemas", () => {
+    const groupConsultTool = MURPH_GROUP_FAMILY_TOOLS.find(
+      (tool) => tool.name === "group_consult",
+    );
+    expect(groupConsultTool?.description)
+      .toContain("ask=group answer; handoff=tell/post/share");
+    expect(groupConsultTool?.description)
+      .toContain("via list_memberships exact ID");
+
     const expectedRootKeys = {
       group_consult: [
         "action", "context", "grantId", "membershipId", "message_ref",
@@ -2574,7 +2582,7 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual({
       action: "handoff",
-      result: { status: "accepted", targetLabel: "Lifting Club" },
+      result: { status: "queued", targetLabel: "Lifting Club" },
     });
     expect(groupRequest).toHaveBeenCalledWith({
       action: "handoff",

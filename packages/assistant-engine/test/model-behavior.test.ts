@@ -3030,7 +3030,9 @@ describe('assistant conversation scope', () => {
     expect(groupPrompt).toContain(
       'only for that explicit current-sender consultation, not account/settings actions, other participants, or unsolicited disclosure',
     )
-    expect(directPrompt).not.toContain('search/load deferred `murph.group_consult`')
+    expect(directPrompt).toContain(
+      'From this private conversation, joined-group consultation is available only for groups Murph has already joined',
+    )
     expect(groupEmailPrompt).not.toContain('search/load deferred `murph.group_consult`')
     expect(restrictedGroupPrompt).not.toContain(
       'search/load deferred `murph.group_consult`',

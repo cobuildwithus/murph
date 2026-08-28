@@ -1336,7 +1336,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'Consult/hand off via list_memberships exact ID; clarify; hide IDs. Before unnamed handoff, vault-cli memory show; fallback "a member". Sender: ask_current_sender=group, ask_current_sender_privately=private, clarify_current_sender=genuine ambiguity; continuations resume. Handoff accepted=queued, not sent/shared.',
+    'ask=group answer; handoff=tell/post/share via list_memberships exact ID; clarify; hide IDs. Unnamed: memory show, else "a member". ask_current_sender=group; ask_current_sender_privately=private; clarify=genuine ambiguity; continuations resume. accepted=queued, not sent/shared.',
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 

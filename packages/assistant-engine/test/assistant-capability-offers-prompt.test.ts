@@ -218,6 +218,16 @@ describe('assistant capability-offers prompt contract', () => {
       'call `murph.group_membership action="list_memberships"`',
     )
     expect(directSection).toContain(
+      'joined-group consultation is available only for groups Murph has already joined',
+    )
+    expect(directSection).toContain('cannot access an unjoined device chat')
+    expect(directSection).toContain(
+      'State that distinction for capability questions',
+    )
+    expect(directSection).toContain(
+      'search/load deferred `murph.group_consult` via `tool_search` or code-mode `ALL_TOOLS` before redirecting or denying',
+    )
+    expect(directSection).toContain(
       'do not claim this build cannot access or message a joined group',
     )
     expect(directSection).toContain(
@@ -257,6 +267,8 @@ describe('assistant capability-offers prompt contract', () => {
     )
     expect(groupPrompt).not.toContain('last resort for a generic group cue')
     expect(unverifiedPrompt).not.toContain('last resort for a generic group cue')
+    expect(groupPrompt).not.toContain('cannot access an unjoined device chat')
+    expect(unverifiedPrompt).not.toContain('cannot access an unjoined device chat')
     expect(groupPrompt).not.toContain('names a visible group')
     expect(unverifiedPrompt).not.toContain('names a visible group')
   })

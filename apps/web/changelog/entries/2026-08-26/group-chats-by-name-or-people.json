@@ -9,6 +9,6 @@
     "summary": "From your private Murph, you can ask about or share into any joined iMessage group, and Murph can distinguish similar chats using their names, participant counts, and safe contact clues.",
     "details": "Murph asks one clear question when several joined chats fit. Contact names appear only from your own shared Contacts; otherwise clues stay limited to area code and last four digits or a generic email participant. If one chat's participant details are temporarily unavailable, the other groups remain usable.",
     "relevanceTags": ["assistant", "groups", "imessage", "privacy"],
-    "sourcePullRequests": [2385, 2483]
+    "sourcePullRequests": [2385, 2471, 2483]
   }
 }
