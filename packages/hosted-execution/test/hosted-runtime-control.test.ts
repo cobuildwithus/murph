@@ -1668,6 +1668,10 @@ describe("hosted runtime control contracts", () => {
       },
       preProvider: {
         mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 5,
+        foregroundPassToWorkspaceForegroundPassMs: 7,
+        workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
+        assistantPhaseCallbackToAssistantPhaseMs: 6,
         workspaceAssistantPreAutomationMs: 11,
         automationLaneToAssistantServiceMs: 7,
         automationReadinessMs: 1,
@@ -1736,6 +1740,32 @@ describe("hosted runtime control contracts", () => {
       },
     });
 
+    const oldRunnerProviderBreakdown = {
+      schemaVersion: 1,
+      preProvider: {
+        mailboxImportDoneToAssistantPhaseMs: 29,
+      },
+    };
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.000Z",
+        phaseBreakdown: oldRunnerProviderBreakdown,
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.000Z",
+        phaseBreakdown: oldRunnerProviderBreakdown,
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    });
+
     // Secret-safety + robustness: a malformed phaseBreakdown is DROPPED (never
     // reaches storage) while the core latency event still parses. phaseBreakdown is
     // best-effort telemetry, so an unsafe/unknown shape must not poison the event
@@ -1789,6 +1819,17 @@ describe("hosted runtime control contracts", () => {
       { receiptScanBytesRead: -1 }, // counts must be non-negative
       { outboxScanElapsedMs: "23" }, // durations must stay numeric
       { automationSessionPreflightMs: "2" }, // nested durations must stay numeric
+      {
+        mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 29,
+      }, // a partial mailbox-to-assistant subdivision is ambiguous
+      {
+        mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 5,
+        foregroundPassToWorkspaceForegroundPassMs: 7,
+        workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
+        assistantPhaseCallbackToAssistantPhaseMs: 7,
+      }, // all mailbox-to-assistant leaves must sum exactly to their parent
       {
         automationLaneToAssistantServiceMs: 7,
         automationReadinessMs: 7,
