@@ -6448,7 +6448,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         : {}),
       ...(shouldRunPostSystemCheckpoint
         ? {
-            ...(systemMailboxDeliveryEffectsForDispatch.length > 0
+            ...(systemMailboxDeliveryEffects.length === 0
+              || systemMailboxDeliveryEffectsForDispatch.length > 0
               || clinicalOutcomeRecordPending
               ? { afterCheckpointKeepsForegroundImportLoop: true }
               : {}),

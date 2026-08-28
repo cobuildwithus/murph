@@ -3164,6 +3164,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     }));
     const postCheckpoint = await result.afterCheckpoint?.();
 
+    expect(result.afterCheckpointKeepsForegroundImportLoop).toBe(true);
     expect(postCheckpoint).toEqual(expect.objectContaining({
       nextWakeAt: foregroundWakeAt,
       nextWakeReason: "assistant",
