@@ -157,7 +157,6 @@ import {
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
-  HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -183,8 +182,8 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupParticipantDisplayNameSource,
-  type HostedRuntimeGroupParticipantTarget,
-  type HostedRuntimeGroupParticipantTargetCue,
+  type HostedRuntimeGroupParticipantLabel,
+  type HostedRuntimeGroupParticipantRoster,
   type HostedRuntimeGroupCurrentSenderDirectResult,
   type HostedRuntimeGroupDailyMetricReportResult,
   type HostedRuntimeGroupMemberAskResult,
@@ -1129,39 +1128,21 @@ export function parseHostedRuntimeGroupToolRequest(
       record,
       new Set([
         "action",
-        "groupLabel",
+        "membershipId",
         "originAssistantInputId",
         "originSessionId",
-        "participantTarget",
         "question",
       ]),
       label,
     );
     return {
       action,
-      ...(record.groupLabel === undefined
-        ? {}
-        : {
-            groupLabel: record.groupLabel === null
-              ? null
-              : parseHostedRuntimeGroupAskBoundedText({
-                  label: "Hosted runtime group tool ask request groupLabel",
-                  maxCodePoints:
-                    HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-                  value: record.groupLabel,
-                }),
-          }),
+      membershipId: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime group tool ask request membershipId",
+        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+        value: record.membershipId,
+      }),
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
-      ...(record.participantTarget === undefined
-        ? {}
-        : {
-            participantTarget: record.participantTarget === null
-              ? null
-              : parseHostedRuntimeGroupParticipantTarget(
-                  record.participantTarget,
-                  `${label} participantTarget`,
-                ),
-          }),
     };
   }
   if (action === "handoff") {
@@ -1171,9 +1152,8 @@ export function parseHostedRuntimeGroupToolRequest(
       new Set([
         "action",
         "context",
-        "groupLabel",
+        "membershipId",
         "originAssistantInputId",
-        "participantTarget",
       ]),
       label,
     );
@@ -1184,32 +1164,15 @@ export function parseHostedRuntimeGroupToolRequest(
         maxCodePoints: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
         value: record.context,
       }),
-      ...(record.groupLabel === undefined
-        ? {}
-        : {
-            groupLabel: record.groupLabel === null
-              ? null
-              : parseHostedRuntimeGroupAskBoundedText({
-                  label: `${label} groupLabel`,
-                  maxCodePoints:
-                    HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-                  value: record.groupLabel,
-                }),
-          }),
+      membershipId: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} membershipId`,
+        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+        value: record.membershipId,
+      }),
       originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
         record.originAssistantInputId,
         `${label} originAssistantInputId`,
       ),
-      ...(record.participantTarget === undefined
-        ? {}
-        : {
-            participantTarget: record.participantTarget === null
-              ? null
-              : parseHostedRuntimeGroupParticipantTarget(
-                  record.participantTarget,
-                  `${label} participantTarget`,
-                ),
-          }),
     };
   }
   if (action === "ask_current_sender") {
@@ -4467,6 +4430,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
         "kind",
         "memberCount",
         "membershipId",
+        "participantRoster",
         "permissionsUrl",
         "requestedVaultShareProjectionScopes",
         "role",
@@ -4516,6 +4480,15 @@ function parseHostedRuntimeGroupMembershipSummaries(
       kind: requireString(record.kind, `${label} entry kind`),
       memberCount,
       membershipId,
+      participantRoster: record.participantRoster === undefined
+        ? {
+            status: "unavailable",
+            unavailableReason: "participant_roster_not_reported",
+          }
+        : parseHostedRuntimeGroupParticipantRoster(
+            record.participantRoster,
+            `${label} entry participantRoster`,
+          ),
       permissionsUrl: readNullableString(
         record.permissionsUrl,
         `${label} entry permissionsUrl`,
@@ -4695,55 +4668,82 @@ function legacyProjectionKindsToScopes(
   );
 }
 
-function parseHostedRuntimeGroupParticipantTarget(
+function parseHostedRuntimeGroupParticipantRoster(
   value: unknown,
   label: string,
-): HostedRuntimeGroupParticipantTarget {
+): HostedRuntimeGroupParticipantRoster {
   const record = requireObject(value, label);
+  const status = requireString(record.status, `${label} status`);
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    return {
+      status,
+      unavailableReason: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} unavailableReason`,
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS,
+        value: record.unavailableReason,
+      }),
+    };
+  }
+  if (status !== "available") {
+    throw new TypeError(`${label} status is invalid.`);
+  }
   assertAllowedObjectKeys(
     record,
-    new Set(["participantCount", "participants"]),
+    new Set(["participantCount", "participantLabels", "status"]),
     label,
   );
-  const participantCount = record.participantCount;
+  const participantCount = requireNumber(
+    record.participantCount,
+    `${label} participantCount`,
+  );
   if (
-    participantCount !== undefined
-    && (
-      typeof participantCount !== "number"
-      || !Number.isInteger(participantCount)
-      || participantCount < 1
-      || participantCount > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
-    )
+    !Number.isInteger(participantCount)
+    || participantCount < 1
+    || participantCount > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
   ) {
     throw new TypeError(
       `${label} participantCount must be an integer between 1 and ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX}.`,
     );
   }
-  const participantValues = record.participants === undefined
-    ? []
-    : requireArray(record.participants, `${label} participants`);
+  const participantValues = requireArray(
+    record.participantLabels,
+    `${label} participantLabels`,
+  );
   if (
-    participantValues.length > HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX
+    participantValues.length > participantCount
+    || participantValues.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
   ) {
     throw new TypeError(
-      `${label} participants must contain at most ${HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX} entries.`,
+      `${label} participantLabels cannot exceed participantCount or ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
     );
   }
-  const participants = participantValues.map((value, index): HostedRuntimeGroupParticipantTargetCue => {
-    const cueLabel = `${label} participants[${index}]`;
-    const cue = requireObject(value, cueLabel);
+  const participantLabels = participantValues.map(
+    (entry, index): HostedRuntimeGroupParticipantLabel => {
+    const entryLabel = `${label} participantLabels[${index}]`;
+    const participantLabel = requireObject(entry, entryLabel);
     assertAllowedObjectKeys(
-      cue,
+      participantLabel,
       new Set(["displayName", "emailParticipant", "phoneHint"]),
-      cueLabel,
+      entryLabel,
     );
-    const displayName = cue.displayName === undefined
+    const presentKeys = ["displayName", "emailParticipant", "phoneHint"]
+      .filter((key) => participantLabel[key] !== undefined);
+    if (presentKeys.length !== 1) {
+      throw new TypeError(`${entryLabel} must contain exactly one safe label.`);
+    }
+    const displayName = participantLabel.displayName === undefined
       ? undefined
       : parseHostedRuntimeGroupAskBoundedText({
-          label: `${cueLabel} displayName`,
+          label: `${entryLabel} displayName`,
           maxCodePoints:
             HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
-          value: cue.displayName,
+          value: participantLabel.displayName,
         });
     if (
       displayName !== undefined
@@ -4753,60 +4753,54 @@ function parseHostedRuntimeGroupParticipantTarget(
       )
     ) {
       throw new TypeError(
-        `${cueLabel} displayName must not contain a full phone number or email address.`,
+        `${entryLabel} displayName must not contain a full phone number or email address.`,
       );
     }
-    const emailParticipant = cue.emailParticipant;
+    const emailParticipant = participantLabel.emailParticipant;
     if (emailParticipant !== undefined && emailParticipant !== true) {
-      throw new TypeError(`${cueLabel} emailParticipant must be true when present.`);
+      throw new TypeError(`${entryLabel} emailParticipant must be true when present.`);
     }
-    let phoneHint: { areaCode?: string; lastFour?: string } | undefined;
-    if (cue.phoneHint !== undefined) {
-      const phone = requireObject(cue.phoneHint, `${cueLabel} phoneHint`);
+    let phoneHint: { areaCode?: string; lastFour: string } | undefined;
+    if (participantLabel.phoneHint !== undefined) {
+      const phone = requireObject(
+        participantLabel.phoneHint,
+        `${entryLabel} phoneHint`,
+      );
       assertAllowedObjectKeys(
         phone,
         new Set(["areaCode", "lastFour"]),
-        `${cueLabel} phoneHint`,
+        `${entryLabel} phoneHint`,
       );
       const areaCode = phone.areaCode;
       const lastFour = phone.lastFour;
       if (areaCode !== undefined && (
         typeof areaCode !== "string" || !/^\d{3}$/u.test(areaCode)
       )) {
-        throw new TypeError(`${cueLabel} phoneHint areaCode must contain three digits.`);
+        throw new TypeError(`${entryLabel} phoneHint areaCode must contain three digits.`);
       }
-      if (lastFour !== undefined && (
-        typeof lastFour !== "string" || !/^\d{4}$/u.test(lastFour)
-      )) {
-        throw new TypeError(`${cueLabel} phoneHint lastFour must contain four digits.`);
-      }
-      if (areaCode === undefined && lastFour === undefined) {
-        throw new TypeError(`${cueLabel} phoneHint must contain areaCode or lastFour.`);
+      if (typeof lastFour !== "string" || !/^\d{4}$/u.test(lastFour)) {
+        throw new TypeError(`${entryLabel} phoneHint lastFour must contain four digits.`);
       }
       phoneHint = {
         ...(areaCode === undefined ? {} : { areaCode }),
-        ...(lastFour === undefined ? {} : { lastFour }),
+        lastFour,
       };
     }
-    if (
-      displayName === undefined
-      && emailParticipant === undefined
-      && phoneHint === undefined
-    ) {
-      throw new TypeError(`${cueLabel} must contain at least one participant clue.`);
+    if (displayName !== undefined) {
+      return { displayName };
     }
-    return {
-      ...(displayName === undefined ? {} : { displayName }),
-      ...(emailParticipant === undefined ? {} : { emailParticipant }),
-      ...(phoneHint === undefined ? {} : { phoneHint }),
-    };
+    if (emailParticipant === true) {
+      return { emailParticipant };
+    }
+    if (!phoneHint) {
+      throw new TypeError(`${entryLabel} is invalid.`);
+    }
+    return { phoneHint };
   });
-  if (participantCount === undefined && participants.length === 0) {
-    throw new TypeError(`${label} must contain participantCount or participants.`);
-  }
   return {
-    ...(participantCount === undefined ? {} : { participantCount }),
-    ...(participants.length === 0 ? {} : { participants }),
+    participantCount,
+    participantLabels,
+    status,
   };
 }
 

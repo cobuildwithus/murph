@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-08-24
+Last verified: 2026-08-28
 
 ## Decision
 
@@ -56,19 +56,17 @@ with prompt-delimiter characters Unicode-escaped, uses its own committed group
 conversation and tone, and authors one ordinary group message through the
 existing notification and outbox owners.
 
-The model supplies only `context`, an optional exact visible `groupLabel`, and
-an optional closed participant description. The participant description may
-contain a participant count, requester-supplied familiar names, NANP area code
-plus last four, international last four, or a generic email-participant marker.
-It never contains a full phone number, email address, or internal id. The model never
-supplies member, membership, runtime, thread, route, provider, callback,
-idempotency, or mailbox identifiers. Exact replay reuses one global event/item
+The model supplies only `context` and the exact opaque `membershipId` from the
+current conversation's `list_memberships` result. It must never expose, invent,
+edit, derive, or accept that id from the member. The model never supplies member,
+runtime, thread, route, provider, callback, idempotency, or mailbox identifiers.
+Exact replay reuses one global event/item
 identity derived from the authenticated member and accepted input, decrypts and
 validates the stored notification, and retains its pinned membership and route
 even if the member's group count changed. Changed context, membership
 generation, or route conflicts instead of redirecting. A repeated call for that
-accepted input reuses the first persisted target without rerunning title or
-participant selection. `accepted`
+accepted input reuses the first persisted target without rerunning inventory
+discovery. `accepted`
 proves only that the target mailbox item is durable. The runner exact-replays
 the same hidden request once after a retryable Cloudflare-to-Web failure, so a
 lost successful response re-signals the same mailbox item instead of reporting
@@ -102,14 +100,15 @@ The model-facing action is:
 ```ts
 type AskGroupArguments = {
   action: "ask";
+  membershipId: string;
   question: string;
-  groupLabel?: string;
 };
 ```
 
-The model supplies no member, membership, runtime, mailbox, session, callback,
-or return-route identifier. Web derives all authority and routing from the
-authenticated caller and stored request.
+`membershipId` is a model-visible selector, not model authority. It must be an
+exact opaque value returned by `list_memberships` in the current conversation.
+Web derives and revalidates member, runtime, mailbox, session, callback, and
+return-route authority from the authenticated caller and stored rows.
 
 The target execution surface is:
 
@@ -166,13 +165,14 @@ Happy path:
 If private messages intervene, the answer begins naturally, for example:
 `quick follow-up from 100 Club...`.
 
-- One joined group: choose it automatically.
-- Several groups plus one exact label match: choose it automatically.
-- Ambiguous: ask once using safe visible labels, such as
-  `Which group did you mean: 100 Club or Wednesday Training?`
+- One inventory entry fits the member's ordinary cue: choose its exact id.
+- Several entries plus one clear title, participant-count, or safe-label fit:
+  choose its exact id.
+- Ambiguous: ask once using only safe titles, real chat participant counts, and
+  other safe participant labels.
 - No groups: offer the existing paste-or-screenshot fallback.
-- Duplicate or unnamed labels: fail closed and ask the member to name or
-  rename one; never expose an id.
+- Duplicate or unnamed titles remain usable when count or safe labels distinguish
+  them. Otherwise ask one concise clarification; never expose an id.
 - Cannot answer: say the group context was insufficient.
 - Admission transport failure: return only an allowlisted Prisma `P####`
   diagnostic code when present, HTTP status, and opaque Assistant Ask request
@@ -188,59 +188,35 @@ Nothing is posted, reacted to, or shown as typing in the group.
 
 ## Routing, authority, and disclosure
 
-Web owns target resolution because it owns current `HostedGroupMember` truth.
+Web owns target authority because it owns current `HostedGroupMember` truth.
 
-1. Allow `ask` only from fresh user-authored input in an authenticated personal
-   direct turn, once per accepted input.
-2. With one current membership and no label, select it.
-3. With a label, normalize it and current display labels using Unicode NFC,
-   trimming, whitespace collapse, and locale-independent lowercase matching.
-   Preserve punctuation
-   and emoji; select only one exact match.
-4. Otherwise return a bounded set of visible labels for clarification.
-5. Require a valid current synthetic group-runtime identity before accepting
-   the ask. The runtime may be cold; the committed request wakes it.
+1. Before `ask` or `handoff`, call `list_memberships`. Continue with the exact
+   opaque `nextCursor` while the candidate is unsettled and later pages remain.
+2. Every returned entry contains its current opaque `membershipId`, existing
+   title, Murph member count, and a `participantRoster` availability result.
+3. For a complete Linq/iMessage/SMS roster, Web removes the provider line,
+   reports the real human participant count including the requester, and labels
+   other people with only the requester's enabled Contacts names, NANP area code
+   plus last four, international last four, or `email participant`.
+4. Web fetches at most four provider summaries concurrently under one absolute
+   deadline. Missing routes, unsupported providers, incomplete rosters, and
+   provider failures mark only that entry unavailable. Optional Contacts
+   failure falls back to masked hints. An unavailable roster never erases the
+   membership or poisons other entries.
+5. The model resolves the member's ordinary cue naturally against that safe
+   inventory. When several entries fit, it asks one concise clarification using
+   safe titles, counts, and labels. It never exposes ids, guesses, fuzzy-matches
+   hidden data, selects by ownership or newness, or fans out.
+6. `ask` and `handoff` send only the exact chosen `membershipId`. Web locks and
+   revalidates that it belongs to the requester, remains active, targets the
+   expected group runtime, and retains valid route authority before append.
 
-For Linq/iMessage/SMS groups, `ask` and `handoff` may instead include the closed
-participant description. This is available to every current group member, not
-only the owner. Web reads that requester's membership set up to a Web-owned
-100-group live-provider scan ceiling and fails closed above it. That ceiling is
-independent of the 25-item model response budget. Web keeps Telegram out of
-this path, opens current Linq routes in one set-based read, and fetches current provider rosters with concurrency four under one
-absolute deadline. Every eligible roster must be complete and canonical before
-participant evidence may prove uniqueness. Web removes the provider line and
-all handles that resolve to the requester, then compares the remaining people.
-Only the requester's own enabled Contacts projection may add familiar names;
-the group owner's or another member's projection is never a fallback. Without
-such a name, clarification uses only participant count, NANP area code plus
-last four, international last four, or `email participant`.
+The 25-row membership page remains a response and provider-work bound, not a
+product cardinality cap. A later membership stays reachable through the stable
+cursor. There is no participant matcher, title matcher, digest, selector token,
+directory, or second authority state.
 
-Exactly one group must satisfy both an exact supplied title and every supplied
-participant clue. Separate person clues must match separate roster entries.
-Zero or multiple matches clarify with unique safe descriptions when possible;
-provider failure, malformed or incomplete roster evidence, duplicate safe
-descriptions, or an over-budget membership universe fails closed. Resolution
-and the effect stay in one Web action: there is no reusable selector token.
-Immediately before append, Web revalidates the exact membership and current
-route. Assistant Ask binds the normalized participant-description digest in its
-existing encrypted target field. Handoff replay instead reuses the stored
-membership and route selected by the first accepted input and performs no
-second title or participant lookup.
-
-The visible-label bound admits at most 64 labels and limits only one
-clarification response. It is not a membership or availability limit: when the
-member names a group, Web compares that normalized label against every current
-membership so the total number of joined groups can never make a unique exact
-target unavailable. The heavier `list_memberships` summary keeps its separate
-25-row page bound and exposes stable continuation instead of making later
-memberships unreachable.
-
-Never fuzzy-match, pick the newest or owned group, consult another member's
-Contacts, guess from roster identities, or fan out. `list_memberships` is not
-required, and the model never
-receives a membership id for an ask.
-
-The exact membership row is a hidden generation fence. Web checks it at
+The exact membership row is the generation fence. Web checks it at
 admission, before the target reads context, and before appending the answer.
 Leave and rejoin creates a new generation, so old work cannot cross it. Target
 completion also requires the exact group runtime and its current write fence.

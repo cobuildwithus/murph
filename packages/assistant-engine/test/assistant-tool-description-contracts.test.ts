@@ -90,7 +90,7 @@ describe("assistant tool description call contracts", () => {
   it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Named group: use groupLabel; never list",
+      "via list_memberships exact ID",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       'Before unnamed handoff, vault-cli memory show; fallback "a member"',

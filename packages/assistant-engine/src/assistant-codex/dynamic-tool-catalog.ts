@@ -12,7 +12,6 @@ import {
 } from '@murphai/contracts'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
 } from '@murphai/hosted-execution/contracts'
 import {
   HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
@@ -23,7 +22,6 @@ import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
-  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
@@ -31,8 +29,6 @@ import {
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
-  HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
-  HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -1050,56 +1046,6 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         description:
           'Required only for action="arm_usage_referral". Send one exact set containing only available policies the current sender explicitly selected.',
       },
-      groupLabel: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-        description:
-          'Optional only for action="ask" or action="handoff". An exact visible group title the member supplied, used only to disambiguate among joined groups; never an internal identifier. A phrase such as "my group with Jordan and Casey" is a participant description, not a groupLabel: omit groupLabel and use participantTarget.',
-      },
-      participantTarget: {
-        type: 'object',
-        additionalProperties: false,
-        minProperties: 1,
-        properties: {
-          participantCount: {
-            type: 'integer',
-            minimum: 1,
-            maximum: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-            description:
-              'Other people in the chat, excluding the requesting member. Convert a stated total chat size only when clear.',
-          },
-          participants: {
-            type: 'array',
-            maxItems: HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              minProperties: 1,
-              properties: {
-                displayName: {
-                  type: 'string',
-                  minLength: 1,
-                  maxLength:
-                    HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
-                },
-                emailParticipant: { type: 'boolean', const: true },
-                phoneHint: {
-                  type: 'object',
-                  additionalProperties: false,
-                  minProperties: 1,
-                  properties: {
-                    areaCode: { type: 'string', pattern: '^\\d{3}$' },
-                    lastFour: { type: 'string', pattern: '^\\d{4}$' },
-                  },
-                },
-              },
-            },
-          },
-        },
-        description:
-          'Optional for ask/handoff when a joined iMessage/SMS group is described by people. Include each non-requester once, using only user-supplied display names, area code/last four, or emailParticipant. Never include full handles, IDs, or guesses.',
-      },
       displayName: {
         type: 'string',
         minLength: 1,
@@ -1124,8 +1070,9 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
       membershipId: {
         type: 'string',
         minLength: 1,
+        maxLength: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
         description:
-          'Required only for action="leave_membership". Use the exact opaque membershipId from the immediately preceding list_memberships result; never guess it or take it from the user.',
+          'Required for action="ask", action="handoff", or action="leave_membership". Use the exact opaque membershipId from list_memberships in this conversation; never expose it, guess it, edit it, or take it from the member.',
       },
       avatarPrompt: {
         type: 'string',
@@ -1261,8 +1208,7 @@ type MurphGroupToolPropertyName = keyof typeof MURPH_GROUP_TOOL_PROPERTIES
 
 const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   group_consult: [
-    'context', 'grantId', 'groupLabel', 'message_ref', 'participantTarget',
-    'question',
+    'context', 'grantId', 'membershipId', 'message_ref', 'question',
   ],
   group_data: [
     'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
@@ -1287,12 +1233,12 @@ type MurphGroupConsultAction =
 
 const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
   ask: {
-    optional: ['groupLabel'],
-    required: ['question'],
+    optional: [],
+    required: ['membershipId', 'question'],
   },
   handoff: {
-    optional: ['groupLabel'],
-    required: ['context'],
+    optional: [],
+    required: ['context', 'membershipId'],
   },
   ask_current_sender: {
     optional: [],
@@ -1390,7 +1336,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'Ask/hand off; host binds. Named group: use groupLabel; never list. Before unnamed handoff, vault-cli memory show; fallback "a member". Sender intent: ask_current_sender=group, ask_current_sender_privately=private, clarify_current_sender=genuine ambiguity; continuations resume. Handoff accepted=queued, not sent/shared.',
+    'Consult/hand off via list_memberships exact ID; clarify; hide IDs. Before unnamed handoff, vault-cli memory show; fallback "a member". Sender: ask_current_sender=group, ask_current_sender_privately=private, clarify_current_sender=genuine ambiguity; continuations resume. Handoff accepted=queued, not sent/shared.',
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 

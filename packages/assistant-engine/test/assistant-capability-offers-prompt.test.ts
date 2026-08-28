@@ -195,7 +195,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('to join by reacting')
   })
 
-  it('routes participant evidence directly and keeps memberships as a bounded last resort', () => {
+  it('lists memberships before direct consultation and clarifies from safe inventory labels', () => {
     const directLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
     )
@@ -214,12 +214,14 @@ describe('assistant capability-offers prompt contract', () => {
       HOSTED_GROUPS_HEADER,
     )
 
-    expect(directLayers.prompt).toContain('last resort for a generic group cue')
     expect(directSection).toContain(
-      'names a visible group',
+      'call `murph.group_membership action="list_memberships"`',
     )
     expect(directSection).toContain(
-      'pass that name as `groupLabel` to `murph.group_consult` without calling `list_memberships`',
+      'do not claim this build cannot access or message a joined group',
+    )
+    expect(directSection).toContain(
+      'Select only an exact opaque `membershipId` returned in this conversation',
     )
     expect(directSection).toContain(
       'otherwise run `vault-cli memory show`',
@@ -227,28 +229,25 @@ describe('assistant capability-offers prompt contract', () => {
     expect(directSection).toContain(
       'use "a member" only when canonical memory has no preferred name',
     )
-    expect(directSection).toContain('club, team, community, or shared challenge')
     expect(directSection).toContain(
-      'call `murph.group_consult action="ask"` or `action="handoff"` directly with `participantTarget`',
-    )
-    expect(directSection).toContain('without calling `list_memberships`')
-    expect(directSection).toContain(
-      'include only other people, never the requester/self',
-    )
-    expect(directSection).toContain('convert total chat size only when clear')
-    expect(directSection).toContain(
-      'without an exact title or participant evidence',
+      'real participant counts, and other safe participant labels',
     )
     expect(directSection).toContain(
-      'Accept only one membership across the complete result or one exact normalized visible-label match',
+      'never treat `truncated` or one entry\'s unavailable participant roster as global unavailability',
     )
-    expect(directSection).toContain('ask one narrow clarification')
+    expect(directSection).toContain(
+      'every inventory entry containing that safe label remains a candidate',
+    )
+    expect(directSection).toContain(
+      'Do not treat people the member omitted as exclusions unless they explicitly say only',
+    )
+    expect(directSection).toContain('ask one concise natural clarification')
+    expect(directSection).toContain(
+      'give every candidate its own participant count or other safe label',
+    )
     expect(directSection).toContain('paste-or-screenshot fallback')
-    expect(directSection).toContain('distinct nonblank visible labels')
-    expect(directSection).toContain('Never fuzzy-match')
-    expect(directSection).toContain('select by role or newness')
-    expect(directSection).toContain('expose identifiers, or fan out')
-    expect(directSection).toContain('ordinary ambiguity without a group cue')
+    expect(directSection).toContain('Never expose, quote, edit, infer')
+    expect(directSection).toContain('never guess among unresolved entries or fan out')
     expect(directSection).toContain('Track each cursor chain separately')
     expect(directSection).toContain(
       'When one chain returns its null next cursor, that chain is exhausted for this turn',

@@ -31,12 +31,10 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
-  HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX,
   type HostedRuntimeAssistantAskControlRequest,
   type HostedRuntimeAssistantAskControlResponse,
   type HostedRuntimeGroupAskResult,
   type HostedRuntimeGroupMemberAskResult,
-  type HostedRuntimeGroupParticipantTarget,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -86,13 +84,6 @@ import {
   type HostedGroupCurrentSenderCompletionAuthority,
 } from "./group-current-sender-assistant-ask";
 import {
-  createHostedGroupParticipantTargetDigest,
-  selectHostedGroupByParticipants,
-  type HostedGroupParticipantTargetSelection,
-} from "./group-participant-target";
-import {
-  normalizeHostedGroupTargetSelector,
-  normalizeHostedPersistedGroupTargetSelector,
   sanitizeHostedGroupTargetDisplayLabel,
 } from "./group-target-description";
 
@@ -102,8 +93,6 @@ const HOSTED_GROUP_CONTEXT_HANDOFF_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-context-handoff.request.v1";
 const HOSTED_GROUP_MEMBER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-member-assistant-ask.request.v2";
-const HOSTED_GROUP_PARTICIPANT_ASK_BINDING_PREFIX =
-  "participant-target-sha256:";
 const HOSTED_ASSISTANT_ASK_COMPLETION_ID_PREFIX = "aask_done_";
 const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE =
   "hosted-assistant-ask";
@@ -205,12 +194,6 @@ export function createHostedGroupContextHandoffEventId(input: {
     .digest("hex")}`;
 }
 
-function createHostedGroupParticipantAskBinding(
-  participantTargetDigest: string,
-): string {
-  return `${HOSTED_GROUP_PARTICIPANT_ASK_BINDING_PREFIX}${participantTargetDigest}`;
-}
-
 export function buildHostedGroupContextHandoffInstructions(input: {
   context: string;
 }): string {
@@ -263,30 +246,8 @@ export function createHostedGroupMemberAssistantAskRequestId(input: {
 }
 
 export async function requestHostedGroupAssistantAsk(input: {
-  groupLabel?: string | null;
   memberId: string;
-  now?: Date;
-  originAssistantInputId: string;
-  originSessionId: string;
-  participantTarget?: HostedRuntimeGroupParticipantTarget | null;
-  prisma?: PrismaClient;
-  question: string;
-}): Promise<HostedGroupAssistantAskAdmission> {
-  const participantTarget = input.participantTarget;
-  if (participantTarget) {
-    return runWithHostedDomainRootUnwrapCache(() =>
-      requestHostedGroupAssistantAskByParticipants({
-        ...input,
-        participantTarget,
-      })
-    );
-  }
-  return requestHostedGroupAssistantAskByLabel(input);
-}
-
-async function requestHostedGroupAssistantAskByLabel(input: {
-  groupLabel?: string | null;
-  memberId: string;
+  membershipId: string;
   now?: Date;
   originAssistantInputId: string;
   originSessionId: string;
@@ -295,12 +256,16 @@ async function requestHostedGroupAssistantAskByLabel(input: {
 }): Promise<HostedGroupAssistantAskAdmission> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
+  const membershipId = normalizeHostedAssistantAskText({
+    label: "Hosted group membership ID",
+    maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
+    value: input.membershipId,
+  });
   const question = normalizeHostedAssistantAskText({
     label: "Hosted assistant ask question",
     maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
     value: input.question,
   });
-  const requestedLabel = normalizeHostedGroupTargetSelector(input.groupLabel);
   const originSessionId = normalizeHostedAssistantAskText({
     label: "Hosted assistant ask origin session ID",
     maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
@@ -325,12 +290,12 @@ async function requestHostedGroupAssistantAskByLabel(input: {
         existingUserId: existing.userId,
         expiresAt: existing.expiresAt ?? null,
         memberId: input.memberId,
+        membershipId,
         now,
         originAssistantInputId: input.originAssistantInputId,
         originSessionId,
         question,
         requestId,
-        requestedLabel,
         tx,
       });
     }
@@ -344,26 +309,10 @@ async function requestHostedGroupAssistantAskByLabel(input: {
       return unavailableAdmission("origin_unavailable");
     }
 
-    const memberships = await readHostedAssistantAskMemberships({
-      memberId: input.memberId,
-      prisma: tx,
-      requestedLabel,
-    });
-    const resolution = resolveHostedAssistantAskMembership({
-      memberships,
-      requestedLabel,
-    });
-    if (resolution.result) {
-      return { mailboxWake: null, result: resolution.result };
-    }
-    if (!resolution.membership) {
-      return unavailableAdmission("membership_unavailable");
-    }
-
     const authority = await readHostedAssistantAskMembershipAuthorityTx({
       expectedOriginMemberId: input.memberId,
-      expectedTargetRuntimeMemberId: resolution.membership.group.runtimeMemberId,
-      membershipId: resolution.membership.id,
+      expectedTargetRuntimeMemberId: null,
+      membershipId,
       now,
       originAssistantInputId: input.originAssistantInputId,
       tx,
@@ -385,7 +334,7 @@ async function requestHostedGroupAssistantAskByLabel(input: {
         target: {
           kind: "joined_group",
           membershipId: authority.membership.id,
-          requestedLabel,
+          requestedLabel: null,
         },
       },
       eventId: requestId,
@@ -415,196 +364,12 @@ async function requestHostedGroupAssistantAskByLabel(input: {
   });
 }
 
-async function requestHostedGroupAssistantAskByParticipants(input: {
-  groupLabel?: string | null;
-  memberId: string;
-  now?: Date;
-  originAssistantInputId: string;
-  originSessionId: string;
-  participantTarget: HostedRuntimeGroupParticipantTarget;
-  prisma?: PrismaClient;
-  question: string;
-}): Promise<HostedGroupAssistantAskAdmission> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
-  const question = normalizeHostedAssistantAskText({
-    label: "Hosted assistant ask question",
-    maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-    value: input.question,
-  });
-  const requestedLabel = normalizeHostedGroupTargetSelector(input.groupLabel);
-  const originSessionId = normalizeHostedAssistantAskText({
-    label: "Hosted assistant ask origin session ID",
-    maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
-    value: input.originSessionId,
-  });
-  const requestId = createHostedAssistantAskRequestId({
-    memberId: input.memberId,
-    originAssistantInputId: input.originAssistantInputId,
-  });
-  const participantTargetDigest = createHostedGroupParticipantTargetDigest(
-    input.participantTarget,
-    requestedLabel,
-  );
-
-  const existing = await readHostedMailboxItemById({
-    mailboxItemId: requestId,
-    prisma,
-  });
-  if (existing) {
-    return prisma.$transaction(async (tx) => {
-      await acquireHostedAssistantAskLockTx(tx, requestId);
-      return replayHostedGroupAssistantAskTx({
-        existingDedupeKey: existing.dedupeKey,
-        existingKind: existing.kind,
-        existingUserId: existing.userId,
-        expiresAt: existing.expiresAt ?? null,
-        memberId: input.memberId,
-        now,
-        originAssistantInputId: input.originAssistantInputId,
-        originSessionId,
-        participantTargetDigest,
-        question,
-        requestId,
-        requestedLabel,
-        tx,
-      });
-    });
-  }
-
-  const originEligible = await prisma.$transaction((tx) =>
-    runWithHostedDomainRootProviderCallsDisabled(() =>
-      isEligiblePersonalAssistantAskCallerTx({
-        memberId: input.memberId,
-        now,
-        originAssistantInputId: input.originAssistantInputId,
-        tx,
-      })
-    )
-  );
-  if (!originEligible) {
-    return unavailableAdmission("origin_unavailable");
-  }
-
-  let selection: HostedGroupParticipantTargetSelection;
-  try {
-    selection = await selectHostedGroupByParticipants({
-      memberId: input.memberId,
-      now,
-      participantTarget: input.participantTarget,
-      prisma,
-      requestedLabel,
-    });
-  } catch {
-    return unavailableAdmission("participant_evidence_unavailable");
-  }
-  if (selection.status === "result") {
-    return { mailboxWake: null, result: selection.result };
-  }
-
-  return prisma.$transaction(async (tx) =>
-    runWithHostedDomainRootProviderCallsDisabled(async () => {
-      await acquireHostedAssistantAskLockTx(tx, requestId);
-      const racedExisting = await readHostedMailboxItemById({
-        mailboxItemId: requestId,
-        prisma: tx,
-      });
-      if (racedExisting) {
-        return replayHostedGroupAssistantAskTx({
-          existingDedupeKey: racedExisting.dedupeKey,
-          existingKind: racedExisting.kind,
-          existingUserId: racedExisting.userId,
-          expiresAt: racedExisting.expiresAt ?? null,
-          memberId: input.memberId,
-          now,
-          originAssistantInputId: input.originAssistantInputId,
-          originSessionId,
-          participantTargetDigest,
-          question,
-          requestId,
-          requestedLabel,
-          tx,
-        });
-      }
-      const authority = await readHostedAssistantAskMembershipAuthorityTx({
-        expectedOriginMemberId: input.memberId,
-        expectedTargetRuntimeMemberId: selection.targetRuntimeMemberId,
-        membershipId: selection.membershipId,
-        now,
-        originAssistantInputId: input.originAssistantInputId,
-        tx,
-      });
-      if (!authority) {
-        return unavailableAdmission("membership_unavailable");
-      }
-      try {
-        await assertHostedThreadRouteEgressAuthority({
-          authority: selection.routeAuthority,
-          prisma: tx,
-        });
-      } catch (error) {
-        if (
-          isHostedOnboardingError(error)
-          && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
-          && !error.retryable
-        ) {
-          return unavailableAdmission("group_route_unavailable");
-        }
-        throw error;
-      }
-
-      const occurredAt = now.toISOString();
-      const expiresAt = new Date(
-        now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-      ).toISOString();
-      const wake = buildHostedExecutionAssistantAskRequestedWake({
-        ask: {
-          expiresAt,
-          originAssistantInputId: input.originAssistantInputId,
-          originSessionId,
-          question,
-          target: {
-            kind: "joined_group",
-            membershipId: authority.membership.id,
-            requestedLabel: createHostedGroupParticipantAskBinding(
-              participantTargetDigest,
-            ),
-          },
-        },
-        eventId: requestId,
-        memberId: authority.targetRuntimeMemberId,
-        occurredAt,
-      });
-      const append = await appendHostedMailboxEnvelopeWithIdentityTx({
-        envelope: wake,
-        expiresAt,
-        itemId: requestId,
-        tx,
-      });
-      if (append.dedupeConflict || append.item.id !== requestId) {
-        return unavailableAdmission("request_conflict");
-      }
-      return {
-        mailboxWake: {
-          expectedUserId: authority.targetRuntimeMemberId,
-          mailboxItemId: requestId,
-        },
-        result: {
-          status: "accepted" as const,
-          targetLabel: selection.targetLabel,
-        },
-      };
-    })
-  );
-}
-
 export async function requestHostedGroupContextHandoff(input: {
   context: string;
-  groupLabel?: string | null;
   memberId: string;
+  membershipId: string;
   now?: Date;
   originAssistantInputId: string;
-  participantTarget?: HostedRuntimeGroupParticipantTarget | null;
   prisma?: PrismaClient;
 }): Promise<HostedGroupAssistantAskAdmission> {
   return runWithHostedDomainRootUnwrapCache(() =>
@@ -614,11 +379,10 @@ export async function requestHostedGroupContextHandoff(input: {
 
 async function requestHostedGroupContextHandoffWithCryptoCache(input: {
   context: string;
-  groupLabel?: string | null;
   memberId: string;
+  membershipId: string;
   now?: Date;
   originAssistantInputId: string;
-  participantTarget?: HostedRuntimeGroupParticipantTarget | null;
   prisma?: PrismaClient;
 }): Promise<HostedGroupAssistantAskAdmission> {
   const prisma = input.prisma ?? getPrisma();
@@ -628,7 +392,11 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     maxCodePoints: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
     value: input.context,
   });
-  const requestedLabel = normalizeHostedGroupTargetSelector(input.groupLabel);
+  const membershipId = normalizeHostedAssistantAskText({
+    label: "Hosted group membership ID",
+    maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
+    value: input.membershipId,
+  });
   const eventId = createHostedGroupContextHandoffEventId({
     memberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
@@ -641,6 +409,7 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
       context,
       eventId,
       memberId: input.memberId,
+      membershipId,
       now,
       originAssistantInputId: input.originAssistantInputId,
       prisma,
@@ -654,58 +423,17 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     prisma,
   });
 
-  let preparedSelection: HostedGroupContextHandoffMembershipSelection;
-  if (input.participantTarget) {
-    const originEligible = await prisma.$transaction((tx) =>
-      runWithHostedDomainRootProviderCallsDisabled(() =>
-        isEligiblePersonalAssistantAskCallerTx({
-          memberId: input.memberId,
-          now,
-          originAssistantInputId: input.originAssistantInputId,
-          tx,
-        })
-      )
-    );
-    if (!originEligible) {
-      return unavailableAdmission("origin_unavailable");
-    }
-    try {
-      const participantSelection = await selectHostedGroupByParticipants({
+  const preparedSelection = await prisma.$transaction((tx) =>
+    runWithHostedDomainRootProviderCallsDisabled(() =>
+      selectHostedGroupContextHandoffMembershipTx({
         memberId: input.memberId,
+        membershipId,
         now,
-        participantTarget: input.participantTarget,
-        prisma,
-        requestedLabel,
-      });
-      preparedSelection = participantSelection.status === "result"
-        ? {
-            result: {
-              mailboxWake: null,
-              result: participantSelection.result,
-            },
-          }
-        : {
-            membershipId: participantSelection.membershipId,
-            routeAuthority: participantSelection.routeAuthority,
-            targetLabel: participantSelection.targetLabel,
-            targetRuntimeMemberId: participantSelection.targetRuntimeMemberId,
-          };
-    } catch {
-      return unavailableAdmission("participant_evidence_unavailable");
-    }
-  } else {
-    preparedSelection = await prisma.$transaction((tx) =>
-      runWithHostedDomainRootProviderCallsDisabled(() =>
-        selectHostedGroupContextHandoffMembershipTx({
-          memberId: input.memberId,
-          now,
-          originAssistantInputId: input.originAssistantInputId,
-          requestedLabel,
-          tx,
-        })
-      )
-    );
-  }
+        originAssistantInputId: input.originAssistantInputId,
+        tx,
+      })
+    )
+  );
   if ("result" in preparedSelection) {
     return preparedSelection.result;
   }
@@ -736,18 +464,6 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
   ) {
     return unavailableAdmission("group_route_unavailable");
   }
-  if (
-    preparedSelection.routeAuthority
-    && (
-      routeAuthority.channel !== preparedSelection.routeAuthority.channel
-      || routeAuthority.containerMemberId
-        !== preparedSelection.routeAuthority.containerMemberId
-      || routeAuthority.threadId !== preparedSelection.routeAuthority.threadId
-    )
-  ) {
-    return unavailableAdmission("group_route_unavailable");
-  }
-
   const occurredAt = now.toISOString();
   const expiresAt = new Date(
     now.getTime() + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
@@ -790,6 +506,7 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
             existingKind: existing.kind,
             existingUserId: existing.userId,
             memberId: input.memberId,
+            membershipId,
             now,
             originAssistantInputId: input.originAssistantInputId,
             tx,
@@ -849,7 +566,7 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
           },
           result: {
             status: "accepted",
-            targetLabel: preparedSelection.targetLabel ?? authority.targetLabel,
+            targetLabel: authority.targetLabel,
           },
         };
       })
@@ -872,16 +589,14 @@ type HostedGroupContextHandoffMembershipSelection =
   | { result: HostedGroupAssistantAskAdmission }
   | {
       membershipId: string;
-      routeAuthority?: HostedExecutionExternalThreadRouteAuthority;
-      targetLabel?: string;
       targetRuntimeMemberId: string;
     };
 
 async function selectHostedGroupContextHandoffMembershipTx(input: {
   memberId: string;
+  membershipId: string;
   now: Date;
   originAssistantInputId: string;
-  requestedLabel: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupContextHandoffMembershipSelection> {
   if (!await isEligiblePersonalAssistantAskCallerTx({
@@ -892,28 +607,10 @@ async function selectHostedGroupContextHandoffMembershipTx(input: {
   })) {
     return { result: unavailableAdmission("origin_unavailable") };
   }
-  const memberships = await readHostedAssistantAskMemberships({
-    memberId: input.memberId,
-    prisma: input.tx,
-    requestedLabel: input.requestedLabel,
-  });
-  const resolution = resolveHostedAssistantAskMembership({
-    memberships,
-    requestedLabel: input.requestedLabel,
-  });
-  if (resolution.result) {
-    return {
-      result: { mailboxWake: null, result: resolution.result },
-    };
-  }
-  const selected = resolution.membership;
-  if (!selected?.group.runtimeMemberId) {
-    return { result: unavailableAdmission("membership_unavailable") };
-  }
   const authority = await readHostedAssistantAskMembershipAuthorityTx({
     expectedOriginMemberId: input.memberId,
-    expectedTargetRuntimeMemberId: selected.group.runtimeMemberId,
-    membershipId: selected.id,
+    expectedTargetRuntimeMemberId: null,
+    membershipId: input.membershipId,
     now: input.now,
     originAssistantInputId: input.originAssistantInputId,
     tx: input.tx,
@@ -2052,6 +1749,7 @@ async function replayHostedGroupContextHandoff(input: {
   context: string;
   eventId: string;
   memberId: string;
+  membershipId: string;
   now: Date;
   originAssistantInputId: string;
   prisma: PrismaClient;
@@ -2083,6 +1781,7 @@ async function replayHostedGroupContextHandoff(input: {
           existingKind: locked.kind,
           existingUserId: locked.userId,
           memberId: input.memberId,
+          membershipId: input.membershipId,
           now: input.now,
           originAssistantInputId: input.originAssistantInputId,
           tx,
@@ -2133,6 +1832,7 @@ async function replayHostedGroupContextHandoffTx(input: {
   existingKind: string;
   existingUserId: string;
   memberId: string;
+  membershipId: string;
   now: Date;
   originAssistantInputId: string;
   tx: Prisma.TransactionClient;
@@ -2182,6 +1882,7 @@ async function replayHostedGroupContextHandoffTx(input: {
       !== buildHostedGroupContextHandoffInstructions({ context: input.context })
     || !handoff
     || handoff.originAssistantInputId !== input.originAssistantInputId
+    || handoff.membershipId !== input.membershipId
     || !routeAuthority
     || routeAuthority.containerMemberId !== wake.userId
     || !route
@@ -2242,13 +1943,12 @@ async function replayHostedGroupAssistantAskTx(input: {
   existingUserId: string;
   expiresAt: string | null;
   memberId: string;
+  membershipId: string;
   now: Date;
   originAssistantInputId: string;
   originSessionId: string;
-  participantTargetDigest?: string;
   question: string;
   requestId: string;
-  requestedLabel: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupAssistantAskAdmission> {
   if (isHostedAssistantAskExpired(input.expiresAt, input.now)) {
@@ -2282,11 +1982,8 @@ async function replayHostedGroupAssistantAskTx(input: {
     wake.ask.originAssistantInputId !== input.originAssistantInputId
     || wake.ask.originSessionId !== input.originSessionId
     || wake.ask.question !== input.question
-    || wake.ask.target.requestedLabel !== (
-      input.participantTargetDigest
-        ? createHostedGroupParticipantAskBinding(input.participantTargetDigest)
-        : input.requestedLabel
-    )
+    || wake.ask.target.membershipId !== input.membershipId
+    || wake.ask.target.requestedLabel !== null
     || createHostedAssistantAskRequestId({
       memberId: input.memberId,
       originAssistantInputId: wake.ask.originAssistantInputId,
@@ -2298,7 +1995,7 @@ async function replayHostedGroupAssistantAskTx(input: {
   const authority = await readHostedAssistantAskMembershipAuthorityTx({
     expectedOriginMemberId: input.memberId,
     expectedTargetRuntimeMemberId: input.existingUserId,
-    membershipId: wake.ask.target.membershipId,
+    membershipId: input.membershipId,
     now: input.now,
     originAssistantInputId: wake.ask.originAssistantInputId,
     tx: input.tx,
@@ -2957,104 +2654,6 @@ function hostedAssistantAskCompletionMatchesAuthority(input: {
     return false;
   }
   return true;
-}
-
-async function readHostedAssistantAskMemberships(input: {
-  memberId: string;
-  prisma: Pick<PrismaClient, "hostedGroupMember"> | Prisma.TransactionClient;
-  requestedLabel: string | null;
-}): Promise<HostedAssistantAskMembership[]> {
-  return input.prisma.hostedGroupMember.findMany({
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: {
-      group: {
-        select: {
-          displayName: true,
-          runtimeMemberId: true,
-        },
-      },
-      id: true,
-      memberId: true,
-    },
-    ...(input.requestedLabel === null
-      ? { take: HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX + 1 }
-      : {}),
-    where: { memberId: input.memberId },
-  });
-}
-
-function resolveHostedAssistantAskMembership(input: {
-  memberships: readonly HostedAssistantAskMembership[];
-  requestedLabel: string | null;
-}): {
-  membership: HostedAssistantAskMembership | null;
-  result: HostedRuntimeGroupAskResult | null;
-} {
-  if (input.memberships.length === 0) {
-    return { membership: null, result: { status: "no_groups" } };
-  }
-
-  if (input.requestedLabel === null && input.memberships.length === 1) {
-    return { membership: input.memberships[0] ?? null, result: null };
-  }
-
-  const labels = readHostedAssistantAskClarificationLabels(input.memberships);
-  if (input.requestedLabel === null) {
-    return labels.length > 0
-      ? {
-          membership: null,
-          result: { groupLabels: labels, status: "clarification_required" },
-        }
-      : {
-          membership: null,
-          result: { status: "unavailable", unavailableReason: "group_labels_unavailable" },
-        };
-  }
-
-  const matches = input.memberships.filter((membership) =>
-    normalizeHostedPersistedGroupTargetSelector(membership.group.displayName)
-      === input.requestedLabel
-  );
-  if (matches.length === 1) {
-    return { membership: matches[0] ?? null, result: null };
-  }
-  if (matches.length > 1) {
-    return {
-      membership: null,
-      result: { status: "unavailable", unavailableReason: "ambiguous_group_label" },
-    };
-  }
-  return labels.length > 0
-    ? {
-        membership: null,
-        result: { groupLabels: labels, status: "clarification_required" },
-      }
-    : {
-        membership: null,
-        result: { status: "unavailable", unavailableReason: "group_label_unavailable" },
-      };
-}
-
-function readHostedAssistantAskClarificationLabels(
-  memberships: readonly HostedAssistantAskMembership[],
-): string[] {
-  const result: string[] = [];
-  const seen = new Set<string>();
-  for (const membership of memberships) {
-    const displayLabel = sanitizeHostedGroupTargetDisplayLabel(
-      membership.group.displayName,
-    );
-    const selector = normalizeHostedGroupTargetSelector(displayLabel);
-    if (!displayLabel || !selector || seen.has(selector)) {
-      continue;
-    }
-    seen.add(selector);
-    result.push(displayLabel);
-    if (result.length === HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX) {
-      break;
-    }
-  }
-  return result;
 }
 
 function isHostedAssistantAskDirectConversation(

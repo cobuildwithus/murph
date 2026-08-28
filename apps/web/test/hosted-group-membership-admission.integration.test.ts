@@ -200,7 +200,7 @@ function routeAuthority(runtimeMemberId: string, threadId: string) {
   };
 }
 
-describe("participant selection composed with Assistant Ask admission", () => {
+describe("membership ID selection composed with Assistant Ask admission", () => {
   const mailboxWakes = new Map<string, Record<string, unknown>>();
   const mailboxItems = new Map<string, {
     dedupeKey: string;
@@ -306,7 +306,7 @@ describe("participant selection composed with Assistant Ask admission", () => {
       });
   }
 
-  it("selects one live roster, appends only that membership, and completes privately", async () => {
+  it("appends only the exact membership ID and completes privately", async () => {
     const memberships = [
       membership({
         displayName: null,
@@ -378,16 +378,10 @@ describe("participant selection composed with Assistant Ask admission", () => {
     });
     await expect(requestHostedGroupAssistantAsk({
       memberId: ORIGIN_MEMBER_ID,
+      membershipId: "membership_second",
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       originSessionId: ORIGIN_SESSION_ID,
-      participantTarget: {
-        participantCount: 2,
-        participants: [
-          { displayName: "Jordan" },
-          { displayName: "Casey" },
-        ],
-      },
       prisma: prisma as never,
       question: "What is the plan for this weekend?",
     })).resolves.toMatchObject({
@@ -397,7 +391,7 @@ describe("participant selection composed with Assistant Ask admission", () => {
       },
       result: {
         status: "accepted",
-        targetLabel: "Weekend Crew — 2 people: Jordan, Casey",
+        targetLabel: "Weekend Crew",
       },
     });
 
@@ -449,7 +443,7 @@ describe("participant selection composed with Assistant Ask admission", () => {
     });
   });
 
-  it("binds a participant-selected handoff to only the exact group route", async () => {
+  it("binds a membership-selected handoff to only the exact group route", async () => {
     const memberships = [
       membership({
         id: "membership_first",
@@ -511,18 +505,15 @@ describe("participant selection composed with Assistant Ask admission", () => {
     await expect(requestHostedGroupContextHandoff({
       context: "The requester completed the planned mobility set.",
       memberId: ORIGIN_MEMBER_ID,
+      membershipId: "membership_second",
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-      participantTarget: {
-        participantCount: 1,
-        participants: [{ displayName: "Jordan" }],
-      },
       prisma: prisma as never,
     })).resolves.toMatchObject({
       mailboxWake: { expectedUserId: SECOND_RUNTIME_MEMBER_ID },
       result: {
         status: "accepted",
-        targetLabel: "Weekend Crew — 1 person: Jordan",
+        targetLabel: "Weekend Crew",
       },
     });
 
@@ -547,7 +538,7 @@ describe("participant selection composed with Assistant Ask admission", () => {
     });
     const parsedHandoffWake = parseHostedExecutionWake(handoffWake);
     if (parsedHandoffWake.kind !== "assistant.notification.requested") {
-      throw new TypeError("Expected the participant handoff notification wake.");
+      throw new TypeError("Expected the membership handoff notification wake.");
     }
     expect(parsedHandoffWake.notification.deliveryDedupeToken)
       .toBe(parsedHandoffWake.eventId);
@@ -560,7 +551,7 @@ describe("participant selection composed with Assistant Ask admission", () => {
     ).toBe(false);
   });
 
-  it("keeps duplicate safe roster descriptions unavailable without appending", async () => {
+  it("rejects an opaque membership ID that is not an active requester membership", async () => {
     const memberships = [
       membership({
         id: "membership_first",
@@ -623,20 +614,17 @@ describe("participant selection composed with Assistant Ask admission", () => {
 
     await expect(requestHostedGroupAssistantAsk({
       memberId: ORIGIN_MEMBER_ID,
+      membershipId: "membership_stale",
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       originSessionId: ORIGIN_SESSION_ID,
-      participantTarget: {
-        participantCount: 1,
-        participants: [{ displayName: "Jordan" }],
-      },
       prisma: prisma as never,
       question: "What is the plan?",
     })).resolves.toEqual({
       mailboxWake: null,
       result: {
         status: "unavailable",
-        unavailableReason: "ambiguous_participant_target",
+        unavailableReason: "membership_unavailable",
       },
     });
     expect(mailboxWakes).toHaveLength(0);

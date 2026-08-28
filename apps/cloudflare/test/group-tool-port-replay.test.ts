@@ -20,7 +20,7 @@ const replaySafeRequests = [
     action: "ask",
     request: {
       action: "ask",
-      groupLabel: "100 Club",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
       originSessionId: "session_private",
       question: "What exercises are scheduled today?",
@@ -56,7 +56,7 @@ const replaySafeRequests = [
     request: {
       action: "handoff",
       context: "The member set a personal record today.",
-      groupLabel: "100 Club",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"f".repeat(32)}`,
     },
     response: {

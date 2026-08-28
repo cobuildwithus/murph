@@ -3,6 +3,8 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -100,6 +102,7 @@ describe("hosted group tool route", () => {
       maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
     });
     expect(mocks.handleTool).toHaveBeenCalledWith({
+      includeParticipantRosters: false,
       memberId: "member_group_runtime",
       request: body,
       // Anchored before the signed-callback read above, so the verification and
@@ -111,6 +114,35 @@ describe("hosted group tool route", () => {
       { requestStartedAtMs: number },
     ];
     expect(handled.requestStartedAtMs).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("enables participant rosters only for the versioned inventory query", async () => {
+    const body = { action: "list_memberships" };
+    mocks.handleTool.mockResolvedValueOnce({
+      action: "list_memberships",
+      result: {
+        disclosureGrants: [],
+        memberships: [],
+        status: "ok",
+        truncated: false,
+      },
+    });
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?${HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM}=${HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE}`,
+      {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
+      includeParticipantRosters: true,
+      request: body,
+    }));
   });
 
   it("accepts an eight-scope group email preparation callback", async () => {
@@ -150,6 +182,7 @@ describe("hosted group tool route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.handleTool).toHaveBeenCalledWith({
+      includeParticipantRosters: false,
       memberId: "member_group_runtime",
       request: body,
       requestStartedAtMs: expect.any(Number),
@@ -166,7 +199,7 @@ describe("hosted group tool route", () => {
       const originAssistantInputId = `ain_${"a".repeat(32)}`;
       const body = {
         action: "ask",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId,
         originSessionId: "session_private",
         question: "What exercises are scheduled today?",
@@ -208,7 +241,7 @@ describe("hosted group tool route", () => {
   it("schedules accepted Ask requests through the shared direct wake path", async () => {
     const body = {
       action: "ask",
-      groupLabel: "100 Club",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
       originSessionId: "session_private",
       question: "What exercises are scheduled today?",
@@ -251,7 +284,7 @@ describe("hosted group tool route", () => {
     const originAssistantInputId = `ain_${"a".repeat(32)}`;
     const body = {
       action: "ask",
-      groupLabel: "100 Club",
+      membershipId: "membership_100_club",
       originAssistantInputId,
       originSessionId: "session_private",
       question: "What exercises are scheduled today?",
@@ -367,6 +400,7 @@ describe("hosted group tool route", () => {
 
       expect(response.status).toBe(200);
       expect(mocks.handleTool).toHaveBeenCalledWith({
+        includeParticipantRosters: false,
         memberId: "member_group_runtime",
         request: expectedRequest,
         requestStartedAtMs: expect.any(Number),
