@@ -35,13 +35,13 @@ describe('assistant progress prompt contract', () => {
       'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement',
     )
     expect(prompt).toContain(
-      'Prefer one early update when reply-critical work spans distinct sources, more than a quick single step, or may outlast ordinary response time—even if each step looks fast',
+      'Send one early update before direct reply-critical work spanning multiple sources or substantive steps, even when each lookup looks fast or routine',
     )
     expect(prompt).toContain(
-      'Reconsider it for each follow-up or resumed turn; earlier updates do not count',
+      'Reconsider this on each follow-up or resumed turn; earlier updates do not count',
     )
     expect(prompt).toContain(
-      'Routine daily-card reads alone do not trigger progress',
+      'A single routine daily-card read alone does not trigger progress',
     )
     expect(prompt).toContain(
       'Skip it within ordinary latency',

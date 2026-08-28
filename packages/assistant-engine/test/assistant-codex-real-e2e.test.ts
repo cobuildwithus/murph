@@ -14862,6 +14862,15 @@ describeRealCodex('real Codex proactive progress e2e', () => {
         const commands = (await readFile(commandLog, 'utf8'))
           .trim()
           .split('\n')
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(
+          `[proactive-progress-e2e] ${JSON.stringify({
+            commandCount: commands.length,
+            progressUpdateCount: progressUpdates.length,
+            reply,
+          })}\n`,
+        )
 
         expect(progressUpdates).toHaveLength(1)
         expect(progressCalls).toHaveLength(1)
@@ -14874,18 +14883,10 @@ describeRealCodex('real Codex proactive progress e2e', () => {
           'meal summary --date 2026-08-27 --format json',
           'sleep summary --date 2026-08-27 --format json',
         ]))
-        const reply = result.finalMessage.trim()
         expect(reply).toMatch(/7,?800/iu)
         expect(reply).toMatch(/7\.4/iu)
         expect(reply).toMatch(/3 meals?|three (?:balanced )?meals?/iu)
         expect(reply).toMatch(/takeaway|overall|balance|solid|steady|good/iu)
-        process.stdout.write(
-          `[proactive-progress-e2e] ${JSON.stringify({
-            commandCount: commands.length,
-            progressUpdateCount: progressUpdates.length,
-            reply,
-          })}\n`,
-        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
