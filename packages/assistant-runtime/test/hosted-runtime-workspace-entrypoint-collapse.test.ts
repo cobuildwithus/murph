@@ -679,11 +679,14 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     }
   });
 
-  test("progressed foreground work preserves a due model-free owner handoff", async () => {
+  test("a requested owner handoff checkpoints after the current foreground pass", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const checkpointObserved = createDeferred<void>();
+    const assistantObserved = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPhaseCalls = 0;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
@@ -723,12 +726,14 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
                 events,
                 workspace: createWorkspaceState({
                   nextWakeAt: TEST_NOW,
-                  nextWakeReason: "mailbox",
+                  nextWakeReason: "assistant",
                   version: "4",
                 }),
               }),
             }),
             async runAssistantPhase() {
+              assistantPhaseCalls += 1;
+              assistantObserved.resolve();
               return {
                 checkpointReason: "assistant_runtime_commit",
                 nextWakeAt: new Date(Date.parse(TEST_NOW) + 60_000).toISOString(),
@@ -739,6 +744,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
                 },
               };
             },
+            runtimeWakeSignal,
             vaultRoot,
           },
         ),
@@ -746,6 +752,11 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         () => events.join(","),
       );
 
+      await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      runtimeWakeSignal.notify({
+        requestedProcessingMode: "system_mailbox",
+      });
       await withRealTimeout(checkpointObserved.promise, 15_000, () => events.join(","));
       const result = await resultPromise;
 
@@ -754,11 +765,14 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["idle_shutdown", TEST_NOW, "mailbox"],
+        [
+          "idle_shutdown",
+          new Date(Date.parse(TEST_NOW) + 60_000).toISOString(),
+          "assistant",
+        ],
       ]);
       assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(result.nextWakeAt, TEST_NOW);
-      assert.equal(result.nextWakeReason, "mailbox");
+      assert.equal(assistantPhaseCalls, 1);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

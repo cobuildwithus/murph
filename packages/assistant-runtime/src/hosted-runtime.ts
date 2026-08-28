@@ -4908,17 +4908,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           nowMs,
         });
         pendingWake = wakeResolution.pendingWake;
-        if (
-          passResult.assistantPhaseResult?.progressed === true
-          && pendingWake.nextWakeReason === "mailbox"
-          && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt, nowMs)
-        ) {
-          // A due mailbox wake is the classified model-free owner frontier,
-          // whether this pass discovered it or preserved it while servicing
-          // newer foreground input.
-          runtimeOwnerHandoffRequested = true;
-          setIdleCheckpointStartBy(nowMs);
-        }
         // The older due token remains checkpoint authority until its hot
         // service attempt is committed. Retain a distinct later assistant
         // obligation in the existing successor slot instead of dropping it.
@@ -5477,6 +5466,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         } = {},
       ): Promise<boolean> => {
         await flushImageGenerationWork();
+        const currentProcessingMode = input.request.processingMode ?? "default";
+        const requestedOwnerHandoff =
+          latencySeed?.requestedProcessingMode !== undefined
+          && latencySeed.requestedProcessingMode !== null
+          && latencySeed.requestedProcessingMode !== currentProcessingMode;
+        const finishRequestedOwnerHandoff = (ran: boolean): boolean => {
+          if (requestedOwnerHandoff) {
+            runtimeOwnerHandoffRequested = true;
+            markIdleCheckpointTimerAfterDirtyWork();
+          }
+          return ran;
+        };
         if (
           latencySeed !== null
           && !runtimeOwnerHandoffRequested
@@ -5501,17 +5502,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && (wakeOptions.shouldContinue?.() ?? true)
           && hostedAssistantInputBatchHasWork(readyImageCompletionInputBatch)
         ) {
-          return await runForegroundMailboxWakeIfWork({
-            includeReadyImageCompletion: true,
-            latencySeed,
-            rearmIdleCheckpointAfterEmptyProbe:
-              wakeOptions.rearmIdleCheckpointAfterEmptyProbe === true,
-            requestIdKind: "checkpoint-interrupt",
-            runAssistantWithoutMailboxWork: true,
-            shouldContinue: wakeOptions.shouldContinue,
-            signal: wakeOptions.signal,
-            systemMailboxAdmission: "pre_checkpoint_safe",
-          });
+          return finishRequestedOwnerHandoff(
+            await runForegroundMailboxWakeIfWork({
+              includeReadyImageCompletion: true,
+              latencySeed,
+              rearmIdleCheckpointAfterEmptyProbe:
+                wakeOptions.rearmIdleCheckpointAfterEmptyProbe === true,
+              requestIdKind: "checkpoint-interrupt",
+              runAssistantWithoutMailboxWork: true,
+              shouldContinue: wakeOptions.shouldContinue,
+              signal: wakeOptions.signal,
+              systemMailboxAdmission: "pre_checkpoint_safe",
+            }),
+          );
         }
         const ran = await runForegroundMailboxWakeIfWork({
           latencySeed,
@@ -5519,7 +5522,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             wakeOptions.rearmIdleCheckpointAfterEmptyProbe === true,
           requestIdKind: "checkpoint-interrupt",
           runAssistantWithoutMailboxWork:
-            pendingWake.nextWakeAt !== null
+            !requestedOwnerHandoff
+              && pendingWake.nextWakeAt !== null
               && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
               && !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
               && !(
@@ -5532,7 +5536,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           signal: wakeOptions.signal,
           systemMailboxAdmission: "pre_checkpoint_safe",
         });
-        return ran;
+        return finishRequestedOwnerHandoff(ran);
       };
       const runPostCheckpointMailboxWake = async (input: {
         initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
@@ -7287,9 +7291,6 @@ function resolvePendingWakeAfterForegroundPass(input: {
   const carriedWakeIsDue =
     input.previousPendingWake.nextWakeAt !== null
     && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs);
-  const carriedModelFreeOwnerWakeIsDue =
-    carriedWakeIsDue
-    && input.previousPendingWake.nextWakeReason === "mailbox";
   const freshDueMailboxOwnerSupersedesCarriedBackground =
     carriedWakeIsDue
     && !input.previousPendingWakeIsForeground
@@ -7332,15 +7333,6 @@ function resolvePendingWakeAfterForegroundPass(input: {
   };
 
   if (input.replaceWake) {
-    if (
-      carriedModelFreeOwnerWakeIsDue
-      && hostedRuntimeWakeReasonIsAssistant(input.passWake.nextWakeReason)
-    ) {
-      return {
-        pendingWake: copyHostedRuntimePendingWake(input.previousPendingWake),
-        preservedDueAssistantWakeOnNoProgress: false,
-      };
-    }
     return {
       pendingWake: copyHostedRuntimePendingWake(input.passWake),
       preservedDueAssistantWakeOnNoProgress: false,

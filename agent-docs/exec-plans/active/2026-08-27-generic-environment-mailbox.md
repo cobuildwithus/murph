@@ -231,19 +231,25 @@ Updated: 2026-08-28
     owner replaced the already-due model-free mailbox wake with its ordinary
     assistant continuation. The Environment row remained durably imported and
     unhandled behind the default fence; no data was lost.
-  - The correction keeps the resolved owner wake authoritative across that
-    progressed foreground pass. A due `mailbox` wake is preserved ahead of an
-    ordinary assistant continuation, requests the existing invocation-local
-    owner handoff, and starts the existing checkpoint immediately. It adds no
-    state, read, scheduler, queue, or Temporal mode.
-  - Current local proof passes: the new exact outer-loop regression, all 21
-    collapse invariants, the four focused assistant owner-ordering tests, all
-    157 Cloudflare runner coordination tests, the assistant-runtime typecheck,
-    and `git diff --check`.
-  - The private Temporal proof passes: 181 workflow-machine tests, the replay
-    suite across all recorded histories with the exact pre-patch mailbox fact,
-    and the private package typecheck. The existing operator migration signal
-    is the required release boundary for old workflow runs.
+  - The next exact paired run disproved that carried-wake correction. Treating
+    every due `mailbox` wake as an owner handoff could yield before fresh
+    conversation input or an older default-owned system row, while the real
+    foreground-to-system request could still end with an ordinary `assistant`
+    wake label. The wake label is therefore not an ownership authority.
+  - The final correction deletes that inference. The active runtime now yields
+    only from the existing explicit cross-owner wake notification after the
+    current foreground pass. Temporal chooses the next owner from the durable
+    `systemMailboxFrontier`: conversation lag and `default_owned` rows stay on
+    the default owner; an imported `model_free` frontier stays on the existing
+    system owner regardless of the generic workspace wake label. No new state,
+    read, scheduler, queue, mode, or feature classifier is introduced.
+  - Current local proof passes: all 21 collapse invariants, all 54 assistant
+    scheduling tests, 181 Temporal workflow-machine tests, the Temporal replay
+    suite, both affected package typechecks, and `git diff --check`. The new
+    outer-loop regression proves that a cross-owner request checkpoints after
+    exactly one foreground assistant pass.
+  - The existing operator migration signal remains the required release
+    boundary for old workflow runs.
 - Composed proof:
   - `pnpm hosted-local e2e foreground-reply-priority` was attempted. The branch
     predates the bundle baseline already merged on `main`; after temporarily
@@ -260,7 +266,7 @@ Updated: 2026-08-28
     and the second exposed the stale wake-label mismatch after strict ownership
     was restored. The current correction keeps the two existing owners and one
     ordered queue, with no new mode or persisted state. It needs a fresh
-    exact-head Linux run after the carried-owner-wake correction.
+    exact-head Linux run after the explicit-owner-boundary correction.
 - Required outcomes:
   - Exact first-frontier classification, no leapfrogging, no model call for
     Environment completion, safe cooperative owner yield in both directions,
