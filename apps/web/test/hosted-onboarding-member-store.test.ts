@@ -2594,7 +2594,7 @@ describe("hosted-member-store", () => {
     });
 
     expect(queryRaw).toHaveBeenCalledTimes(1);
-    expect(executeRaw).not.toHaveBeenCalled();
+    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(findUnique).toHaveBeenCalledWith({
       select: {
         linqChatLookupKey: true,

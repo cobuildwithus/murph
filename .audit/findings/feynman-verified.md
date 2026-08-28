@@ -220,3 +220,45 @@ moving another failure boundary, so they are outside this patch.
   execution TypeScript checks passed; agent-doc drift and diff checks passed.
 - The focused real-Codex journey queued one exact named group handoff with one
   `handoff` tool call and no membership-list call.
+
+## Vault CLI error-recovery follow-up - 2026-08-27
+
+### Verified findings and smallest corrections
+
+| IDs | Verdict | Correction |
+| --- | --- | --- |
+| VC-001, VC-002 | Medium | Map known stored event contract and JSONL failures once at the exact-read owner, and validate matching owned rows before reading their ids. |
+| VC-003 | Medium | Reuse `toVaultMetadataCliError` in `vault update`. |
+| VC-004 | Medium | Return the entity already produced by event/intervention writes; retain a read only for the no-op detach path. |
+| VC-005, VC-006 | Medium | Preserve a primary command failure across cleanup and scan all format flags so the final recognized format wins. |
+| VC-007 | Medium | Parse the bounded score schema before scoring, expose only public root paths and fixed invariant guidance, and rethrow unexpected non-TypeErrors. |
+| VC-008, VC-009, VC-010 | Medium | Give each device request a fresh deadline, classify body-read failures, and derive retryability from both method safety and response class without adding retries. |
+| VC-011 | Medium | Reuse the filesystem mapper for `@file` reads and use fixed, cause-free stdin validation/read envelopes. |
+| VC-012 | Low | Project Exa SDK/request failures as transport, request-shape failures as validation, and response failures as response. |
+| VC-013 | Medium | Reuse the filesystem mapper, preserve the primary operation failure, and distinguish saved-but-not-cleaned from unsaved. |
+| VC-014 | Medium | Validate qualifier maps, stored media, source, and string arrays atomically instead of filtering malformed values. |
+| VC-015, VC-016, VC-017 | Medium | Reuse canonical enums, reject non-object sample rows, validate real calendar dates, and apply one ordered-range guard at command boundaries. |
+| VC-018 | Medium | Check the explicit clinical-records foreground-yield fact before the linked abort at synchronous boundaries, while preserving `AbortError` for in-flight cancellation. |
+
+### Safety and architecture dispositions
+
+- Messages and hints are fixed and value-free; raw records, provider bodies,
+  transport causes, absolute paths, tokens, and submitted identifiers are not
+  copied into recovery context.
+- Unknown exceptions retain their existing fallback. Only stable owner codes or
+  proven deterministic TypeErrors receive a specific public classification.
+- Device requests gain a deadline but no automatic retry. Ambiguous write
+  failures are explicitly non-retryable.
+- The patch deletes redundant reads and composes existing schemas and mappers.
+  It introduces no persisted state, dependency, service, compatibility shim, or
+  lifecycle manager.
+
+### Regression proof selected
+
+- Exact and owned event corruption: core owner test plus built CLI show, edit,
+  delete, and import snapshots with privacy non-echo assertions.
+- Wrapper, score input, shared JSON input, device transport/body, and finite
+  option/date behavior: focused package tests and CLI projections.
+- Final proof requires package typechecks, a built CLI run of the recovery
+  suite, exact-head ReviewGPT, required GitHub checks, and current-base
+  mergeability.

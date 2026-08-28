@@ -1,12 +1,31 @@
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import {
+  HOSTED_EXECUTION_NONCE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
+  HOSTED_EXECUTION_SIGNATURE_HEADER,
+  HOSTED_EXECUTION_TIMESTAMP_HEADER,
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import {
+  encodeHostedExecutionSignedRequestPayload,
+} from "@murphai/hosted-execution/auth";
 import { describe, expect, it, vi } from "vitest";
 
 const groupActionAuthorityMocks = vi.hoisted(() => ({
   hasActivationProof: vi.fn(),
   readWake: vi.fn(),
   resolveSenderMemberId: vi.fn(),
+}));
+
+const visibleReconciliationMocks = vi.hoisted(() => ({
+  access: null as unknown,
+  client: null as unknown,
+  enabled: false,
+  facts: null as unknown,
+  item: null as unknown,
+  wake: null as unknown,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => {
@@ -17,8 +36,29 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => {
     ...actual,
     readHostedMailboxConversationWakeByAssistantInputId:
       groupActionAuthorityMocks.readWake,
+    readHostedMailboxLatestPendingConversationItem: (...args: Parameters<
+      typeof actual.readHostedMailboxLatestPendingConversationItem
+    >) => {
+      if (visibleReconciliationMocks.enabled) {
+        return Promise.resolve(visibleReconciliationMocks.item);
+      }
+      return actual.readHostedMailboxLatestPendingConversationItem(...args);
+    },
+    readHostedMailboxWakeByItemId: (...args: Parameters<
+      typeof actual.readHostedMailboxWakeByItemId
+    >) => {
+      if (visibleReconciliationMocks.enabled) {
+        return Promise.resolve(visibleReconciliationMocks.wake);
+      }
+      return actual.readHostedMailboxWakeByItemId(...args);
+    },
   };
 });
+
+vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => ({
+  readHostedRuntimeReconciliationFacts: () =>
+    Promise.resolve(visibleReconciliationMocks.facts),
+}));
 
 vi.mock("@/src/lib/hosted-groups/group-message-sender", async (importOriginal) => {
   const actual = await importOriginal<
@@ -51,6 +91,7 @@ import {
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
+  createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
@@ -62,8 +103,16 @@ import {
 } from "@/src/lib/hosted-execution/usage-limit-notice-claim";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
+  createHostedLinqProviderEventLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  readHostedMailboxWakeByDedupeKey,
+} from "@/src/lib/hosted-mailbox/store";
+import * as prismaModule from "@/src/lib/prisma";
 import { createPrismaClient } from "@/src/lib/prisma";
+import {
+  POST as postHostedLinqEgressEngagement,
+} from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 import {
   recordHostedLaunchRequiredConsent,
 } from "@/src/lib/legal/consent";
@@ -71,11 +120,18 @@ import {
   readHostedGroupMembershipsForMember,
 } from "@/src/lib/hosted-groups/group-store";
 import {
+  readHostedRuntimeReconciliationFactsWithVisibleAccess,
+} from "@/src/lib/hosted-orchestration/visible-runtime-reconciliation";
+import * as hostedRuntimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
+import * as hostedLinqClient from "@/src/lib/hosted-onboarding/linq-client";
+import * as recognizedInboundAccess from "@/src/lib/hosted-onboarding/recognized-inbound-access";
+import {
   assertHostedGroupParticipantActionOriginHasOwnMurph,
 } from "@/src/lib/hosted-groups/participant-action-authority";
 import {
   ensureHostedThreadContainerRouteTx,
   type PreparedHostedThreadContainerCreation,
+  type PreparedHostedThreadContainerDeliveryRoute,
 } from "@/src/lib/hosted-routing/thread-container-service";
 import {
   buildHostedThreadDeliveryRoute,
@@ -90,11 +146,28 @@ import {
   readHostedThreadRouteByThreadIdentity,
   retireHostedLinqThreadRouteForRemovedAccountTx,
 } from "@/src/lib/hosted-routing/thread-route-store";
-import type {
-  HostedLinqParticipantChangedEvent,
+import {
+  parseHostedLinqWebhookEvent,
+  requireHostedLinqMessageEditedEvent,
+  requireHostedLinqMessageReceivedEvent,
+  type HostedLinqParticipantChangedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
 import {
+  buildHostedMemberIdentityPrivateColumns,
+} from "@/src/lib/hosted-onboarding/member-private-codecs";
+import {
+  upsertHostedMemberHomeLinqBindingTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-linq";
+import {
+  encryptHostedLinqLinePhoneNumber,
+} from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
+import {
+  planHostedOnboardingLinqWebhook,
+} from "@/src/lib/hosted-onboarding/webhook-provider-linq";
+import {
   applyHostedLinqParticipantChangeToRouteTx,
+  handleHostedOnboardingLinqWebhook,
+  runHostedLinqMessageEditPreparedTransaction,
 } from "@/src/lib/hosted-onboarding/webhook-service";
 import {
   HOSTED_CRYPTO_DOMAINS,
@@ -125,12 +198,79 @@ type RouteFixture = {
   threadIdentityLookupKey: string;
 };
 
+type ActiveLinqGroupRoute = {
+  canonicalAccountLookupKey: string;
+  canonicalDeliveryRouteEncrypted: string;
+  canonicalPreparedDeliveryRoute: PreparedHostedThreadContainerDeliveryRoute;
+  canonicalRecipientPhone: string;
+  canonicalThreadLookupKey: string;
+  deliveringPreparedDeliveryRoute: PreparedHostedThreadContainerDeliveryRoute;
+  deliveringRecipientPhone: string;
+  participantPhone: string;
+};
+
+type ActiveLinqDirectRoute = ActiveLinqGroupRoute & {
+  recipientPhoneLookupKey: string;
+};
+
 function createDeferred<T = void>(): Deferred<T> {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+async function createSignedHostedCallbackRequest(input: {
+  body: string;
+  keyId: string;
+  nonce: string;
+  path: string;
+  privateKey: JsonWebKey;
+  timestamp: string;
+  userId: string;
+}): Promise<Request> {
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    input.privateKey,
+    {
+      name: "ECDSA",
+      namedCurve: "P-256",
+    },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    {
+      hash: "SHA-256",
+      name: "ECDSA",
+    },
+    key,
+    encodeHostedExecutionSignedRequestPayload({
+      method: "POST",
+      nonce: input.nonce,
+      path: input.path,
+      payload: input.body,
+      search: "",
+      timestamp: input.timestamp,
+      userId: input.userId,
+    }),
+  );
+
+  return new Request(`https://internal.example.test${input.path}`, {
+    body: input.body,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      [HOSTED_EXECUTION_NONCE_HEADER]: input.nonce,
+      [HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER]: input.keyId,
+      [HOSTED_EXECUTION_SIGNATURE_HEADER]: Buffer.from(signature).toString(
+        "base64url",
+      ),
+      [HOSTED_EXECUTION_TIMESTAMP_HEADER]: input.timestamp,
+      [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+    },
+    method: "POST",
+  });
 }
 
 async function buildPreparedThreadContainerCreation(input: {
@@ -238,6 +378,182 @@ async function createRouteFixture(): Promise<RouteFixture> {
   };
 }
 
+async function activateLinqGroupRoute(
+  fixture: RouteFixture,
+): Promise<ActiveLinqGroupRoute> {
+  const numericSuffix = String(
+    Number.parseInt(randomUUID().replaceAll("-", "").slice(0, 7), 16)
+      % 10_000_000,
+  ).padStart(7, "0");
+  const participantPhone = `+1555${numericSuffix}`;
+  const canonicalRecipientPhone = `+1556${numericSuffix}`;
+  const deliveringRecipientPhone = `+1557${numericSuffix}`;
+  const participantPhoneLookupKey = createHostedPhoneLookupKey(
+    participantPhone,
+  );
+  const canonicalAccountLookupKey = createHostedPhoneLookupKey(
+    canonicalRecipientPhone,
+  );
+  const deliveringAccountLookupKey = createHostedPhoneLookupKey(
+    deliveringRecipientPhone,
+  );
+  if (
+    !participantPhoneLookupKey
+    || !canonicalAccountLookupKey
+    || !deliveringAccountLookupKey
+  ) {
+    throw new Error("Expected valid Linq routing phone inputs.");
+  }
+
+  await fixture.observer.hostedMember.update({
+    data: { billingStatus: "active" },
+    where: { id: fixture.ownerMemberId },
+  });
+  for (const scope of ["launch.legal", "launch.health-data"] as const) {
+    await recordHostedLaunchRequiredConsent({
+      memberId: fixture.ownerMemberId,
+      prisma: fixture.observer,
+      scope,
+      source: "linq-route-lock-order-concurrency-test",
+    });
+  }
+  const identityPrivate = await buildHostedMemberIdentityPrivateColumns({
+    memberId: fixture.ownerMemberId,
+    phoneNumber: participantPhone,
+    prisma: fixture.observer,
+    privyUserId: null,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: null,
+  });
+  await fixture.observer.hostedMemberIdentity.create({
+    data: {
+      ...identityPrivate,
+      maskedPhoneNumberHint: "*** test",
+      memberId: fixture.ownerMemberId,
+      phoneLookupKey: participantPhoneLookupKey,
+      phoneNumberVerifiedAt: new Date("2026-08-09T11:00:00.000Z"),
+    },
+  });
+
+  const canonicalDeliveryRoute = buildHostedThreadDeliveryRoute({
+    accountLookupKey: canonicalAccountLookupKey,
+    channel: "linq",
+    threadId: fixture.threadId,
+  });
+  const canonicalDeliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
+    containerMemberId: fixture.containerMemberId,
+    prisma: fixture.observer,
+    route: canonicalDeliveryRoute,
+  });
+  const canonicalThreadLookupKey = createHostedExternalThreadLookupKey({
+    accountLookupKey: canonicalAccountLookupKey,
+    channel: "linq",
+    threadId: fixture.threadId,
+  });
+  if (!canonicalThreadLookupKey) {
+    throw new Error("Expected a canonical Linq thread lookup key.");
+  }
+  await fixture.observer.hostedThreadRoute.update({
+    data: {
+      accountLookupKey: canonicalAccountLookupKey,
+      deliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+      threadLookupKey: canonicalThreadLookupKey,
+    },
+    where: {
+      channel_threadIdentityLookupKey: {
+        channel: "linq",
+        threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+      },
+    },
+  });
+
+  const deliveringRoute = buildHostedThreadDeliveryRoute({
+    accountLookupKey: deliveringAccountLookupKey,
+    channel: "linq",
+    threadId: fixture.threadId,
+  });
+  return {
+    canonicalAccountLookupKey,
+    canonicalDeliveryRouteEncrypted,
+    canonicalPreparedDeliveryRoute: {
+      containerMemberId: fixture.containerMemberId,
+      deliveryRoute: canonicalDeliveryRoute,
+      deliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+      observedDeliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+    },
+    canonicalRecipientPhone,
+    canonicalThreadLookupKey,
+    deliveringPreparedDeliveryRoute: {
+      containerMemberId: fixture.containerMemberId,
+      deliveryRoute: deliveringRoute,
+      deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({
+        containerMemberId: fixture.containerMemberId,
+        prisma: fixture.observer,
+        route: deliveringRoute,
+      }),
+      observedDeliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+    },
+    deliveringRecipientPhone,
+    participantPhone,
+  };
+}
+
+async function activateLinqDirectRoute(
+  fixture: RouteFixture,
+): Promise<ActiveLinqDirectRoute> {
+  const route = await activateLinqGroupRoute(fixture);
+  const recipientPhoneLookupKey = createHostedPhoneLookupKey(
+    route.canonicalRecipientPhone,
+  );
+  const participantPhoneLookupKey = createHostedPhoneLookupKey(
+    route.participantPhone,
+  );
+  if (!recipientPhoneLookupKey) {
+    throw new Error("Expected a direct-route recipient lookup key.");
+  }
+  if (!participantPhoneLookupKey) {
+    throw new Error("Expected a direct-route participant lookup key.");
+  }
+
+  await fixture.observer.hostedThreadRoute.deleteMany({
+    where: {
+      channel: "linq",
+      threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+    },
+  });
+  await fixture.observer.hostedLinqLine.create({
+    data: {
+      configuredAt: new Date("2026-08-09T11:00:00.000Z"),
+      egressPolicy: "enabled",
+      healthStatus: "healthy",
+      phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(
+        route.canonicalRecipientPhone,
+      ),
+      phoneNumberHint: "*** test",
+      phoneNumberLookupKey: recipientPhoneLookupKey,
+      source: "test",
+    },
+  });
+  await fixture.observer.$transaction((tx) =>
+    upsertHostedMemberHomeLinqBindingTx({
+      clearPending: true,
+      homeLineAssignedAt: new Date("2026-08-09T11:00:00.000Z"),
+      linqChatId: fixture.threadId,
+      memberId: fixture.ownerMemberId,
+      participantContact: {
+        kind: "phone",
+        lookupKey: participantPhoneLookupKey,
+      },
+      prisma: tx,
+      recipientPhone: route.canonicalRecipientPhone,
+    })
+  );
+
+  return { ...route, recipientPhoneLookupKey };
+}
+
 async function cleanupRouteFixture(fixture: RouteFixture): Promise<void> {
   await fixture.observer.hostedThreadRoute.deleteMany({
     where: {
@@ -260,6 +576,7 @@ async function cleanupRouteFixture(fixture: RouteFixture): Promise<void> {
       id: {
         in: [
           fixture.containerMemberId,
+          fixture.ownerMemberId,
           ...(container ? [container.ownerMemberId] : []),
         ],
       },
@@ -509,6 +826,37 @@ function observeParticipantContextRouteWrite(input: {
   });
 }
 
+function pauseHostedParticipantWebhookAfterContextWrite(input: {
+  ciphertext: Deferred<string>;
+  client: PrismaClient;
+  pid: Deferred<number>;
+  release: Deferred<void>;
+}): PrismaClient {
+  return new Proxy(input.client, {
+    get(target, property) {
+      if (property === "$transaction") {
+        return <TResult>(
+          callback: (tx: Prisma.TransactionClient) => Promise<TResult>,
+          options?: {
+            isolationLevel?: Prisma.TransactionIsolationLevel;
+            maxWait?: number;
+            timeout?: number;
+          },
+        ) => target.$transaction(async (tx) => {
+          input.pid.resolve(await readBackendPid(tx));
+          return callback(observeParticipantContextRouteWrite({
+            ciphertext: input.ciphertext,
+            release: input.release,
+            tx,
+          }));
+        }, options);
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 function pauseAddressBookClearBeforeCommit(input: {
   cleared: Deferred<void>;
   client: PrismaClient;
@@ -650,8 +998,451 @@ function observeHostedThreadRouteLockAttempt(input: {
   });
 }
 
+function pauseHostedMemberRoutingDemotionAfterWrite(input: {
+  demoted: Deferred<void>;
+  release: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  const hostedMemberRouting = new Proxy(input.tx.hostedMemberRouting, {
+    get(target, property) {
+      if (property === "updateMany") {
+        return async (args: Prisma.HostedMemberRoutingUpdateManyArgs) => {
+          const result = await target.updateMany(args);
+          input.demoted.resolve();
+          await input.release.promise;
+          return result;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
+  return new Proxy<Prisma.TransactionClient>(input.tx, {
+    get(target, property) {
+      if (property === "hostedMemberRouting") {
+        return hostedMemberRouting;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function buildRoutedGroupMessageEvent(input: {
+  createdAt: string;
+  eventId: string;
+  messageId: string;
+  ownerPhone: string;
+  participantPhone: string;
+  text: string;
+  threadId: string;
+}) {
+  return requireHostedLinqMessageReceivedEvent(parseHostedLinqWebhookEvent(
+    JSON.stringify({
+    api_version: "v3",
+    created_at: input.createdAt,
+    data: {
+      chat: {
+        id: input.threadId,
+        is_group: true,
+        owner_handle: {
+          handle: input.ownerPhone,
+          id: "owner-handle",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      direction: "inbound",
+      id: input.messageId,
+      parts: [{ type: "text", value: input.text }],
+      sender_handle: {
+        handle: input.participantPhone,
+        id: "sender-handle",
+        service: "iMessage",
+      },
+      sent_at: input.createdAt,
+      service: "iMessage",
+    },
+    event_id: input.eventId,
+    event_type: "message.received",
+    webhook_version: "2026-02-03",
+    }),
+  ));
+}
+
+function buildRoutedDirectMessageEvent(input: {
+  createdAt: string;
+  eventId: string;
+  messageId: string;
+  participantPhone: string;
+  recipientPhone: string;
+  text: string;
+  threadId: string;
+}) {
+  return requireHostedLinqMessageReceivedEvent(parseHostedLinqWebhookEvent(
+    JSON.stringify({
+      api_version: "v3",
+      created_at: input.createdAt,
+      data: {
+        chat: {
+          id: input.threadId,
+          is_group: false,
+          owner_handle: {
+            handle: input.recipientPhone,
+            id: "owner-handle-direct",
+            is_me: true,
+            service: "iMessage",
+          },
+        },
+        direction: "inbound",
+        id: input.messageId,
+        parts: [{ type: "text", value: input.text }],
+        sender_handle: {
+          handle: input.participantPhone,
+          id: "sender-handle-direct",
+          service: "iMessage",
+        },
+        sent_at: input.createdAt,
+        service: "iMessage",
+      },
+      event_id: input.eventId,
+      event_type: "message.received",
+      webhook_version: "2026-02-03",
+    }),
+  ));
+}
+
+function buildRoutedGroupMessageEditedEvent(input: {
+  createdAt: string;
+  eventId: string;
+  messageId: string;
+  participantPhone: string;
+  text: string;
+  threadId: string;
+}) {
+  return requireHostedLinqMessageEditedEvent(parseHostedLinqWebhookEvent(
+    JSON.stringify({
+    api_version: "v3",
+    created_at: input.createdAt,
+    data: {
+      chat: { id: input.threadId },
+      direction: "inbound",
+      edited_at: input.createdAt,
+      id: input.messageId,
+      part: { index: 0, text: input.text },
+      sender_handle: {
+        handle: input.participantPhone,
+        id: "sender-handle-edit",
+        is_me: false,
+        service: "iMessage",
+      },
+    },
+    event_id: input.eventId,
+    event_type: "message.edited",
+    webhook_version: "2026-02-03",
+    }),
+  ));
+}
+
+function pauseHostedWebhookTransactionAfterRawOperation(input: {
+  client: PrismaClient;
+  locked: Deferred<void>;
+  operation?: "execute" | "query";
+  operationCall?: number;
+  pid: Deferred<number>;
+  release: Deferred<void>;
+  timeoutMs?: number;
+}): PrismaClient {
+  let paused = false;
+  let rawOperationCalls = 0;
+  return new Proxy(input.client, {
+    get(target, property) {
+      if (property === "$transaction") {
+        return <TResult>(
+          callback: (tx: Prisma.TransactionClient) => Promise<TResult>,
+          options?: {
+            isolationLevel?: Prisma.TransactionIsolationLevel;
+            maxWait?: number;
+            timeout?: number;
+          },
+        ) => {
+          return target.$transaction(async (tx) => {
+            input.pid.resolve(await readBackendPid(tx));
+            const propertyToPause = input.operation === "execute"
+              ? "$executeRaw"
+              : input.operation === "query"
+                ? "$queryRaw"
+                : null;
+            const pausedTx = new Proxy<Prisma.TransactionClient>(tx, {
+              get(transaction, transactionProperty) {
+                const value = Reflect.get(
+                  transaction,
+                  transactionProperty,
+                  transaction,
+                );
+                if (
+                  propertyToPause !== null
+                  && transactionProperty === propertyToPause
+                  && typeof value === "function"
+                ) {
+                  return async (...args: unknown[]) => {
+                    const result = await Reflect.apply(value, transaction, args);
+                    rawOperationCalls += 1;
+                    if (
+                      !paused
+                      && rawOperationCalls === (input.operationCall ?? 1)
+                    ) {
+                      paused = true;
+                      input.locked.resolve();
+                      await input.release.promise;
+                    }
+                    return result;
+                  };
+                }
+                return typeof value === "function"
+                  ? value.bind(transaction)
+                  : value;
+              },
+            });
+            return callback(pausedTx);
+          }, {
+            ...options,
+            ...(input.timeoutMs ? { timeout: input.timeoutMs } : {}),
+          });
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+async function runVisibleAccessRace<T>(input: {
+  accessKind?: "access_notice" | "signup";
+  assignedPhone: string;
+  fixture: RouteFixture;
+  operationChatLockCall?: number;
+  participantPhone: string;
+  runOperation: (client: PrismaClient) => Promise<T>;
+  startOrder: "operation-first" | "reconciliation-first";
+}): Promise<{
+  operation: T;
+  reconciliation:
+    | { error: unknown; status: "rejected" }
+    | { status: "resolved" };
+}> {
+  const firstLockHeld = createDeferred();
+  const releaseFirst = createDeferred();
+  const reconciliationPid = createDeferred<number>();
+  const operationPid = createDeferred<number>();
+  let reconciliationTask: Promise<
+    | { error: unknown; status: "rejected" }
+    | { status: "resolved" }
+  > | null = null;
+  let operationTask: Promise<T> | null = null;
+  const providerSend = vi.spyOn(
+    hostedLinqClient,
+    "sendHostedLinqChatMessage",
+  ).mockResolvedValue({
+    chatId: input.fixture.threadId,
+    messageId: `message_visible_signup_${randomUUID()}`,
+  });
+  const providerCreateChat = vi.spyOn(
+    hostedLinqClient,
+    "createHostedLinqChat",
+  ).mockResolvedValue({
+    chatId: `chat_private_signup_${randomUUID()}`,
+    messageId: `message_private_signup_${randomUUID()}`,
+  });
+  const signalRuntime = vi.spyOn(
+    hostedRuntimeSignal,
+    "signalHostedMailboxAppendRuntime",
+  ).mockResolvedValue({
+    signalAccepted: true,
+    workflowId: "hosted-user-runtime:lock-order-test",
+  });
+  const getPrisma = vi.spyOn(prismaModule, "getPrisma")
+    .mockImplementation(() => {
+      if (!visibleReconciliationMocks.client) {
+        throw new Error("Expected a visible reconciliation Prisma client.");
+      }
+      return visibleReconciliationMocks.client as PrismaClient;
+    });
+  const resolveAccess = vi.spyOn(
+    recognizedInboundAccess,
+    "resolveHostedRecognizedInboundAccess",
+  ).mockImplementation(async () => {
+    if (!visibleReconciliationMocks.access) {
+      throw new Error("Expected a visible reconciliation access result.");
+    }
+    return visibleReconciliationMocks.access as never;
+  });
+  const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+
+  try {
+    process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://www.withmurph.ai";
+    clearHostedOnboardingEnvCache();
+    const accessKind = input.accessKind ?? "signup";
+    const inviteId = `invite_visible_${randomUUID()}`;
+    const inviteCode = `visible-${randomUUID()}`;
+    if (accessKind === "signup") {
+      await input.fixture.observer.hostedInvite.create({
+        data: {
+          channel: "linq",
+          expiresAt: new Date("2026-09-09T12:00:00.000Z"),
+          id: inviteId,
+          inviteCode,
+          memberId: input.fixture.ownerMemberId,
+        },
+      });
+    }
+    const participantPhoneLookupKey = createHostedPhoneLookupKey(
+      input.participantPhone,
+    );
+    if (!participantPhoneLookupKey) {
+      throw new Error("Expected a visible-signup participant lookup key.");
+    }
+    visibleReconciliationMocks.enabled = true;
+    visibleReconciliationMocks.access = accessKind === "access_notice"
+      ? {
+          kind: "access_notice",
+          message: "Your billing needs attention.",
+          noticeCode: "billing_inactive",
+          responseReason: "sent-billing-inactive-notice",
+        }
+      : {
+          inviteCode,
+          inviteId,
+          joinUrl: `https://www.withmurph.ai/join/${inviteCode}`,
+          kind: "signup",
+          message: "Finish setup.",
+          responseReason: "sent-signup-link",
+        };
+    visibleReconciliationMocks.facts = {
+      blocked: { reason: "user_not_active" },
+      mailboxLag: [{ lane: "conversation", lag: "1" }],
+      workspace: { nextWakeAt: null },
+    };
+    visibleReconciliationMocks.item = { id: "mailbox_stale_direct" };
+    visibleReconciliationMocks.wake = {
+      eventId: `event_stale_direct_${randomUUID()}`,
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: input.fixture.threadId,
+          from: input.participantPhone,
+          isFromMe: false,
+          messageId: `message_stale_direct_${randomUUID()}`,
+          parts: [{ type: "text", value: "Help" }],
+          service: "iMessage",
+          threadIsDirect: true,
+        },
+        phoneLookupKey: participantPhoneLookupKey,
+        senderMemberId: input.fixture.ownerMemberId,
+      },
+      occurredAt: "2026-08-09T11:59:00.000Z",
+      userId: input.fixture.ownerMemberId,
+    };
+
+    const runReconciliation = (pauseAfterMemberLock: boolean) => {
+      visibleReconciliationMocks.client =
+        pauseHostedWebhookTransactionAfterRawOperation({
+          client: input.fixture.messageClient,
+          locked: firstLockHeld,
+          ...(pauseAfterMemberLock ? { operation: "query" } : {}),
+          pid: reconciliationPid,
+          release: releaseFirst,
+          timeoutMs: 120_000,
+        });
+      reconciliationTask = readHostedRuntimeReconciliationFactsWithVisibleAccess({
+        userId: input.fixture.ownerMemberId,
+      }).then(
+        () => ({ status: "resolved" as const }),
+        (error: unknown) => ({ error, status: "rejected" as const }),
+      );
+    };
+    const runOperation = (pauseAfterChatLock: boolean) => {
+      const client = pauseHostedWebhookTransactionAfterRawOperation({
+        client: input.fixture.participantClient,
+        locked: firstLockHeld,
+        ...(pauseAfterChatLock
+          ? {
+              operation: "execute",
+              operationCall: input.operationChatLockCall ?? 1,
+            }
+          : {}),
+        pid: operationPid,
+        release: releaseFirst,
+        timeoutMs: 120_000,
+      });
+      operationTask = input.runOperation(client);
+    };
+
+    if (input.startOrder === "reconciliation-first") {
+      runReconciliation(true);
+      await firstLockHeld.promise;
+      runOperation(false);
+      await waitForBlockedBackend({
+        observer: input.fixture.observer,
+        pid: await operationPid.promise,
+      });
+    } else {
+      runOperation(true);
+      await firstLockHeld.promise;
+      runReconciliation(false);
+      if (!reconciliationTask) {
+        throw new Error("Expected the private reconciliation to start.");
+      }
+      await reconciliationTask;
+    }
+    releaseFirst.resolve();
+
+    if (!operationTask || !reconciliationTask) {
+      throw new Error("Expected both visible-access race transactions.");
+    }
+    const [operation, reconciliation] = await Promise.all([
+      operationTask,
+      reconciliationTask,
+    ]);
+    expect(providerSend).not.toHaveBeenCalled();
+    expect(providerCreateChat).toHaveBeenCalledOnce();
+    expect(providerCreateChat).toHaveBeenCalledWith(expect.objectContaining({
+      from: input.assignedPhone,
+      to: [input.participantPhone],
+    }));
+    return {
+      operation,
+      reconciliation,
+    };
+  } finally {
+    releaseFirst.resolve();
+    await Promise.allSettled([
+      ...(operationTask ? [operationTask] : []),
+      ...(reconciliationTask ? [reconciliationTask] : []),
+    ]);
+    visibleReconciliationMocks.client = null;
+    visibleReconciliationMocks.access = null;
+    visibleReconciliationMocks.enabled = false;
+    visibleReconciliationMocks.facts = null;
+    visibleReconciliationMocks.item = null;
+    visibleReconciliationMocks.wake = null;
+    resolveAccess.mockRestore();
+    getPrisma.mockRestore();
+    providerCreateChat.mockRestore();
+    providerSend.mockRestore();
+    signalRuntime.mockRestore();
+    restoreEnvValue(
+      "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+      previousPublicBaseUrl,
+    );
+    clearHostedOnboardingEnvCache();
+  }
+}
+
 describe.skipIf(!runPostgresConcurrencyProof)(
-  "Linq participant-addition PostgreSQL ordering",
+  "Linq group PostgreSQL ordering",
   () => {
     it("retires only a route that was not refreshed after the removal event", async () => {
       const fixture = await createRouteFixture();
@@ -716,6 +1507,954 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await cleanupRouteFixture(fixture);
       }
     });
+    it.each([
+      { startOrder: "operation-first" },
+      { startOrder: "reconciliation-first" },
+    ] as const)(
+      "serializes visible signup with actual direct ingress when $startOrder",
+      async ({ startOrder }) => {
+        let fixture: RouteFixture | null = null;
+        let directRoute: ActiveLinqDirectRoute | null = null;
+        try {
+          fixture = await createRouteFixture();
+          const activeFixture = fixture;
+          directRoute = await activateLinqDirectRoute(activeFixture);
+          const event = buildRoutedDirectMessageEvent({
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `event_direct_${randomUUID()}`,
+            messageId: `message_direct_${randomUUID()}`,
+            participantPhone: directRoute.participantPhone,
+            recipientPhone: directRoute.canonicalRecipientPhone,
+            text: "Direct ingress",
+            threadId: activeFixture.threadId,
+          });
+          const race = await runVisibleAccessRace({
+            assignedPhone: directRoute.canonicalRecipientPhone,
+            fixture: activeFixture,
+            participantPhone: directRoute.participantPhone,
+            runOperation: (client) => client.$transaction((tx) =>
+              planHostedOnboardingLinqWebhook({ event, prisma: tx })
+            ),
+            startOrder,
+          });
+
+          expect(race.operation).toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-active-member",
+            },
+          });
+          expect(race.reconciliation).toEqual({ status: "resolved" });
+          expect(await activeFixture.observer.hostedMailboxItem.count({
+            where: { dedupeKey: event.event_id },
+          })).toBe(1);
+          expect(await readHostedMailboxWakeByDedupeKey({
+            dedupeKey: event.event_id,
+            prisma: activeFixture.observer,
+            userId: activeFixture.ownerMemberId,
+          })).toMatchObject({
+            eventId: event.event_id,
+            kind: "conversation.message",
+            message: {
+              channel: "linq",
+              linqMessage: {
+                chatId: activeFixture.threadId,
+                messageId: event.data.message.id,
+                threadIsDirect: true,
+              },
+            },
+          });
+          expect(await activeFixture.observer.hostedThreadRoute.count({
+            where: {
+              channel: "linq",
+              threadIdentityLookupKey: activeFixture.threadIdentityLookupKey,
+            },
+          })).toBe(0);
+        } finally {
+          if (fixture && directRoute) {
+            await fixture.observer.hostedLinqLine.deleteMany({
+              where: {
+                phoneNumberLookupKey: directRoute.recipientPhoneLookupKey,
+              },
+            });
+          }
+          if (fixture) {
+            await cleanupRouteFixture(fixture);
+          }
+        }
+      },
+    );
+
+    it.each([
+      { startOrder: "edit-first" },
+      { startOrder: "egress-first" },
+    ] as const)(
+      "serializes the signed direct edit with authenticated runtime egress when $startOrder",
+      async ({ startOrder }) => {
+        const firstLockHeld = createDeferred();
+        const releaseFirst = createDeferred();
+        const editPid = createDeferred<number>();
+        const egressPid = createDeferred<number>();
+        let fixture: RouteFixture | null = null;
+        let directRoute: ActiveLinqDirectRoute | null = null;
+        let editTask: ReturnType<
+          typeof handleHostedOnboardingLinqWebhook
+        > | null = null;
+        let egressTask: Promise<Response> | null = null;
+        let egressClient: PrismaClient | null = null;
+        const getPrisma = vi.spyOn(prismaModule, "getPrisma")
+          .mockImplementation(() => {
+            if (!egressClient) {
+              throw new Error("Expected the authenticated egress Prisma client.");
+            }
+            return egressClient;
+          });
+        const signalRuntime = vi.spyOn(
+          hostedRuntimeSignal,
+          "signalHostedMailboxAppendRuntime",
+        ).mockResolvedValue({
+          signalAccepted: true,
+          workflowId: "hosted-user-runtime:linq-lock-order-test",
+        });
+        const callbackKey = generateKeyPairSync("ec", {
+          namedCurve: "prime256v1",
+          privateKeyEncoding: { format: "jwk" },
+          publicKeyEncoding: { format: "jwk" },
+        });
+        const callbackKeyId = `linq-lock-order-${randomUUID()}`;
+        const previousCallbackKeyId =
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID;
+        const previousCallbackPublicJwk =
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK;
+        const previousCallbackKeyring =
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON;
+        const previousWebhookSecret = process.env.LINQ_WEBHOOK_SECRET;
+        const webhookSecret = `linq-lock-order-${randomUUID()}`;
+        const providerIdempotencyKey =
+          `assistant-outbox:linq-lock-order:${randomUUID()}`;
+        const providerIdempotencyLookupKey =
+          createHostedLinqDeliveryIdempotencyLookupKey(
+            providerIdempotencyKey,
+          );
+
+        try {
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = callbackKeyId;
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK =
+            JSON.stringify(callbackKey.publicKey);
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON =
+            JSON.stringify({ [callbackKeyId]: callbackKey.publicKey });
+          process.env.LINQ_WEBHOOK_SECRET = webhookSecret;
+          clearHostedOnboardingEnvCache();
+
+          fixture = await createRouteFixture();
+          const activeFixture = fixture;
+          directRoute = await activateLinqDirectRoute(activeFixture);
+          const activeDirectRoute = directRoute;
+          const originalMessageId = `message_direct_original_${randomUUID()}`;
+          const originalEvent = buildRoutedDirectMessageEvent({
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `event_direct_original_${randomUUID()}`,
+            messageId: originalMessageId,
+            participantPhone: activeDirectRoute.participantPhone,
+            recipientPhone: activeDirectRoute.canonicalRecipientPhone,
+            text: "Original direct message",
+            threadId: activeFixture.threadId,
+          });
+          await expect(activeFixture.observer.$transaction((tx) =>
+            planHostedOnboardingLinqWebhook({
+              event: originalEvent,
+              prisma: tx,
+            })
+          )).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-active-member",
+            },
+          });
+
+          const editEvent = buildRoutedGroupMessageEditedEvent({
+            createdAt: "2026-08-09T12:01:00.000Z",
+            eventId: `event_direct_edit_${randomUUID()}`,
+            messageId: originalMessageId,
+            participantPhone: activeDirectRoute.participantPhone,
+            text: "Corrected direct message",
+            threadId: activeFixture.threadId,
+          });
+          const editRawBody = JSON.stringify(editEvent);
+          const editTimestamp = String(Math.floor(Date.now() / 1_000));
+          const editSignature = `sha256=${createHmac("sha256", webhookSecret)
+            .update(`${editTimestamp}.${editRawBody}`)
+            .digest("hex")}`;
+          const engagementPath =
+            "/api/internal/hosted-runtime/linq-egress/engagement";
+          const engagementBody = JSON.stringify({
+            authorityCheckOnly: false,
+            directRecipientPhoneNumber: activeDirectRoute.participantPhone,
+            fromPhoneNumber: activeDirectRoute.canonicalRecipientPhone,
+            idempotencyKey: providerIdempotencyKey,
+            target: activeFixture.threadId,
+            targetKind: "thread",
+          });
+          const engagementRequest = await createSignedHostedCallbackRequest({
+            body: engagementBody,
+            keyId: callbackKeyId,
+            nonce: randomUUID().replaceAll("-", ""),
+            path: engagementPath,
+            privateKey: callbackKey.privateKey,
+            timestamp: new Date().toISOString(),
+            userId: activeFixture.ownerMemberId,
+          });
+          const editClient = pauseHostedWebhookTransactionAfterRawOperation({
+            client: activeFixture.participantClient,
+            locked: firstLockHeld,
+            ...(startOrder === "edit-first" ? { operation: "execute" } : {}),
+            pid: editPid,
+            release: releaseFirst,
+          });
+          egressClient = pauseHostedWebhookTransactionAfterRawOperation({
+            client: activeFixture.messageClient,
+            locked: firstLockHeld,
+            ...(startOrder === "egress-first" ? { operation: "execute" } : {}),
+            pid: egressPid,
+            release: releaseFirst,
+          });
+
+          const startEdit = () =>
+            handleHostedOnboardingLinqWebhook({
+              prisma: editClient,
+              rawBody: editRawBody,
+              scheduleAfterResponse: () => undefined,
+              signature: editSignature,
+              timestamp: editTimestamp,
+            });
+          const startEgress = () =>
+            postHostedLinqEgressEngagement(engagementRequest);
+
+          if (startOrder === "edit-first") {
+            editTask = startEdit();
+            await firstLockHeld.promise;
+            egressTask = startEgress();
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await egressPid.promise,
+            });
+          } else {
+            egressTask = startEgress();
+            await firstLockHeld.promise;
+            editTask = startEdit();
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await editPid.promise,
+            });
+          }
+          releaseFirst.resolve();
+
+          if (!editTask || !egressTask) {
+            throw new Error("Expected both signed Linq requests to start.");
+          }
+          const [editResult, egressResponse] = await Promise.all([
+            editTask,
+            egressTask,
+          ]);
+          expect(editResult).toMatchObject({
+            ignored: false,
+            ok: true,
+            reason: "wake-appended-message-edit",
+          });
+          expect(egressResponse.status).toBe(200);
+          await expect(egressResponse.json()).resolves.toMatchObject({
+            ok: true,
+            providerDispatchClaimed: true,
+            resolvedRoute: {
+              target: activeFixture.threadId,
+              targetKind: "thread",
+              threadIsDirect: true,
+            },
+          });
+          expect(await activeFixture.observer.hostedMailboxItem.count({
+            where: { dedupeKey: editEvent.event_id },
+          })).toBe(1);
+          expect(await activeFixture.observer.hostedLinqDelivery.count({
+            where: { idempotencyKey: providerIdempotencyLookupKey },
+          })).toBe(1);
+          expect(signalRuntime).toHaveBeenCalledTimes(1);
+        } finally {
+          releaseFirst.resolve();
+          await Promise.allSettled([
+            ...(editTask ? [editTask] : []),
+            ...(egressTask ? [egressTask] : []),
+          ]);
+          if (fixture) {
+            await fixture.observer.hostedWebInternalRequestNonce.deleteMany({
+              where: { userId: fixture.ownerMemberId },
+            });
+            await fixture.observer.hostedLinqDelivery.deleteMany({
+              where: { idempotencyKey: providerIdempotencyLookupKey },
+            });
+          }
+          if (fixture && directRoute) {
+            await fixture.observer.hostedLinqLine.deleteMany({
+              where: {
+                phoneNumberLookupKey: directRoute.recipientPhoneLookupKey,
+              },
+            });
+          }
+          if (fixture) {
+            await cleanupRouteFixture(fixture);
+          }
+          getPrisma.mockRestore();
+          signalRuntime.mockRestore();
+          restoreEnvValue(
+            "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
+            previousCallbackKeyId,
+          );
+          restoreEnvValue(
+            "HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK",
+            previousCallbackPublicJwk,
+          );
+          restoreEnvValue(
+            "HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON",
+            previousCallbackKeyring,
+          );
+          restoreEnvValue("LINQ_WEBHOOK_SECRET", previousWebhookSecret);
+          clearHostedOnboardingEnvCache();
+        }
+      },
+    );
+
+    it.each([
+      { startOrder: "operation-first" },
+      { startOrder: "reconciliation-first" },
+    ] as const)(
+      "serializes visible signup with an actual direct edit when $startOrder",
+      async ({ startOrder }) => {
+        let fixture: RouteFixture | null = null;
+        let directRoute: ActiveLinqDirectRoute | null = null;
+        try {
+          fixture = await createRouteFixture();
+          const activeFixture = fixture;
+          directRoute = await activateLinqDirectRoute(activeFixture);
+          const originalMessageId = `message_direct_original_${randomUUID()}`;
+          const originalEvent = buildRoutedDirectMessageEvent({
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `event_direct_original_${randomUUID()}`,
+            messageId: originalMessageId,
+            participantPhone: directRoute.participantPhone,
+            recipientPhone: directRoute.canonicalRecipientPhone,
+            text: "Original direct message",
+            threadId: activeFixture.threadId,
+          });
+          await expect(activeFixture.observer.$transaction((tx) =>
+            planHostedOnboardingLinqWebhook({
+              event: originalEvent,
+              prisma: tx,
+            })
+          )).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-active-member",
+            },
+          });
+          const editEvent = buildRoutedGroupMessageEditedEvent({
+            createdAt: "2026-08-09T12:01:00.000Z",
+            eventId: `event_direct_edit_${randomUUID()}`,
+            messageId: originalMessageId,
+            participantPhone: directRoute.participantPhone,
+            text: "Corrected direct message",
+            threadId: activeFixture.threadId,
+          });
+          const race = await runVisibleAccessRace({
+            assignedPhone: directRoute.canonicalRecipientPhone,
+            fixture: activeFixture,
+            operationChatLockCall: 2,
+            participantPhone: directRoute.participantPhone,
+            runOperation: (client) =>
+              runHostedLinqMessageEditPreparedTransaction({
+                event: editEvent,
+                prisma: client,
+              }),
+            startOrder,
+          });
+
+          expect(race.operation).toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-message-edit",
+            },
+          });
+          expect(race.reconciliation).toEqual({ status: "resolved" });
+          expect(await activeFixture.observer.hostedMailboxItem.count({
+            where: { dedupeKey: editEvent.event_id },
+          })).toBe(1);
+          expect(await readHostedMailboxWakeByDedupeKey({
+            dedupeKey: editEvent.event_id,
+            prisma: activeFixture.observer,
+            userId: activeFixture.ownerMemberId,
+          })).toMatchObject({
+            eventId: editEvent.event_id,
+            kind: "conversation.message",
+            message: {
+              channel: "linq",
+              linqMessage: {
+                chatId: activeFixture.threadId,
+                editedTextPartIndex: 0,
+                messageId: originalMessageId,
+                parts: [{
+                  type: "text",
+                  value: "Corrected direct message",
+                }],
+                threadIsDirect: true,
+              },
+            },
+          });
+        } finally {
+          if (fixture && directRoute) {
+            await fixture.observer.hostedLinqLine.deleteMany({
+              where: {
+                phoneNumberLookupKey: directRoute.recipientPhoneLookupKey,
+              },
+            });
+          }
+          if (fixture) {
+            await cleanupRouteFixture(fixture);
+          }
+        }
+      },
+    );
+
+    it.each([
+      { accessKind: "signup", startOrder: "operation-first" },
+      { accessKind: "signup", startOrder: "reconciliation-first" },
+      { accessKind: "access_notice", startOrder: "operation-first" },
+      { accessKind: "access_notice", startOrder: "reconciliation-first" },
+    ] as const)(
+      "serializes visible $accessKind with actual first group-route creation when $startOrder",
+      async ({ accessKind, startOrder }) => {
+        let fixture: RouteFixture | null = null;
+        let directRoute: ActiveLinqDirectRoute | null = null;
+        try {
+          fixture = await createRouteFixture();
+          const activeFixture = fixture;
+          directRoute = await activateLinqDirectRoute(activeFixture);
+          await activeFixture.observer.hostedThreadContainer.delete({
+            where: { memberId: activeFixture.containerMemberId },
+          });
+          await activeFixture.observer.hostedMember.delete({
+            where: { id: activeFixture.containerMemberId },
+          });
+          const preparedCreation = await buildPreparedThreadContainerCreation({
+            accountLookupKey: directRoute.canonicalAccountLookupKey,
+            containerMemberId: activeFixture.containerMemberId,
+            prisma: activeFixture.observer,
+            threadId: activeFixture.threadId,
+          });
+          const event = buildRoutedGroupMessageEvent({
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `event_group_create_${randomUUID()}`,
+            messageId: `message_group_create_${randomUUID()}`,
+            ownerPhone: directRoute.canonicalRecipientPhone,
+            participantPhone: directRoute.participantPhone,
+            text: "First group message",
+            threadId: activeFixture.threadId,
+          });
+          const race = await runVisibleAccessRace({
+            accessKind,
+            assignedPhone: directRoute.canonicalRecipientPhone,
+            fixture: activeFixture,
+            participantPhone: directRoute.participantPhone,
+            runOperation: (client) => client.$transaction((tx) =>
+              planHostedOnboardingLinqWebhook({
+                event,
+                pendingGroupParticipantMemberIds: [
+                  activeFixture.ownerMemberId,
+                ],
+                preparedThreadContainerCreation: preparedCreation,
+                prisma: tx,
+              })
+            ),
+            startOrder,
+          });
+
+          expect(race.operation).toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-thread-route",
+            },
+          });
+          expect(race.reconciliation).toEqual({ status: "resolved" });
+          expect(await activeFixture.observer.hostedMailboxItem.count({
+            where: { dedupeKey: event.event_id },
+          })).toBe(1);
+          expect(await readHostedMailboxWakeByDedupeKey({
+            dedupeKey: event.event_id,
+            prisma: activeFixture.observer,
+            userId: activeFixture.containerMemberId,
+          })).toMatchObject({
+            eventId: event.event_id,
+            kind: "conversation.message",
+            message: {
+              channel: "linq",
+              linqMessage: {
+                chatId: activeFixture.threadId,
+                messageId: event.data.message.id,
+                threadIsDirect: false,
+              },
+            },
+          });
+          expect(await activeFixture.observer.hostedThreadRoute.findUnique({
+            select: { containerMemberId: true },
+            where: {
+              channel_threadIdentityLookupKey: {
+                channel: "linq",
+                threadIdentityLookupKey: activeFixture.threadIdentityLookupKey,
+              },
+            },
+          })).toEqual({ containerMemberId: activeFixture.containerMemberId });
+          expect(await activeFixture.observer.hostedMemberRouting.findUnique({
+            select: {
+              linqChatLookupKey: true,
+              pendingLinqChatLookupKey: true,
+            },
+            where: { memberId: activeFixture.ownerMemberId },
+          })).toMatchObject({
+            linqChatLookupKey: null,
+            pendingLinqChatLookupKey: null,
+          });
+        } finally {
+          if (fixture && directRoute) {
+            await fixture.observer.hostedLinqLine.deleteMany({
+              where: {
+                phoneNumberLookupKey: directRoute.recipientPhoneLookupKey,
+              },
+            });
+          }
+          if (fixture) {
+            await cleanupRouteFixture(fixture);
+          }
+        }
+      },
+    );
+
+    it.each([
+      { startOrder: "message-first" },
+      { startOrder: "edit-first" },
+    ] as const)(
+      "serializes an active-group edit with a routed message when $startOrder",
+      async ({ startOrder }) => {
+        const firstLockHeld = createDeferred();
+        const releaseFirst = createDeferred();
+        const messagePid = createDeferred<number>();
+        const editPid = createDeferred<number>();
+        let fixture: RouteFixture | null = null;
+        let messageTransaction: ReturnType<
+          typeof planHostedOnboardingLinqWebhook
+        > | null = null;
+        let editTransaction: ReturnType<
+          typeof runHostedLinqMessageEditPreparedTransaction
+        > | null = null;
+
+        try {
+          fixture = await createRouteFixture();
+          const activeFixture = fixture;
+          const activeRoute = await activateLinqGroupRoute(activeFixture);
+          const originalMessageId = `message_original_${randomUUID()}`;
+          const originalEvent = buildRoutedGroupMessageEvent({
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `event_original_${randomUUID()}`,
+            messageId: originalMessageId,
+            ownerPhone: activeRoute.canonicalRecipientPhone,
+            participantPhone: activeRoute.participantPhone,
+            text: "Original group message",
+            threadId: activeFixture.threadId,
+          });
+          await expect(activeFixture.observer.$transaction((tx) =>
+            planHostedOnboardingLinqWebhook({
+              event: originalEvent,
+              preparedThreadDeliveryRoute:
+                activeRoute.canonicalPreparedDeliveryRoute,
+              prisma: tx,
+            })
+          )).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-thread-route",
+            },
+          });
+
+          const newMessageEvent = buildRoutedGroupMessageEvent({
+            createdAt: "2026-08-09T12:02:00.000Z",
+            eventId: `event_new_${randomUUID()}`,
+            messageId: `message_new_${randomUUID()}`,
+            ownerPhone: activeRoute.canonicalRecipientPhone,
+            participantPhone: activeRoute.participantPhone,
+            text: "Concurrent group message",
+            threadId: activeFixture.threadId,
+          });
+          const editEvent = buildRoutedGroupMessageEditedEvent({
+            createdAt: "2026-08-09T12:01:00.000Z",
+            eventId: `event_edit_${randomUUID()}`,
+            messageId: originalMessageId,
+            participantPhone: activeRoute.participantPhone,
+            text: "Corrected group message",
+            threadId: activeFixture.threadId,
+          });
+
+          const runMessage = (pauseAfterChatLock: boolean) => {
+            const client = pauseHostedWebhookTransactionAfterRawOperation({
+              client: activeFixture.messageClient,
+              locked: firstLockHeld,
+              ...(pauseAfterChatLock ? { operation: "execute" } : {}),
+              pid: messagePid,
+              release: releaseFirst,
+            });
+            messageTransaction = client.$transaction((tx) =>
+              planHostedOnboardingLinqWebhook({
+                event: newMessageEvent,
+                preparedThreadDeliveryRoute:
+                  activeRoute.canonicalPreparedDeliveryRoute,
+                prisma: tx,
+              })
+            );
+          };
+          const runEdit = (pauseAfterChatLock: boolean) => {
+            const client = pauseHostedWebhookTransactionAfterRawOperation({
+              client: activeFixture.participantClient,
+              locked: firstLockHeld,
+              ...(pauseAfterChatLock
+                ? { operation: "execute", operationCall: 2 }
+                : {}),
+              pid: editPid,
+              release: releaseFirst,
+            });
+            editTransaction = runHostedLinqMessageEditPreparedTransaction({
+              event: editEvent,
+              prisma: client,
+            });
+          };
+
+          if (startOrder === "message-first") {
+            runMessage(true);
+            await firstLockHeld.promise;
+            runEdit(false);
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await editPid.promise,
+            });
+          } else {
+            runEdit(true);
+            await firstLockHeld.promise;
+            runMessage(false);
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await messagePid.promise,
+            });
+          }
+          releaseFirst.resolve();
+
+          if (!messageTransaction || !editTransaction) {
+            throw new Error("Expected both Linq message transactions.");
+          }
+          await expect(messageTransaction).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-thread-route",
+            },
+          });
+          await expect(editTransaction).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-message-edit",
+            },
+          });
+
+          const [newMessageWake, editWake] = await Promise.all([
+            readHostedMailboxWakeByDedupeKey({
+              dedupeKey: newMessageEvent.event_id,
+              prisma: activeFixture.observer,
+              userId: activeFixture.containerMemberId,
+            }),
+            readHostedMailboxWakeByDedupeKey({
+              dedupeKey: editEvent.event_id,
+              prisma: activeFixture.observer,
+              userId: activeFixture.containerMemberId,
+            }),
+          ]);
+          expect(newMessageWake).toMatchObject({
+            eventId: newMessageEvent.event_id,
+            kind: "conversation.message",
+            message: {
+              channel: "linq",
+              linqMessage: {
+                chatId: activeFixture.threadId,
+                messageId: newMessageEvent.data.message.id,
+              },
+            },
+          });
+          expect(editWake).toMatchObject({
+            eventId: editEvent.event_id,
+            kind: "conversation.message",
+            message: {
+              channel: "linq",
+              linqMessage: {
+                chatId: activeFixture.threadId,
+                editedTextPartIndex: 0,
+                messageId: originalMessageId,
+                parts: [{
+                  type: "text",
+                  value: "Corrected group message",
+                }],
+              },
+            },
+          });
+        } finally {
+          releaseFirst.resolve();
+          await Promise.allSettled([
+            ...(messageTransaction ? [messageTransaction] : []),
+            ...(editTransaction ? [editTransaction] : []),
+          ]);
+          if (fixture) {
+            await cleanupRouteFixture(fixture);
+          }
+        }
+      },
+    );
+
+    it.each([
+      {
+        eventType: "participant.added",
+        startOrder: "message-first",
+      },
+      {
+        eventType: "participant.added",
+        startOrder: "participant-first",
+      },
+      {
+        eventType: "participant.removed",
+        startOrder: "message-first",
+      },
+      {
+        eventType: "participant.removed",
+        startOrder: "participant-first",
+      },
+    ] as const)(
+      "serializes $eventType with an owner-sent routed message when $startOrder",
+      async ({ eventType, startOrder }) => {
+        const messageDemoted = createDeferred();
+        const releaseMessage = createDeferred();
+        const participantContext = createDeferred<string>();
+        const releaseParticipant = createDeferred();
+        const messagePid = createDeferred<number>();
+        const participantPid = createDeferred<number>();
+        let fixture: RouteFixture | null = null;
+        let messageTransaction: ReturnType<
+          typeof planHostedOnboardingLinqWebhook
+        > | null = null;
+        let participantWebhook: ReturnType<
+          typeof handleHostedOnboardingLinqWebhook
+        > | null = null;
+        let participantEventLookupKey: string | null = null;
+        const previousWebhookSecret = process.env.LINQ_WEBHOOK_SECRET;
+        const webhookSecret = "linq-lock-order-test-secret";
+
+        try {
+          process.env.LINQ_WEBHOOK_SECRET = webhookSecret;
+          clearHostedOnboardingEnvCache();
+          fixture = await createRouteFixture();
+          const activeFixture = fixture;
+          const activeRoute = await activateLinqGroupRoute(activeFixture);
+          const {
+            canonicalAccountLookupKey,
+            canonicalDeliveryRouteEncrypted,
+            canonicalThreadLookupKey,
+            deliveringPreparedDeliveryRoute,
+            deliveringRecipientPhone,
+            participantPhone,
+          } = activeRoute;
+          const event = buildRoutedGroupMessageEvent({
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `event_${randomUUID()}`,
+            messageId: `message_${randomUUID()}`,
+            ownerPhone: deliveringRecipientPhone,
+            participantPhone,
+            text: "Route this group message",
+            threadId: activeFixture.threadId,
+          });
+          const participantEvent = buildParticipantChangeEvent({
+            eventType,
+            handle: participantPhone,
+            threadId: activeFixture.threadId,
+          });
+          participantEventLookupKey = createHostedLinqProviderEventLookupKey(
+            participantEvent.event_id,
+          );
+          const participantRawBody = JSON.stringify(participantEvent);
+          const participantTimestamp = String(Math.floor(Date.now() / 1_000));
+          const participantSignature = `sha256=${createHmac(
+            "sha256",
+            webhookSecret,
+          ).update(`${participantTimestamp}.${participantRawBody}`).digest("hex")}`;
+
+          const runOwnerMessage = (pauseAfterDemotion: boolean) => {
+            messageTransaction = activeFixture.messageClient.$transaction(
+              async (tx) => {
+                messagePid.resolve(await readBackendPid(tx));
+                return planHostedOnboardingLinqWebhook({
+                  event,
+                  preparedThreadDeliveryRoute:
+                    deliveringPreparedDeliveryRoute,
+                  prisma: pauseAfterDemotion
+                    ? pauseHostedMemberRoutingDemotionAfterWrite({
+                        demoted: messageDemoted,
+                        release: releaseMessage,
+                        tx,
+                      })
+                    : tx,
+                });
+              },
+            );
+          };
+          const runParticipantWebhook = () => {
+            participantWebhook = handleHostedOnboardingLinqWebhook({
+              prisma: pauseHostedParticipantWebhookAfterContextWrite({
+                ciphertext: participantContext,
+                client: activeFixture.participantClient,
+                pid: participantPid,
+                release: releaseParticipant,
+              }),
+              rawBody: participantRawBody,
+              signature: participantSignature,
+              timestamp: participantTimestamp,
+            });
+          };
+
+          if (startOrder === "message-first") {
+            releaseParticipant.resolve();
+            runOwnerMessage(true);
+            await messageDemoted.promise;
+            runParticipantWebhook();
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await participantPid.promise,
+            });
+            releaseMessage.resolve();
+          } else {
+            runParticipantWebhook();
+            await participantContext.promise;
+            runOwnerMessage(false);
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await messagePid.promise,
+            });
+            releaseParticipant.resolve();
+          }
+
+          if (!messageTransaction || !participantWebhook) {
+            throw new Error("Expected both Linq webhook transactions.");
+          }
+          await expect(messageTransaction).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-thread-route",
+            },
+          });
+          await expect(participantWebhook).resolves.toMatchObject({
+            ignored: true,
+            ok: true,
+            reason: `recorded-linq-provider-event:${eventType}`,
+          });
+          const storedRoute = await activeFixture.observer.hostedThreadRoute
+            .findUnique({
+              select: {
+                accountLookupKey: true,
+                deliveryRouteEncrypted: true,
+                pendingGroupReactionContextEncrypted: true,
+                pendingParticipantAddition: true,
+                threadLookupKey: true,
+              },
+              where: {
+                channel_threadIdentityLookupKey: {
+                  channel: "linq",
+                  threadIdentityLookupKey:
+                    activeFixture.threadIdentityLookupKey,
+                },
+              },
+            });
+          expect(storedRoute).toMatchObject({
+            accountLookupKey: canonicalAccountLookupKey,
+            deliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+            threadLookupKey: canonicalThreadLookupKey,
+          });
+          expect(await activeFixture.observer.hostedLinqProviderEvent.count({
+            where: { eventId: participantEventLookupKey },
+          })).toBe(1);
+
+          const wake = await readHostedMailboxWakeByDedupeKey({
+            dedupeKey: event.event_id,
+            prisma: activeFixture.observer,
+            userId: activeFixture.containerMemberId,
+          });
+          if (
+            !wake
+            || wake.kind !== "conversation.message"
+            || wake.message.channel !== "linq"
+          ) {
+            throw new Error("Expected a routed Linq conversation wake.");
+          }
+          const expectedContext = eventType === "participant.added"
+            ? "was added to the group"
+            : "was removed from the group";
+          if (startOrder === "participant-first") {
+            expect(wake.message.groupReactionContext).toContain(expectedContext);
+            if (eventType === "participant.added") {
+              expect(wake.message.groupParticipantAdded).toBe(true);
+            } else {
+              expect(wake.message).not.toHaveProperty("groupParticipantAdded");
+            }
+            expect(storedRoute).toMatchObject({
+              pendingGroupReactionContextEncrypted: null,
+              pendingParticipantAddition: false,
+            });
+          } else {
+            expect(wake.message).not.toHaveProperty("groupParticipantAdded");
+            expect(wake.message).not.toHaveProperty("groupReactionContext");
+            expect(storedRoute?.pendingParticipantAddition).toBe(
+              eventType === "participant.added",
+            );
+            expect(storedRoute?.pendingGroupReactionContextEncrypted)
+              .toMatch(/^hsb-test:/u);
+            expect(readHostedSecureBoxTestValue(
+              storedRoute?.pendingGroupReactionContextEncrypted ?? "",
+            )).toContain(expectedContext);
+          }
+        } finally {
+          releaseMessage.resolve();
+          releaseParticipant.resolve();
+          await Promise.allSettled([
+            ...(messageTransaction ? [messageTransaction] : []),
+            ...(participantWebhook ? [participantWebhook] : []),
+          ]);
+          if (fixture) {
+            if (participantEventLookupKey) {
+              await fixture.observer.hostedLinqProviderEvent.deleteMany({
+                where: { eventId: participantEventLookupKey },
+              });
+            }
+            await cleanupRouteFixture(fixture);
+          }
+          restoreEnvValue("LINQ_WEBHOOK_SECRET", previousWebhookSecret);
+          clearHostedOnboardingEnvCache();
+        }
+      },
+    );
 
     it("serializes mixed-version Telegram creators on the raw external thread", async () => {
       if (!databaseUrl) {

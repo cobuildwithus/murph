@@ -957,7 +957,6 @@ async function prepareCodexAppServerProcessInput(
     args,
     codexCommand,
     env,
-    workingDirectory,
   })
   return {
     args,
@@ -973,13 +972,11 @@ function buildCodexAppServerLaunchKey(input: {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
-  workingDirectory: string
 }): string {
   return hashCodexRawString(JSON.stringify({
     args: input.args,
     codexCommand: input.codexCommand,
     env: stableCodexProcessEnv(input.env),
-    workingDirectory: input.workingDirectory,
   }))
 }
 
@@ -2472,7 +2469,6 @@ export async function executeCodexManagedAccountOperation(
     args,
     codexCommand,
     env,
-    workingDirectory,
   })
 
   await stopWarmCodexAppServer('managed-account-operation')
@@ -3491,15 +3487,29 @@ async function runCodexAppServerTurnOnProcess(
     }
     noReplySettlementStarted = true
     for (const deliveryContextOrdinal of listNoReplyFinalActionPatchOrdinals()) {
+      const precedingReplyDeliveryContextOrdinal = Math.max(
+        -1,
+        ...precedingAgentMessageSegments
+          .map((segment) => segment.deliveryContextOrdinal)
+          .filter((ordinal) => ordinal < deliveryContextOrdinal),
+        trailingSteerCandidate !== null &&
+            trailingSteerCandidate.deliveryContextOrdinal < deliveryContextOrdinal
+          ? trailingSteerCandidate.deliveryContextOrdinal
+          : -1,
+      )
       await input.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal,
         // The accepted event settles the cumulative accepted-turn prefix
-        // through this ordinal, so a reaction recorded for any covered
-        // earlier context must keep terminal suppression evidence deferred
-        // until reaction delivery settles.
+        // only when no earlier reply owns part of that prefix. A reaction
+        // recorded for any covered earlier context must keep terminal
+        // suppression evidence deferred until reaction delivery settles.
         messageReactionPending: reactionPatches.some(
           (entry) => entry.deliveryContextOrdinal <= deliveryContextOrdinal,
         ),
+        precedingReplyDeliveryContextOrdinal:
+          precedingReplyDeliveryContextOrdinal < 0
+            ? null
+            : precedingReplyDeliveryContextOrdinal,
       })
       acceptedNoReplyDeliveryContextOrdinals.push(deliveryContextOrdinal)
       await input.onFinishWithoutReplyRecorded?.({
@@ -4069,6 +4079,12 @@ async function runCodexAppServerTurnOnProcess(
     },
     deliveryContextOrdinal: number,
   ): void => {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_CONTEXT_ADVANCED',
+        'Response media cannot attach after accepted input advances the response context.',
+      )
+    }
     if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY',
@@ -4082,18 +4098,6 @@ async function runCodexAppServerTurnOnProcess(
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_MEDIA_LIMIT_EXCEEDED',
         `Assistant responses may attach at most ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} media items.`,
-      )
-    }
-    if (responseCard !== null && nextMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response media cannot be combined with a response card.',
-      )
-    }
-    if (responseCardTextFallback !== null && nextMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response media cannot be combined with response card text recovery.',
       )
     }
     responseMedia = nextMedia
@@ -4113,24 +4117,6 @@ async function runCodexAppServerTurnOnProcess(
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_AFTER_NO_REPLY',
         'A response card cannot be attached after finish_without_reply.',
-      )
-    }
-    if (responseCard !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card may be attached to a final response.',
-      )
-    }
-    if (responseCardTextFallback !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card outcome may be attached to a final response.',
-      )
-    }
-    if (responseMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'A response card cannot be combined with response media.',
       )
     }
     if (requiredVaultFileApprovalUrls.length > 0) {
@@ -4158,18 +4144,6 @@ async function runCodexAppServerTurnOnProcess(
         'Response card text recovery cannot attach after finish_without_reply.',
       )
     }
-    if (responseCard !== null || responseCardTextFallback !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card outcome may be attached to a final response.',
-      )
-    }
-    if (responseMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response card text recovery cannot be combined with response media.',
-      )
-    }
     if (requiredVaultFileApprovalUrls.length > 0) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_VAULT_FILE_CONFLICT',
@@ -4180,17 +4154,9 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
-    const trailingSteerCandidateOrdinal =
-      trailingSteerCandidate?.deliveryContextOrdinal
     if (
       externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
       hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
-    ) {
-      return false
-    }
-    if (
-      typeof trailingSteerCandidateOrdinal === 'number' &&
-      trailingSteerCandidateOrdinal < deliveryContextOrdinal
     ) {
       return false
     }
@@ -4201,13 +4167,6 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     if (responseCardTextFallback !== null) {
-      return false
-    }
-    if (
-      precedingAgentMessageSegments.some((segment) =>
-        segment.deliveryContextOrdinal < deliveryContextOrdinal
-      )
-    ) {
       return false
     }
     return true
@@ -4957,7 +4916,10 @@ async function runCodexAppServerTurnOnProcess(
           const text = error instanceof VaultCliError &&
             error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
             ? 'response media unavailable after finish_without_reply'
-            : 'response media limit reached'
+            : error instanceof VaultCliError &&
+                error.code === 'ASSISTANT_RESPONSE_MEDIA_CONTEXT_ADVANCED'
+              ? 'response media unavailable for this final response'
+              : 'response media limit reached'
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -5278,8 +5240,8 @@ async function runCodexAppServerTurnOnProcess(
         completedFinalAgentMessage = null
         assistantStreams.clear()
         assistantStreamOrder.length = 0
-        responseMedia = []
       }
+      responseMedia = []
       responseCard = null
       responseCardTextFallback = null
       completedUserMessageOrdinal += 1

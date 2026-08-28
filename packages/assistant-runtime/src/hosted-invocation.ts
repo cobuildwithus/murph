@@ -13,6 +13,9 @@ export { drainHostedRuntimeDeferredUsageCompletionsBestEffort } from "./hosted-r
 import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
+import type {
+  HostedWorkspaceRestorePreparation,
+} from "./hosted-workspace-restore-preparation.ts";
 import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "./hosted-runtime/runtime-logs.ts";
@@ -49,6 +52,7 @@ export interface HostedWorkspaceInvocationInput {
   mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder;
   onConversationActivityObserved?: () => void;
   platform: HostedRuntimePlatform;
+  preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
   readCurrentLease: () =>
     | HostedRuntimeBridgeCheckpointLease
     | null
@@ -93,6 +97,9 @@ export async function runHostedWorkspaceInvocation(
       onConversationActivityObserved: input.onConversationActivityObserved
         ? () => input.onConversationActivityObserved?.()
         : undefined,
+      ...(input.preparedWorkspaceRestore
+        ? { preparedWorkspaceRestore: input.preparedWorkspaceRestore }
+        : {}),
       runtimeIssueProvenance: input.runtimeIssueProvenance ?? null,
       runtimeWakeSignal,
       shutdownSignal: input.shutdownSignal ?? null,

@@ -739,14 +739,13 @@ function throwIfPreempted(input: {
   signal: AbortSignal | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
 }): void {
-  input.signal?.throwIfAborted();
-  if (input.shouldYieldClinicalRecords?.() !== true) {
-    return;
+  if (input.shouldYieldClinicalRecords?.() === true) {
+    throw new HostedClinicalRecordsRuntimeError(
+      "CLINICAL_RECORDS_FOREGROUND_PREEMPTED",
+      "Hosted clinical records sync yielded to foreground work.",
+    );
   }
-  throw new HostedClinicalRecordsRuntimeError(
-    "CLINICAL_RECORDS_FOREGROUND_PREEMPTED",
-    "Hosted clinical records sync yielded to foreground work.",
-  );
+  input.signal?.throwIfAborted();
 }
 
 function terminalFailure(input: {

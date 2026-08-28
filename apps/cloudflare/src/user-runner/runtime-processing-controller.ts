@@ -446,30 +446,16 @@ export class RuntimeProcessingController {
       && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
         input.input.orchestrationAttemptId,
       );
-    const foregroundWaitingOnModelFree =
-      requestedProcessingMode === "default"
-      && (
-        (
-          activeFence.processingMode === "system_mailbox"
-          && !triggeredByTrustedWebDirect
-        )
-        || activeFence.processingMode === "environment_interview"
-      );
-    const environmentWaitingOnForeground =
-      activeFence.processingMode === "default"
-      && requestedProcessingMode === "environment_interview";
+    const cooperativeMailboxOwnerHandoff =
+      activeFence.processingMode === "system_mailbox"
+      && requestedProcessingMode === "default";
     if (activeFence.processingMode !== requestedProcessingMode) {
       if (
         activeFence.processingMode === "inbox_media_retention"
         || (
           activeFence.processingMode === "system_mailbox"
-          && (
-            requestedProcessingMode === "environment_interview"
-            || (
-              requestedProcessingMode === "default"
-              && triggeredByTrustedWebDirect
-            )
-          )
+          && requestedProcessingMode === "default"
+          && triggeredByTrustedWebDirect
         )
       ) {
         return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({
@@ -480,10 +466,7 @@ export class RuntimeProcessingController {
           runtimeWakeStartedAt: input.runtimeWakeStartedAt,
         });
       }
-      if (
-        !foregroundWaitingOnModelFree
-        && !environmentWaitingOnForeground
-      ) {
+      if (!cooperativeMailboxOwnerHandoff) {
         const activeRuntimeState =
           await this.readActiveRuntimeFenceLiveness({
             activeFence,
@@ -512,11 +495,8 @@ export class RuntimeProcessingController {
     const canCoalesceWithoutWake =
       activeFence.processingMode === "inbox_media_retention"
       || (
-        (
-          activeFence.processingMode === "system_mailbox"
-          || activeFence.processingMode === "environment_interview"
-        )
-        && requestedProcessingMode === activeFence.processingMode
+        activeFence.processingMode === "system_mailbox"
+        && requestedProcessingMode === "system_mailbox"
       );
     if (canCoalesceWithoutWake) {
       const activeRuntimeState =
@@ -571,6 +551,9 @@ export class RuntimeProcessingController {
           ? { orchestration: inputAtActiveWakeStart.orchestration }
           : {}),
         processingMode: activeFence.processingMode,
+        ...(cooperativeMailboxOwnerHandoff
+          ? { requestedProcessingMode }
+          : {}),
         userId: record.userId,
       },
       commandBudget: input.commandBudget,
@@ -589,7 +572,7 @@ export class RuntimeProcessingController {
     });
 
     if (containerResult.kind === "accepted") {
-      if (foregroundWaitingOnModelFree || environmentWaitingOnForeground) {
+      if (cooperativeMailboxOwnerHandoff) {
         // The active child accepted the wake so it can checkpoint and release.
         // It did not accept processing under the requested mode.
         return this.createRetryLater({
@@ -1524,8 +1507,7 @@ class HostedRuntimeHealthDataConsentStopError extends Error {
 function normalizeRuntimeProcessingMode(
   value: RuntimeProcessingInput["processingMode"],
 ): RunnerRuntimeProcessingMode {
-  return value === "environment_interview"
-      || value === "inbox_media_retention"
+  return value === "inbox_media_retention"
       || value === "system_mailbox"
     ? value
     : "default";

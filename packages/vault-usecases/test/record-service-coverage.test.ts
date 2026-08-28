@@ -1511,7 +1511,19 @@ describe("record service seams", () => {
         links: [],
       },
     }));
-    const eventEdit = vi.fn(async () => ({ lookupId: "evt_1" }));
+    const eventEdit = vi.fn(async () => ({
+      lookupId: "evt_1",
+      entity: {
+        id: "evt_1",
+        kind: "intervention_session",
+        title: "Edited",
+        occurredAt: null,
+        path: "events/evt_1.md",
+        markdown: null,
+        data: {},
+        links: [],
+      },
+    }));
     const intervention = await importWithMocks<typeof import("../src/usecases/intervention.ts")>(
       "../src/usecases/intervention.ts",
       {

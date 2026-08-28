@@ -1922,6 +1922,7 @@ test('sendAssistantMessageLocal resolves required progress to one exact accepted
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
       messageReactionPending: false,
+      precedingReplyDeliveryContextOrdinal: null,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 0,
@@ -2251,6 +2252,7 @@ test('sendAssistantMessageLocal carries the provider reaction patch into the no-
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
       messageReactionPending: true,
+      precedingReplyDeliveryContextOrdinal: null,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 0,
@@ -2313,6 +2315,7 @@ test('sendAssistantMessageLocal carries the provider reaction patch into the no-
     ],
     deliveryContextOrdinal: 0,
     messageReactionPending: true,
+    precedingReplyDeliveryContextOrdinal: null,
   })
   expect(mocks.deliverAssistantReaction.mock.calls[0]?.[0]?.input).toMatchObject({
     deliveryReplyToMessageId: 'linq-message-older-eligible',
