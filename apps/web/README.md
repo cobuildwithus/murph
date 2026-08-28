@@ -885,6 +885,13 @@ Hosted onboarding extras:
   retryable while its already-committed billing result remains intact. Both
   website and iMessage Assistant billing use the same Web-owned Stripe
   services, so there is no separate channel-specific configuration.
+- `HOSTED_WEB_VERCEL_ALERT_WEBHOOK_SECRET` enables the signed
+  `alerts.triggered` receiver at
+  `/api/internal/vercel-alerts/webhook`. Vercel owns platform usage/error
+  anomaly detection and grouping; Web verifies the exact raw body before
+  parsing it and sends only bounded aggregate metrics through the shared
+  operational Resend channel. Leave the variable unset until the matching
+  Vercel account webhook and its secret are ready together.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
 - `PRIVY_CUSTOM_AUTH_DOMAIN`
@@ -1361,6 +1368,16 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   The time zone is the monitor opt-in: without it the monitor stays disabled;
   with it, incomplete Resend email config or an invalid time zone fails the
   cron visibly. The latency path has no Linq/iMessage fallback.
+- To receive Vercel usage/error anomaly emails through Resend, configure
+  `HOSTED_WEB_VERCEL_ALERT_WEBHOOK_SECRET` together with the same
+  `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`, and
+  `HOSTED_LINQ_ALERT_EMAILS`, then subscribe the production project to the
+  Vercel account-webhook event `alerts.triggered` at
+  `https://www.withmurph.ai/api/internal/vercel-alerts/webhook`. The webhook
+  secret shown by Vercel must match the Production environment value. A valid
+  unsupported event is acknowledged without email; an invalid signature,
+  malformed alert, incomplete email configuration, or failed Resend request
+  returns non-2xx so Vercel retains retry ownership.
 - The same `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`, and
   `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts and
   positive-payment notifications. No time-zone setting is required. Confirm
@@ -2034,6 +2051,11 @@ Notes:
 - `/api/internal/hosted-runtime/latency-alert/cron` scans existing Web-owned
   latency and durable mailbox-progress facts every five minutes. It does not
   signal Temporal, wake Cloudflare, or participate in message processing.
+- `/api/internal/vercel-alerts/webhook` receives event-driven Vercel usage and
+  error anomalies. It is not a cron and adds no steady-state five-minute
+  invocation. The route bounds the raw body at 64 KiB, verifies
+  `x-vercel-signature`, and sends one aggregate-only Resend email using a
+  stable event-derived idempotency key.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
   managed-user crypto provisioning. Later successful invoices for an already
@@ -2121,6 +2143,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-onboarding/stripe/cron`
 - `GET /api/internal/hosted-growth/usage-referral/cron`
 - `GET /api/internal/hosted-runtime/latency-alert/cron`
+- `POST /api/internal/vercel-alerts/webhook`
 
 The signed device-sync reconcile request includes only `connectionId`. Web
 places the request on the existing manual-reconcile wake and carries no
