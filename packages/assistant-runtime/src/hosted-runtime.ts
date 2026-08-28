@@ -4,9 +4,7 @@ import path from "node:path";
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
-  attachHostedRuntimeFailurePhaseCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeFailurePhaseName,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceStagedMilestones,
@@ -46,13 +44,9 @@ import {
   MURPH_ANDROID_APP_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
-  buildHostedExecutionSafeErrorDiagnostics,
-  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
-  readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
   type HostedExecutionConversationMessageChannel,
-  type HostedExecutionLogPhase,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
@@ -189,9 +183,19 @@ import {
   type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
-  restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
+import {
+  attachHostedRuntimeFailurePhase,
+  raceHostedRuntimeCancellation,
+  readHostedRuntimeAbortReason,
+  startHostedWorkspaceRestorePreparation,
+  type HostedRuntimePhaseLogger,
+  type HostedWorkspaceRestorePreparation,
+} from "./hosted-workspace-restore-preparation.ts";
+export {
+  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
+} from "./hosted-workspace-restore-preparation.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
   hostedCanonicalWriteReceiptRecoveryStatusFields,
@@ -767,6 +771,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
     context?: HostedWorkspaceRuntimeJobImportContext,
   ): Promise<HostedMailboxItemImportOutcome>;
   platform: HostedRuntimePlatform;
+  preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onConversationActivityObserved?: (
     observation: Exclude<HostedConversationActivityObservation, "not_observed">,
@@ -1158,21 +1163,6 @@ function hostedSystemMailboxWakeChangedFromWorkspace(input: {
     });
 }
 
-export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Error {
-  readonly actualWorkspaceVersion: string | null;
-  readonly expectedWorkspaceVersion: string;
-
-  constructor(input: {
-    actualWorkspaceVersion: string | null;
-    expectedWorkspaceVersion: string;
-  }) {
-    super("Hosted workspace runtime job read a stale workspace version.");
-    this.name = "HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError";
-    this.actualWorkspaceVersion = input.actualWorkspaceVersion;
-    this.expectedWorkspaceVersion = input.expectedWorkspaceVersion;
-  }
-}
-
 export class HostedRuntimeCheckpointInterruptedByWakeError extends Error {
   readonly code = "runtime_wake_during_checkpoint";
   readonly checkpointConflictReason: "foreground_pending" | null;
@@ -1457,8 +1447,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         snapshot.localWorkspaceCleanForWarmReuse === true;
       return snapshot;
     };
-  const phaseLogger = createHostedRuntimePhaseLogger();
-  const emitPhaseLog = phaseLogger.emit;
+  let phaseLogger: HostedRuntimePhaseLogger | null =
+    options.preparedWorkspaceRestore?.phaseLogger ?? null;
   const pendingDeferredUsageCaptures = new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
   const pendingLocalWorkspaceMutationCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
@@ -1500,7 +1490,22 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   };
 
   try {
-    const runtimePhaseStartedAt = new Date().toISOString();
+    const workspaceRestorePreparation = options.preparedWorkspaceRestore
+      ?? startHostedWorkspaceRestorePreparation({
+        job: input,
+        platform: runtime.platform,
+        signal: runtimeAbortController.signal,
+        vaultRoot: options.vaultRoot,
+      });
+    workspaceRestorePreparation.adoptRuntimeAbortGuard({
+      assertLive: assertRuntimeNotAborted,
+      job: input,
+      vaultRoot: options.vaultRoot,
+    });
+    const activePhaseLogger = workspaceRestorePreparation.phaseLogger;
+    phaseLogger = activePhaseLogger;
+    const emitPhaseLog = activePhaseLogger.emit;
+    const runtimePhaseStartedAt = workspaceRestorePreparation.runtimePhaseStartedAt;
     const invocationOrchestrationLatencySeed = createHostedRuntimeOrchestrationLatencySeed(
       readHostedRuntimeInvocationOrchestrationLatencyDiagnostics(options.latencyMilestones),
     );
@@ -1510,43 +1515,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ...(baseLatencyMilestones ?? {}),
       runtimePhaseStartedAt,
     };
-    emitPhaseLog({
-      input,
-      requestId,
-      stage: "workspace.read",
-      status: "start",
-    });
-    const workspaceRead = Object.hasOwn(input.request, "workspace")
-      ? {
-          fetchedAt: new Date().toISOString(),
-          workspace: input.request.workspace ?? null,
-        }
-      : await raceHostedRuntimeCancellation(
-          workspacePort.read(),
-          runtimeAbortController.signal,
-        );
-    emitPhaseLog({
-      details: {
-        actualWorkspaceVersion: workspaceRead.workspace?.version ?? null,
-        workspaceReadSource: Object.hasOwn(input.request, "workspace")
-          ? "invocation_request"
-          : "workspace_port",
-        workspacePresent: workspaceRead.workspace !== null,
-      },
-      input,
-      requestId,
-      stage: "workspace.read",
-      status: "done",
-    });
-    assertRuntimeNotAborted();
-    assertWorkspaceRunVersionMatchesRequest({
-      expectedWorkspaceVersion: input.request.workspaceVersion,
-      workspace: workspaceRead.workspace,
-    });
-    assertWorkspaceRunUserMatchesRequest({
-      expectedUserId: input.request.userId,
-      workspace: workspaceRead.workspace,
-    });
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,
     );
@@ -1704,21 +1672,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       await kickDetachedAssistantAskAfterImport(item, outcome);
       return outcome;
     };
-    emitPhaseLog({
-      input,
-      requestId,
-      stage: "workspace.restore",
-      status: "start",
-    });
-    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
-      logContext: runtimeLogContext,
-      platform: guardedRuntime.platform,
-      signal: runtimeAbortController.signal,
-      vaultRoot: options.vaultRoot,
-      workspace: workspaceRead.workspace,
-    });
+    const {
+      restored,
+      workspaceRead,
+      workspaceRestoreDoneAt,
+    } = await workspaceRestorePreparation.promise;
     assertRuntimeNotAborted();
-    const workspaceRestoreDoneAt = new Date().toISOString();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone
     // object already passed to the assistant_input_staged event. No new request,
@@ -1740,17 +1699,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           restoreWasCold: restored.restoreWasCold,
         },
       };
-    emitPhaseLog({
-      details: {
-        materializedArtifactPathCount: restored.materializedArtifactPaths.size,
-        restoreMode: restored.mode,
-        restoreWasCold: restored.restoreWasCold,
-      },
-      input,
-      requestId,
-      stage: "workspace.restore",
-      status: "done",
-    });
     assertRuntimeNotAborted();
     const hostedVaultStartupPreparation = await prepareHostedVaultForRuntime({
       assertRuntimeNotAborted,
@@ -3981,7 +3929,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         return refresh;
       } catch (error) {
         if (maintenanceSignal.aborted) {
-          phaseLogger.close("browser_vault.refresh");
+          activePhaseLogger.close("browser_vault.refresh");
         } else {
           emitPhaseLog({
             error,
@@ -6332,7 +6280,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         } catch (error) {
           resumeDetachedAssistantAskAfterWorkspaceBoundary();
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
-            phaseLogger.close("workspace.checkpoint.idle_shutdown");
+            activePhaseLogger.close("workspace.checkpoint.idle_shutdown");
             const shutdownWasSignaled = () => options.shutdownSignal?.aborted === true;
             if (
               shutdownWasSignaled()
@@ -6377,7 +6325,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             continue;
           }
           if (isHostedRuntimeCheckpointSupersededByWorkspaceProgress(error)) {
-            phaseLogger.close("workspace.checkpoint.idle_shutdown");
+            activePhaseLogger.close("workspace.checkpoint.idle_shutdown");
             await runForegroundPass({
               latencySeed: null,
               requestIdKind: "checkpoint-interrupt",
@@ -6950,12 +6898,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     });
     return invocationResult;
   } catch (error) {
-    const failedRuntimePhases = phaseLogger.failOpenPhases({
+    const failedRuntimePhases = phaseLogger?.failOpenPhases({
       error,
       input,
       requestId,
-    });
-    emitPhaseLog({
+    }) ?? [];
+    phaseLogger?.emit({
       error,
       input,
       requestId,
@@ -6998,129 +6946,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
     }
   }
-}
-
-type HostedRuntimePhaseLogStatus = "done" | "fail" | "start";
-
-type HostedRuntimePhaseName = HostedRuntimeFailurePhaseName;
-
-interface HostedRuntimePhaseLogState {
-  ordinal: number;
-  runtimeStartedAtMs: number;
-  startedAtMsByStage: Map<HostedRuntimePhaseName, number>;
-}
-
-interface HostedRuntimePhaseLogger {
-  close(stage: HostedRuntimePhaseName): void;
-  emit(input: HostedRuntimePhaseLogInput): void;
-  failOpenPhases(
-    input: Omit<HostedRuntimePhaseLogInput, "stage" | "status">,
-  ): HostedRuntimePhaseName[];
-}
-
-interface HostedRuntimePhaseLogInput {
-  details?: HostedExecutionStructuredLogDetails;
-  error?: unknown;
-  input: HostedAssistantWorkspaceRuntimeJobInput;
-  phase?: HostedExecutionLogPhase;
-  requestId: string;
-  stage: HostedRuntimePhaseName;
-  status: HostedRuntimePhaseLogStatus;
-}
-
-function createHostedRuntimePhaseLogger(): HostedRuntimePhaseLogger {
-  const state: HostedRuntimePhaseLogState = {
-    ordinal: 0,
-    runtimeStartedAtMs: Date.now(),
-    startedAtMsByStage: new Map(),
-  };
-
-  return {
-    close(stage) {
-      state.startedAtMsByStage.delete(stage);
-    },
-    emit(input) {
-      emitHostedRuntimePhaseLog(input, state);
-    },
-    failOpenPhases(input) {
-      const openStages = Array.from(state.startedAtMsByStage.keys()).reverse();
-      for (const stage of openStages) {
-        emitHostedRuntimePhaseLog({
-          ...input,
-          stage,
-          status: "fail",
-        }, state);
-      }
-      return openStages;
-    },
-  };
-}
-
-function attachHostedRuntimeFailurePhase(
-  error: unknown,
-  phase: HostedRuntimePhaseName,
-): unknown {
-  if (
-    !(error instanceof Error)
-    || deriveHostedExecutionErrorCode(error) !== "runtime_error"
-  ) {
-    return error;
-  }
-
-  // The shared canonical classifier is the single authority: if it cannot
-  // produce an actionable classification, preserve the causal phase without
-  // changing `.code`, `.errorCode`, retry behavior, or durable failure state.
-  return attachHostedRuntimeFailurePhaseCode(error, phase);
-}
-
-function emitHostedRuntimePhaseLog(
-  input: HostedRuntimePhaseLogInput,
-  state: HostedRuntimePhaseLogState,
-): void {
-  const phaseTrace = buildHostedRuntimePhaseTraceMetadata(input, state);
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    details: {
-      attemptId: input.input.request.attemptId,
-      leaseGeneration: input.input.request.leaseGeneration,
-      requestId: input.requestId,
-      runtimePhase: input.stage,
-      ...phaseTrace,
-      runtimePhaseStatus: input.status,
-      workspaceVersion: input.input.request.workspaceVersion,
-      ...buildHostedRuntimePhaseFailureMetadata(input.error),
-      ...(input.details ?? {}),
-    },
-    level: input.status === "fail" ? "error" : "info",
-    message: "Hosted workspace runtime phase boundary.",
-    phase: input.phase ?? (input.status === "fail" ? "failed" : "wake.running"),
-    userId: null,
-  });
-}
-
-function buildHostedRuntimePhaseFailureMetadata(
-  error: unknown,
-): HostedExecutionStructuredLogDetails {
-  if (error === undefined) {
-    return {};
-  }
-  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-
-  return {
-    failureDetailsPresent: hasHostedRuntimePhaseOwnProperty(error, "details"),
-    ...(typeof diagnostics?.errorCode === "string"
-      ? { failureErrorCode: diagnostics.errorCode }
-      : {}),
-    ...(typeof diagnostics?.errorName === "string"
-      ? { failureErrorName: diagnostics.errorName }
-      : {}),
-    failureErrorDetailPresent: typeof diagnostics?.errorDetail === "string",
-    ...(typeof diagnostics?.errorStatus === "number"
-      ? { failureErrorStatus: diagnostics.errorStatus }
-      : {}),
-    failureMessagePresent: error instanceof Error && error.message.trim().length > 0,
-    failureName: readHostedExecutionSafeErrorName(error) ?? null,
-  };
 }
 
 function buildHostedBrowserVaultRefreshLogDetails(
@@ -7175,38 +7000,6 @@ function classifyHostedBrowserVaultReplicaRefresh(
     default:
       return assertNever(refresh);
   }
-}
-
-function hasHostedRuntimePhaseOwnProperty(error: unknown, key: string): boolean {
-  return Boolean(
-    error
-      && typeof error === "object"
-      && Object.prototype.hasOwnProperty.call(error, key),
-  );
-}
-
-function buildHostedRuntimePhaseTraceMetadata(
-  input: Pick<HostedRuntimePhaseLogInput, "stage" | "status">,
-  state: HostedRuntimePhaseLogState,
-): HostedExecutionStructuredLogDetails {
-  const nowMs = Date.now();
-  state.ordinal += 1;
-  const phaseStartedAtMs = state.startedAtMsByStage.get(input.stage) ?? null;
-  const details: HostedExecutionStructuredLogDetails = {
-    runtimeElapsedMs: Math.max(0, nowMs - state.runtimeStartedAtMs),
-    runtimePhaseOrdinal: state.ordinal,
-    ...(phaseStartedAtMs === null || input.status === "start"
-      ? {}
-      : { runtimePhaseDurationMs: Math.max(0, nowMs - phaseStartedAtMs) }),
-  };
-
-  if (input.status === "start") {
-    state.startedAtMsByStage.set(input.stage, nowMs);
-  } else {
-    state.startedAtMsByStage.delete(input.stage);
-  }
-
-  return details;
 }
 
 // Single owner for the protections + materializer + retention wiring used by
@@ -8222,32 +8015,6 @@ function assertHostedWorkspaceCheckpointAccepted(
   }
 }
 
-function raceHostedRuntimeCancellation<T>(
-  promise: Promise<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  if (signal.aborted) {
-    return Promise.reject(readHostedRuntimeAbortReason(signal));
-  }
-
-  return new Promise<T>((resolve, reject) => {
-    const abort = () => {
-      reject(readHostedRuntimeAbortReason(signal));
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", abort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", abort);
-        reject(error);
-      },
-    );
-  });
-}
-
 function startOwnedHostedProjectionStage<T>(input: {
   ownerSignals: readonly AbortSignal[];
   runStage: (signal: AbortSignal) => Promise<T>;
@@ -8269,12 +8036,6 @@ function startOwnedHostedProjectionStage<T>(input: {
     },
     promise,
   };
-}
-
-function readHostedRuntimeAbortReason(signal: AbortSignal): unknown {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : new Error("Hosted workspace runtime was aborted.");
 }
 
 function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null | undefined): void {
@@ -8573,51 +8334,6 @@ function parseHostedMailboxSeqOrNull(value: string | null | undefined): bigint |
     && /^(?:0|[1-9][0-9]*)$/u.test(value)
     ? BigInt(value)
     : null;
-}
-
-function assertWorkspaceRunVersionMatchesRequest(input: {
-  expectedWorkspaceVersion: string;
-  workspace: HostedWorkspaceState | null;
-}): void {
-  if (workspaceRunVersionMatchesRequest(input)) {
-    return;
-  }
-
-  throw new HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError({
-    actualWorkspaceVersion: input.workspace?.version ?? null,
-    expectedWorkspaceVersion: input.expectedWorkspaceVersion,
-  });
-}
-
-function workspaceRunVersionMatchesRequest(input: {
-  expectedWorkspaceVersion: string;
-  workspace: HostedWorkspaceState | null;
-}): boolean {
-  const actualWorkspaceVersion = input.workspace?.version ?? null;
-
-  if (actualWorkspaceVersion === input.expectedWorkspaceVersion) {
-    return true;
-  }
-
-  if (actualWorkspaceVersion === null && input.expectedWorkspaceVersion === "0") {
-    return true;
-  }
-
-  return false;
-}
-
-function assertWorkspaceRunUserMatchesRequest(input: {
-  expectedUserId: string;
-  workspace: HostedWorkspaceState | null;
-}): void {
-  if (input.workspace === null || input.workspace.userId === input.expectedUserId) {
-    return;
-  }
-
-  throw new HostedWorkspaceRunnerUserMismatchError({
-    actualUserId: input.workspace.userId,
-    expectedUserId: input.expectedUserId,
-	  });
 }
 
 function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined): number {

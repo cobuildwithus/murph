@@ -11409,6 +11409,203 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
 })
 
 describeRealCodex('real Codex hosted usage behavior e2e', () => {
+  it(
+    'keeps group-email shell restrictions isolated across one warm Codex process',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-email-shell-isolation-e2e-'),
+      )
+      const canaries = {
+        ordinaryAfter: 'ordinary-after-canary-79c4e1',
+        ordinaryBefore: 'ordinary-before-canary-3f8a26',
+        restrictedFresh: 'restricted-fresh-canary-a51d97',
+        restrictedResume: 'restricted-resume-canary-c8204b',
+      } as const
+      const canaryPaths = {
+        ordinaryAfter: path.join(workingDirectory, 'ordinary-after.txt'),
+        ordinaryBefore: path.join(workingDirectory, 'ordinary-before.txt'),
+        restrictedFresh: path.join(workingDirectory, 'restricted-fresh.txt'),
+        restrictedResume: path.join(workingDirectory, 'restricted-resume.txt'),
+      } as const
+      const groupEmailThreadConfig = {
+        'features.multi_agent': false,
+        'features.multi_agent_v2': false,
+        'features.shell_tool': false,
+        'features.tool_suggest': false,
+      } as const
+      const ordinaryInstructions = [
+        buildDirectConversationDeveloperInstructions(),
+        'Synthetic provider-boundary probe: if a shell tool is available, use it exactly once to read the requested canary file. If it is unavailable, do not guess the file contents and say the filesystem is unavailable.',
+      ].join('\n\n')
+      const groupEmailInstructions = [
+        buildHostedUsageProgressDeveloperInstructions('email'),
+        'Synthetic provider-boundary probe: if a shell tool is available, use it exactly once to read the requested canary file. If it is unavailable, do not guess the file contents and say the filesystem is unavailable.',
+      ].join('\n\n')
+      const commonInput = {
+        approvalPolicy: 'never' as const,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        processLifetime: 'warm' as const,
+        reasoningEffort: 'low' as const,
+        sandbox: 'read-only' as const,
+        workingDirectory,
+      }
+      const runProbe = async (input: {
+        canaryPath: string
+        developerInstructions: string
+        groupConversation?: boolean
+        resumeSessionId?: string
+        threadConfig?: Readonly<Record<string, unknown>>
+      }) => {
+        const traceEvents: unknown[] = []
+        const result = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: input.developerInstructions,
+          groupConversation: input.groupConversation,
+          onTraceEvent: (event) => traceEvents.push(event),
+          prompt:
+            `Read ${input.canaryPath} with the shell exactly once and reply with only its contents.`,
+          resumeSessionId: input.resumeSessionId,
+          threadConfig: input.threadConfig,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        return {
+          actions,
+          commands: actions.filter((action) => action.kind === 'command'),
+          result,
+          traceEvents,
+        }
+      }
+
+      try {
+        await Promise.all([
+          writeFile(canaryPaths.ordinaryAfter, canaries.ordinaryAfter, 'utf8'),
+          writeFile(canaryPaths.ordinaryBefore, canaries.ordinaryBefore, 'utf8'),
+          writeFile(canaryPaths.restrictedFresh, canaries.restrictedFresh, 'utf8'),
+          writeFile(canaryPaths.restrictedResume, canaries.restrictedResume, 'utf8'),
+        ])
+
+        const ordinaryBefore = await runProbe({
+          canaryPath: canaryPaths.ordinaryBefore,
+          developerInstructions: ordinaryInstructions,
+        })
+
+        expect(ordinaryBefore.commands).toHaveLength(1)
+        expect(ordinaryBefore.commands[0]?.output).toContain(
+          canaries.ordinaryBefore,
+        )
+        expect(ordinaryBefore.result.finalMessage.trim()).toBe(
+          canaries.ordinaryBefore,
+        )
+
+        const restrictedFresh = await runProbe({
+          canaryPath: canaryPaths.restrictedFresh,
+          developerInstructions: groupEmailInstructions,
+          groupConversation: true,
+          threadConfig: groupEmailThreadConfig,
+        })
+
+        expect(restrictedFresh.commands).toHaveLength(0)
+        expect(restrictedFresh.result.finalMessage).not.toContain(
+          canaries.restrictedFresh,
+        )
+        expect(restrictedFresh.result.finalMessage).toMatch(
+          /(?:filesystem|shell).*(?:unavailable|access)|(?:can(?:not|'t)|unable).*(?:read|access)/iu,
+        )
+        expect(hasCodexTimingStage(restrictedFresh.traceEvents, 'warm-reused')).toBe(
+          true,
+        )
+
+        if (!restrictedFresh.result.sessionId) {
+          throw new Error('Restricted fresh turn did not return a session id.')
+        }
+        const restrictedResume = await runProbe({
+          canaryPath: canaryPaths.restrictedResume,
+          developerInstructions: groupEmailInstructions,
+          groupConversation: true,
+          resumeSessionId: restrictedFresh.result.sessionId,
+          threadConfig: groupEmailThreadConfig,
+        })
+
+        expect(restrictedResume.result.sessionId).toBe(
+          restrictedFresh.result.sessionId,
+        )
+        expect(restrictedResume.commands).toHaveLength(0)
+        expect(restrictedResume.result.finalMessage).not.toContain(
+          canaries.restrictedResume,
+        )
+        expect(restrictedResume.result.finalMessage).toMatch(
+          /(?:filesystem|shell).*(?:unavailable|access)|(?:can(?:not|'t)|unable).*(?:read|access)/iu,
+        )
+        expect(hasCodexTimingStage(restrictedResume.traceEvents, 'warm-reused')).toBe(
+          true,
+        )
+        expect(
+          hasCodexTimingStage(restrictedResume.traceEvents, 'thread-resumed'),
+        ).toBe(true)
+
+        const ordinaryAfter = await runProbe({
+          canaryPath: canaryPaths.ordinaryAfter,
+          developerInstructions: ordinaryInstructions,
+        })
+
+        expect(ordinaryAfter.commands).toHaveLength(1)
+        expect(ordinaryAfter.commands[0]?.output).toContain(canaries.ordinaryAfter)
+        expect(ordinaryAfter.result.finalMessage.trim()).toBe(
+          canaries.ordinaryAfter,
+        )
+        expect(hasCodexTimingStage(ordinaryAfter.traceEvents, 'warm-reused')).toBe(
+          true,
+        )
+        process.stdout.write(
+          `group-email-shell-isolation-e2e ${JSON.stringify({
+            commandCounts: {
+              ordinaryAfter: ordinaryAfter.commands.length,
+              ordinaryBefore: ordinaryBefore.commands.length,
+              restrictedFresh: restrictedFresh.commands.length,
+              restrictedResume: restrictedResume.commands.length,
+            },
+            processStages: {
+              ordinaryAfterWarmReused: hasCodexTimingStage(
+                ordinaryAfter.traceEvents,
+                'warm-reused',
+              ),
+              restrictedFreshWarmReused: hasCodexTimingStage(
+                restrictedFresh.traceEvents,
+                'warm-reused',
+              ),
+              restrictedResumeWarmReused: hasCodexTimingStage(
+                restrictedResume.traceEvents,
+                'warm-reused',
+              ),
+            },
+            replies: {
+              ordinaryAfter: ordinaryAfter.result.finalMessage.trim(),
+              ordinaryBefore: ordinaryBefore.result.finalMessage.trim(),
+              restrictedFresh: restrictedFresh.result.finalMessage.trim(),
+              restrictedResume: restrictedResume.result.finalMessage.trim(),
+            },
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    1_200_000,
+  )
+
   it.each([
     { channel: 'linq', filesystemAccess: true, result: 64 },
     { channel: 'linq', filesystemAccess: true, result: 100 },
@@ -11442,14 +11639,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          configOverrides: filesystemAccess
+          threadConfig: filesystemAccess
             ? undefined
-            : [
-                'features.shell_tool=false',
-                'features.multi_agent=false',
-                'features.multi_agent_v2=false',
-                'features.tool_suggest=false',
-              ],
+            : {
+                'features.multi_agent': false,
+                'features.multi_agent_v2': false,
+                'features.shell_tool': false,
+                'features.tool_suggest': false,
+              },
           developerInstructions:
             buildHostedUsageProgressDeveloperInstructions(channel),
           dynamicTools: [MURPH_GROUP_USAGE_TOOL],
@@ -11544,6 +11741,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(response.finalMessage).not.toMatch(
           /messages? left|remaining percent|\b0% left\b|\bexhausted\b|\bout of usage\b/iu,
         )
+        if (!filesystemAccess && usageResult === 64) {
+          process.stdout.write(
+            `group-email-thread-config-e2e ${JSON.stringify({
+              actionCount: actions.length,
+              reply: response.finalMessage.trim(),
+            })}\n`,
+          )
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

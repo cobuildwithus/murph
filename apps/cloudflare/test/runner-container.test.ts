@@ -5938,7 +5938,7 @@ describe("RunnerContainer", () => {
       }
       runnerRequestSignal.resolve(signal);
       await releaseAdmittedBoundary.promise;
-      return createInvalidRunnerRequestResponse();
+      return new Response(null, { status: 204 });
     });
     const { container, startAndWaitForPorts } = createContainerDouble({
       containerFetch,
@@ -6020,8 +6020,8 @@ describe("RunnerContainer", () => {
     expect(containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
     )).toHaveLength(2);
-    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-    expect(destroy).toHaveBeenCalledOnce();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
   }
 
   it.each(["accepted", "queued"] as const)(

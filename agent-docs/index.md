@@ -41,6 +41,11 @@ Hosted scheduled connection-loss retries keep one ephemeral exact-job obligation
 independent from aggregate assistant wakes; deadline revalidation and stale no-op
 behavior are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
+Current Linq group message receipt, active-group edits, and participant changes
+share chat-before-member/route database lock order. The invariant and focused
+PostgreSQL proof are specified by `agent-docs/RELIABILITY.md` and
+`agent-docs/references/testing-ci-map.md`.
+
 Kernel browser-session authority is independent of the optional Live View
 capability. Web-owned automation may continue when that viewer cannot be safely
 embedded. One code-owned Kernel host policy derives validation and CSP, while
