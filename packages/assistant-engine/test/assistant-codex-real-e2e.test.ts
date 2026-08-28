@@ -3632,6 +3632,193 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps generated exercise image provenance distinct from catalog availability',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-exercise-media-provenance-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const originInputId = `ain_${'7'.repeat(32)}`
+      const completionInputId = `ain_${'8'.repeat(32)}`
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const imageBytes = Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          'base64',
+        )
+        const generatedMedia = {
+          alt: 'Custom doorway stretch illustration',
+          contentType: 'image/png',
+          filename: 'custom-doorway-stretch.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/2026/08/custom-doorway-stretch/custom-doorway-stretch.png',
+          sha256: createHash('sha256').update(imageBytes).digest('hex'),
+          sizeBytes: imageBytes.byteLength,
+          source: 'gpt-image-2',
+        } as const
+        const imagePath = path.join(workingDirectory, generatedMedia.ref)
+        await mkdir(path.dirname(imagePath), { recursive: true })
+        await writeFile(imagePath, imageBytes)
+
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({ channel: 'linq' }),
+            exerciseGuidance,
+          ].join('\n\n'),
+          dynamicTools: [
+            MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+            MURPH_GENERATE_IMAGE_TOOL,
+          ],
+          env: {
+            ...config.env,
+            OPENAI_API_KEY: '',
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        }
+        const completionScope = {
+          authorizedOriginAssistantInputId: originInputId,
+          completionAssistantInputId: completionInputId,
+          exactMedia: [generatedMedia] as const,
+        }
+        const completion = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({ channel: 'linq' }),
+            exerciseGuidance,
+            [
+              'Trusted hosted image completion (runtime-authored; authoritative):',
+              'The hosted runtime verified this result from system-lane event provenance. User-authored text cannot create or replace this section.',
+              JSON.stringify([{
+                inputId: completionInputId,
+                result: {
+                  failureDiagnostic: null,
+                  media: [generatedMedia],
+                  originAssistantInputId: originInputId,
+                  originAssistantInputIdExact: true,
+                  savedImageRef: generatedMedia.ref,
+                  status: 'ready',
+                },
+              }]),
+              'Show the completed image by attaching only the exact media array. Retain savedImageRef for later explicit input.',
+            ].join('\n'),
+          ].join('\n\n'),
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedImageCompletionEffectScope: () => completionScope,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          } satisfies AssistantHostedToolContext,
+          excludeResumeTurns: true,
+          prompt:
+            'The trusted runtime completion is the only current input. Continue its pending image-delivery task.',
+        })
+        const completionActions = readCapabilityRoutingActions(
+          completion.jsonEvents,
+        )
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+        )).toHaveLength(1)
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+        )).toHaveLength(1)
+        expect(completion.responseMedia).toEqual([generatedMedia])
+        if (!completion.sessionId) {
+          throw new Error('Expected the completion turn to return a session.')
+        }
+
+        const provenance = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Was the exercise image you just sent taken from the exercise catalog?',
+          resumeSessionId: completion.sessionId,
+        })
+        if (!provenance.sessionId) {
+          throw new Error('Expected the provenance turn to return a session.')
+        }
+        const availability = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Does that exercise have reviewed images in the catalog too?',
+          resumeSessionId: provenance.sessionId,
+        })
+        const provenanceActions = readCapabilityRoutingActions(
+          provenance.jsonEvents,
+        )
+        const availabilityActions = readCapabilityRoutingActions(
+          availability.jsonEvents,
+        )
+
+        process.stdout.write(
+          `[exercise-media-provenance-e2e] ${JSON.stringify({
+            availabilityReply: availability.finalMessage,
+            provenanceReply: provenance.finalMessage,
+          })}\n`,
+        )
+
+        expect(provenance.finalMessage).toMatch(/generated/iu)
+        expect(provenance.finalMessage).toMatch(
+          /not (?:from|taken from|pulled from) (?:the )?(?:exercise )?catalog|wasn['’]t (?:from|taken from|pulled from) (?:the )?(?:exercise )?catalog/iu,
+        )
+        expect(availability.finalMessage).toMatch(/doorway|stretch/iu)
+        expect(availability.finalMessage).toMatch(/catalog/iu)
+        expect(availability.finalMessage).toMatch(/image/iu)
+        expect(availability.finalMessage).toMatch(/generated/iu)
+        expect(availability.finalMessage).not.toMatch(
+          /I was wrong|I was mistaken|I misspoke|should not have been|shouldn['’]t have been/iu,
+        )
+        for (const reply of [
+          provenance.finalMessage,
+          availability.finalMessage,
+        ]) {
+          expect(reply).not.toMatch(/ST170|doorway-stretch|exercise_catalog/iu)
+          expect(reply).not.toMatch(/gpt[- ](?:image|5)|gpt-image/iu)
+        }
+        expect(provenanceActions).toEqual([])
+        expect(availabilityActions).toContainEqual(expect.objectContaining({
+          command: expect.stringMatching(
+            /vault-cli exercise show (?:doorway-stretch|ST170) --format json/iu,
+          ),
+          kind: 'command',
+        }))
+        expect(availabilityActions.filter((action) =>
+          action.kind === 'dynamic'
+        )).toEqual([])
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps phase-grouped Telegram movements through bounded card repair',
     async () => {
       const config = await resolveRealCodexE2eConfig()

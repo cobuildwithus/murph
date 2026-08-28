@@ -35,6 +35,24 @@ describe('exercise catalog runtime guidance', () => {
       'A request for a missing exercise picture is a presentation repair, not a request for a newly generated substitute.',
     )
     expect(compact).toContain(
+      'Complete that repair in the current turn: look up the exercise, attach catalog media, and do not send only an acknowledgement.',
+    )
+    expect(compact).toContain(
+      'When asked where an already-sent exercise image came from, answer from its recorded media source or generation-tool evidence.',
+    )
+    expect(compact).toContain(
+      'Distinguish that specific delivered image from other images available for the same exercise.',
+    )
+    expect(compact).toContain(
+      'Discovering catalog alternatives does not change the provenance of an earlier image or justify retracting a correct provenance answer.',
+    )
+    expect(compact).toContain(
+      'in visible text say catalog, generated, or custom-generated naturally; do not name providers or models or show media source values unless explicitly asked.',
+    )
+    expect(compact).toContain(
+      'This does not change the exact source field required in media-tool arguments.',
+    )
+    expect(compact).toContain(
       'never append a catalog id in parentheses or expose a source token.',
     )
     expect(compact).toContain(
