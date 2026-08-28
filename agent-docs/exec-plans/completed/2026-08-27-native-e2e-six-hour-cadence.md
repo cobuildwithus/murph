@@ -152,7 +152,7 @@ Updated: 2026-08-28
   reuse the latest same-SHA success without paid work.
 - Deleted the unused pull-request candidate lifecycle, destructive identity
   reset path, and mutable source-pin configuration. The resulting patch removes
-  4,517 lines while adding 1,002 lines, including tests and owner docs.
+  4,517 lines while adding 1,022 lines, including tests and owner docs.
 - Focused native tests passed (24/24), repository policy tests passed (34/34),
   workflow lint and diff checks passed, and the final full ReviewGPT audit
   returned `ROUND_OUTCOME: PASS` with no qualifying findings.
