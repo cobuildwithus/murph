@@ -37,6 +37,11 @@ reuse, and focused proof are specified by
 Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
 expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
+Current Linq group message receipt, active-group edits, and participant changes
+share chat-before-member/route database lock order. The invariant and focused
+PostgreSQL proof are specified by `agent-docs/RELIABILITY.md` and
+`agent-docs/references/testing-ci-map.md`.
+
 Kernel browser-session authority is independent of the optional Live View
 capability. Web-owned automation may continue when that viewer cannot be safely
 embedded. One code-owned Kernel host policy derives validation and CSP, while
