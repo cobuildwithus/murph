@@ -596,8 +596,7 @@ async function executeAssistantCodexAttempt(input: {
         sandbox:
           outputOnlyTurn
             ? null
-            : hostedImageCompletionNativeCapabilitiesRestrictedTurn ||
-                creativeNotificationSongTurn ||
+            : creativeNotificationSongTurn ||
                 readOnlyAutomationTurn ||
                 groupEmailTurn
               ? 'read-only'
