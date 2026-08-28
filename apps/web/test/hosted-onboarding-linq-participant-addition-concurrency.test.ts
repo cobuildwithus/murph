@@ -1,6 +1,16 @@
 import { createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import {
+  HOSTED_EXECUTION_NONCE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
+  HOSTED_EXECUTION_SIGNATURE_HEADER,
+  HOSTED_EXECUTION_TIMESTAMP_HEADER,
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import {
+  encodeHostedExecutionSignedRequestPayload,
+} from "@murphai/hosted-execution/auth";
 import { describe, expect, it, vi } from "vitest";
 
 const groupActionAuthorityMocks = vi.hoisted(() => ({
@@ -100,6 +110,9 @@ import {
 } from "@/src/lib/hosted-mailbox/store";
 import * as prismaModule from "@/src/lib/prisma";
 import { createPrismaClient } from "@/src/lib/prisma";
+import {
+  POST as postHostedLinqEgressEngagement,
+} from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 import {
   recordHostedLaunchRequiredConsent,
 } from "@/src/lib/legal/consent";
@@ -205,6 +218,58 @@ function createDeferred<T = void>(): Deferred<T> {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+async function createSignedHostedCallbackRequest(input: {
+  body: string;
+  keyId: string;
+  nonce: string;
+  path: string;
+  privateKey: JsonWebKey;
+  timestamp: string;
+  userId: string;
+}): Promise<Request> {
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    input.privateKey,
+    {
+      name: "ECDSA",
+      namedCurve: "P-256",
+    },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    {
+      hash: "SHA-256",
+      name: "ECDSA",
+    },
+    key,
+    encodeHostedExecutionSignedRequestPayload({
+      method: "POST",
+      nonce: input.nonce,
+      path: input.path,
+      payload: input.body,
+      search: "",
+      timestamp: input.timestamp,
+      userId: input.userId,
+    }),
+  );
+
+  return new Request(`https://internal.example.test${input.path}`, {
+    body: input.body,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      [HOSTED_EXECUTION_NONCE_HEADER]: input.nonce,
+      [HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER]: input.keyId,
+      [HOSTED_EXECUTION_SIGNATURE_HEADER]: Buffer.from(signature).toString(
+        "base64url",
+      ),
+      [HOSTED_EXECUTION_TIMESTAMP_HEADER]: input.timestamp,
+      [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+    },
+    method: "POST",
+  });
 }
 
 async function buildPreparedThreadContainerCreation(input: {
@@ -1453,6 +1518,244 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           if (fixture) {
             await cleanupRouteFixture(fixture);
           }
+        }
+      },
+    );
+
+    it.each([
+      { startOrder: "edit-first" },
+      { startOrder: "egress-first" },
+    ] as const)(
+      "serializes the signed direct edit with authenticated runtime egress when $startOrder",
+      async ({ startOrder }) => {
+        const firstLockHeld = createDeferred();
+        const releaseFirst = createDeferred();
+        const editPid = createDeferred<number>();
+        const egressPid = createDeferred<number>();
+        let fixture: RouteFixture | null = null;
+        let directRoute: ActiveLinqDirectRoute | null = null;
+        let editTask: ReturnType<
+          typeof handleHostedOnboardingLinqWebhook
+        > | null = null;
+        let egressTask: Promise<Response> | null = null;
+        let egressClient: PrismaClient | null = null;
+        const getPrisma = vi.spyOn(prismaModule, "getPrisma")
+          .mockImplementation(() => {
+            if (!egressClient) {
+              throw new Error("Expected the authenticated egress Prisma client.");
+            }
+            return egressClient;
+          });
+        const signalRuntime = vi.spyOn(
+          hostedRuntimeSignal,
+          "signalHostedMailboxAppendRuntime",
+        ).mockResolvedValue({
+          signalAccepted: true,
+          workflowId: "hosted-user-runtime:linq-lock-order-test",
+        });
+        const callbackKey = generateKeyPairSync("ec", {
+          namedCurve: "prime256v1",
+          privateKeyEncoding: { format: "jwk" },
+          publicKeyEncoding: { format: "jwk" },
+        });
+        const callbackKeyId = `linq-lock-order-${randomUUID()}`;
+        const previousCallbackKeyId =
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID;
+        const previousCallbackPublicJwk =
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK;
+        const previousCallbackKeyring =
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON;
+        const previousWebhookSecret = process.env.LINQ_WEBHOOK_SECRET;
+        const webhookSecret = `linq-lock-order-${randomUUID()}`;
+        const providerIdempotencyKey =
+          `assistant-outbox:linq-lock-order:${randomUUID()}`;
+        const providerIdempotencyLookupKey =
+          createHostedLinqDeliveryIdempotencyLookupKey(
+            providerIdempotencyKey,
+          );
+
+        try {
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = callbackKeyId;
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK =
+            JSON.stringify(callbackKey.publicKey);
+          process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON =
+            JSON.stringify({ [callbackKeyId]: callbackKey.publicKey });
+          process.env.LINQ_WEBHOOK_SECRET = webhookSecret;
+          clearHostedOnboardingEnvCache();
+
+          fixture = await createRouteFixture();
+          const activeFixture = fixture;
+          directRoute = await activateLinqDirectRoute(activeFixture);
+          const activeDirectRoute = directRoute;
+          const originalMessageId = `message_direct_original_${randomUUID()}`;
+          const originalEvent = buildRoutedDirectMessageEvent({
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `event_direct_original_${randomUUID()}`,
+            messageId: originalMessageId,
+            participantPhone: activeDirectRoute.participantPhone,
+            recipientPhone: activeDirectRoute.canonicalRecipientPhone,
+            text: "Original direct message",
+            threadId: activeFixture.threadId,
+          });
+          await expect(activeFixture.observer.$transaction((tx) =>
+            planHostedOnboardingLinqWebhook({
+              event: originalEvent,
+              prisma: tx,
+            })
+          )).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-active-member",
+            },
+          });
+
+          const editEvent = buildRoutedGroupMessageEditedEvent({
+            createdAt: "2026-08-09T12:01:00.000Z",
+            eventId: `event_direct_edit_${randomUUID()}`,
+            messageId: originalMessageId,
+            participantPhone: activeDirectRoute.participantPhone,
+            text: "Corrected direct message",
+            threadId: activeFixture.threadId,
+          });
+          const editRawBody = JSON.stringify(editEvent);
+          const editTimestamp = String(Math.floor(Date.now() / 1_000));
+          const editSignature = `sha256=${createHmac("sha256", webhookSecret)
+            .update(`${editTimestamp}.${editRawBody}`)
+            .digest("hex")}`;
+          const engagementPath =
+            "/api/internal/hosted-runtime/linq-egress/engagement";
+          const engagementBody = JSON.stringify({
+            authorityCheckOnly: false,
+            directRecipientPhoneNumber: activeDirectRoute.participantPhone,
+            fromPhoneNumber: activeDirectRoute.canonicalRecipientPhone,
+            idempotencyKey: providerIdempotencyKey,
+            target: activeFixture.threadId,
+            targetKind: "thread",
+          });
+          const engagementRequest = await createSignedHostedCallbackRequest({
+            body: engagementBody,
+            keyId: callbackKeyId,
+            nonce: randomUUID().replaceAll("-", ""),
+            path: engagementPath,
+            privateKey: callbackKey.privateKey,
+            timestamp: new Date().toISOString(),
+            userId: activeFixture.ownerMemberId,
+          });
+          const editClient = pauseHostedWebhookTransactionAfterRawOperation({
+            client: activeFixture.participantClient,
+            locked: firstLockHeld,
+            ...(startOrder === "edit-first" ? { operation: "execute" } : {}),
+            pid: editPid,
+            release: releaseFirst,
+          });
+          egressClient = pauseHostedWebhookTransactionAfterRawOperation({
+            client: activeFixture.messageClient,
+            locked: firstLockHeld,
+            ...(startOrder === "egress-first" ? { operation: "execute" } : {}),
+            pid: egressPid,
+            release: releaseFirst,
+          });
+
+          const startEdit = () =>
+            handleHostedOnboardingLinqWebhook({
+              prisma: editClient,
+              rawBody: editRawBody,
+              scheduleAfterResponse: () => undefined,
+              signature: editSignature,
+              timestamp: editTimestamp,
+            });
+          const startEgress = () =>
+            postHostedLinqEgressEngagement(engagementRequest);
+
+          if (startOrder === "edit-first") {
+            editTask = startEdit();
+            await firstLockHeld.promise;
+            egressTask = startEgress();
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await egressPid.promise,
+            });
+          } else {
+            egressTask = startEgress();
+            await firstLockHeld.promise;
+            editTask = startEdit();
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await editPid.promise,
+            });
+          }
+          releaseFirst.resolve();
+
+          if (!editTask || !egressTask) {
+            throw new Error("Expected both signed Linq requests to start.");
+          }
+          const [editResult, egressResponse] = await Promise.all([
+            editTask,
+            egressTask,
+          ]);
+          expect(editResult).toMatchObject({
+            ignored: false,
+            ok: true,
+            reason: "wake-appended-message-edit",
+          });
+          expect(egressResponse.status).toBe(200);
+          await expect(egressResponse.json()).resolves.toMatchObject({
+            ok: true,
+            providerDispatchClaimed: true,
+            resolvedRoute: {
+              target: activeFixture.threadId,
+              targetKind: "thread",
+              threadIsDirect: true,
+            },
+          });
+          expect(await activeFixture.observer.hostedMailboxItem.count({
+            where: { dedupeKey: editEvent.event_id },
+          })).toBe(1);
+          expect(await activeFixture.observer.hostedLinqDelivery.count({
+            where: { idempotencyKey: providerIdempotencyLookupKey },
+          })).toBe(1);
+          expect(signalRuntime).toHaveBeenCalledTimes(1);
+        } finally {
+          releaseFirst.resolve();
+          await Promise.allSettled([
+            ...(editTask ? [editTask] : []),
+            ...(egressTask ? [egressTask] : []),
+          ]);
+          if (fixture) {
+            await fixture.observer.hostedWebInternalRequestNonce.deleteMany({
+              where: { userId: fixture.ownerMemberId },
+            });
+            await fixture.observer.hostedLinqDelivery.deleteMany({
+              where: { idempotencyKey: providerIdempotencyLookupKey },
+            });
+          }
+          if (fixture && directRoute) {
+            await fixture.observer.hostedLinqLine.deleteMany({
+              where: {
+                phoneNumberLookupKey: directRoute.recipientPhoneLookupKey,
+              },
+            });
+          }
+          if (fixture) {
+            await cleanupRouteFixture(fixture);
+          }
+          getPrisma.mockRestore();
+          signalRuntime.mockRestore();
+          restoreEnvValue(
+            "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
+            previousCallbackKeyId,
+          );
+          restoreEnvValue(
+            "HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK",
+            previousCallbackPublicJwk,
+          );
+          restoreEnvValue(
+            "HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON",
+            previousCallbackKeyring,
+          );
+          restoreEnvValue("LINQ_WEBHOOK_SECRET", previousWebhookSecret);
+          clearHostedOnboardingEnvCache();
         }
       },
     );

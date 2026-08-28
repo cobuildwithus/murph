@@ -1211,8 +1211,8 @@ describe("hosted Linq egress authority", () => {
       },
     });
     expect(observedOrder).toEqual([
-      "member-home",
       "chat",
+      "member-home",
       "provider-dispatch",
     ]);
     expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledWith({
@@ -1887,7 +1887,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
-  it("rejects a home-route override when that resolved chat became a group route", async () => {
+  it("revalidates a home-route override when that resolved chat becomes a group route", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-current-home",
     });
@@ -1905,7 +1905,7 @@ describe("hosted Linq egress authority", () => {
     });
     mocks.getPrisma.mockReturnValue(prisma);
 
-    const response = await postHostedLinqEgressEngagement(
+    const preflightResponse = await postHostedLinqEgressEngagement(
       new Request("https://internal.example.test/engagement", {
         body: JSON.stringify({
           authorityCheckOnly: true,
@@ -1920,8 +1920,35 @@ describe("hosted Linq egress authority", () => {
       }),
     );
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
+    expect(preflightResponse.status).toBe(200);
+    const preflight = await preflightResponse.json() as {
+      resolvedRoute: Record<string, unknown>;
+    };
+    expect(preflight).toMatchObject({
+      resolvedRoute: {
+        target: "chat-current-home",
+        targetKind: "thread",
+      },
+    });
+
+    const providerEntryResponse = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          expectedResolvedRoute: preflight.resolvedRoute,
+          idempotencyKey: "assistant-outbox:intent-group-takeover",
+          target: "chat-current-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(providerEntryResponse.status).toBe(403);
+    await expect(providerEntryResponse.json()).resolves.toMatchObject({
       error: {
         code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
       },

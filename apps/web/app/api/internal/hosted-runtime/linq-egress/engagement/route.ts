@@ -69,16 +69,21 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
 
   const assertion = await prisma.$transaction(async (tx) => {
+    const chatLockTarget = targetKind === "participant"
+      ? null
+      : expectedResolvedRoute?.targetKind === "thread"
+        ? expectedResolvedRoute.target
+        : target;
+    if (chatLockTarget) {
+      await acquireHostedLinqChatOwnershipLockTx({
+        chatId: chatLockTarget,
+        tx,
+      });
+    }
     if (targetKind !== "participant") {
       await acquireHostedMemberHomeLinqRouteLockTx({
         memberId: userId,
         prisma: tx,
-      });
-    }
-    if (targetKind !== "participant" && target) {
-      await acquireHostedLinqChatOwnershipLockTx({
-        chatId: target,
-        tx,
       });
     }
 
@@ -98,32 +103,20 @@ export const POST = withJsonError(async (request: Request) => {
     });
     const providerTarget = asserted.resolvedRoute.target;
     const providerTargetKind = asserted.resolvedRoute.targetKind;
-    let finalAuthority = asserted;
     if (
       providerTargetKind !== "participant"
       && providerTarget
       && providerTarget !== target
+      && !authorityCheckOnly
     ) {
-      await acquireHostedLinqChatOwnershipLockTx({
-        chatId: providerTarget,
-        tx,
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_MISMATCH",
+        httpStatus: 403,
+        message: "Hosted Linq send-time route authority changed before provider entry.",
+        retryable: false,
       });
-      finalAuthority =
-        await assertHostedLinqRecentInboundEngagementForRuntime({
-          answeredMailboxItemIds,
-          authorityCheckOnly,
-          directRecipientPhoneNumber,
-          expectedResolvedRoute: asserted.resolvedRoute,
-          fromPhoneNumber,
-          homeRouteFallbackAllowed: false,
-          idempotencyKey,
-          memberId: userId,
-          prisma: tx,
-          replyToMessageId,
-          target: providerTarget,
-          targetKind: providerTargetKind,
-        });
     }
+    const finalAuthority = asserted;
 
     if (
       expectedResolvedRoute
