@@ -1618,7 +1618,7 @@ test("canonical raw tombstoning treats malformed ledger shards as blockers", asy
   assert.match(canonicalText, /sampleValues/u);
 });
 
-test("dense raw timeseries tombstoning treats plain ledger raw references as blockers", async () => {
+test("dense raw timeseries tombstoning treats archived event raw references as blockers", async () => {
   const vaultRoot = await createRawArtifactFixture();
   await runWearableStorageMigrationPass({
     vaultRoot,
@@ -1629,9 +1629,8 @@ test("dense raw timeseries tombstoning treats plain ledger raw references as blo
   const eventShardPath = "ledger/events/2026/2026-05.jsonl";
   await fs.mkdir(path.dirname(path.join(vaultRoot, eventShardPath)), { recursive: true });
   await fs.writeFile(
-    path.join(vaultRoot, eventShardPath),
-    `{"rawRef":"${rawPath}"}\n`,
-    "utf8",
+    path.join(vaultRoot, `${eventShardPath}.gz`),
+    gzipSync(`{"rawRef":"${rawPath}"}\n`),
   );
 
   const result = await runWearableStorageMigrationPass({
