@@ -23,6 +23,7 @@ import type {
   HostedRuntimeLatencyPhaseBreakdown,
   HostedRuntimeOrchestrationLatencyDiagnostics,
   HostedRuntimeLatencyTraceStagedMilestones,
+  HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -72,6 +73,7 @@ type HostedWorkspaceInvocationRuntimeWakeInput =
   | {
       notifiedAtEpochMs?: number | null;
       orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+      requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
     };
 
 export interface HostedWorkspaceInvocationOptions {

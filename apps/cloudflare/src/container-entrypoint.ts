@@ -42,6 +42,7 @@ import {
 import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   readHostedRuntimeFailurePhaseCode,
+  type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   drainHostedAssistantDeliveryControlPlaneWritesBestEffort,
@@ -303,12 +304,14 @@ interface HostedContainerRuntimeWakeRequest {
   attemptId: string;
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
   userId: string;
 }
 
 type HostedContainerRuntimeWakeNotification = {
   notifiedAtEpochMs?: number | null;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
 };
 
 export async function startHostedContainerEntrypoint(input: {
@@ -331,6 +334,8 @@ export async function startHostedContainerEntrypoint(input: {
   let activeRuntimeWakePendingLeaseGeneration: string | null = null;
   let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
   let activeRuntimeWakePendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
+  let activeRuntimeWakePendingRequestedProcessingMode:
+    HostedWorkspaceInvocationProcessingMode | null = null;
   let activeRuntimeWakePendingUserId: string | null = null;
   let activeWorkspaceInvocationAbort: {
     abort: (reason: Error) => void;
@@ -492,6 +497,9 @@ export async function startHostedContainerEntrypoint(input: {
           accepted = !mismatch && wake({
             ...(acceptedWakeOrchestration ? { orchestration: acceptedWakeOrchestration } : {}),
             notifiedAtEpochMs,
+            ...(wakeRequest.requestedProcessingMode
+              ? { requestedProcessingMode: wakeRequest.requestedProcessingMode }
+              : {}),
           }) === true;
         } else if (!wakeRequest) {
           accepted = wake?.({ notifiedAtEpochMs }) === true;
@@ -518,6 +526,9 @@ export async function startHostedContainerEntrypoint(input: {
             } else if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
               activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
             }
+            activeRuntimeWakePendingRequestedProcessingMode =
+              wakeRequest?.requestedProcessingMode
+              ?? activeRuntimeWakePendingRequestedProcessingMode;
             activeRuntimeWakePending = true;
             pending = true;
             accepted = true;
@@ -891,9 +902,12 @@ export async function startHostedContainerEntrypoint(input: {
           const pendingWake = activeRuntimeWakePending;
           const pendingWakeNotifiedAtEpochMs = activeRuntimeWakePendingNotifiedAtEpochMs;
           const pendingWakeOrchestration = activeRuntimeWakePendingOrchestration;
+          const pendingWakeRequestedProcessingMode =
+            activeRuntimeWakePendingRequestedProcessingMode;
           activeRuntimeWakePending = false;
           activeRuntimeWakePendingNotifiedAtEpochMs = null;
           activeRuntimeWakePendingOrchestration = null;
+          activeRuntimeWakePendingRequestedProcessingMode = null;
           emitHostedExecutionStructuredLog({
             component: "container",
             details: {
@@ -905,6 +919,9 @@ export async function startHostedContainerEntrypoint(input: {
                       ? { orchestration: pendingWakeOrchestration }
                       : {}),
                     notifiedAtEpochMs: pendingWakeNotifiedAtEpochMs ?? undefined,
+                    ...(pendingWakeRequestedProcessingMode
+                      ? { requestedProcessingMode: pendingWakeRequestedProcessingMode }
+                      : {}),
                   })
                 : false,
               workspaceAttemptId: activeRuntimeWakeAttemptId,
@@ -997,6 +1014,7 @@ export async function startHostedContainerEntrypoint(input: {
         activeRuntimeWakePendingLeaseGeneration = null;
         activeRuntimeWakePendingNotifiedAtEpochMs = null;
         activeRuntimeWakePendingOrchestration = null;
+        activeRuntimeWakePendingRequestedProcessingMode = null;
         activeRuntimeWakePendingUserId = null;
       }
       if (
@@ -1448,13 +1466,33 @@ function parseHostedContainerRuntimeWakeRequest(
   if (!userId) {
     throw new TypeError("Runtime wake request requires userId.");
   }
+  const requestedProcessingMode = readHostedContainerRequestedProcessingMode(
+    record.requestedProcessingMode,
+  );
 
   return {
     attemptId,
     leaseGeneration,
     orchestration: readHostedContainerRuntimeWakeOrchestration(record.orchestration),
+    ...(requestedProcessingMode ? { requestedProcessingMode } : {}),
     userId,
   };
+}
+
+function readHostedContainerRequestedProcessingMode(
+  value: unknown,
+): HostedWorkspaceInvocationProcessingMode | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (
+    value === "default"
+    || value === "inbox_media_retention"
+    || value === "system_mailbox"
+  ) {
+    return value;
+  }
+  throw new TypeError("Runtime wake request processing mode is unsupported.");
 }
 
 function readHostedContainerRuntimeWakeOrchestration(

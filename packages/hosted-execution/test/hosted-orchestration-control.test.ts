@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyHostedSystemMailboxExecutionClass,
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
@@ -128,7 +129,6 @@ describe("hosted orchestration control contracts", () => {
       workspace,
     })).toEqual({
       blocked: null,
-      environmentInterviewPending: false,
       mailboxLag,
       workspace,
     });
@@ -142,7 +142,6 @@ describe("hosted orchestration control contracts", () => {
       },
     })).toEqual({
       blocked: null,
-      environmentInterviewPending: false,
       mailboxLag,
       workspace: {
         ...workspace,
@@ -180,7 +179,6 @@ describe("hosted orchestration control contracts", () => {
       },
     })).toEqual({
       blocked: null,
-      environmentInterviewPending: false,
       mailboxLag,
       workspace: {
         inboxMediaRetentionWakeAt: null,
@@ -201,7 +199,6 @@ describe("hosted orchestration control contracts", () => {
         reason: "ai_usage_gate_unavailable",
         retryAt: "2026-05-20T12:02:00.000Z",
       },
-      environmentInterviewPending: false,
       mailboxLag,
       workspace: null,
     });
@@ -217,10 +214,28 @@ describe("hosted orchestration control contracts", () => {
         reason: "automation_engagement_paused",
         retryAt: "2026-05-21T12:00:00.000Z",
       },
-      environmentInterviewPending: false,
       mailboxLag,
       workspace: null,
     });
+  });
+
+  it("classifies the generic first system-mailbox frontier", () => {
+    expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "environment-interview.completed:completion",
+      kind: "environment-interview.completed",
+    })).toBe("model_free");
+    expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "assistant.ask.completed:request",
+      kind: "assistant.ask.completed",
+    })).toBe("default_owned");
+    expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "assistant.notification.requested:group-join:membership",
+      kind: "assistant.notification.requested",
+    })).toBe("model_free");
+    expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "assistant.notification.requested:generic",
+      kind: "assistant.notification.requested",
+    })).toBe("default_owned");
   });
 
   it("rejects raw payload-shaped fields in reconciliation facts contracts", () => {
