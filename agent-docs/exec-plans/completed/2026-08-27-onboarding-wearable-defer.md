@@ -1,6 +1,6 @@
 # Continue onboarding after optional wearable deferral
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -113,6 +113,11 @@ Updated: 2026-08-27
   117,577 to 117,772 bytes (+195, +0.17%); group input remains 20,775 tokens
   and 94,396 bytes.
 - Preliminary specialist ReviewGPT: two accepted findings, both remediated and
-  covered above. Draft PR: #2457. Remaining proof: push the remediated exact
-  head, required CI, parent final review, plan closure, and current-base
-  merge-tree.
+  covered above. PR: #2457.
+- Passed: required GitHub checks on the remediated exact candidate head,
+  including release app verification, Assistant Engine/package coverage,
+  build/typecheck, fixture coverage, repository hygiene, provider boundaries,
+  and PR evidence.
+- Passed: parent final review, `git diff --check`, private-identifier scan, and
+  a clean current-base `git merge-tree --write-tree` proof.
+Completed: 2026-08-27
