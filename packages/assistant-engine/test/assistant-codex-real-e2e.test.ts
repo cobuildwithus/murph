@@ -7077,6 +7077,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               ).toBe(true)
             }
             expect(result.finalMessage, testCase.slug).toMatch(/queu/iu)
+            expect(result.finalMessage, testCase.slug)
+              .not.toMatch(/\b(?:passed|sent|delivered|told|shared|posted)\b/iu)
+            expect(result.finalMessage, testCase.slug)
+              .not.toMatch(/\b(?:can't|cannot)\b.*\b(?:group|chat)\b/iu)
           } finally {
             await removeRealCodexTemporaryPath(workingDirectory)
           }

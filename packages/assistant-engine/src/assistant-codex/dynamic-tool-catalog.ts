@@ -1067,7 +1067,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
             minimum: 1,
             maximum: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
             description:
-              'Other people in the chat, excluding the requesting member. Convert a stated total chat size only when clear.',
+              'Number of other people in the chat, excluding the requesting member. If the member includes themself in a roster or total, subtract that self entry before setting this count. Convert a stated total chat size only when clear.',
           },
           participants: {
             type: 'array',
@@ -1287,11 +1287,11 @@ type MurphGroupConsultAction =
 
 const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
   ask: {
-    optional: ['groupLabel'],
+    optional: ['groupLabel', 'participantTarget'],
     required: ['question'],
   },
   handoff: {
-    optional: ['groupLabel'],
+    optional: ['groupLabel', 'participantTarget'],
     required: ['context'],
   },
   ask_current_sender: {
@@ -1390,7 +1390,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'Ask/hand off; host binds. Named group: use groupLabel; never list. Before unnamed handoff, vault-cli memory show; fallback "a member". Sender intent: ask_current_sender=group, ask_current_sender_privately=private, clarify_current_sender=genuine ambiguity; continuations resume. Handoff accepted=queued, not sent/shared.',
+    'Ask/hand off. Named group: use groupLabel; never list. Unnamed handoff: vault-cli memory show; fallback "a member". ask_current_sender=group; ask_current_sender_privately=private; clarify_current_sender=genuine ambiguity; continuations resume. Accepted=queued: say queued; never passed/sent/delivered/told/shared/posted.',
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 
