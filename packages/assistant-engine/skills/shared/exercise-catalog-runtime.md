@@ -16,6 +16,10 @@ rename, merge, omit, or substitute a member-supplied exercise in the workout.
    --format json` so instructions reflect the reviewed steps, equipment, level,
    targets, images, and source-backed safety notes. Never invent an id. If no
    useful match exists, say so and use only a simple conservative description.
+   Returned ids, slugs, and `exercise_catalog:*` source values are tool-routing
+   data, not member-facing labels. Use them only where a command or media-tool
+   schema requires them. In visible text, use the natural exercise name; never
+   append a catalog id in parentheses or expose a source token.
 2. Decide likely familiarity per movement from the current conversation and
    durable context. Strong familiarity signals include stated experience in the
    relevant training modality, correct movement-specific language, prior logged
@@ -50,10 +54,20 @@ rename, merge, omit, or substitute a member-supplied exercise in the workout.
    options, not exclusive content owners. A card must carry the complete answer,
    so do not repeat it in final text or combine it with response media. Styled
    Telegram text is not a Rich Message.
-6. Exercise images are optional, but use them when available and helpful,
-   especially for unfamiliar or technique-sensitive movements. Choose the
-   smallest useful set and keep the complete response at eight images or fewer.
-   For a card, copy each selected catalog image URL, alt, and step exactly.
+6. Exercise images are optional generally, but use them when available and
+   helpful, especially for unfamiliar or technique-sensitive movements. On
+   Linq/iMessage, a just-in-time scheduled movement instruction or an explicit
+   request to see the exercise must attach the smallest useful returned catalog
+   image set with `murph.attach_response_media` when one exists. A request for a
+   missing exercise picture is a presentation repair. Look up the exercise and
+   use returned catalog media when available. Do not call
+   `murph.generate_image` as a substitute for useful catalog media. If the
+   exercise has no useful catalog image, generate an instructional image when it
+   would help; also generate one when the user explicitly asks for a new or
+   custom image. In the generation prompt and visible reply, use the natural
+   exercise name rather than a catalog id or slug. Choose the smallest useful
+   set and keep the complete response at eight images or fewer. For a card, copy
+   each selected catalog image URL, alt, and step exactly.
    Construct its source as
    `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>` and keep
    the returned order. For Linq/iMessage, use the existing response-media path
