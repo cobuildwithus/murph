@@ -111,10 +111,6 @@ import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
 import {
-  parseAssistantHostedImageCompletionOriginContextText,
-  renderAssistantHostedImageCompletionSystemText,
-} from '../src/assistant/hosted-image-completion.ts'
-import {
   sendAssistantMessageLocal,
 } from '../src/assistant/service.ts'
 import {
@@ -149,7 +145,6 @@ import {
 } from '../src/assistant/cron/runtime-state.ts'
 import {
   buildAssistantAutoReplyPrompt,
-  buildTrustedHostedImageCompletionTurnContext,
   prepareAssistantAutoReplyInput,
   type AssistantAutoReplyPromptInput,
 } from '../src/assistant/automation/prompt-builder.ts'
@@ -486,6 +481,92 @@ describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
         expect(result.response).toMatch(/cobalt/iu)
         expect(result.response).not.toMatch(
           /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
+describeRealCodex('real Codex resumed conversation reconstruction e2e', () => {
+  it(
+    'uses committed recent context missing from native provider state',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-resumed-conversation-reconstruction-e2e-'),
+      )
+      const commonInput = {
+        channel: 'telegram' as const,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        deliverResponse: false,
+        executionContext: null,
+        includeEarlySessionOnboarding: false,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        persistUserPromptOnFailure: false,
+        provider: 'codex-cli' as const,
+        reasoningEffort: 'low' as const,
+        sandbox: 'read-only' as const,
+        threadId: 'thread-resumed-reconstruction',
+        threadIsDirect: true,
+        turnEnvironment: {
+          currentWorkingDirectory: workingDirectory,
+          env: config.env,
+        },
+        vault: workingDirectory,
+        workingDirectory,
+      }
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const warmup = await sendAssistantMessageLocal({
+          ...commonInput,
+          prompt: 'Reply with exactly: WARMUP READY',
+        })
+        expect(warmup.response).toMatch(/WARMUP READY/iu)
+
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          warmup.session.sessionId,
+          [
+            {
+              kind: 'user',
+              text: 'For the synthetic launch checklist, use the green comet label.',
+            },
+            {
+              kind: 'assistant',
+              text: 'Noted. The synthetic launch checklist uses the green comet label.',
+            },
+          ],
+        )
+
+        const resumed = await sendAssistantMessageLocal({
+          ...commonInput,
+          prompt: 'Which label did we choose for the synthetic launch checklist?',
+          sessionId: warmup.session.sessionId,
+        })
+
+        process.stdout.write(
+          `[resumed-conversation-reconstruction-e2e] ${JSON.stringify({
+            reply: resumed.response.trim(),
+            resumedSession: resumed.session.sessionId === warmup.session.sessionId,
+          })}\n`,
+        )
+        expect(resumed.response).toMatch(/green comet/iu)
+        expect(resumed.response).not.toMatch(
+          /do not (?:know|remember)|don't (?:know|remember)|no context|which label/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -8889,317 +8970,6 @@ describeRealCodex('real Codex proactive physical-note address e2e', () => {
         }
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
-      }
-    },
-    720_000,
-  )
-})
-
-describeRealCodex('real Codex physical-note completion continuity e2e', () => {
-  it(
-    'keeps the originating destination through completion and a terse approval',
-    async () => {
-      const config = await resolveRealCodexE2eConfig()
-      const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-physical-note-continuity-e2e-'),
-      )
-      const skillsRoot = path.join(workingDirectory, 'skills')
-      const binDirectory = path.join(workingDirectory, 'bin')
-      const originInputId = `ain_${'8'.repeat(32)}`
-      const completionInputId = `ain_${'9'.repeat(32)}`
-      const approvalInputId = `ain_${'a'.repeat(32)}`
-      const imageBytes = Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-        'base64',
-      )
-      const media = {
-        alt: 'Generated fictional thank-you note',
-        contentType: 'image/png',
-        filename: 'generated-physical-note.png',
-        kind: 'vault_image',
-        ref: 'raw/captures/2026/08/generated-note/generated-physical-note.png',
-        sha256: createHash('sha256').update(imageBytes).digest('hex'),
-        sizeBytes: imageBytes.byteLength,
-        source: 'gpt-image-2',
-      } as const
-      const originRequest = [
-        `Message ref: ${originInputId}`,
-        'Please create a warm thank-you note for Casey for helping with a fictional move.',
-        'The opening context is intentionally long so direct committed-message replay keeps only the beginning.',
-        'Routine fictional planning detail. '.repeat(260),
-        'Tail mailing destination: 42 Example Lane, Sampleton, GA 30303.',
-        'Show me the finished artwork first. Do not mail it until I approve it.',
-      ].join('\n\n')
-      const sendRequests: unknown[] = []
-
-      try {
-        await materializePhysicalNoteSkill({ skillsRoot })
-        await materializePhysicalNoteAddressVaultCli({
-          binDirectory,
-          result: buildPhysicalNoteAddressResult({ recommended: true }),
-        })
-        const imagePath = path.join(workingDirectory, media.ref)
-        await mkdir(path.dirname(imagePath), { recursive: true })
-        await writeFile(imagePath, imageBytes)
-        const commonInput = {
-          approvalPolicy: 'never',
-          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-          codexCommand:
-            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-            ?? undefined,
-          codexHome: config.codexHome,
-          developerInstructions: buildDirectConversationDeveloperInstructions(),
-          dynamicTools: resolveMurphDynamicTools({
-            physicalNotesAvailable: true,
-          }),
-          env: {
-            ...config.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
-            PATH: [binDirectory, config.env.PATH]
-              .filter((value): value is string => Boolean(value))
-              .join(path.delimiter),
-          },
-          model: config.model,
-          modelProvider: config.modelProvider,
-          reasoningEffort: 'low',
-          sandbox: 'workspace-write' as const,
-          vaultRoot: workingDirectory,
-          workingDirectory,
-        }
-        const physicalNotes = {
-          async send(request: unknown) {
-            sendRequests.push(request)
-            return {
-              complimentary: true,
-              costUsdMicros: '0',
-              physicalNoteId: 'hpn_continuity_accepted',
-              status: 'accepted' as const,
-            }
-          },
-        }
-        const privateImageUrlPublisher = {
-          async publishPrivateImageUrl() {
-            return {
-              expiresAt: '2027-08-27T00:00:00.000Z',
-              url: 'https://private-media.example.test/generated-note',
-            }
-          },
-        }
-        const unavailableVaultFileSend = async () => ({
-          filename: 'unused',
-          status: 'denied' as const,
-        })
-        const completionSystemText = renderAssistantHostedImageCompletionSystemText({
-          originAssistantInputId: originInputId,
-          originAssistantInputIdExact: true,
-          originContextText: originRequest,
-          result: {
-            media,
-            runtimeIssue: null,
-            savedImageRef: media.ref,
-          },
-        })
-        const boundedOriginContext =
-          parseAssistantHostedImageCompletionOriginContextText(
-            completionSystemText,
-          )
-        if (!boundedOriginContext) {
-          throw new Error('Expected bounded hosted completion origin context.')
-        }
-        expect(Buffer.byteLength(originRequest, 'utf8')).toBeGreaterThan(4_000)
-        expect(originRequest.slice(0, 4_000)).not.toContain('42 Example Lane')
-        expect(boundedOriginContext).toContain('42 Example Lane')
-        expect(Buffer.byteLength(boundedOriginContext, 'utf8'))
-          .toBeLessThanOrEqual(2_000)
-
-        const completionPromptInputs: AssistantAutoReplyPromptInput[] = [{
-          actorIsSelf: false,
-          attachmentDescriptors: [],
-          attachmentEvidence: {
-            attachments: [],
-            optionalInboxCaptureId: null,
-            reasonCode: null,
-            source: null,
-            status: 'not_attempted',
-            updatedAt: null,
-          },
-          conversation: {
-            accountId: null,
-            actorId: 'synthetic-physical-note-requester',
-            actorIsSelf: false,
-            source: 'linq',
-            threadId: 'synthetic-physical-note-continuity',
-            threadIsDirect: true,
-          },
-          inputId: completionInputId,
-          occurredAt: '2026-08-27T15:00:01.000Z',
-          projection: null,
-          receivedAt: '2026-08-27T15:00:01.000Z',
-          replyTarget: {
-            channel: 'linq',
-            messageId: 'synthetic-image-completion',
-            threadId: 'synthetic-physical-note-continuity',
-          },
-          source: 'linq',
-          sourceMetadata: null,
-          telegramMetadata: null,
-          text: null,
-          trustedHostedImageCompletion: {
-            originContextText: boundedOriginContext,
-            result: {
-              media: [media],
-              originAssistantInputId: originInputId,
-              originAssistantInputIdExact: true,
-              savedImageRef: media.ref,
-              status: 'ready',
-            },
-          },
-        }]
-        const completionPrompt = buildAssistantAutoReplyPrompt(
-          completionPromptInputs,
-        )
-        const completionTurnContext =
-          buildTrustedHostedImageCompletionTurnContext(completionPromptInputs)
-        if (completionPrompt.kind !== 'ready' || !completionTurnContext) {
-          throw new Error('Expected production completion provider input.')
-        }
-        expect(completionPrompt.prompt).toContain('42 Example Lane')
-        expect(Buffer.byteLength(completionPrompt.prompt, 'utf8'))
-          .toBeLessThanOrEqual(4_000)
-        expect(completionTurnContext).not.toContain('42 Example Lane')
-
-        const completion = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          developerInstructions: [
-            commonInput.developerInstructions,
-            completionTurnContext,
-          ].join('\n\n'),
-          excludeResumeTurns: true,
-          hostedToolContext: {
-            computerToolsAvailable: false,
-            currentHostedDeliveryContext: () => null,
-            currentHostedImageCompletionEffectScope: () => ({
-              authorizedOriginAssistantInputId: originInputId,
-              completionAssistantInputId: completionInputId,
-              exactMedia: [media],
-            }),
-            currentHostedMailboxItemIds: () => [],
-            physicalNotes,
-            privateImageUrlPublisher,
-            sendVaultFile: unavailableVaultFileSend,
-            vaultFileSendAvailable: false,
-          },
-          prompt: completionPrompt.prompt,
-        })
-        const completionActions = readCapabilityRoutingActions(
-          completion.jsonEvents,
-        )
-        expect(completion.responseMedia).toEqual([media])
-        expect(completionActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
-        )).toHaveLength(1)
-        expect(completionActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
-        )).toHaveLength(0)
-        expect(completionActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
-        )).toHaveLength(0)
-        expect(sendRequests).toHaveLength(0)
-        if (!completion.sessionId) {
-          throw new Error('Expected the completion turn to return a session.')
-        }
-        const sessionId = completion.sessionId
-
-        const approval = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          authorizeAcceptedMessageTarget: async ({ messageRef }) =>
-            messageRef === approvalInputId
-              ? { targetInputId: approvalInputId }
-              : null,
-          hostedToolContext: {
-            computerToolsAvailable: false,
-            currentAssistantInputId: () => approvalInputId,
-            currentHostedDeliveryContext: () => null,
-            currentHostedMailboxItemIds: () => [],
-            currentUserActionScope: () => ({
-              acceptedInputIds: [approvalInputId],
-              conversationId: 'conversation-physical-note-continuity',
-              conversationScope: 'direct',
-              inboundMailboxItemIds: ['mailbox-physical-note-approval'],
-              originSessionId: sessionId,
-              recipientKey: 'recipient-physical-note-continuity',
-            }),
-            physicalNotes,
-            privateImageUrlPublisher,
-            sendVaultFile: unavailableVaultFileSend,
-            vaultFileSendAvailable: false,
-          },
-          prompt: [
-            `Message ref: ${approvalInputId}`,
-            'I love it. Send that exact note now, please.',
-          ].join('\n\n'),
-          resumeSessionId: sessionId,
-        })
-        const approvalActions = readCapabilityRoutingActions(
-          approval.jsonEvents,
-        )
-        const sendCalls = approvalActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
-        )
-        expect(sendCalls).toHaveLength(1)
-        expect(sendCalls[0]).toMatchObject({
-          argumentsValue: {
-            image_ref: media.ref,
-            image_sha256: media.sha256,
-            message_ref: approvalInputId,
-            to: {
-              address_line1: '42 Example Lane',
-              city: 'Sampleton',
-              name: 'Casey',
-              postal_code: '30303',
-              state: 'GA',
-            },
-          },
-          kind: 'dynamic',
-          tool: MURPH_SEND_PHYSICAL_NOTE_TOOL.name,
-        })
-        expect(approvalActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
-        )).toHaveLength(0)
-        expect(sendRequests).toHaveLength(1)
-        expect(sendRequests[0]).toMatchObject({
-          originAssistantInputId: approvalInputId,
-          recipient: {
-            addressLine1: '42 Example Lane',
-            city: 'Sampleton',
-            name: 'Casey',
-            postalCode: '30303',
-            state: 'GA',
-          },
-        })
-        expect(approval.finalMessage).toMatch(
-          /accepted|printing|headed to print/iu,
-        )
-        expect(approval.finalMessage).not.toMatch(
-          /(?:address|city|state|zip).{0,80}\?/iu,
-        )
-        process.stdout.write(
-          `[physical-note-continuity-e2e] ${JSON.stringify({
-            approvalReply: approval.finalMessage.trim(),
-            completionReply: completion.finalMessage.trim(),
-            sendCount: sendRequests.length,
-          })}\n`,
-        )
-      } finally {
-        await removeRealCodexTemporaryPaths([
-          workingDirectory,
-          ...config.temporaryPaths,
-        ])
       }
     },
     720_000,

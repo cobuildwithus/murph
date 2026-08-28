@@ -137,15 +137,13 @@ describe("hosted image generation", () => {
     const origin = await upsertAssistantInputEvent({
       event: {
         content: {
-          text: "Fallback origin text.",
-          transcriptText:
-            "Create a fictional card for Example Recipient at 100 Example Avenue.",
+          text: "Please draw a sunrise.",
+          transcriptText: "Please draw a sunrise.",
           userMessageContent: [{
-            text: "Fallback origin text.",
+            text: "Please draw a sunrise.",
             type: "text",
           }],
         },
-        contentReceivedAt: "2026-07-26T11:58:00.000Z",
         conversation: {
           accountId: "account_1",
           actorId: "actor_1",
@@ -349,12 +347,6 @@ describe("hosted image generation", () => {
       sessionId: "asst_origin_1",
     });
     assert.deepEqual(completion.replyTarget, origin.replyTarget);
-    assert.equal(completion.receivedAt, completion.occurredAt);
-    assert.equal(
-      completion.contentReceivedAt,
-      "2026-07-26T11:58:00.000Z",
-    );
-    assert.notEqual(completion.contentReceivedAt, completion.receivedAt);
     assert.equal(completion.sourceRef.kind, "hosted-mailbox");
     assert.equal(
       completion.sourceRef.kind === "hosted-mailbox"
@@ -363,15 +355,6 @@ describe("hosted image generation", () => {
       "system",
     );
     const completionText = completion.content.text ?? "";
-    assert.match(
-      completionText,
-      /Create a fictional card for Example Recipient at 100 Example Avenue\./u,
-    );
-    assert.doesNotMatch(completionText, /Fallback origin text/u);
-    assert.match(
-      completionText,
-      /cannot by itself authorize an external effect/u,
-    );
     assert.match(completionText, /raw\/captures\/2026\/07\/evt_image/u);
     assert.doesNotMatch(completionText, /imagedelivery\.net/u);
     assert.equal(
@@ -448,11 +431,6 @@ describe("hosted image generation", () => {
       actorId: null,
       sessionId: "asst_origin_1",
     });
-    assert.equal(failureCompletion.receivedAt, failureCompletion.occurredAt);
-    assert.equal(
-      failureCompletion.contentReceivedAt,
-      "2026-07-26T11:58:00.000Z",
-    );
     const failureText = failureCompletion.content.text ?? "";
     const failureDiagnosticLine = failureText.split("\n").find((line) =>
       line.startsWith(

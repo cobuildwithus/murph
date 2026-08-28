@@ -1,4 +1,4 @@
-# Physical Note Context Carry
+# Resumed Conversation Continuity
 
 Status: active
 Created: 2026-08-27
@@ -6,21 +6,22 @@ Updated: 2026-08-27
 
 ## Goal
 
-Keep the authenticated originating request available after a trusted hosted
-image completion so a later explicit approval can reuse recent workflow details
-without depending exclusively on native provider-thread memory.
+Keep Murph's bounded, committed recent transcript available on every provider
+turn, including native thread resumes, so provider-side compaction cannot erase
+recent user-visible conversation context.
 
 ## Evidence
 
-- Production ingress retained and consumed the originating conversation item;
-  the image completion and later replies stayed in one assistant session and
-  resumed one provider thread.
-- Resumed turns intentionally supplied no explicit flat conversation history.
-  Provider-visible input shrank materially at the asynchronous completion
-  boundary, after which the assistant could no longer use a detail from the
-  originating request.
-- The completion selector already reloads the exact origin and proves the same
-  authenticated route, but the completion input carries only result metadata.
+- The private workspace export proves the relevant recent input was already
+  persisted in Murph's committed transcript before the assistant lost it.
+- Production runtime metadata proves the affected turns stayed in one assistant
+  session and resumed one provider thread, while every resumed turn explicitly
+  omitted Murph's committed transcript from provider input.
+- Provider-visible input shrank materially at the asynchronous completion
+  boundary. The model then lacked a recent detail still present in Murph's own
+  transcript, proving native provider resume alone is not a continuity source.
+- Planning and provider code independently enforce the same false choice:
+  either resume the provider thread or replay Murph's bounded transcript.
 - The separate stuck-note recovery correctly cleared the newly blocked request,
   then found one legacy unresolved guard. Its read-only provider lookup returned
   an authorization-class response, so absence is not proven and the guard must
@@ -28,32 +29,31 @@ without depending exclusively on native provider-thread memory.
 
 ## Affected People And Journeys
 
-1. A person supplies all draft and destination details, receives generated
-   artwork asynchronously, then approves it without repeating those details.
-2. A person sends another same-route message before the trusted completion is
-   processed; the completion remains first and carries only its authenticated
-   origin context plus exact-successor input.
-3. A completion is restored after interruption; the same bounded context is
-   available without turning the historical request into current effect
-   authority.
-4. A person whose origin content has expired or is unavailable receives the
-   existing truthful clarification path; the runtime does not invent context.
+1. A person supplies task details, receives an asynchronous result, then gives
+   a short approval without repeating the recent details.
+2. A long-running native provider thread is compacted between two ordinary
+   turns; Murph's bounded committed transcript still supplies recent context.
+3. A person sends multiple accepted inputs in one turn; each remains a distinct,
+   ordered transcript unit with its own retention time.
+4. A current prompt is also the latest committed input; it is not replayed a
+   second time in the recent-history section.
 
 ## Tasks
 
-1. Extend the trusted completion renderer with a bounded, clearly delimited
-   excerpt of the exact origin's user-level text, preserving both ends when the
-   input must be shortened.
-2. Stage that context only after the existing exact-origin and reply-route
-   checks; keep the completion input as the sole accepted input so historical
-   text cannot authorize a new external effect.
-3. Add deterministic coverage for context presence, bounds, missing content,
-   same-route batching, and current-input authority.
-4. Add one synthetic real-Codex journey that starts from production-built
-   trusted completion input with no origin provider history, then proves a
-   terse later approval performs one physical-note send.
-5. Update the hosted runtime contract and a privacy-safe changelog fragment.
-6. Run focused tests and typecheck, ReviewGPT gates, exact-head CI, merge proof,
+1. Remove the native-resume branches that suppress the existing bounded
+   committed transcript in planning and the provider adapter.
+2. Delete the physical-note-specific origin-context carrier, timestamp field,
+   runtime propagation, documentation, and tests from the earlier candidate.
+3. Persist compound accepted inputs as separate ordered transcript entries via
+   the existing accepted-input journal and transcript owner.
+4. Add deterministic coverage proving native resume and bounded recent history
+   are composed, the current prompt is not duplicated, and compound inputs keep
+   independent semantic and retention boundaries.
+5. Add one synthetic real-Codex journey that resumes a provider thread without
+   usable native context and recovers the needed recent detail from the
+   production-built bounded transcript.
+6. Update durable continuity contracts and a privacy-safe changelog fragment.
+7. Run focused tests and typecheck, ReviewGPT gates, exact-head CI, merge proof,
    and deployment verification.
 
 ## Constraints
@@ -61,41 +61,34 @@ without depending exclusively on native provider-thread memory.
 - Never store or reproduce production transcript text, identifiers, names, or
   addresses in source, tests, documentation, reviews, or release notes.
 - Add no new state owner, workflow, queue, provider request, or effect authority.
-- Preserve the 14-day assistant-input content-retention owner and the existing
-  completion provenance, ordering, and exact-successor boundaries.
+- Reuse the existing 72-message, 4,000-byte-per-entry, 12,000-byte-total
+  transcript projection and its explicit context-only label.
+- Preserve the 14-day assistant-input content-retention owner and existing
+  completion provenance and ordering boundaries.
 - Do not clear a physical-note row without accepted or proven-absent provider
   evidence.
 
 ## Verification
 
-- `pnpm --filter @murphai/assistant-engine exec vitest run --config
-  vitest.config.ts --no-coverage
-  test/assistant-automation-reply-event-path.test.ts
-  test/assistant-hosted-image-completion.test.ts
-  test/assistant-hosted-image-completion-authority.test.ts
-  test/assistant-input-store.test.ts
-  test/assistant-local-service-delivery.test.ts
-  test/assistant-codex-turn-planning.test.ts` — 298 passed across bounded
-  one-worker runs.
-- `pnpm --filter @murphai/assistant-runtime exec vitest run --config
-  vitest.config.ts --isolate=true --no-coverage
-  test/hosted-runtime-image-generation.test.ts
-  test/hosted-runtime-pending-input-index.test.ts
-  test/hosted-runtime-turn-input.test.ts` — 81 passed.
-- Assistant Engine and Assistant Runtime typechecks passed.
-- `pnpm test:assistant:live -- --test "keeps the originating destination
-  through completion and a terse approval"` — passed with `gpt-5.6-terra`
-  through local subscription auth after the fixture moved the destination past
-  the ordinary committed-message replay cap. The production-built completion
-  prompt retained the bounded tail, attached the exact synthetic image once,
-  and the later approval sent once using that carried destination without
-  asking for destination fields. Reply review: Ready.
-- ReviewGPT round 1 found that the initial candidate stored but discarded the
-  origin excerpt at the production prompt boundary. Round 2 then proved that
-  keeping the excerpt only in transient trusted turn context still lost it
-  during cold transcript reconstruction. The requirement-level retrospective
-  selected the existing normalized completion prompt as the one semantic
-  carrier: it persists one bounded non-authoritative excerpt, while trusted
-  turn context keeps only result authority. The existing input event hands the
-  origin receipt time to transcript persistence without changing completion
-  ordering or adding another state owner. Final remediation review is pending.
+- Assistant Engine typecheck passed.
+- Focused Assistant Engine suite passed: 331 tests across turn planning,
+  provider prompt assembly, local delivery/transcript persistence, and
+  automation event admission.
+- Deterministic provider proof resumes a native thread while including two
+  bounded committed-history messages and verifies the current prompt appears
+  exactly once.
+- Deterministic transcript proof persists a large older asynchronous result and
+  a newer accepted message as two ordered entries with independent receipt
+  timestamps and transcript refs.
+- `pnpm test:assistant:live -- --test "uses committed recent context missing
+  from native provider state"` passed with `gpt-5.6-terra` through local
+  subscription auth. The native provider thread intentionally never received
+  the synthetic detail; the resumed production path recovered it from Murph's
+  committed transcript and replied `Green comet.` on the same session. Reply
+  review: Ready.
+- Product UX walkthrough: Ready. A member can give a short follow-up after an
+  asynchronous result or long-thread compaction without repeating a recent
+  detail; current accepted-input authority and ordinary clarification behavior
+  remain unchanged.
+- Changelog, ReviewGPT, exact-head CI, merge proof, and deployment verification
+  remain pending.

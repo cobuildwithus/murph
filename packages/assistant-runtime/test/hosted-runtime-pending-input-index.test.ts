@@ -1075,60 +1075,6 @@ describe("hosted pending assistant input index", () => {
     });
   });
 
-  it("uses the content receipt deadline when carried text was staged later", async () => {
-    const vaultRoot = await createTempVault();
-    await saveAssistantAutomationState(vaultRoot, {
-      autoReply: [{
-        channel: "linq",
-        eligibleAfter: null,
-        enabledAt: "2026-04-01T00:00:00.000Z",
-      }],
-      updatedAt: "2026-04-01T00:00:00.000Z",
-      version: 1,
-    });
-    const event = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: {
-        ...createAssistantInputEvent({
-          dedupeKey: "dedupe_retention_delayed_content",
-          eventId: "evt_retention_delayed_content",
-          itemId: "item_retention_delayed_content",
-          laneSeq: "10",
-          messageId: "msg_retention_delayed_content",
-          occurredAt: "2026-04-10T00:00:01.000Z",
-          receivedAt: "2026-04-10T00:00:02.000Z",
-          text: "private delayed context copy",
-        }),
-        contentReceivedAt: "2026-04-01T00:00:02.000Z",
-      },
-    });
-    await enqueueHostedPendingAssistantInputId({
-      inputId: event.inputId,
-      vaultRoot,
-    });
-
-    await expect(runHostedPendingAssistantInputContentRetention({
-      now: "2026-04-15T00:00:02.000Z",
-      vaultRoot,
-    })).resolves.toEqual({
-      inputsRetired: 1,
-      inputsSuppressed: 1,
-      nextEligibleAt: null,
-    });
-    await expect(readAssistantInputEvent({
-      inputId: event.inputId,
-      vault: vaultRoot,
-    })).resolves.toMatchObject({
-      content: {
-        text: null,
-        transcriptText: null,
-        userMessageContent: null,
-      },
-      contentReceivedAt: "2026-04-01T00:00:02.000Z",
-      contentRetiredAt: "2026-04-15T00:00:02.000Z",
-    });
-  });
-
   it("abandons a committed reply intent before suppressing expired input", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {

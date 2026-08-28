@@ -376,16 +376,9 @@ export async function executeCodexAssistantTurnAttempt(
     }
   }
   try {
-    const primaryInput =
-      input.resume
-        ? {
-            ...input,
-            conversationHistoryMessages: undefined,
-          }
-        : input
-    const prompt = resolveAssistantProviderPrompt(primaryInput)
+    const prompt = resolveAssistantProviderPrompt(input)
     emitAssistantProviderPromptSizeTraceEvent({
-      input: primaryInput,
+      input,
       prompt,
     })
     result = await executeCodexAppServerTurn({

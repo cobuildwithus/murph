@@ -450,9 +450,6 @@ const assistantInputEventRecordSchema = z
     ),
     content: assistantInputContentSchema,
     conversation: assistantInputConversationRefSchema.nullable().default(null),
-    contentReceivedAt: safeNullableAssistantInputTimestampSchema(
-      'contentReceivedAt',
-    ).optional(),
     contentRetiredAt: safeNullableAssistantInputTimestampSchema(
       'contentRetiredAt',
     ).optional(),
@@ -523,7 +520,6 @@ export function resolveAssistantInputEventReferenceAt(
 
 export interface UpsertAssistantInputEventInput {
   content?: z.input<typeof assistantInputContentSchema>
-  contentReceivedAt?: string | null
   conversation?: AssistantInputConversationRef | null
   occurredAt: string
   receivedAt?: string | null
@@ -1042,9 +1038,6 @@ function buildAssistantInputEventRecord(input: {
     idempotencyKey: `sha256:${sha256Hex(stableStringify(assistantInputSourceRefIdentity(sourceRef)))}`,
     inputId,
     occurredAt: input.event.occurredAt,
-    ...(input.event.contentReceivedAt
-      ? { contentReceivedAt: input.event.contentReceivedAt }
-      : {}),
     projection: {
       captureId: null,
       lastAttemptedAt: null,

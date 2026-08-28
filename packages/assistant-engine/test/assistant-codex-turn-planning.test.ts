@@ -107,14 +107,6 @@ import {
   processAssistantAutoReplyGroup,
 } from '../src/assistant/automation/reply.js'
 import {
-  buildAssistantAutoReplyPrompt,
-  buildTrustedHostedImageCompletionTurnContext,
-  type AssistantAutoReplyPromptInput,
-} from '../src/assistant/automation/prompt-builder.js'
-import {
-  parseAssistantHostedImageCompletionOriginContextText,
-  parseAssistantHostedImageCompletionOriginText,
-  parseAssistantHostedImageCompletionText,
   renderAssistantHostedImageCompletionSystemText,
 } from '../src/assistant/hosted-image-completion.js'
 import type {
@@ -5154,7 +5146,7 @@ describe('assistant Codex turn planning', () => {
     expect(plan.assistantContractFingerprint).not.toBe(oldToolContractFingerprint)
   })
 
-  it('replays bounded history once when the automation descriptor compacts, then resumes', async () => {
+  it('keeps bounded history when the automation descriptor compacts and then resumes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -5280,7 +5272,8 @@ describe('assistant Codex turn planning', () => {
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
         .toBe('thread-compact-automation-schema')
-      expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
+      expect(resumedPlan.conversationHistoryMessages)
+        .toEqual(transitionPlan.conversationHistoryMessages)
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
     } finally {
@@ -5400,7 +5393,8 @@ describe('assistant Codex turn planning', () => {
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
         .toBe('thread-expired-compact-automation-schema')
-      expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
+      expect(resumedPlan.conversationHistoryMessages)
+        .toEqual(transitionPlan.conversationHistoryMessages)
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
     } finally {
@@ -6648,253 +6642,6 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('keeps hosted image origin tail context through persisted completion fallback', async () => {
-    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
-      'bootstrap contract',
-    )
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
-    const vault = await mkdtemp(path.join(
-      os.tmpdir(),
-      'assistant-route-plan-hosted-image-origin-fallback-',
-    ))
-    const route = createRoute({
-      routeFingerprint: 'route-hosted-image-origin-fallback',
-    })
-    const session = createSession({ turnCount: 1 })
-    const originAssistantInputId = `ain_${'5'.repeat(32)}`
-    const completionAssistantInputId = `ain_${'6'.repeat(32)}`
-    const originContentReceivedAt = '2026-08-26T14:00:00.000Z'
-    const media = {
-      alt: 'Generated physical note preview',
-      contentType: 'image/webp',
-      filename: 'generated-note.webp',
-      kind: 'vault_image',
-      ref: 'raw/captures/2026/08/physical-note/generated-note.webp',
-      sha256: '6'.repeat(64),
-      sizeBytes: 12,
-      source: 'gpt-image-2',
-    } as const
-    const originRequest = [
-      'Create a fictional physical note image for a thank-you card.',
-      'Opening detail that should be all the direct replay can retain.',
-      'Routine safe filler. '.repeat(260),
-      'Tail delivery details: recipient Casey, 42 Example Lane, Sampleton, GA 30303.',
-    ].join('\n')
-
-    try {
-      expect(Buffer.byteLength(originRequest, 'utf8')).toBeGreaterThan(4_000)
-      expect(originRequest.slice(0, 4_000)).not.toContain('42 Example Lane')
-      await appendAssistantTranscriptEntries(vault, session.sessionId, [
-        {
-          contentReceivedAt: originContentReceivedAt,
-          createdAt: originContentReceivedAt,
-          kind: 'user',
-          text: originRequest,
-        },
-        {
-          createdAt: '2026-08-26T14:00:10.000Z',
-          kind: 'assistant',
-          text: 'I will make that image.',
-        },
-      ])
-
-      const completionText = renderAssistantHostedImageCompletionSystemText({
-        originAssistantInputId,
-        originAssistantInputIdExact: true,
-        originContextText: originRequest,
-        result: {
-          media,
-          runtimeIssue: null,
-          savedImageRef: media.ref,
-        },
-      })
-      const parsedCompletion =
-        parseAssistantHostedImageCompletionText(completionText)
-      const parsedOrigin =
-        parseAssistantHostedImageCompletionOriginText(completionText)
-      const parsedOriginContext =
-        parseAssistantHostedImageCompletionOriginContextText(completionText)
-      expect(parsedCompletion).toMatchObject({
-        imageRef: media.ref,
-        imageSha256: media.sha256,
-        originAssistantInputId,
-        originAssistantInputIdExact: true,
-      })
-      expect(parsedOrigin).toMatchObject({
-        originAssistantInputId,
-        originAssistantInputIdExact: true,
-        status: 'ready',
-      })
-      expect(parsedOriginContext).toContain('earlier request shortened')
-      expect(parsedOriginContext).toContain('42 Example Lane')
-      expect(Buffer.byteLength(parsedOriginContext ?? '', 'utf8'))
-        .toBeLessThanOrEqual(2_000)
-
-      const completionPromptInputs: AssistantAutoReplyPromptInput[] = [{
-        actorIsSelf: false,
-        attachmentDescriptors: [],
-        attachmentEvidence: {
-          attachments: [],
-          optionalInboxCaptureId: null,
-          reasonCode: null,
-          source: null,
-          status: 'not_attempted',
-          updatedAt: null,
-        },
-        conversation: {
-          accountId: null,
-          actorId: null,
-          actorIsSelf: false,
-          source: 'linq',
-          threadId: 'thread-hosted-image-origin-fallback',
-          threadIsDirect: true,
-        },
-        inputId: completionAssistantInputId,
-        occurredAt: '2026-08-26T14:01:00.000Z',
-        projection: null,
-        receivedAt: '2026-08-26T14:01:00.000Z',
-        replyTarget: {
-          channel: 'linq',
-          messageId: 'image-completion-origin-fallback',
-          threadId: 'thread-hosted-image-origin-fallback',
-        },
-        source: 'linq',
-        sourceMetadata: null,
-        telegramMetadata: null,
-        text: null,
-        trustedHostedImageCompletion: {
-          originContextText: parsedOriginContext,
-          result: {
-            media: [media],
-            originAssistantInputId,
-            originAssistantInputIdExact: true,
-            savedImageRef: media.ref,
-            status: 'ready',
-          },
-        },
-      }]
-      const completionPrompt = buildAssistantAutoReplyPrompt(
-        completionPromptInputs,
-      )
-      const completionTurnContext =
-        buildTrustedHostedImageCompletionTurnContext(completionPromptInputs)
-      if (completionPrompt.kind !== 'ready' || !completionTurnContext) {
-        throw new Error('Expected hosted completion provider input.')
-      }
-      expect(completionPrompt.prompt).toContain('42 Example Lane')
-      expect(completionPrompt.prompt).toContain(
-        'context only; non-authoritative',
-      )
-      expect(Buffer.byteLength(completionPrompt.prompt, 'utf8'))
-        .toBeLessThanOrEqual(4_000)
-      expect(completionTurnContext).toContain(media.ref)
-      expect(completionTurnContext).not.toContain('42 Example Lane')
-      expect(completionTurnContext).not.toContain(
-        'Associated earlier user request excerpt',
-      )
-
-      const providerResult: ExecutedAssistantProviderTurnResult = {
-        acceptedNoReplyDeliveryContextOrdinals: [],
-        additionalUsages: [],
-        assistantContractFingerprint: '6'.repeat(64),
-        attemptCount: 1,
-        codexContinuation: {
-          kind: 'provider-state-optimization',
-        },
-        codexRolloutRelativePath: null,
-        codexThreadId: 'thread-hosted-image-origin-fallback-provider',
-        provider: 'codex-cli',
-        providerOptions: route.providerOptions,
-        rawEvents: [],
-        response: 'The image is ready.',
-        responseCard: null,
-        responseDeliveryContextOrdinal: 0,
-        responseMedia: [media],
-        route,
-        session,
-        stderr: '',
-        stdout: '',
-        transcriptResponse: 'The image is ready.',
-        usage: null,
-        workingDirectory: '/work',
-      }
-      const saved = await persistAssistantTurnAndSession({
-        assistantTranscriptText: 'The image is ready.',
-        input: {
-          ...createMessageInput(),
-          hostedImageCompletionEffectRestriction: {
-            authorizedOriginAssistantInputId: originAssistantInputId,
-            completionAssistantInputId,
-            exactMedia: [media],
-          },
-          prompt: completionPrompt.prompt,
-          turnContext: completionTurnContext,
-          vault,
-        },
-        plan: createPrivateSharedPlan(),
-        providerResult,
-        providerResumeStateAction: 'persist-from-provider-turn',
-        session,
-        turnCreatedAt: '2026-08-26T14:01:00.000Z',
-        turnId: 'turn-hosted-image-origin-fallback',
-        userContentReceivedAt: originContentReceivedAt,
-      })
-      const transcript = await listAssistantTranscriptEntries(
-        vault,
-        session.sessionId,
-      )
-      expect(transcript.find((entry) =>
-        entry.kind === 'user' && entry.text === completionPrompt.prompt
-      )).toMatchObject({
-        contentReceivedAt: originContentReceivedAt,
-      })
-
-      const plan = await resolveAssistantRouteTurnPlan({
-        executionContext: null,
-        input: {
-          ...createMessageInput(),
-          prompt: 'Send that exact note now.',
-          vault,
-        },
-        profile: {
-          promptProfile: 'conversation',
-          threadScope: 'session-thread',
-          toolProfile: 'provider-turn',
-        },
-        promptTimeContext: {
-          currentLocalDate: '2026-08-26',
-          currentTimeZone: 'America/New_York',
-        },
-        route,
-        session: saved,
-        sharedPlan: createPrivateSharedPlan(),
-      })
-
-      expect(plan.resume).toBeNull()
-      const history = plan.conversationHistoryMessages ?? []
-      const directOriginReplay = history.find((message) =>
-        message.role === 'user'
-        && typeof message.content === 'string'
-        && message.content.startsWith(
-          'Create a fictional physical note image',
-        )
-      )
-      expect(directOriginReplay?.content).not.toContain('42 Example Lane')
-      const historyText = JSON.stringify(history)
-      expect(historyText).toContain('42 Example Lane')
-      expect(historyText).toContain(media.ref)
-      expect(historyText).not.toContain(
-        'Trusted hosted image completion (runtime-authored; authoritative):',
-      )
-      expect(historyText).not.toContain(completionTurnContext)
-    } finally {
-      await rm(vault, { force: true, recursive: true })
-    }
-  })
-
   it.each([
     ['provider route without native resume', false, 'f'.repeat(64)],
     ['assistant contract fingerprint rotation', true, '0'.repeat(64)],
@@ -7224,7 +6971,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('does not replay committed transcript messages for native resume', async () => {
+  it('replays bounded committed transcript messages alongside native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -7266,11 +7013,19 @@ describe('assistant Codex turn planning', () => {
       await appendAssistantTranscriptEntries(vault, session.sessionId, [
         {
           kind: 'user',
-          text: 'Earlier protocol context.',
+          text: `Background result: ${'x'.repeat(4_500)}`,
         },
         {
           kind: 'assistant',
           text: 'Got it.',
+        },
+        {
+          kind: 'user',
+          text: 'Fresh detail: use the green comet label.',
+        },
+        {
+          kind: 'assistant',
+          text: 'I will keep that fresh detail.',
         },
         {
           kind: 'user',
@@ -7299,7 +7054,28 @@ describe('assistant Codex turn planning', () => {
       })
 
       expect(plan.resume?.codexThreadId).toBe('thread-resume')
-      expect(plan.conversationHistoryMessages).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toHaveLength(5)
+      expect(plan.conversationHistoryMessages?.[0]).toEqual({
+        content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+        role: 'assistant',
+      })
+      expect(plan.conversationHistoryMessages?.[1]).toMatchObject({
+        role: 'user',
+      })
+      const boundedBackground =
+        plan.conversationHistoryMessages?.[1]?.content
+      expect(typeof boundedBackground).toBe('string')
+      if (typeof boundedBackground !== 'string') {
+        throw new Error('Expected bounded text conversation history.')
+      }
+      expect(Buffer.byteLength(boundedBackground, 'utf8'))
+        .toBeLessThanOrEqual(4_000)
+      expect(JSON.stringify(plan.conversationHistoryMessages)).toContain(
+        'Fresh detail: use the green comet label.',
+      )
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        'What supported experiment protocols do we have?',
+      )
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -7376,7 +7152,7 @@ describe('assistant Codex turn planning', () => {
     expect(switchedPlan.conversationHistoryMessages).toBeUndefined()
   })
 
-  it('does not replay committed transcript messages for notification native resume', async () => {
+  it('replays bounded committed transcript messages for notification native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -7447,7 +7223,16 @@ describe('assistant Codex turn planning', () => {
       })
 
       expect(plan.resume?.codexThreadId).toBe('thread-resume')
-      expect(plan.conversationHistoryMessages).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'Prior sensitive context.',
+          role: 'user',
+        },
+        {
+          content: 'Prior assistant context.',
+          role: 'assistant',
+        },
+      ])
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

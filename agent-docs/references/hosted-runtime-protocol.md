@@ -1463,16 +1463,6 @@ unstamped user entry. Until both gates pass, fail-closed legacy scrubbing is
 forbidden because it can erase recent paired conversation history
 irreversibly.
 
-A delayed hosted image completion keeps its own ordering timestamps but stamps
-the exact origin content receipt time on the existing assistant input event.
-Accepted-turn transcript persistence copies that timestamp onto the normalized
-completion prompt, whose bounded origin excerpt is then the single semantic
-carrier for both immediate provider input and cold-thread history. This input
-field is only a staging handoff before transcript persistence; it is not a
-post-cleanup fallback retention owner, and it does not extend the original
-14-day deadline. The trusted turn context contains only the normalized
-completion result and exact media authority, never the historical excerpt.
-
 Accepted Linq reply and reaction delivery carry an earlier copy of the same
 exact-item consume authority: the runtime keeps `answeredMailboxItemIds` on the
 existing outbox intent, and the signed delivery callback stamps matching
@@ -2132,16 +2122,7 @@ uses the existing receipt checkpoint against the latest workspace. After the
 private capture is ready, the runtime upserts one trusted system input containing
 its exact `vault_image` descriptor on the original route, registers that input
 with the ordinary pending assistant-input index, and notifies the existing wake
-signal. After reloading the exact origin and proving its reply route, that same
-completion input also carries a bounded context-only excerpt of the origin's
-user-level text. The excerpt preserves the beginning and end when shortened so
-workflow details supplied after longer draft content remain available across
-provider compaction and cold transcript fallback. It stays inside the ordinary
-assistant-input content lifecycle and retires with that completion; it creates
-no second transcript or product-state owner. The origin is not added to the
-accepted input batch, so quoted historical content cannot become the current
-message, reply target, or authority for an external effect. When OpenAI rejects
-generation or editing, the same completion input
+signal. When OpenAI rejects generation or editing, the same completion input
 keeps the legacy exact `{status:"failed"}` result envelope and carries one
 separate runtime-authored diagnostic line. New readers accept that line only
 from exact runtime-authored system provenance, normalize and bound it, and
@@ -3091,12 +3072,17 @@ snapshot concern: if a container dies before the next idle-shutdown direct-R2
 v2 snapshot, restore must still be correct from durable mailbox, exact canonical
 write receipts, transcript, and assistant runtime state even if provider-native
 resume optimization is unavailable.
-Fresh-thread starts and stale native-resume fallback may include bounded recent
-committed transcript history. That history is semantic assistant content and
-must exclude runtime-owned capability URLs that were appended only for user
-delivery. Primary native-resume attempts do not replay committed history into
-the provider prompt, and the provider-native turn never receives those
-runtime-appended URLs. Active-turn input is not serialized as provider prompt
+Every foreground provider turn may include bounded recent committed transcript
+history, including a primary native-resume attempt. Native resume preserves
+provider-owned thread state; the committed transcript independently preserves
+recent user-visible conversation meaning when that provider state is compacted
+or unavailable. The bounded projection drops a trailing user entry equal to the
+current prompt, so current input appears exactly once. Compound accepted inputs
+persist as separate ordered transcript entries when their normalized texts are
+available, preserving each input's receipt timestamp and per-entry truncation
+boundary. Replayed history is context only, cannot grant current effect
+authority, and must exclude runtime-owned capability URLs that were appended
+only for user delivery. Active-turn input is not serialized as provider prompt
 history; it is either folded in before the first provider request, steered
 through the live Codex turn, or left unaccepted for a later normal turn when it
 misses the live steering window.

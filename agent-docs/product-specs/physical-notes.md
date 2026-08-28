@@ -36,12 +36,8 @@ The assistant composes two existing-style primitives:
    flows pass the exact accepted `message_ref`; generic image generations remain
    composable but cannot authorize an automatic physical send.
 2. The existing hosted image completion re-enters the same Codex conversation as
-   a trusted system input. It includes a bounded copy of the exact originating
-   user-level text after the runtime proves the origin and reply route, so an
-   approval after preview can reuse the supplied recipient and destination even
-   when provider-native history was compacted. That copy is context only: the
-   origin is not accepted again and cannot authorize a send. No note workflow,
-   polling loop, scheduler, automation, or second continuation owner is added.
+   a trusted system input. No note workflow, polling loop, scheduler, automation,
+   or second continuation owner is added.
 3. `murph.send_physical_note` materializes and hashes the exact saved image,
    publishes a short-lived private capability, and asks Web to submit it to Lob.
 

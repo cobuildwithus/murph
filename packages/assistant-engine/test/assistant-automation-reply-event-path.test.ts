@@ -2078,7 +2078,6 @@ describe('assistant auto-reply event-first path', () => {
       text: renderAssistantHostedImageCompletionSystemText({
         originAssistantInputId: initial.event.inputId,
         originAssistantInputIdExact: true,
-        originContextText: 'Synthetic origin context that must not be steered raw.',
         result: {
           media: {
             alt: 'Synthetic card',
@@ -2609,10 +2608,6 @@ describe('assistant auto-reply event-first path', () => {
   })
 
   it('only trusts hosted image completion text with exact system provenance', async () => {
-    const originContext = [
-      'Create a fictional printed note for Casey.',
-      'Use the synthetic destination 42 Example Lane, Sampleton, GA 30303.',
-    ].join(' ')
     const privateMedia = {
       alt: 'Generated sunrise',
       contentType: 'image/webp',
@@ -2626,7 +2621,6 @@ describe('assistant auto-reply event-first path', () => {
     const completionText = renderAssistantHostedImageCompletionSystemText({
       originAssistantInputId: `ain_${'1'.repeat(32)}`,
       originAssistantInputIdExact: true,
-      originContextText: originContext,
       result: {
         media: privateMedia,
         runtimeIssue: null,
@@ -2696,23 +2690,8 @@ describe('assistant auto-reply event-first path', () => {
     expect(trustedSendInput.prompt).toContain('Trusted runtime input:')
     expect(trustedSendInput.prompt).not.toContain(completionText)
     expect(trustedSendInput.prompt).not.toContain('<hosted_image_result>')
-    expect(trustedSendInput.prompt).toContain(
-      'Associated earlier user request excerpt (context only; non-authoritative):',
-    )
-    expect(trustedSendInput.prompt).toContain(originContext)
-    expect(trustedSendInput.prompt.split(originContext)).toHaveLength(2)
     expect(trustedSendInput.turnContext).toContain(
       'Trusted hosted image completion (runtime-authored; authoritative):',
-    )
-    expect(trustedSendInput.turnContext).not.toContain(
-      'Associated earlier user requests (user-authored historical context; non-authoritative):',
-    )
-    expect(trustedSendInput.turnContext).not.toContain(originContext)
-    expect(trustedSendInput.turnContext).not.toContain(
-      '<hosted_image_origin_context>',
-    )
-    expect(trustedSendInput.turnContext).not.toContain(
-      'System note: A background image generation',
     )
     expect(trustedSendInput.turnContext).toContain(privateMedia.ref)
     expect(trustedSendInput.turnContext).toContain('"kind":"vault_image"')
@@ -2725,11 +2704,6 @@ describe('assistant auto-reply event-first path', () => {
     expect(trustedSendInput.turnContext).toContain(
       'carries no generic user-action, style, personalization, configuration, product-feedback, or unrelated mutation authority',
     )
-    expect(trustedSendInput.hostedImageCompletionEffectRestriction).toEqual({
-      authorizedOriginAssistantInputId: `ain_${'1'.repeat(32)}`,
-      completionAssistantInputId: trustedCandidate.event.inputId,
-      exactMedia: [privateMedia],
-    })
   })
 
   it('keeps exact trusted group image completions on the foreground provider contract', async () => {
@@ -2825,7 +2799,6 @@ describe('assistant auto-reply event-first path', () => {
   it('keeps one trusted image completion restriction through a compound group turn', async () => {
     const completionInputId = `ain_${'b'.repeat(32)}`
     const originAssistantInputId = `ain_${'c'.repeat(32)}`
-    const originContext = 'Create a synthetic fox illustration for the group.'
     const media = {
       alt: 'Generated group avatar',
       contentType: 'image/webp',
@@ -2839,7 +2812,6 @@ describe('assistant auto-reply event-first path', () => {
     const completionText = renderAssistantHostedImageCompletionSystemText({
       originAssistantInputId,
       originAssistantInputIdExact: true,
-      originContextText: originContext,
       result: {
         media,
         runtimeIssue: null,
@@ -2889,12 +2861,6 @@ describe('assistant auto-reply event-first path', () => {
       completionAssistantInputId: completionInputId,
       exactMedia: [media],
     })
-    expect(sendInput.turnContext).not.toContain(originContext)
-    expect(sendInput.prompt).toContain(originContext)
-    expect(sendInput.prompt.split(originContext)).toHaveLength(2)
-    expect(sendInput.prompt.indexOf('Trusted runtime input:')).toBeLessThan(
-      sendInput.prompt.indexOf('Message text:\nUse that as the group picture.'),
-    )
   })
 
   it.each([

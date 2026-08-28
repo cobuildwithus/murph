@@ -440,9 +440,7 @@ function isHostedPendingInputRetentionDeliverableStatus(
 function resolveHostedPendingInputReceivedAtMs(
   event: AssistantInputEventRecord,
 ): number {
-  return Date.parse(
-    event.contentReceivedAt ?? event.receivedAt ?? event.occurredAt,
-  );
+  return Date.parse(event.receivedAt ?? event.occurredAt);
 }
 
 function normalizeHostedPendingInputRetentionNow(
@@ -728,9 +726,7 @@ async function preserveHostedExternalLinqReplyInAssistantTranscript(input: {
     [
       {
         contentReceivedAt:
-          input.answeredEvent.contentReceivedAt
-          ?? input.answeredEvent.receivedAt
-          ?? input.answeredEvent.occurredAt,
+          input.answeredEvent.receivedAt ?? input.answeredEvent.occurredAt,
         createdAt: userCreatedAt,
         kind: "user",
         text: userText,
