@@ -14745,6 +14745,158 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
   )
 })
 
+describeRealCodex('real Codex proactive progress e2e', () => {
+  it(
+    'sends one early update before a multi-source recovery overview',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-proactive-progress-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLog = path.join(workingDirectory, 'vault-commands.log')
+      const progressUpdates: string[] = []
+
+      try {
+        await mkdir(binDirectory, { recursive: true })
+        const executablePath = path.join(binDirectory, 'vault-cli')
+        const emit = (value: unknown) =>
+          `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+        await writeFile(
+          executablePath,
+          [
+            '#!/bin/sh',
+            'set -eu',
+            `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(commandLog)}`,
+            'case "$*" in',
+            `  "activity summary --date 2026-08-27 --format json") ${emit({
+              activeMinutes: 32,
+              localDate: '2026-08-27',
+              steps: 7_800,
+            })} ;;`,
+            `  "meal summary --date 2026-08-27 --format json") ${emit({
+              localDate: '2026-08-27',
+              mealCount: 3,
+              status: 'balanced',
+            })} ;;`,
+            `  "sleep summary --date 2026-08-27 --format json") ${emit({
+              hours: 7.4,
+              localDate: '2026-08-27',
+              quality: 'good',
+            })} ;;`,
+            '  *) printf \'unsupported daily-overview fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+            'esac',
+            '',
+          ].join('\n'),
+          { encoding: 'utf8', mode: 0o700 },
+        )
+        await chmod(executablePath, 0o700)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'Use vault-cli for canonical member data.',
+              'For a recovery overview, read all three bounded sources before answering:',
+              '- vault-cli activity summary --date 2026-08-27 --format json',
+              '- vault-cli meal summary --date 2026-08-27 --format json',
+              '- vault-cli sleep summary --date 2026-08-27 --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            assistantProgressUpdatesAvailable: true,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-28',
+            currentTimeZone: 'America/New_York',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            ordinaryInboundTurn: true,
+            turnTrigger: 'automation-auto-reply',
+          }),
+          dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          env: {
+            ...config.env,
+            PATH: [binDirectory, config.env.PATH]
+              .filter((value): value is string => Boolean(value))
+              .join(path.delimiter),
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          progressDelivery: {
+            async send(text) {
+              progressUpdates.push(text)
+              return { kind: 'sent', source: 'model' }
+            },
+          },
+          prompt: [
+            'Look into whether my activity, meals, and sleep from yesterday point to an obvious recovery pattern.',
+            'Check all three before answering and give me the main takeaway.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const progressCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        )
+        const overviewReads = actions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes('vault-cli')
+        )
+        const commands = (await readFile(commandLog, 'utf8'))
+          .trim()
+          .split('\n')
+
+        expect(progressUpdates).toHaveLength(1)
+        expect(progressCalls).toHaveLength(1)
+        expect(overviewReads.length).toBeGreaterThanOrEqual(1)
+        expect(progressCalls[0]?.eventIndex).toBeLessThan(
+          overviewReads[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
+        )
+        expect(commands).toEqual(expect.arrayContaining([
+          'activity summary --date 2026-08-27 --format json',
+          'meal summary --date 2026-08-27 --format json',
+          'sleep summary --date 2026-08-27 --format json',
+        ]))
+        const reply = result.finalMessage.trim()
+        expect(reply).toMatch(/7,?800/iu)
+        expect(reply).toMatch(/7\.4/iu)
+        expect(reply).toMatch(/3 meals?|three (?:balanced )?meals?/iu)
+        expect(reply).toMatch(/takeaway|overall|balance|solid|steady|good/iu)
+        process.stdout.write(
+          `[proactive-progress-e2e] ${JSON.stringify({
+            commandCount: commands.length,
+            progressUpdateCount: progressUpdates.length,
+            reply,
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex Kernel browser continuation e2e', () => {
   it(
     'opens an account portal, reports setup readiness, and does not enter private information',

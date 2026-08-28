@@ -355,10 +355,16 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
   "codexActionOutputBytesTotal",
   "codexActionOutputItemCount",
   "codexActionOutputUnitMax",
+  "codexActionProgressUpdateCallCount",
+  "codexActionProgressUpdateFailedCount",
+  "codexActionProgressUpdateFirstCallElapsedMs",
+  "codexActionProgressUpdateSentCount",
   "codexActionProviderActionCount",
+  "codexActionProviderRequestOrdinal",
   "codexActionReasoningOutputUnitMax",
   "codexActionStartedCount",
   "codexActionTotalUnitMax",
+  "codexActionTurnCorrelation",
   "codexActionUsageSampleCount",
   "codexActionWebSearchCount",
 ] as const;
@@ -1052,6 +1058,7 @@ function readHostedAssistantCodexAppServerTimingTrace(
   if (stage === "turn-completed") {
     for (const key of [
       "codexTimingProviderRequestOrdinal",
+      "codexTimingTurnCorrelation",
       "codexTimingTurnStartAckElapsedMs",
       "codexTimingTurnStartedNotificationElapsedMs",
       "codexTimingTurnCompletedNotificationElapsedMs",

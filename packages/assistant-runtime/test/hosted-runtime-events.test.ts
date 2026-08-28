@@ -924,6 +924,7 @@ describe("executeHostedMailboxEvent", () => {
     });
     const completionBoundaries = {
       codexTimingProviderRequestOrdinal: 2,
+      codexTimingTurnCorrelation: 281_474_976_710_655,
       codexTimingTurnStartAckElapsedMs: 14,
       codexTimingTurnStartedNotificationElapsedMs: 16,
       codexTimingTurnCompletedNotificationElapsedMs: 5_610,
@@ -947,6 +948,7 @@ describe("executeHostedMailboxEvent", () => {
 
     expect(entry?.redacted).toEqual(expect.objectContaining({
       codexTimingProviderRequestOrdinal: 2,
+      codexTimingTurnCorrelation: 281_474_976_710_655,
       codexTimingTurnCompleteElapsedMs: 5_622,
       codexTimingTurnCompletedNotificationElapsedMs: 5_610,
       codexTimingTurnStartAckElapsedMs: 14,
@@ -1033,7 +1035,12 @@ describe("executeHostedMailboxEvent", () => {
           codexActionOutputBytesTotal: 128,
           codexActionOutputItemCount: 3,
           codexActionOutputUnitMax: 1200,
+          codexActionProgressUpdateCallCount: 1,
+          codexActionProgressUpdateFailedCount: 0,
+          codexActionProgressUpdateFirstCallElapsedMs: 2_400,
+          codexActionProgressUpdateSentCount: 1,
           codexActionProviderActionCount: 2,
+          codexActionProviderRequestOrdinal: 0,
           codexActionSlowDurationMs: [123, 60],
           codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
           codexActionSlowLabels: [
@@ -1074,6 +1081,7 @@ describe("executeHostedMailboxEvent", () => {
             },
           ],
           codexActionTotalUnitMax: 82500,
+          codexActionTurnCorrelation: 281_474_976_710_655,
           codexActionUsageSampleCount: 1,
           codexActionTurnIdPresent: true,
           codexActionWebSearchCount: 0,
@@ -1100,7 +1108,12 @@ describe("executeHostedMailboxEvent", () => {
         codexActionKinds: ["dynamic.tool.call", "command.execution"],
         codexActionOutputBytesMax: 64,
         codexActionOutputBytesTotal: 128,
+        codexActionProgressUpdateCallCount: 1,
+        codexActionProgressUpdateFailedCount: 0,
+        codexActionProgressUpdateFirstCallElapsedMs: 2_400,
+        codexActionProgressUpdateSentCount: 1,
         codexActionProviderActionCount: 2,
+        codexActionProviderRequestOrdinal: 0,
         codexActionSlowDurationMs: [123, 60],
         codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
         codexActionToolSummaries: [
@@ -1128,6 +1141,7 @@ describe("executeHostedMailboxEvent", () => {
           },
         ],
         codexActionTraceType: "action-diagnostics",
+        codexActionTurnCorrelation: 281_474_976_710_655,
         providerTraceKind: "codex.action_diagnostics",
         requestId: "req_123",
         schema: "murph.assistant-codex-action-diagnostics.v1",
