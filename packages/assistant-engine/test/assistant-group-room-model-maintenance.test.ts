@@ -72,7 +72,6 @@ async function execute(
   state: AssistantGroupRoomModelReadState,
 ): Promise<Awaited<ReturnType<typeof executeGroupRoomModelDynamicTool>>> {
   return await executeGroupRoomModelDynamicTool({
-    available: true,
     managedMaintenanceAuthorized: true,
     readGroupRoomModelState: async () => state,
     request: { args, kind: 'group-room-model' },
