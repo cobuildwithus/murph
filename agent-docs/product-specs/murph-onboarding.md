@@ -536,9 +536,13 @@ detail progressively at the first just-in-time instructional touchpoint.
   Preferences memory in the member's words. Use Context memory only when the
   factual answer remains useful outside onboarding and has no structured owner.
   Never create an opaque onboarding-step marker in memory.
-- A simple defer remains unresolved. Save timing or contact guidance only when
-  it is durable enough to outlive the current thread, and update or forget that
-  memory when the preference changes.
+- Interpret a defer by its object. Deferring an unanswered checkpoint leaves it
+  unresolved. The always-visible onboarding overlay owns the connection-only
+  exception: after the source is known, postponing only its optional connection
+  neither reopens the data-source checkpoint nor pauses the next foundation
+  beat, while an explicit onboarding pause still stops advancement. Save timing
+  or contact guidance only when it is durable enough to outlive the current
+  thread, and update or forget that memory when the preference changes.
 - Use the global health-record ingestion path for files, labs, labels, and
   other slow evidence. Do not complete onboarding until each
   foundation-critical accepted input, minimum fact, or raw source has a

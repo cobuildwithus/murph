@@ -29,15 +29,25 @@ import type {
 } from "../worker-routes/shared.ts";
 
 export class UserRunnerDurableObject extends DurableObject implements UserRunnerDurableObjectStubLike {
+  private readonly activationTiming: {
+    userRunnerConstructorStartedAtEpochMs: number;
+    userRunnerConstructorFinishedAtEpochMs: number;
+  };
+  private userRunnerFirstEnsureRuntimeProcessingAtEpochMs: number | null = null;
   private readonly runner: HostedUserRunner;
 
   constructor(
     state: DurableObjectStateLike,
     env: WorkerEnvironmentSource,
-    runner: HostedUserRunner = createHostedUserRunner(state, env),
+    runner?: HostedUserRunner,
   ) {
+    const userRunnerConstructorStartedAtEpochMs = Date.now();
     super(state as never, env as never);
-    this.runner = runner;
+    this.runner = runner ?? createHostedUserRunner(state, env);
+    this.activationTiming = {
+      userRunnerConstructorStartedAtEpochMs,
+      userRunnerConstructorFinishedAtEpochMs: Date.now(),
+    };
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {
@@ -79,11 +89,18 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
+    const userRunnerRpcStartedAtEpochMs = Date.now();
+    this.userRunnerFirstEnsureRuntimeProcessingAtEpochMs ??=
+      userRunnerRpcStartedAtEpochMs;
+
     return this.runner.ensureRuntimeProcessingForUser({
       ...input,
       orchestration: {
         ...(input.orchestration ?? {}),
-        userRunnerRpcStartedAtEpochMs: Date.now(),
+        ...this.activationTiming,
+        userRunnerFirstEnsureRuntimeProcessingAtEpochMs:
+          this.userRunnerFirstEnsureRuntimeProcessingAtEpochMs,
+        userRunnerRpcStartedAtEpochMs,
       },
     });
   }

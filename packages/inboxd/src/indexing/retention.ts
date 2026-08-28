@@ -16,6 +16,7 @@ import {
   normalizeRelativeVaultPath,
   acquireCanonicalWriteLock,
   isVaultError,
+  listEventLedgerShardPaths,
   readJsonlRecords,
   resolveVaultPathOnDisk,
   runCanonicalWrite,
@@ -527,9 +528,7 @@ async function listDurableRawInboxReferences(
   options: { rejectInvalidRecords?: boolean } = {},
 ): Promise<Set<string>> {
   const references = new Set<string>();
-  const ledgerPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const ledgerPaths = await listEventLedgerShardPaths(vaultRoot);
 
   for (const relativePath of ledgerPaths) {
     for (const rawRecord of await readJsonlRecords({ vaultRoot, relativePath })) {

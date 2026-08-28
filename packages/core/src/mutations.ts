@@ -65,10 +65,16 @@ import {
 } from "./event-links.ts";
 import { VaultError } from "./errors.ts";
 import {
+  listEventLedgerShardPaths,
+  listEventLedgerShardPathsInterruptible,
+  listEventLedgerShardSources,
+  readEventLedgerShardRecords,
+  visitEventLedgerShardRecordsInterruptible,
+} from "./event-ledger-storage.ts";
+import {
   pathExists,
   readUtf8File,
   walkVaultFiles,
-  walkVaultFilesInterruptible,
   writeVaultTextFile,
 } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
@@ -2316,13 +2322,7 @@ async function indexLatestEventsByExternalRef(
 
   for (const relativePath of relativePaths) {
     signal?.throwIfAborted();
-    const resolved = resolveVaultPath(vaultRoot, relativePath);
-
-    if (!(await pathExists(resolved.absolutePath))) {
-      continue;
-    }
-
-    await visitJsonlRecordsInterruptible({
+    await visitEventLedgerShardRecordsInterruptible({
       vaultRoot,
       relativePath,
       signal,
@@ -3357,13 +3357,12 @@ function emitDeviceBatchImportTiming(
 }
 
 async function buildDeviceEventLedgerFingerprint(vaultRoot: string): Promise<string> {
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
-  const metadata = await Promise.all(shardPaths.map(async (relativePath) => {
-    const shard = await stat(resolveVaultPath(vaultRoot, relativePath).absolutePath);
+  const shardSources = await listEventLedgerShardSources(vaultRoot);
+  const metadata = await Promise.all(shardSources.map(async (source) => {
+    const shard = await stat(resolveVaultPath(vaultRoot, source.sourcePath).absolutePath);
     return [
-      relativePath,
+      source.logicalPath,
+      source.kind,
       shard.dev,
       shard.ino,
       shard.size,
@@ -3569,9 +3568,7 @@ async function buildDeviceEventIdentityContext(
       legacyReservations: new Map(),
     };
   }
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const shardPaths = await listEventLedgerShardPaths(vaultRoot);
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
   const context: DeviceEventIdentityContext = { index, legacyReservations: new Map() };
   // A legitimate primary spine may advance before the duplicate is repaired.
@@ -5325,14 +5322,10 @@ async function reconcileEventImportDecisionsByExternalRef(
 ): Promise<EventImportReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
 
-  const { relativePaths: shardPaths } = await walkVaultFilesInterruptible(
+  const { relativePaths: shardPaths } = await listEventLedgerShardPathsInterruptible({
+    signal,
     vaultRoot,
-    VAULT_LAYOUT.eventLedgerDirectory,
-    {
-    extension: ".jsonl",
-      signal,
-    },
-  );
+  });
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths, signal);
 
   for (const decision of decisions) {
@@ -5610,9 +5603,7 @@ export async function dedupeDeviceEventsByExternalRef({
   vaultRoot,
   apply = false,
 }: DedupeDeviceEventsByExternalRefInput): Promise<DedupeDeviceEventsByExternalRefResult> {
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const shardPaths = await listEventLedgerShardPaths(vaultRoot);
   const deletedAt = new Date().toISOString();
   const groupedByShard = new Map<string, Map<string, EventSpineEntry<EventRecord>[]>>();
   // Highest revision per event id across ALL parsed rows in ALL shards,
@@ -5626,7 +5617,7 @@ export async function dedupeDeviceEventsByExternalRef({
   for (const relativePath of shardPaths) {
     const grouped = new Map<string, EventSpineEntry<EventRecord>[]>();
 
-    for (const raw of await readJsonlRecords({ vaultRoot, relativePath })) {
+    for (const raw of await readEventLedgerShardRecords({ vaultRoot, relativePath })) {
       const parsed = safeParseContract(eventRecordSchema, raw);
 
       if (!parsed.success) {
@@ -6118,15 +6109,16 @@ async function inspectExactDocumentSourceSet(input: {
     };
   }
 
-  const shardPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const shardPaths = await listEventLedgerShardPaths(input.vaultRoot);
   const entries: EventSpineEntry<DocumentEventRecord>[] = [];
   const activityEventIds = new Set<string>();
   const activityEventIdsByRawRef = new Map<string, Set<string>>();
 
   for (const relativePath of shardPaths) {
-    for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+    for (const rawRecord of await readEventLedgerShardRecords({
+      vaultRoot: input.vaultRoot,
+      relativePath,
+    })) {
       const parsed = safeParseContract(eventRecordSchema, rawRecord);
       const rawEventId = typeof rawRecord === "object"
         && rawRecord !== null
