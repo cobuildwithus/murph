@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-26
+Last verified: 2026-08-27
 
 ## Non-Negotiable Rules
 
@@ -367,10 +367,18 @@ Last verified: 2026-08-26
   replies only because snapshot exclusion is the independent persistence
   boundary. An explicit canonical event raw reference is the sole durable-save
   exception and keeps its separately authorized lifecycle. The tool
-  pins Gemini 3.7 Flash, 1 FPS, low thinking, one call, no retry, a 14 MiB raw
-  cap, a 90-second timeout, and a bounded response. The Worker must revalidate
-  the exact request and use manual redirects before replacing the runner
-  sentinel with `GEMINI_API_KEY`. A protocol-valid successful response must be
+  pins Gemini 3.7 Flash and maps only `standard` to 1 FPS or
+  `detailed_motion` to 5 FPS. Murph chooses that semantic mode before egress;
+  raw FPS remains unavailable to the model and member. Both current profiles
+  use medium thinking, omit an explicit output-token cap, allow one call, do
+  not retry, keep the 14 MiB raw cap and 90-second timeout, and bound both the
+  delivered response and tool result. The Worker must revalidate the exact
+  request and use manual redirects before replacing the runner sentinel with
+  `GEMINI_API_KEY`. During rollout it may also accept only the exact deployed
+  legacy profile of 1 FPS, low thinking, and a 1,800-token output cap from a
+  warm old runner; mixed profiles remain denied, new runners never emit the
+  legacy shape, and the compatibility reader is removed after the rollback
+  floor advances. A protocol-valid successful response must be
   withheld until Web durably accepts its exact usage record; callback rejection
   fails the tool closed. An upstream response above the 1 MiB delivery cap is a
   protocol violation: reject it without widening the buffer, let Murph absorb
@@ -385,11 +393,21 @@ Last verified: 2026-08-26
   usable idempotency key. Treat this as a bounded v1 at-least-once residual,
   not permission to retry within a turn. Do not add durable video/result state
   without a separate retention and recovery design.
-  Completed turns use trusted failure text when the model returns blank or
-  selects no reply, while non-empty model/card wording wins. A terminal primary
-  provider failure after the tool result remains under ordinary outer-turn
-  retry ownership; the failed attempt does not independently deliver that
-  fallback.
+  The existing in-memory turn state binds the first completed provider result
+  to its accepted message ref, attachment ordinal, complete question, and
+  sampling mode across group-draft reconsideration. An exact repeat returns
+  that result without provider egress. A distinct later request receives no
+  provider call and must keep the earlier result attributed only to its earlier
+  request while saying the later request was not analyzed. It must neither
+  replace the completed result with an internal duplicate-call status nor use
+  earlier-video evidence to answer the later request.
+  Codex owns every non-empty semantic reply; the runtime does not classify,
+  replace, or append to model wording. The runtime retains the latest
+  structured video-tool fallback only for blank or no-reply recovery,
+  including the composed status for a distinct later request. A terminal
+  primary provider failure after the tool result remains under ordinary
+  outer-turn retry ownership; the failed attempt does not independently
+  deliver that fallback.
 - Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
   flow for the authenticated member's exact current Customer, Subscription,
   Subscription Item, and server-selected target Price. The browser chooses no

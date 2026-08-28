@@ -12,14 +12,22 @@ export const HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV = "GEMINI_API_KEY";
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL =
   "https://generativelanguage.googleapis.com";
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL = "gemini-3.7-flash";
-export const HOSTED_GEMINI_VIDEO_ANALYSIS_FPS = 1;
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_SAMPLING_MODES = [
+  "standard",
+  "detailed_motion",
+] as const;
+export type HostedGeminiVideoAnalysisSamplingMode =
+  typeof HOSTED_GEMINI_VIDEO_ANALYSIS_SAMPLING_MODES[number];
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_FPS_BY_SAMPLING_MODE = {
+  standard: 1,
+  detailed_motion: 5,
+} as const satisfies Record<HostedGeminiVideoAnalysisSamplingMode, number>;
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_VIDEO_BYTES = 14 * 1024 * 1024;
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_REQUEST_BODY_BYTES =
   20 * 1024 * 1024;
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES =
   1024 * 1024;
-export const HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_OUTPUT_TOKENS = 1_800;
-export const HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL = "low";
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL = "medium";
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION = [
   "Analyze the supplied video to answer the user's question.",
   "Describe only visible or audible evidence, use timestamps when helpful, and state uncertainty plainly.",

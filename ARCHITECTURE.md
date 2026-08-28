@@ -3756,13 +3756,18 @@ symlink, reads exactly the snapshotted byte count with an EOF probe, verifies
 the digest and MP4/QuickTime/WebM signature, and only then permits external
 egress.
 
-The first version makes one inline legacy `generateContent` request to the
-fixed `gemini-3.7-flash` model with explicit `videoMetadata.fps = 1`, low
-thinking, a 14 MiB raw-video cap, a 90-second timeout, and no retry. It creates
-no Gemini Files API object, upload lifecycle, queue, cache, or database owner.
-The byte cap and one-call ceiling bound transport and memory; video duration
-and provider-token consumption remain bounded by Gemini's fixed model/request
-limits rather than a local duration probe.
+The tool makes one inline legacy `generateContent` request to the fixed
+`gemini-3.7-flash` model. Murph chooses one semantic sampling mode before
+egress: omitted or `standard` maps to `videoMetadata.fps = 1`, while
+`detailed_motion` maps to 5 FPS for rapid movement, exercise phases, quick
+scene changes, or brief events. Both modes use medium thinking and new requests
+omit an explicit output-token cap. The runtime owns the exact mapping; the
+member and model cannot supply a raw FPS or provider setting. The request keeps
+the 14 MiB raw-video cap, 90-second timeout, one-call ceiling, and no retry. It
+creates no Gemini Files API object, upload lifecycle, queue, cache, or database
+owner. The byte, response, and tool-result caps bound transport and memory;
+video duration and provider-token consumption remain bounded by Gemini's fixed
+model/request limits rather than a local duration or output-token probe.
 
 The ceiling is per host turn, not an exactly-once receipt across a rare outer
 hosted retry. If execution fails after Gemini accepts the request but before
@@ -3772,16 +3777,33 @@ Murph-usable idempotency key. V1 accepts that bounded at-least-once residual
 instead of persisting provider prose or adding an analysis-effect state
 machine; exact-once recovery would require a durable pre-egress receipt plus
 cached-result or explicit recovery semantics and a separate retention review.
-For completed turns, a trusted tool-failure fallback defeats explicit no-reply
-and fills blank model output without replacing non-empty model/card wording. If
-the primary provider transport itself fails after the tool result but before
-final assembly, the ordinary outer turn retry remains the owner; v1 does not
-promote the fallback through failed-attempt delivery state.
+Within one host turn, including the in-memory group-draft reconsideration,
+Murph binds the first completed Gemini tool result to its accepted message,
+attachment ordinal, complete question, and sampling mode in the existing turn
+state. An exact later repeat receives that result without new egress. A later
+distinct request receives no Gemini call: its tool result keeps the earlier
+result explicitly attributed to the earlier request and says the later request
+was not analyzed. This prevents either a duplicate-call status from replacing
+the first result or the first video's evidence from being presented as the
+second video's answer. This adds no durable result owner or retry.
+For completed turns, Codex owns every non-empty semantic reply. The runtime
+does not classify, replace, or append to model wording. It retains the latest
+structured video-tool fallback only for blank or no-reply recovery, including
+the composed earlier-result attribution and later-request-not-analyzed status
+from a distinct same-turn request. If the primary provider transport itself
+fails after the tool result but before final assembly, the ordinary outer turn
+retry remains the owner; v1 does not promote the fallback through
+failed-attempt delivery state.
 
 Hosted execution carries only the Gemini sentinel in the runner. The exact
-Google host, model path, method, JSON shape, MIME set, FPS, thinking level,
-request/response limits, and manual redirect posture are revalidated by the
-Cloudflare egress interceptor before the Worker substitutes its credential.
+Google host, model path, method, JSON shape, MIME set, sampling profile,
+thinking level, request/response limits, and manual redirect posture are
+revalidated by the Cloudflare egress interceptor before the Worker substitutes
+its credential. During the rollout compatibility window, that reader also
+admits only the exact previously deployed 1 FPS, low-thinking,
+1,800-output-token profile from a warm old runner. New runners never emit that
+legacy shape; remove the reader branch only after warm runners and the rollback
+floor have advanced.
 The narrow raw HTTP owner is intentional: the Google SDK does not expose the
 request-scoped fetch injection required by Murph's identity-bound provider
 boundary, while the current Interactions API cannot explicitly set video FPS.

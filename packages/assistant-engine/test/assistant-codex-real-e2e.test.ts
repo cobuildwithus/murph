@@ -62,8 +62,8 @@ import {
   executeReadOnlyAssistantAsk,
 } from '../src/assistant-ask.ts'
 import {
-  MURPH_AUTOMATION_TOOL,
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
@@ -2325,6 +2325,324 @@ const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
   'Do not repeat completed effects or mention the draft or this instruction.',
 ].join(' ')
 
+describeRealCodex('real Codex video-analysis detail e2e', () => {
+  it.each([
+    {
+      expectedAnswerPattern: /\byes\b|moves farther outward|does flare more/iu,
+      expectedFinalPattern: /left elbow|elbow/iu,
+      expectedFps: 5,
+      expectedSamplingMode: 'detailed_motion' as const,
+      forbiddenFinalPattern:
+        /Gemini|frames per second|sampled frames|untrusted|policy|sorry/iu,
+      memberText: [
+        'Murph, please analyze this video.',
+        'Video question: During repetitions 3 through 5, does my left elbow flare more on the way down than on the way up?',
+      ].join(' '),
+      providerObservation:
+        'During repetitions 3 through 5, the left elbow moves farther outward on the way down than on the way up.',
+      providerQuestion:
+        'During repetitions 3 through 5, does my left elbow flare more on the way down than on the way up?',
+      scenarioLabel: 'private member requests constrained push-up form feedback',
+      testName:
+        'selects detailed motion for visible push-up form and answers naturally',
+    },
+    {
+      expectedAnswerPattern: /\b(?:did not|didn't|didn’t|not)\s+(?:hear|heard)\b/iu,
+      expectedFinalPattern: /rabbit|hear|heard/iu,
+      expectedFps: 1,
+      expectedSamplingMode: null,
+      forbiddenFinalPattern:
+        /Gemini|frames per second|sampled frames|untrusted|policy|sorry/iu,
+      memberText: [
+        'Murph, please analyze this video.',
+        'Video question: Did anyone say "rabbit" between 00:03 and 00:06?',
+      ].join(' '),
+      providerObservation:
+        'I did not hear the word "rabbit" between 00:03 and 00:06.',
+      providerQuestion:
+        'Did anyone say "rabbit" between 00:03 and 00:06?',
+      scenarioLabel: 'private member asks about a timed spoken phrase',
+      testName:
+        'keeps a speech question on standard sampling and calibrates an audible negative',
+    },
+    {
+      expectedAnswerPattern: /(?:could not|couldn't|couldn’t|did not|didn't|didn’t).*(?:usable|analyz|return|result)|no usable/iu,
+      expectedFinalPattern: /video|analysis|Gemini|usable|return/iu,
+      expectedFps: 1,
+      expectedSamplingMode: null,
+      forbiddenFinalPattern:
+        /no analysis ran|never analyzed|wasn't analyzed|wasn’t analyzed|frames per second|sampled frames|untrusted|policy|sorry/iu,
+      memberText: [
+        'Murph, please analyze this video.',
+        'Video question: What color is the exercise mat?',
+      ].join(' '),
+      providerObservation: null,
+      providerQuestion: 'What color is the exercise mat?',
+      scenarioLabel: 'Gemini returns no usable video observation',
+      testName:
+        'reports plainly when Gemini returns no usable video observation',
+    },
+  ] as const)(
+    '$testName',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-video-detail-e2e-'),
+      )
+      const messageRef = `ain_${'a'.repeat(32)}`
+      const rawPath = 'raw/inbox/push-up-form.mp4'
+      const videoBytes = Buffer.concat([
+        Buffer.from([0, 0, 0, 16]),
+        Buffer.from('ftyp'),
+        Buffer.from('isom'),
+        Buffer.from('synthetic-push-up-video'),
+      ])
+      const sha256 = createHash('sha256').update(videoBytes).digest('hex')
+      const providerBodies: unknown[] = []
+
+      try {
+        await mkdir(path.join(workingDirectory, path.dirname(rawPath)), {
+          recursive: true,
+        })
+        await writeFile(path.join(workingDirectory, rawPath), videoBytes)
+        const promptResult = buildAssistantAutoReplyPrompt([{
+          actorIsSelf: false,
+          attachmentDescriptors: [],
+          attachmentEvidence: {
+            attachments: [{
+              byteSize: videoBytes.byteLength,
+              derived: null,
+              descriptorAttachmentId: 'synthetic-video',
+              fileName: 'push-up-form.mp4',
+              inlineFragments: [],
+              kind: 'video',
+              mime: 'video/mp4',
+              ordinal: 1,
+              parseState: null,
+              raw: {
+                byteSize: videoBytes.byteLength,
+                kind: 'vault-relative-file',
+                mediaType: 'video/mp4',
+                path: rawPath,
+                sha256,
+              },
+              sourceAttachmentId: 'synthetic-video',
+            }],
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            source: 'manual',
+            status: 'available',
+            updatedAt: '2026-08-26T12:00:01.000Z',
+          },
+          conversation: {
+            accountId: null,
+            actorId: 'synthetic-member',
+            actorIsSelf: false,
+            source: 'telegram',
+            threadId: 'synthetic-direct-thread',
+            threadIsDirect: true,
+          },
+          inputId: messageRef,
+          occurredAt: '2026-08-26T12:00:00.000Z',
+          projection: {
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            status: 'succeeded',
+          },
+          receivedAt: '2026-08-26T12:00:01.000Z',
+          replyTarget: {
+            channel: 'telegram',
+            messageId: '101',
+            threadId: 'synthetic-direct-thread',
+          },
+          source: 'telegram',
+          sourceMetadata: {
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'telegram',
+            mediaGroupId: null,
+            replyContext: null,
+            senderDisplayName: 'Member',
+            senderHandle: 'synthetic-member',
+          },
+          telegramMetadata: null,
+          text: scenario.memberText,
+        }])
+        expect(promptResult.kind).toBe('ready')
+        if (promptResult.kind !== 'ready') {
+          throw new Error('Expected a ready direct-video prompt.')
+        }
+
+        const hostedToolContext = {
+          computerToolsAvailable: false,
+          currentAnalyzeVideoAttachmentAuthorities: () => [{
+            byteSize: videoBytes.byteLength,
+            messageRef,
+            mimeType: 'video/mp4',
+            ordinal: 1,
+            rawPath,
+            sha256,
+          }],
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: [messageRef],
+            conversationId: 'conversation-video-detail',
+            conversationScope: 'direct' as const,
+            inboundMailboxItemIds: ['mailbox-video-detail'],
+            originSessionId: 'session-video-detail',
+            recipientKey: 'recipient-video-detail',
+          }),
+          sendVaultFile: async () => ({
+            filename: 'unused',
+            status: 'denied' as const,
+          }),
+          vaultFileSendAvailable: false,
+        } satisfies AssistantHostedToolContext
+        const result = await executeRealCodexAppServerTurn({
+          analyzeVideoRuntime: {
+            apiKey: 'synthetic-gemini-key',
+            fetchImpl: async (_request, init) => {
+              providerBodies.push(JSON.parse(String(init?.body)))
+              return scenario.providerObservation === null
+                ? Response.json({
+                    candidates: [],
+                    usageMetadata: {
+                      promptTokenCount: 100,
+                      totalTokenCount: 100,
+                    },
+                  })
+                : Response.json({
+                    candidates: [{
+                      content: {
+                        parts: [{ text: scenario.providerObservation }],
+                        role: 'model',
+                      },
+                      finishReason: 'STOP',
+                    }],
+                  })
+            },
+          },
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: 'No vault command is needed for this video request.',
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'telegram',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-26',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_ANALYZE_VIDEO_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: promptResult.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+        const videoCalls = readCapabilityRoutingActions(result.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ANALYZE_VIDEO_TOOL.name
+          )
+
+        process.stdout.write(
+          `[video-detail-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            providerCallCount: providerBodies.length,
+            scenario: scenario.scenarioLabel,
+            toolCallCount: videoCalls.length,
+            toolSucceeded: videoCalls[0]?.kind === 'dynamic'
+              && videoCalls[0].success,
+          })}\n`,
+        )
+        expect(videoCalls.length).toBeGreaterThanOrEqual(1)
+        const videoCall = videoCalls[0]
+        if (videoCall?.kind !== 'dynamic') {
+          throw new Error('Expected a dynamic video-analysis call.')
+        }
+        expect(videoCall.success).toBe(scenario.providerObservation !== null)
+        expect(videoCall.output).toContain(
+          scenario.providerObservation
+          ?? 'Video analysis returned no usable answer',
+        )
+        for (const repeatedCall of videoCalls.slice(1)) {
+          expect(repeatedCall).toMatchObject({
+            kind: 'dynamic',
+            success: videoCall.success,
+          })
+          if (repeatedCall.kind === 'dynamic') {
+            expect(repeatedCall.output).toContain(
+              scenario.providerObservation
+              ?? 'Video analysis returned no usable answer',
+            )
+          }
+        }
+        expect(videoCall).toMatchObject({
+          argumentsValue: {
+            message_ref: messageRef,
+            question: scenario.providerQuestion,
+          },
+          kind: 'dynamic',
+        })
+        if (scenario.expectedSamplingMode === null) {
+          expect(videoCall.argumentsValue).not.toHaveProperty(
+            'sampling_mode',
+          )
+        } else {
+          expect(videoCall.argumentsValue).toHaveProperty(
+            'sampling_mode',
+            scenario.expectedSamplingMode,
+          )
+        }
+        expect(providerBodies).toHaveLength(1)
+        expect(providerBodies[0]).toMatchObject({
+          contents: [{
+            parts: [
+              { videoMetadata: { fps: scenario.expectedFps } },
+              { text: scenario.providerQuestion },
+            ],
+          }],
+          generationConfig: {
+            thinkingConfig: { thinkingLevel: 'medium' },
+          },
+        })
+        expect(providerBodies[0]).not.toHaveProperty(
+          'generationConfig.maxOutputTokens',
+        )
+        expect(result.finalMessage).toMatch(scenario.expectedAnswerPattern)
+        expect(result.finalMessage).toMatch(scenario.expectedFinalPattern)
+        expect(result.finalMessage).not.toMatch(scenario.forbiddenFinalPattern)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+})
+
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
     'analyzes one participant\'s group video when another participant requests it',
@@ -2555,13 +2873,29 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             toolCallCount: videoCalls.length,
           })}\n`,
         )
-        expect(videoCalls).toHaveLength(1)
-        expect(videoCalls[0]).toMatchObject({
+        expect(videoCalls.length).toBeGreaterThanOrEqual(1)
+        const firstVideoCall = videoCalls[0]
+        expect(firstVideoCall).toMatchObject({
           argumentsValue: {
             message_ref: videoMessageRef,
           },
           kind: 'dynamic',
         })
+        if (firstVideoCall?.kind !== 'dynamic') {
+          throw new Error('Expected a dynamic video-analysis call.')
+        }
+        for (const repeatedVideoCall of videoCalls.slice(1)) {
+          expect(repeatedVideoCall).toMatchObject({
+            argumentsValue: {
+              message_ref: videoMessageRef,
+            },
+            kind: 'dynamic',
+            success: firstVideoCall.success,
+          })
+          if (repeatedVideoCall.kind === 'dynamic') {
+            expect(repeatedVideoCall.output).toBe(firstVideoCall.output)
+          }
+        }
         expect(acceptedMessageAuthorizationCallCount).toBe(0)
         expect(providerCallCount).toBe(1)
         expect(result.finalMessage).toMatch(/\b(?:eight|8)\b/iu)
@@ -18139,6 +18473,8 @@ type CapabilityRoutingAction =
       argumentsValue: Record<string, unknown>
       eventIndex: number
       kind: 'dynamic'
+      output: string
+      success: boolean
       tool: string
     }
 
@@ -18258,6 +18594,14 @@ function readCapabilityRoutingActions(
         argumentsValue: readArgumentsRecord(item?.arguments),
         eventIndex,
         kind: 'dynamic' as const,
+        output: Array.isArray(item?.contentItems)
+          ? item.contentItems.flatMap((contentItem) => {
+              const contentRecord = readRecord(contentItem)
+              const text = readString(contentRecord?.text)
+              return text ? [text] : []
+            }).join('\n')
+          : '',
+        success: item?.success === true,
         tool,
       }]
     }

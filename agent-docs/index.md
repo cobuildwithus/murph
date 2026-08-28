@@ -88,11 +88,12 @@ are specified by
 Changes that can alter Murph's interpretation, tool behavior, silence
 decision, or user-visible reply require deterministic boundary proof plus one
 focused production-derived real-Codex journey and manual review of the actual
-synthetic replies. When the default subscription is usage-limited before any
-provider action, the repository grants one bounded retry through a discovered
-already-authenticated alternate Codex home without reading or copying auth or
-cycling profiles. The one-command local subscription runner, provider-key
-boundary, UX verdict, and PR evidence contract are specified by
+synthetic replies. When the default subscription fails before any provider
+action, the repository tries each discovered authenticated local Codex home
+once in stable order without repeated approval or reading or copying auth.
+It stops rotating homes when a run reaches provider action. The one-command
+local subscription runner, provider-key boundary, UX verdict, and PR evidence
+contract are specified by
 `.agents/skills/verify-murph-assistant/SKILL.md`,
 `agent-docs/operations/completion-workflow.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
@@ -201,11 +202,19 @@ external groups omit it. The tool may be present before the input has video
 authority because provider tools freeze at turn start and the first video may
 arrive through live steering. Murph freezes attachment metadata before Codex
 can act on each initial or live-steered input, verifies the exact bytes before
-cross-provider egress, pins 1 FPS and bounded output, and keeps credentials at
-the Worker boundary. Ordinary inbound hosted video
-bytes stay outside workspace snapshots and become immediately
-retention-eligible when active input no longer needs them; explicit canonical
-durable references are the exception. The
+cross-provider egress, maps standard and detailed-motion intent to allowlisted
+1 or 5 FPS profiles with medium thinking, bounds delivered output without an
+explicit request token cap, and keeps credentials at the Worker boundary.
+Ordinary inbound hosted video bytes stay outside workspace
+snapshots and become immediately retention-eligible when active input no longer
+needs them; explicit canonical durable references are the exception. The first
+completed provider result remains bound in turn memory to its accepted message,
+attachment ordinal, complete question, and sampling mode across group-draft
+reconsideration. Exact repeats reuse it without another Gemini call; distinct
+later requests remain explicitly unanalyzed and cannot inherit its evidence.
+Codex owns every non-empty semantic reply; the runtime retains only the latest
+structured result for blank or no-reply recovery. There is no prose classifier
+or durable result state. The
 architecture, security, deployment order, and
 verification owners are `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and
@@ -698,7 +707,7 @@ payloads reuse the set-based root unwrap path. This contract is specified by
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, one-shot first-visit persona picker handoff, fixed-pack usage-credit Checkout plus capped monthly group authorization and explicit saved-card PaymentIntents, metadata-only Stripe failure alert configuration, canonical purchase/referral credit-entry ownership and remaining projections, conversational referral state, product-label database restore and constraint rollout order, gated OpenAI/Venice assistant Settings projection, signed conversation convergence, and cross-lane mailbox causal-sequence ownership, hosted AI usage allowance ownership, hosted computer-use run/handoff ownership, hosted Linq first-contact decision retention and iMessage app-fallback screening boundary, health-data revocation rollback floor, approval-read rollback floor, Temporal reconciliation-facts boundary, and app-source/testkit ownership split. | `apps/web/**` | Medium | 2026-08-09 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract, including payloadless direct Linq and Assistant Ask latency wakes, strict plan-usage consumer rollout order, Worker-owned provider egress allowlists, runner-scoped OpenAI and Venice egress credentials, asynchronous private generated-image delivery, and encrypted temporary group-avatar staging. | `apps/cloudflare/**` | Medium | 2026-07-29 |
-| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including the coordinated health-data revocation Web/Worker rollback floor, gated Venice provider activation, Web-first Gemini video-analysis pricing and immediate Worker/runner activation, rollout and rollback floors for shared message targeting, direct support escalation, and group room-model maintenance, hard-cut Assistant Ask and consented group disclosure rollback floors, phone-call fail-closed direct-origin/result/stop rollout with deterministic-item rollback proof and fence drain, group-funding urgency/capability rollout order, additive failed-request diagnostic rollout, native permission smoke, Blacksmith deploy handoff validation, private generated-image delivery and group-avatar staging, the approval-read web/runtime compatibility floor, the gated personality projection-convergence hard cut, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-08-20 |
+| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including the coordinated health-data revocation Web/Worker rollback floor, gated Venice provider activation, Web-first Gemini video-analysis pricing plus selectable-sampling reader-first compatibility, rollout and rollback floors for shared message targeting, direct support escalation, and group room-model maintenance, hard-cut Assistant Ask and consented group disclosure rollback floors, phone-call fail-closed direct-origin/result/stop rollout with deterministic-item rollback proof and fence drain, group-funding urgency/capability rollout order, additive failed-request diagnostic rollout, native permission smoke, Blacksmith deploy handoff validation, private generated-image delivery and group-avatar staging, the approval-read web/runtime compatibility floor, the gated personality projection-convergence hard cut, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-08-26 |
 | `packages/assistantd/README.md` | Local assistant daemon boundary and control-plane contract. | `packages/assistantd/**` | Medium | 2026-03-30 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare, including bounded same-conversation exact-successor provider-turn batches, terminal input-id authority for Web-derived preference order, mailbox-causal assistant-preference application, and legacy pending-item replay. | `packages/assistant-runtime/**` | Medium | 2026-07-15 |
 | `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |
