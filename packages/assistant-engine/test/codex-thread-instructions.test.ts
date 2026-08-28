@@ -76,13 +76,16 @@ describe('Codex thread instructions', () => {
       'eager absence or a failed probe is not proof',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'A bare `Can you...?` asks only about capability',
+      'Capability inquiry alone permits no probe',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Answer from tool descriptions; never call the capability or invent a demo',
+      'follow current source guidance',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Act only when the request includes a concrete task or content',
+      'Missing content, topic, or message is material: ask before calling tools; never invent it',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      'A bare `Can you...?`',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Continue from runtime summaries without restarting completed work',

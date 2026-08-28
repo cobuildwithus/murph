@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Capability questions get a straight answer",
-    "summary": "When you ask whether Murph can do something, it now answers from its available capabilities without trying the action first.",
-    "details": "Murph waits for an actual task before it runs a capability. This keeps an unrequested availability check from creating content, changing state, or turning a rejected probe into a false unavailable answer.",
+    "summary": "When you ask whether Murph supports something, it now answers without trying the action first.",
+    "details": "Capability-only questions stay read-only. When you ask Murph to do something, it acts once the required details are present or asks only for the missing detail.",
     "relevanceTags": ["assistant", "capabilities", "reliability"],
     "sourcePullRequests": [2485]
   }

@@ -50,6 +50,9 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       'when a loaded Murph skill or product flow explicitly asks for a voice memo',
     )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
+      'When the user requests a memo without supplying its content, topic, or message, ask what it should say before calling; never invent text to satisfy the required field.',
+    )
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'Final response text is optional.',
     )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(

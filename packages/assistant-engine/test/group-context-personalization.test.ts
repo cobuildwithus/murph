@@ -98,6 +98,7 @@ describe('group context personalization', () => {
   it('keeps the public song tool contract narrow and authority preserving', () => {
     expectContainsAll(MURPH_GENERATE_SONG_TOOL.description, [
       'Use only when the current user explicitly requests generated music or a complete independently authorized owning-flow contract explicitly requires a song for the current turn.',
+      'When the request supplies no song topic, style, lyrics, or other material direction, ask for one before calling; never invent the entire provider prompt to satisfy the required field.',
       'On ordinary conversation turns, read `$MURPH_ASSISTANT_SKILLS_ROOT/music-generation/SKILL.md` before calling.',
       'In an isolated owning flow that forbids other tools or supplies its complete song contract',
       'follow that owning prompt directly instead of attempting a skill read',

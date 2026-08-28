@@ -1394,6 +1394,9 @@ describe('hosted domain dynamic tools', () => {
     expect(MURPH_DEVICE_TOOL.description).toMatch(
       /at most once for that message; after any result, do not retry/u,
     )
+    expect(MURPH_DEVICE_TOOL.description).toContain(
+      'For one connection request, call connect at most once; after a successful result, use its connectUrl and do not retry.',
+    )
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
       action: 'reconcile',

@@ -1254,20 +1254,20 @@ describe('assistant execution prompt contract', () => {
     const composedPrompt = `${MURPH_CODEX_BASE_INSTRUCTIONS}\n${developerPrompt}`
 
     expect(composedPrompt).toContain(
-      'A bare `Can you...?` asks only about capability',
+      'Capability inquiry alone permits no probe',
     )
     expect(composedPrompt).toContain(
-      'Answer from tool descriptions; never call the capability or invent a demo',
+      'Missing content, topic, or message is material: ask before calling tools; never invent it',
     )
     expect(composedPrompt).toContain(
       'search deferred tools via `tool_search` or code-mode `ALL_TOOLS`',
     )
     expect(
       composedPrompt.split(
-        'A bare `Can you...?` asks only about capability',
+        'Capability inquiry alone permits no probe',
       ),
     ).toHaveLength(2)
-    expect(developerPrompt).not.toContain('call the capability or invent a demo')
+    expect(developerPrompt).not.toContain('authorize a probe')
   })
 
   it('keeps only Murph-specific behavior outside the Codex base kernel', () => {

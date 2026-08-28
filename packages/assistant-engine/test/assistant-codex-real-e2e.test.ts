@@ -7512,30 +7512,43 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
 describeRealCodex('real Codex capability questions e2e', () => {
   it(
-    'answers capability questions without executing the capability',
+    'distinguishes capability questions from concrete requests',
     async () => {
       const config = await resolveRealCodexE2eConfig()
-      const probes = [
+      const capabilityInquiries = [
         {
           capability: 'voice memos',
-          expectedTopic: /\b(?:voice|audio|record|say)\b/iu,
-          prompt: 'Can you send me a voice memo?',
+          expectedTopic: /\b(?:voice|audio|memo)\b/iu,
+          prompt: 'Do you support voice memos?',
         },
         {
           capability: 'music generation',
           expectedTopic: /\b(?:song|music|lyrics|style|mood)\b/iu,
-          prompt: 'Can you make an original song for me?',
+          prompt: 'Do you make original songs?',
         },
         {
           capability: 'wearable connection',
           expectedTopic: /\b(?:garmin|wearable|connect|data)\b/iu,
-          prompt: 'Can you connect to my Garmin and use the data?',
+          prompt: 'Do you support Garmin connections?',
         },
         {
           capability: 'lab discovery',
           expectedTopic:
             /\b(?:lab|test|panel|cholesterol|hormone|nutrient|blood sugar|wellness)\b/iu,
-          prompt: 'Can you help me find lab tests?',
+          prompt: 'Do you help with finding lab tests?',
+        },
+      ] as const
+      const incompleteRequests = [
+        {
+          capability: 'voice memos',
+          expectedMissingDetail: /\b(?:what|say|record|message|text)\b/iu,
+          prompt: 'Can you send me a voice memo?',
+        },
+        {
+          capability: 'music generation',
+          expectedMissingDetail:
+            /\b(?:what|which|genre|style|mood|lyrics|instrumental|vocals)\b/iu,
+          prompt: 'Can you make an original song for me?',
         },
       ] as const
       const dynamicTools = resolveMurphDynamicTools({
@@ -7543,63 +7556,176 @@ describeRealCodex('real Codex capability questions e2e', () => {
         labsAvailable: true,
         voiceMemoGenerationAvailable: true,
       })
+      const developerInstructions =
+        buildDirectConversationDeveloperInstructions(false, null, [
+          { label: 'Garmin', provider: 'garmin' },
+        ], true)
+      const executeProbe = async (input: {
+        hostedToolContext?: AssistantHostedToolContext
+        prompt: string
+      }) => {
+        const workingDirectory = await mkdtemp(
+          path.join(tmpdir(), 'murph-capability-boundary-e2e-'),
+        )
+
+        try {
+          return await executeRealCodexAppServerTurn({
+            approvalPolicy: 'never',
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            developerInstructions,
+            dynamicTools,
+            env: config.env,
+            excludeResumeTurns: true,
+            hostedToolContext: input.hostedToolContext,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            prompt: input.prompt,
+            reasoningEffort: 'low',
+            sandbox: 'workspace-write',
+            workingDirectory,
+          })
+        } finally {
+          await removeRealCodexTemporaryPaths([workingDirectory])
+        }
+      }
 
       try {
-        for (const probe of probes) {
-          const workingDirectory = await mkdtemp(
-            path.join(tmpdir(), 'murph-capability-question-e2e-'),
+        for (const inquiry of capabilityInquiries) {
+          const result = await executeProbe({ prompt: inquiry.prompt })
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          const capabilityCalls = actions.filter((action) =>
+            action.kind === 'dynamic'
           )
-          try {
-            const result = await executeRealCodexAppServerTurn({
-              approvalPolicy: 'never',
-              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-              codexCommand:
-                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-                ?? undefined,
-              codexHome: config.codexHome,
-              developerInstructions:
-                buildDirectConversationDeveloperInstructions(false, null, [
-                  { label: 'Garmin', provider: 'garmin' },
-                ]),
-              dynamicTools,
-              env: config.env,
-              excludeResumeTurns: true,
-              model: config.model,
-              modelProvider: config.modelProvider,
-              prompt: probe.prompt,
-              reasoningEffort: 'low',
-              sandbox: 'workspace-write',
-              workingDirectory,
-            })
-            const actions = readCapabilityRoutingActions(result.jsonEvents)
-            const capabilityCalls = actions.filter((action) =>
-              action.kind === 'dynamic'
-            )
-            const reply = result.finalMessage.trim()
+          const reply = result.finalMessage.trim()
 
-            process.stdout.write(
-              `[capability-question-e2e] ${JSON.stringify({
-                capability: probe.capability,
-                reply,
-                toolCallCount: capabilityCalls.length,
-              })}\n`,
-            )
-            expect(
-              capabilityCalls,
-              `${probe.capability} capability question must not execute a tool`,
-            ).toEqual([])
-            expect(reply, probe.capability).toMatch(/\b(?:yes|sure|can)\b/iu)
-            expect(reply, probe.capability).toMatch(probe.expectedTopic)
-            expect(reply, probe.capability).not.toMatch(
-              /\b(?:cannot|can['’]?t|unable|unavailable)\b/iu,
-            )
-            if (probe.capability === 'wearable connection') {
-              expect(reply).not.toMatch(/\bsettings\b/iu)
+          process.stdout.write(
+            `[capability-inquiry-e2e] ${JSON.stringify({
+              capability: inquiry.capability,
+              reply,
+              toolCallCount: capabilityCalls.length,
+            })}\n`,
+          )
+          expect(
+            capabilityCalls,
+            `${inquiry.capability} inquiry must not execute a tool`,
+          ).toEqual([])
+          expect(reply, inquiry.capability).toMatch(
+            /\b(?:yes|sure|support|can|help)\b/iu,
+          )
+          expect(reply, inquiry.capability).toMatch(inquiry.expectedTopic)
+          expect(reply, inquiry.capability).not.toMatch(
+            /^(?:sorry[,.]?\s*)?(?:i\s+)?(?:cannot|can['’]?t|am unable|am unavailable)\b/iu,
+          )
+        }
+
+        for (const request of incompleteRequests) {
+          const result = await executeProbe({ prompt: request.prompt })
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          const capabilityCalls = actions.filter((action) =>
+            action.kind === 'dynamic'
+          )
+          const reply = result.finalMessage.trim()
+
+          process.stdout.write(
+            `[incomplete-capability-request-e2e] ${JSON.stringify({
+              capability: request.capability,
+              reply,
+              toolCallCount: capabilityCalls.length,
+            })}\n`,
+          )
+          expect(
+            capabilityCalls,
+            `${request.capability} request missing input must not execute a tool`,
+          ).toEqual([])
+          expect(reply, request.capability).toContain('?')
+          expect(reply, request.capability).toMatch(
+            request.expectedMissingDetail,
+          )
+        }
+
+        const connectUrl =
+          'https://www.withmurph.ai/connect/garmin?token=synthetic-capability-test'
+        const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+        const deviceTool: NonNullable<
+          AssistantHostedToolContext['deviceTool']
+        > = {
+          async request(request) {
+            deviceRequests.push(request)
+            if (request.action === 'list_accounts') {
+              return {
+                accounts: [],
+                action: 'list_accounts',
+                provider: request.provider ?? null,
+                sourceProvider: request.sourceProvider ?? null,
+              }
             }
-          } finally {
-            await removeRealCodexTemporaryPaths([workingDirectory])
+            if (request.action !== 'connect') {
+              throw new Error('Unexpected device action in capability proof.')
+            }
+            return {
+              action: 'connect',
+              link: {
+                authorizationUrl:
+                  'https://www.withmurph.ai/connect/garmin/authorize?token=synthetic-capability-test',
+                connectUrl,
+                expiresAt: '2027-07-29T17:05:00.000Z',
+                provider: 'garmin',
+                providerLabel: 'Garmin',
+              },
+            }
           }
         }
+        const concreteRequest = await executeProbe({
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentInvocationScope: () => ({
+              conversationScope: 'direct',
+              origin: {
+                assistantInputId:
+                  'ain_00000000000000000000000000000029',
+                kind: 'accepted_input',
+                sessionId: 'session-capability-request',
+              },
+              originSessionId: 'session-capability-request',
+            }),
+            deviceTool,
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt: 'Can you connect my Garmin and send me the connection link?',
+        })
+        const concreteActions = readCapabilityRoutingActions(
+          concreteRequest.jsonEvents,
+        )
+        const connectCalls = concreteActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_DEVICE_TOOL.name
+          && action.argumentsValue.action === 'connect'
+        )
+
+        process.stdout.write(
+          `[concrete-capability-request-e2e] ${JSON.stringify({
+            connectCalls,
+            deviceRequests,
+            reply: concreteRequest.finalMessage,
+          })}\n`,
+        )
+
+        expect(connectCalls).toHaveLength(1)
+        expect(
+          deviceRequests.filter((request) => request.action === 'connect'),
+        ).toEqual([{ action: 'connect', provider: 'garmin' }])
+        const concreteReply = concreteRequest.finalMessage.trim()
+        expect(concreteReply.endsWith(connectUrl)).toBe(true)
+        expect(concreteReply.match(/https:\/\//gu) ?? []).toHaveLength(1)
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
@@ -20527,6 +20653,7 @@ function buildDirectConversationDeveloperInstructions(
   assistantContextSnapshotPrompt: string | null = null,
   assistantHostedDeviceConnectProviders:
     readonly AssistantHostedDeviceConnectProvider[] = [],
+  assistantHostedLabsAvailable = false,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -20534,6 +20661,7 @@ function buildDirectConversationDeveloperInstructions(
     assistantHostedDeviceConnectAvailable:
       assistantHostedDeviceConnectProviders.length > 0,
     assistantHostedDeviceConnectProviders,
+    assistantHostedLabsAvailable,
     assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
