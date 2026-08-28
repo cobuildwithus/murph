@@ -89,6 +89,20 @@ Updated: 2026-08-27
 - No new Frog entry: the observed failure is production behavior, which Frog
   explicitly excludes, and dependency setup followed the documented worktree
   path.
+- Accepted the preliminary coverage finding and applied ReviewGPT's test-only
+  remediation exactly: the assembled Linq first-contact journey now requires
+  both milestones to survive Cloudflare-to-Web PostgreSQL persistence.
+- The focused hosted-local journey cannot start on this macOS checkout because
+  the repository's absolute runner-bundle budget fails by 36,565 bytes before
+  Vitest; the authoritative Linux production-bundle check passed on the first-
+  reviewed head, and no guard was bypassed.
+- Final ReviewGPT round 1 returned one accepted High finding: the initial
+  foreground-selector callback does not observe live steering or background
+  recovery, and the same-attempt fence rejects a newer recovery attempt. The
+  resulting absence can misclassify an input as not selected after it was
+  accepted for provider execution. Remediation must move the observation to the
+  existing common accepted-input boundary, use the existing lease-generation
+  transfer rule, and delete the incomplete selector callback plumbing.
 
 ## Verification
 
@@ -101,3 +115,9 @@ Updated: 2026-08-27
   milestones update only already-matched trace rows; unmatched inputs are a
   bounded no-op; trace failures do not alter runtime flow; no migration,
   functional behavior, provider call, or device-sync surface changes.
+- Completed local proof: 33 hosted-execution tests, 187 assistant-runtime tests,
+  105 Web tests, affected package typechecks (including Cloudflare after the
+  specialist test), `pnpm logs:guard`, and `git diff --check` passed. Final
+  ReviewGPT round 1 ran for 188 minutes on the immutable first-reviewed head and
+  returned `FINDINGS`; ReviewGPT-authored remediation, a resolved later round,
+  exact-head CI, and deployment proof remain pending.
