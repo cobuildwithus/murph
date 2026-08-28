@@ -80,9 +80,9 @@ email when the account is still email-only.
 - Assistant: a deterministic regression plus one focused real-Codex journey
   proves that the three-day onboarding occurrence reaches a useful email reply
   when the fallback is selected.
-- iOS: unit tests prove linked-account operations, canonical refresh, gate
+- iOS: unit tests prove linked-account operations, canonical refresh, phone-code
   recovery, and semantic contact labels; exact-pushed-head simulator evidence
-  shows phone entry, code entry, and Telegram/recovery presentation.
+  shows the required phone-or-Telegram choice gate.
 - Cross-repo: the iOS field is additive and tolerant of an older Web response;
   Web deploys first so the canonical setup projection exists before the native
   gate ships.
@@ -150,10 +150,10 @@ email when the account is still email-only.
       routes, native onboarding flow, and pinned Privy linked-account surface.
 - [x] Implement the Web/server contract and focused proof.
 - [x] Implement the iOS gate, recovery, and focused proof.
-- [ ] Update canonical documentation and changelog after both PR numbers exist.
-- [ ] Run scoped verification, assistant journey, simulator visual proof,
-      required reviews, and exact-head CI.
-- [ ] Commit, open coordinated PRs, and record deploy order.
+- [x] Update canonical documentation and changelog after both PR numbers exist.
+- [ ] Run scoped verification, assistant journey, required reviews, and
+      exact-head CI; simulator visual proof is captured.
+- [x] Commit, open coordinated PRs, and record the Web-first deploy order.
 
 ## Verification
 
