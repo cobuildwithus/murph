@@ -28,8 +28,8 @@ const GROUP_ACTION_FIXTURES = {
   ask: { action: "ask", question: "What changed this week?" },
   handoff: { action: "handoff", context: "The member completed the workout." },
   ask_current_sender: { action: "ask_current_sender", message_ref: MESSAGE_REF },
-  message_current_sender: {
-    action: "message_current_sender",
+  ask_current_sender_privately: {
+    action: "ask_current_sender_privately",
     message_ref: MESSAGE_REF,
   },
   clarify_current_sender: {
@@ -203,7 +203,7 @@ describe("murph.group parser-first family compatibility", () => {
 
     for (const action of [
       "ask_current_sender",
-      "message_current_sender",
+      "ask_current_sender_privately",
       "clarify_current_sender",
       "continue_current_sender_in_group",
       "continue_current_sender_privately",
@@ -255,7 +255,7 @@ describe("murph.group parser-first family compatibility", () => {
     });
 
     const legacyArguments = {
-      action: "ask_current_sender_privately",
+      action: "message_current_sender",
       message_ref: MESSAGE_REF,
     };
     expect(schemaAdvertisesGroupConsultObjectShape(legacyArguments)).toBe(false);

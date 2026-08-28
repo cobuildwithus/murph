@@ -296,6 +296,18 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("advertises family-bounded schemas", () => {
+    const groupConsultTool = MURPH_GROUP_FAMILY_TOOLS.find(
+      (tool) => tool.name === "group_consult",
+    );
+    expect(groupConsultTool?.description)
+      .toContain("ask=group answer; handoff=tell/post/share");
+    expect(groupConsultTool?.description)
+      .toContain("title=groupLabel");
+    expect(groupConsultTool?.description)
+      .toContain("people/count=participantTarget");
+    expect(groupConsultTool?.description)
+      .toContain("names not groupLabel");
+
     const expectedRootKeys = {
       group_consult: [
         "action", "context", "grantId", "groupLabel", "message_ref",
@@ -606,7 +618,7 @@ describe("murph.group dynamic tool", () => {
 
     for (const [action, audience] of [
       ["ask_current_sender", "group"],
-      ["message_current_sender", "current_sender"],
+      ["ask_current_sender_privately", "current_sender"],
     ] as const) {
       expect(readMurphDynamicToolRequest(groupToolCall({
         action,

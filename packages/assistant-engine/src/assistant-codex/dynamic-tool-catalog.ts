@@ -896,7 +896,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'ask',
     'handoff',
     'ask_current_sender',
-    'message_current_sender',
+    'ask_current_sender_privately',
     'clarify_current_sender',
     'continue_current_sender_in_group',
     'continue_current_sender_privately',
@@ -1298,7 +1298,7 @@ const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
     optional: [],
     required: ['message_ref'],
   },
-  message_current_sender: {
+  ask_current_sender_privately: {
     optional: [],
     required: ['message_ref'],
   },
@@ -1390,7 +1390,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'Ask/handoff once; host binds. Title=groupLabel. "Group/chat with [people]" or count=participantTarget; no list. Sender: ask_current_sender=group; message_current_sender=private only. Clarify if ambiguous; follow-ups resume replies. Handoff context identity-neutral. If queued, say queued/pending; never sent/delivered.',
+    'ask=group answer; handoff=tell/post/share. title=groupLabel; people/count=participantTarget; names not groupLabel; no list. ask_current_sender=group; ask_current_sender_privately=private; clarify=destination only; resume continuations. Handoff identity-neutral; host labels. accepted=queued/pending, never sent/shared.',
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 

@@ -1770,22 +1770,27 @@ describe('assistant Codex turn planning', () => {
     expect(plan.turnContextPrompt).not.toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain(
-      `Read and follow \`${skillRef}\` before advancing, declining, or completing onboarding`,
+      `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
     )
     expect(plan.developerInstructions).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion.',
     )
     const onboardingDecisionContract = [
       'During discovery, a stated health goal is context, not an action request.',
       'Only an immediate request or safety need moves problem-solving ahead of the park.',
       'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
-      'Honor pause, defer, skip, and decline.',
-      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
+      'Once a data source is identified, postponing only its optional connection does not pause onboarding. Do not issue or reissue a link; acknowledge the choice, continue to the next unresolved foundation beat unless the user explicitly pauses onboarding itself, and never imply the connection exists until visible evidence proves it.',
     ] as const
     for (const clause of onboardingDecisionContract) {
       expect(plan.developerInstructions).toContain(clause)
       expect(plan.turnContextPrompt).not.toContain(clause)
     }
+    expect(plan.developerInstructions).not.toContain(
+      'Honor pause, defer, skip, and decline.',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
+    )
     expect(plan.developerInstructions).not.toContain(
       'roughly 5-6 short assistant messages',
     )

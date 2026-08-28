@@ -196,7 +196,7 @@ describe("murph.group current-sender intent", () => {
           additionalProperties: false,
           properties: {
             action: {
-              enum: ["message_current_sender"],
+              enum: ["ask_current_sender_privately"],
               type: "string",
             },
             message_ref: expect.objectContaining({

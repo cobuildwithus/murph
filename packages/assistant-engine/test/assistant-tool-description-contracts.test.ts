@@ -90,18 +90,23 @@ describe("assistant tool description call contracts", () => {
   it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("handoff");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Title=groupLabel",
+      "title=groupLabel",
     );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("once");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      '"Group/chat with [people]" or count=participantTarget',
+      "ask=group answer; handoff=tell/post/share",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "people/count=participantTarget",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "names not groupLabel; no list",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("memory show");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Handoff context identity-neutral",
+      "Handoff identity-neutral; host labels",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "If queued, say queued/pending; never sent/delivered",
+      "accepted=queued/pending, never sent/shared",
     );
   });
 
@@ -125,13 +130,16 @@ describe("assistant tool description call contracts", () => {
       "ask_current_sender=group",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "message_current_sender=private only",
+      "ask_current_sender_privately=private",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Clarify if ambiguous",
+      "clarify=destination only",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "follow-ups resume replies",
+      "resume continuations",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
+      "message_current_sender",
     );
   });
 });
