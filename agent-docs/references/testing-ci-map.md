@@ -347,8 +347,10 @@ resume, binds an explicit native reply to the matching first of two delivered
 captures, and keeps that provenance separate from later group-mutation
 authority. Assistant-runtime tests prove verification finishes before provider
 dispatch; Linq and Telegram adapter tests prove attachment-id and rebuilt
-multipart delivery. Cloudflare Worker tests lock the legacy upload route to
-`410 Gone`. The hosted-local Codex image-media scenario generates through the
+multipart delivery. Cloudflare Worker tests hard-cut the retired upload path
+through the generic effects-port 404 fallback and prove its generic diagnostic
+classification without write-fence validation. The hosted-local Codex
+image-media scenario generates through the
 real app-server tool relay, persists the vault capture, delivers a Linq
 attachment id, and reuses the same capture on retry without a public image URL.
 The opt-in live-provider Assistant Engine scenario covers the natural

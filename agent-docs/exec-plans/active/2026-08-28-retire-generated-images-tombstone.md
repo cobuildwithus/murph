@@ -12,8 +12,9 @@ Updated: 2026-08-28
 
 ## Success criteria
 
-- No current source, runtime harness, test, or deployment guide references the
-  retired `/generated-images` upload route or its route constant/handler.
+- No current source, runtime harness, or deployment guide routes the retired
+  `/generated-images` upload path; one highest-boundary negative regression
+  names it only to lock the generic 404 and diagnostic fallback.
 - Unknown runner-effects paths continue to return 404 through the existing
   shared fallback.
 - Current generated-image capture and attachment behavior remains owned by the

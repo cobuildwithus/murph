@@ -724,6 +724,39 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("hard-cuts the retired generated-image upload route through the generic effects-port fallback", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://results.worker/generated-images", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({ validateRuntimeWriteFence }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          hostKind: "effects_port",
+          method: "POST",
+          operation: "effects_port",
+          responseStatus: 404,
+        }),
+        level: "warn",
+        message: "Hosted runner internal outbound response completed.",
+        phase: "wake.running",
+      }),
+    );
+  });
+
   it("rejects internal virtual-host requests without a runtime write fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
