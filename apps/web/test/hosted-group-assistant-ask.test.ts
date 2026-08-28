@@ -373,6 +373,24 @@ describe("Hosted group Assistant Ask admission", () => {
       itemId: requestId,
       tx: expect.any(Object),
     });
+    expect(mocks.resolveHostedAssistantNotificationDestination)
+      .toHaveBeenCalledWith({
+        memberId: TARGET_RUNTIME_MEMBER_ID,
+        prisma,
+      });
+    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
+      authority: expect.objectContaining({
+        containerMemberId: TARGET_RUNTIME_MEMBER_ID,
+        threadId: "linq-group-chat",
+      }),
+      prisma: expect.any(Object),
+    });
+    expect(
+      mocks.assertHostedThreadRouteEgressAuthority.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.appendHostedMailboxEnvelopeWithIdentityTx.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
     expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
   });
 
@@ -454,6 +472,60 @@ describe("Hosted group Assistant Ask admission", () => {
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
+  it("rejects before append when the selected group has no current route", async () => {
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(null);
+    const { prisma } = createPrisma();
+
+    await expect(requestHostedGroupAssistantAsk({
+      memberId: ORIGIN_MEMBER_ID,
+      membershipId: "membership-one",
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      prisma: prisma as never,
+      question: QUESTION,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects when route authority changes before the locked append", async () => {
+    mocks.assertHostedThreadRouteEgressAuthority.mockRejectedValue(
+      hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+        httpStatus: 403,
+        message: "The selected route changed before append.",
+        retryable: false,
+      }),
+    );
+    const { prisma } = createPrisma();
+
+    await expect(requestHostedGroupAssistantAsk({
+      memberId: ORIGIN_MEMBER_ID,
+      membershipId: "membership-one",
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      prisma: prisma as never,
+      question: QUESTION,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      },
+    });
+    expect(mocks.resolveHostedAssistantNotificationDestination)
+      .toHaveBeenCalledOnce();
+    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+  });
+
   it("rejects synthetic callers before membership resolution", async () => {
     const { prisma, tx } = createPrisma({ syntheticOrigin: true });
 
@@ -516,6 +588,38 @@ describe("Hosted group Assistant Ask admission", () => {
       result: { status: "accepted", targetLabel: "100 Club" },
     });
     expect(tx.hostedGroupMember.findMany).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects replay after the pinned group loses route authority", async () => {
+    const wake = requestWake();
+    const { prisma } = createPrisma();
+    mocks.readHostedMailboxItemById.mockResolvedValue(mailboxItemForWake(wake));
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(wake);
+    mocks.assertHostedThreadRouteEgressAuthority.mockRejectedValue(
+      hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+        httpStatus: 403,
+        message: "The pinned route is no longer authorized.",
+        retryable: false,
+      }),
+    );
+
+    await expect(requestHostedGroupAssistantAsk({
+      memberId: ORIGIN_MEMBER_ID,
+      membershipId: "membership-one",
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      prisma: prisma as never,
+      question: QUESTION,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      },
+    });
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 

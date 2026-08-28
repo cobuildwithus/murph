@@ -93,7 +93,7 @@ describe("assistant tool description call contracts", () => {
       "ask=group answer; handoff=tell/post/share",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "via list_memberships exact ID",
+      "exact ID after exhausting list_memberships pages",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       'Unnamed: memory show, else "a member"',

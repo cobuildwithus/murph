@@ -103,6 +103,9 @@ import {
   requestHostedGroupAssistantAsk,
   requestHostedGroupContextHandoff,
 } from "../src/lib/hosted-groups/group-assistant-ask";
+import {
+  readHostedGroupMembershipParticipantRosters,
+} from "../src/lib/hosted-groups/group-membership-participants";
 
 const NOW = new Date("2026-08-26T12:00:00.000Z");
 const ORIGIN_MEMBER_ID = "member_requester";
@@ -371,6 +374,7 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
       outcome: "matched",
       requestedHandleCount: 3,
     });
+    installExactDestination(SECOND_RUNTIME_MEMBER_ID, "chat_second");
 
     const requestId = createHostedAssistantAskRequestId({
       memberId: ORIGIN_MEMBER_ID,
@@ -549,6 +553,82 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
         wake.userId === FIRST_RUNTIME_MEMBER_ID
       ),
     ).toBe(false);
+  });
+
+  it("rejects an ask when a listed group's route disappears before admission", async () => {
+    const selected = membership({
+      displayName: "Weekend Crew",
+      id: "membership_second",
+      runtimeMemberId: SECOND_RUNTIME_MEMBER_ID,
+    });
+    const { prisma } = createPrisma([selected]);
+    dependencyMocks.readHostedRuntimeAiAllowedMemberIds.mockResolvedValue(
+      new Set([SECOND_RUNTIME_MEMBER_ID]),
+    );
+    dependencyMocks.readHostedThreadContainerLinqRouteAuthorities
+      .mockResolvedValue({
+        authorities: new Map([[SECOND_RUNTIME_MEMBER_ID, routeAuthority(
+          SECOND_RUNTIME_MEMBER_ID,
+          "chat_second",
+        )]]),
+        nonLinqContainerMemberIds: new Set(),
+        unavailableContainerMemberIds: new Set(),
+      });
+    dependencyMocks.getHostedLinqChatSummary.mockResolvedValue({
+      handleCount: 3,
+      handles: [
+        { handle: PROVIDER_PHONE, isMe: true, status: "active" },
+        { handle: REQUESTER_PHONE, isMe: false, status: "active" },
+        { handle: "+14155550606", isMe: false, status: "active" },
+      ],
+      handlesComplete: true,
+      isGroup: true,
+    });
+    dependencyMocks.lookupHostedGroupParticipantMemberIdsByHandles
+      .mockResolvedValue(new Map([[REQUESTER_PHONE, ORIGIN_MEMBER_ID]]));
+    dependencyMocks.readHostedMemberAddressBookAdvisoryNames.mockResolvedValue({
+      canonicalHandleCount: 1,
+      contactMatchCount: 1,
+      names: new Map([["+14155550606", "Jordan"]]),
+      outcome: "matched",
+      requestedHandleCount: 1,
+    });
+
+    await expect(readHostedGroupMembershipParticipantRosters({
+      memberId: ORIGIN_MEMBER_ID,
+      memberships: [{
+        membershipId: selected.id,
+        runtimeMemberId: selected.group.runtimeMemberId,
+      }],
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toEqual(new Map([[
+      "membership_second",
+      {
+        participantCount: 2,
+        participantLabels: [{ displayName: "Jordan" }],
+        status: "available",
+      },
+    ]]));
+
+    dependencyMocks.resolveHostedAssistantNotificationDestination
+      .mockResolvedValue(null);
+    await expect(requestHostedGroupAssistantAsk({
+      memberId: ORIGIN_MEMBER_ID,
+      membershipId: "membership_second",
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      prisma: prisma as never,
+      question: "What is the plan?",
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      },
+    });
+    expect(mailboxWakes).toHaveLength(0);
   });
 
   it("rejects an opaque membership ID that is not an active requester membership", async () => {

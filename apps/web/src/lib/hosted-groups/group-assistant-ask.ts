@@ -251,7 +251,21 @@ export async function requestHostedGroupAssistantAsk(input: {
   now?: Date;
   originAssistantInputId: string;
   originSessionId: string;
-  prisma?: HostedAssistantAskPrismaClient;
+  prisma?: PrismaClient;
+  question: string;
+}): Promise<HostedGroupAssistantAskAdmission> {
+  return runWithHostedDomainRootUnwrapCache(() =>
+    requestHostedGroupAssistantAskWithCryptoCache(input)
+  );
+}
+
+async function requestHostedGroupAssistantAskWithCryptoCache(input: {
+  memberId: string;
+  membershipId: string;
+  now?: Date;
+  originAssistantInputId: string;
+  originSessionId: string;
+  prisma?: PrismaClient;
   question: string;
 }): Promise<HostedGroupAssistantAskAdmission> {
   const prisma = input.prisma ?? getPrisma();
@@ -276,19 +290,88 @@ export async function requestHostedGroupAssistantAsk(input: {
     originAssistantInputId: input.originAssistantInputId,
   });
 
+  const existing = await readHostedMailboxItemById({
+    mailboxItemId: requestId,
+    prisma,
+  });
+  if (existing) {
+    return replayHostedGroupAssistantAsk({
+      existingUserId: existing.userId,
+      memberId: input.memberId,
+      membershipId,
+      now,
+      originAssistantInputId: input.originAssistantInputId,
+      originSessionId,
+      prisma,
+      question,
+      requestId,
+    });
+  }
+
+  await readHostedMailboxConversationWakeByAssistantInputId({
+    assistantInputId: input.originAssistantInputId,
+    availableAt: now,
+    memberId: input.memberId,
+    prisma,
+  });
+
+  const preparedSelection = await prisma.$transaction((tx) =>
+    runWithHostedDomainRootProviderCallsDisabled(() =>
+      selectHostedGroupConsultMembershipTx({
+        memberId: input.memberId,
+        membershipId,
+        now,
+        originAssistantInputId: input.originAssistantInputId,
+        tx,
+      })
+    )
+  );
+  if ("result" in preparedSelection) {
+    return preparedSelection.result;
+  }
+
+  const destination = await resolveHostedGroupConsultDestination({
+    prisma,
+    targetRuntimeMemberId: preparedSelection.targetRuntimeMemberId,
+  });
+  if (!destination) {
+    return unavailableAdmission("group_route_unavailable");
+  }
+
+  const occurredAt = now.toISOString();
+  const expiresAt = new Date(
+    now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  ).toISOString();
+  const wake = buildHostedExecutionAssistantAskRequestedWake({
+    ask: {
+      expiresAt,
+      originAssistantInputId: input.originAssistantInputId,
+      originSessionId,
+      question,
+      target: {
+        kind: "joined_group",
+        membershipId: preparedSelection.membershipId,
+        requestedLabel: null,
+      },
+    },
+    eventId: requestId,
+    memberId: preparedSelection.targetRuntimeMemberId,
+    occurredAt,
+  });
+
   return prisma.$transaction(async (tx) => {
     await acquireHostedAssistantAskLockTx(tx, requestId);
 
-    const existing = await readHostedMailboxItemById({
+    const lockedExisting = await readHostedMailboxItemById({
       mailboxItemId: requestId,
       prisma: tx,
     });
-    if (existing) {
+    if (lockedExisting) {
       return replayHostedGroupAssistantAskTx({
-        existingDedupeKey: existing.dedupeKey,
-        existingKind: existing.kind,
-        existingUserId: existing.userId,
-        expiresAt: existing.expiresAt ?? null,
+        existingDedupeKey: lockedExisting.dedupeKey,
+        existingKind: lockedExisting.kind,
+        existingUserId: lockedExisting.userId,
+        expiresAt: lockedExisting.expiresAt ?? null,
         memberId: input.memberId,
         membershipId,
         now,
@@ -296,6 +379,7 @@ export async function requestHostedGroupAssistantAsk(input: {
         originSessionId,
         question,
         requestId,
+        routeAuthority: destination.routeAuthority,
         tx,
       });
     }
@@ -311,7 +395,8 @@ export async function requestHostedGroupAssistantAsk(input: {
 
     const authority = await readHostedAssistantAskMembershipAuthorityTx({
       expectedOriginMemberId: input.memberId,
-      expectedTargetRuntimeMemberId: null,
+      expectedTargetRuntimeMemberId:
+        preparedSelection.targetRuntimeMemberId,
       membershipId,
       now,
       originAssistantInputId: input.originAssistantInputId,
@@ -320,27 +405,13 @@ export async function requestHostedGroupAssistantAsk(input: {
     if (!authority) {
       return unavailableAdmission("membership_unavailable");
     }
-
-    const occurredAt = now.toISOString();
-    const expiresAt = new Date(
-      now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-    ).toISOString();
-    const wake = buildHostedExecutionAssistantAskRequestedWake({
-      ask: {
-        expiresAt,
-        originAssistantInputId: input.originAssistantInputId,
-        originSessionId,
-        question,
-        target: {
-          kind: "joined_group",
-          membershipId: authority.membership.id,
-          requestedLabel: null,
-        },
-      },
-      eventId: requestId,
-      memberId: authority.targetRuntimeMemberId,
-      occurredAt,
-    });
+    if (!await hasHostedGroupConsultRouteAuthorityTx({
+      expectedRuntimeMemberId: preparedSelection.targetRuntimeMemberId,
+      routeAuthority: destination.routeAuthority,
+      tx,
+    })) {
+      return unavailableAdmission("group_route_unavailable");
+    }
     const append = await appendHostedMailboxEnvelopeWithIdentityTx({
       envelope: wake,
       expiresAt,
@@ -353,7 +424,7 @@ export async function requestHostedGroupAssistantAsk(input: {
 
     return {
       mailboxWake: {
-        expectedUserId: authority.targetRuntimeMemberId,
+        expectedUserId: preparedSelection.targetRuntimeMemberId,
         mailboxItemId: requestId,
       },
       result: {
@@ -425,7 +496,7 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
 
   const preparedSelection = await prisma.$transaction((tx) =>
     runWithHostedDomainRootProviderCallsDisabled(() =>
-      selectHostedGroupContextHandoffMembershipTx({
+      selectHostedGroupConsultMembershipTx({
         memberId: input.memberId,
         membershipId,
         now,
@@ -438,32 +509,14 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     return preparedSelection.result;
   }
 
-  let boundDestination: ReturnType<
-    typeof bindHostedAssistantNotificationDestination
-  >;
-  try {
-    const destination = await resolveHostedAssistantNotificationDestination({
-      memberId: preparedSelection.targetRuntimeMemberId,
-      prisma,
-    });
-    if (!destination) {
-      return unavailableAdmission("group_route_unavailable");
-    }
-    boundDestination = bindHostedAssistantNotificationDestination({
-      destination,
-      memberId: preparedSelection.targetRuntimeMemberId,
-    });
-  } catch {
+  const destination = await resolveHostedGroupConsultDestination({
+    prisma,
+    targetRuntimeMemberId: preparedSelection.targetRuntimeMemberId,
+  });
+  if (!destination) {
     return unavailableAdmission("group_route_unavailable");
   }
-  const routeAuthority = boundDestination.externalThreadRouteAuthority;
-  if (
-    routeAuthority === null
-    || boundDestination.route.threadIsDirect !== false
-    || boundDestination.route.delivery.kind !== "thread"
-  ) {
-    return unavailableAdmission("group_route_unavailable");
-  }
+  const { boundDestination, routeAuthority } = destination;
   const occurredAt = now.toISOString();
   const expiresAt = new Date(
     now.getTime() + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
@@ -533,20 +586,12 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
         if (!authority) {
           return unavailableAdmission("membership_unavailable");
         }
-        try {
-          await assertHostedThreadRouteEgressAuthority({
-            authority: routeAuthority,
-            prisma: tx,
-          });
-        } catch (error) {
-          if (
-            isHostedOnboardingError(error)
-            && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
-            && !error.retryable
-          ) {
-            return unavailableAdmission("group_route_unavailable");
-          }
-          throw error;
+        if (!await hasHostedGroupConsultRouteAuthorityTx({
+          expectedRuntimeMemberId: preparedSelection.targetRuntimeMemberId,
+          routeAuthority,
+          tx,
+        })) {
+          return unavailableAdmission("group_route_unavailable");
         }
 
         const append = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
@@ -585,20 +630,20 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
   });
 }
 
-type HostedGroupContextHandoffMembershipSelection =
+type HostedGroupConsultMembershipSelection =
   | { result: HostedGroupAssistantAskAdmission }
   | {
       membershipId: string;
       targetRuntimeMemberId: string;
     };
 
-async function selectHostedGroupContextHandoffMembershipTx(input: {
+async function selectHostedGroupConsultMembershipTx(input: {
   memberId: string;
   membershipId: string;
   now: Date;
   originAssistantInputId: string;
   tx: Prisma.TransactionClient;
-}): Promise<HostedGroupContextHandoffMembershipSelection> {
+}): Promise<HostedGroupConsultMembershipSelection> {
   if (!await isEligiblePersonalAssistantAskCallerTx({
     memberId: input.memberId,
     now: input.now,
@@ -622,6 +667,67 @@ async function selectHostedGroupContextHandoffMembershipTx(input: {
     membershipId: authority.membership.id,
     targetRuntimeMemberId: authority.targetRuntimeMemberId,
   };
+}
+
+async function resolveHostedGroupConsultDestination(input: {
+  prisma: PrismaClient;
+  targetRuntimeMemberId: string;
+}): Promise<{
+  boundDestination: ReturnType<
+    typeof bindHostedAssistantNotificationDestination
+  >;
+  routeAuthority: HostedExecutionExternalThreadRouteAuthority;
+} | null> {
+  try {
+    const destination = await resolveHostedAssistantNotificationDestination({
+      memberId: input.targetRuntimeMemberId,
+      prisma: input.prisma,
+    });
+    if (!destination) {
+      return null;
+    }
+    const boundDestination = bindHostedAssistantNotificationDestination({
+      destination,
+      memberId: input.targetRuntimeMemberId,
+    });
+    const routeAuthority = boundDestination.externalThreadRouteAuthority;
+    if (
+      routeAuthority === null
+      || boundDestination.route.threadIsDirect !== false
+      || boundDestination.route.delivery.kind !== "thread"
+    ) {
+      return null;
+    }
+    return { boundDestination, routeAuthority };
+  } catch {
+    return null;
+  }
+}
+
+async function hasHostedGroupConsultRouteAuthorityTx(input: {
+  expectedRuntimeMemberId: string;
+  routeAuthority: HostedExecutionExternalThreadRouteAuthority;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (input.routeAuthority.containerMemberId !== input.expectedRuntimeMemberId) {
+    return false;
+  }
+  try {
+    await assertHostedThreadRouteEgressAuthority({
+      authority: input.routeAuthority,
+      prisma: input.tx,
+    });
+    return true;
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
+      && !error.retryable
+    ) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export async function requestHostedGroupMemberAssistantAsk(input: {
@@ -1745,6 +1851,52 @@ function isHostedCurrentSenderGroupCompletionEnvelopeValid(input: {
     && input.wake.ask.expiresAt === input.authority.expiresAt;
 }
 
+async function replayHostedGroupAssistantAsk(input: {
+  existingUserId: string;
+  memberId: string;
+  membershipId: string;
+  now: Date;
+  originAssistantInputId: string;
+  originSessionId: string;
+  prisma: PrismaClient;
+  question: string;
+  requestId: string;
+}): Promise<HostedGroupAssistantAskAdmission> {
+  const destination = await resolveHostedGroupConsultDestination({
+    prisma: input.prisma,
+    targetRuntimeMemberId: input.existingUserId,
+  });
+  if (!destination) {
+    return unavailableAdmission("group_route_unavailable");
+  }
+
+  return input.prisma.$transaction(async (tx) => {
+    await acquireHostedAssistantAskLockTx(tx, input.requestId);
+    const existing = await readHostedMailboxItemById({
+      mailboxItemId: input.requestId,
+      prisma: tx,
+    });
+    if (!existing) {
+      return unavailableAdmission("request_conflict");
+    }
+    return replayHostedGroupAssistantAskTx({
+      existingDedupeKey: existing.dedupeKey,
+      existingKind: existing.kind,
+      existingUserId: existing.userId,
+      expiresAt: existing.expiresAt ?? null,
+      memberId: input.memberId,
+      membershipId: input.membershipId,
+      now: input.now,
+      originAssistantInputId: input.originAssistantInputId,
+      originSessionId: input.originSessionId,
+      question: input.question,
+      requestId: input.requestId,
+      routeAuthority: destination.routeAuthority,
+      tx,
+    });
+  });
+}
+
 async function replayHostedGroupContextHandoff(input: {
   context: string;
   eventId: string;
@@ -1909,20 +2061,12 @@ async function replayHostedGroupContextHandoffTx(input: {
   if (!authority) {
     return unavailableAdmission("membership_unavailable");
   }
-  try {
-    await assertHostedThreadRouteEgressAuthority({
-      authority: routeAuthority,
-      prisma: input.tx,
-    });
-  } catch (error) {
-    if (
-      isHostedOnboardingError(error)
-      && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
-      && !error.retryable
-    ) {
-      return unavailableAdmission("group_route_unavailable");
-    }
-    throw error;
+  if (!await hasHostedGroupConsultRouteAuthorityTx({
+    expectedRuntimeMemberId: input.existingUserId,
+    routeAuthority,
+    tx: input.tx,
+  })) {
+    return unavailableAdmission("group_route_unavailable");
   }
 
   return {
@@ -1949,6 +2093,7 @@ async function replayHostedGroupAssistantAskTx(input: {
   originSessionId: string;
   question: string;
   requestId: string;
+  routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupAssistantAskAdmission> {
   if (isHostedAssistantAskExpired(input.expiresAt, input.now)) {
@@ -2002,6 +2147,13 @@ async function replayHostedGroupAssistantAskTx(input: {
   });
   if (!authority) {
     return unavailableAdmission("membership_unavailable");
+  }
+  if (!await hasHostedGroupConsultRouteAuthorityTx({
+    expectedRuntimeMemberId: input.existingUserId,
+    routeAuthority: input.routeAuthority,
+    tx: input.tx,
+  })) {
+    return unavailableAdmission("group_route_unavailable");
   }
 
   return {

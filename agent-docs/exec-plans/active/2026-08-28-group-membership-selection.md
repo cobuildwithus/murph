@@ -57,8 +57,8 @@ rest.
 - A raw roster could expose contact handles. The inventory emits only authorized
   contact names, otherwise bounded phone hints or a generic email label.
 - Reading all memberships at once would create unbounded provider fanout. The
-  existing page boundary remains authoritative; Murph follows the opaque cursor
-  until it finds the target or exhausts the list.
+  existing page boundary remains authoritative; Murph exhausts the opaque
+  cursor chain before choosing or asking the final clarification.
 - Discovery cannot be the action authority. Web re-locks the exact membership
   and revalidates requester ownership, active access, runtime identity, and
   route authority immediately before the existing ask or handoff path proceeds.
@@ -140,34 +140,37 @@ rest.
 
 ## Product UX Walkthrough
 
-- Ready. A focused real-Codex journey used three synthetic joined groups that
-  shared one participant label and included colliding visible titles. Murph
-  listed once, distinguished all three with a participant count and another
-  safe clue, waited for the member's clarification, and handed off with exactly
-  the selected membership ID. It neither exposed IDs nor called more than one
-  handoff.
+- Ready. A focused real-Codex journey used three synthetic joined groups across
+  two inventory pages. They shared one participant label and included colliding
+  visible titles. Murph exhausted both pages, distinguished all three with real
+  chat participant counts, waited for the member's clarification, and handed
+  off with exactly the selected membership ID. It neither exposed IDs nor
+  called more than one handoff.
 - The walkthrough caught and removed three brittle behaviors before the
   candidate was frozen: vague "the other" clarification, a false claim that
   joined-group messaging was unavailable, and exclusion of groups that had
-  additional people beyond the participant named by the member.
+  additional people beyond the participant named by the member. Its final pass
+  also caught and corrected use of Murph-member counts instead of real chat
+  participant counts.
 - Deterministic journeys separately cover a unique match, partial roster
   availability, stale membership IDs after leave/rejoin, changed runtime/route
   authority, and replay with a different selected membership.
 
 ## Local Evidence
 
-- Hosted Web: six focused files passed (225 tests); changelog registry passed
-  (9 tests); package typecheck passed.
+- Hosted Web: six focused files passed (230 tests); changelog registry passed
+  (39 tests); package typecheck passed.
 - Hosted execution: three focused files passed (76 tests); package typecheck
   passed.
 - Cloudflare: three focused files passed (230 tests); package typecheck passed.
-- Assistant Engine: group-tool, prompt, tool-description, and scripted exact-ID
-  coverage passed (142 focused tests plus one changed scripted journey); package
-  typecheck passed. The focused real-Codex journey passed and its reviewed
-  member-facing behavior is Ready.
+- Assistant Engine: group-tool, prompt, tool-description, and model-behavior
+  coverage passed (217 tests), and the focused scripted exact-ID journey passed;
+  package typecheck passed. The two-page focused real-Codex journey passed on
+  `gpt-5.6-terra`; its reviewed member-facing behavior is Ready.
 - Provider input, measured from the same normalized complete request with the
-  deferred group schema absent initially: direct scope changed from 24,897
-  tokens / 114,914 bytes to 24,913 tokens / 115,138 bytes (+16 / +224); group
-  scope remained 22,298 tokens / 102,874 bytes (no change).
-- `git diff --check` passed. Exact-head CI and the required preliminary and
-  final ReviewGPT gates remain pending until the candidate PR exists.
+  deferred group schema absent initially: direct scope changed from 22,317
+  tokens / 105,380 bytes to 22,360 tokens / 105,751 bytes (+43 / +371); group
+  scope remained 18,770 tokens / 89,508 bytes (no change).
+- `git diff --check` and private-identifier inspection passed. The preliminary
+  ReviewGPT findings were accepted and resolved; exact-head CI and final
+  ReviewGPT round 2 remain pending on the corrected candidate.

@@ -17,6 +17,7 @@ import {
 } from "../hosted-onboarding/linq-client";
 import {
   createHostedLinqParticipantContact,
+  createHostedLinqParticipantContactLookupKeyReadCandidates,
   type HostedLinqParticipantContact,
 } from "../hosted-onboarding/linq-participant-contact";
 import {
@@ -196,7 +197,10 @@ export async function readHostedGroupMembershipParticipantRosters(input: {
 async function readParticipantContacts(input: {
   memberships: readonly HostedGroupMembershipParticipantSource[];
   rosters: Map<string, HostedRuntimeGroupParticipantRoster>;
-  routes: ReadonlyMap<string, { threadId: string }>;
+  routes: ReadonlyMap<string, {
+    accountLookupKey?: string | null;
+    threadId: string;
+  }>;
   signal: AbortSignal;
 }): Promise<HostedGroupMembershipParticipantContacts[]> {
   const contactsByMembership = new Map<
@@ -230,7 +234,10 @@ async function readParticipantContacts(input: {
             chatId: route.threadId,
             signal: input.signal,
           });
-          const contacts = readCompleteParticipantContacts(summary);
+          const contacts = readCompleteParticipantContacts({
+            ...summary,
+            accountLookupKey: route.accountLookupKey,
+          });
           if (!contacts) {
             input.rosters.set(
               membership.membershipId,
@@ -259,6 +266,7 @@ async function readParticipantContacts(input: {
 }
 
 function readCompleteParticipantContacts(input: {
+  accountLookupKey?: string | null;
   handleCount?: number;
   handles: readonly HostedLinqChatHandleSummary[];
   handlesComplete?: boolean;
@@ -271,12 +279,24 @@ function readCompleteParticipantContacts(input: {
   ) {
     return null;
   }
-  const contacts = input.handles
-    .filter(isActiveNonProviderHandle)
-    .map((handle) => createHostedLinqParticipantContact({
+  const contacts = input.handles.flatMap((handle) => {
+    if (!isActiveHandle(handle) || handle.isMe) {
+      return [];
+    }
+    const contact = createHostedLinqParticipantContact({
       kind: handle.handle.includes("@") ? "email" : "phone",
       value: handle.handle,
-    }));
+    });
+    if (
+      contact
+      && input.accountLookupKey
+      && createHostedLinqParticipantContactLookupKeyReadCandidates(contact)
+        .includes(input.accountLookupKey)
+    ) {
+      return [];
+    }
+    return [contact];
+  });
   if (
     contacts.some((contact) => contact === null)
     || contacts.length === 0
@@ -289,9 +309,9 @@ function readCompleteParticipantContacts(input: {
   );
 }
 
-function isActiveNonProviderHandle(handle: HostedLinqChatHandleSummary): boolean {
+function isActiveHandle(handle: HostedLinqChatHandleSummary): boolean {
   const status = handle.status?.trim().toLocaleLowerCase("und") ?? null;
-  return !handle.isMe && (status === null || status === "active");
+  return status === null || status === "active";
 }
 
 function createParticipantLabel(input: {

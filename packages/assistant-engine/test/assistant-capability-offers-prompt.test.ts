@@ -234,16 +234,24 @@ describe('assistant capability-offers prompt contract', () => {
       'Select only an exact opaque `membershipId` returned in this conversation',
     )
     expect(directSection).toContain(
+      'while `nextCursor` is nonnull, call `list_memberships` again with that exact cursor',
+    )
+    expect(directSection).toContain("complete inventory's titles")
+    expect(directSection).not.toContain('If the candidate is not settled')
+    expect(directSection).toContain(
       'otherwise run `vault-cli memory show`',
     )
     expect(directSection).toContain(
       'use "a member" only when canonical memory has no preferred name',
     )
     expect(directSection).toContain(
-      'real participant counts, and other safe participant labels',
+      '`participantRoster.participantCount`, which is the real chat participant count',
     )
     expect(directSection).toContain(
-      'never treat `truncated` or one entry\'s unavailable participant roster as global unavailability',
+      'Never use `memberCount` for this clarification',
+    )
+    expect(directSection).toContain(
+      'Never treat `truncated` or one entry\'s unavailable participant roster as global unavailability',
     )
     expect(directSection).toContain(
       'every inventory entry containing that safe label remains a candidate',
@@ -253,7 +261,7 @@ describe('assistant capability-offers prompt contract', () => {
     )
     expect(directSection).toContain('ask one concise natural clarification')
     expect(directSection).toContain(
-      'give every candidate its own participant count or other safe label',
+      'give every candidate its own real participant count or other safe label',
     )
     expect(directSection).toContain('paste-or-screenshot fallback')
     expect(directSection).toContain('Never expose, quote, edit, infer')

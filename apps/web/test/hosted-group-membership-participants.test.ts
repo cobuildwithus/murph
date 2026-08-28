@@ -52,11 +52,22 @@ vi.mock("../src/lib/hosted-groups/participant-member", async (importOriginal) =>
 import {
   readHostedGroupMembershipParticipantRosters,
 } from "../src/lib/hosted-groups/group-membership-participants";
+import {
+  createHostedLinqParticipantContact,
+} from "../src/lib/hosted-onboarding/linq-participant-contact";
 
 const NOW = new Date("2026-08-28T12:00:00.000Z");
 const REQUESTER_MEMBER_ID = "member_requester";
 const REQUESTER_PHONE = "+12125550100";
 const PROVIDER_PHONE = "+15550000000";
+const PROVIDER_LOOKUP_KEY = createHostedLinqParticipantContact({
+  kind: "phone",
+  value: PROVIDER_PHONE,
+})?.lookupKey;
+
+if (!PROVIDER_LOOKUP_KEY) {
+  throw new TypeError("Synthetic provider phone must produce a lookup key.");
+}
 
 function membership(index: number) {
   return {
@@ -65,9 +76,13 @@ function membership(index: number) {
   };
 }
 
-function route(runtimeMemberId: string, threadId: string) {
+function route(
+  runtimeMemberId: string,
+  threadId: string,
+  accountLookupKey = PROVIDER_LOOKUP_KEY,
+) {
   return {
-    accountLookupKey: "linq_account",
+    accountLookupKey,
     channel: "linq" as const,
     containerMemberId: runtimeMemberId,
     threadId,
@@ -190,6 +205,58 @@ describe("joined-group participant inventory", () => {
       participantLabels: [
         { phoneHint: { lastFour: "0321" } },
         { emailParticipant: true },
+      ],
+      status: "available",
+    });
+  });
+
+  it("excludes the routed provider account when Linq does not mark it as self", async () => {
+    const memberships = [membership(1), membership(2)];
+    dependencyMocks.readHostedRuntimeAiAllowedMemberIds.mockResolvedValue(
+      new Set(["runtime_1", "runtime_2"]),
+    );
+    dependencyMocks.readHostedThreadContainerLinqRouteAuthorities
+      .mockResolvedValue({
+        authorities: new Map([
+          ["runtime_1", route("runtime_1", "chat_1")],
+          ["runtime_2", route("runtime_2", "chat_2")],
+        ]),
+        nonLinqContainerMemberIds: new Set(),
+        unavailableContainerMemberIds: new Set(),
+      });
+    dependencyMocks.getHostedLinqChatSummary.mockImplementation(
+      async ({ chatId }: { chatId: string }) => {
+        const chatSummary = summary([
+          chatId === "chat_1" ? "+14155550101" : "+14155550202",
+        ]);
+        if (chatId === "chat_1") {
+          const provider = chatSummary.handles[0];
+          if (provider) {
+            provider.isMe = false;
+          }
+        }
+        return chatSummary;
+      },
+    );
+
+    const result = await readHostedGroupMembershipParticipantRosters({
+      memberId: REQUESTER_MEMBER_ID,
+      memberships,
+      now: NOW,
+      prisma: {} as never,
+    });
+
+    expect(result.get("membership_1")).toEqual({
+      participantCount: 2,
+      participantLabels: [
+        { phoneHint: { areaCode: "415", lastFour: "0101" } },
+      ],
+      status: "available",
+    });
+    expect(result.get("membership_2")).toEqual({
+      participantCount: 2,
+      participantLabels: [
+        { phoneHint: { areaCode: "415", lastFour: "0202" } },
       ],
       status: "available",
     });

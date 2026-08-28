@@ -190,8 +190,9 @@ Nothing is posted, reacted to, or shown as typing in the group.
 
 Web owns target authority because it owns current `HostedGroupMember` truth.
 
-1. Before `ask` or `handoff`, call `list_memberships`. Continue with the exact
-   opaque `nextCursor` while the candidate is unsettled and later pages remain.
+1. Before `ask` or `handoff`, call `list_memberships` and exhaust its cursor
+   chain. While `nextCursor` is nonnull, continue with that exact opaque cursor;
+   choose or ask the final clarification only from the complete inventory.
 2. Every returned entry contains its current opaque `membershipId`, existing
    title, Murph member count, and a `participantRoster` availability result.
 3. For a complete Linq/iMessage/SMS roster, Web removes the provider line,

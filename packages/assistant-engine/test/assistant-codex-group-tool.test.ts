@@ -295,7 +295,7 @@ describe("murph.group dynamic tool", () => {
     expect(groupConsultTool?.description)
       .toContain("ask=group answer; handoff=tell/post/share");
     expect(groupConsultTool?.description)
-      .toContain("via list_memberships exact ID");
+      .toContain("exact ID after exhausting list_memberships pages");
 
     const expectedRootKeys = {
       group_consult: [
