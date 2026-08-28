@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "exercise-pictures-arrive-with-the-cue",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Exercise pictures arrive with the cue",
+    "summary": "When Murph teaches a movement in a scheduled Messages cue, it now includes a reviewed exercise picture when one is available and keeps internal catalog labels out of the conversation.",
+    "details": "If a picture is missing and you ask to see it, Murph uses the reviewed catalog image when available and can create an instructional image when the catalog has none. Setup-only and non-instructional turns remain text-first.",
+    "relevanceTags": ["assistant", "exercise", "messages"],
+    "sourcePullRequests": [2467]
+  }
+}

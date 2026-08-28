@@ -1,13 +1,12 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-24
+Last verified: 2026-08-27
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
 
 1. One preliminary `completion-specialists` pass combines the applicable
-   Product UX, prompt, frontend, and coverage lenses. It may return one bounded coverage patch
-   artifact.
+   Product UX, prompt, frontend, and coverage lenses. It is review-only.
 2. The separate `pr-review` loop is the final cross-cutting gate for eligible work
    and replaces local `deep-review`.
 
@@ -106,10 +105,7 @@ Do not stack a manual polling loop on top of a live `--wait` process or detached
 wake watcher.
 
 The completion watcher does not relax exact-head, exact-thread, attachment,
-artifact, model, timeout, or response-marker validation. In particular, keep
-the preliminary coverage-patch download and application boundary in
-`agent-docs/operations/completion-workflow.md` § Preliminary ReviewGPT Packet;
-do not use a generic wake handoff as authority to apply an artifact.
+model, timeout, or response-marker validation.
 
 ## Finding Disposition Boundary
 
@@ -121,17 +117,17 @@ concrete code or path evidence, current user or operational harm, and the
 smallest justified fix with its complexity cost.
 
 A preliminary specialist result does not end the active task turn. After the
-parent reports the result and dispositions as a progress update, it may inspect
-an attached coverage artifact and remediate accepted findings within the
-existing task authority without asking for separate user permission. This
-continuation does not authorize a scope expansion, destructive action, or
-external action that otherwise requires approval.
+parent reports the result and dispositions as a progress update, it may
+remediate accepted findings within the existing task authority without asking
+for separate user permission. This continuation does not authorize a scope
+expansion, destructive action, or external action that otherwise requires
+approval.
 
 A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause: report the result
 and dispositions, then wait for the user to resume before mutating the
-candidate, downloading or applying an artifact, launching another review, or
-merging. If a concurrent final stage returns `FINDINGS`, that stricter pause
-also blocks pending specialist-driven mutation. A validated final
+candidate, launching another review, or merging. If a concurrent final stage
+returns `FINDINGS`, that stricter pause also blocks pending specialist-driven
+mutation. A validated final
 `ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly to
 the remaining parent review and merge checks without a user-resume pause.
 
@@ -187,8 +183,11 @@ Run one preliminary specialist pass when any of these lenses apply:
   or prompt regression behavior changed;
 - frontend: user-facing `apps/web` UI changed outside the tiny static-copy fast
   path; or
-- coverage: the diff changes executable behavior or changes the tests, fixtures,
-  configuration, or direct-proof scaffolding that establishes its proof.
+- coverage: tests, fixtures, or direct-proof infrastructure are a primary PR
+  outcome, or the changed behavior makes a material proof claim that ordinary
+  focused owner tests cannot establish at a stable boundary. Executable or
+  proof-file changes alone do not activate it; the final gate, when present,
+  owns ordinary correctness and test adequacy.
 
 The task must use a clean worktree/PR lane. Commit and push the review candidate
 and open or update the PR. The canonical `pnpm --silent review:gpt` command
@@ -274,36 +273,12 @@ An `INVALID` result is a tooling/evidence failure: correct the gap and retry the
 same preliminary pass. A `PASS` or `FINDINGS` result is the one substantive
 specialist pass; do not split or rerun it by lens. Apply the parent-owned
 finding-disposition boundary, report the result and dispositions as a progress
-update, then continue with accepted remediation or artifact inspection without
+update, then continue with accepted remediation without
 a user-resume pause. If a concurrent final stage has returned `FINDINGS`, obey
 its turn-ending pause before any candidate mutation.
 
-After the parent reports the preliminary dispositions, handle only accepted
-findings against the real code and tests. If the response attaches
-`reviewgpt-coverage.patch`,
-retain the exact review thread URL, artifact index, and selected lane. Download
-only that assistant-owned artifact from the same thread with the managed lane's
-CDP endpoint, for example:
-
-```bash
-pnpm exec cobuild-review-gpt thread download \
-  --artifact-index <index> \
-  --chat-url <exact-review-thread-url> \
-  --browser-endpoint http://127.0.0.1:<selected-lane-port> \
-  --output-dir audit-packages/pr-<number>-specialists
-```
-
-Read the full patch before applying it. Confirm every path is a test, fixture,
-or direct-proof scaffold; reject production, prompt, UI, config, schema,
-workflow, dependency, lockfile, generated, or docs hunks. Run
-`git apply --check audit-packages/pr-<number>-specialists/reviewgpt-coverage.patch`
-only after that inspection, then apply that same named file deliberately and
-rerun the focused local proof for the affected behavior. Push the result so the
-required exact-head CI surface evaluates it. Never pipe a downloaded artifact
-directly into `git apply`, and never treat the attachment as landed code.
-
-Resolve accepted Product UX, prompt, and frontend findings in the
-parent, rerun focused proof, and push the resulting candidate. If final round 1
+Resolve accepted findings against the real code and tests in the parent, rerun
+focused proof, and push the resulting candidate. If final round 1
 ran concurrently, preserve its first-reviewed-head baseline and verify the
 combined behavior-bearing remediation in the next substantive round. If accepted
 Product UX remediation materially changed a product-owned dimension, the
@@ -327,8 +302,7 @@ Run the loop when all of the following hold:
    exact pushed candidate is stable enough for a full-patch audit.
 4. The preliminary specialist pass starts against the same exact head when any
    of its lenses apply. It may still be running; completion still requires its
-   substantive result, resolved findings, and recorded coverage-patch
-   disposition.
+   substantive result and resolved findings.
 5. The user has not explicitly opted out of the final gate in the current task.
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
@@ -817,8 +791,8 @@ worktree active, and stop. Do not poll for a quiet base.
 - Do not substitute Codex subagents, pasted text, connector context,
   dirty-worktree context, ad hoc archives, or an unmanaged/non-ReviewGPT browser
   profile for either ReviewGPT stage.
-- Do not commit ReviewGPT responses, rendered evidence, or downloaded patch
-  artifacts. Files under `audit-packages/` and `.artifacts/review-gpt/` are
+- Do not commit ReviewGPT responses or rendered evidence. Files under
+  `audit-packages/` and `.artifacts/review-gpt/` are
   local working artifacts.
   Agents may instead post a concise PR comment as each round is resolved,
   stating what they fixed and why; these comments are optional.

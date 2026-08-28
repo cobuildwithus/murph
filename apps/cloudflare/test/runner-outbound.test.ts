@@ -140,9 +140,6 @@ import {
   readHostedRunnerWebControlRoute,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
 import {
-  handleRunnerGeneratedImageUploadRequest,
-} from "../src/runner-outbound/generated-images.ts";
-import {
   handleRunnerPrivateImageUrlPublishRequest,
 } from "../src/runner-outbound/private-image-urls.ts";
 import type {
@@ -152,7 +149,6 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
   HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
@@ -3115,37 +3111,6 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(emailSendMock).toHaveBeenCalledOnce();
-  });
-
-  it("tombstones generated-image URL uploads after the write fence", async () => {
-    const runner = createWorkspaceVersionAwareUserRunner();
-    const fetchMock = vi.fn<typeof fetch>();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const uploadRequest = new Request(
-      `http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`,
-      {
-        headers: createMailboxPayloadDecodeHeaders(),
-        method: "POST",
-      },
-    );
-    const response = await handleRunnerOutboundRequest(
-      uploadRequest,
-      createRunnerOutboundEnv({
-        USER_RUNNER: {
-          getByName: runner.getByName,
-        },
-      }),
-      "member_123" ,
-    );
-
-    expect(response.status).toBe(410);
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fetchMock).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error:
-        "Legacy generated-image URL uploads have moved to private provider attachments.",
-    });
   });
 
   it("sends the minimal image payload through the serialized UserRunner publisher", async () => {

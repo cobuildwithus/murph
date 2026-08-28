@@ -896,6 +896,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'ask',
     'handoff',
     'ask_current_sender',
+    'ask_current_sender_privately',
     'clarify_current_sender',
     'continue_current_sender_in_group',
     'continue_current_sender_privately',
@@ -1281,6 +1282,74 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   readonly MurphGroupToolPropertyName[]
 >
 
+type MurphGroupConsultAction =
+  (typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult)[number]
+
+const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
+  ask: {
+    optional: ['groupLabel', 'participantTarget'],
+    required: ['question'],
+  },
+  handoff: {
+    optional: ['groupLabel', 'participantTarget'],
+    required: ['context'],
+  },
+  ask_current_sender: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  ask_current_sender_privately: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  clarify_current_sender: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  continue_current_sender_in_group: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  continue_current_sender_privately: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  ask_member: {
+    optional: [],
+    required: ['grantId', 'question'],
+  },
+} as const satisfies Record<
+  MurphGroupConsultAction,
+  {
+    optional: readonly MurphGroupToolPropertyName[]
+    required: readonly MurphGroupToolPropertyName[]
+  }
+>
+
+function buildMurphGroupConsultInputSchema() {
+  return {
+    oneOf: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult.map((action) => {
+      const actionProperties = MURPH_GROUP_CONSULT_ACTION_PROPERTIES[action]
+      const propertyNames: readonly MurphGroupToolPropertyName[] = [
+        ...actionProperties.required,
+        ...actionProperties.optional,
+      ]
+      return {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { type: 'string', enum: [action] },
+          ...Object.fromEntries(propertyNames.map((propertyName) => [
+            propertyName,
+            MURPH_GROUP_TOOL_PROPERTIES[propertyName],
+          ])),
+        },
+        required: ['action', ...actionProperties.required],
+      }
+    }),
+  } as const
+}
+
 function buildMurphGroupFamilyInputSchema<
   const Name extends keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
 >(name: Name) {
@@ -1316,11 +1385,14 @@ function buildMurphGroupFamilyTool<
   } as const
 }
 
-export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
+export const MURPH_GROUP_CONSULT_TOOL = {
+  namespace: 'murph',
   name: 'group_consult',
+  deferLoading: true,
   description:
-    'Ask/hand off; host binds group/member/sender. Pass named group as groupLabel; never list first. Before handoff, if name absent, run vault-cli memory show; use "a member" only if none. Complete current-sender request: message_current_sender. Follow-up: clarify_current_sender, then continue_current_sender_privately or continue_current_sender_in_group; never continue a fresh request. Accepted handoff: say queued, not sent/told/shared/posted.',
-})
+    'ask=group answer; handoff=tell/post/share. title=groupLabel; people/count=participantTarget; names not groupLabel; no list. Unnamed: memory show, else "a member". ask_current_sender=group; ask_current_sender_privately=private; clarify=genuine ambiguity; continuations resume. accepted=queued, not sent/shared.',
+  inputSchema: buildMurphGroupConsultInputSchema(),
+} as const
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
@@ -1363,7 +1435,10 @@ export const MURPH_GROUP_FAMILY_TOOLS = [
 
 export const MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME = {
   group: ['action', ...Object.keys(MURPH_GROUP_TOOL_PROPERTIES)],
-  group_consult: Object.keys(MURPH_GROUP_CONSULT_TOOL.inputSchema.properties),
+  group_consult: [
+    'action',
+    ...MURPH_GROUP_TOOL_FAMILY_PROPERTIES.group_consult,
+  ],
   group_data: Object.keys(MURPH_GROUP_DATA_TOOL.inputSchema.properties),
   group_membership: Object.keys(MURPH_GROUP_MEMBERSHIP_TOOL.inputSchema.properties),
   group_usage: Object.keys(MURPH_GROUP_USAGE_TOOL.inputSchema.properties),
@@ -1533,7 +1608,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'One bounded Playwright macro-step in current authorized run; returns state. No missing or sensitive input or final confirmation. Before browser call two this turn, call send_progress_update if available and not yet sent. Failure leaves outcome uncertain; call computer_open before retry/next action.',
+    'Bounded Playwright macro-step in current authorized run; returns state. Allows specifically authorized non-credential identity/health input and approved final terms. Never invent data, enter credentials/OTP/payment, bypass CAPTCHA, accept material consent, or retry unknown effects. After failure, call computer_open.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 

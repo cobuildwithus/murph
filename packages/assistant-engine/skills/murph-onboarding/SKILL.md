@@ -111,7 +111,8 @@ Treat every useful saved fact in the snapshot as known evidence for the open
 health threads and foundation checkpoints. Never re-ask it.
 Missing evidence is unresolved unless the visible conversation shows that the
 user said it was not relevant or explicitly skipped it. A request to continue
-later is a deferral, not a completed checkpoint.
+later is interpreted by the object-scoped deferral rule in
+`references/persistence-recovery-follow-up.md`, not by timing words alone.
 
 Preserve forward progress when older wording has fallen out of visible history.
 If the visible conversation shows a foundation question or answer after an

@@ -611,6 +611,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.enum([
+        'ask_current_sender_privately',
         'clarify_current_sender',
         'continue_current_sender_in_group',
         'continue_current_sender_privately',
@@ -1007,6 +1008,14 @@ const computerRunIdSchema = z.string().trim().min(1)
 const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
   'startUrl',
 ] as const
+
+const COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS = Object.keys(
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema.properties,
+)
+const computerPauseForUserValidationPaths =
+  collectSafeJsonSchemaValidationPaths(
+    MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema,
+  )
 
 const computerNavigationUrlSchema = z
   .string()
@@ -2103,6 +2112,8 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerPauseForUserArgumentsSchema,
         schemaName: 'murph.computer_pause_for_user.input',
+        schemaPaths: computerPauseForUserValidationPaths,
+        schemaRootKeys: COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS,
         toolName: 'murph.computer_pause_for_user',
       })
       return parsed.ok
@@ -4651,6 +4662,18 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 }
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
+  if (
+    response.action === 'handoff'
+    && response.result.status === 'accepted'
+  ) {
+    return {
+      ...response,
+      result: {
+        ...response.result,
+        status: 'queued',
+      },
+    }
+  }
   if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
@@ -7261,6 +7284,7 @@ function parseGroupArguments(
   }
   if (
     parsed.data.action === 'ask_current_sender'
+    || parsed.data.action === 'ask_current_sender_privately'
     || parsed.data.action === 'clarify_current_sender'
     || parsed.data.action === 'continue_current_sender_in_group'
     || parsed.data.action === 'continue_current_sender_privately'
@@ -7535,6 +7559,7 @@ function parseGroupArguments(
 
 function readCurrentSenderToolDecision(action:
   | 'ask_current_sender'
+  | 'ask_current_sender_privately'
   | 'clarify_current_sender'
   | 'continue_current_sender_in_group'
   | 'continue_current_sender_privately'
@@ -7546,6 +7571,7 @@ function readCurrentSenderToolDecision(action:
   switch (action) {
     case 'ask_current_sender':
       return { audience: 'group', mode: 'new' }
+    case 'ask_current_sender_privately':
     case 'message_current_sender':
       return { audience: 'current_sender', mode: 'new' }
     case 'clarify_current_sender':
@@ -7713,6 +7739,7 @@ function parseComputerArguments<TArgs>(input: {
   argumentsValue: unknown
   schema: z.ZodType<TArgs> & { shape?: Record<string, unknown> }
   schemaName: string
+  schemaPaths?: readonly string[]
   schemaRootKeys?: readonly string[]
   toolName: string
 }):
@@ -7726,6 +7753,7 @@ function parseComputerArguments<TArgs>(input: {
         error: parsed.error,
         rawInput: input.argumentsValue,
         schemaName: input.schemaName,
+        schemaPaths: input.schemaPaths,
         schemaRootKeys: input.schemaRootKeys ?? readZodObjectRootKeys(input.schema),
         toolName: input.toolName,
       }),
