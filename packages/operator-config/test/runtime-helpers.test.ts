@@ -1441,8 +1441,10 @@ test('device sync client helpers trim env values, send bearer auth, and map cont
       error instanceof VaultCliError &&
       error.code === 'device_sync_invalid_response' &&
       /invalid JSON payload/u.test(error.message) &&
-      error.context?.baseUrl === 'http://127.0.0.1:8788' &&
-      error.context?.path === '/providers',
+      error.context?.retryable === false &&
+      error.context?.stage === 'response' &&
+      error.context?.baseUrl === undefined &&
+      error.context?.path === undefined,
   )
 
   assert.throws(

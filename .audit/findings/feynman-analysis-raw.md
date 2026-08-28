@@ -115,3 +115,49 @@ without restoring any user capability. Separate 200-member shared-read and
 100-recipient email bounds depend on immutable authority snapshots and recipient
 batching; they were recorded as distinct architecture work rather than changed
 speculatively in this patch.
+
+## Vault CLI error-recovery follow-up - 2026-08-27
+
+### Failure-boundary matrix
+
+| ID | Owner boundary | Question that exposed the failure | Pre-fix effect |
+| --- | --- | --- | --- |
+| VC-001 | exact event read | What classifies a malformed or contract-invalid stored event before a mutation begins? | A generic `vault_error` hid the repair action. |
+| VC-002 | owned event lookup | Why was a matching meal or document row required to have a valid id before validation? | Corrupt owned rows looked absent. |
+| VC-003 | vault metadata update | Why did one metadata mutation bypass the existing metadata mapper? | `vault update` hid validation recovery. |
+| VC-004 | event and intervention mutation result | Why read again after the write already returned the committed entity? | A successful mutation could be reported as failed. |
+| VC-005 | CLI entrypoint cleanup | Which failure wins when both the command and shutdown fail? | Cleanup replaced the actionable command error. |
+| VC-006 | pre-serve formatter selection | Which repeated output-format flag is effective? | Pre-serve errors used the first flag while Incur used the last. |
+| VC-007 | challenge score input | Which failures are schema mistakes, deterministic inconsistencies, or internal faults? | One catch-all erased repair paths and mislabeled internal errors. |
+| VC-008 | shared device requester | What ends a stalled local daemon request? | A request could hang without producing any error. |
+| VC-009 | shared device requester | Who owns `Response` body-read failures? | Stream failures escaped typed device recovery. |
+| VC-010 | device retry projection | Is a failed request safe to repeat after the server may have acted? | POST failures could inherit retryable advice intended for reads. |
+| VC-011 | shared JSON input | What stable filesystem class owns an unreadable `@file`? | Raw causes were retained while callers only saw `command_failed`. |
+| VC-012 | Exa boundary | Why record an internal failure stage without projecting a supported stage? | Machine callers lost transport versus response phase. |
+| VC-013 | progress-card persistence | Did cleanup fail before or after the image was saved? | Cleanup could make a saved card look unsaved; filesystem failures looked transient. |
+| VC-014 | structured measurement input | Why discard invalid nested entries instead of rejecting the submitted record? | A partial measurement could be persisted as success. |
+| VC-015 | finite CLI filters | What does an unknown status, event kind, or sample stream mean? | Typos returned successful empty results or zero summaries. |
+| VC-016 | sample ledger read | Is valid JSON sufficient when the ledger contract requires an object? | Primitive and array rows were silently skipped. |
+| VC-017 | calendar and range input | Does a regex prove a real date or an ordered range? | Impossible and reversed dates reached read owners as valid filters. |
+| VC-018 | clinical-records preemption | Which error wins when the foreground poll aborts just before the synchronous yield boundary? | A timing race replaced the stable preemption code with a generic `AbortError`. |
+
+### Cross-function analysis
+
+- Error ownership remains where the stable fact is known: core validates stored
+  records, usecases map domain recovery, shared clients classify transport, and
+  commands validate finite public options.
+- Post-write output must derive from the committed mutation result. A second read
+  adds no truth and can only introduce a false failure window.
+- Retryability is an effect property, not a status-code property. Read methods
+  may be repeated after transport failures; an ambiguous POST may not.
+- Validation must reject malformed nested input atomically. Filtering invalid
+  entries changes the requested write and creates misleading success.
+- At a synchronous maintenance boundary, the explicit foreground-yield fact
+  must win over the poller's linked abort. In-flight work still uses the abort
+  signal for immediate cancellation.
+- No finding requires a retry loop, queue, supervisor, new state owner, or broad
+  error framework. Existing schemas, mappings, and committed results are enough.
+
+The audit rejected an exhaustive leaf-to-error registry as speculative
+machinery: the current inventory count changed, but no additional reachable
+failure was proven from that count alone.
