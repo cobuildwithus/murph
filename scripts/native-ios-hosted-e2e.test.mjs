@@ -37,13 +37,6 @@ import {
   runBoundedCommand,
 } from "./native-ios-hosted-e2e-support.mjs";
 import {
-  inspectRetryableNativeIosFailureCode,
-  inspectRetryableNativeIosPullRequest,
-  parseNativeIosHostedE2eRetryArgs,
-  retryNativeIosHostedE2e,
-  selectRetryableRepoHygieneRun,
-} from "./native-ios-hosted-e2e-retry.mjs";
-import {
   createE2eDeployment,
   inspectPublicCandidateResponse,
   inspectRetirableE2eDeployment,
@@ -65,45 +58,6 @@ const COMMAND_TREE_FIXTURE = path.join(
   "fixtures",
   "native-ios-hosted-e2e-command-tree.mjs",
 );
-const TRUSTED_DEFAULT_BRANCH_CONTROLLERS = [
-  "scripts/native-ios-hosted-e2e-identity.mjs",
-  "scripts/native-ios-hosted-e2e-native.mjs",
-  "scripts/native-ios-hosted-e2e-support.mjs",
-  "scripts/native-ios-hosted-e2e-vercel.mjs",
-  "scripts/native-ios-hosted-e2e.mjs",
-];
-
-function retryablePullRequest(headSha = SHA) {
-  return {
-    head: {
-      ref: "feature/native-e2e",
-      repo: { full_name: "cobuildwithus/murph" },
-      sha: headSha,
-    },
-    draft: false,
-    number: 42,
-    state: "open",
-    user: { type: "User" },
-  };
-}
-
-function repoHygieneRun(id, overrides = {}) {
-  return {
-    conclusion: "success",
-    event: "pull_request",
-    head_branch: "feature/native-e2e",
-    head_repository: { full_name: "cobuildwithus/murph" },
-    head_sha: SHA,
-    id,
-    name: "Repo Hygiene",
-    path: ".github/workflows/repo-hygiene.yml",
-    pull_requests: [],
-    repository: { full_name: "cobuildwithus/murph" },
-    status: "completed",
-    ...overrides,
-  };
-}
-
 test("cross-repo contract is minimal, versioned, and names lifecycle ownership truthfully", () => {
   assert.equal(NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION, "3");
   assert.deepEqual(buildDispatchInputs({
@@ -169,437 +123,118 @@ test("Web PR revalidation uses only the explicit repository token and exact pull
   }
 });
 
-test("PR selector targets Web candidates and leaves controller rollout to trusted default branch", async () => {
+test("trusted iOS controller is six-hour, main-change gated, and production-only", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
-  );
-  assert.ok(
-    workflow.includes("--jq '.[] | .filename, (.previous_filename // empty)'"),
-    "renamed paths must be evaluated through previous_filename",
   );
   const workflowConcurrency = workflow.slice(
     workflow.indexOf("\nconcurrency:\n"),
     workflow.indexOf("\njobs:\n"),
   );
-  assert.match(
-    workflowConcurrency,
-    /group: native-ios-hosted-e2e-\$\{\{ github\.event\.workflow_run\.pull_requests\[0\]\.number \|\| github\.event\.deployment\.sha \|\| github\.run_id \}\}/u,
-    "workflow concurrency must retain only one running and one newest pending run per PR",
-  );
+
+  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/6 \* \* \*"/u);
+  assert.match(workflow, /actions: read\n\s+contents: read/u);
+  assert.match(workflowConcurrency, /group: native-ios-production-canary/u);
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);
   assert.doesNotMatch(workflowConcurrency, /queue:/u);
-  const prLive = workflow.slice(
-    workflow.indexOf("  pr-live:"),
-    workflow.indexOf("  pr-required:"),
-  );
-  assert.match(
-    prLive,
-    /group: native-ios-hosted-e2e-live\n\s+queue: max\n\s+cancel-in-progress: false/u,
-    "the one destructive live slot must remain globally serialized without pending replacement",
-  );
-  const liveStart = workflow.indexOf("  pr-live:\n");
-  const liveEnd = workflow.indexOf("\n  pr-required:\n", liveStart);
-  const liveJob = workflow.slice(liveStart, liveEnd);
-  const earlyHeadCheck = liveJob.indexOf("- name: Revalidate exact PR head before runner setup");
-  assert.ok(earlyHeadCheck >= 0, "the live job must revalidate before runner setup");
-  for (const laterStep of [
-    "- name: Checkout trusted control plane",
-    "- name: Setup pnpm",
-    "- name: Setup Node",
-    "- name: Install trusted control dependencies",
-  ]) {
-    assert.ok(liveJob.indexOf(laterStep) > earlyHeadCheck, `${laterStep} must follow head revalidation`);
-  }
-  assert.match(liveJob, /NATIVE_IOS_E2E_WEB_GITHUB_TOKEN: \$\{\{ github\.token \}\}/u);
-  assert.match(liveJob, /--pr-number "\$\{PR_NUMBER\}"/u);
-  const directRerunGuard = [
-    "if: ${{ github.run_attempt == 1",
-    "github.event.workflow_run.conclusion == 'success'",
-    "needs.select-pr.outputs.selected == 'true'",
-    "needs.select-pr.outputs.trusted == 'true' }}",
-  ].join(" && ");
-  assert.ok(
-    prLive.includes(directRerunGuard),
-    "a direct workflow rerun must not inherit its original live-queue priority",
-  );
-  assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
   assert.match(
     workflow,
-    /Retry: node scripts\/native-ios-hosted-e2e-retry\.mjs --pr \$\{PR_NUMBER\} --failure-code xcodebuild_failed/u,
+    /native-ios-hosted-e2e\.yml\/runs\?event=schedule&status=success&per_page=1/u,
+  );
+  assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
+  assert.match(workflow, /CURRENT_SHA: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /if: \$\{\{ needs\.select-main\.outputs\.should_run == 'true' \}\}/u);
+  assert.match(workflow, /DEPLOYED_SHA: \$\{\{ needs\.select-main\.outputs\.web_sha \}\}/u);
+  assert.match(workflow, /ref: \$\{\{ needs\.select-main\.outputs\.web_sha \}\}/u);
+  assert.match(workflow, /environment: native-ios-production-canary/u);
+  assert.match(workflow, /node scripts\/native-ios-hosted-e2e\.mjs canary/u);
+  assert.match(workflow, /NATIVE_IOS_E2E_IOS_EXPECTED_SHA/u);
+  assert.match(workflow, /NATIVE_IOS_E2E_IOS_REF/u);
+  assert.match(workflow, /NATIVE_IOS_E2E_IOS_WORKFLOW/u);
+  assert.doesNotMatch(
+    workflow,
+    /workflow_run:|deployment_status:|workflow_dispatch:|pull_request:|push:|pull-requests:|statuses: write|pr-live:|pr-required:|native-ios-hosted-e2e-live|node scripts\/native-ios-hosted-e2e\.mjs pr/u,
   );
   assert.doesNotMatch(
     workflow,
-    /^\s+apps\/web\/\*\|/mu,
-    "the selector must not admit every hosted Web path",
+    /NATIVE_IOS_E2E_DATABASE_URL|NATIVE_IOS_E2E_PRIVY_TEST_PHONE|NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID/u,
   );
-  assert.equal(workflowTopLevelWebRegex(workflow), "^apps/web/[^/]+$");
-  for (const file of [
-    "apps/web/future-build.config.ts",
-    "apps/web/tsconfig.next.json",
-    "apps/web/app/api/device-sync/companion/future/route.ts",
-    "apps/web/prisma/future/schema.prisma",
-    "apps/web/scripts/ensure-prisma-client-link.ts",
-    "apps/web/scripts/future-build-owner.ts",
-    "apps/web/src/lib/future-runtime-owner.ts",
-    "packages/device-syncd/src/hosted-runtime.ts",
-  ]) {
-    assert.equal(runWorkflowSelector(workflow, file), "selected", file);
+
+  const jobs = workflow.slice(workflow.indexOf("\njobs:\n"));
+  assert.deepEqual(
+    [...jobs.matchAll(/^  (?<name>[a-z][a-z-]+):$/gmu)].map((match) => match.groups.name),
+    ["select-main", "production-canary"],
+  );
+  for (const line of workflow.split("\n").filter((value) => /^\s*uses:/u.test(value))) {
+    assert.match(line, /uses: [^\s]+@[0-9a-f]{40}(?:\s|$)/u, line);
   }
-  for (const file of [
-    "apps/web/app/page.tsx",
-    "apps/web/app/changelog/page.tsx",
-    "apps/web/changelog/README.md",
-    "apps/web/src/components/marketing/hero.tsx",
-    "apps/web/test/dashboard-home-page.test.tsx",
-    "packages/assistant-runtime/src/index.ts",
-    "packages/health-commons/src/index.ts",
-  ]) {
-    assert.equal(runWorkflowSelector(workflow, file), "neutral", file);
-  }
-  const broadWebMutation = workflow.replace(
-    '              case "${file}" in\n',
-    '              case "${file}" in\n                apps/web/*|\\\n',
-  );
-  assert.equal(
-    runWorkflowSelector(broadWebMutation, "apps/web/app/page.tsx"),
-    "selected",
-    "the unrelated Web mutation must demonstrate why the broad pattern is forbidden",
-  );
-  assert.equal(TRUSTED_DEFAULT_BRANCH_CONTROLLERS.length, 5);
-  for (const controller of TRUSTED_DEFAULT_BRANCH_CONTROLLERS) {
-    assert.equal(runWorkflowSelector(workflow, controller), "neutral", controller);
-  }
-  assert.equal(
-    runWorkflowSelector(workflow, "scripts/native-ios-hosted-e2e.test.mjs"),
-    "neutral",
-  );
-  assert.equal(
-    runWorkflowSelector(workflow, "agent-docs/product-specs/companion-app.md"),
-    "neutral",
-  );
 });
 
-test("commit status descriptions distinguish real-run proof from every non-run path", async () => {
+test("iOS schedule admission skips only a current successful scheduled proof", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
   );
-  const script = extractWorkflowStepScript(workflow, "Publish stable commit status");
-  const prNumber = String(Number.MAX_SAFE_INTEGER);
-  const baseEnv = {
-    LIVE_RESULT: "skipped",
-    PR_NUMBER: prNumber,
-    RUN_ATTEMPT: "1",
-    SELECT_RESULT: "success",
-    SELECTED: "true",
-    SOURCE_RESULT: "success",
-    TRUSTED: "true",
-  };
-  const scenarios = [
-    [
-      { RUN_ATTEMPT: "2" },
-      "failure",
-      `Retry: node scripts/native-ios-hosted-e2e-retry.mjs --pr ${prNumber} --failure-code xcodebuild_failed`,
-    ],
-    [
-      { SELECT_RESULT: "failure" },
-      "failure",
-      "This controller run did not execute real native iOS hosted E2E: selection failed.",
-    ],
-    [
-      { SOURCE_RESULT: "failure" },
-      "failure",
-      "This controller run did not execute real native iOS hosted E2E: Repo Hygiene did not pass.",
-    ],
-    [
-      { SELECTED: "false" },
-      "success",
-      "This controller run did not execute real native iOS hosted E2E: path filter did not select the commit.",
-    ],
-    [
-      { TRUSTED: "false" },
-      "failure",
-      "This controller run did not execute real native iOS hosted E2E: trusted same-repository human head required.",
-    ],
-    [
-      { LIVE_RESULT: "success" },
-      "success",
-      "This controller run passed real native iOS hosted E2E for the exact commit.",
-    ],
-    [
-      { LIVE_RESULT: "failure" },
-      "failure",
-      "This status cannot determine whether real native iOS hosted E2E started; no passing proof was recorded.",
-    ],
-  ];
-  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-status-proof-"));
+  const script = extractWorkflowStepScript(
+    workflow,
+    "Compare main with the latest successful scheduled proof",
+  );
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-cadence-proof-"));
   try {
     await writeFile(path.join(tempDir, "gh"), `#!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$@" > "$GH_CAPTURE"
+printf '%s\\n' "\${PREVIOUS_SHA:-}"
 `, { mode: 0o755 });
-    for (const [index, [overrides, expectedState, expectedDescription]] of scenarios.entries()) {
-      const capturePath = path.join(tempDir, `gh-${index}.args`);
+    const scenarios = [
+      { attempt: "1", expected: "true", previousSha: "" },
+      { attempt: "1", expected: "false", previousSha: SHA },
+      { attempt: "1", expected: "true", previousSha: "b".repeat(40) },
+      { attempt: "2", expected: "true", previousSha: SHA },
+    ];
+    for (const [index, scenario] of scenarios.entries()) {
+      const outputPath = path.join(tempDir, `output-${index}`);
       const result = spawnSync("bash", ["-c", script], {
         cwd: REPO_ROOT,
         encoding: "utf8",
         env: {
           ...process.env,
-          ...baseEnv,
-          ...overrides,
-          GH_CAPTURE: capturePath,
+          CURRENT_SHA: SHA,
+          GITHUB_OUTPUT: outputPath,
           GITHUB_REPOSITORY: "cobuildwithus/murph",
-          GITHUB_RUN_ID: "987",
-          GITHUB_SERVER_URL: "https://github.example.test",
           PATH: `${tempDir}:${process.env.PATH ?? ""}`,
-          STATUS_SHA: SHA,
+          PREVIOUS_SHA: scenario.previousSha,
+          RUN_ATTEMPT: scenario.attempt,
         },
       });
-      assert.equal(result.status, expectedState === "success" ? 0 : 1, result.stderr);
-      const ghArgs = (await readFile(capturePath, "utf8")).trimEnd().split("\n");
-      assert.ok(ghArgs.includes(`state=${expectedState}`));
-      const description = ghArgs.find((argument) => argument.startsWith("description="))
-        ?.slice("description=".length);
-      assert.equal(description, expectedDescription);
-      assert.ok(description.length <= 140, `commit status description is ${description.length} characters`);
+      assert.equal(result.status, 0, result.stderr);
+      const output = Object.fromEntries(
+        (await readFile(outputPath, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => line.split("=", 2)),
+      );
+      assert.deepEqual(output, { should_run: scenario.expected, web_sha: SHA });
     }
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
 
-  assert.ok(workflow.includes("This controller run has not executed real native iOS hosted E2E yet."));
-  assert.doesNotMatch(workflow, /PR does not require the hosted Web native E2E lane/u);
-});
-
-test("shared native retry routes are documented instead of direct workflow reruns", async () => {
-  const documents = await Promise.all([
-    readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
-    readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
-  ]);
-  for (const document of documents) {
-    assert.match(
-      document,
-      /node scripts\/native-ios-hosted-e2e-retry\.mjs --pr <number> --failure-code xcodebuild_failed/u,
-    );
-    assert.match(
-      document,
-      /node scripts\/native-ios-hosted-e2e-retry\.mjs --pr <number> --failure-code android_workflow_rerun/u,
-    );
-    assert.match(document, /operator attestation/u);
-    assert.match(document, /does not discover or verify/u);
-  }
-});
-
-test("native retry helper requires one positive PR number and an infrastructure code", () => {
-  assert.deepEqual(
-    parseNativeIosHostedE2eRetryArgs([
-      "--pr",
-      "42",
-      "--failure-code",
-      "xcodebuild_failed",
-    ]),
-    { failureCode: "xcodebuild_failed", prNumber: 42 },
-  );
-  assert.deepEqual(
-    parseNativeIosHostedE2eRetryArgs([
-      "--pr",
-      "42",
-      "--failure-code",
-      "android_workflow_rerun",
-    ]),
-    { failureCode: "android_workflow_rerun", prNumber: 42 },
-  );
-  for (const argv of [
-    [],
-    ["42"],
-    ["--pr", "0", "--failure-code", "xcodebuild_failed"],
-    ["--pr", "01", "--failure-code", "xcodebuild_failed"],
-    ["--pr", "42"],
-    ["--failure-code", "xcodebuild_failed", "--pr", "42"],
-    ["--pr", "42", "--failure-code", "xcodebuild_failed", "extra"],
-  ]) {
-    assert.throws(() => parseNativeIosHostedE2eRetryArgs(argv), /Usage:/u);
-  }
-});
-
-test("native retry rejects journey, product, legacy, and contract failure codes", () => {
-  assert.equal(inspectRetryableNativeIosFailureCode("xcodebuild_failed"), "xcodebuild_failed");
-  assert.equal(
-    inspectRetryableNativeIosFailureCode("android_workflow_rerun"),
-    "android_workflow_rerun",
-  );
-  for (const failureCode of [
-    "fresh_signup_and_onboarding_failed",
-    "returning_privy_otp_failed",
-    "initial_privy_otp_failed",
-    "junction_connect_failed",
-    "connected_state_failed",
-    "healthkit_authorization_failed",
-    "returning_member_state_failed",
-    "returning_member_shell_failed",
-    "healthkit_authorization_sheet_missing",
-    "workflow_contract_validation_failed",
-  ]) {
-    assert.throws(
-      () => inspectRetryableNativeIosFailureCode(failureCode),
-      /allowlisted infrastructure failure codes android_workflow_rerun or xcodebuild_failed/u,
-      failureCode,
-    );
-  }
-});
-
-test("every advertised native retry command reaches the shared exact-head rerun owner", async () => {
-  for (const workflowName of [
-    "native-ios-hosted-e2e.yml",
-    "native-android-hosted-e2e.yml",
-  ]) {
-    const workflow = await readFile(
-      path.join(REPO_ROOT, ".github", "workflows", workflowName),
-      "utf8",
-    );
-    const commands = [...workflow.matchAll(
-      /node scripts\/native-ios-hosted-e2e-retry\.mjs --pr \$\{PR_NUMBER\} --failure-code [a-z_]+/gu,
-    )].map((match) => match[0].replace("${PR_NUMBER}", "42"));
-    assert.equal(commands.length, 1, `${workflowName} must advertise one retry command`);
-
-    const parsed = parseNativeIosHostedE2eRetryArgs(commands[0].split(" ").slice(2));
-    const calls = [];
-    await retryNativeIosHostedE2e({
-      ...parsed,
-      request: async (request) => {
-        calls.push(request);
-        if (request.endpoint === "repos/cobuildwithus/murph/pulls/42") {
-          return retryablePullRequest();
-        }
-        if (request.method === "GET") {
-          return [{ workflow_runs: [repoHygieneRun(321)] }];
-        }
-        return null;
+    const invalidResult = spawnSync("bash", ["-c", script], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CURRENT_SHA: SHA,
+        GITHUB_OUTPUT: path.join(tempDir, "invalid-output"),
+        GITHUB_REPOSITORY: "cobuildwithus/murph",
+        PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+        PREVIOUS_SHA: "not-a-sha",
+        RUN_ATTEMPT: "1",
       },
     });
-    assert.deepEqual(
-      calls.filter((request) => request.method === "POST"),
-      [{
-        endpoint: "repos/cobuildwithus/murph/actions/runs/321/rerun",
-        method: "POST",
-      }],
-      `${workflowName} must reach the one exact Repo Hygiene rerun POST`,
-    );
+    assert.equal(invalidResult.status, 1);
+    assert.match(invalidResult.stdout, /did not expose an exact SHA/u);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
   }
-});
-
-test("native iOS retry helper selects the newest exact-head successful Repo Hygiene owner", () => {
-  const run = selectRetryableRepoHygieneRun([
-    {
-      workflow_runs: [
-        repoHygieneRun(100),
-        repoHygieneRun(105, { conclusion: "failure" }),
-        repoHygieneRun(106, { head_branch: "feature/other" }),
-      ],
-    },
-    {
-      workflow_runs: [
-        repoHygieneRun(110),
-        repoHygieneRun(120, { head_sha: "b".repeat(40) }),
-        repoHygieneRun(130, { pull_requests: [{ number: 99 }] }),
-      ],
-    },
-  ], { headRef: "feature/native-e2e", headSha: SHA, prNumber: 42 });
-  assert.equal(run.id, 110);
-});
-
-test("native iOS retry helper will not replace an active Repo Hygiene owner", () => {
-  assert.throws(() => selectRetryableRepoHygieneRun({
-    workflow_runs: [
-      repoHygieneRun(110),
-      repoHygieneRun(111, { conclusion: null, status: "in_progress" }),
-    ],
-  }, { headRef: "feature/native-e2e", headSha: SHA, prNumber: 42 }), /already has an active/u);
-});
-
-test("native iOS retry helper revalidates the current head before rerunning Repo Hygiene", async () => {
-  const calls = [];
-  let prReads = 0;
-  const result = await retryNativeIosHostedE2e({
-    failureCode: "xcodebuild_failed",
-    prNumber: 42,
-    request: async (request) => {
-      calls.push(request);
-      if (request.endpoint === "repos/cobuildwithus/murph/pulls/42") {
-        prReads += 1;
-        return retryablePullRequest();
-      }
-      if (request.method === "GET" && request.endpoint.includes("/actions/workflows/repo-hygiene.yml/runs?")) {
-        assert.match(request.endpoint, /branch=feature%2Fnative-e2e/u);
-        assert.equal(request.paginate, true);
-        return [{ workflow_runs: [repoHygieneRun(321)] }];
-      }
-      if (request.method === "POST") return null;
-      throw new Error(`Unexpected request: ${JSON.stringify(request)}`);
-    },
-  });
-  assert.deepEqual(result, {
-    failureCode: "xcodebuild_failed",
-    headSha: SHA,
-    prNumber: 42,
-    repoHygieneRunId: 321,
-  });
-  assert.equal(prReads, 2);
-  assert.deepEqual(calls.at(-1), {
-    endpoint: "repos/cobuildwithus/murph/actions/runs/321/rerun",
-    method: "POST",
-  });
-});
-
-test("native iOS retry helper fails closed when the PR head moves", async () => {
-  let prReads = 0;
-  let posted = false;
-  await assert.rejects(() => retryNativeIosHostedE2e({
-    failureCode: "xcodebuild_failed",
-    prNumber: 42,
-    request: async (request) => {
-      if (request.endpoint === "repos/cobuildwithus/murph/pulls/42") {
-        prReads += 1;
-        return retryablePullRequest(prReads === 1 ? SHA : "b".repeat(40));
-      }
-      if (request.method === "GET") return [{ workflow_runs: [repoHygieneRun(321)] }];
-      posted = true;
-      return null;
-    },
-  }), /head changed/u);
-  assert.equal(posted, false);
-});
-
-test("native iOS retry requires the current PR to remain ready", () => {
-  assert.throws(() => inspectRetryableNativeIosPullRequest({
-    ...retryablePullRequest(),
-    draft: true,
-  }, { expectedPrNumber: 42 }), /must be ready for review/u);
-});
-
-test("native iOS retry rejects a product failure before making a GitHub request", async () => {
-  let requested = false;
-  await assert.rejects(() => retryNativeIosHostedE2e({
-    failureCode: "fresh_signup_and_onboarding_failed",
-    prNumber: 42,
-    request: async () => {
-      requested = true;
-      return null;
-    },
-  }), /allowlisted infrastructure failure codes android_workflow_rerun or xcodebuild_failed/u);
-  assert.equal(requested, false);
-});
-
-test("native iOS retry helper preserves the workflow trust boundary", () => {
-  assert.throws(() => inspectRetryableNativeIosPullRequest({
-    ...retryablePullRequest(),
-    head: {
-      ref: "feature/native-e2e",
-      repo: { full_name: "outside/fork" },
-      sha: SHA,
-    },
-  }, { expectedPrNumber: 42 }), /same-repository human-authored/u);
 });
 
 test("Vercel custom environment proof binds the dedicated id and slug", () => {
@@ -664,8 +299,11 @@ test("Vercel owns the one Junction namespace read by cleanup and the candidate",
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
   );
-  assert.match(workflow, /NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID/u);
-  assert.doesNotMatch(workflow, /NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_NAMESPACE/u);
+  assert.doesNotMatch(
+    workflow,
+    /NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID|NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
+    "the production-only schedule must not receive destructive PR namespace authority",
+  );
 
   const controller = await readFile(
     path.join(REPO_ROOT, "scripts", "native-ios-hosted-e2e.mjs"),
@@ -1691,39 +1329,6 @@ function jsonResponse(value) {
   });
 }
 
-function runWorkflowSelector(workflow, file) {
-  const topLevelWebRegex = workflowTopLevelWebRegex(workflow);
-  const match = /case "\$\{file\}" in\n(?<patterns>[\s\S]*?)\)\n\s+selected=true\n\s+break/u.exec(workflow);
-  assert.ok(match?.groups?.patterns, "workflow selector case was not found");
-  const script = [
-    "set -euo pipefail",
-    'file="$1"',
-    `if [[ "\${file}" =~ ${topLevelWebRegex} ]]; then`,
-    '  printf "selected\\n"',
-    "  exit 0",
-    "fi",
-    'case "${file}" in',
-    `${match.groups.patterns})`,
-    '  printf "selected\\n"',
-    "  ;;",
-    "*)",
-    '  printf "neutral\\n"',
-    "  ;;",
-    "esac",
-  ].join("\n");
-  const result = spawnSync("bash", ["-c", script, "selector", file], {
-    encoding: "utf8",
-  });
-  assert.equal(result.error, undefined);
-  assert.equal(result.status, 0, result.stderr);
-  return result.stdout.trim();
-}
-
-function workflowTopLevelWebRegex(workflow) {
-  const match = /if \[\[ "\$\{file\}" =~ (?<pattern>\S+) \]\]; then/u.exec(workflow);
-  assert.ok(match?.groups?.pattern, "top-level Web selector boundary was not found");
-  return match.groups.pattern;
-}
 
 async function runVercelBuild(environment) {
   const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-vercel-build-"));

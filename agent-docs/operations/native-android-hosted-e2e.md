@@ -2,36 +2,29 @@
 
 ## Ownership
 
-`.github/workflows/native-android-hosted-e2e.yml` is the trusted shared-backend
-controller. It never executes candidate workflow code. For a trusted same-repo
-pull request that passed Repo Hygiene, it checks out the protected default
-branch, revalidates the exact PR head, creates a dedicated public Vercel
-candidate from that exact Web SHA, resets the one protected non-production
-identity, dispatches the private Android workflow at an immutable tag, verifies
-terminal hosted/Junction state, and retires the candidate and identity.
+`.github/workflows/native-android-hosted-e2e.yml` is the trusted default-branch
+production canary controller. It runs at minute 47 every six hours, after the
+iOS controller's minute-17 slot. It admits no pull-request, deployment-status,
+or manual event and publishes no required commit status.
 
-Android reuses the existing hosted-native database, Privy, Junction, and Vercel
-lifecycle modules. This is deliberate: there is one cleanup authority and one
-set of live rows. The Android and iOS workflows share the historical
-`native-ios-hosted-e2e-live` concurrency group, so they cannot reset or attest
-the shared identity concurrently. The Android postcondition is platform
-specific and requires Junction provider slug `health_connect`; the existing iOS
-postcondition remains `apple_health_kit`.
+The read-only selection job compares the current default-branch SHA with the
+latest successful scheduled run of this exact workflow. An equal SHA skips the
+paid native journey. A missing checkpoint or changed SHA runs it; a failed run
+leaves the previous checkpoint in place, so the next slot retries. An explicit
+rerun of the same trusted scheduled run bypasses the skip. Fixed,
+non-canceling Android concurrency prevents overlap without creating a waiter
+for every commit or deployment event.
 
-PR admission uses stable Web ownership boundaries rather than a per-file list.
-It selects every top-level Web config/build entrypoint, the complete `scripts`,
-`prisma`, and `src/lib` trees, the companion API subtree, the current workspace
-package closure, and the shared/native Android controller owners. New files in
-those owners select automatically, and renamed paths are evaluated. Nested Web
-UI, content, and tests plus unrelated workspace packages publish a path-filtered
-success without consuming the shared live slot. Android and iOS retain the same
-Web and package boundaries because both native journeys exercise the same hosted
-companion surface; Android additionally selects its private dispatcher and
-controller files.
+The canary checks out `main`, proves that exact SHA is in current protected-main
+history, and verifies that the current production alias resolves to it before
+dispatching the private Android workflow at an immutable tag. It uses only
+`production_canary` with `non_destructive_existing_identity`. It does not enter
+the historical shared PR environment, acquire reset authority, create a Vercel
+candidate, or mutate the dedicated PR identity.
 
-Production deployment events run a separate non-destructive canary. The
-controller proves the deployment SHA is protected-main history and that the
-current production alias still resolves to that exact SHA before dispatching.
+The dispatcher modules retain deterministic PR-mode support and focused tests,
+but no public workflow currently admits that mode. Those helpers are not a
+current operator path; reintroduction requires a separate trust and cost review.
 
 ## Private Android dispatch contract
 
@@ -42,7 +35,8 @@ head selection, and source mismatch fail closed. The dispatched public inputs
 are:
 
 - contract version `1`;
-- `pr` or `production_canary` mode;
+- `pr` or `production_canary` mode (the public workflow currently dispatches
+  only `production_canary`);
 - exact hosted Web HTTPS origin and exact Web SHA;
 - privacy-safe correlation id;
 - a 30-minute epoch-second dispatch expiry;
@@ -65,55 +59,15 @@ a run that passed preflight cannot outlive that fallback fence before cleanup.
 
 ## Protected environments
 
-### `native-ios-hosted-e2e` (shared PR lifecycle)
+### Dormant shared PR lifecycle
 
-The Android controller deliberately uses the existing historical
-`native-ios-hosted-e2e` environment. Both native lanes operate the same
-dedicated Vercel deployment, database, Junction namespace, and Privy identity,
-so those non-exportable credentials have one protected owner rather than
-platform-named copies that can drift.
-
-Android adds these variables to the shared environment:
-
-- `NATIVE_ANDROID_E2E_GITHUB_APP_ID`
-- `NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER`
-- `NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_NAME`
-- `NATIVE_ANDROID_E2E_ANDROID_WORKFLOW`
-- `NATIVE_ANDROID_E2E_ANDROID_REF`
-- `NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA`
-
-Android adds this secret to the shared environment:
-
-- `NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY`
-
-The shared lifecycle remains configured through the existing
-`NATIVE_IOS_E2E_*` database, Junction, Privy, and Vercel variables and secrets.
-The Android workflow maps those values into the shared lifecycle module without
-copying them to another GitHub environment.
-
-The GitHub App installation must be limited to the private Android repository
-and grant only Actions write and Contents read. The trusted controller mints
-and refreshes repository-scoped installation tokens itself so the documented
-dispatch lease and private-run timeout cannot outlive a credential minted
-before deployment. It removes the App id and private key from its process
-environment immediately after constructing that ephemeral supplier; child
-commands and summaries never receive either value. The protected phone must be the
-same reusable E.164 identity configured in the Android repository's protected
-workflow environment. The shared `NATIVE_IOS_E2E_PRIVY_APP_ID` must identify
-the same Privy application as the private Android environment's public app id,
-and that Android environment's client id must belong to it. The fixed OTP
-remains only in the private Android repository; the shared backend neither
-receives nor stores it.
-
-A native Privy app client may be shared across iOS and Android only when its
-allowed app identifiers include the exact Android application ids
-`ai.withmurph.app` and `ai.withmurph.app.dev`. The dashboard client label is
-descriptive, not an authorization boundary; the allowed identifiers are the
-enforced contract.
-
-The database URLs name the same explicit E2E/test database. The shared Vercel
-custom environment and Junction namespace remain the existing hosted-native
-E2E target and namespace; do not provision a second live-row owner for Android.
+The dispatcher modules and their tests retain PR-mode support for the
+historical shared database, Privy, Junction, and Vercel lifecycle. The current
+Android workflow never references the `native-ios-hosted-e2e` environment or
+its destructive credentials. Those values are not prerequisites for the
+scheduled production canary. Reintroducing that path requires a separate
+review of its single cleanup authority, cross-platform identity, application
+identifier, and provider-isolation contracts.
 
 ### `native-android-production-canary`
 
@@ -137,9 +91,8 @@ identity lifecycle. Canary dispatch is
 
 The backend workflow emits bounded stage/result notices and exact source ids.
 It does not print the phone, OTP, tokens, provider payloads, member records, or
-Junction user values. It creates no artifact. Candidate deployments and the
-dedicated PR identity are retired in fail-closed finalization even after a
-primary failure. Production canaries do not mutate identity lifecycle state.
+Junction user values. It creates no artifact. The scheduled production canary
+does not create candidate deployments or mutate identity lifecycle state.
 
 The private Android workflow owns raw instrumentation output handling: raw SDK,
 Gradle, provider, and test results stay in runner-temporary storage, are reduced
@@ -147,20 +100,18 @@ to one allowlisted stage summary, and are deleted before completion.
 
 ## Bootstrap and source rotation
 
-Apply and land this backend patch first. Its bootstrap pull request cannot run
-the new trusted controller from candidate code, so review it independently and
-run the deterministic backend tests. Land the Android patch next, create a
-protected lightweight tag pointing directly to its reviewed commit, and set
-`NATIVE_ANDROID_E2E_ANDROID_REF` plus
-`NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA` together. Configure the Android
-repository environments before enabling the required commit status or
-production event canary. Observe one manually approved protected dispatch end
-to end before making the status required.
+For initial setup, land the backend controller, then land the Android patch,
+create a protected lightweight tag pointing directly to its reviewed commit,
+and set `NATIVE_ANDROID_E2E_ANDROID_REF` plus
+`NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA` together. Configure the production
+canary environment before enabling the scheduled controller. The canary is
+informational and must not become a required commit status.
 
 For every Android revision, create a new protected lightweight tag and update
 both variables atomically. Never move or recreate an existing tag. A moved,
 annotated, branch-backed, or SHA-skewed ref is rejected independently by the
-backend dispatcher and private workflow.
+backend dispatcher and private workflow. The next eligible scheduled slot
+tests the new source; rerun that trusted scheduled run for an immediate retry.
 
 ## Deterministic verification
 

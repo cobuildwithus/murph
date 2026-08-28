@@ -542,181 +542,121 @@ test("backend controller reuses canonical identity, deployment, and postconditio
   assert.match(native, /dispatch lease and private job timeout/u);
 });
 
-test("trusted workflow is pinned, protected, source-bound, and shares the destructive live lock", async () => {
+test("trusted Android controller is six-hour, main-change gated, and production-only", async () => {
   const workflow = await readFile(
     path.join(ROOT, ".github", "workflows", "native-android-hosted-e2e.yml"),
     "utf8",
   );
-  assert.match(workflow, /workflow_run:/u);
-  assert.match(workflow, /deployment_status:/u);
-  assert.match(workflow, /--paginate/u);
-  assert.match(workflow, /previous_filename/u);
-  assert.match(workflow, /context='Native Android hosted E2E'/u);
-  assert.match(workflow, /github\.run_attempt == 1/u);
-  assert.match(workflow, /environment: native-ios-hosted-e2e/u);
-  assert.match(workflow, /timeout-minutes: 150/u);
-  assert.match(workflow, /timeout-minutes: 110/u);
+  const workflowConcurrency = workflow.slice(
+    workflow.indexOf("\nconcurrency:\n"),
+    workflow.indexOf("\njobs:\n"),
+  );
+
+  assert.match(workflow, /schedule:\n\s+- cron: "47 \*\/6 \* \* \*"/u);
+  assert.match(workflow, /actions: read\n\s+contents: read/u);
+  assert.match(workflowConcurrency, /group: native-android-production-canary/u);
+  assert.match(workflowConcurrency, /cancel-in-progress: false/u);
+  assert.doesNotMatch(workflowConcurrency, /queue:/u);
+  assert.match(
+    workflow,
+    /native-android-hosted-e2e\.yml\/runs\?event=schedule&status=success&per_page=1/u,
+  );
+  assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
+  assert.match(workflow, /CURRENT_SHA: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /if: \$\{\{ needs\.select-main\.outputs\.should_run == 'true' \}\}/u);
+  assert.match(workflow, /DEPLOYED_SHA: \$\{\{ needs\.select-main\.outputs\.web_sha \}\}/u);
+  assert.match(workflow, /ref: \$\{\{ needs\.select-main\.outputs\.web_sha \}\}/u);
   assert.match(workflow, /environment: native-android-production-canary/u);
-  assert.match(workflow, /group: native-ios-hosted-e2e-live/u);
-  assert.match(workflow, /group: native-android-production-canary-live/u);
-  assert.match(workflow, /queue: max/u);
+  assert.match(workflow, /node scripts\/native-android-hosted-e2e\.mjs canary/u);
+  assert.match(workflow, /timeout-minutes: 110/u);
   assert.match(workflow, /NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA/u);
   assert.match(workflow, /NATIVE_ANDROID_E2E_ANDROID_REF/u);
   assert.match(workflow, /NATIVE_ANDROID_E2E_ANDROID_WORKFLOW/u);
   assert.match(workflow, /NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY/u);
-  assert.match(workflow, /secrets\.NATIVE_IOS_E2E_DATABASE_URL/u);
-  assert.match(workflow, /secrets\.NATIVE_IOS_E2E_PRIVY_TEST_PHONE/u);
-  assert.match(workflow, /secrets\.NATIVE_IOS_E2E_VERCEL_TOKEN/u);
-  assert.match(workflow, /vars\.NATIVE_IOS_E2E_PRIVY_APP_ID/u);
-  assert.match(workflow, /vars\.NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID/u);
-  assert.doesNotMatch(workflow, /secrets\.NATIVE_ANDROID_E2E_DATABASE_URL/u);
-  assert.doesNotMatch(workflow, /secrets\.NATIVE_ANDROID_E2E_PRIVY_TEST_PHONE/u);
-  assert.doesNotMatch(workflow, /secrets\.NATIVE_ANDROID_E2E_VERCEL_TOKEN/u);
-  assert.doesNotMatch(workflow, /vars\.NATIVE_ANDROID_E2E_PRIVY_APP_ID/u);
-  assert.doesNotMatch(workflow, /vars\.NATIVE_ANDROID_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID/u);
-  assert.doesNotMatch(workflow, /create-github-app-token|NATIVE_ANDROID_E2E_GITHUB_TOKEN/u);
-  assert.doesNotMatch(workflow, /upload-artifact|download-artifact/u);
+  assert.doesNotMatch(
+    workflow,
+    /workflow_run:|deployment_status:|workflow_dispatch:|pull_request:|push:|pull-requests:|statuses: write|pr-live:|pr-required:|native-ios-hosted-e2e-live|node scripts\/native-android-hosted-e2e\.mjs pr/u,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /NATIVE_IOS_E2E_DATABASE_URL|NATIVE_IOS_E2E_PRIVY_TEST_PHONE|NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID/u,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /create-github-app-token|NATIVE_ANDROID_E2E_GITHUB_TOKEN|upload-artifact|download-artifact/u,
+  );
+
+  const jobs = workflow.slice(workflow.indexOf("\njobs:\n"));
+  assert.deepEqual(
+    [...jobs.matchAll(/^  (?<name>[a-z][a-z-]+):$/gmu)].map((match) => match.groups.name),
+    ["select-main", "production-canary"],
+  );
   for (const line of workflow.split("\n").filter((value) => /^\s*uses:/u.test(value))) {
     assert.match(line, /uses: [^\s]+@[0-9a-f]{40}(?:\s|$)/u, line);
   }
 });
 
-test("Android workflow selector uses stable hosted companion ownership boundaries", async () => {
+test("Android schedule admission skips only a current successful scheduled proof", async () => {
   const workflow = await readFile(
     path.join(ROOT, ".github", "workflows", "native-android-hosted-e2e.yml"),
     "utf8",
   );
-  const iosWorkflow = await readFile(
-    path.join(ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
-    "utf8",
-  );
-  const androidControllerPatterns = new Set([
-    "scripts/native-ios-hosted-e2e*",
-    "scripts/native-android-hosted-e2e*",
-    ".github/workflows/native-android-hosted-e2e.yml",
-    "agent-docs/operations/native-android-hosted-e2e.md",
-  ]);
-  assert.equal(
-    workflowTopLevelWebRegex(workflow),
-    workflowTopLevelWebRegex(iosWorkflow),
-    "the top-level Web owner boundary must stay aligned across native platforms",
-  );
-  assert.deepEqual(
-    workflowSelectorPatterns(workflow).filter((pattern) => !androidControllerPatterns.has(pattern)),
-    workflowSelectorPatterns(iosWorkflow),
-    "the hosted companion dependency closure must stay aligned across native platforms",
-  );
-  assert.deepEqual(
-    workflowSelectorPatterns(workflow).filter((pattern) => pattern.startsWith("apps/web/")),
-    [
-      "apps/web/app/api/device-sync/companion/*",
-      "apps/web/prisma/*",
-      "apps/web/scripts/*",
-      "apps/web/src/lib/*",
-    ],
-    "Web admission must use stable owner trees rather than file literals",
-  );
-  assert.doesNotMatch(
+  const script = extractWorkflowStepScript(
     workflow,
-    /^\s+apps\/web\/\*\|/mu,
-    "the selector must not admit every hosted Web path",
+    "Compare main with the latest successful scheduled proof",
   );
-  for (const selected of [
-    "apps/web/future-build.config.ts",
-    "apps/web/tsconfig.next.json",
-    "apps/web/app/api/device-sync/companion/future/route.ts",
-    "apps/web/prisma/future/schema.prisma",
-    "apps/web/scripts/ensure-prisma-client-link.ts",
-    "apps/web/scripts/future-build-owner.ts",
-    "apps/web/src/lib/future-runtime-owner.ts",
-    "packages/device-syncd/src/hosted-runtime.ts",
-    "scripts/native-android-hosted-e2e-native.mjs",
-    "scripts/native-ios-hosted-e2e-identity.mjs",
-    ".github/workflows/native-ios-hosted-e2e.yml",
-    ".github/workflows/native-android-hosted-e2e.yml",
-  ]) {
-    assert.equal(runWorkflowSelector(workflow, selected), "selected", selected);
-  }
-  for (const neutral of [
-    "README.md",
-    "agent-docs/product-specs/companion-app.md",
-    "apps/web/app/page.tsx",
-    "apps/web/app/changelog/page.tsx",
-    "apps/web/changelog/README.md",
-    "apps/web/src/components/marketing/hero.tsx",
-    "apps/web/test/dashboard-home-page.test.tsx",
-    "packages/assistant-runtime/src/index.ts",
-    "packages/health-commons/src/index.ts",
-  ]) {
-    assert.equal(runWorkflowSelector(workflow, neutral), "neutral", neutral);
-  }
-  const broadWebMutation = workflow.replace(
-    '              case "${file}" in\n',
-    '              case "${file}" in\n                apps/web/*|\\\n',
-  );
-  assert.equal(
-    runWorkflowSelector(broadWebMutation, "apps/web/app/page.tsx"),
-    "selected",
-    "the unrelated Web mutation must demonstrate why the broad pattern is forbidden",
-  );
-});
-
-test("Android commit status shell distinguishes retry, skip, trust, live pass, and failure", async () => {
-  const workflow = await readFile(
-    path.join(ROOT, ".github", "workflows", "native-android-hosted-e2e.yml"),
-    "utf8",
-  );
-  const script = extractWorkflowStepScript(workflow, "Publish stable commit status");
-  const prNumber = String(Number.MAX_SAFE_INTEGER);
-  const baseEnv = {
-    LIVE_RESULT: "skipped",
-    PR_NUMBER: prNumber,
-    RUN_ATTEMPT: "1",
-    SELECT_RESULT: "success",
-    SELECTED: "true",
-    SOURCE_RESULT: "success",
-    TRUSTED: "true",
-  };
-  const scenarios = [
-    [{ RUN_ATTEMPT: "2" }, "failure", `Retry: node scripts/native-ios-hosted-e2e-retry.mjs --pr ${prNumber} --failure-code android_workflow_rerun`],
-    [{ SELECT_RESULT: "failure" }, "failure", "Hosted-native Android selection failed; no passing proof was recorded."],
-    [{ SOURCE_RESULT: "failure" }, "failure", "Repo Hygiene did not pass; hosted-native Android was not run."],
-    [{ SELECTED: "false" }, "success", "Path filter did not select hosted-native Android for this exact commit."],
-    [{ TRUSTED: "false" }, "failure", "A trusted same-repository human head is required for live Android credentials."],
-    [{ LIVE_RESULT: "success" }, "success", "Real hosted-native Android E2E passed for the exact commit."],
-    [{ LIVE_RESULT: "failure" }, "failure", "No passing terminal hosted-native Android proof was recorded."],
-  ];
-  const tempDir = await mkdtemp(path.join(tmpdir(), "native-android-status-proof-"));
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-android-cadence-proof-"));
   try {
     await writeFile(path.join(tempDir, "gh"), `#!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$@" > "$GH_CAPTURE"
+printf '%s\\n' "\${PREVIOUS_SHA:-}"
 `, { mode: 0o755 });
-    for (const [index, [overrides, expectedState, expectedDescription]] of scenarios.entries()) {
-      const capturePath = path.join(tempDir, `gh-${index}.args`);
+    const scenarios = [
+      { attempt: "1", expected: "true", previousSha: "" },
+      { attempt: "1", expected: "false", previousSha: WEB_SHA },
+      { attempt: "1", expected: "true", previousSha: "b".repeat(40) },
+      { attempt: "2", expected: "true", previousSha: WEB_SHA },
+    ];
+    for (const [index, scenario] of scenarios.entries()) {
+      const outputPath = path.join(tempDir, `output-${index}`);
       const result = spawnSync("bash", ["-c", script], {
         cwd: ROOT,
         encoding: "utf8",
         env: {
           ...process.env,
-          ...baseEnv,
-          ...overrides,
-          GH_CAPTURE: capturePath,
+          CURRENT_SHA: WEB_SHA,
+          GITHUB_OUTPUT: outputPath,
           GITHUB_REPOSITORY: "cobuildwithus/murph",
-          GITHUB_RUN_ID: "987",
-          GITHUB_SERVER_URL: "https://github.example.test",
           PATH: `${tempDir}:${process.env.PATH ?? ""}`,
-          STATUS_SHA: WEB_SHA,
+          PREVIOUS_SHA: scenario.previousSha,
+          RUN_ATTEMPT: scenario.attempt,
         },
       });
-      assert.equal(result.status, expectedState === "success" ? 0 : 1, result.stderr);
-      const ghArgs = (await readFile(capturePath, "utf8")).trimEnd().split("\n");
-      assert.ok(ghArgs.includes(`state=${expectedState}`));
-      const description = ghArgs.find((argument) => argument.startsWith("description="))
-        ?.slice("description=".length);
-      assert.equal(description, expectedDescription);
-      assert.ok(description.length <= 140, `commit status description is ${description.length} characters`);
+      assert.equal(result.status, 0, result.stderr);
+      const output = Object.fromEntries(
+        (await readFile(outputPath, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => line.split("=", 2)),
+      );
+      assert.deepEqual(output, { should_run: scenario.expected, web_sha: WEB_SHA });
     }
+
+    const invalidResult = spawnSync("bash", ["-c", script], {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CURRENT_SHA: WEB_SHA,
+        GITHUB_OUTPUT: path.join(tempDir, "invalid-output"),
+        GITHUB_REPOSITORY: "cobuildwithus/murph",
+        PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+        PREVIOUS_SHA: "not-a-sha",
+        RUN_ATTEMPT: "1",
+      },
+    });
+    assert.equal(invalidResult.status, 1);
+    assert.match(invalidResult.stdout, /did not expose an exact SHA/u);
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }
@@ -778,51 +718,4 @@ function extractWorkflowStepScript(workflow, stepName) {
   }
   assert.ok(scriptLines.length > 0, `${stepName} script must be readable`);
   return scriptLines.join("\n");
-}
-
-function runWorkflowSelector(workflow, file) {
-  const topLevelWebRegex = workflowTopLevelWebRegex(workflow);
-  const script = [
-    "set -euo pipefail",
-    'file="$1"',
-    `if [[ "\${file}" =~ ${topLevelWebRegex} ]]; then`,
-    '  printf "selected\\n"',
-    "  exit 0",
-    "fi",
-    'case "${file}" in',
-    `${workflowSelectorPatternSource(workflow)})`,
-    '  printf "selected\\n"',
-    "  ;;",
-    "*)",
-    '  printf "neutral\\n"',
-    "  ;;",
-    "esac",
-  ].join("\n");
-  const result = spawnSync("bash", ["-c", script, "selector", file], {
-    encoding: "utf8",
-  });
-  assert.equal(result.error, undefined);
-  assert.equal(result.status, 0, result.stderr);
-  return result.stdout.trim();
-}
-
-function workflowTopLevelWebRegex(workflow) {
-  const match = /if \[\[ "\$\{file\}" =~ (?<pattern>\S+) \]\]; then/u.exec(workflow);
-  assert.ok(match?.groups?.pattern, "top-level Web selector boundary was not found");
-  return match.groups.pattern;
-}
-
-function workflowSelectorPatterns(workflow) {
-  return workflowSelectorPatternSource(workflow)
-    .replace(/\\\n\s*/gu, "")
-    .trim()
-    .split("|")
-    .map((pattern) => pattern.trim())
-    .filter(Boolean);
-}
-
-function workflowSelectorPatternSource(workflow) {
-  const match = /case "\$\{file\}" in\n(?<patterns>[\s\S]*?)\)\n\s+selected=true\n\s+break/u.exec(workflow);
-  assert.ok(match?.groups?.patterns, "workflow selector case was not found");
-  return match.groups.patterns;
 }
