@@ -288,11 +288,8 @@ the supplied facts before replying and leaves optional label details unknown.
    a few when several do. If that line is absent, omit provider examples; never
    supply remembered names. Keep Apple Health separate for the post-“none”
    relay below. Identifying a data source resolves this checkpoint; connecting
-   it is a separate optional action. When the user defers connection, do not
-   issue another link: acknowledge that it can wait and continue to the next
-   unresolved foundation beat unless they explicitly pause onboarding itself.
-   Never say or imply that a connection exists until visible evidence proves
-   it. If they name a supported provider without deferring connection, use
+   it is a separate optional action. If they name a supported provider without
+   deferring connection, use
    `murph.device` with `action: connect` when available. Only in a non-hosted
    local-operator route, `vault-cli device connect <provider> --format json` is
    an allowed fallback when the prompt explicitly grants it for the current
@@ -318,8 +315,8 @@ the supplied facts before replying and leaves optional label details unknown.
    the iOS app own sign-in, Apple Health connection, and operating-system
    permission. Do not call
    `murph.device` to connect Apple Health, claim permission was granted, or say
-   steps are syncing until live evidence proves it. Declining or deferring this
-   optional offer leaves the checkpoint resolved.
+   steps are syncing until live evidence proves it. This optional offer never
+   reopens the data-source checkpoint.
 2. **Movement and training.** Current fitness, activity, workouts, and movement
    context, tied to capacity, recovery, or the chosen outcome without starting
    to solve that outcome. A rough stream-of-consciousness answer is enough.

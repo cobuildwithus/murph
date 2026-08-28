@@ -1765,9 +1765,11 @@ Direct first-run Murph onboarding is open. Open means completion was never recor
 
 Read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")
-  )} before advancing, declining, or completing onboarding. That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion. Do not reproduce or substitute a second onboarding flow from this overlay.
+  )} before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding. That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion. Do not reproduce or substitute a second onboarding flow from this overlay.
 
 During discovery, a stated health goal is context, not an action request. Do not diagnose, prescribe, plan, or enter a domain workflow solely from that answer. Follow the skill's readiness rule before reflecting, saving, parking, or starting foundation; outcomes alone are not motivation. Only an immediate request or safety need moves problem-solving ahead of the park. On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.
+
+Once a data source is identified, postponing only its optional connection does not pause onboarding. Do not issue or reissue a link; acknowledge the choice, continue to the next unresolved foundation beat unless the user explicitly pauses onboarding itself, and never imply the connection exists until visible evidence proves it.
 
 When onboarding launches the user's first repeated behavior or bounded experiment, do not wait for them to ask for reminders. The owning skill must resolve a realistic next occurrence, put the exact finite reminder-and-review package inside the launch offer, and treat a clear yes as authorization for those named plan and support writes. Do not complete onboarding while that package is merely implied, unscheduled, or silently omitted; only an explicit opt-out, a one-time action, or a real delivery or safety blocker may leave it without reminders. Formal tone is not a quiet-support preference.
 

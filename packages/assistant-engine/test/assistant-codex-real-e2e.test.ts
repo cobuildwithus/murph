@@ -253,10 +253,23 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
     ONBOARDING_POLICY_PATHS[2][1],
   ],
   minimal_identity_prompt: [ONBOARDING_POLICY_PATHS[0][1]],
+  wearable_connection_offer: [
+    ONBOARDING_POLICY_PATHS[0][1],
+    ONBOARDING_POLICY_PATHS[1][1],
+    ONBOARDING_POLICY_PATHS[2][1],
+    'connected-apps/SKILL.md',
+  ],
   wearable_connection_deferred: [
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[1][1],
     ONBOARDING_POLICY_PATHS[2][1],
+    ONBOARDING_POLICY_PATHS[3][1],
+  ],
+  wearable_connection_deferred_return: [
+    ONBOARDING_POLICY_PATHS[0][1],
+    ONBOARDING_POLICY_PATHS[1][1],
+    ONBOARDING_POLICY_PATHS[2][1],
+    ONBOARDING_POLICY_PATHS[3][1],
   ],
 } as const
 type RealCodexOnboardingScenario =
@@ -947,22 +960,23 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           status: 'ok',
           truncated: false,
         } as const
+        const unresolvedResumeContext = {
+          ...resumeContext,
+          allergies: emptySurface,
+          conditions: emptySurface,
+          deviceAccounts: emptySurface,
+          experiments: emptySurface,
+          memory: {
+            ...resumeContext.memory,
+            recordCount: memoryRecords.length,
+            records: memoryRecords,
+          },
+          regimens: emptySurface,
+          supplements: emptySurface,
+        }
         await writeFile(
           path.join(workingDirectory, 'onboarding-resume-context.json'),
-          `${JSON.stringify({
-            ...resumeContext,
-            allergies: emptySurface,
-            conditions: emptySurface,
-            deviceAccounts: emptySurface,
-            experiments: emptySurface,
-            memory: {
-              ...resumeContext.memory,
-              recordCount: memoryRecords.length,
-              records: memoryRecords,
-            },
-            regimens: emptySurface,
-            supplements: emptySurface,
-          })}\n`,
+          `${JSON.stringify(unresolvedResumeContext)}\n`,
           { encoding: 'utf8', mode: 0o600 },
         )
         const deviceRequests: AssistantHostedDeviceToolRequest[] = []
@@ -971,8 +985,21 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         > = {
           async request(request) {
             deviceRequests.push(request)
+            if (request.action === 'connect') {
+              return {
+                action: 'connect',
+                link: {
+                  authorizationUrl:
+                    'https://connect.example.test/oura/authorize',
+                  connectUrl: 'https://connect.example.test/oura',
+                  expiresAt: '2026-08-27T17:05:00.000Z',
+                  provider: 'oura',
+                  providerLabel: 'Oura',
+                },
+              }
+            }
             if (request.action !== 'list_accounts') {
-              throw new Error('No device write is expected in this journey.')
+              throw new Error('Unexpected device action in onboarding proof.')
             }
             return {
               accounts: [],
@@ -986,6 +1013,28 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           config,
           workingDirectory,
         })
+        const supportedProviders = [
+          { label: 'Oura', provider: 'oura' },
+        ] as const
+        const hostedToolContext: AssistantHostedToolContext = {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentInvocationScope: () => ({
+            conversationScope: 'direct',
+            origin: {
+              assistantInputId: 'ain_00000000000000000000000000000027',
+              kind: 'accepted_input',
+              sessionId: 'session-onboarding-wearable-defer',
+            },
+            originSessionId: 'session-onboarding-wearable-defer',
+          }),
+          deviceTool,
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        }
         const result = await executeRealCodexOnboardingProbe({
           ...turnInput,
           developerInstructions: buildDirectConversationDeveloperInstructions(
@@ -995,32 +1044,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
               'The latest visible Murph message asked whether the member uses a wearable or health app. No wearable connection is visible.',
               'Movement, current protocols, supplements, medical basics, and recent labs remain unresolved.',
             ].join('\n'),
-            [
-              { label: 'Oura', provider: 'oura' },
-            ],
+            supportedProviders,
           ),
           dynamicTools: [MURPH_DEVICE_TOOL],
           excludeResumeTurns: true,
-          hostedToolContext: {
-            computerToolsAvailable: false,
-            currentHostedDeliveryContext: () => null,
-            currentHostedMailboxItemIds: () => [],
-            currentInvocationScope: () => ({
-              conversationScope: 'direct',
-              origin: {
-                assistantInputId:
-                  'ain_00000000000000000000000000000027',
-                kind: 'accepted_input',
-                sessionId: 'session-onboarding-wearable-defer',
-              },
-              originSessionId: 'session-onboarding-wearable-defer',
-            }),
-            deviceTool,
-            sendVaultFile: async () => {
-              throw new Error('Vault file sends are unavailable in this test.')
-            },
-            vaultFileSendAvailable: false,
-          },
+          hostedToolContext,
           prompt: "I use Oura, but I'd rather connect it later.",
           scenario: 'wearable_connection_deferred',
         })
@@ -1034,24 +1062,170 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           `[onboarding-wearable-defer-e2e] ${JSON.stringify({ reply })}\n`,
         )
 
-        expect(result.policyFiles).toEqual(expect.arrayContaining([
-          'aspiration-foundation-delegation.md',
-          'persistence-recovery-follow-up.md',
-        ]))
         expect(deviceWriteActions).toHaveLength(0)
         expect(
           deviceRequests.filter((request) => request.action !== 'list_accounts'),
         ).toHaveLength(0)
         expect(reply).toMatch(/oura|connect/iu)
         expect(reply).toMatch(/later|wait|whenever|when you(?:'re| are) ready/iu)
-        expect(reply).toMatch(/voice memo/iu)
-        expect(reply).toMatch(/typ(?:e|ing)/iu)
-        expect(reply).toMatch(/supplements|meds|conditions|allergies/iu)
+        expect(reply).toMatch(
+          /voice memo|movement|move|training|supplements|meds|conditions|allergies|medical/iu,
+        )
         expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
         expect(reply).not.toContain('https://')
         expect(reply).not.toMatch(
           /\b(?:oura(?:'s| is)|it(?:'s| is)|you(?:'re| are)|we(?:'re| are)) (?:now )?(?:connected|linked|syncing)\b|\bi (?:have )?(?:connected|linked) (?:your )?oura\b|\b(?:connected|linked) (?:to )?(?:your )?oura\b|\bi can (?:see|use|pull) (?:your )?oura\b|\b(?:oura )?data (?:is|are) (?:syncing|coming in|available)\b/iu,
         )
+
+        const linkOffer = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            true,
+            [
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the private welcome, minimal identity, aspiration readiness, reflection, save, and park are complete.',
+              'The latest visible Murph message asked whether the member uses a wearable or health app. No wearable connection is visible.',
+              'Movement, current protocols, supplements, medical basics, and recent labs remain unresolved.',
+            ].join('\n'),
+            supportedProviders,
+          ),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          excludeResumeTurns: true,
+          hostedToolContext,
+          prompt: 'I use Oura. Send me the connection link now.',
+          scenario: 'wearable_connection_offer',
+        })
+        const linkOfferActions = linkOffer.actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_DEVICE_TOOL.name
+          && action.argumentsValue.action === 'connect'
+        )
+        expect(linkOfferActions.length).toBeGreaterThanOrEqual(1)
+        expect(linkOffer.finalMessage).toContain(
+          'https://connect.example.test/oura',
+        )
+
+        const laterRequestOffset = deviceRequests.length
+        const laterDeferral = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            true,
+            [
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the private welcome, minimal identity, aspiration readiness, reflection, save, and park are complete.',
+              'The visible conversation identifies Oura as the data source and contains Murph\'s real connection-link handoff. No wearable connection is visible.',
+              'Movement, current protocols, supplements, medical basics, and recent labs remain unresolved.',
+            ].join('\n'),
+            supportedProviders,
+          ),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          hostedToolContext,
+          prompt: "I'll do that later.",
+          resumeSessionId: linkOffer.sessionId,
+          scenario: 'wearable_connection_deferred',
+        })
+        const laterReply = laterDeferral.finalMessage.trim()
+        expect(
+          deviceRequests
+            .slice(laterRequestOffset)
+            .filter((request) => request.action !== 'list_accounts'),
+          'later-turn connection writes',
+        ).toHaveLength(0)
+        expect(laterReply).toMatch(/later|wait|whenever|when you(?:'re| are) ready/iu)
+        expect(laterReply).toMatch(
+          /voice memo|movement|move|training|supplements|meds|conditions|allergies|medical/iu,
+        )
+        expect(laterReply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(laterReply).not.toContain('https://')
+        expect(laterReply).not.toMatch(
+          /\b(?:oura(?:'s| is)|it(?:'s| is)|you(?:'re| are)|we(?:'re| are)) (?:now )?(?:connected|linked|syncing)\b|\bi (?:have )?(?:connected|linked) (?:your )?oura\b|\b(?:connected|linked) (?:to )?(?:your )?oura\b|\bi can (?:see|use|pull) (?:your )?oura\b|\b(?:oura )?data (?:is|are) (?:syncing|coming in|available)\b/iu,
+        )
+
+        const returnContext = buildRealCodexOnboardingResumeContext('later')
+        if (returnContext.memory.status !== 'ok') {
+          throw new Error('Expected available return-stage memory fixture.')
+        }
+        const returnMemoryRecords = [
+          ...returnContext.memory.records,
+          {
+            id: 'wearable_source_context',
+            section: 'context',
+            text: 'Uses Oura as a data source; the optional connection is postponed.',
+          },
+        ]
+        await writeFile(
+          path.join(workingDirectory, 'onboarding-resume-context.json'),
+          `${JSON.stringify({
+            ...returnContext,
+            deviceAccounts: emptySurface,
+            memory: {
+              ...returnContext.memory,
+              recordCount: returnMemoryRecords.length,
+              records: returnMemoryRecords,
+            },
+          })}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        const returnRequestOffset = deviceRequests.length
+        const contextualReturn = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            true,
+            [
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; Oura is the identified data source and only its optional connection was deferred.',
+              'Movement, current protocols, supplements, medical basics, and recent labs are resolved. The saved sleep thread is aspiration-ready.',
+              'Return to the sleep thread without reopening an already resolved foundation checkpoint.',
+            ].join('\n'),
+            supportedProviders,
+          ),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          hostedToolContext,
+          prompt: "That's everything for the foundation. What's next?",
+          resumeSessionId: laterDeferral.sessionId,
+          scenario: 'wearable_connection_deferred_return',
+        })
+        expect(
+          deviceRequests
+            .slice(returnRequestOffset)
+            .filter((request) => request.action !== 'list_accounts'),
+          'return-stage connection writes',
+        ).toHaveLength(0)
+        expect(contextualReturn.finalMessage).toMatch(/sleep|thread|start|work on/iu)
+        expect(contextualReturn.finalMessage).not.toMatch(
+          /wearable|oura|connect|health app/iu,
+        )
+
+        await writeFile(
+          path.join(workingDirectory, 'onboarding-resume-context.json'),
+          `${JSON.stringify(unresolvedResumeContext)}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        const pauseRequestOffset = deviceRequests.length
+        const onboardingPause = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            true,
+            [
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; Oura is the identified data source and no connection is visible.',
+              'Movement, current protocols, supplements, medical basics, and recent labs remain unresolved.',
+            ].join('\n'),
+            supportedProviders,
+          ),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          excludeResumeTurns: true,
+          hostedToolContext,
+          prompt: "Let's pause onboarding until next week.",
+          scenario: 'wearable_connection_deferred',
+        })
+        expect(
+          deviceRequests
+            .slice(pauseRequestOffset)
+            .filter((request) => request.action !== 'list_accounts'),
+          'explicit-pause connection writes',
+        ).toHaveLength(0)
+        expect(onboardingPause.finalMessage).toMatch(/pause|next week|pick it up|when you(?:'re| are) ready/iu)
+        expect(onboardingPause.finalMessage).not.toMatch(
+          /voice memo|supplements|meds|conditions|allergies|blood tests|labs/iu,
+        )
+        expect(onboardingPause.finalMessage.match(/\?/gu) ?? []).toHaveLength(0)
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)
       }
@@ -1131,6 +1305,31 @@ describe('onboarding policy read detection', () => {
       allowedRelativePaths: [ONBOARDING_POLICY_PATHS[0][1]],
       skillsRoot,
     })).resolves.toEqual([2, 3, 4, 6, 8])
+  })
+
+  it('does not flag skill-free or path-only file discovery', async () => {
+    const skillsRoot = resolveAssistantSkillsRoot()
+    await expect(readUnexpectedSkillPolicyActionIndexes({
+      actions: [
+        {
+          command:
+            "sed -n '1,240p' vault-cli; find . -maxdepth 3 -type f -not -path './skills/*' -print",
+          eventIndex: 4,
+          kind: 'command',
+          ok: true,
+          output: './onboarding-resume-context.json',
+        },
+        {
+          command: "find ./skills -path '*onboarding*' -type f -maxdepth 3 -print",
+          eventIndex: 5,
+          kind: 'command',
+          ok: true,
+          output: './skills/murph-onboarding/SKILL.md',
+        },
+      ],
+      allowedRelativePaths: [],
+      skillsRoot,
+    })).resolves.toEqual([])
   })
 })
 
@@ -15575,7 +15774,7 @@ async function readUnexpectedSkillPolicyActionIndexes(input: {
     'skills',
   ]
   const contentReader =
-    /\b(?:awk|base64|cat|find|grep|head|jq|less|more|od|rg|sed|strings|tail|xxd)\b/u
+    /\b(?:awk|base64|cat|grep|head|jq|less|more|od|rg|sed|strings|tail|xxd)\b/u
 
   return input.actions.flatMap((action) => {
     if (action.kind !== 'command') {
@@ -15600,6 +15799,7 @@ async function readUnexpectedSkillPolicyActionIndexes(input: {
     const broadContentRead = referencedRootTokens.length > 0
       && contentReader.test(action.command)
       && (mentionedAssets.length === 0 || globbedRootPath)
+      && !/-not\s+-path\s+(['"])\.\/skills\/\*\1/u.test(action.command)
     return unexpectedExplicitPath || broadContentRead
       ? [action.eventIndex]
       : []
@@ -15650,7 +15850,14 @@ async function executeRealCodexOnboardingProbe(
     })
   expect(
     unexpectedSkillPolicyActionIndexes,
-    `${scenario} unrelated or broad skill policy reads`,
+    `${scenario} unrelated or broad skill policy reads: ${JSON.stringify(
+      actions.flatMap((action) =>
+        action.kind === 'command'
+        && unexpectedSkillPolicyActionIndexes.includes(action.eventIndex)
+          ? [{ command: action.command, eventIndex: action.eventIndex }]
+          : []
+      ),
+    )}`,
   ).toEqual([])
   const usage = readCodexTokenUsageEvents(result.jsonEvents).at(-1)?.last ?? null
   process.stdout.write(

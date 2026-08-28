@@ -9,8 +9,9 @@ Updated: 2026-08-27
 - Let a member postpone the optional wearable connection action without
   accidentally postponing the rest of onboarding after they have already
   identified their data source.
-- Collapse onboarding transition ownership back into the onboarding skill by
-  deleting the broader duplicate rule from the system overlay.
+- Replace the contradictory broad overlay with one always-visible,
+  connection-only transition rule while keeping generic object-scoped defer
+  meaning in the onboarding skill.
 
 ## Success criteria
 
@@ -53,8 +54,8 @@ Updated: 2026-08-27
    Mitigation: require truthful acknowledgement and forbid active/syncing claims
    until connection evidence is visible.
 3. Risk: a prompt-only lexical assertion could miss the user-visible composite
-   transition.
-   Mitigation: pair deterministic ownership checks with one focused real-Codex
+   transition or a resumed turn that does not reload the onboarding skill.
+   Mitigation: pair deterministic ownership checks with a multi-turn real-Codex
    journey built from the production prompt and skill assets.
 
 ## Tasks
@@ -81,17 +82,37 @@ Updated: 2026-08-27
   gate. The current automatic link handoff remains when a supported source is
   named without a deferral; a same-turn or later connection deferral skips the
   link write and continues onboarding.
+- Preliminary ReviewGPT found that a later-turn bare "later" still conflicted
+  with generic persistence/completion wording and that the live proof covered
+  only the same-turn case. Both findings were accepted.
+- Real-Codex remediation proved that a resumed short reply may correctly skip
+  on-demand skill reads. The durable minimum is therefore one narrow
+  always-visible connection-only transition in the direct onboarding overlay,
+  plus one generic object-scoped defer rule in the persistence reference.
+  Duplicate connection-only copies were deleted from the stage references.
+- The real-Codex proof asserts observable behavior, not a prescribed internal
+  reference read: same-turn defer, prior-link bare defer, resolved return, and
+  explicit onboarding pause.
 
 ## Verification
 
-- Passed: Assistant Engine prompt/model asset tests, 100 passed and 7 skipped.
-- Passed: Assistant Engine route-planning tests, 100 passed.
+- Passed: Assistant Engine prompt/model asset and route-planning tests, 200
+  passed and 7 skipped.
+- Passed: onboarding policy-read detector tests, 3 passed and 131 skipped.
 - Passed: Assistant Engine typecheck after the final TypeScript test edit.
-- Passed: focused real-Codex journey on `gpt-5.6-terra`, 1 passed and 132
-  skipped. The reply acknowledged that the wearable could wait, continued to
-  the bundled voice-or-typing foundation memo, asked one question, made no
-  device write, included no link, and claimed no connection or syncing state.
+- Passed: focused multi-turn real-Codex journey on `gpt-5.6-terra`, 1 passed
+  and 133 skipped. Same-turn and prior-link connection deferrals acknowledged
+  the choice, made no new device write, emitted no link or false connection
+  claim, and continued with one useful foundation question. A fully resolved
+  foundation returned to the saved thread without reopening the wearable
+  checkpoint. An explicit onboarding pause made no advancement.
   Product UX verdict: Ready.
 - Passed: focused changelog page test, 9 passed, and Web typecheck.
-- Draft PR: #2457. Remaining proof: preliminary specialist ReviewGPT result,
-  required exact-head CI, parent final review, and current-base merge-tree.
+- Measured the final serialized-instruction delta against the existing complete
+  base request capture: individual 25,683 to 25,716 tokens (+33, +0.13%) and
+  117,577 to 117,772 bytes (+195, +0.17%); group input remains 20,775 tokens
+  and 94,396 bytes.
+- Preliminary specialist ReviewGPT: two accepted findings, both remediated and
+  covered above. Draft PR: #2457. Remaining proof: push the remediated exact
+  head, required CI, parent final review, plan closure, and current-base
+  merge-tree.
