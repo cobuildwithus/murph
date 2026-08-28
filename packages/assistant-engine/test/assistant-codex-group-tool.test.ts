@@ -300,11 +300,11 @@ describe("murph.group dynamic tool", () => {
       (tool) => tool.name === "group_consult",
     );
     expect(groupConsultTool?.description)
-      .toContain("Exact group title: use groupLabel");
+      .toContain("Exact title=groupLabel");
     expect(groupConsultTool?.description)
-      .toContain("People/count description: use participantTarget");
+      .toContain("people/count=participantTarget");
     expect(groupConsultTool?.description)
-      .toContain("never turn a participant name into groupLabel");
+      .toContain("Participant name is not groupLabel");
 
     const expectedRootKeys = {
       group_consult: [
