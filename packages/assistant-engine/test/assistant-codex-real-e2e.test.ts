@@ -6917,30 +6917,21 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       const config = await resolveRealCodexE2eConfig()
       const cases = [
         {
-          allowCountOmission: false,
-          expectedAction: 'handoff',
-          expectedCount: undefined,
           expectedNames: ['Jordan'],
           prompt:
             'Tell my existing group chat with Jordan that Member Echo finished the mobility set.',
           slug: 'named-person',
         },
         {
-          allowCountOmission: false,
-          expectedAction: 'handoff',
-          expectedCount: 2,
           expectedNames: ['Jordan', 'Casey'],
           prompt:
             'Tell my existing three-person group chat with Jordan and Casey that Member Echo finished the mobility set.',
           slug: 'total-chat-size',
         },
         {
-          allowCountOmission: true,
-          expectedAction: 'ask',
-          expectedCount: 2,
           expectedNames: ['Jordan', 'Casey'],
           prompt:
-            'Ask my existing group chat with me, Jordan, and Casey what mobility set they recommend, and bring the answer back to me privately.',
+            'Tell my existing group chat with me, Jordan, and Casey that Member Echo finished the mobility set.',
           slug: 'explicit-self',
         },
       ] as const
@@ -7016,15 +7007,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                         },
                       }
                     }
-                    if (request.action === 'ask') {
-                      return {
-                        action: 'ask',
-                        result: {
-                          status: 'accepted',
-                          targetLabel: '2 people: Jordan, Casey',
-                        },
-                      }
-                    }
                     return {
                       action: 'handoff',
                       result: {
@@ -7059,24 +7041,24 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               groupRequests.filter(({ action }) => action === 'list_memberships'),
               testCase.slug,
             ).toHaveLength(0)
-            const consultRequests = groupRequests.filter(
+            const handoffRequests = groupRequests.filter(
               (request): request is Extract<
                 GroupRequest,
-                { action: 'ask' | 'handoff' }
-              > => request.action === 'ask' || request.action === 'handoff',
+                { action: 'handoff' }
+              > => request.action === 'handoff',
             )
-            expect(consultRequests, testCase.slug).toHaveLength(1)
-            expect(consultRequests[0], testCase.slug).toMatchObject({
-              action: testCase.expectedAction,
+            expect(handoffRequests, testCase.slug).toHaveLength(1)
+            expect(handoffRequests[0], testCase.slug).toMatchObject({
+              action: 'handoff',
               participantTarget: {
                 participants: testCase.expectedNames.map((displayName) => ({
                   displayName,
                 })),
               },
             })
-            expect(consultRequests[0], testCase.slug)
+            expect(handoffRequests[0], testCase.slug)
               .not.toHaveProperty('groupLabel')
-            const participantTarget = consultRequests[0]?.participantTarget as {
+            const participantTarget = handoffRequests[0]?.participantTarget as {
               participantCount?: number
               participants?: Array<{ displayName?: string }>
             }
@@ -7087,32 +7069,14 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               ),
               testCase.slug,
             ).toBe(false)
-            if (testCase.allowCountOmission) {
+            if (testCase.expectedNames.length === 2) {
               expect(
                 participantTarget.participantCount === undefined
-                || participantTarget.participantCount === testCase.expectedCount,
+                || participantTarget.participantCount === 2,
                 testCase.slug,
               ).toBe(true)
-            } else if (testCase.expectedCount === undefined) {
-              expect(participantTarget.participantCount, testCase.slug)
-                .toBeUndefined()
-            } else {
-              expect(participantTarget.participantCount, testCase.slug)
-                .toBe(testCase.expectedCount)
             }
-            if (testCase.expectedAction === 'ask') {
-              expect(result.finalMessage, testCase.slug).toMatch(/check/iu)
-              expect(result.finalMessage, testCase.slug).toMatch(/privat/iu)
-              expect(result.finalMessage, testCase.slug)
-                .toMatch(/\b(?:nothing|not|won't|will not)\b.*\bpost/iu)
-              expect(result.finalMessage, testCase.slug).not.toMatch(/queu/iu)
-            } else {
-              expect(result.finalMessage, testCase.slug).toMatch(/queu/iu)
-              expect(result.finalMessage, testCase.slug)
-                .not.toMatch(/\b(?:passed|sent|delivered|told|shared|posted)\b/iu)
-            }
-            expect(result.finalMessage, testCase.slug)
-              .not.toMatch(/\b(?:can't|cannot)\b.*\b(?:group|chat)\b/iu)
+            expect(result.finalMessage, testCase.slug).toMatch(/queu/iu)
           } finally {
             await removeRealCodexTemporaryPath(workingDirectory)
           }

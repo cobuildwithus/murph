@@ -51,7 +51,7 @@ const TARGET_TOOL_DESCRIPTION_BUDGETS = [
     MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
     350,
   ],
-  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 500],
+  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 320],
   ["group_data", MURPH_GROUP_DATA_TOOL, 410],
   ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL, 350],
   ["group_usage", MURPH_GROUP_USAGE_TOOL, 360],
@@ -90,16 +90,10 @@ describe("assistant tool description call contracts", () => {
   it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Exact title=groupLabel",
+      "Named group: use groupLabel; never list",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "People use participantTarget.participants; stated total also needs participantCount=total-1",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Never combine targets/list groups",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      'Unnamed handoff: vault-cli memory show; fallback "a member"',
+      'Before unnamed handoff, vault-cli memory show; fallback "a member"',
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "ask_current_sender=group",
@@ -108,19 +102,13 @@ describe("assistant tool description call contracts", () => {
       "ask_current_sender_privately=private",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "clarify_current_sender=ambiguity",
+      "clarify_current_sender=genuine ambiguity",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "continuations resume",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Accepted ask reply MUST say checking privately and nothing will be posted in group",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Accepted handoff: reply only queued",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "never claim reached/posted",
+      "Handoff accepted=queued, not sent/shared",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
       "message_current_sender",

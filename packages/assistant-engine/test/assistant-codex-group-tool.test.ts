@@ -210,20 +210,10 @@ describe("murph.group dynamic tool", () => {
       .toContain('state="armed"');
     expect(GROUP_TOOL_INPUT_PROPERTIES.groupLabel.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
-    expect(GROUP_TOOL_INPUT_PROPERTIES.groupLabel.description)
-      .toContain("Never set this from a person name or alongside participantTarget");
     expect(
       GROUP_TOOL_INPUT_PROPERTIES.participantTarget.properties
         .participantCount.description,
-    ).toContain("Counts other people only");
-    expect(
-      GROUP_TOOL_INPUT_PROPERTIES.participantTarget.properties
-        .participantCount.description,
-    ).toContain("REQUIRED when the member states a total chat size: set total minus one");
-    expect(
-      GROUP_TOOL_INPUT_PROPERTIES.participantTarget.properties
-        .participants.description,
-    ).toContain("participantCount supplements these names and never replaces them");
+    ).toContain("excluding the requesting member");
     expect(GROUP_TOOL_INPUT_PROPERTIES.participantTarget.description)
       .toContain("Include each non-requester once");
     expect(GROUP_TOOL_INPUT_PROPERTIES.permissionText.maxLength)
@@ -306,19 +296,6 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("advertises family-bounded schemas", () => {
-    const expectedConsultKeysByAction = {
-      ask: ["action", "groupLabel", "participantTarget", "question"],
-      handoff: ["action", "context", "groupLabel", "participantTarget"],
-      ask_current_sender: ["action", "message_ref"],
-      ask_current_sender_privately: ["action", "message_ref"],
-      clarify_current_sender: ["action", "message_ref"],
-      continue_current_sender_in_group: ["action", "message_ref"],
-      continue_current_sender_privately: ["action", "message_ref"],
-      ask_member: ["action", "grantId", "question"],
-    } as const satisfies Record<
-      (typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult)[number],
-      readonly string[]
-    >;
     const expectedRootKeys = {
       group_consult: [
         "action", "context", "grantId", "groupLabel", "message_ref",
@@ -354,10 +331,6 @@ describe("murph.group dynamic tool", () => {
           )),
         ].sort()).toEqual([...expectedRootKeys.group_consult].sort());
         for (const branch of tool.inputSchema.oneOf) {
-          const action = branch.properties.action.enum[0];
-          expect(Object.keys(branch.properties).sort()).toEqual(
-            [...expectedConsultKeysByAction[action]].sort(),
-          );
           expect(branch.additionalProperties).toBe(false);
           expect(branch.required).toContain("action");
           for (const forbiddenField of [

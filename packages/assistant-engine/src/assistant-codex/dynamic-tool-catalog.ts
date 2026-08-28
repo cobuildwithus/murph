@@ -1055,7 +1055,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
         description:
-          'Optional only for action="ask" or action="handoff". An exact visible group title the member supplied, used only to disambiguate among joined groups; never an internal identifier. A phrase such as "my group with Jordan and Casey" is a participant description, not a groupLabel: omit groupLabel and use participantTarget. Never set this from a person name or alongside participantTarget.',
+          'Optional only for action="ask" or action="handoff". An exact visible group title the member supplied, used only to disambiguate among joined groups; never an internal identifier. A phrase such as "my group with Jordan and Casey" is a participant description, not a groupLabel: omit groupLabel and use participantTarget.',
       },
       participantTarget: {
         type: 'object',
@@ -1067,13 +1067,11 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
             minimum: 1,
             maximum: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
             description:
-              'REQUIRED when the member states a total chat size: set total minus one. Otherwise optional. Counts other people only. Omit any requester/self roster entry.',
+              'Other people in the chat, excluding the requesting member. Convert a stated total chat size only when clear.',
           },
           participants: {
             type: 'array',
             maxItems: HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
-            description:
-              'Named non-requesters supplied by the member. When any people are named, include each exactly once; participantCount supplements these names and never replaces them.',
             items: {
               type: 'object',
               additionalProperties: false,
@@ -1289,11 +1287,11 @@ type MurphGroupConsultAction =
 
 const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
   ask: {
-    optional: ['groupLabel', 'participantTarget'],
+    optional: ['groupLabel'],
     required: ['question'],
   },
   handoff: {
-    optional: ['groupLabel', 'participantTarget'],
+    optional: ['groupLabel'],
     required: ['context'],
   },
   ask_current_sender: {
@@ -1392,7 +1390,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'Ask/hand off. Exact title=groupLabel. People use participantTarget.participants; stated total also needs participantCount=total-1. Never combine targets/list groups. Unnamed handoff: vault-cli memory show; fallback "a member". ask_current_sender=group; ask_current_sender_privately=private; clarify_current_sender=ambiguity; continuations resume. Accepted ask reply MUST say checking privately and nothing will be posted in group. Accepted handoff: reply only queued; never claim reached/posted.',
+    'Ask/hand off; host binds. Named group: use groupLabel; never list. Before unnamed handoff, vault-cli memory show; fallback "a member". Sender intent: ask_current_sender=group, ask_current_sender_privately=private, clarify_current_sender=genuine ambiguity; continuations resume. Handoff accepted=queued, not sent/shared.',
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 
