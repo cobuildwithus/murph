@@ -1,6 +1,6 @@
 # Compact rebuildable vault storage
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-27
 
@@ -63,9 +63,9 @@ Updated: 2026-08-27
    workspace were lost during ReviewGPT artifact capture.
 3. [done] Run focused query and ledger tests, typecheck, direct archive
    amendment/replay proof, and before/after storage measurements.
-4. [in progress] Push the review candidate, open the PR, add its source-linked
-   changelog entry, and complete the required preliminary specialist, final
-   ReviewGPT, and exact-head CI gates before closing the plan.
+4. [done] Push the review candidate, open the PR, add its source-linked
+   changelog entry, complete the required preliminary specialist and final
+   ReviewGPT gates, and hand the closed-plan head to exact-head CI.
 
 ## Decisions
 
@@ -104,4 +104,6 @@ Updated: 2026-08-27
   staging against plain JSONL, archiving before commit, and committing into the
   single gzip representation. Accepted the specialist coverage gaps. For the
   specialist UX finding, removed `audit` from the generic projected family
-  enum instead of adding a canonical audit scan to generic search.
+  enum instead of adding a canonical audit scan to generic search. Final
+  ReviewGPT round three passed with no qualifying findings.
+Completed: 2026-08-27
