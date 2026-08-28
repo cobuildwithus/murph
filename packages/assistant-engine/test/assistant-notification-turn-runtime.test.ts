@@ -1112,7 +1112,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   })
 })
 
-test('sendAssistantNotificationLocal rejects deferred immediate exact-text delivery but accepts queue-only deferral', async () => {
+test('sendAssistantNotificationLocal converges a deferred exact-text retry after post-queue cancellation', async () => {
   const initialSession = createAssistantSession({
     binding: {
       actorId: 'actor-exact',
@@ -1131,15 +1131,27 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   sharedPlan.conversationPolicy.audience.channel = 'telegram'
   sharedPlan.conversationPolicy.audience.threadId = 'thread-exact'
   sharedPlan.conversationPolicy.audience.threadIsDirect = true
-  const deliverMessage = vi.fn(async () => ({
-    delivery: null,
-    deliveryError: null,
-    intent: {
-      intentId: 'intent-deferred',
-    },
-    kind: 'queued',
-    session: null,
-  }))
+  const abortController = new AbortController()
+  const abortError = new VaultCliError(
+    'ASSISTANT_CRON_FOREGROUND_YIELDED',
+    'Assistant background work yielded to fresh foreground input.',
+  )
+  let deliveryAttempt = 0
+  const deliverMessage = vi.fn(async () => {
+    deliveryAttempt += 1
+    if (deliveryAttempt === 2) {
+      abortController.abort(abortError)
+    }
+    return {
+      delivery: null,
+      deliveryError: null,
+      intent: {
+        intentId: 'intent-deferred',
+      },
+      kind: 'queued' as const,
+      session: null,
+    }
+  })
   const runtimeState = {
     outbox: {
       deliverMessage,
@@ -1281,8 +1293,12 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   vi.mocked(runtimeState.sessions.save).mockClear()
   mocks.markAssistantFirstContactSeen.mockClear()
 
+  const beforeCommit = vi.fn(async () => undefined)
   const result = await sendAssistantNotificationLocal({
+    abortSignal: abortController.signal,
     answeredMailboxItemIds: ['aask_done_exact'],
+    beforeCommit,
+    deferCommitUntilDeliveryAccepted: true,
     deliveryDedupeToken: 'signup-welcome:member_exact',
     deliveryDispatchMode: 'queue-only',
     deliveryIdempotencyKey: 'signup-welcome:member_exact',
@@ -1298,6 +1314,8 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   })
 
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(abortController.signal.aborted).toBe(true)
+  expect(beforeCommit).toHaveBeenCalledOnce()
   expect(deliverMessage).toHaveBeenCalledWith(
     expect.objectContaining({
       answeredMailboxItemIds: ['aask_done_exact'],

@@ -205,14 +205,27 @@ describe('assistant capability-offers prompt contract', () => {
     )
 
     expect(section).toContain(
-      '`murph.group_consult action="ask_current_sender"`',
+      'asks for an answer that requires their own private history or context',
     )
     expect(section).toContain(
-      'Call `message_current_sender` only when the sender explicitly asks to receive the answer privately',
+      'choose `ask_current_sender` for an explicit answer in the group, `message_current_sender` for an explicit private answer',
     )
-    expect(section).toContain("that message's exact `Message ref`")
+    expect(section).toContain('complete request or destination answer')
+    expect(section).toContain('never add `question`')
     expect(section).toContain('do not tell them to switch chats')
-    expect(section).toContain('call `clarify_current_sender`')
+    expect(section).toContain(
+      '`clarify_current_sender` only when the answer destination is genuinely ambiguous',
+    )
+    expect(section).toContain(
+      "Use the matching continuation action only when the same sender's next reply solely selects the group or private destination",
+    )
+    expect(section).toContain('If that reply adds or changes substance')
+    expect(section).toContain(
+      'ask the sender to restate one complete, self-contained request and its intended answer destination in a single next message',
+    )
+    expect(section).toContain(
+      'treat that accepted message as a new request, not a continuation',
+    )
   })
 
   it('routes participant evidence directly and keeps memberships as a bounded last resort', () => {
@@ -486,6 +499,8 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('`action="share_contact_card"` are available')
     expect(section).toContain('not authenticated strongly enough')
     expect(section).toContain('share a contact card')
+    expect(section).not.toContain('ask_current_sender')
+    expect(section).not.toContain('requires their own private history or context')
   })
 
   it('keeps group-email transport restrictions without hosted group tools', () => {

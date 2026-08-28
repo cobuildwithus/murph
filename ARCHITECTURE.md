@@ -483,7 +483,10 @@ boundaries. An Ask runs a read-only pass inside the selected target context and
 returns one bounded answer without writing there. A Notification delivers one
 route-bound payload without opening the destination context. Trusted adapters
 may select an existing membership or exact current-sender relationship, but
-they do not copy, mount, or merge conversation state between contexts.
+they do not mount or merge conversation state between contexts. The explicit
+private-to-group handoff is the narrow copy exception: the host attributes one
+consented, bounded result and commits it as standalone assistant context in the
+canonical destination transcript; it never copies the source transcript.
 
 The current-sender Assistant Ask adapter is a single first-party, one-time
 personal-runtime request path, not a grant shortcut. The group model exposes

@@ -1663,6 +1663,12 @@ Last verified: 2026-08-27
   output-only continuation immediately; they do not wait for the routine idle
   checkpoint or a second wake. The caller Murph may compose from room context,
   but the resulting outbox intent still carries the completion id and expiry.
+  Fresh foreground input may preempt before that intent is queued. Once the
+  exact intent is durable, the short transcript/session finalization ignores a
+  new foreground yield and rechecks only the completion's remaining authority;
+  the ordinary outbox is then the sole retry owner. This prevents a replay from
+  finding an abandoned deduplicated intent and consuming the mailbox item
+  without dispatch.
   Linq and Telegram revalidate the exact completion and disclosure authority
   inside their existing Web-owned messaging-provider-entry checks. If the
   authority expires or changes after queueing, the outbox first persists the

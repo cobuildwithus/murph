@@ -106,7 +106,7 @@ describe('assistant ask continuation', () => {
     }
   })
 
-  it('abandons a queued continuation intent when abort arrives after queueing', async () => {
+  it('abandons a queued continuation intent when final authorization throws', async () => {
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-ask-abort-after-queue-'),
     )
@@ -117,7 +117,7 @@ describe('assistant ask continuation', () => {
         threadId: 'thread-abort',
         vault,
       })
-      const abort = new DOMException('Foreground input arrived.', 'AbortError')
+      const abort = new DOMException('Authorization check failed.', 'AbortError')
       continuationMocks.markOutboxIntentTerminal.mockReset()
       continuationMocks.markOutboxIntentTerminal.mockResolvedValue(true)
 

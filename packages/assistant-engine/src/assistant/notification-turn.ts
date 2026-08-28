@@ -1273,6 +1273,15 @@ async function runAssistantNotificationBeforeCommit(
   input: AssistantNotificationInput,
   context: AssistantNotificationCommitContext,
 ): Promise<void> {
+  const deliveryAccepted =
+    context.deliveryOutcome?.kind === 'sent' ||
+    (input.deliveryDispatchMode === 'queue-only' &&
+      context.deliveryOutcome?.kind === 'queued')
+  if (deliveryAccepted) {
+    await input.beforeCommit?.(context)
+    return
+  }
+
   throwIfAssistantNotificationAborted(input.abortSignal)
   await input.beforeCommit?.(context)
   throwIfAssistantNotificationAborted(input.abortSignal)

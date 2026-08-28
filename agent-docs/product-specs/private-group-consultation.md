@@ -339,6 +339,10 @@ response exactly and does not let another model reinterpret it as an expiry,
 provider error, or execution failure. Mailbox completion returns the exact
 newly created outbox intent to the existing foreground-causal collector so a
 later user message cannot overtake that completion before dispatch.
+Foreground work may preempt until that intent is queued. After queueing, the
+outbox owns delivery: transcript/session finalization ignores a new foreground
+yield while still rechecking expiry. A retry therefore cannot reuse an
+abandoned deduplicated intent and consume the completion without dispatch.
 
 After Web durably appends either side of the joined-group request/reply pair, it
 signals the existing Temporal runtime workflow. Only after that signal is
@@ -568,6 +572,9 @@ requests drain or expire for ten minutes, then rolls back consumers.
 16. A private-to-group handoff attributes a consenting member by the existing
     group-safe profile projection when available, commits into the canonical
     group transcript, and leaves the next ordinary group turn able to use it.
+17. A composed synthetic journey covers Web handoff admission, wake
+    serialization/parsing, runtime dispatch, canonical transcript import, and
+    a cold follow-up without using a real member identity or provider.
 
 The production-faithful concurrency test pauses an active group provider turn,
 imports an ask, starts the child, delivers a new group message, and proves both

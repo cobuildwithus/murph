@@ -8,6 +8,7 @@ export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> 
 >;
 
 export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
+  "@murphai/assistant-engine": "../../packages/assistant-engine/src/index.ts",
   "@murphai/assistant-runtime": "../../packages/assistant-runtime/src/index.ts",
   "@murphai/clinical-records": "../../packages/clinical-records/src/index.ts",
   "@murphai/cloudflare-hosted-control": "../../packages/cloudflare-hosted-control/package.json",
@@ -21,9 +22,12 @@ export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/query": "../../packages/query/src/index.ts",
   "@murphai/core": "../../packages/core/src/index.ts",
   "@murphai/importers": "../../packages/importers/src/index.ts",
+  "@murphai/inbox-services": "../../packages/inbox-services/src/index.ts",
   "@murphai/inboxd": "../../packages/inboxd/src/index.ts",
+  "@murphai/operator-config": "../../packages/operator-config/package.json",
   "@murphai/parsers": "../../packages/parsers/src/index.ts",
   "@murphai/device-syncd": "../../packages/device-syncd/src/index.ts",
+  "@murphai/vault-usecases": "../../packages/vault-usecases/src/index.ts",
 } as const satisfies WorkspaceSourceEntryRelativePaths;
 
 type VitestAlias = {

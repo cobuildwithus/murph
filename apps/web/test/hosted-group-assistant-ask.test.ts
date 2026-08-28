@@ -1,4 +1,21 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import path from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const assistantBoundaries = vi.hoisted(() => ({
+  executeProvider: vi.fn(),
+}));
+
+vi.mock("@murphai/assistant-engine/assistant-codex", async (
+  importOriginal,
+) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    executeCodexAppServerTurn: assistantBoundaries.executeProvider,
+  };
+});
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
@@ -78,7 +95,20 @@ import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionGroupContextHandoffInstructions,
+  buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import {
+  listAssistantTranscriptEntries,
+  resolveAssistantSession,
+  saveAssistantSession,
+} from "@murphai/assistant-engine/assistant-store";
+import {
+  sendAssistantMessageLocal,
+} from "@murphai/assistant-engine/assistant-service";
+import {
+  executeHostedMailboxEvent,
+} from "@murphai/assistant-runtime";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
 } from "@murphai/hosted-execution/contracts";
@@ -313,6 +343,85 @@ function mailboxItemForContextHandoff(
     id: wake.eventId,
     kind: wake.kind,
     userId: wake.userId,
+  };
+}
+
+function createSyntheticProviderTurn(input: {
+  response: string;
+  threadId: string;
+}) {
+  return {
+    acceptedNoReplyDeliveryContextOrdinals: [],
+    additionalUsages: [],
+    finalAction: null,
+    finalActionExplicit: false,
+    finalMessage: input.response,
+    jsonEvents: [],
+    precedingAgentMessageSegments: [],
+    providerActionCount: 0,
+    reactions: [],
+    responseDeliveryContextOrdinal: 0,
+    responseCard: null,
+    responseMedia: [],
+    rolloutRelativePath: null,
+    runtimeIssueInputs: [],
+    sessionId: input.threadId,
+    stderr: "",
+    stdout: "",
+    targetInputId: null,
+    threadId: input.threadId,
+    transcriptMessage: input.response,
+    turnId: `turn-${input.threadId}`,
+  };
+}
+
+function createSyntheticRuntime(): Parameters<
+  typeof executeHostedMailboxEvent
+>[0]["runtime"] {
+  return {
+    commitTimeoutMs: null,
+    forwardedEnv: {},
+    platform: {
+      artifactStore: {
+        async get() {
+          return null;
+        },
+        async put() {},
+      },
+      deviceSyncPort: null,
+      effectsPort: {
+        async deletePreparedAssistantDelivery() {},
+        async readRawEmailMessage() {
+          return null;
+        },
+        async readAssistantDeliveryRecord() {
+          return null;
+        },
+        async assertLinqRecentInboundEngagement() {
+          throw new Error("Queue-only handoff must not dispatch to Linq.");
+        },
+        async recordLinqDeliveryOutcome() {},
+        async sendEmail() {},
+        async writeAssistantDeliveryRecord(record) {
+          return record;
+        },
+      },
+      usageRecordPort: null,
+    },
+    platformEnv: {},
+    resolvedConfig: {
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+      managedAutoReplyChannels: [{
+        capabilityReady: true,
+        channel: "linq",
+        memberChannel: "linq",
+      }],
+    },
+    userEnv: {},
   };
 }
 
@@ -893,6 +1002,202 @@ describe("Hosted private-to-group context handoff admission", () => {
       projectionScopes: [],
       runtimeMemberId: TARGET_RUNTIME_MEMBER_ID,
     });
+  });
+
+  it("carries a Web-admitted handoff through runtime import and a cold group follow-up", async () => {
+    const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!testTempRoot) {
+      throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    }
+    const vaultRoot = await mkdtemp(
+      path.join(testTempRoot, "group-handoff-composed-flow-"),
+    );
+    const flowNow = new Date();
+    const target = {
+      adapter: "codex-cli" as const,
+      approvalPolicy: "never" as const,
+      codexCommand: null,
+      codexHome: null,
+      model: "gpt-5.6-terra",
+      modelProvider: "vercel-ai-gateway",
+      oss: false,
+      profile: null,
+      reasoningEffort: "medium" as const,
+      sandbox: "danger-full-access" as const,
+    };
+    const runtime = createSyntheticRuntime();
+    const destination = groupDestination().bound;
+    const locator = {
+      actorId: destination.route.actorId,
+      bindingDeliveryTarget: destination.route.delivery.target,
+      channel: destination.route.channel,
+      deliveryKind: destination.route.delivery.kind,
+      deliveryTarget: destination.route.delivery.target,
+      identityId: destination.route.identityId,
+      threadId: destination.route.threadId,
+      threadIsDirect: destination.route.threadIsDirect,
+    };
+
+    try {
+      await executeHostedMailboxEvent({
+        executionContext: {
+          hosted: {
+            defaultTarget: target,
+            memberId: TARGET_RUNTIME_MEMBER_ID,
+            userEnvKeys: [],
+          },
+        },
+        runtime,
+        runtimeEnv: {},
+        sourceMailboxItemId: "synthetic-group-activation",
+        vaultRoot,
+        wake: buildHostedExecutionMemberActivatedWake({
+          eventId: "member.activated:synthetic-group-handoff",
+          initialGroupRoomModelMarkdown:
+            "## Explicit setup\n\nKeep this synthetic room focused on training consistency.",
+          memberChannels: {
+            email: false,
+            linq: true,
+            telegram: false,
+          },
+          memberId: TARGET_RUNTIME_MEMBER_ID,
+          onboardingFollowupEnrollment: false,
+          occurredAt: flowNow.toISOString(),
+          signupWelcome: null,
+        }),
+      });
+      const initial = await resolveAssistantSession({
+        ...locator,
+        target,
+        vault: vaultRoot,
+      });
+      const staleResume = {
+        routeFingerprint: "route-before-handoff",
+        threadId: "provider-thread-before-handoff",
+      };
+      await saveAssistantSession(vaultRoot, {
+        ...initial.session,
+        codexResume: staleResume,
+        resumeState: staleResume,
+      });
+
+      const handoffText =
+        "Member Delta averaged 7,400 steps across 120 synthetic tracked days.";
+      assistantBoundaries.executeProvider
+        .mockResolvedValueOnce(createSyntheticProviderTurn({
+          response: handoffText,
+          threadId: "isolated-handoff-thread",
+        }))
+        .mockImplementationOnce(async () => {
+          await expect(listAssistantTranscriptEntries(
+            vaultRoot,
+            initial.session.sessionId,
+          )).resolves.toContainEqual(expect.objectContaining({
+            standaloneAssistantContext: true,
+            text: handoffText,
+          }));
+          return createSyntheticProviderTurn({
+            response:
+              "That is a meaningful long-term activity pattern and a useful baseline.",
+            threadId: "ordinary-group-thread",
+          });
+        });
+
+      let admittedWake: ReturnType<typeof contextHandoffWake> | null = null;
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementationOnce(
+        async (input: {
+          envelope: ReturnType<typeof contextHandoffWake>;
+        }) => {
+          admittedWake = input.envelope;
+          return {
+            dedupeConflict: false,
+            duplicate: false,
+            inserted: true,
+            item: {
+              id: input.envelope.eventId,
+              userId: input.envelope.userId,
+            },
+          };
+        },
+      );
+      const { prisma } = createPrisma();
+      const context =
+        "The member averaged 7,400 steps across 120 synthetic tracked days.";
+      const admission = await requestHostedGroupContextHandoff({
+        context,
+        memberId: ORIGIN_MEMBER_ID,
+        now: flowNow,
+        originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        prisma: prisma as never,
+      });
+      expect(admission).toMatchObject({
+        mailboxWake: { expectedUserId: TARGET_RUNTIME_MEMBER_ID },
+        result: { status: "accepted", targetLabel: "100 Club" },
+      });
+      if (!admittedWake) {
+        throw new Error("Expected Web to append one synthetic handoff wake.");
+      }
+      const parsedWake = parseHostedExecutionWake(
+        JSON.parse(JSON.stringify(admittedWake)),
+      );
+      expect(parsedWake).toMatchObject({
+        kind: "assistant.notification.requested",
+        notification: {
+          groupContextHandoff: { sourceDisplayName: "Member Delta" },
+        },
+      });
+
+      const runtimeOutcome = await executeHostedMailboxEvent({
+        executionContext: {
+          hosted: {
+            defaultTarget: target,
+            memberId: TARGET_RUNTIME_MEMBER_ID,
+            userEnvKeys: [],
+          },
+        },
+        forceQueueOnlyAssistantNotification: true,
+        runtime,
+        runtimeEnv: {},
+        sourceMailboxItemId: parsedWake.eventId,
+        vaultRoot,
+        wake: parsedWake,
+      });
+      expect(runtimeOutcome.deliveryIntentIds).toHaveLength(1);
+      await expect(resolveAssistantSession({
+        ...locator,
+        createIfMissing: false,
+        target,
+        vault: vaultRoot,
+      })).resolves.toMatchObject({
+        session: {
+          codexResume: null,
+          sessionId: initial.session.sessionId,
+        },
+      });
+
+      const followUp = await sendAssistantMessageLocal({
+        ...locator,
+        deliverResponse: false,
+        executionContext: {
+          hosted: {
+            defaultTarget: target,
+            memberId: TARGET_RUNTIME_MEMBER_ID,
+            userEnvKeys: [],
+          },
+        },
+        includeEarlySessionOnboarding: false,
+        persistUserPromptOnFailure: false,
+        prompt: "What do you think about that average over the full period?",
+        sessionId: initial.session.sessionId,
+        vault: vaultRoot,
+        workingDirectory: vaultRoot,
+      });
+
+      expect(followUp.response).toMatch(/meaningful long-term activity pattern/iu);
+      expect(assistantBoundaries.executeProvider).toHaveBeenCalledTimes(2);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
   });
 
   it.each([

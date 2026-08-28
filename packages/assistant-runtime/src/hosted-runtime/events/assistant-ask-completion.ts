@@ -54,9 +54,11 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     mailboxLane: "assistant-ask-completion",
   });
   const shouldYield = input.shouldYield ?? null;
+  const remainsAuthorized = () =>
+    !isHostedAssistantAskCompletionExpired(input.wake.ask.expiresAt);
   const canCommit = () =>
     shouldYield?.() !== true
-    && !isHostedAssistantAskCompletionExpired(input.wake.ask.expiresAt);
+    && remainsAuthorized();
   if (shouldYield?.() === true) {
     throw new HostedAssistantAskCompletionPreemptedError();
   }
@@ -178,12 +180,18 @@ export async function executeHostedAssistantAskCompletedWake(input: {
               ],
             }
           : {}),
-        beforeCommit: () => {
+        beforeDelivery: () => {
           if (canCommit()) {
             return;
           }
           if (shouldYield?.() === true) {
             throw new HostedAssistantAskCompletionPreemptedError();
+          }
+          throw expiredBeforeCommit;
+        },
+        beforeCommit: () => {
+          if (remainsAuthorized()) {
+            return;
           }
           throw expiredBeforeCommit;
         },
@@ -220,6 +228,7 @@ export async function executeHostedAssistantAskCompletedWake(input: {
         answeredMailboxItemIds: [
           input.sourceMailboxItemId ?? input.wake.eventId,
         ],
+        canFinalize: remainsAuthorized,
         canCommit,
         conversation: conversationRefFromBinding(session.binding),
         expectedConversationScope: "group",
@@ -249,6 +258,7 @@ export async function executeHostedAssistantAskCompletedWake(input: {
       const continuation = await sendAssistantAskContinuation({
         ...deliveryInput,
         actorId: route.participantId,
+        canFinalize: remainsAuthorized,
         canCommit,
         conversation: conversationRefFromAssistantInputConversation(
           origin.conversation!,
