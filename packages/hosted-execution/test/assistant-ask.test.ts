@@ -24,6 +24,9 @@ import {
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
 } from "../src/parsers.ts";
+import {
+  HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX,
+} from "../src/runtime-control.ts";
 
 const ORIGIN_ASSISTANT_INPUT_ID = "ain_0123456789abcdef0123456789abcdef";
 const ORIGIN_SESSION_ID = "session_private";
@@ -256,6 +259,53 @@ describe("hosted Assistant Ask runtime control", () => {
       originSessionId: ORIGIN_SESSION_ID,
       question: "What is today's workout?",
     })).toMatchObject({ groupLabel: null });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "ask",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      participantTarget: {
+        participantCount: 2,
+        participants: [
+          { displayName: "Taylor" },
+          { phoneHint: { areaCode: "415", lastFour: "9876" } },
+        ],
+      },
+      question: "What did we decide?",
+    })).toMatchObject({
+      participantTarget: {
+        participantCount: 2,
+        participants: [
+          { displayName: "Taylor" },
+          { phoneHint: { areaCode: "415", lastFour: "9876" } },
+        ],
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      participantTarget: {
+        participants: [{ phoneHint: { lastFour: "4155559876" } }],
+      },
+      question: "What did we decide?",
+    })).toThrow(/four digits/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "handoff",
+      context: "A member completed the planned activity.",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      participantTarget: {
+        participants: [{ emailParticipant: false }],
+      },
+    })).toThrow(/must be true/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      participantTarget: {
+        participants: [{ displayName: "+1 (415) 555-9876" }],
+      },
+      question: "What did we decide?",
+    })).toThrow(/must not contain/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "ask",
       membershipId: "model_selected_membership",
@@ -274,12 +324,25 @@ describe("hosted Assistant Ask runtime control", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask",
       result: {
-        groupLabels: ["100 Club", "Wednesday Training"],
+        groupLabels: Array.from(
+          { length: HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX },
+          (_, index) => `Group ${index + 1}`,
+        ),
         status: "clarification_required",
       },
     })).toMatchObject({
       result: { status: "clarification_required" },
     });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "ask",
+      result: {
+        groupLabels: Array.from(
+          { length: HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX + 1 },
+          (_, index) => `Group ${index + 1}`,
+        ),
+        status: "clarification_required",
+      },
+    })).toThrow(/between 1 and 64 entries/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask",
       result: { status: "no_groups" },

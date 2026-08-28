@@ -6,6 +6,7 @@ import { test, vi } from "vitest";
 
 import {
   appendJsonlRecord,
+  archiveClosedEventLedgerShards,
   initializeVault,
   readJsonlRecords,
   validateVault,
@@ -199,6 +200,10 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
   assert.ok(protectedPath);
   assert.ok(tamperedPath);
   await writeVaultFile(vaultRoot, tamperedPath, "mutated-image");
+  await archiveClosedEventLedgerShards({
+    now: new Date("2026-07-05T00:00:00.000Z"),
+    vaultRoot,
+  });
 
   const result = await runInboxMediaRetention({
     vaultRoot,

@@ -21,8 +21,10 @@ import {
   readHostedMailboxAssistantInputItemDetails,
   resolveAssistantSession,
   retireAssistantInputEventContent,
+  type AssistantInputAttachmentEvidence,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
+  type AssistantInputProjectionStatus,
 } from "@murphai/assistant-engine";
 import type {
   AssistantModelTarget,
@@ -136,7 +138,12 @@ const HOSTED_PENDING_INPUT_RETENTION_DELIVERABLE_STATUSES = [
 ] as const;
 type HostedPendingAssistantInputReplyabilityEvent = Pick<
   AssistantInputEventRecord,
-  "conversation" | "replyTarget" | "sourceRef"
+  | "attachmentEvidence"
+  | "content"
+  | "conversation"
+  | "projection"
+  | "replyTarget"
+  | "sourceRef"
 >;
 
 export function resolveHostedPendingAssistantInputStatePath(
@@ -1554,8 +1561,46 @@ export function isHostedPendingAssistantInputStillReplyable(input: {
   ) {
     return false;
   }
+  if (input.event.conversation?.actorIsSelf === true) {
+    return false;
+  }
+  if (
+    requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount:
+        input.event.content.attachmentDescriptors.length,
+      projectionStatus: input.event.projection.status,
+    })
+    && !isHostedAssistantInputAttachmentEvidenceSettled(
+      input.event.attachmentEvidence,
+    )
+  ) {
+    return false;
+  }
 
   return input.enabledAutoReplyChannels.has(replyChannel);
+}
+
+export function requiresHostedAssistantInputAttachmentEvidence(input: {
+  attachmentDescriptorCount: number;
+  projectionStatus: AssistantInputProjectionStatus;
+}): boolean {
+  return input.attachmentDescriptorCount > 0
+    && input.projectionStatus !== "not_attempted";
+}
+
+export function isHostedAssistantInputAttachmentEvidenceSettled(
+  evidence: Pick<AssistantInputAttachmentEvidence, "attachments" | "status">,
+): boolean {
+  if (evidence.status === "failed") {
+    return true;
+  }
+  if (evidence.status !== "available" && evidence.status !== "partial") {
+    return false;
+  }
+  return evidence.attachments.every(
+    (attachment) => attachment.parseState !== "pending"
+      && attachment.parseState !== "running",
+  );
 }
 
 function createEmptyHostedPendingAssistantInputState(input: {

@@ -1571,10 +1571,13 @@ describe("hosted runtime control contracts", () => {
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         runtimeInvocationOrchestrationAttemptId:
           "web-ingress-123e4567-e89b-42d3-a456-426614174000",
-        userRunnerRpcStartedAtEpochMs: 1_777_000_000_021,
-        runtimeConsentLockAcquiredAtEpochMs: 1_777_000_000_022,
-        healthDataAdmissionReadStartedAtEpochMs: 1_777_000_000_023,
-        healthDataAdmissionReadFinishedAtEpochMs: 1_777_000_000_024,
+        userRunnerConstructorStartedAtEpochMs: 1_777_000_000_021,
+        userRunnerConstructorFinishedAtEpochMs: 1_777_000_000_022,
+        userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1_777_000_000_023,
+        userRunnerRpcStartedAtEpochMs: 1_777_000_000_023,
+        runtimeConsentLockAcquiredAtEpochMs: 1_777_000_000_024,
+        healthDataAdmissionReadStartedAtEpochMs: 1_777_000_000_025,
+        healthDataAdmissionReadFinishedAtEpochMs: 1_777_000_000_026,
         userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         runnerStateBindStartedAtEpochMs: 1_777_000_000_031,
         runnerStateBindFinishedAtEpochMs: 1_777_000_000_032,
@@ -1665,6 +1668,10 @@ describe("hosted runtime control contracts", () => {
       },
       preProvider: {
         mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 5,
+        foregroundPassToWorkspaceForegroundPassMs: 7,
+        workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
+        assistantPhaseCallbackToAssistantPhaseMs: 6,
         workspaceAssistantPreAutomationMs: 11,
         automationLaneToAssistantServiceMs: 7,
         automationReadinessMs: 1,
@@ -1733,6 +1740,32 @@ describe("hosted runtime control contracts", () => {
       },
     });
 
+    const oldRunnerProviderBreakdown = {
+      schemaVersion: 1,
+      preProvider: {
+        mailboxImportDoneToAssistantPhaseMs: 29,
+      },
+    };
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.000Z",
+        phaseBreakdown: oldRunnerProviderBreakdown,
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.000Z",
+        phaseBreakdown: oldRunnerProviderBreakdown,
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    });
+
     // Secret-safety + robustness: a malformed phaseBreakdown is DROPPED (never
     // reaches storage) while the core latency event still parses. phaseBreakdown is
     // best-effort telemetry, so an unsafe/unknown shape must not poison the event
@@ -1787,6 +1820,17 @@ describe("hosted runtime control contracts", () => {
       { outboxScanElapsedMs: "23" }, // durations must stay numeric
       { automationSessionPreflightMs: "2" }, // nested durations must stay numeric
       {
+        mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 29,
+      }, // a partial mailbox-to-assistant subdivision is ambiguous
+      {
+        mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 5,
+        foregroundPassToWorkspaceForegroundPassMs: 7,
+        workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
+        assistantPhaseCallbackToAssistantPhaseMs: 7,
+      }, // all mailbox-to-assistant leaves must sum exactly to their parent
+      {
         automationLaneToAssistantServiceMs: 7,
         automationReadinessMs: 7,
       }, // a partial subdivision is ambiguous and must be dropped
@@ -1840,6 +1884,9 @@ describe("hosted runtime control contracts", () => {
       { runtimeInvocationOrchestrationAttemptId: "attempt_1" }, // arbitrary attempt ids are forbidden
       { runtimeControlAuthStartedAtEpochMs: "1777000000015" }, // CF-side string leaf
       { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
+      { userRunnerConstructorStartedAtEpochMs: "1777000000021" }, // activation timestamps stay numeric
+      { userRunnerConstructorFinishedAtEpochMs: -1 }, // activation timestamps stay non-negative
+      { userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1.5 }, // activation timestamps stay integral
       { userRunnerEnsureStartedAtEpochMs: -1 }, // negative leaf
       { activeFenceTargetWasPriorVersion: 1 }, // boolean leaf must stay boolean
       { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
@@ -2149,6 +2196,9 @@ describe("hosted runtime control contracts", () => {
       runtimeStoreEnsureElapsedMs: 80,
       tokenAcquiredAtEpochMs: 1_777_000_000_010,
       tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+      userRunnerConstructorStartedAtEpochMs: 1_777_000_000_120,
+      userRunnerConstructorFinishedAtEpochMs: 1_777_000_000_122,
+      userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1_777_000_000_123,
       workspaceReadElapsedMs: 70,
     })).toEqual({
       activeFenceTargetWasPriorVersion: true,
@@ -2168,6 +2218,9 @@ describe("hosted runtime control contracts", () => {
       runtimeStoreEnsureElapsedMs: 80,
       tokenAcquiredAtEpochMs: 1_777_000_000_010,
       tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+      userRunnerConstructorStartedAtEpochMs: 1_777_000_000_120,
+      userRunnerConstructorFinishedAtEpochMs: 1_777_000_000_122,
+      userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1_777_000_000_123,
       workspaceReadElapsedMs: 70,
     });
 

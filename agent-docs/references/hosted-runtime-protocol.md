@@ -1727,6 +1727,22 @@ without reaching the provider, later provider starts retain the canonical path
 but omit the subdivision so earlier group work and pass-shared history scans are
 not misattributed; the scan-nesting statement applies only to an emitted complete
 subdivision.
+
+The UserRunner Durable Object records optional constructor-start,
+constructor-finish, and first-`ensureRuntimeProcessingForUser` epoch-millisecond
+facts in the existing in-memory orchestration phase. Production runner
+construction occurs between the two constructor stamps; recording and
+propagation add no request, storage write, provider call, awaited logging step,
+or second logging system. These are facts about the Durable Object instance
+activation, not about every request, so a warm request can carry stamps older
+than its Cloudflare route timestamp. The identifier-free cold-start report emits
+the route-to-constructor, constructor-initialization, and
+constructor-to-first-ensure slices only when
+`route <= constructor start <= constructor finish <= first ensure` and the
+instance's first-ensure stamp equals the current RPC-entry stamp. Warm or
+otherwise ambiguous chronology remains eligible for the existing route-to-RPC
+aggregate but emits none of the three activation-only slices.
+
 Because Web strictly parses phase-breakdown leaves, roll this telemetry out
 Web-first so its reader accepts the additive fields before a runner emits them;
 during rollback, remove the runner/Cloudflare emitter before rolling Web back.

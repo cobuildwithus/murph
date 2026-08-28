@@ -859,7 +859,7 @@ test('timeline exposes projected health entry types', async () => {
   }
 })
 
-test('search rejects unsupported record-type values', async () => {
+test('search rejects audit because it is not part of the query projection', async () => {
   const vaultRoot = await makeCanonicalHealthFixture()
 
   try {
@@ -869,7 +869,7 @@ test('search rejects unsupported record-type values', async () => {
       '--text',
       'sleep',
       '--record-type',
-      'not_a_real_record_type',
+      'audit',
       '--vault',
       vaultRoot,
     ])

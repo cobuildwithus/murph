@@ -211,12 +211,12 @@ open. Default to this order, but pull a more relevant checkpoint forward when
 it materially improves safety or keeps the conversation natural.
 
 These six are what must be *resolved*, not six turns the user must sit
-through. Deliver them in three beats: connect a data source if there is one
-(checkpoint 1), then invite one brain-dump voice memo that covers movement,
-current protocols, supplements, and medical basics at once (checkpoints 2–5),
-then close with the lab question (checkpoint 6). The numbered entries below
-define what each checkpoint means, how to save it, and its delegation rules;
-they are not a script to read one question at a time.
+through. Deliver them in three beats: identify a data source and optionally
+connect it (checkpoint 1), then invite one brain-dump voice memo that covers
+movement, current protocols, supplements, and medical basics at once
+(checkpoints 2–5), then close with the lab question (checkpoint 6). The
+numbered entries below define what each checkpoint means, how to save it, and
+its delegation rules; they are not a script to read one question at a time.
 
 #### The brain-dump memo (checkpoints 2–5)
 
@@ -287,7 +287,9 @@ the supplied facts before replying and leaves optional label details unknown.
    prompt's hosted wearable connection line: one label when only one exists and
    a few when several do. If that line is absent, omit provider examples; never
    supply remembered names. Keep Apple Health separate for the post-“none”
-   relay below. If they name a supported provider, use
+   relay below. Identifying a data source resolves this checkpoint; connecting
+   it is a separate optional action. If they name a supported provider without
+   deferring connection, use
    `murph.device` with `action: connect` when available. Only in a non-hosted
    local-operator route, `vault-cli device connect <provider> --format json` is
    an allowed fallback when the prompt explicitly grants it for the current
@@ -313,9 +315,8 @@ the supplied facts before replying and leaves optional label details unknown.
    the iOS app own sign-in, Apple Health connection, and operating-system
    permission. Do not call
    `murph.device` to connect Apple Health, claim permission was granted, or say
-   steps are syncing until live evidence proves it. Declining this optional
-   offer leaves the checkpoint resolved. Choosing to connect later does not
-   prove that the connection already exists.
+   steps are syncing until live evidence proves it. This optional offer never
+   reopens the data-source checkpoint.
 2. **Movement and training.** Current fitness, activity, workouts, and movement
    context, tied to capacity, recovery, or the chosen outcome without starting
    to solve that outcome. A rough stream-of-consciousness answer is enough.

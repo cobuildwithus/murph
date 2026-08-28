@@ -51,7 +51,7 @@ const TARGET_TOOL_DESCRIPTION_BUDGETS = [
     MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
     350,
   ],
-  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 460],
+  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 320],
   ["group_data", MURPH_GROUP_DATA_TOOL, 410],
   ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL, 350],
   ["group_usage", MURPH_GROUP_USAGE_TOOL, 360],
@@ -87,11 +87,44 @@ describe("assistant tool description call contracts", () => {
     expect(total).toBeLessThanOrEqual(6_700);
   });
 
-  it("keeps group handoff discovery and pending-state semantics explicit", () => {
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("queued, not sent");
+  it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("handoff");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "never say told, shared, or posted",
+      "ask=group answer; handoff=tell/post/share",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "title=groupLabel",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "people/count=participantTarget",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "names not groupLabel; no list",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      'Unnamed: memory show, else "a member"',
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "ask_current_sender=group",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "ask_current_sender_privately=private",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "clarify=genuine ambiguity",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "continuations resume",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "accepted=queued, not sent/shared",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
+      "message_current_sender",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("room-vault");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
+      "host-mediated bridge",
     );
   });
 
@@ -112,18 +145,4 @@ describe("assistant tool description call contracts", () => {
     );
   });
 
-  it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Use message_current_sender for a complete private current-sender request",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Call clarify_current_sender before a needed follow-up",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "continue_current_sender_privately or continue_current_sender_in_group only for a later reply",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "never a fresh request",
-    );
-  });
 });

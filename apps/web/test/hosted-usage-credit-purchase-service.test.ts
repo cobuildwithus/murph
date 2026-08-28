@@ -3878,6 +3878,8 @@ describe("createHostedUsageCreditCheckout", () => {
     );
     expect(queryText).toContain('"group"."join_code" = ');
     expect(queryText).toContain('"group"."runtime_member_id" = ');
+    expect(queryText).toContain('FOR SHARE OF "group"');
+    expect(queryText).not.toContain('FOR SHARE OF "group", "container"');
     expect(queryCall.values).toEqual([
       "group_join_code_1234",
       "member_group_runtime",
@@ -3885,6 +3887,62 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.purchases.size).toBe(0);
     expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      "owner-created join code",
+      "group_join_code_1234",
+      [
+        "owner-group-lock",
+        "beneficiary-lock",
+        "container-lock",
+        "owner-group-lock",
+        "beneficiary-lock",
+        "container-lock",
+      ],
+    ],
+    [
+      "signed funding-only locator",
+      "gf1.member_group_runtime.signed_funding_locator",
+      [
+        "beneficiary-lock",
+        "container-lock",
+        "beneficiary-lock",
+        "container-lock",
+      ],
+    ],
+  ] as const)(
+    "keeps canonical funding lock order for the %s",
+    async (_label, joinCode, expectedLockOrder) => {
+      const usageCreditEvents: string[] = [];
+      const fake = createFakePrisma({ usageCreditEvents });
+      mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValue({
+        displayName: "Sunday sleep crew",
+        fundingPath: `/groups/fund/${encodeURIComponent(joinCode)}`,
+        joinCode,
+        kind: "friends",
+        runtimeMemberId: "member_group_runtime",
+      });
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+
+      await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode,
+        now: NOW,
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      });
+
+      expect(usageCreditEvents.filter((event) =>
+        event === "beneficiary-lock"
+        || event === "container-lock"
+        || event === "owner-group-lock"
+      )).toEqual(expectedLockOrder);
+    },
+  );
 
   it.each([
     [
@@ -7773,6 +7831,11 @@ function createFakePrisma(input: {
               : input.occupiedUsageCreditSlotCount ?? 0,
         }];
       }
+      input.usageCreditEvents?.push(
+        sql.includes('FROM "hosted_group" AS "group"')
+          ? "owner-group-lock"
+          : "container-lock",
+      );
       groupFundingQueryCalls.push({ queryParts, values });
       return input.groupFundingTargetLocked === false
         ? []

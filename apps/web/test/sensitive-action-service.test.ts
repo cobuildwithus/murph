@@ -120,12 +120,8 @@ describe("sensitive action challenges", () => {
 
     await expect(verifyAndConsumeSensitiveActionChallenge({
       authorization: { signature, token: challenge.token },
-      bindingHash: buildSettingsSensitiveActionBinding({
-        kind: "account.delete",
-        memberId: "member_123",
-        sessionId: "session_456",
-      }),
-      kind: "account.delete",
+      bindingHash: "b".repeat(64),
+      kind: "assistant.action.approve",
       memberId: "member_123",
       now,
       prisma,
@@ -229,13 +225,13 @@ describe("sensitive action challenges", () => {
     const prisma = createPrismaFake();
     mocks.readHostedPrivyUserById.mockRejectedValueOnce(new Error("provider unavailable"));
     const bindingHash = buildSettingsSensitiveActionBinding({
-      kind: "account.delete",
+      kind: "vault.export",
       memberId: "member_123",
       sessionId: "session_123",
     });
     const challenge = await createSensitiveActionChallenge({
       bindingHash,
-      kind: "account.delete",
+      kind: "vault.export",
       memberId: "member_123",
       now,
       prisma,
@@ -245,7 +241,7 @@ describe("sensitive action challenges", () => {
     await expect(verifyAndConsumeSensitiveActionChallenge({
       authorization: { signature, token: challenge.token },
       bindingHash,
-      kind: "account.delete",
+      kind: "vault.export",
       memberId: "member_123",
       now,
       prisma,
@@ -258,13 +254,13 @@ describe("sensitive action challenges", () => {
   it("does not consume a challenge signed by another wallet", async () => {
     const prisma = createPrismaFake();
     const bindingHash = buildSettingsSensitiveActionBinding({
-      kind: "account.delete",
+      kind: "vault.export",
       memberId: "member_123",
       sessionId: "session_123",
     });
     const challenge = await createSensitiveActionChallenge({
       bindingHash,
-      kind: "account.delete",
+      kind: "vault.export",
       memberId: "member_123",
       now,
       prisma,
@@ -277,7 +273,7 @@ describe("sensitive action challenges", () => {
     await expect(verifyAndConsumeSensitiveActionChallenge({
       authorization: { signature, token: challenge.token },
       bindingHash,
-      kind: "account.delete",
+      kind: "vault.export",
       memberId: "member_123",
       now,
       prisma,

@@ -263,20 +263,26 @@ bounded mailbox result read by exact same-turn replay and expires without a
 delivery obligation. The personal vault, group vault, runner, and assistant
 session do not gain another permission store.
 
-Permission text is bounded to 1,000 code points. Each group may retain at most
-25 permission rows, and grant-generation history is capped at 25 per group and
-25 per member under the existing group/member locks. Exact request and reaction
-replays resolve before the history counts, so they remain idempotent at the
-cap; only a fresh row returns `limit_reached`. Live group/member projections
-also return at most 25 active grants. Authority and replay use the existing
-indexed permission id, provider-message lookup, membership, and
-permission/grant relations; immutable history is not copied into hosted
-workspace snapshots or mailbox payloads. Rows remain retained for the owning
-group's lifetime and cascade with group/account deletion; no retention
-scheduler is introduced.
+Permission text is bounded to 1,000 code points. Permission and grant history
+does not impose a lifetime or active product-cardinality cap: a member can keep
+granting or requesting fresh permissions after 25 prior operations. Authority
+and replay use the existing indexed permission id, provider-message lookup,
+membership, and permission/grant relations; immutable history is not copied
+into hosted workspace snapshots or mailbox payloads. Rows remain retained for
+the owning group's lifetime and cascade with group/account deletion; no
+retention scheduler is introduced.
 
-`read_current` is the single group summary action that decrypts and returns
-active disclosure grants. `create_join_link`, `post_join_offer`, and
+Assistant-visible active grants remain bounded to 25 decrypted rows per page.
+Group `read_current` and personal `list_memberships` each accept an independent,
+opaque `(grantedAt, id)` continuation and return an explicit next cursor and
+truncation marker. A missing target therefore continues to a later page instead
+of blocking the 26th grant or hiding it. Invalid cursors fail explicitly, and
+every later `ask_member` or revocation revalidates the exact current grant
+authority as before.
+
+`read_current` is the single group summary action that decrypts and returns one
+page of active disclosure grants; repeating it with Web's exact disclosure
+cursor reads the next page. `create_join_link`, `post_join_offer`, and
 `update_display_name` return their ordinary mutation summaries without opening
 unrelated permission text, so those mutations do not depend on the disclosure
 secure-box.

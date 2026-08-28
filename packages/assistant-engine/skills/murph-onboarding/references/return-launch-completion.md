@@ -189,8 +189,8 @@ Onboarding is complete with `user_answered` only when all of these are true:
 
 An experiment, plan, support loop, wearable connection, lab upload, group, or
 specific positive health fact is not required. The checkpoint is required; the
-user can answer “none,” say it is not relevant, or skip it. “Later,” “tomorrow,”
-or “I don't have it handy” leaves onboarding open.
+user can answer “none,” say it is not relevant, or skip it. Apply the defer
+evidence owned by `persistence-recovery-follow-up.md` before completion.
 
 #### Arm the first personal read
 

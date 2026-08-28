@@ -68,37 +68,46 @@ Murph Cloud workflow and GitHub Environment without exposing its value to the
 public repository, only after vendor approval confirms that the exact hosted
 Gemini project has the applicable paid/no-training controls required by
 Murph's health-data policy. Key presence alone does not prove those controls.
-Finally, deploy the Worker and runner bundle together with
-immediate convergence. The runner receives only the normal injected-credential
-sentinel; the Worker owns the real key and substitutes it only after the exact
-Gemini request passes authorization and shape validation.
+Finally, deploy the Worker and runner bundle with the compatible egress reader
+active before a new runner request shape can reach it. The runner receives only
+the normal injected-credential sentinel; the Worker owns the real key and
+substitutes it only after the exact Gemini request passes authorization and
+shape validation. During this rollout the Worker accepts the two current
+profiles, standard 1 FPS or detailed-motion 5 FPS with medium thinking and no
+explicit output-token cap, plus only the exact previous 1 FPS, low-thinking,
+1,800-token shape from a warm old runner.
 
 Do not deploy the Cloudflare producer ahead of Web pricing: the Worker now
 withholds a successful Gemini response until Web accepts its usage row, so an
 older Web would turn every otherwise successful analysis into a 502. Missing
 key configuration is fail-closed and
-omits `murph.analyze_video`. During an immediate rollout, old instances omit
-the tool and new instances expose it for private-direct turns and authenticated
-Linq/Telegram group turns with accepted user-action input. Any authenticated
-group participant may request analysis of another participant's video in the
-same accepted group turn. Unverified external groups continue to omit it. An
-eligible turn may receive the schema before its accepted input has video
-authority because the provider tool set freezes at turn start; this lets the
-first live-steered video be frozen and authorized before tool execution in that
-same turn. There is no schema, backfill, dual-write, or stored compatibility
-state.
+omits `murph.analyze_video`. During this update, an old runner continues to emit
+the exact legacy profile while a new runner may emit either current profile;
+the compatible Worker accepts both without permitting arbitrary FPS, thinking,
+or output settings. Both generations expose the tool for private-direct turns
+and authenticated Linq/Telegram group turns with accepted user-action input.
+Any authenticated group participant may request analysis of another
+participant's video in the same accepted group turn; unverified external groups
+continue to omit it. New requests choose the mode before egress and never retry
+the clip at another rate. An eligible turn may receive the schema before its
+accepted input has video authority because the provider tool set freezes at
+turn start; this lets the first live-steered video be frozen and authorized
+before tool execution in that same turn. There is no schema, backfill,
+dual-write, or stored compatibility state.
 
-Rollback the Worker/runner producer first, then remove the private secret
-mapping if desired; the Web reader and pricing branch are safe to leave in
-place. Post-deploy, use one consented short MP4/MOV/WebM video in a private
-direct conversation to verify a single Gemini request, explicit 1 FPS
-metadata, bounded output, and one usage
-record. Then use one consented group video and verify one Gemini request plus
-one group-visible result when its uploader requests analysis. Have a different
-authenticated participant request analysis of a second consented group video
-and verify the same single-request result. Inspect only bounded status/error
-aggregates, never media, prompts, paths, response bodies, sender handles, or
-credential values.
+Do not revert the compatible Worker while a new runner can still emit the new
+request shape. Disable the tool or roll back the runner writer first, drain warm
+new runners, and only then revert the reader; the Web usage reader and pricing
+branch are safe to leave in place. Post-deploy, use consented short supported
+videos in a private direct conversation to verify one ordinary request selects
+standard 1 FPS and one rapid-movement or exercise-form request selects detailed
+motion 5 FPS. Confirm both finish with one Gemini call and one usage record.
+Then use one consented group video and verify the same single-request result
+when its uploader requests analysis. Have a different authenticated participant
+request analysis of a second consented group video and verify the same result.
+Inspect only bounded status/error aggregates and token counters, never media,
+prompts, paths, request or response bodies, sender handles, or credential
+values.
 
 ### Hosted inbox video transience rollout
 

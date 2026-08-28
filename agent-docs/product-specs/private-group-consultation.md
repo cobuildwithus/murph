@@ -56,13 +56,19 @@ with prompt-delimiter characters Unicode-escaped, uses its own committed group
 conversation and tone, and authors one ordinary group message through the
 existing notification and outbox owners.
 
-The model supplies only `context` and an optional visible `groupLabel`. It never
+The model supplies only `context`, an optional exact visible `groupLabel`, and
+an optional closed participant description. The participant description may
+contain a participant count, requester-supplied familiar names, NANP area code
+plus last four, international last four, or a generic email-participant marker.
+It never contains a full phone number, email address, or internal id. The model never
 supplies member, membership, runtime, thread, route, provider, callback,
 idempotency, or mailbox identifiers. Exact replay reuses one global event/item
 identity derived from the authenticated member and accepted input, decrypts and
 validates the stored notification, and retains its pinned membership and route
 even if the member's group count changed. Changed context, membership
-generation, target group, or route conflicts instead of redirecting. `accepted`
+generation, or route conflicts instead of redirecting. A repeated call for that
+accepted input reuses the first persisted target without rerunning title or
+participant selection. `accepted`
 proves only that the target mailbox item is durable. The runner exact-replays
 the same hidden request once after a retryable Cloudflare-to-Web failure, so a
 lost successful response re-signals the same mailbox item instead of reporting
@@ -195,8 +201,43 @@ Web owns target resolution because it owns current `HostedGroupMember` truth.
 5. Require a valid current synthetic group-runtime identity before accepting
    the ask. The runtime may be cold; the committed request wakes it.
 
-Never fuzzy-match, pick the newest or owned group, inspect roster identities to
-guess, or fan out. `list_memberships` is not required, and the model never
+For Linq/iMessage/SMS groups, `ask` and `handoff` may instead include the closed
+participant description. This is available to every current group member, not
+only the owner. Web reads that requester's membership set up to a Web-owned
+100-group live-provider scan ceiling and fails closed above it. That ceiling is
+independent of the 25-item model response budget. Web keeps Telegram out of
+this path, opens current Linq routes in one set-based read, and fetches current provider rosters with concurrency four under one
+absolute deadline. Every eligible roster must be complete and canonical before
+participant evidence may prove uniqueness. Web removes the provider line and
+all handles that resolve to the requester, then compares the remaining people.
+Only the requester's own enabled Contacts projection may add familiar names;
+the group owner's or another member's projection is never a fallback. Without
+such a name, clarification uses only participant count, NANP area code plus
+last four, international last four, or `email participant`.
+
+Exactly one group must satisfy both an exact supplied title and every supplied
+participant clue. Separate person clues must match separate roster entries.
+Zero or multiple matches clarify with unique safe descriptions when possible;
+provider failure, malformed or incomplete roster evidence, duplicate safe
+descriptions, or an over-budget membership universe fails closed. Resolution
+and the effect stay in one Web action: there is no reusable selector token.
+Immediately before append, Web revalidates the exact membership and current
+route. Assistant Ask binds the normalized participant-description digest in its
+existing encrypted target field. Handoff replay instead reuses the stored
+membership and route selected by the first accepted input and performs no
+second title or participant lookup.
+
+The visible-label bound admits at most 64 labels and limits only one
+clarification response. It is not a membership or availability limit: when the
+member names a group, Web compares that normalized label against every current
+membership so the total number of joined groups can never make a unique exact
+target unavailable. The heavier `list_memberships` summary keeps its separate
+25-row page bound and exposes stable continuation instead of making later
+memberships unreachable.
+
+Never fuzzy-match, pick the newest or owned group, consult another member's
+Contacts, guess from roster identities, or fan out. `list_memberships` is not
+required, and the model never
 receives a membership id for an ask.
 
 The exact membership row is a hidden generation fence. Web checks it at

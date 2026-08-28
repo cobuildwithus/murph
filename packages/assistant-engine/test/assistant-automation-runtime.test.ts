@@ -10435,7 +10435,7 @@ describe('assistant auto-reply runtime', () => {
       })
       expect(acceptedB).toMatchObject({
         prompt: expect.stringContaining(
-          'Sender: +15552220000\n\nAddress-book name (display only): \"Actor B\"',
+          'Sender: +15552220000\n\nAddress-book name: \"Actor B\"',
         ),
       })
       expect(acceptedB).toMatchObject({
@@ -10456,7 +10456,7 @@ describe('assistant auto-reply runtime', () => {
       })
       expect(acceptedA).toMatchObject({
         prompt: expect.stringContaining(
-          'Sender: +15551110000\n\nProfile name (display only): \"Actor A\"',
+          'Sender: +15551110000\n\nProfile name: \"Actor A\"',
         ),
       })
       expect(acceptedA).toMatchObject({
@@ -10478,9 +10478,9 @@ describe('assistant auto-reply runtime', () => {
         kind: 'accepted',
         prompt: expect.stringContaining('Sender: +15553330000'),
       })
-      expect(JSON.stringify(acceptedC)).not.toContain('Profile name (display only)')
+      expect(JSON.stringify(acceptedC)).not.toContain('Profile name:')
       expect(JSON.stringify(acceptedC)).not.toContain(
-        'Address-book name (display only)',
+        'Address-book name:',
       )
 
       const acceptedCLater = await input.activeTurnInput?.({
@@ -10497,7 +10497,7 @@ describe('assistant auto-reply runtime', () => {
         prompt: expect.stringContaining('Sender: +15553330000'),
       })
       expect(JSON.stringify(acceptedCLater)).not.toContain(
-        'Profile name (display only)',
+        'Profile name:',
       )
 
       await input.activeTurnCheckpoint?.({
@@ -10587,7 +10587,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining(
-          'Sender: +15551110000\n\nProfile name (display only): "Actor A"',
+          'Sender: +15551110000\n\nProfile name: "Actor A"',
         ),
       }),
     )

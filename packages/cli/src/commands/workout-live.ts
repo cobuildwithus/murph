@@ -17,6 +17,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   compactInteger,
+  compactNumber,
   parseCompactFields,
   rejectUnsupportedCompactFields,
   requireCompactString,
@@ -40,6 +41,8 @@ const initialExerciseFields = new Set([
   'name',
   'reps',
   'sets',
+  'targetWeight',
+  'targetWeightUnit',
   'sourceExerciseId',
   'groupId',
   'mode',
@@ -77,6 +80,12 @@ function parseInitialExercise(
     'exercise',
     invalidInitialExercise,
   )
+  const targetWeight = compactNumber(
+    fields,
+    'targetWeight',
+    'exercise',
+    invalidInitialExercise,
+  )
   const mode = fields.get('mode')
   const parsedMode = mode === undefined
     ? undefined
@@ -91,6 +100,19 @@ function parseInitialExercise(
   const parsedUnitOverride = unitOverride === 'lb' || unitOverride === 'kg'
     ? unitOverride
     : undefined
+  const targetWeightUnit = fields.get('targetWeightUnit')
+  if (
+    targetWeightUnit !== undefined
+    && targetWeightUnit !== 'lb'
+    && targetWeightUnit !== 'kg'
+  ) {
+    invalidInitialExercise('--exercise field targetWeightUnit must be lb or kg.')
+  }
+  if ((targetWeight === undefined) !== (targetWeightUnit === undefined)) {
+    invalidInitialExercise(
+      '--exercise fields targetWeight and targetWeightUnit must be provided together.',
+    )
+  }
 
   return {
     name: requireCompactString(
@@ -101,6 +123,12 @@ function parseInitialExercise(
     ),
     ...(reps === undefined ? {} : { reps }),
     ...(setCount === undefined ? {} : { setCount }),
+    ...(targetWeight === undefined || targetWeightUnit === undefined
+      ? {}
+      : {
+          targetWeight,
+          targetWeightUnit,
+        }),
     ...(fields.has('sourceExerciseId')
       ? { sourceExerciseId: fields.get('sourceExerciseId') }
       : {}),
@@ -185,7 +213,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .max(100)
         .optional()
         .describe(
-          'Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.',
+          'Initial exercise grammar: name=... with optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/mode/unitOverride/note. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.',
         ),
       type: z
         .string()

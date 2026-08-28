@@ -83,7 +83,6 @@ import { Client } from "pg";
 
 import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject-key";
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
-import { encryptComputerRunSecret } from "../../src/lib/computer-use/crypto";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
 import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
 
@@ -143,6 +142,10 @@ const hostedVaultShareProjectionStoreModuleSpecifier = new URL(
 ).href;
 const hostedComputerUseServiceModuleSpecifier = new URL(
   "../../src/lib/computer-use/service.ts",
+  import.meta.url,
+).href;
+const hostedComputerUseCryptoModuleSpecifier = new URL(
+  "../../src/lib/computer-use/crypto.ts",
   import.meta.url,
 ).href;
 const hostedComputerUseStoreModuleSpecifier = new URL(
@@ -209,19 +212,22 @@ interface HostedVaultShareGrantStoreForTestModule {
 }
 
 interface HostedVaultShareProjectionStoreForTestModule {
-  findActiveHostedVaultShares(input: {
+  findActiveHostedVaultSharePage(input: {
     grantorMemberId: string;
     prisma: HostedTestPrismaClient;
     projectionMode?: HostedVaultShareProjectionMode;
     projectionScope: HostedVaultShareProjectionScope;
-  }): Promise<Array<{
-    destinationMemberId: string;
-    grantorMemberId: string;
-    id: string;
-    projectionKind: string;
-    projectionScope: HostedVaultShareProjectionScope;
-    projectionScopeKey: string;
-  }>>;
+    sourceWorkspaceVersion: string;
+  }): Promise<{
+    shares: Array<{
+      destinationMemberId: string;
+      grantorMemberId: string;
+      id: string;
+      projectionKind: string;
+      projectionScope: HostedVaultShareProjectionScope;
+      projectionScopeKey: string;
+    }>;
+  }>;
   replaceHostedVaultShareProjectionSnapshot(input: {
     prisma: HostedTestPrismaClient;
     projectionMode?: HostedVaultShareProjectionMode;
@@ -295,7 +301,10 @@ interface HostedLinqWorkspaceIsolationForTestPrismaClient {
     } | null>;
   };
   hostedThreadContainer: {
-    findUnique(args: unknown): Promise<{ memberId: string } | null>;
+    findUnique(args: unknown): Promise<{
+      memberId: string;
+      monthlyUsageLimitUsdMicros: bigint;
+    } | null>;
   };
   hostedWorkspace: {
     findUnique(args: unknown): Promise<{ version: bigint } | null>;
@@ -521,6 +530,16 @@ interface HostedComputerUseServiceModule {
     env: NodeJS.ProcessEnv;
     store: HostedComputerUseStoreForTest;
   }) => HostedComputerUseServiceForTest;
+}
+
+interface HostedComputerUseCryptoModule {
+  encryptComputerRunSecret(input: {
+    field: "kernel-live-view-url";
+    memberId: string;
+    prisma: HostedTestPrismaClient;
+    runId: string;
+    value: string;
+  }): Promise<string | null>;
 }
 
 export interface HostedComputerRunForTest {
@@ -1503,12 +1522,13 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         });
       }
       for (const projectionScope of input.projectionScopes) {
-        const shares = await projectionStore.findActiveHostedVaultShares({
+        const page = await projectionStore.findActiveHostedVaultSharePage({
           grantorMemberId: participant.memberId,
           prisma: deps.prisma,
           projectionScope,
+          sourceWorkspaceVersion: sourceWorkspace.version.toString(),
         });
-        const share = shares.find((candidate) =>
+        const share = page.shares.find((candidate) =>
           candidate.destinationMemberId === input.runtimeMemberId
         );
         if (!share) {
@@ -1793,15 +1813,20 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
   periodStart: Date;
   remainingUsdMicros?: bigint;
 }): Promise<HostedAiUsagePeriodForTest> {
-  const limitUsdMicros = 10_000_000n;
-  const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
-  if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
-    throw new RangeError("Hosted AI usage test balance must be within the period limit.");
-  }
-  const spentUsdMicros = limitUsdMicros - remainingUsdMicros;
-  const blockedAt = remainingUsdMicros === 0n ? input.periodStart : null;
-  return withHostedWebTestkitDeps(input.environment, async (deps) =>
-    await deps.prisma.hostedAiUsagePeriod.upsert({
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const threadContainer = await deps.prisma.hostedThreadContainer.findUnique({
+      select: { monthlyUsageLimitUsdMicros: true },
+      where: { memberId: input.memberId },
+    });
+    const limitUsdMicros =
+      threadContainer?.monthlyUsageLimitUsdMicros ?? 10_000_000n;
+    const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
+    if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
+      throw new RangeError("Hosted AI usage test balance must be within the period limit.");
+    }
+    const spentUsdMicros = limitUsdMicros - remainingUsdMicros;
+    const blockedAt = remainingUsdMicros === 0n ? input.periodStart : null;
+    return await deps.prisma.hostedAiUsagePeriod.upsert({
       create: {
         billingPlanCode: "launch_monthly",
         blockedAt,
@@ -1826,8 +1851,8 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
           periodStart: input.periodStart,
         },
       },
-    })
-  );
+    });
+  });
 }
 
 export async function readHostedAiUsageLimitPeriodForTest(input: {
@@ -1906,18 +1931,25 @@ export async function listHostedLinqDeliveriesForTest(input: {
 export async function seedHostedComputerRunForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expiresAt?: Date;
-  kernelLiveViewUrl?: string;
   kernelSessionId?: string;
+  liveViewUrl: string;
   memberId: string;
   runId: string;
 }): Promise<HostedComputerRunForTest> {
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const kernelLiveViewUrlEncrypted = await encryptComputerRunSecret({
+    const cryptoModule = await import(
+      hostedComputerUseCryptoModuleSpecifier
+    ) as HostedComputerUseCryptoModule;
+    const kernelLiveViewUrlEncrypted = await cryptoModule.encryptComputerRunSecret({
       field: "kernel-live-view-url",
       memberId: input.memberId,
+      prisma: deps.prisma,
       runId: input.runId,
-      value: input.kernelLiveViewUrl,
+      value: input.liveViewUrl,
     });
+    if (!kernelLiveViewUrlEncrypted) {
+      throw new Error("Hosted computer test run live-view encryption failed.");
+    }
     const run = await deps.prisma.hostedComputerRun.create({
       data: {
         expiresAt: input.expiresAt ?? new Date(Date.now() + 60 * 60 * 1_000),

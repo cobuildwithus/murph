@@ -845,9 +845,12 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH",
+      "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD",
+      "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
+      "isHostedRuntimeVaultShareDeliverContinuation",
     ]);
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
       "/api/internal/hosted-mailbox/payload/fetch",
@@ -882,6 +885,17 @@ describe("hosted execution coverage gaps", () => {
     expect(routeModule.HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH).toBe(
       "/api/internal/hosted-runtime/vault-share/active-kinds",
     );
+    expect(routeModule.HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD)
+      .toBe("continuation");
+    const continuationValidator =
+      routeModule.isHostedRuntimeVaultShareDeliverContinuation;
+    expect(continuationValidator).toBeTypeOf("function");
+    if (typeof continuationValidator !== "function") {
+      throw new Error("Expected the vault-share continuation validator export.");
+    }
+    expect(continuationValidator("member_025")).toBe(true);
+    expect(continuationValidator("bad/cursor")).toBe(false);
+    expect(continuationValidator("x".repeat(129))).toBe(false);
     expect(routeModule.HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH).toBe(
       "/api/internal/hosted-runtime/action-approvals/consume",
     );
