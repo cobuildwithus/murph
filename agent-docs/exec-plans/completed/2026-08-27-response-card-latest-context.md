@@ -1,6 +1,6 @@
 # Response Card Latest-Context Attachment
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -30,7 +30,7 @@ request belongs to an older context.
    card contract.
 3. [complete] Add one focused production-derived real-Codex journey and review
    its actual synthetic reply.
-4. [in progress] Add the member-facing changelog item, run focused checks and
+4. [complete] Add the member-facing changelog item, run focused checks and
    typecheck, then complete the required PR reviews and CI.
 
 ## Verification
@@ -51,6 +51,7 @@ request belongs to an older context.
   response card after accepted input advances"` — passed (4 tests).
 - `pnpm --dir packages/assistant-engine typecheck` after specialist remediation
   — passed.
+- Pull request evidence guards — passed on the reviewed candidate head.
 
 ## Review
 
@@ -60,3 +61,4 @@ request belongs to an older context.
   normal card and oversized-card text recovery; both reject the stale request
   after accepted input advances. No Product UX, prompt, or frontend findings
   remain.
+Completed: 2026-08-27
