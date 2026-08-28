@@ -1431,7 +1431,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       status: "processed",
     });
-
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
     }));
@@ -1517,6 +1516,118 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs a selected model-free mailbox row before already-due cron work", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    mocks.getAssistantCronStatus.mockResolvedValue({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: dueAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) => {
+        if (
+          (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+        ) {
+          return { at: null, executionClass: null, reason: null };
+        }
+        return {
+          at: dueAt,
+          executionClass: "model_free",
+          reason: "mailbox",
+        };
+      },
+    );
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      workspace: createDueAssistantWorkspace({ nextWakeAt: dueAt }),
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+      progressed: false,
+    }));
+  });
+
+  it("yields to a model-free mailbox row after its default-owned predecessor", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    let unrestrictedWakeReadCount = 0;
+    mocks.getAssistantCronStatus.mockResolvedValue({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: dueAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) => {
+        if (
+          (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+        ) {
+          return { at: null, executionClass: null, reason: null };
+        }
+        unrestrictedWakeReadCount += 1;
+        return unrestrictedWakeReadCount < 3
+          ? {
+              at: dueAt,
+              executionClass: "default_owned",
+              reason: "assistant",
+            }
+          : {
+              at: dueAt,
+              executionClass: "model_free",
+              reason: "mailbox",
+            };
+      },
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_default_owned",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      failed: 0,
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+      recorded: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: dueAt,
+        nextWakeReason: "mailbox",
+      }),
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+      progressed: true,
+    }));
+    await expect(result.afterCheckpoint?.()).resolves.toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
+    }));
   });
 
   it("does not treat a running cron job's past nextRunAt as runnable due work", async () => {

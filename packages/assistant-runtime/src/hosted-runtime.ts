@@ -249,6 +249,7 @@ import {
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   hostedRuntimeWakeReasonUsesAssistantPhase,
+  selectHostedRuntimeOwnerWakeCandidate,
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
@@ -1015,6 +1016,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     vaultRoot: input.vaultRoot,
   });
   const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    now: () => now.toISOString(),
     vaultRoot: input.vaultRoot,
   });
   const assistantCronWake = await resolveHostedAssistantCronWakeAfterInitialImport({
@@ -1054,23 +1056,32 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
       reason: assistantCronWake.reason,
     },
   ]);
-  const selectedWake = !input.assistantExecutionBlocked && assistantCronWake.dueNow
-    ? {
-        nextWakeAt: assistantCronWake.at,
-        nextWakeReason: assistantCronWake.reason,
-      }
-    : input.assistantExecutionBlocked && modelFreeWake.nextWakeAt
+  const selectedWake = input.assistantExecutionBlocked && modelFreeWake.nextWakeAt
     ? modelFreeWake
-    : selectEarliestHostedRuntimeWake([
-        {
-          at: modelFreeWake.nextWakeAt,
-          reason: modelFreeWake.nextWakeReason,
-        },
-        {
-          at: assistantWake.nextWakeAt,
-          reason: assistantWake.nextWakeReason,
-        },
-      ]);
+    : (() => {
+        const selected = selectHostedRuntimeOwnerWakeCandidate({
+          backgroundCandidates: [{
+            at: assistantWake.nextWakeAt,
+            reason: assistantWake.nextWakeReason,
+          }],
+          foregroundCandidates: [
+            createHostedRuntimeWakeCandidate(
+              outboxWakeAt,
+              HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+            ),
+            createHostedRuntimeWakeCandidate(
+              pendingAssistantInputWakeAt,
+              HOSTED_ASSISTANT_WAKE_REASON,
+            ),
+          ],
+          nowMs: input.nowMs,
+          systemMailboxWake,
+        });
+        return {
+          nextWakeAt: selected.at,
+          nextWakeReason: selected.reason,
+        };
+      })();
   return {
     assistantCronWakeAt: assistantCronWake.at,
     assistantCronDueNow: assistantCronWake.dueNow,
@@ -2803,10 +2814,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ]);
         const invocationResult = {
           ...(foregroundWakeObserved
-              || (!assistantExecutionBlocked && (
-                projectedWake.assistantCronDueNow
-                || defaultOwnerDueNow
-              ))
+              || (!assistantExecutionBlocked && defaultOwnerDueNow)
             ? { immediateRecheckRequested: true as const }
             : {}),
           nextWakeAt: returnedWake.nextWakeAt,
@@ -3265,14 +3273,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         initialProjectedWake.assistantCronWakeAt ?? "",
       );
       assistantCronDeadlineMs = !assistantExecutionBlocked
+        && hostedRuntimeWakeReasonIsAssistant(
+          initialProjectedWake.nextWakeReason,
+        )
         && Number.isFinite(projectedAssistantCronDeadlineMs)
         ? projectedAssistantCronDeadlineMs
         : null;
       if (
         !assistantExecutionBlocked
         && (
-          initialProjectedWake.assistantCronDueNow
-          || defaultOwnerDueNow
+          defaultOwnerDueNow
         )
       ) {
         if (

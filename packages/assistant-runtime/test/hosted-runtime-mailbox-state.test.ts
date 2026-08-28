@@ -413,6 +413,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "default_owned",
         reason: "assistant",
       });
     } finally {
@@ -485,6 +486,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "default_owned",
         reason: "assistant",
       });
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
@@ -493,6 +495,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "model_free",
         reason: "device-sync.reconcile",
       });
 
@@ -504,6 +507,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "model_free",
         reason: "device-sync.reconcile",
       });
     } finally {
@@ -536,6 +540,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "model_free",
         reason: "mailbox",
       });
     } finally {
@@ -621,6 +626,7 @@ describe("hosted runtime system mailbox state", () => {
         }),
       ).resolves.toEqual({
         at: "2026-04-08T00:00:30.000Z",
+        executionClass: null,
         reason: "device-sync.reconcile",
       });
     } finally {

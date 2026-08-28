@@ -48,7 +48,7 @@ import {
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
-  type HostedRuntimeWakeCandidate,
+  type HostedSystemMailboxWakeCandidate,
 } from "./wake-candidates.ts";
 
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA = "murph.hosted-system-mailbox-state.v1";
@@ -362,7 +362,7 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   now?: () => string;
   vaultRoot: string;
-}): Promise<HostedRuntimeWakeCandidate> {
+}): Promise<HostedSystemMailboxWakeCandidate> {
   const now = (input.now ?? (() => new Date().toISOString()))();
   const state = excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
     await readHostedSystemMailboxState(input.vaultRoot),
@@ -391,19 +391,25 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
     state: selectionState,
   });
   if (readyItem !== null) {
-    return createHostedRuntimeWakeCandidate(
-      resolveSystemMailboxItemNextWakeAt(readyItem, now),
-      resolveHostedSystemMailboxItemWakeReason(readyItem),
-    );
+    return {
+      ...createHostedRuntimeWakeCandidate(
+        resolveSystemMailboxItemNextWakeAt(readyItem, now),
+        resolveHostedSystemMailboxItemWakeReason(readyItem),
+      ),
+      executionClass: isHostedSystemMailboxModelFreeFrontierItem(readyItem)
+        ? "model_free"
+        : "default_owned",
+    };
   }
-  return selectHostedRuntimeWakeCandidate(
-    items.map((item) =>
+  return {
+    ...selectHostedRuntimeWakeCandidate(items.map((item) =>
       createHostedRuntimeWakeCandidate(
         resolveSystemMailboxItemNextWakeAt(item, now),
         resolveHostedSystemMailboxItemWakeReason(item),
       )
-    ),
-  );
+    )),
+    executionClass: null,
+  };
 }
 
 export function findNextHostedSystemMailboxQueueItem(input: {

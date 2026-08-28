@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-27
-Updated: 2026-08-27
+Updated: 2026-08-28
 
 ## Goal
 
@@ -147,9 +147,22 @@ Updated: 2026-08-27
   - The queue's existing selected item is now the single wake authority, and
     its wake reason comes from the shared execution classifier: model-free
     work uses the existing generic mailbox wake while default-owned work uses
-    the assistant wake. The focused Environment, approval handoff, and ordered
-    frontier tests pass (3 tests), the complete mailbox-state suite passes (29
-    tests), and assistant-runtime typecheck passes.
+    the assistant wake.
+  - The second exact Linux run proved that wake classification alone was not
+    sufficient: the default assistant phase could still preflight due cron,
+    prepare the model-free row itself, or continue into automation after
+    completing a default-owned predecessor.
+  - The current correction carries the frontier's execution class with its
+    wake and applies one shared order: due foreground input or delivery, then
+    a due model-free mailbox frontier, then ordinary background work.
+    Default-owned rows retain ordinary wake ordering. The default phase now
+    yields before preparing model-free work and also yields after checkpointing
+    a default-owned predecessor when the next frontier is model-free.
+  - Current local proof passes: 30 mailbox-state, delegated-direction, and wake
+    selection tests; four focused Environment, approval, and owner-scheduling
+    tests; all 52 shared assistant-phase scheduling tests; the default-
+    predecessor checkpoint callback regression; assistant-runtime typecheck;
+    and `git diff --check`.
 - Composed proof:
   - `pnpm hosted-local e2e foreground-reply-priority` was attempted, but the
     runner's fixed macOS total-byte ceiling stopped bundle assembly before the
