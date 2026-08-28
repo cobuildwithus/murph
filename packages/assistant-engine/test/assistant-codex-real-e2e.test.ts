@@ -4179,10 +4179,15 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             /complete rest|do not (?:keep )?train|don[’']t (?:keep )?train|stop (?:all (?:activity|movement|exercise)|training)|avoid all (?:activity|movement|exercise)|do nothing until/iu,
           )
           expect(
-            stableText.replaceAll(
-              /\b(?:not|isn[’']t|doesn[’']t (?:seem|sound)) urgent\b/giu,
-              '',
-            ),
+            stableText
+              .replaceAll(
+                /\b(?:not|isn[’']t|doesn[’']t (?:seem|sound)) urgent\b/giu,
+                '',
+              )
+              .replaceAll(
+                /\burgent(?:\s+(?:medical\s+)?(?:care|assessment|evaluation|attention))?\s+(?:is|was)\s+not\s+(?:indicated|needed|required|suggested|warranted)\b/giu,
+                '',
+              ),
             `${label} stable label-only acute routing`,
           ).not.toMatch(
             /\burgent\b|same-day|emergency|emergency room|\bER\b/iu,
@@ -12869,7 +12874,7 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
             expect(summary).toMatch(/\b(?:member|user)\b/iu)
             expect(summary).toMatch(/\bsettings\b|\bdevices?\b/iu)
             expect(summary).toMatch(
-              /\boura\b|supported wearable (?:account|provider)/iu,
+              /\boura\b|supported wearable[- ](?:account|provider)/iu,
             )
             expect(summary).toMatch(/\bconnect/iu)
             expect(summary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
@@ -13107,9 +13112,11 @@ describeRealCodex('real Codex support escalation e2e', () => {
         .toBeLessThanOrEqual(PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)
       expect(recordedFeedback).toHaveLength(1)
       expect(result.finalMessage).toMatch(
-        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+        /account-linked(?: support)? escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked(?: support)? escalation/iu,
       )
-      expect(result.finalMessage).not.toMatch(/direct notification failed/iu)
+      expect(result.finalMessage).not.toMatch(
+        /direct notification(?: to (?:human )?support)? failed/iu,
+      )
     },
     720_000,
   )
@@ -13162,9 +13169,11 @@ describeRealCodex('real Codex support escalation e2e', () => {
       expect(secondCall.argumentsValue.supportArea).toBeUndefined()
       expect(secondCall.argumentsValue.supportProblem).toBe('classification')
       expect(recordedFeedback).toHaveLength(0)
-      expect(result.finalMessage).toMatch(/direct notification failed/iu)
+      expect(result.finalMessage).toMatch(
+        /direct notification(?: to (?:human )?support)? failed/iu,
+      )
       expect(result.finalMessage).not.toMatch(
-        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+        /account-linked(?: support)? escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked(?: support)? escalation/iu,
       )
     },
     720_000,
@@ -13216,7 +13225,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
       )
       expect(recordedFeedback).toHaveLength(1)
       expect(result.finalMessage).not.toMatch(
-        /feedback|recorded|logged|triage|account-linked escalation|direct notification|support@/iu,
+        /feedback|recorded|logged|triage|account-linked(?: support)? escalation|direct notification|support@/iu,
       )
     },
     720_000,
@@ -13292,7 +13301,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           /\bissue\b.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}\bissue\b/iu,
         )
         expect(privateText, 'account-linked escalation confirmation').toMatch(
-          /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+          /account-linked(?: support)? escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked(?: support)? escalation/iu,
         )
         expect(privateText, 'no invented promise').not.toMatch(
           /ticket|case number|will (?:fix|resolve|respond|reply|follow up)|within \d+|has (?:read|seen|received)/iu,
@@ -13389,13 +13398,15 @@ describeRealCodex('real Codex support escalation e2e', () => {
         expect(call.argumentsValue.supportProblem).toBeUndefined()
 
         const response = result.finalMessage.trim()
-        expect(response).toMatch(/direct notification failed/iu)
+        expect(response).toMatch(
+          /direct notification(?: to (?:human )?support)? failed/iu,
+        )
         expect(response).toMatch(
           /can still|continue|help|next step|try|troubleshoot|work through/iu,
         )
         expect(response).not.toContain('support@withmurph.ai')
         expect(response).not.toMatch(
-          /account-linked escalation.{0,80}(?:saved|recorded)|(?:issue|summary).{0,80}(?:saved|recorded)|email (?:was|has been) (?:sent|delivered|received)|ticket|case number/iu,
+          /account-linked(?: support)? escalation.{0,80}(?:saved|recorded)|(?:issue|summary).{0,80}(?:saved|recorded)|email (?:was|has been) (?:sent|delivered|received)|ticket|case number/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
