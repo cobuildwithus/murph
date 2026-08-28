@@ -158,8 +158,12 @@ import {
   type AssistantAutoReplyPromptInput,
 } from '../src/assistant/automation/prompt-builder.ts'
 import {
+  type AssistantNotificationInput,
   parseAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
+import {
+  prepareAssistantCronNotificationInput,
+} from '../src/assistant/cron/output-history.ts'
 import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
 } from '../src/assistant/shared.ts'
@@ -7918,15 +7922,133 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
 })
 
 describeRealCodex('real Codex recurring reminder conversation e2e', () => {
+  it('sends only the first ordinary cue from production notification composition', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-first-recurring-reminder-e2e-'),
+    )
+
+    try {
+      await initializeVault({
+        timezone: 'America/New_York',
+        vaultRoot: workingDirectory,
+      })
+      const createdAutomation = await upsertAutomation({
+        continuityPolicy: 'fresh',
+        instructions: 'Remind the room to do its short reset.',
+        now: new Date('2026-08-27T12:00:00.000Z'),
+        route: {
+          channel: 'linq',
+          deliveryTarget: 'synthetic-first-reminder',
+          identityId: null,
+          participantId: null,
+          threadId: 'synthetic-first-reminder',
+          threadIsDirect: false,
+        },
+        schedule: { kind: 'dailyLocal', localTime: '19:00' },
+        slug: 'synthetic-first-reminder',
+        status: 'active',
+        supportKind: 'reminder',
+        tags: [],
+        title: 'Synthetic room reset reminder',
+        vaultRoot: workingDirectory,
+      })
+      const source = findCanonicalAssistantCronRecordInList(
+        await listCanonicalAssistantCronRecords(workingDirectory),
+        createdAutomation.record.automationId,
+      )
+      expect(source?.kind).toBe('automation')
+      if (!source || source.kind !== 'automation') {
+        throw new Error('Expected the canonical reminder automation source.')
+      }
+      const jobId = resolveCanonicalAssistantCronJobId(source)
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+        jobId,
+        now: '2026-08-27T12:00:00.000Z',
+      })
+      const instructions = buildAssistantCronExecutionInstructions(
+        {
+          job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+          kind: 'canonical',
+          runtimeState,
+          source,
+        },
+        { automationId: null, contextReferences: [] },
+      )
+      const occurrenceAt = '2026-08-27T23:00:00.000Z'
+      const notificationInput = {
+        instructions,
+        outboxAutomationAuthority: {
+          automationId: createdAutomation.record.automationId,
+          expectedUpdatedAt: createdAutomation.record.updatedAt,
+        },
+        recurringReminderConversation: true,
+        scheduledAutomationScheduleKind: source.schedule.kind,
+        scheduledInvocationAuthority: {
+          automationId: createdAutomation.record.automationId,
+          occurrenceAt,
+        },
+        turnTrigger: 'automation-cron',
+        vault: workingDirectory,
+        workingDirectory,
+      } satisfies AssistantNotificationInput
+      const preparedInput = await prepareAssistantCronNotificationInput(
+        notificationInput,
+        { sessionId: 'session-synthetic-first-reminder' },
+      )
+      expect(preparedInput.instructions).toContain(
+        'Otherwise send the current concise cue normally.',
+      )
+      expect(preparedInput.instructions).not.toContain(
+        'Recent outputs from this automation',
+      )
+      expect(preparedInput.instructions).not.toMatch(/keep, change, or pause/iu)
+
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions:
+          buildScheduledAutomationDeveloperInstructions('group'),
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        groupConversation: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: preparedInput.instructions,
+        reasoningEffort: 'high',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') {
+        throw new Error('Expected the first reminder occurrence to send its cue.')
+      }
+      process.stdout.write(
+        `[real-codex first recurring reminder] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}\n`,
+      )
+      expect(decision.text).toMatch(/\b(?:reset|tidy|straighten)\b/iu)
+      expect(decision.text).toMatch(/\b(?:room|short|quick)\b/iu)
+      expect(decision.text).not.toMatch(
+        /\b(?:keep|change|pause)\b[^?\n]{0,48}\b(?:reminders?|interruptions?|these|them)\b|\b(?:reminders?|interruptions?|these|them)\b[^?\n]{0,48}\b(?:keep|change|pause)\b/iu,
+      )
+      expect(decision.text).not.toContain('?')
+      expect(decision.text).not.toMatch(/did you|complete|failed|ignored/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
+
   it.each([
-    {
-      context: 'No reminder from this automation has been dispatched yet.',
-      expectedKind: 'send_message',
-      expectedText: hasRoomResetCueMeaning,
-      savedInstructions: 'Remind the room to do its short reset.',
-      scenario: 'sends the first ordinary cue',
-      scope: 'group' as const,
-    },
     {
       context: [
         'The immediately prior cue, "Quick room reset.", was provider-accepted and sent.',
@@ -8029,14 +8151,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
       if (expectedText) {
         expect(decision.kind).toBe('send_message')
         if (decision.kind === 'send_message') {
-          if (typeof expectedText === 'function') {
-            expect(
-              expectedText(decision.text),
-              `${scenario} semantic reminder text`,
-            ).toBe(true)
-          } else {
-            expect(decision.text).toMatch(expectedText)
-          }
+          expect(decision.text).toMatch(expectedText)
           expect(decision.text).not.toMatch(/did you|complete|failed|ignored/iu)
         }
       }
