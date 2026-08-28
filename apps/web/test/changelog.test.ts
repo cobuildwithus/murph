@@ -166,7 +166,7 @@ describe("changelog registry", () => {
       title: "Clearer iMessage card previews",
     });
     expect(item?.details).toContain("free of card values");
-    expect(item?.details).toContain("ask Murph for the card in text");
+    expect(item?.details).toContain("short preview label");
     expect(item?.tryIt).toBeUndefined();
   });
 
