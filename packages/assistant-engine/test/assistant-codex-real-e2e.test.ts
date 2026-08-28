@@ -7594,6 +7594,11 @@ describeRealCodex('real Codex capability questions e2e', () => {
               normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
               ?? undefined,
             codexHome: config.codexHome,
+            configOverrides: [
+              'shell_environment_policy.inherit="all"',
+              'shell_environment_policy.ignore_default_excludes=true',
+              `shell_environment_policy.include_only=${JSON.stringify(REAL_CODEX_E2E_ENV_ALLOWLIST)}`,
+            ],
             developerInstructions,
             dynamicTools,
             env: {
@@ -7653,8 +7658,8 @@ describeRealCodex('real Codex capability questions e2e', () => {
             })}\n`,
           )
           expect(
-            capabilityCalls,
-            `${inquiry.capability} inquiry must not execute a tool`,
+            actions,
+            `${inquiry.capability} inquiry must not execute a command or tool`,
           ).toEqual([])
           expect(reply, inquiry.capability).toMatch(inquiry.expectedSupport)
           expect(reply, inquiry.capability).not.toMatch(inquiry.deniedSupport)
@@ -7676,8 +7681,8 @@ describeRealCodex('real Codex capability questions e2e', () => {
             })}\n`,
           )
           expect(
-            capabilityCalls,
-            `${request.capability} request missing input must not execute a tool`,
+            actions,
+            `${request.capability} request missing input must not execute a command or tool`,
           ).toEqual([])
           expect(reply.match(/\?/gu) ?? [], request.capability).toHaveLength(1)
           expect(reply, request.capability).toMatch(
@@ -7707,25 +7712,47 @@ describeRealCodex('real Codex capability questions e2e', () => {
             kind: 'linq',
           },
         })
-        const directedSongCalls = readCapabilityRoutingActions(
+        const directedSongActions = readCapabilityRoutingActions(
           directedSong.jsonEvents,
-        ).filter((action) =>
+        )
+        const directedSongCalls = directedSongActions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_GENERATE_SONG_TOOL.name
+        )
+        const musicSkillReads = directedSongActions.filter((action) =>
+          action.kind === 'command'
+          && /music-generation\/SKILL\.md/u.test(action.command)
         )
 
         process.stdout.write(
           `[directed-capability-request-e2e] ${JSON.stringify({
+            actionCount: directedSongActions.length,
+            musicSkillReads,
             songCalls: directedSongCalls,
             songGenerationCount: songGenerations.length,
           })}\n`,
         )
 
+        expect(directedSongActions).toHaveLength(2)
+        expect(musicSkillReads).toHaveLength(1)
+        expect(musicSkillReads[0]).toMatchObject({
+          kind: 'command',
+          ok: true,
+        })
+        if (musicSkillReads[0]?.kind !== 'command') {
+          throw new Error('Expected one successful music skill read.')
+        }
+        expect(musicSkillReads[0].output).toContain(
+          'The public tool description owns whether a user song request is call-ready.',
+        )
         expect(directedSongCalls).toHaveLength(1)
+        expect(musicSkillReads[0].eventIndex).toBeLessThan(
+          directedSongCalls[0]?.eventIndex ?? -1,
+        )
         expect(songGenerations).toHaveLength(1)
 
         const connectUrl =
-          'https://www.withmurph.ai/connect/garmin?token=3f7c1a8e92b64d50'
+          'https://www.withmurph.ai/connect#deviceConnectIntent=dc_3f7c1a8e92b64d503f7c1a8e92b64d50&connectSource=garmin&connectProvider=garmin'
         const deviceRequests: AssistantHostedDeviceToolRequest[] = []
         const deviceTool: NonNullable<
           AssistantHostedToolContext['deviceTool']
@@ -7746,8 +7773,7 @@ describeRealCodex('real Codex capability questions e2e', () => {
             return {
               action: 'connect',
               link: {
-                authorizationUrl:
-                  'https://www.withmurph.ai/connect/garmin/authorize?token=3f7c1a8e92b64d50',
+                authorizationUrl: connectUrl,
                 connectUrl,
                 expiresAt: '2027-07-29T17:05:00.000Z',
                 provider: 'garmin',
@@ -7777,7 +7803,11 @@ describeRealCodex('real Codex capability questions e2e', () => {
           })}\n`,
         )
 
-        expect(connectCalls).toHaveLength(1)
+        expect(connectCalls.length).toBeGreaterThanOrEqual(1)
+        expect(concreteActions.every((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_DEVICE_TOOL.name
+        )).toBe(true)
         expect(deviceRequests).toEqual([
           { action: 'connect', provider: 'garmin' },
         ])
@@ -7785,64 +7815,117 @@ describeRealCodex('real Codex capability questions e2e', () => {
         expect(concreteReply.endsWith(connectUrl)).toBe(true)
         expect(concreteReply.match(/https:\/\//gu) ?? []).toHaveLength(1)
 
-        const failedDeviceRequests: AssistantHostedDeviceToolRequest[] = []
-        const failedConnect = await executeProbe({
-          hostedToolContext: buildDeviceHostedToolContext({
-            async request(request) {
-              failedDeviceRequests.push(request)
-              if (request.action !== 'connect') {
-                throw new Error(
-                  'Unexpected device action in failed-connect proof.',
-                )
-              }
-              throw {
-                code: 'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE',
-                context: {
-                  retryable: true,
-                  status: 503,
-                  statusCode: 503,
-                },
-                forwardedFromWeb: true,
-                name: 'HostedWebControlPlaneResponseError',
+        const failedConnectCases = [
+          {
+            error: {
+              code: 'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE',
+              context: {
                 retryable: true,
                 status: 503,
                 statusCode: 503,
-              }
+              },
+              forwardedFromWeb: true,
+              name: 'HostedWebControlPlaneResponseError',
+              retryable: true,
+              status: 503,
+              statusCode: 503,
             },
-          }),
-          prompt: 'Can you connect my Garmin and send me the connection link?',
-        })
-        const failedConnectCalls = readCapabilityRoutingActions(
-          failedConnect.jsonEvents,
-        ).filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_DEVICE_TOOL.name
-          && action.argumentsValue.action === 'connect'
-        )
-        const failedConnectReply = failedConnect.finalMessage.trim()
+            expectedRecovery:
+              /\b(?:again|fresh|later|new request)\b/iu,
+            expectedState: /\btemporarily unavailable\b/iu,
+            forbiddenState: /\b(?:connected successfully|connection (?:link )?is ready)\b/iu,
+            name: 'transient outage',
+          },
+          {
+            error: {
+              code: 'HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED',
+              context: {
+                retryable: false,
+                status: 403,
+                statusCode: 403,
+              },
+              forwardedFromWeb: true,
+              name: 'HostedWebControlPlaneResponseError',
+              retryable: false,
+              status: 403,
+              statusCode: 403,
+            },
+            expectedRecovery: /\b(?:ask again|continue|try again)\b/iu,
+            expectedState: /\bprivate\b/iu,
+            forbiddenState: /\b(?:connected successfully|connection (?:link )?is ready)\b/iu,
+            name: 'private conversation required',
+          },
+          {
+            error: new Error('Synthetic unknown connection outcome.'),
+            expectedRecovery:
+              /\b(?:again|fresh|new request)\b/iu,
+            expectedState:
+              /\b(?:could not|couldn['’]?t|unable to)\b[^.!?\n]{0,50}\bconfirm/iu,
+            forbiddenState:
+              /\b(?:failed|failure|connected successfully|connection (?:link )?is ready)\b/iu,
+            name: 'unknown outcome',
+          },
+        ] as const
 
-        process.stdout.write(
-          `[failed-capability-request-e2e] ${JSON.stringify({
-            connectCalls: failedConnectCalls,
-            deviceRequests: failedDeviceRequests,
-            reply: failedConnectReply,
-          })}\n`,
-        )
+        for (const failedCase of failedConnectCases) {
+          const failedDeviceRequests: AssistantHostedDeviceToolRequest[] = []
+          const failedConnect = await executeProbe({
+            hostedToolContext: buildDeviceHostedToolContext({
+              async request(request) {
+                failedDeviceRequests.push(request)
+                if (request.action !== 'connect') {
+                  throw new Error(
+                    'Unexpected device action in failed-connect proof.',
+                  )
+                }
+                throw failedCase.error
+              },
+            }),
+            prompt: 'Can you connect my Garmin and send me the connection link?',
+          })
+          const failedActions = readCapabilityRoutingActions(
+            failedConnect.jsonEvents,
+          )
+          const failedConnectCalls = failedActions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_DEVICE_TOOL.name
+            && action.argumentsValue.action === 'connect'
+          )
+          const failedConnectReply = failedConnect.finalMessage.trim()
 
-        expect(failedConnectCalls).toHaveLength(1)
-        expect(failedDeviceRequests).toEqual([
-          { action: 'connect', provider: 'garmin' },
-        ])
-        expect(failedConnectReply).toMatch(
-          /\b(?:temporarily unavailable|could not|couldn['’]?t|unable)\b/iu,
-        )
-        expect(failedConnectReply).toMatch(
-          /\b(?:again|fresh|later|new request)\b/iu,
-        )
-        expect(failedConnectReply).not.toMatch(/https:\/\//iu)
-        expect(failedConnectReply).not.toMatch(
-          /\b(?:connected successfully|connection (?:link )?is ready)\b/iu,
-        )
+          process.stdout.write(
+            `[failed-capability-request-e2e] ${JSON.stringify({
+              actions: failedActions,
+              case: failedCase.name,
+              deviceRequests: failedDeviceRequests,
+              reply: failedConnectReply,
+            })}\n`,
+          )
+
+          expect(
+            failedConnectCalls.length,
+            failedCase.name,
+          ).toBeGreaterThanOrEqual(1)
+          expect(failedActions.every((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_DEVICE_TOOL.name
+          ), failedCase.name).toBe(true)
+          expect(failedDeviceRequests, failedCase.name).toEqual([
+            { action: 'connect', provider: 'garmin' },
+          ])
+          expect(failedConnectReply, failedCase.name).toMatch(
+            failedCase.expectedState,
+          )
+          expect(failedConnectReply, failedCase.name).toMatch(
+            failedCase.expectedRecovery,
+          )
+          expect(failedConnectReply, failedCase.name).not.toMatch(
+            /https:\/\//iu,
+          )
+          expect(failedConnectReply, failedCase.name).not.toMatch(
+            failedCase.forbiddenState,
+          )
+        }
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }

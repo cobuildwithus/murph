@@ -1565,6 +1565,12 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'Use `murph.device` to list accounts, create a real connection link, or queue reconciliation',
     )
+    expect(prompt).toContain(
+      'A returned first-party `connectUrl`, including its short-lived browser claim, is authorized for delivery to the current private member',
+    )
+    expect(prompt).toContain(
+      'Send it unchanged; never fabricate a URL or ask for provider credentials',
+    )
     expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain(
       'Canonical public App Store listing: https://apps.apple.com/us/app/murph-ai/id6786145859',

@@ -91,6 +91,9 @@ import type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
 import {
+  createDeviceTurnState,
+} from './assistant-codex/dynamic-tools/device.js'
+import {
   createAskGrokTurnState,
   type AskGrokToolRuntime,
 } from './assistant-codex/ask-grok-tool.js'
@@ -3342,6 +3345,7 @@ async function runCodexAppServerTurnOnProcess(
   const analyzeVideoTurnState =
     input.analyzeVideoTurnState ?? createAnalyzeVideoTurnState()
   const askGrokTurnState = createAskGrokTurnState()
+  const deviceTurnState = createDeviceTurnState()
   const groupSharedReadTurnState = {
     currentSenderDecisionByMessageRef: new Map(),
     invalid: false,
@@ -3371,6 +3375,7 @@ async function runCodexAppServerTurnOnProcess(
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
   let requiredFinalResponseFallback: string | null = null
+  let requiredFinalResponseText: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
     new Map<string, RequiredAutomationLocalAtClarification>()
@@ -3481,6 +3486,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
+    requiredFinalResponseText !== null ||
     requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
@@ -4864,6 +4870,7 @@ async function runCodexAppServerTurnOnProcess(
               : null,
           askGrokTurnState,
           generateSongTurnState,
+          deviceTurnState,
         })
         return result
       },
@@ -4878,6 +4885,15 @@ async function runCodexAppServerTurnOnProcess(
         if (analyzeVideoFallback !== null) {
           requiredFinalResponseFallback = analyzeVideoFallback
         }
+      }
+      const finalResponseText = normalizeNullableString(
+        result.requiredFinalResponseText,
+      )
+      if (
+        finalResponseText !== null &&
+        requiredFinalResponseText === null
+      ) {
+        requiredFinalResponseText = finalResponseText
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -6081,11 +6097,13 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  const semanticFinalMessage = finalResponseCard
-    ? renderAssistantResponseCardText(finalResponseCard)
-    : finalResponseCardTextFallback
-      ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
-      : modelFinalMessage
+  const semanticFinalMessage =
+    requiredFinalResponseText ??
+    (finalResponseCard
+      ? renderAssistantResponseCardText(finalResponseCard)
+      : finalResponseCardTextFallback
+        ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
+        : modelFinalMessage)
   const normalizedSemanticFinalMessage =
     normalizeNullableString(semanticFinalMessage)
   const requiredSemanticFinalMessage =
@@ -6105,16 +6123,18 @@ async function runCodexAppServerTurnOnProcess(
     ),
     requiredVaultFileApprovalUrls,
   )
-  const semanticTranscriptMessage = finalResponseCard
-    ? requiredAutomationLocalAtClarificationsInOrder.length === 0
-      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
-      : renderAssistantResponseCardText(finalResponseCard)
-    : finalResponseCardTextFallback
-      ? renderAssistantWorkoutResponseCardTranscriptText(
-          finalResponseCardTextFallback,
-        )
-      : normalizeNullableString(modelFinalMessage) ??
-        (finalResponseMedia.length > 0 ? '' : null)
+  const semanticTranscriptMessage =
+    requiredFinalResponseText ??
+    (finalResponseCard
+      ? requiredAutomationLocalAtClarificationsInOrder.length === 0
+        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+        : renderAssistantResponseCardText(finalResponseCard)
+      : finalResponseCardTextFallback
+        ? renderAssistantWorkoutResponseCardTranscriptText(
+            finalResponseCardTextFallback,
+          )
+        : normalizeNullableString(modelFinalMessage) ??
+          (finalResponseMedia.length > 0 ? '' : null))
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
     normalizeNullableString(semanticTranscriptMessage) ??
       requiredFinalResponseFallback ??

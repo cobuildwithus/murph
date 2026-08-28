@@ -12,12 +12,16 @@ import type {
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const DEVICE_TOOL_RESULT_MAX_BYTES = 60_000
-const CONNECT_EFFECT_ONCE_HINT =
-  'Do not call connect again for this member request. Report the failure, tell the member they can ask again later, and wait for a fresh member request before another connect attempt.'
+const CONNECT_FRESH_REQUEST_SUFFIX =
+  'Do not call connect again for this member request. Wait for a fresh member request before another connect attempt.'
 const CONNECT_SUCCESS_HINT =
-  'Return connectUrl exactly in the final reply, including its opaque query. It is a user-deliverable link, not a provider credential. Successful link creation is terminal; do not call list_accounts or any device action again for this member request.'
+  'Send connectUrl unchanged on the final line. Its short-lived browser claim is authorized for delivery to this current private member; it is not a provider credential. Success is terminal; do not call a device action again for this request.'
 const NO_DATA_OUTREACH_EFFECT_ONCE_HINT =
   'Do not retry this request. Wait for a fresh private member instruction before another no-data outreach change.'
+
+function connectFreshRequestHint(recovery: string): string {
+  return `${recovery} ${CONNECT_FRESH_REQUEST_SUFFIX}`
+}
 const deviceProviderSchema = z
   .string()
   .trim()
@@ -56,7 +60,7 @@ export const MURPH_DEVICE_TOOL = {
   namespace: 'murph',
   name: 'device',
   description:
-    'Work with the current authenticated member’s wearable and health-device accounts. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. For one connection request, call connect at most once; after a successful result, return its connectUrl exactly, including its opaque query, without calling list_accounts or any device action again. A returned connectUrl is a user-deliverable link, not a provider credential. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin check-in timing while Garmin is the supported no-data-outreach source: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, provider access tokens, delivery routes, or generic commands.',
+    'Work with the current authenticated member’s wearable and health-device accounts. Capability questions are inspection-only: answer from this description without calling. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived first-party connectUrl for a supported provider. For one connection request, call connect at most once; after success, send the returned connectUrl unchanged on the final line without calling a device action again. Its short-lived browser claim is authorized for delivery to the current private member; it is not a provider credential. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin check-in timing while Garmin is the supported no-data-outreach source: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, provider access tokens, delivery routes, or generic commands.',
   inputSchema: z.toJSONSchema(deviceArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -69,6 +73,22 @@ export type DeviceDynamicToolRequest =
       kind: 'invalid-device-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
+
+export interface DeviceDynamicToolExecutionResult {
+  requiredFinalResponseText?: string
+  rpcResult: {
+    contentItems: Array<{ text: string; type: 'inputText' }>
+    success: boolean
+  }
+}
+
+export interface DeviceTurnState {
+  connectAttempt: Promise<DeviceDynamicToolExecutionResult> | null
+}
+
+export function createDeviceTurnState(): DeviceTurnState {
+  return { connectAttempt: null }
+}
 
 export function readDeviceDynamicToolRequest(input: {
   arguments: unknown
@@ -100,17 +120,34 @@ export function readDeviceDynamicToolRequest(input: {
       }
 }
 
-export async function executeDeviceDynamicTool(input: {
+interface ExecuteDeviceDynamicToolInput {
   acceptedInputAuthority?: { assistantInputId: string } | null
   abortSignal?: AbortSignal | null
   deviceTool: AssistantHostedDeviceTool
   request: Extract<DeviceDynamicToolRequest, { kind: 'device' }>
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
+  turnState?: DeviceTurnState | null
+}
+
+export async function executeDeviceDynamicTool(
+  input: ExecuteDeviceDynamicToolInput,
+): Promise<DeviceDynamicToolExecutionResult> {
+  const turnState = input.turnState ?? null
+  if (turnState?.connectAttempt) {
+    return await turnState.connectAttempt
   }
-}> {
+
+  if (input.request.request.action === 'connect' && turnState) {
+    const attempt = executeDeviceDynamicToolOnce(input)
+    turnState.connectAttempt = attempt
+    return await attempt
+  }
+
+  return await executeDeviceDynamicToolOnce(input)
+}
+
+async function executeDeviceDynamicToolOnce(
+  input: ExecuteDeviceDynamicToolInput,
+): Promise<DeviceDynamicToolExecutionResult> {
   try {
     if (
       input.request.request.action === 'configure_no_data_outreach'
@@ -129,20 +166,20 @@ export async function executeDeviceDynamicTool(input: {
       signal: input.abortSignal ?? null,
     })
     if (response.action !== input.request.request.action) {
-      return deviceTextResult(
-        false,
-        serializeDeviceToolError(
-          projectDeviceResponseMismatch(input.request.request.action),
-        ),
+      return deviceToolErrorResult(
+        projectDeviceResponseMismatch(input.request.request.action),
       )
     }
 
     const text = serializeDeviceToolResponse(response)
     return text
-      ? deviceTextResult(true, text)
-      : deviceTextResult(
-          false,
-          serializeDeviceToolError(
+      ? {
+          ...deviceTextResult(true, text),
+          ...(response.action === 'connect'
+            ? { requiredFinalResponseText: response.link.connectUrl }
+            : {}),
+        }
+      : deviceToolErrorResult(
             input.request.request.action === 'configure_no_data_outreach'
               ? projectUnclassifiedDeviceToolFailure(
                   input.request.request.action,
@@ -157,17 +194,13 @@ export async function executeDeviceDynamicTool(input: {
                     ? 'Retry list_accounts with a provider or sourceProvider filter.'
                     : 'Narrow the device request before retrying.',
                 },
-          ),
         )
   } catch (error) {
-    return deviceTextResult(
-      false,
-      serializeDeviceToolError(
-        projectDeviceToolError(
-          error,
-          input.request.request.action,
-          input.abortSignal?.aborted === true,
-        ),
+    return deviceToolErrorResult(
+      projectDeviceToolError(
+        error,
+        input.request.request.action,
+        input.abortSignal?.aborted === true,
       ),
     )
   }
@@ -176,6 +209,7 @@ export async function executeDeviceDynamicTool(input: {
 interface DeviceToolErrorProjection {
   code: string
   hint: string
+  memberReply?: string
   message: string
   retryable: boolean
   stage: string
@@ -199,7 +233,10 @@ function projectDeviceResponseMismatch(
       message: 'The device response action did not match the requested action.',
       retryable: false,
       stage: deviceToolStage(action),
-      hint: CONNECT_EFFECT_ONCE_HINT,
+      hint: connectFreshRequestHint(
+        'Say only that link creation could not be confirmed; do not describe it as success or failure.',
+      ),
+      memberReply: 'I could not confirm whether the device connection link was created. Please ask me again in a new message.',
     }
   }
 
@@ -233,7 +270,10 @@ function projectDeviceToolError(
           message: 'That device provider is not available to connect.',
           retryable: false,
           stage,
-          hint: CONNECT_EFFECT_ONCE_HINT,
+          hint: connectFreshRequestHint(
+            'Tell the member to choose an available provider when they ask again.',
+          ),
+          memberReply: 'That device provider is not available to connect. Please choose an available provider in a new message.',
         }
       case 'device_reconcile_unavailable':
         return {
@@ -287,7 +327,10 @@ function projectDeviceToolError(
             code: hostedError.code,
             message: 'Device connection links are temporarily unavailable.',
             retryable: hostedError.retryable,
-            retryHint: CONNECT_EFFECT_ONCE_HINT,
+            retryHint: connectFreshRequestHint(
+              'Tell the member connection links are temporarily unavailable and they can ask again later.',
+            ),
+            memberReply: 'Device connection links are temporarily unavailable. Please ask me again later.',
             stage,
           })
         case 'HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED':
@@ -296,7 +339,10 @@ function projectDeviceToolError(
             message: 'Device connections require a private member conversation.',
             retryable: false,
             stage,
-            hint: CONNECT_EFFECT_ONCE_HINT,
+            hint: connectFreshRequestHint(
+              'Tell the member to continue in their private Murph conversation and ask again there.',
+            ),
+            memberReply: 'Device connections require a private Murph conversation. Please continue there and ask me again.',
           }
         case 'HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED':
           return {
@@ -304,7 +350,10 @@ function projectDeviceToolError(
             message: 'That device provider is not configured for connection.',
             retryable: false,
             stage,
-            hint: CONNECT_EFFECT_ONCE_HINT,
+            hint: connectFreshRequestHint(
+              'Tell the member that provider is not configured and they can ask again after it becomes available.',
+            ),
+            memberReply: 'That device provider is not configured for connection. Please ask me again after it becomes available.',
           }
         case 'INVALID_REQUEST':
           return {
@@ -312,7 +361,10 @@ function projectDeviceToolError(
             message: 'The device connection request was invalid.',
             retryable: false,
             stage,
-            hint: CONNECT_EFFECT_ONCE_HINT,
+            hint: connectFreshRequestHint(
+              'Say the request was invalid and wait for a corrected request using one exposed provider and no extra fields.',
+            ),
+            memberReply: 'The device connection request was invalid. Please ask again with one supported provider.',
           }
         case 'HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET':
           return {
@@ -320,7 +372,10 @@ function projectDeviceToolError(
             message: 'The device connection return target is invalid.',
             retryable: false,
             stage,
-            hint: CONNECT_EFFECT_ONCE_HINT,
+            hint: connectFreshRequestHint(
+              'Tell the member to continue in a supported private iMessage or Telegram conversation and ask again there.',
+            ),
+            memberReply: 'The device connection return target is unsupported. Please continue in a private iMessage or Telegram conversation and ask me again.',
           }
       }
     }
@@ -333,6 +388,7 @@ function projectKnownHostedRetryableDeviceError(input: {
   action: AssistantHostedDeviceToolRequest['action']
   code: string
   message: string
+  memberReply?: string
   retryable: boolean
   retryHint: string
   stage: string
@@ -347,6 +403,7 @@ function projectKnownHostedRetryableDeviceError(input: {
     retryable: true,
     stage: input.stage,
     hint: input.retryHint,
+    ...(input.memberReply ? { memberReply: input.memberReply } : {}),
   }
 }
 
@@ -374,7 +431,14 @@ function projectUnclassifiedDeviceToolFailure(
         : 'The device operation completion could not be confirmed.',
       retryable: false,
       stage,
-      hint: CONNECT_EFFECT_ONCE_HINT,
+      hint: connectFreshRequestHint(
+        callerSignalAborted
+          ? 'Say the connect attempt was cancelled.'
+          : 'Say only that link creation could not be confirmed; do not describe it as success or failure.',
+      ),
+      memberReply: callerSignalAborted
+        ? 'The device connection request was cancelled.'
+        : 'I could not confirm whether the device connection link was created. Please ask me again in a new message.',
     }
   }
   if (callerSignalAborted) {
@@ -455,14 +519,25 @@ function serializeDeviceToolError(
   projection: DeviceToolErrorProjection,
 ): string {
   return JSON.stringify({
-    error: {
-      code: projection.code,
-      hint: projection.hint,
-      message: projection.message,
-      retryable: projection.retryable,
-      stage: projection.stage,
-    },
+    outcome: 'not_completed',
+    message: projection.message,
+    ...(projection.memberReply ? { memberReply: projection.memberReply } : {}),
+    requiredRecovery: projection.hint,
+    code: projection.code,
+    retryable: projection.retryable,
+    stage: projection.stage,
   })
+}
+
+function deviceToolErrorResult(
+  projection: DeviceToolErrorProjection,
+): DeviceDynamicToolExecutionResult {
+  return {
+    ...deviceTextResult(false, serializeDeviceToolError(projection)),
+    ...(projection.memberReply
+      ? { requiredFinalResponseText: projection.memberReply }
+      : {}),
+  }
 }
 
 function serializeDeviceToolResponse(
@@ -485,14 +560,8 @@ function serializeDeviceToolResponse(
     : response.action === 'connect'
       ? {
           action: response.action,
+          connectUrl: response.link.connectUrl,
           hint: CONNECT_SUCCESS_HINT,
-          link: {
-            authorizationUrl: response.link.authorizationUrl,
-            connectUrl: response.link.connectUrl,
-            expiresAt: response.link.expiresAt,
-            provider: response.link.provider,
-            providerLabel: response.link.providerLabel,
-          },
         }
       : response.action === 'reconcile'
         ? {

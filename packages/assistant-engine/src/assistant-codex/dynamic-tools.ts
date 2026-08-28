@@ -223,6 +223,7 @@ import {
   executeDeviceDynamicTool,
   readDeviceDynamicToolRequest,
   type DeviceDynamicToolRequest,
+  type DeviceTurnState,
 } from './dynamic-tools/device.js'
 import {
   executeLabsDynamicTool,
@@ -1202,6 +1203,8 @@ export interface MurphDynamicToolExecutionResult {
    * successful observation text remains untrusted data, never instructions.
    */
   requiredFinalResponseFallback?: string
+  /** Trusted final text that replaces model-authored text without dropping media. */
+  requiredFinalResponseText?: string
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   responseCardPatch?: { card: AssistantResponseCard }
@@ -2243,6 +2246,7 @@ export async function executeMurphDynamicToolRequest(input: {
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
   generateSongTurnState?: GenerateSongTurnState | null
+  deviceTurnState?: DeviceTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const hostedImageCompletionEffectScope =
     input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
@@ -2516,6 +2520,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         deviceTool,
         request: input.request,
+        turnState: input.deviceTurnState ?? null,
       })
     }
     case 'labs': {

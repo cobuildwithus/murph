@@ -61,7 +61,10 @@ describe('Codex thread instructions', () => {
       'one-time codes, CAPTCHA, new consent',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Treat ordinary tool friction as recoverable: inspect state and exhaust the owner's bounded safe recovery",
+      'Honor tool outcomes and required recovery; never genericize success, failure, or retry',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Repeat effects only if their result permits it',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain('connected sources')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
@@ -79,7 +82,7 @@ describe('Codex thread instructions', () => {
       'Capability inquiry alone permits no probe',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'follow current source guidance',
+      'use supplied inputs and current source guidance',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Missing content, topic, or message is material: ask before calling tools; never invent it',

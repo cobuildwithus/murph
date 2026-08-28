@@ -1395,10 +1395,13 @@ describe('hosted domain dynamic tools', () => {
       /at most once for that message; after any result, do not retry/u,
     )
     expect(MURPH_DEVICE_TOOL.description).toContain(
-      'For one connection request, call connect at most once; after a successful result, return its connectUrl exactly, including its opaque query, without calling list_accounts or any device action again.',
+      'Capability questions are inspection-only: answer from this description without calling.',
     )
     expect(MURPH_DEVICE_TOOL.description).toContain(
-      'A returned connectUrl is a user-deliverable link, not a provider credential.',
+      'For one connection request, call connect at most once; after success, send the returned connectUrl unchanged on the final line without calling a device action again.',
+    )
+    expect(MURPH_DEVICE_TOOL.description).toContain(
+      'Its short-lived browser claim is authorized for delivery to the current private member; it is not a provider credential.',
     )
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
@@ -1921,15 +1924,12 @@ describe('hosted domain dynamic tools', () => {
     }, { signal: abortController.signal })
     expect(readResultPayload(result)).toEqual({
       action: 'connect',
-      hint: 'Return connectUrl exactly in the final reply, including its opaque query. It is a user-deliverable link, not a provider credential. Successful link creation is terminal; do not call list_accounts or any device action again for this member request.',
-      link: {
-        authorizationUrl: 'https://connect.example.test/authorize',
-        connectUrl: 'https://connect.example.test/start',
-        expiresAt: '2026-07-16T12:05:00.000Z',
-        provider: 'whoop',
-        providerLabel: 'WHOOP',
-      },
+      connectUrl: 'https://connect.example.test/start',
+      hint: 'Send connectUrl unchanged on the final line. Its short-lived browser claim is authorized for delivery to this current private member; it is not a provider credential. Success is terminal; do not call a device action again for this request.',
     })
+    expect(result.requiredFinalResponseText).toBe(
+      'https://connect.example.test/start',
+    )
 
     const unavailable = await executeMurphDynamicToolRequest({
       env: {},

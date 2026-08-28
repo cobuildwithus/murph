@@ -1,29 +1,46 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { executeDeviceDynamicTool } from '../src/assistant-codex/dynamic-tools/device.js'
+import {
+  createDeviceTurnState,
+  executeDeviceDynamicTool,
+} from '../src/assistant-codex/dynamic-tools/device.js'
 
 function readToolError(result: Awaited<ReturnType<typeof executeDeviceDynamicTool>>) {
   const text = result.rpcResult.contentItems[0]?.text ?? ''
+  const wire = JSON.parse(text) as {
+    code: string
+    memberReply?: string
+    message: string
+    outcome: 'not_completed'
+    requiredRecovery: string
+    retryable: boolean
+    stage: string
+  }
   return {
-    parsed: JSON.parse(text) as {
+    parsed: {
       error: {
-        code: string
-        hint: string
-        message: string
-        retryable: boolean
-        stage: string
-      }
+        code: wire.code,
+        hint: wire.requiredRecovery,
+        message: wire.message,
+        retryable: wire.retryable,
+        stage: wire.stage,
+      },
     },
     text,
+    wire,
   }
 }
 
 const PRIVATE_HOSTED_DEVICE_SENTINEL = 'private-hosted-device-response'
-const CONNECT_EFFECT_ONCE_HINT =
-  'Do not call connect again for this member request. Report the failure, tell the member they can ask again later, and wait for a fresh member request before another connect attempt.'
+const CONNECT_FRESH_REQUEST_SUFFIX =
+  'Do not call connect again for this member request. Wait for a fresh member request before another connect attempt.'
 const NO_DATA_OUTREACH_EFFECT_ONCE_HINT =
   'Do not retry this request. Wait for a fresh private member instruction before another no-data outreach change.'
+
+function connectFreshRequestHint(recovery: string): string {
+  return `${recovery} ${CONNECT_FRESH_REQUEST_SUFFIX}`
+}
 
 function createHostedWebControlPlaneResponseError(input: {
   code: string
@@ -73,6 +90,41 @@ async function executeDeviceFailure(
 }
 
 describe('hosted device dynamic tool recovery', () => {
+  it('replays the first connect result for later device calls in the same turn', async () => {
+    const request = vi.fn(async () => ({
+      action: 'connect' as const,
+      link: {
+        authorizationUrl: 'https://example.test/connect#claim=synthetic',
+        connectUrl: 'https://example.test/connect#claim=synthetic',
+        expiresAt: '2026-08-28T12:00:00.000Z',
+        provider: 'synthetic-provider',
+        providerLabel: 'Synthetic',
+      },
+    }))
+    const turnState = createDeviceTurnState()
+    const deviceTool = { request }
+
+    const connect = await executeDeviceDynamicTool({
+      deviceTool,
+      request: {
+        kind: 'device',
+        request: { action: 'connect', provider: 'synthetic-provider' },
+      },
+      turnState,
+    })
+    const laterRead = await executeDeviceDynamicTool({
+      deviceTool,
+      request: {
+        kind: 'device',
+        request: { action: 'list_accounts', provider: 'synthetic-provider' },
+      },
+      turnState,
+    })
+
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(laterRead).toEqual(connect)
+  })
+
   for (const testCase of [
     {
       action: 'list_accounts',
@@ -91,7 +143,9 @@ describe('hosted device dynamic tool recovery', () => {
     },
     {
       action: 'connect',
-      expectedHint: CONNECT_EFFECT_ONCE_HINT,
+      expectedHint: connectFreshRequestHint(
+        'Say only that link creation could not be confirmed; do not describe it as success or failure.',
+      ),
       retryable: false,
       response: {
         accountId: PRIVATE_HOSTED_DEVICE_SENTINEL,
@@ -153,7 +207,8 @@ describe('hosted device dynamic tool recovery', () => {
         request: { kind: 'device', request },
       })
 
-      const { parsed, text } = readToolError(result)
+      const { parsed, text, wire } = readToolError(result)
+      expect(wire.outcome).toBe('not_completed')
       expect(result.rpcResult.success).toBe(false)
       expect(parsed.error).toEqual({
         code: 'device_response_mismatch',
@@ -209,7 +264,8 @@ describe('hosted device dynamic tool recovery', () => {
         },
       })
 
-      const { parsed, text } = readToolError(result)
+      const { parsed, text, wire } = readToolError(result)
+      expect(wire.outcome).toBe('not_completed')
       expect(parsed.error).toEqual({
         code: 'device_operation_outcome_unknown',
         hint: NO_DATA_OUTREACH_EFFECT_ONCE_HINT,
@@ -246,7 +302,9 @@ describe('hosted device dynamic tool recovery', () => {
     expect(result.rpcResult.success).toBe(false)
     expect(parsed.error).toEqual({
       code: 'device_connect_provider_unavailable',
-      hint: CONNECT_EFFECT_ONCE_HINT,
+      hint: connectFreshRequestHint(
+        'Tell the member to choose an available provider when they ask again.',
+      ),
       message: 'That device provider is not available to connect.',
       retryable: false,
       stage: 'device-connect',
@@ -314,7 +372,9 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE',
-      hint: CONNECT_EFFECT_ONCE_HINT,
+      hint: connectFreshRequestHint(
+        'Tell the member connection links are temporarily unavailable and they can ask again later.',
+      ),
       message: 'Device connection links are temporarily unavailable.',
       retryable: true,
       status: 503,
@@ -322,7 +382,9 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED',
-      hint: CONNECT_EFFECT_ONCE_HINT,
+      hint: connectFreshRequestHint(
+        'Tell the member to continue in their private Murph conversation and ask again there.',
+      ),
       message: 'Device connections require a private member conversation.',
       retryable: false,
       status: 403,
@@ -330,7 +392,9 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED',
-      hint: CONNECT_EFFECT_ONCE_HINT,
+      hint: connectFreshRequestHint(
+        'Tell the member that provider is not configured and they can ask again after it becomes available.',
+      ),
       message: 'That device provider is not configured for connection.',
       retryable: false,
       status: 404,
@@ -338,7 +402,9 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'INVALID_REQUEST',
-      hint: CONNECT_EFFECT_ONCE_HINT,
+      hint: connectFreshRequestHint(
+        'Say the request was invalid and wait for a corrected request using one exposed provider and no extra fields.',
+      ),
       message: 'The device connection request was invalid.',
       retryable: false,
       status: 400,
@@ -346,7 +412,9 @@ describe('hosted device dynamic tool recovery', () => {
     {
       action: 'connect',
       code: 'HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET',
-      hint: CONNECT_EFFECT_ONCE_HINT,
+      hint: connectFreshRequestHint(
+        'Tell the member to continue in a supported private iMessage or Telegram conversation and ask again there.',
+      ),
       message: 'The device connection return target is invalid.',
       retryable: false,
       status: 400,
@@ -358,7 +426,7 @@ describe('hosted device dynamic tool recovery', () => {
         testCase.action,
       )
 
-      const { parsed, text } = readToolError(result)
+      const { parsed, text, wire } = readToolError(result)
       expect(parsed.error).toEqual({
         code: testCase.code,
         hint: testCase.hint,
@@ -366,6 +434,12 @@ describe('hosted device dynamic tool recovery', () => {
         retryable: testCase.retryable,
         stage: `device-${testCase.action}`,
       })
+      if (testCase.action === 'connect') {
+        expect(wire.memberReply).toEqual(expect.any(String))
+        expect(result.requiredFinalResponseText).toBe(wire.memberReply)
+      } else {
+        expect(result.requiredFinalResponseText).toBeUndefined()
+      }
       expect(text).not.toContain(PRIVATE_HOSTED_DEVICE_SENTINEL)
     })
   }
@@ -445,7 +519,9 @@ describe('hosted device dynamic tool recovery', () => {
 
     expect(readToolError(result).parsed.error).toEqual({
       code: 'device_operation_outcome_unknown',
-      hint: CONNECT_EFFECT_ONCE_HINT,
+      hint: connectFreshRequestHint(
+        'Say only that link creation could not be confirmed; do not describe it as success or failure.',
+      ),
       message: 'The device operation completion could not be confirmed.',
       retryable: false,
       stage: 'device-connect',
