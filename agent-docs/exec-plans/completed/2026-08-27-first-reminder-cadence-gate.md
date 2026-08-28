@@ -1,8 +1,8 @@
 # Gate recurring-reminder cadence policy on delivered history
 
-Status: active
+Status: completed
 Created: 2026-08-27
-Updated: 2026-08-27
+Updated: 2026-08-28
 
 ## Outcome
 
@@ -75,9 +75,25 @@ Updated: 2026-08-27
 
 ## Verification
 
-- Focused assistant cron output-history and runtime tests.
-- Assistant-engine TypeScript check.
-- One uniquely named `gpt-5.6-luna` live assistant journey for the first
-  ordinary recurring-reminder occurrence.
-- Preliminary prompt, Product UX, and coverage specialist review; exact-head CI
-  and any additional review gate required by the final change shape.
+- The new composed first-occurrence runtime assertion failed before the source
+  correction, proving that the old prompt still exposed cadence policy.
+- Focused assistant cron output-history tests passed (8 tests), the ordinary
+  three-occurrence cadence journey passed, and the safety-critical
+  three-occurrence journey passed after its stale prompt-text assertion was
+  updated.
+- Assistant-engine and Web TypeScript checks passed. The changelog page tests
+  passed (9 tests), as did `git diff --check` and the private-identifier scan.
+- The production-composed live journey
+  `sends only the first ordinary cue from production notification composition`
+  passed with `gpt-5.6-luna` at high reasoning. The inspected synthetic reply
+  sent only the requested room-reset cue, with no question or cadence
+  administration.
+- Provider-input measurement on equivalent synthetic direct and group fixtures
+  reduced complete first-occurrence input by 452-453 tokens and 2,528 bytes;
+  tools and schemas were unchanged.
+- Preliminary Product UX, prompt, frontend, and coverage specialist review found
+  no production issue. Its one medium coverage finding identified the stale
+  safety-critical test assertion above; the accepted test-only correction was
+  verified with the focused safety-reminder journey. The remediation head then
+  passed the required pull-request checks.
+Completed: 2026-08-28
