@@ -1009,6 +1009,14 @@ const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
   'startUrl',
 ] as const
 
+const COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS = Object.keys(
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema.properties,
+)
+const computerPauseForUserValidationPaths =
+  collectSafeJsonSchemaValidationPaths(
+    MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.inputSchema,
+  )
+
 const computerNavigationUrlSchema = z
   .string()
   .trim()
@@ -2104,6 +2112,8 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerPauseForUserArgumentsSchema,
         schemaName: 'murph.computer_pause_for_user.input',
+        schemaPaths: computerPauseForUserValidationPaths,
+        schemaRootKeys: COMPUTER_PAUSE_FOR_USER_ARGUMENT_ROOT_KEYS,
         toolName: 'murph.computer_pause_for_user',
       })
       return parsed.ok
@@ -7729,6 +7739,7 @@ function parseComputerArguments<TArgs>(input: {
   argumentsValue: unknown
   schema: z.ZodType<TArgs> & { shape?: Record<string, unknown> }
   schemaName: string
+  schemaPaths?: readonly string[]
   schemaRootKeys?: readonly string[]
   toolName: string
 }):
@@ -7742,6 +7753,7 @@ function parseComputerArguments<TArgs>(input: {
         error: parsed.error,
         rawInput: input.argumentsValue,
         schemaName: input.schemaName,
+        schemaPaths: input.schemaPaths,
         schemaRootKeys: input.schemaRootKeys ?? readZodObjectRootKeys(input.schema),
         toolName: input.toolName,
       }),
