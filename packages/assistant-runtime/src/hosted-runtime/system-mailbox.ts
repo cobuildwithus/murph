@@ -984,6 +984,43 @@ export async function deferHostedSystemMailboxItemAfterVaultShareProjectionFailu
   );
 }
 
+export function createHostedBrowserVaultRefreshTimeoutRetryWakeCandidate(
+): HostedRuntimeWakeCandidate {
+  return createHostedRuntimeWakeCandidate(
+    new Date(Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS).toISOString(),
+    null,
+  );
+}
+
+export async function deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout(input: {
+  item: HostedSystemMailboxPendingItem;
+  vaultRoot: string;
+}): Promise<HostedRuntimeWakeCandidate | null> {
+  if (
+    input.item.status !== "recording"
+    || input.item.postCheckpointRecord !== null
+    || input.item.routeAction !== "apply-runtime-control-request"
+    || input.item.wake.kind !== "runtime.browser-vault-refresh-requested"
+  ) {
+    return null;
+  }
+  const nextWakeAt = new Date(
+    Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
+  ).toISOString();
+  await updateHostedSystemMailboxPendingItem({
+    item: {
+      ...input.item,
+      nextAttemptAt: nextWakeAt,
+      status: "recording",
+    },
+    vaultRoot: input.vaultRoot,
+  });
+  return createHostedRuntimeWakeCandidate(
+    nextWakeAt,
+    resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
+  );
+}
+
 export async function retainHostedSystemMailboxItemUntilDeliveryWake(input: {
   item: HostedSystemMailboxPendingItem;
   nextWakeAt: string;

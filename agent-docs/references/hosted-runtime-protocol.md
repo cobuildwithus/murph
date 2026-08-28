@@ -3182,10 +3182,18 @@ reads share that signal and every started child settles before the lane returns,
 so timed-out or preempted work cannot continue beside a successor attempt. A
 Browser Vault control or no-record device-sync item that already reached
 `recording` is selected read-only. A runtime wake or host abort leaves its durable
-state untouched for the next foreground-safe opportunity. Timeout, source
-change, publication conflict, generic failure, and an oversized replica
-terminally record the current item without a future retry; a later browser
-freshness request may enqueue new work after the underlying state changes.
+state untouched for the next foreground-safe opportunity. For the Browser Vault
+control item, a timeout retains that same recording item, applies the existing
+system-mailbox retry delay, and checkpoints one future assistant wake; the default
+post-checkpoint and no-progress return paths project the same delayed wake. There
+is no inline timeout retry and only one delayed wake is owned at a time.
+Conversation work, other foreground wakes, host abort, shutdown, mailbox budget,
+and checkpoint fences remain higher priority. A later publication or any existing
+terminal refresh outcome records the item normally and removes the timeout wake.
+Other system-mailbox items keep their existing timeout recording behavior. Source
+change, publication conflict, generic failure, and an oversized replica remain
+terminal without a future retry; a later browser freshness request may enqueue new
+work after the underlying state changes.
 A timeout result also carries the closed refresh-stage vocabulary
 `initial_source_hash`, `replica_construction`, `replica_serialization`,
 `second_source_hash`, `replica_write`, or `ref_publication`; the

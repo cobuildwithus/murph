@@ -34,8 +34,9 @@ reuse, and focused proof are specified by
 `agent-docs/operations/verification-and-runtime.md` and
 `agent-docs/references/testing-ci-map.md`.
 
-Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
-expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
+Hosted Browser Vault terminal-failure convergence, bounded retained-item timeout
+retry, joined-cancellation ownership, and direct proof expectations are specified
+by `agent-docs/references/hosted-runtime-protocol.md`.
 
 Kernel browser-session authority is independent of the optional Live View
 capability. Web-owned automation may continue when that viewer cannot be safely

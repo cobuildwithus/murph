@@ -209,6 +209,8 @@ import {
   createHostedConversationMailboxImportItem,
 } from "./hosted-runtime/mailbox-conversation-import.ts";
 import {
+  createHostedBrowserVaultRefreshTimeoutRetryWakeCandidate,
+  deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout,
   deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
@@ -3365,6 +3367,29 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const refreshDisposition = classifyHostedBrowserVaultReplicaRefresh(
             refresh,
           );
+          if (refreshDisposition.action === "retry") {
+            if (
+              hostAbortObserved
+              || runtimeAbortController.signal.aborted
+              || options.shutdownSignal?.aborted === true
+              || shouldYieldSystemMailboxWork()
+            ) {
+              return { preempted: true, prepared: true };
+            }
+            const retryWake =
+              await deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout({
+                item: recordItem,
+                vaultRoot: restored.vaultRoot,
+              });
+            if (retryWake) {
+              rememberSystemMailboxPostRecordWake(retryWake);
+              await checkpointSystemMailboxMode(
+                `${inputItem.stagePrefix}.checkpoint.browser_vault_timeout_retry`,
+                [retryWake],
+              );
+              return { preempted: true, prepared: true };
+            }
+          }
           if (refreshDisposition.action === "preempt") {
             if (refresh.status === "deferred_runtime_wake") {
               foregroundWakeObserved = true;
@@ -6644,6 +6669,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (
           deferredBrowserVaultWakePrefetch
           && browserVaultRefresh?.status !== "deferred_runtime_wake"
+          && browserVaultRefresh?.status !== "deferred_timeout"
         ) {
           const deferredBrowserWakeHandled = await runOptionalPostCheckpointWork(
             async () =>
@@ -6666,6 +6692,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
         const refreshRequestedImmediateWake =
           browserVaultRefresh?.status === "deferred_runtime_wake";
+        const refreshRequestedTimeoutRetryWake =
+          browserVaultReplicaRefreshRequested
+          && browserVaultRefresh?.status === "deferred_timeout"
+          && !postCheckpointWorkSignal.aborted
+          && mayRunPostCheckpointWork()
+            ? createHostedBrowserVaultRefreshTimeoutRetryWakeCandidate()
+            : null;
         await closeDetachedAssistantAskBeforeWorkspaceRelease();
         if (runtimeStateDirty) {
           continue;
@@ -6695,6 +6728,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               ? "inbox_media_retention"
             : null,
           },
+          {
+            at: refreshRequestedTimeoutRetryWake?.at ?? null,
+            reason: refreshRequestedTimeoutRetryWake?.reason ?? null,
+          },
         ]);
         const immediateRecheckRequested =
           runtimeOwnerHandoffRequested()
@@ -6708,7 +6745,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           );
         const checkpointReturnWakePresent = Object.hasOwn(committedWorkspace ?? {}, "nextWakeAt")
           || pendingWake.nextWakeAt !== null
-          || committedWorkspace?.inboxMediaRetentionWakeAt !== null;
+          || committedWorkspace?.inboxMediaRetentionWakeAt !== null
+          || refreshRequestedTimeoutRetryWake !== null;
         const invocationResult = {
           ...(immediateRecheckRequested
             ? { immediateRecheckRequested: true as const }
@@ -6797,6 +6835,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     }
     const refreshRequestedImmediateWake =
       noProgressBrowserVaultRefresh?.status === "deferred_runtime_wake";
+    const refreshRequestedTimeoutRetryWake =
+      noProgressBrowserVaultRefresh?.status === "deferred_timeout"
+      && !noProgressBrowserVaultRefreshSignal.aborted
+        ? createHostedBrowserVaultRefreshTimeoutRetryWakeCandidate()
+        : null;
     const noProgressReturnWake = selectEarliestHostedRuntimeWake([
       {
         at: pendingWake.nextWakeAt,
@@ -6805,6 +6848,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       {
         at: committedWorkspace?.inboxMediaRetentionWakeAt ?? null,
         reason: committedWorkspace?.inboxMediaRetentionWakeAt ? "inbox_media_retention" : null,
+      },
+      {
+        at: refreshRequestedTimeoutRetryWake?.at ?? null,
+        reason: refreshRequestedTimeoutRetryWake?.reason ?? null,
       },
     ]);
     const invocationResult = {
@@ -7043,6 +7090,7 @@ function classifyHostedBrowserVaultReplicaRefresh(
   refresh: HostedBrowserVaultReplicaRefreshResult,
 ):
   | { action: "complete" }
+  | { action: "retry" }
   | { action: "preempt" } {
   switch (refresh.status) {
     case "published":
@@ -7050,11 +7098,12 @@ function classifyHostedBrowserVaultReplicaRefresh(
     case "skipped_no_port":
     case "workspace_missing":
     case "deferred_source_changed":
-    case "deferred_timeout":
     case "publish_conflict":
     case "refresh_failed":
     case "refresh_failed_too_large":
       return { action: "complete" };
+    case "deferred_timeout":
+      return { action: "retry" };
     case "deferred_aborted":
     case "deferred_runtime_wake":
       return { action: "preempt" };
