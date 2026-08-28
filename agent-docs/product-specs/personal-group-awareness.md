@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-08-26
+Last verified: 2026-08-28
 
 ## User outcome
 
@@ -80,6 +80,16 @@ Private Murph repeats `list_memberships` with the exact opaque cursor returned
 by Web until it finds the selector or exhausts the collection. The model never
 constructs, edits, or accepts either cursor from the member.
 
+Inventory-v2 callers also receive one `participantRoster` result per membership.
+An available result contains the real human chat participant count, including
+the requester, and safe labels for the other people: requester-authorized
+Contacts names, masked phone hints, or a generic email marker. Unsupported
+providers, missing routes, incomplete rosters, and provider failures are
+entry-local unavailable results. They do not hide the membership or poison
+another entry. Ask and handoff may use only the exact opaque `membershipId`
+returned by this read; safe titles, counts, and labels help the model clarify
+but never authorize an effect.
+
 Permission changes stay on the existing authenticated join page for members who already possess the owner-authorized link. Private Murph's only membership mutation is self-leave, selected from its current Web-owned list and bound to the signed callback member. Reacting in a personal direct-message thread to change a group permission remains deliberately out of scope. Existing server-owned reactions inside a route-bound group chat remain unchanged.
 
 The authenticated join page renders the viewer's current opaque membership id,
@@ -143,6 +153,18 @@ cursors before Web begins returning `nextCursor`,
 to accept initial requests without either cursor. After Web emits these fields,
 rolling the runner behind that parser floor would reject otherwise successful
 reads.
+
+Participant roster inventory uses a query capability marker rather than an
+unconditional response expansion. New Cloudflare/runner code sends
+`membershipInventoryProtocol=v2` and accepts older Web responses that omit the
+roster by normalizing each entry to `participant_roster_not_reported`. New Web
+returns roster fields only for that exact query value, so older callers retain
+their strict legacy response shape. Deploy and recycle Cloudflare/runner first,
+then deploy Web. During that interval membership listing and leaving remain
+compatible, while the new membership-id Ask/handoff request correctly remains
+unavailable until Web is current. Roll back Web first, then the runner. Do not
+deploy Web while legacy runtime containers can still send title- or
+participant-based Ask/handoff requests.
 
 ## Direct proof
 

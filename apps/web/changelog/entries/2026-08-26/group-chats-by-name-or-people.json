@@ -5,10 +5,10 @@
     "id": "group-chats-by-name-or-people",
     "kind": "improvement",
     "priority": 2,
-    "title": "Ask Murph for a group chat by name or people",
-    "summary": "From your private Murph, you can now ask about or share into an existing joined iMessage group by its chat name or by the people in it.",
-    "details": "Murph uses only your own shared Contacts when available. Otherwise it offers limited clues such as area code and last four digits. When Murph can safely distinguish possible matches, it asks which one; otherwise it says it cannot identify the group. New joined groups also keep their existing iMessage title when one is available.",
+    "title": "Pick the right joined group by its chat and people",
+    "summary": "From your private Murph, you can ask about or share into any joined iMessage group, and Murph can distinguish similar chats using their names, participant counts, and safe contact clues.",
+    "details": "Murph asks one clear question when several joined chats fit. Contact names appear only from your own shared Contacts; otherwise clues stay limited to area code and last four digits or a generic email participant. If one chat's participant details are temporarily unavailable, the other groups remain usable.",
     "relevanceTags": ["assistant", "groups", "imessage", "privacy"],
-    "sourcePullRequests": [2385, 2471]
+    "sourcePullRequests": [2385, 2471, 2483]
   }
 }

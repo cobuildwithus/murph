@@ -3032,7 +3032,7 @@ describe('assistant conversation scope', () => {
       'This lane is only for current-sender consultation, not account/settings actions, other participants, or unsolicited disclosure',
     )
     expect(directPrompt).toContain(
-      'From this private conversation, you can ask or hand off to a group only when Murph has already joined it',
+      'From this private conversation, joined-group consultation is available only for groups Murph has already joined',
     )
     expect(groupEmailPrompt).not.toContain('search/load deferred `murph.group_consult`')
     expect(restrictedGroupPrompt).not.toContain(

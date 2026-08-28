@@ -381,21 +381,22 @@ authorized target runtime, and `assistant.ask.completed` returns one bounded
 answer to the bound caller runtime. The first adapter is a private member asking
 a joined group Murph. `apps/web` derives the exact group runtime, membership
 generation, origin, expiry, and private return route from the signed caller and
-web-owned rows; the model supplies only the question and an optional visible
-group label. Web rechecks membership before the group read and completion
-append. For a current member describing a joined Linq/iMessage/SMS group by
-people, the model may instead supply a closed participant target containing
-only familiar names, participant count, area code/last-four hints, or a generic
-email marker. Web scans a separately bounded complete membership universe,
-reads current provider rosters with concurrency four, and may consult only the
-requester's own Contacts projection. Provider handles remain transient, every
-eligible roster must be complete, exactly one group must match, and the final
-transaction revalidates the exact membership and route. Assistant Ask persists
-a versioned normalized participant-target digest in its existing encrypted
-request field. A handoff instead treats its one accepted-input event id and
-stored membership/route as first-write-wins authority: replay reuses that exact
-effect and never reruns participant or title selection. This adds no participant
-directory, selector state, or new runtime wire shape.
+web-owned rows. Before an Ask or handoff, the private runtime lists the caller's
+current membership page. Each entry carries its opaque membership generation,
+existing title, Murph member count, and a separately available live chat roster
+summary: real human participant count plus requester-authorized Contacts names,
+masked phone hints, or a generic email marker. Provider handles remain transient.
+A missing route, unsupported provider, incomplete roster, provider failure, or
+optional Contacts failure is scoped to that entry; it does not hide otherwise
+usable memberships. The model reasons over those safe summaries, asks a natural
+clarification when several entries fit, and passes only the exact returned
+`membershipId` with the bounded question or handoff context. It never exposes,
+invents, edits, or derives the identifier. Web locks and revalidates that exact
+membership belongs to the requester, is still active, points to the expected
+group runtime, and retains route authority before queueing. Leaving and rejoining
+creates a new membership id, so an older clarification is a stale generation.
+Ask and handoff replay remain pinned to the stored membership id; no title or
+participant matcher, target digest, directory, or selector state exists.
 After Temporal accepts each pointer-only mailbox signal, Web starts the
 same payloadless, no-retry direct `ensure-processing` latency hint used by Linq;
 Temporal remains the only durable wake and reconciliation owner. The target

@@ -47,6 +47,7 @@ const mocks = vi.hoisted(() => ({
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
+  readHostedGroupMembershipParticipantRosters: vi.fn(),
   readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId: vi.fn(),
@@ -134,6 +135,11 @@ vi.mock("@/src/lib/hosted-groups/participant-member", async () => {
       mocks.lookupHostedGroupParticipantMemberIdsByHandles,
   };
 });
+
+vi.mock("@/src/lib/hosted-groups/group-membership-participants", () => ({
+  readHostedGroupMembershipParticipantRosters:
+    mocks.readHostedGroupMembershipParticipantRosters,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
   ...(await importOriginal<
@@ -571,6 +577,16 @@ describe("handleHostedRuntimeGroupTool", () => {
       nextCursor: null,
       truncated: false,
     });
+    mocks.readHostedGroupMembershipParticipantRosters.mockResolvedValue(
+      new Map([["membership_runners", {
+        participantCount: 3,
+        participantLabels: [
+          { displayName: "Taylor" },
+          { phoneHint: { areaCode: "415", lastFour: "9876" } },
+        ],
+        status: "available",
+      }]]),
+    );
     mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
@@ -901,7 +917,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_self",
       request: {
         action: "ask",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
         originSessionId: "session_private",
         question: "What is today's workout?",
@@ -913,8 +929,8 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.requestHostedGroupAssistantAsk).toHaveBeenCalledWith({
-      groupLabel: "100 Club",
       memberId: "member_self",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
       originSessionId: "session_private",
       question: "What is today's workout?",
@@ -940,7 +956,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       request: {
         action: "handoff",
         context: "The member set a personal record today.",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
       },
       scheduleMailboxWake,
@@ -951,8 +967,8 @@ describe("handleHostedRuntimeGroupTool", () => {
 
     expect(mocks.requestHostedGroupContextHandoff).toHaveBeenCalledWith({
       context: "The member set a personal record today.",
-      groupLabel: "100 Club",
       memberId: "member_self",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
     });
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
@@ -977,7 +993,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_self",
       request: {
         action: "ask",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
         originSessionId: "session_private",
         question: "What is today's workout?",
@@ -1342,6 +1358,14 @@ describe("handleHostedRuntimeGroupTool", () => {
           kind: "friends",
           memberCount: 7,
           membershipId: "membership_runners",
+          participantRoster: {
+            participantCount: 3,
+            participantLabels: [
+              { displayName: "Taylor" },
+              { phoneHint: { areaCode: "415", lastFour: "9876" } },
+            ],
+            status: "available",
+          },
           permissionsUrl: null,
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
@@ -1365,6 +1389,32 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.readActiveHostedGroupDisclosureGrantsForMember).toHaveBeenCalledWith(
       expect.objectContaining({ cursor: null, memberId: "member_self" }),
     );
+  });
+
+  it("keeps the legacy membership response shape for callers without inventory v2", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+
+    const response = await handleHostedRuntimeGroupTool({
+      includeParticipantRosters: false,
+      memberId: "member_self",
+      request: { action: "list_memberships" },
+    });
+
+    expect(response).toMatchObject({
+      action: "list_memberships",
+      result: { status: "ok" },
+    });
+    if (
+      response.action !== "list_memberships"
+      || response.result.status !== "ok"
+    ) {
+      throw new TypeError("Expected a successful membership inventory.");
+    }
+    expect(response.result.memberships[0]).not.toHaveProperty(
+      "participantRoster",
+    );
+    expect(mocks.readHostedGroupMembershipParticipantRosters)
+      .not.toHaveBeenCalled();
   });
 
   it("returns an existing join link as a permissions URL only to the group owner", async () => {

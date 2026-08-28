@@ -7398,6 +7398,14 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                         kind: 'friends',
                         memberCount: 8,
                         membershipId: 'membership_trail_crew',
+                        participantRoster: {
+                          participantCount: 9,
+                          participantLabels: [
+                            { displayName: 'Taylor' },
+                            { phoneHint: { areaCode: '415', lastFour: '9876' } },
+                          ],
+                          status: 'available',
+                        },
                         permissionsUrl: null,
                         requestedVaultShareProjectionScopes: [],
                         role: 'member',
@@ -7460,11 +7468,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           })}\n`,
         )
 
-        expect(groupRequests).toHaveLength(1)
-        const handoffRequest = groupRequests[0]
+        expect(groupRequests).toHaveLength(2)
+        expect(groupRequests[0]).toEqual({ action: 'list_memberships' })
+        const handoffRequest = groupRequests[1]
         expect(handoffRequest).toMatchObject({
           action: 'handoff',
-          groupLabel: 'Trail Crew',
+          membershipId: 'membership_trail_crew',
         })
         if (
           !handoffRequest
@@ -7756,27 +7765,16 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'targets a joined group directly from requester-relative participant descriptions',
+    'clarifies overlapping participant rosters and hands off by exact membership ID',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const cases = [
         {
-          expectedNames: ['Jordan'],
+          expectedMembershipId: 'membership_taylor_casey',
           prompt:
-            'Tell my existing group chat with Jordan that Member Echo finished the mobility set.',
-          slug: 'named-person',
-        },
-        {
-          expectedNames: ['Jordan', 'Casey'],
-          prompt:
-            'Tell my existing three-person group chat with Jordan and Casey that Member Echo finished the mobility set.',
-          slug: 'total-chat-size',
-        },
-        {
-          expectedNames: ['Jordan', 'Casey'],
-          prompt:
-            'Tell my existing group chat with me, Jordan, and Casey that Member Echo finished the mobility set.',
-          slug: 'explicit-self',
+            'Tell my existing group chat with Taylor that Member Echo finished the mobility set.',
+          selection: 'The four-person one with Casey.',
+          slug: 'overlapping-rosters',
         },
       ] as const
 
@@ -7784,7 +7782,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         for (const testCase of cases) {
           const workingDirectory = await mkdtemp(path.join(
             tmpdir(),
-            `murph-private-group-participant-target-${testCase.slug}-e2e-`,
+            `murph-private-group-membership-selection-${testCase.slug}-e2e-`,
           ))
           type GroupRequest = Parameters<
             NonNullable<AssistantHostedToolContext['groupTool']>['request']
@@ -7794,7 +7792,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           try {
             const skillsRoot = path.join(workingDirectory, 'skills')
             await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
-            const result = await executeRealCodexAppServerTurn({
+            const commonInput = {
               approvalPolicy: 'never',
               baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
               codexCommand:
@@ -7819,7 +7817,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                     `conversation_private_group_participant_${testCase.slug}`,
                   recipientKey:
                     `recipient_private_group_participant_${testCase.slug}`,
-                  returnContactKind: 'text',
+                  returnContactKind: 'text' as const,
                 }),
                 currentHostedMailboxItemIds: () => [],
                 currentUserActionScope: () => ({
@@ -7828,7 +7826,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                   ],
                   conversationId:
                     `conversation_private_group_participant_${testCase.slug}`,
-                  conversationScope: 'direct',
+                  conversationScope: 'direct' as const,
                   inboundMailboxItemIds: [
                     `mailbox_private_group_participant_${testCase.slug}`,
                   ],
@@ -7838,14 +7836,91 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                     `recipient_private_group_participant_${testCase.slug}`,
                 }),
                 groupTool: {
-                  request: async (request) => {
+                  request: async (
+                    request: GroupRequest,
+                  ): ReturnType<
+                    NonNullable<AssistantHostedToolContext['groupTool']>['request']
+                  > => {
                     groupRequests.push(request)
                     if (request.action === 'list_memberships') {
+                      if (request.cursor === undefined) {
+                        return {
+                          action: 'list_memberships',
+                          result: {
+                            disclosureGrants: [],
+                            memberships: [
+                              {
+                                displayName: 'Training Friends',
+                                grantedVaultShareProjectionScopes: [],
+                                kind: 'friends',
+                                memberCount: 2,
+                                membershipId: 'membership_taylor_phone',
+                                participantRoster: {
+                                  participantCount: 3,
+                                  participantLabels: [
+                                    { displayName: 'Taylor' },
+                                    { phoneHint: { areaCode: '212', lastFour: '1042' } },
+                                  ],
+                                  status: 'available',
+                                },
+                                permissionsUrl: null,
+                                requestedVaultShareProjectionScopes: [],
+                                role: 'member',
+                                sponsorshipUrl: null,
+                              },
+                            ],
+                            nextCursor: 'membership_cursor_page_2',
+                            status: 'ok',
+                            truncated: true,
+                          },
+                        }
+                      }
+                      if (request.cursor !== 'membership_cursor_page_2') {
+                        throw new Error('Expected the exact second membership cursor.')
+                      }
                       return {
                         action: 'list_memberships',
                         result: {
                           disclosureGrants: [],
-                          memberships: [],
+                          memberships: [
+                            {
+                              displayName: 'Training Friends',
+                              grantedVaultShareProjectionScopes: [],
+                              kind: 'friends',
+                              memberCount: 3,
+                              membershipId: 'membership_taylor_casey',
+                              participantRoster: {
+                                participantCount: 4,
+                                participantLabels: [
+                                  { displayName: 'Taylor' },
+                                  { displayName: 'Casey' },
+                                  { phoneHint: { areaCode: '646', lastFour: '7788' } },
+                                ],
+                                status: 'available',
+                              },
+                              permissionsUrl: null,
+                              requestedVaultShareProjectionScopes: [],
+                              role: 'member',
+                              sponsorshipUrl: null,
+                            },
+                            {
+                              displayName: null,
+                              grantedVaultShareProjectionScopes: [],
+                              kind: 'friends',
+                              memberCount: 1,
+                              membershipId: 'membership_taylor_pair',
+                              participantRoster: {
+                                participantCount: 2,
+                                participantLabels: [{ displayName: 'Taylor' }],
+                                status: 'available',
+                              },
+                              permissionsUrl: null,
+                              requestedVaultShareProjectionScopes: [],
+                              role: 'member',
+                              sponsorshipUrl: null,
+                            },
+                          ],
+                          nextCursor: null,
                           status: 'ok',
                           truncated: false,
                         },
@@ -7855,7 +7930,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                       action: 'handoff',
                       result: {
                         status: 'accepted',
-                        targetLabel: '2 people: Jordan, Casey',
+                        targetLabel: 'Training Friends',
                       },
                     }
                   },
@@ -7867,15 +7942,59 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               },
               model: config.model,
               modelProvider: config.modelProvider,
-              prompt: testCase.prompt,
               reasoningEffort: 'low',
               sandbox: 'workspace-write',
               workingDirectory,
+            } as const
+            const clarification = await executeRealCodexAppServerTurn({
+              ...commonInput,
+              prompt: testCase.prompt,
+            })
+            expect(clarification.finalMessage, testCase.slug).toMatch(
+              /(?:which|two-person|three-person|four-person|casey|phone)/iu,
+            )
+            expect(clarification.finalMessage, testCase.slug).not.toMatch(
+              /\bthe other\b/iu,
+            )
+            expect(clarification.finalMessage, testCase.slug).not.toContain(
+              'membership_',
+            )
+            for (const participantCount of ['(?:3|three)', '(?:4|four)']) {
+              expect(clarification.finalMessage, testCase.slug).toMatch(
+                new RegExp(
+                  `\\b${participantCount}(?:[- ](?:person|people|member|participant)s?|\\s+in the chat)`,
+                  'iu',
+                ),
+              )
+            }
+            expect(clarification.finalMessage, testCase.slug).toMatch(
+              /(?:\b(?:2|two)(?:[- ](?:person|people|member)|\s+in the chat)|(?:just|only)\s+taylor)/iu,
+            )
+            expect(clarification.finalMessage, testCase.slug).not.toMatch(
+              /\b1[- ]member\b/iu,
+            )
+            expect(groupRequests.slice(0, 2), testCase.slug).toEqual([
+              { action: 'list_memberships' },
+              {
+                action: 'list_memberships',
+                cursor: 'membership_cursor_page_2',
+              },
+            ])
+            expect(
+              groupRequests.filter(({ action }) => action === 'handoff'),
+              testCase.slug,
+            ).toHaveLength(0)
+
+            const result = await executeRealCodexAppServerTurn({
+              ...commonInput,
+              prompt: testCase.selection,
+              resumeSessionId: clarification.sessionId,
             })
 
             process.stdout.write(
               `[group-handoff-participants-e2e] ${JSON.stringify({
-                reply: result.finalMessage.trim(),
+                clarificationReply: clarification.finalMessage.trim(),
+                finalReply: result.finalMessage.trim(),
                 requests: groupRequests,
                 slug: testCase.slug,
               })}\n`,
@@ -7884,7 +8003,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             expect(
               groupRequests.filter(({ action }) => action === 'list_memberships'),
               testCase.slug,
-            ).toHaveLength(0)
+            ).toHaveLength(2)
             const handoffRequests = groupRequests.filter(
               (request): request is Extract<
                 GroupRequest,
@@ -7894,32 +8013,15 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             expect(handoffRequests, testCase.slug).toHaveLength(1)
             expect(handoffRequests[0], testCase.slug).toMatchObject({
               action: 'handoff',
-              participantTarget: {
-                participants: testCase.expectedNames.map((displayName) => ({
-                  displayName,
-                })),
-              },
+              membershipId: testCase.expectedMembershipId,
             })
             expect(handoffRequests[0], testCase.slug)
               .not.toHaveProperty('groupLabel')
-            const participantTarget = handoffRequests[0]?.participantTarget as {
-              participantCount?: number
-              participants?: Array<{ displayName?: string }>
-            }
-            expect(
-              participantTarget.participants?.some(({ displayName }) =>
-                displayName?.toLocaleLowerCase('und') === 'me'
-                || displayName?.toLocaleLowerCase('und') === 'member echo'
-              ),
-              testCase.slug,
-            ).toBe(false)
-            if (testCase.expectedNames.length === 2) {
-              expect(
-                participantTarget.participantCount === undefined
-                || participantTarget.participantCount === 2,
-                testCase.slug,
-              ).toBe(true)
-            }
+            expect(handoffRequests[0], testCase.slug)
+              .not.toHaveProperty('participantTarget')
+            expect(result.finalMessage, testCase.slug).not.toContain(
+              'membership_',
+            )
             expect(result.finalMessage, testCase.slug).toMatch(/queu/iu)
           } finally {
             await removeRealCodexTemporaryPath(workingDirectory)

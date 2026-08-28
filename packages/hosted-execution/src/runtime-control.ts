@@ -1021,6 +1021,9 @@ export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER =
 export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER =
   "currentSenderProtocol";
 export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE = "v3";
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM =
+  "membershipInventoryProtocol";
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE = "v2";
 
 export function isHostedRuntimeAssistantAskDiagnosticCode(
   value: unknown,
@@ -1196,7 +1199,22 @@ export interface HostedRuntimeUsageReferralSourceContext {
 export const HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX = 64;
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS = 512;
-export const HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX = 8;
+
+export type HostedRuntimeGroupParticipantLabel =
+  | { displayName: string }
+  | { emailParticipant: true }
+  | { phoneHint: HostedRuntimeGroupParticipantPhoneHint };
+
+export type HostedRuntimeGroupParticipantRoster =
+  | {
+      participantCount: number;
+      participantLabels: HostedRuntimeGroupParticipantLabel[];
+      status: "available";
+    }
+  | {
+      status: "unavailable";
+      unavailableReason: string;
+    };
 
 export interface HostedRuntimeGroupMembershipSummary {
   displayName: string | null;
@@ -1204,6 +1222,8 @@ export interface HostedRuntimeGroupMembershipSummary {
   kind: string;
   memberCount: number;
   membershipId: string;
+  /** Omitted only by Web deployments from before membership roster discovery. */
+  participantRoster?: HostedRuntimeGroupParticipantRoster;
   permissionsUrl: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
@@ -1464,18 +1484,7 @@ export interface HostedRuntimeGroupParticipantDisplayName {
 
 export interface HostedRuntimeGroupParticipantPhoneHint {
   areaCode?: string;
-  lastFour?: string;
-}
-
-export interface HostedRuntimeGroupParticipantTargetCue {
-  displayName?: string;
-  emailParticipant?: true;
-  phoneHint?: HostedRuntimeGroupParticipantPhoneHint;
-}
-
-export interface HostedRuntimeGroupParticipantTarget {
-  participantCount?: number;
-  participants?: readonly HostedRuntimeGroupParticipantTargetCue[];
+  lastFour: string;
 }
 
 export type HostedRuntimeGroupParticipantDisplayNamesResult =
@@ -1498,18 +1507,16 @@ export type HostedRuntimeGroupParticipantDisplayNamesResult =
 export type HostedRuntimeGroupToolRequest =
   | {
       action: "ask";
-      groupLabel?: string | null;
+      membershipId: string;
       originAssistantInputId: string;
       originSessionId: string;
-      participantTarget?: HostedRuntimeGroupParticipantTarget | null;
       question: string;
     }
   | {
       action: "handoff";
       context: string;
-      groupLabel?: string | null;
+      membershipId: string;
       originAssistantInputId: string;
-      participantTarget?: HostedRuntimeGroupParticipantTarget | null;
     }
   | {
       action: "ask_current_sender";

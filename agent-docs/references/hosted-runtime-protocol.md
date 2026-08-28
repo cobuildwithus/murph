@@ -896,12 +896,19 @@ route authority, reloads the exact source, and prevents a replay from changing
 the already-fixed result destination.
 
 `murph.group_consult(action="ask")` is admitted only from a fresh authenticated private
-input. The runtime calls `assistantAskPort.request`; the signed
+input. The runtime first calls the paged `list_memberships` action with the
+inventory-v2 query capability. Each returned membership carries its opaque row
+id, safe existing title, Murph member count, and an independently available
+live participant roster summary. The model may clarify naturally using safe
+titles, real human participant counts, requester-authorized Contacts names,
+masked phone hints, and generic email markers, but it passes only the exact
+opaque `membershipId` returned in that conversation. It never exposes, invents,
+edits, derives, or accepts that id from the member. The signed
 `POST /api/internal/hosted-execution/assistant-asks/runtime` Web control owner
-resolves the current `HostedGroupMember` row and synthetic group runtime from
-the caller plus an optional exact visible label. Models never supply member,
-membership, runtime, mailbox, callback, session, or return-route ids. Web
-derives one stable request identity, pins the origin, destination, membership
+locks and revalidates the current `HostedGroupMember` row, signed requester,
+synthetic group runtime, and route. Models never supply member, runtime,
+mailbox, callback, session, or return-route ids. Web derives one stable request
+identity, pins the origin, destination, membership
 generation, and ten-minute expiry, appends one encrypted
 `assistant.ask.requested` item, then signals the existing group runtime. Exact
 retry reuses that item and cannot resolve a different target. Once Temporal
@@ -1072,6 +1079,17 @@ In a private runtime, the existing `list_memberships` response also exposes
 that member's active grants as a top-level additive `disclosureGrants` array;
 older Web responses without the field normalize to an empty array. Revocation
 may select only an exact id from that private read.
+
+Inventory-v2 membership responses additionally expose a `participantRoster`
+result on each entry. Available rosters report the real human chat count,
+including the requester, and safe labels for the other people. Missing routes,
+unsupported providers, incomplete rosters, and provider failures are scoped to
+one unavailable entry; optional Contacts failure falls back to masked hints.
+The query capability is an expand/contract boundary: new runners send
+`membershipInventoryProtocol=v2` and accept old Web omissions as
+`participant_roster_not_reported`; new Web omits the field for callers without
+that exact query value so old strict response parsers keep working. Deploy and
+recycle Cloudflare/runner before Web, and roll back Web before the runner.
 
 For `murph.group_consult(action="ask_member")`, trusted runtime code injects one origin:
 either the current accepted non-direct group input and signed route or one

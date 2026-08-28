@@ -2150,6 +2150,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
           executionContext.hosted?.groupTool?.request({
             action: "handoff",
             context: "Email cannot hand off private context.",
+            membershipId: "hgm_private_member",
             originAssistantInputId: emailInputId,
           }),
         turnEnvironment: null,
