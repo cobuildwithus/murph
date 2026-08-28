@@ -5894,6 +5894,18 @@ async function runSystemMailboxMaintenancePhase(input: {
       resolveHostedAssistantPhaseNowMs(phaseInput),
     )
   ) {
+    if (phaseInput.shouldYieldBackgroundMaintenance?.() === true) {
+      return {
+        backgroundMaintenanceYielded: true,
+        continueAssistantLane: false,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
+        result: buildPreAutomationLaneSkippedAssistantWakeResult({
+          wakeAt: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)).toISOString(),
+        }),
+      };
+    }
     return {
       backgroundMaintenanceYielded: false,
       continueAssistantLane: false,
@@ -5974,6 +5986,20 @@ async function runSystemMailboxMaintenancePhase(input: {
       resolveHostedAssistantPhaseNowMs(phaseInput),
     )
   ) {
+    if (phaseInput.shouldYieldBackgroundMaintenance?.() === true) {
+      return {
+        backgroundMaintenanceYielded: true,
+        continueAssistantLane: false,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
+        result: mergeMemberPreferencesPrePlanningResult(
+          buildPreAutomationLaneSkippedAssistantWakeResult({
+            wakeAt: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)).toISOString(),
+          }),
+        ),
+      };
+    }
     return {
       backgroundMaintenanceYielded: false,
       continueAssistantLane: false,

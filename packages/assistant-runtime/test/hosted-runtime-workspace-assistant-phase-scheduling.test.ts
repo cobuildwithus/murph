@@ -1557,6 +1557,41 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("rechecks foreground ownership before handing a due model-free row to the system owner", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    let foregroundConversationWorkObserved = false;
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) => {
+        if (
+          (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+        ) {
+          return { at: null, executionClass: null, reason: null };
+        }
+        foregroundConversationWorkObserved = true;
+        return {
+          at: dueAt,
+          executionClass: "model_free",
+          reason: "mailbox",
+        };
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      shouldYieldBackgroundMaintenance: () => foregroundConversationWorkObserved,
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      progressed: false,
+    }));
+    expect(result.nextWakeReason).toBeUndefined();
+  });
+
   it("delivers a ready outbox before handing a due model-free row to the system owner", async () => {
     const dueAt = "2026-04-27T00:00:00.000Z";
     const deliveryEffect = createDeliveryEffect();
