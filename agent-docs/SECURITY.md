@@ -1370,60 +1370,23 @@ locally readable.
   browser transport.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
-- The dormant native iOS and Android PR-lifecycle modules may share a Junction
-  sandbox only through an explicit non-empty
-  `JUNCTION_CLIENT_USER_ID_NAMESPACE` whose default is
-  absent everywhere else. The dedicated Vercel custom environment is the sole
-  namespace value owner: the controller reads that exact non-sensitive variable by its
-  configured Vercel environment-variable id and validates its custom-environment
-  scope before any cleanup, deployment retirement, deployment, or native
-  dispatch. Cleanup must completely enumerate and validate the configured team,
-  ignore every unrelated namespace, delete at most one exact namespace-owned
-  user, and prove that namespace empty before resetting the isolated database.
-  Deployment retirement must first enumerate aliases through each already
-  validated lane-owned deployment, reject malformed alias responses, and delete
-  those exact alias ids before deleting the deployment so the reusable custom
-  environment cannot retain an alias to deleted state.
-  This namespace limits trusted cleanup; it does not scope the Junction Team API
-  key, which retains full team data access. A second key on the same team is not
-  a least-privilege boundary, so the shared sandbox must contain only disposable
-  test identities and never staging, production, or real-person data.
-  Hosted crypto for that candidate must use the dedicated Vercel project's
-  exact named custom-environment OIDC subject (`environment:native-ios-e2e`), as
-  reported by Vercel project/deployment metadata. The non-production Workload
-  Identity provider must explicitly admit that subject, the preview crypto
-  service account must grant impersonation only to that exact principal, and
-  the service account must have only key-level access to the preview KMS
-  keyring. Do not substitute the generic `environment:preview` subject for a
-  custom-environment deployment.
-  The production provider is not changed by E2E activation. The E2E principal
-  must have no impersonation binding on the production crypto service account
-  and no IAM role on production KMS keys; the production service account must
-  continue to admit only the exact production subject. Provider admission alone
-  grants no crypto authority, so prove the effective boundary across the Vercel
-  subject, provider mapping and condition, service-account policies,
-  hosted-crypto variables, and key-level IAM before the first credentialed
-  sweep.
-  No current public workflow admits that destructive PR mode or references its
-  environment. Reintroduction requires a separate trust and cost review.
-  If restored, Android must reuse this exact namespace, isolated database,
-  Privy principal, and Vercel custom environment through the existing trusted
-  cleanup owner, and the two destructive native jobs must share one
-  non-canceling live lock.
-  Android dispatch accepts only a separately configured reviewed commit behind
-  an immutable lightweight private-repository tag, an exact hosted Web SHA and
-  origin, and a short-lived lease. The public controller may hold only Actions
-  write and Contents read in that private repository. Its existing protected
-  process mints repository-scoped installation tokens just in time, refreshes
-  them before expiry, and removes the App private key from the environment
-  before child commands; it never receives the fixed OTP, reads private job
-  logs or artifacts, or executes candidate code with credentials. The private workflow keeps raw instrumentation/provider
-  output in runner-temporary storage, publishes only one closed allowlisted
-  stage summary, and removes all raw output before completion. Its production
-  canary owns no database, Privy, or Junction reset authority. The current iOS
-  and Android controllers run staggered six-hour production canaries, admit no
-  PR, deployment-status, or manual event, and receive only their platform
-  source plus current-production alias proof credentials.
+- Native iOS and Android public controllers are protected-main production
+  canaries only. They run on staggered six-hour schedules, admit no PR,
+  deployment-status, or manual event, and own no database, Privy, Junction,
+  custom-environment deployment, or identity-reset authority. Reviewed private
+  source refs and SHAs live in `.github/native-hosted-e2e-controller.json` so a
+  source rotation must pass ordinary protected-main review. Each controller
+  proves the policy tag is an immutable lightweight tag resolving to the exact
+  policy SHA and dispatches the exact current production alias SHA. An alias
+  behind scheduled `main` is accepted only when the existing Vercel classifier
+  proves every intervening path is an eligible dated release note.
+  Android's public controller may hold only Actions write and Contents read in
+  the private repository. It mints repository-scoped installation tokens just
+  in time, refreshes them before expiry, and removes the App private key from
+  the environment before child commands. The private workflow keeps raw
+  instrumentation/provider output in runner-temporary storage, publishes only
+  one closed allowlisted stage summary, and removes all raw output before
+  completion. Public orchestration never reads private job logs or artifacts.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
 - Cloudflare runner Containers must explicitly render Wrangler SSH disabled for
   every class and must contain no authorized keys. Deploy automation must not

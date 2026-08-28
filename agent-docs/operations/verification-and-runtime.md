@@ -167,11 +167,13 @@ supplement that proof, but it cannot establish runtime cleanup behavior.
 Native iOS and Android hosted E2E are production canaries, not pull-request
 statuses. The trusted default-branch controllers run on staggered six-hour
 schedules: iOS at minute 17 and Android at minute 47. Each cheap selection job
-reads the latest successful scheduled run for its own workflow and skips the
-native job when that run already covered the current protected-`main` SHA.
-Missing history or a newer SHA admits the canary. A failed canary has no
-successful checkpoint and therefore retries at the next slot; an explicit rerun
-of the same trusted schedule attempt bypasses the no-change skip.
+reads the latest completed scheduled outcome for its own workflow and skips the
+native job only when that outcome succeeded at the current protected-`main`
+SHA. Missing history, a newer SHA, or a latest failure admits the canary. An
+explicit rerun of the same trusted schedule attempt bypasses the no-change
+skip. Reviewed native source pins live in
+`.github/native-hosted-e2e-controller.json`, so a source rotation advances the
+protected-main checkpoint.
 
 Neither controller admits `workflow_run`, `deployment_status`, or
 branch-selectable `workflow_dispatch` events, and neither publishes a commit
@@ -179,15 +181,18 @@ status. Fixed non-canceling workflow concurrency bounds each platform to one
 running and one pending controller. The workflows do not receive the destructive
 PR database, Privy, Junction-namespace, or candidate-deployment authority.
 
-A scheduled native pass is production-shaped evidence only for the exact
-protected-`main` revision it records. Trusted orchestration first proves that
-revision remains in `main` history and that the current production alias still
-resolves to it, then dispatches the reviewed immutable iOS or Android source in
-`production_canary` mode. The private journey uses
+A scheduled native pass is production-shaped evidence for the current
+protected-`main` checkpoint and the exact deployed Web SHA it dispatches.
+Trusted orchestration proves the scheduled revision remains in `main` history,
+then resolves the current production alias. When the alias trails `main`, the
+existing Vercel build classifier must prove the complete intervening diff is
+eligible dated release notes; otherwise the controller fails before paid
+dispatch and retries. It dispatches that deployed SHA with the reviewed
+immutable iOS or Android source in `production_canary` mode. The private journey uses
 `non_destructive_existing_identity`; local mocked or hosted-local tests do not
 replace it. The iOS and Android production environments remain separate and
-contain only their platform source credentials plus production-alias proof
-authority.
+contain only their repository dispatch credentials plus production-alias proof
+authority. Source refs and SHAs are committed policy, not environment values.
 
 Controller child commands are time-bounded. Android additionally binds the
 private commit to an immutable lightweight tag and a short dispatch lease,

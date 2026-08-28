@@ -5,9 +5,9 @@ on:
     - cron: "47 */6 * * *"
 
 # This trusted default-branch controller spends native-runner capacity only
-# after protected main advances beyond the latest successful scheduled proof.
+# when the latest completed schedule is not a success for current protected main.
 # A failed canary remains eligible at the next slot; an explicit workflow rerun
-# also retries the same revision immediately.
+# also retries the same revision immediately. Source pins live in protected main.
 permissions:
   actions: read
   contents: read
@@ -25,7 +25,7 @@ jobs:
       should_run: ${{ steps.select.outputs.should_run }}
       web_sha: ${{ steps.select.outputs.web_sha }}
     steps:
-      - name: Compare main with the latest successful scheduled proof
+      - name: Compare main with the latest completed scheduled outcome
         id: select
         env:
           CURRENT_SHA: ${{ github.sha }}
@@ -36,15 +36,23 @@ jobs:
           set -euo pipefail
           [[ "${CURRENT_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Schedule must identify an exact protected-main SHA."; exit 1; }
           previous_sha=""
+          previous_conclusion=""
           if [[ "${RUN_ATTEMPT}" == 1 ]]; then
-            previous_sha="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/native-android-hosted-e2e.yml/runs?event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""')"
-            if [[ -n "${previous_sha}" && ! "${previous_sha}" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::Latest successful native Android schedule did not expose an exact SHA."
+            previous_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/native-android-hosted-e2e.yml/runs?event=schedule&status=completed&per_page=1" --jq '.workflow_runs[0] // {}')"
+            previous_sha="$(jq -r '.head_sha // ""' <<< "${previous_run}")"
+            previous_status="$(jq -r '.status // ""' <<< "${previous_run}")"
+            previous_conclusion="$(jq -r '.conclusion // ""' <<< "${previous_run}")"
+            if [[ -n "${previous_sha}" ]]; then
+              [[ "${previous_sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Latest completed native Android schedule did not expose an exact SHA."; exit 1; }
+              [[ "${previous_status}" == completed ]] || { echo "::error::Latest native Android schedule was not completed."; exit 1; }
+              [[ "${previous_conclusion}" =~ ^(action_required|cancelled|failure|neutral|skipped|stale|startup_failure|success|timed_out)$ ]] || { echo "::error::Latest native Android schedule had an invalid conclusion."; exit 1; }
+            elif [[ "${previous_run}" != "{}" ]]; then
+              echo "::error::Latest native Android schedule was malformed."
               exit 1
             fi
           fi
           should_run=true
-          if [[ "${RUN_ATTEMPT}" == 1 && "${previous_sha}" == "${CURRENT_SHA}" ]]; then
+          if [[ "${RUN_ATTEMPT}" == 1 && "${previous_sha}" == "${CURRENT_SHA}" && "${previous_conclusion}" == success ]]; then
             should_run=false
           fi
           {
@@ -99,8 +107,6 @@ jobs:
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
           HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
-          NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA }}
-          NATIVE_ANDROID_E2E_ANDROID_REF: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REF }}
           NATIVE_ANDROID_E2E_ANDROID_REPOSITORY: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER }}/${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_NAME }}
           NATIVE_ANDROID_E2E_ANDROID_WORKFLOW: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_WORKFLOW }}
           NATIVE_ANDROID_E2E_GITHUB_APP_ID: ${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}
@@ -110,6 +116,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/native-android-hosted-e2e.mjs canary \
+            --policy .github/native-hosted-e2e-controller.json \
             --web-sha "${DEPLOYED_SHA}" \
             --web-base-url "${PRODUCTION_BASE_URL}" \
             --correlation-id "murph-production-${DEPLOYED_SHA}-${{ github.run_id }}-${{ github.run_attempt }}"

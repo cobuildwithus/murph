@@ -1,129 +1,83 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION,
-  NATIVE_IOS_HOSTED_E2E_LANE_MARKER,
-  runPrLifecycle,
-} from "./native-ios-hosted-e2e.mjs";
-import {
-  buildDedicatedDatabasePoolOptions,
-  buildJunctionClientUserId,
-  cleanupE2e,
-  inspectDedicatedMemberIdentity,
-  inspectE2eDatabaseUrls,
-  inspectFreshPrivyPrincipal,
-  inspectJunctionAppleHealthConnection,
-  inspectNamespacedJunctionUsers,
-  inspectResolvedJunctionUser,
-  withDedicatedDatabaseOwner,
-} from "./native-ios-hosted-e2e-identity.mjs";
-import {
   buildDispatchInputs,
   dispatchAndWait,
-  inspectCurrentProductionSha,
-  inspectExactPrHead,
   inspectPrivateDispatchTag,
   inspectPrivateRun,
-  revalidateExactPrHead,
 } from "./native-ios-hosted-e2e-native.mjs";
 import {
+  NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION,
   inspectBoundedCommandResult,
+  inspectNativeE2EControllerPolicy,
+  readNativeE2EControllerPolicy,
   runBoundedCommand,
+  selectProductionCanaryWebSha,
 } from "./native-ios-hosted-e2e-support.mjs";
-import {
-  createE2eDeployment,
-  inspectPublicCandidateResponse,
-  inspectRetirableE2eDeployment,
-  inspectRetirableE2eDeploymentAliases,
-  inspectVercelCustomEnvironment,
-  inspectVercelDeployment,
-  inspectVercelJunctionNamespaceVariable,
-  retireE2eDeployments,
-} from "./native-ios-hosted-e2e-vercel.mjs";
 
 const SHA = "a".repeat(40);
-const TEST_PHONE = ["+1", "202", "555", "0100"].join("");
+const IOS_SHA = "b".repeat(40);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const WEB_ROOT = path.join(REPO_ROOT, "apps", "web");
-const VERCEL_BUILD_SCRIPT = path.join(WEB_ROOT, "scripts", "vercel-build.sh");
+const CONTROLLER_POLICY = path.join(REPO_ROOT, ".github", "native-hosted-e2e-controller.json");
 const COMMAND_TREE_FIXTURE = path.join(
   REPO_ROOT,
   "scripts",
   "fixtures",
   "native-ios-hosted-e2e-command-tree.mjs",
 );
-test("cross-repo contract is minimal, versioned, and names lifecycle ownership truthfully", () => {
+
+test("production iOS contract is minimal and non-destructive", () => {
   assert.equal(NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION, "3");
   assert.deepEqual(buildDispatchInputs({
-    correlationId: "murph-pr-123",
-    mode: "pr",
-    webBaseUrl: "https://native-e2e.example.test",
+    correlationId: "murph-production-canary",
+    webBaseUrl: "https://www.withmurph.ai",
     webSha: SHA,
   }), {
     contract_version: "3",
-    correlation_id: "murph-pr-123",
-    identity_lifecycle: "orchestrator_owned_reset",
-    mode: "pr",
-    web_base_url: "https://native-e2e.example.test",
+    correlation_id: "murph-production-canary",
+    identity_lifecycle: "non_destructive_existing_identity",
+    mode: "production_canary",
+    web_base_url: "https://www.withmurph.ai",
     web_sha: SHA,
   });
-  assert.equal(buildDispatchInputs({
+  assert.throws(() => buildDispatchInputs({
     correlationId: "murph-production-canary",
-    mode: "production_canary",
-    webBaseUrl: "https://murph.ai",
+    webBaseUrl: "https://candidate.example.test",
     webSha: SHA,
-  }).identity_lifecycle, "non_destructive_existing_identity");
+  }), /production origin/u);
 });
 
-test("Web PR revalidation binds the exact PR number and head SHA", () => {
-  assert.equal(inspectExactPrHead({
-    head: { sha: SHA },
-    number: 123,
-  }, { expectedSha: SHA, prNumber: 123 }), true);
-  assert.throws(() => inspectExactPrHead({
-    head: { sha: "b".repeat(40) },
-    number: 123,
-  }, { expectedSha: SHA, prNumber: 123 }), /changed before private iOS dispatch/u);
-  assert.throws(() => inspectExactPrHead({
-    head: { sha: SHA },
-    number: 124,
-  }, { expectedSha: SHA, prNumber: 123 }), /unexpected pull request/u);
+test("protected-main policy owns both immutable native sources", async () => {
+  const policy = await readNativeE2EControllerPolicy(CONTROLLER_POLICY);
+  assert.match(policy.ios.privateRef, /^native-ios-e2e-/u);
+  assert.match(policy.android.privateRef, /^native-android-e2e-/u);
+  assert.match(policy.ios.privateSha, /^[0-9a-f]{40}$/u);
+  assert.match(policy.android.privateSha, /^[0-9a-f]{40}$/u);
+
+  assert.throws(() => inspectNativeE2EControllerPolicy({
+    contractVersion: 2,
+    ios: policy.ios,
+    android: policy.android,
+  }), /version/u);
+  assert.throws(() => inspectNativeE2EControllerPolicy({
+    contractVersion: 1,
+    ios: { privateRef: "refs/heads/main", privateSha: policy.ios.privateSha },
+    android: policy.android,
+  }), /lightweight tag/u);
+  assert.throws(() => inspectNativeE2EControllerPolicy({
+    contractVersion: 1,
+    ios: { privateRef: policy.ios.privateRef, privateSha: "not-a-sha" },
+    android: policy.android,
+  }), /40-character SHA/u);
 });
 
-test("Web PR revalidation uses only the explicit repository token and exact pull request", async () => {
-  const originalFetch = globalThis.fetch;
-  const originalLog = console.log;
-  const calls = [];
-  try {
-    globalThis.fetch = async (url, init) => {
-      calls.push({ headers: init.headers, url: String(url) });
-      return new Response(JSON.stringify({ head: { sha: SHA }, number: 123 }), {
-        headers: { "content-type": "application/json" },
-      });
-    };
-    console.log = () => undefined;
-    await revalidateExactPrHead({
-      expectedSha: SHA,
-      prNumber: 123,
-      repository: "cobuildwithus/murph",
-      token: "web-controller-token",
-    });
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, "https://api.github.com/repos/cobuildwithus/murph/pulls/123");
-    assert.equal(calls[0].headers.authorization, "Bearer web-controller-token");
-  } finally {
-    console.log = originalLog;
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("trusted iOS controller is six-hour, main-change gated, and production-only", async () => {
+test("trusted iOS controller is six-hour, latest-outcome gated, and production-only", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
@@ -140,21 +94,21 @@ test("trusted iOS controller is six-hour, main-change gated, and production-only
   assert.doesNotMatch(workflowConcurrency, /queue:/u);
   assert.match(
     workflow,
-    /native-ios-hosted-e2e\.yml\/runs\?event=schedule&status=success&per_page=1/u,
+    /native-ios-hosted-e2e\.yml\/runs\?event=schedule&status=completed&per_page=1/u,
   );
+  assert.doesNotMatch(workflow, /status=success/u);
+  assert.match(workflow, /previous_conclusion.*success/su);
   assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
   assert.match(workflow, /CURRENT_SHA: \$\{\{ github\.sha \}\}/u);
   assert.match(workflow, /if: \$\{\{ needs\.select-main\.outputs\.should_run == 'true' \}\}/u);
-  assert.match(workflow, /DEPLOYED_SHA: \$\{\{ needs\.select-main\.outputs\.web_sha \}\}/u);
-  assert.match(workflow, /ref: \$\{\{ needs\.select-main\.outputs\.web_sha \}\}/u);
   assert.match(workflow, /environment: native-ios-production-canary/u);
   assert.match(workflow, /node scripts\/native-ios-hosted-e2e\.mjs canary/u);
-  assert.match(workflow, /NATIVE_IOS_E2E_IOS_EXPECTED_SHA/u);
-  assert.match(workflow, /NATIVE_IOS_E2E_IOS_REF/u);
+  assert.match(workflow, /--policy \.github\/native-hosted-e2e-controller\.json/u);
   assert.match(workflow, /NATIVE_IOS_E2E_IOS_WORKFLOW/u);
+  assert.doesNotMatch(workflow, /NATIVE_IOS_E2E_IOS_(?:EXPECTED_SHA|REF)/u);
   assert.doesNotMatch(
     workflow,
-    /workflow_run:|deployment_status:|workflow_dispatch:|pull_request:|push:|pull-requests:|statuses: write|pr-live:|pr-required:|native-ios-hosted-e2e-live|node scripts\/native-ios-hosted-e2e\.mjs pr/u,
+    /workflow_run:|deployment_status:|workflow_dispatch:|pull_request:|push:|pull-requests:|statuses: write|node scripts\/native-ios-hosted-e2e\.mjs pr/u,
   );
   assert.doesNotMatch(
     workflow,
@@ -171,26 +125,37 @@ test("trusted iOS controller is six-hour, main-change gated, and production-only
   }
 });
 
-test("iOS schedule admission skips only a current successful scheduled proof", async () => {
+test("iOS schedule skips only a same-SHA successful latest outcome", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
   );
   const script = extractWorkflowStepScript(
     workflow,
-    "Compare main with the latest successful scheduled proof",
+    "Compare main with the latest completed scheduled outcome",
   );
   const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-cadence-proof-"));
   try {
     await writeFile(path.join(tempDir, "gh"), `#!/usr/bin/env bash
 set -euo pipefail
-printf '%s\\n' "\${PREVIOUS_SHA:-}"
+[[ "$#" == 4 ]] || exit 64
+[[ "$1" == api ]] || exit 64
+[[ "$2" == "repos/\${GITHUB_REPOSITORY}/actions/workflows/native-ios-hosted-e2e.yml/runs?event=schedule&status=completed&per_page=1" ]] || exit 64
+[[ "$3" == --jq ]] || exit 64
+[[ "$4" == '.workflow_runs[0] // {}' ]] || exit 64
+[[ "\${FAIL_HISTORY_LOOKUP:-0}" != 1 ]] || exit 42
+if [[ -z "\${PREVIOUS_SHA:-}" ]]; then
+  printf '{}\n'
+else
+  printf '{"head_sha":"%s","status":"%s","conclusion":"%s"}\n' "\${PREVIOUS_SHA}" "\${PREVIOUS_STATUS:-completed}" "\${PREVIOUS_CONCLUSION:-success}"
+fi
 `, { mode: 0o755 });
     const scenarios = [
-      { attempt: "1", expected: "true", previousSha: "" },
-      { attempt: "1", expected: "false", previousSha: SHA },
-      { attempt: "1", expected: "true", previousSha: "b".repeat(40) },
-      { attempt: "2", expected: "true", previousSha: SHA },
+      { attempt: "1", conclusion: "", expected: "true", previousSha: "" },
+      { attempt: "1", conclusion: "success", expected: "false", previousSha: SHA },
+      { attempt: "1", conclusion: "failure", expected: "true", previousSha: SHA },
+      { attempt: "1", conclusion: "success", expected: "true", previousSha: "c".repeat(40) },
+      { attempt: "2", conclusion: "success", expected: "true", previousSha: SHA },
     ];
     for (const [index, scenario] of scenarios.entries()) {
       const outputPath = path.join(tempDir, `output-${index}`);
@@ -200,9 +165,11 @@ printf '%s\\n' "\${PREVIOUS_SHA:-}"
         env: {
           ...process.env,
           CURRENT_SHA: SHA,
+          FAIL_HISTORY_LOOKUP: scenario.attempt === "2" ? "1" : "0",
           GITHUB_OUTPUT: outputPath,
-          GITHUB_REPOSITORY: "cobuildwithus/murph",
+          GITHUB_REPOSITORY: "example/murph",
           PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+          PREVIOUS_CONCLUSION: scenario.conclusion,
           PREVIOUS_SHA: scenario.previousSha,
           RUN_ATTEMPT: scenario.attempt,
         },
@@ -217,425 +184,101 @@ printf '%s\\n' "\${PREVIOUS_SHA:-}"
       assert.deepEqual(output, { should_run: scenario.expected, web_sha: SHA });
     }
 
-    const invalidResult = spawnSync("bash", ["-c", script], {
+    for (const [invalidIndex, invalid] of [
+      { PREVIOUS_SHA: "not-a-sha" },
+      { PREVIOUS_CONCLUSION: "unknown", PREVIOUS_SHA: SHA },
+      { PREVIOUS_SHA: SHA, PREVIOUS_STATUS: "in_progress" },
+    ].entries()) {
+      const result = spawnSync("bash", ["-c", script], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          CURRENT_SHA: SHA,
+          GITHUB_OUTPUT: path.join(tempDir, `invalid-${invalidIndex}`),
+          GITHUB_REPOSITORY: "example/murph",
+          PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+          PREVIOUS_CONCLUSION: "success",
+          PREVIOUS_STATUS: "completed",
+          RUN_ATTEMPT: "1",
+          ...invalid,
+        },
+      });
+      assert.equal(result.status, 1);
+    }
+
+    const historyFailure = spawnSync("bash", ["-c", script], {
       cwd: REPO_ROOT,
       encoding: "utf8",
       env: {
         ...process.env,
         CURRENT_SHA: SHA,
-        GITHUB_OUTPUT: path.join(tempDir, "invalid-output"),
-        GITHUB_REPOSITORY: "cobuildwithus/murph",
+        FAIL_HISTORY_LOOKUP: "1",
+        GITHUB_OUTPUT: path.join(tempDir, "history-failure-output"),
+        GITHUB_REPOSITORY: "example/murph",
         PATH: `${tempDir}:${process.env.PATH ?? ""}`,
-        PREVIOUS_SHA: "not-a-sha",
         RUN_ATTEMPT: "1",
       },
     });
-    assert.equal(invalidResult.status, 1);
-    assert.match(invalidResult.stdout, /did not expose an exact SHA/u);
+    assert.equal(historyFailure.status, 42);
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }
 });
 
-test("Vercel custom environment proof binds the dedicated id and slug", () => {
-  assert.equal(inspectVercelCustomEnvironment({
-    id: "env_e2e",
-    slug: "native-ios-e2e",
-    type: "preview",
-  }, { customEnvironmentId: "env_e2e" }), true);
-  for (const mutation of [
-    { id: "env_other" },
-    { slug: "production" },
-    { type: "production" },
-  ]) {
-    assert.throws(() => inspectVercelCustomEnvironment({
-      id: "env_e2e",
-      slug: "native-ios-e2e",
-      type: "preview",
-      ...mutation,
-    }, { customEnvironmentId: "env_e2e" }), /dedicated E2E target/u);
-  }
-});
-
-test("Vercel owns the one Junction namespace read by cleanup and the candidate", async () => {
-  assert.equal(inspectVercelJunctionNamespaceVariable({
-    customEnvironmentIds: ["env_e2e"],
-    decrypted: true,
-    id: "env_var_e2e_namespace",
-    key: "JUNCTION_CLIENT_USER_ID_NAMESPACE",
-    target: [],
-    type: "encrypted",
-    value: "e2e",
-  }, {
-    customEnvironmentId: "env_e2e",
-    environmentVariableId: "env_var_e2e_namespace",
-  }), "e2e");
-  for (const mutation of [
-    { id: "env_var_other" },
-    { key: "JUNCTION_CLIENT_USER_ID_SECRET" },
-    { type: "sensitive" },
-    { decrypted: false },
-    { target: ["production"] },
-    { customEnvironmentIds: ["env_other"] },
-    { value: "" },
-    { value: "dev" },
-  ]) {
-    assert.throws(() => inspectVercelJunctionNamespaceVariable({
-      customEnvironmentIds: ["env_e2e"],
-      decrypted: true,
-      id: "env_var_e2e_namespace",
-      key: "JUNCTION_CLIENT_USER_ID_NAMESPACE",
-      target: [],
-      type: "encrypted",
-      value: "e2e",
-      ...mutation,
-    }, {
-      customEnvironmentId: "env_e2e",
-      environmentVariableId: "env_var_e2e_namespace",
-    }), /Junction namespace variable/u);
-  }
-
-  const workflow = await readFile(
-    path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
-    "utf8",
-  );
-  assert.doesNotMatch(
-    workflow,
-    /NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID|NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
-    "the production-only schedule must not receive destructive PR namespace authority",
-  );
-
-  const controller = await readFile(
-    path.join(REPO_ROOT, "scripts", "native-ios-hosted-e2e.mjs"),
-    "utf8",
-  );
-  const runPrStart = controller.indexOf("async function runPr(args)");
-  const tokenRead = controller.indexOf('requiredEnv("NATIVE_IOS_E2E_WEB_GITHUB_TOKEN")', runPrStart);
-  const tokenDelete = controller.indexOf("delete process.env.NATIVE_IOS_E2E_WEB_GITHUB_TOKEN", runPrStart);
-  const namespaceRead = controller.indexOf("readE2eJunctionClientUserIdNamespace()", runPrStart);
-  const lifecycleStart = controller.indexOf("await runPrLifecycle", runPrStart);
-  assert.ok(
-    runPrStart >= 0
-      && tokenRead > runPrStart
-      && tokenDelete > tokenRead
-      && namespaceRead > tokenDelete
-      && lifecycleStart > namespaceRead,
-    "the Web status token must leave process env before child-capable cleanup and deployment work",
-  );
-});
-
-test("Vercel proof binds project, custom environment, ref, and exact PR SHA", () => {
-  const expected = {
-    customEnvironmentId: "env_e2e",
-    projectId: "prj_e2e",
-    ref: "feature/native-e2e",
-    sha: SHA,
-  };
-  assert.deepEqual(inspectVercelDeployment({
-    customEnvironment: { id: "env_e2e" },
-    gitSource: { ref: expected.ref, sha: SHA },
-    id: "dpl_123",
-    projectId: "prj_e2e",
-    readyState: "READY",
-    target: "preview",
-    url: "native-e2e.vercel.app",
-  }, expected), {
-    baseUrl: "https://native-e2e.vercel.app",
-    failed: false,
-    id: "dpl_123",
-    ready: true,
-  });
-  for (const mutation of [
-    { customEnvironment: { id: "env_other" } },
-    { gitSource: { ref: expected.ref, sha: "b".repeat(40) } },
-    { projectId: "prj_other" },
-    { target: "production" },
-  ]) {
-    assert.throws(() => inspectVercelDeployment({
-      customEnvironment: { id: "env_e2e" },
-      gitSource: { ref: expected.ref, sha: SHA },
-      id: "dpl_123",
-      projectId: "prj_e2e",
-      readyState: "READY",
-      target: "preview",
-      url: "native-e2e.vercel.app",
-      ...mutation,
-    }, expected));
-  }
-});
-
-test("Vercel deployment creation sends only current strict API fields", async () => {
-  const env = {
-    GITHUB_REPOSITORY_ID: "123456789",
-    NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID: "env_e2e",
-    NATIVE_IOS_E2E_VERCEL_PROJECT_ID: "prj_e2e",
-    NATIVE_IOS_E2E_VERCEL_PROJECT_NAME: "murph-native-ios-e2e",
-    NATIVE_IOS_E2E_VERCEL_TOKEN: "vercel_test_token",
-  };
-  const originalEnv = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
-  const originalFetch = globalThis.fetch;
-  const originalLog = console.log;
-  let requestBody;
-  try {
-    Object.assign(process.env, env);
-    globalThis.fetch = async (_url, init) => {
-      requestBody = JSON.parse(init.body);
-      return new Response(JSON.stringify({ id: "dpl_123" }), {
-        headers: { "content-type": "application/json" },
-      });
-    };
-    console.log = () => undefined;
-
-    assert.deepEqual(await createE2eDeployment({
-      correlationId: "murph-pr-test",
-      ref: "feature/native-e2e",
-      sha: SHA,
-    }), { id: "dpl_123" });
-    assert.deepEqual(requestBody, {
-      customEnvironmentSlugOrId: "env_e2e",
-      gitSource: {
-        ref: "feature/native-e2e",
-        repoId: 123456789,
-        sha: SHA,
-        type: "github",
-      },
-      meta: {
-        murphNativeIosE2e: NATIVE_IOS_HOSTED_E2E_LANE_MARKER,
-        murphNativeIosE2eContract: NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION,
-        murphNativeIosE2eCorrelationId: "murph-pr-test",
-      },
-      name: "murph-native-ios-e2e",
-      project: "prj_e2e",
-    });
-    assert.equal(Object.hasOwn(requestBody, "public"), false);
-  } finally {
-    console.log = originalLog;
-    globalThis.fetch = originalFetch;
-    for (const [name, value] of originalEnv) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
-});
-
-test("Vercel native E2E migration failure stops ordinary migration and build", async () => {
-  const config = JSON.parse(await readFile(path.join(WEB_ROOT, "vercel.json"), "utf8"));
-  assert.equal(config.buildCommand, "sh scripts/vercel-build.sh");
-  assert.ok(config.buildCommand.length <= 256);
-
-  const result = await runVercelBuild({
-    FAIL_PNPM_COMMAND: "prisma:migrate:deploy",
-    VERCEL_ENV: "preview",
-    VERCEL_TARGET_ENV: "native-ios-e2e",
-  });
-  assert.equal(result.status, 42, result.stderr);
-  assert.deepEqual(result.calls, [
-    "prisma:migrate:deploy|direct=1|generated=",
-  ]);
-});
-
-test("Vercel native E2E migration success preserves custom, ordinary, build order", async () => {
-  const result = await runVercelBuild({
-    VERCEL_ENV: "preview",
-    VERCEL_TARGET_ENV: "native-ios-e2e",
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.calls, [
-    "prisma:migrate:deploy|direct=1|generated=",
-    "release:production:migrate|direct=|generated=",
-    "build|direct=|generated=1",
-  ]);
-});
-
-test("Vercel native E2E target rejects production before any command", async () => {
-  const result = await runVercelBuild({
+test("release-note-only alias lag dispatches the actual production SHA", () => {
+  let classifiedEnv = null;
+  assert.equal(selectProductionCanaryWebSha(SHA, SHA, {
+    classifyBuild: () => {
+      throw new Error("same SHA must not classify a range");
+    },
+  }), SHA);
+  assert.equal(selectProductionCanaryWebSha(SHA, IOS_SHA, {
+    classifyBuild: ({ env }) => {
+      classifiedEnv = env;
+      return { reason: "eligible-markdown-docs", skipBuild: true };
+    },
+  }), SHA);
+  assert.deepEqual(classifiedEnv, {
     VERCEL_ENV: "production",
-    VERCEL_TARGET_ENV: "native-ios-e2e",
+    VERCEL_GIT_COMMIT_REF: "main",
+    VERCEL_GIT_COMMIT_SHA: IOS_SHA,
+    VERCEL_GIT_PREVIOUS_SHA: SHA,
   });
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /native-ios-e2e must not use Vercel production/u);
-  assert.deepEqual(result.calls, []);
+  assert.throws(() => selectProductionCanaryWebSha(SHA, IOS_SHA, {
+    classifyBuild: () => ({ reason: "ineligible-path", skipBuild: false }),
+  }), /runtime-relevant change/u);
 });
 
-test("public PR candidate must be anonymously reachable without redirects or protection", () => {
-  assert.equal(inspectPublicCandidateResponse({
-    baseUrl: "https://native-e2e.example.test",
-    location: null,
-    responseUrl: "https://native-e2e.example.test/",
-    status: 200,
-  }), true);
-  assert.throws(() => inspectPublicCandidateResponse({
-    baseUrl: "https://native-e2e.example.test",
-    location: null,
-    responseUrl: "https://native-e2e.example.test/",
-    status: 401,
-  }), /cannot be reached anonymously/u);
-  assert.throws(() => inspectPublicCandidateResponse({
-    baseUrl: "https://native-e2e.example.test",
-    location: "https://login.example.test/",
-    responseUrl: "https://native-e2e.example.test/",
-    status: 302,
-  }), /cross-origin redirect/u);
-  assert.throws(() => inspectPublicCandidateResponse({
-    baseUrl: "https://native-e2e.example.test",
-    location: null,
-    responseUrl: "https://other.example.test/",
-    status: 200,
-  }), /crossed origins/u);
-  assert.throws(() => inspectPublicCandidateResponse({
-    baseUrl: "https://native-e2e.example.test",
-    location: null,
-    responseUrl: "https://native-e2e.example.test/",
-    status: 500,
-  }), /HTTP 500/u);
+test("private workflow proof pins the immutable tag and returned run SHA", () => {
+  assert.equal(inspectPrivateDispatchTag({
+    object: { sha: IOS_SHA, type: "commit" },
+    ref: "refs/tags/native-ios-e2e-v3",
+  }, { expectedSha: IOS_SHA, ref: "native-ios-e2e-v3" }), IOS_SHA);
+  assert.throws(() => inspectPrivateDispatchTag({
+    object: { sha: IOS_SHA, type: "commit" },
+    ref: "refs/tags/native-ios-e2e-v3",
+  }, { expectedSha: SHA, ref: "native-ios-e2e-v3" }), /reviewed pinned SHA/u);
+  assert.deepEqual(inspectPrivateRun({
+    conclusion: "success",
+    event: "workflow_dispatch",
+    head_sha: IOS_SHA,
+    id: 42,
+    status: "completed",
+  }, { runId: 42, sha: IOS_SHA }), { complete: true, conclusion: "success" });
+  assert.throws(() => inspectPrivateRun({
+    conclusion: "success",
+    event: "workflow_dispatch",
+    head_sha: SHA,
+    id: 42,
+    status: "completed",
+  }, { runId: 42, sha: IOS_SHA }), /does not match/u);
 });
 
-test("destructive reset admits only lane-owned non-production deployments in the dedicated target", () => {
-  const expected = { customEnvironmentId: "env_e2e", projectId: "prj_e2e" };
-  assert.equal(inspectRetirableE2eDeployment({
-    customEnvironment: { id: "env_e2e" },
-    id: "dpl_123",
-    meta: { murphNativeIosE2e: NATIVE_IOS_HOSTED_E2E_LANE_MARKER },
-    projectId: "prj_e2e",
-    target: null,
-  }, expected), "dpl_123");
-  for (const mutation of [
-    { customEnvironment: { id: "env_other" } },
-    { meta: { murphNativeIosE2e: "foreign-lane" } },
-    { projectId: "prj_other" },
-    { target: "production" },
-  ]) {
-    assert.throws(() => inspectRetirableE2eDeployment({
-      customEnvironment: { id: "env_e2e" },
-      id: "dpl_123",
-      meta: { murphNativeIosE2e: NATIVE_IOS_HOSTED_E2E_LANE_MARKER },
-      projectId: "prj_e2e",
-      target: null,
-      ...mutation,
-    }, expected), /unrelated active deployment/u);
-  }
-});
-
-test("Vercel retirement deletes exact aliases first and preserves the deployment when alias cleanup fails", async () => {
+test("iOS canary resolves production, proves the pinned tag, and accepts one exact run", async () => {
   const env = {
-    NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID: "env_e2e",
-    NATIVE_IOS_E2E_VERCEL_PROJECT_ID: "prj_e2e",
-    NATIVE_IOS_E2E_VERCEL_TOKEN: "vercel_test_token",
-  };
-  const originalEnv = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
-  const originalFetch = globalThis.fetch;
-  const originalLog = console.log;
-  const destructiveCalls = [];
-  const aliasDeleteStatuses = { alias_one: 204, alias_two: 204 };
-  let paginationNext = null;
-  try {
-    Object.assign(process.env, env);
-    globalThis.fetch = async (url, init = {}) => {
-      const value = String(url);
-      const method = init.method ?? "GET";
-      if (value.includes("/custom-environments/env_e2e")) {
-        return jsonResponse({ id: "env_e2e", slug: "native-ios-e2e", type: "preview" });
-      }
-      if (value.includes("/v6/deployments")) {
-        const state = new URL(value).searchParams.get("state");
-        return jsonResponse({
-          deployments: state === "READY" ? [{ id: "dpl_owned" }] : [],
-          pagination: { next: null },
-        });
-      }
-      if (value.includes("/v13/deployments/dpl_owned") && method === "GET") {
-        return jsonResponse({
-          customEnvironment: { id: "env_e2e" },
-          id: "dpl_owned",
-          meta: { murphNativeIosE2e: NATIVE_IOS_HOSTED_E2E_LANE_MARKER },
-          projectId: "prj_e2e",
-          target: null,
-        });
-      }
-      if (value.includes("/v2/deployments/dpl_owned/aliases")) {
-        return jsonResponse({
-          aliases: ["one", "two"].map((suffix) => ({
-            alias: `native-e2e-${suffix}.example.test`,
-            created: "2026-08-22T00:00:00.000Z",
-            redirect: null,
-            uid: `alias_${suffix}`,
-          })),
-          pagination: { next: paginationNext },
-        });
-      }
-      const aliasId = value.match(/\/v2\/aliases\/(alias_(?:one|two))/u)?.[1];
-      if (aliasId && method === "DELETE") {
-        destructiveCalls.push(aliasId);
-        return new Response(null, { status: aliasDeleteStatuses[aliasId] });
-      }
-      if (value.includes("/v13/deployments/dpl_owned") && method === "DELETE") {
-        destructiveCalls.push("deployment");
-        return new Response(null, { status: 204 });
-      }
-      throw new Error(`unexpected ${method} ${value}`);
-    };
-    console.log = () => undefined;
-
-    await retireE2eDeployments(null);
-    assert.deepEqual(destructiveCalls, ["alias_one", "alias_two", "deployment"]);
-
-    destructiveCalls.length = 0;
-    aliasDeleteStatuses.alias_two = 500;
-    await assert.rejects(
-      () => retireE2eDeployments(null),
-      /Vercel E2E alias cleanup failed with HTTP 500/u,
-    );
-    assert.deepEqual(destructiveCalls, ["alias_one", "alias_two"]);
-
-    destructiveCalls.length = 0;
-    aliasDeleteStatuses.alias_two = 204;
-    paginationNext = "next-page";
-    await assert.rejects(
-      () => retireE2eDeployments(null),
-      /deployment alias list was incomplete/u,
-    );
-    assert.deepEqual(destructiveCalls, []);
-  } finally {
-    console.log = originalLog;
-    globalThis.fetch = originalFetch;
-    for (const [name, value] of originalEnv) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
-});
-
-test("Vercel retirement validates the complete exact-deployment alias response", () => {
-  const owned = {
-    alias: "native-e2e.example.test",
-    created: "2026-08-22T00:00:00.000Z",
-    redirect: null,
-    uid: "alias_owned",
-  };
-  assert.deepEqual(inspectRetirableE2eDeploymentAliases({ aliases: [owned] }), ["alias_owned"]);
-  assert.throws(
-    () => inspectRetirableE2eDeploymentAliases({ aliases: [{ ...owned, uid: undefined }] }),
-    /deployment alias id is missing or invalid/u,
-  );
-  assert.throws(
-    () => inspectRetirableE2eDeploymentAliases({ aliases: null }),
-    /deployment alias list was invalid/u,
-  );
-  assert.throws(
-    () => inspectRetirableE2eDeploymentAliases({
-      aliases: [owned],
-      pagination: { next: "next-page" },
-    }),
-    /deployment alias list was incomplete/u,
-  );
-});
-
-test("private iOS dispatch revalidates the Web head after tag proof and before dispatch", async () => {
-  const env = {
-    NATIVE_IOS_E2E_GITHUB_TOKEN: "private-ios-token",
-    NATIVE_IOS_E2E_IOS_EXPECTED_SHA: SHA,
-    NATIVE_IOS_E2E_IOS_REF: "native-e2e-v3",
-    NATIVE_IOS_E2E_IOS_REPOSITORY: "cobuildwithus/murph-ios",
+    NATIVE_IOS_E2E_GITHUB_TOKEN: "private-token",
+    NATIVE_IOS_E2E_IOS_REPOSITORY: "example/murph-ios",
     NATIVE_IOS_E2E_IOS_WORKFLOW: "native-ios-hosted-e2e.yml",
   };
   const originalEnv = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
@@ -644,20 +287,22 @@ test("private iOS dispatch revalidates the Web head after tag proof and before d
   const calls = [];
   try {
     Object.assign(process.env, env);
+    console.log = () => undefined;
     globalThis.fetch = async (url, init = {}) => {
       const value = String(url);
       if (value.includes("/git/ref/tags/")) {
         calls.push("tag");
-        return jsonResponse({ object: { sha: SHA, type: "commit" }, ref: "refs/tags/native-e2e-v3" });
-      }
-      if (value.endsWith("/pulls/123")) {
-        calls.push("revalidate");
-        return jsonResponse({ head: { sha: SHA }, number: 123 });
+        return jsonResponse({
+          object: { sha: IOS_SHA, type: "commit" },
+          ref: "refs/tags/native-ios-e2e-v3",
+        });
       }
       if (value.endsWith("/dispatches")) {
         calls.push("dispatch");
-        assert.equal(init.method, "POST");
-        assert.equal(init.headers.authorization, "Bearer private-ios-token");
+        const body = JSON.parse(init.body);
+        assert.equal(body.ref, "native-ios-e2e-v3");
+        assert.equal(body.inputs.web_sha, SHA);
+        assert.equal(body.inputs.mode, "production_canary");
         return jsonResponse({ workflow_run_id: 42 });
       }
       if (value.endsWith("/actions/runs/42")) {
@@ -665,27 +310,26 @@ test("private iOS dispatch revalidates the Web head after tag proof and before d
         return jsonResponse({
           conclusion: "success",
           event: "workflow_dispatch",
-          head_sha: SHA,
+          head_sha: IOS_SHA,
           id: 42,
           status: "completed",
         });
       }
       throw new Error(`unexpected URL ${value}`);
     };
-    console.log = () => undefined;
-
     await dispatchAndWait({
-      correlationId: "murph-pr-123",
-      mode: "pr",
-      prHead: {
-        prNumber: 123,
-        repository: "cobuildwithus/murph",
-        token: "web-controller-token",
-      },
-      webBaseUrl: "https://candidate.example",
+      correlationId: "murph-production-canary",
+      source: { privateRef: "native-ios-e2e-v3", privateSha: IOS_SHA },
+      webBaseUrl: "https://www.withmurph.ai",
       webSha: SHA,
+    }, {
+      resolveWebSha: async ({ scheduledMainSha }) => {
+        calls.push("production");
+        assert.equal(scheduledMainSha, SHA);
+        return SHA;
+      },
     });
-    assert.deepEqual(calls, ["tag", "revalidate", "dispatch", "status"]);
+    assert.deepEqual(calls, ["production", "tag", "dispatch", "status"]);
   } finally {
     console.log = originalLog;
     globalThis.fetch = originalFetch;
@@ -696,284 +340,7 @@ test("private iOS dispatch revalidates the Web head after tag proof and before d
   }
 });
 
-test("failed Web head revalidation prevents private iOS dispatch", async () => {
-  const env = {
-    NATIVE_IOS_E2E_GITHUB_TOKEN: "private-ios-token",
-    NATIVE_IOS_E2E_IOS_EXPECTED_SHA: SHA,
-    NATIVE_IOS_E2E_IOS_REF: "native-e2e-v3",
-    NATIVE_IOS_E2E_IOS_REPOSITORY: "cobuildwithus/murph-ios",
-    NATIVE_IOS_E2E_IOS_WORKFLOW: "native-ios-hosted-e2e.yml",
-  };
-  const originalEnv = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
-  const originalFetch = globalThis.fetch;
-  let dispatchCalled = false;
-  try {
-    Object.assign(process.env, env);
-    globalThis.fetch = async (url) => {
-      const value = String(url);
-      if (value.includes("/git/ref/tags/")) {
-        return jsonResponse({ object: { sha: SHA, type: "commit" }, ref: "refs/tags/native-e2e-v3" });
-      }
-      if (value.endsWith("/pulls/123")) {
-        return jsonResponse({ head: { sha: "b".repeat(40) }, number: 123 });
-      }
-      dispatchCalled = true;
-      throw new Error(`unexpected URL ${value}`);
-    };
-    await assert.rejects(() => dispatchAndWait({
-      correlationId: "murph-pr-123",
-      mode: "pr",
-      prHead: {
-        prNumber: 123,
-        repository: "cobuildwithus/murph",
-        token: "web-controller-token",
-      },
-      webBaseUrl: "https://candidate.example",
-      webSha: SHA,
-    }), /changed before private iOS dispatch/u);
-    assert.equal(dispatchCalled, false);
-  } finally {
-    globalThis.fetch = originalFetch;
-    for (const [name, value] of originalEnv) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
-});
-
-test("private workflow proof pins the immutable tag and returned run SHA", () => {
-  assert.equal(inspectPrivateDispatchTag({
-    object: { sha: SHA, type: "commit" },
-    ref: "refs/tags/native-e2e-v3",
-  }, { expectedSha: SHA, ref: "native-e2e-v3" }), SHA);
-  assert.throws(() => inspectPrivateDispatchTag({
-    object: { sha: SHA, type: "commit" },
-    ref: "refs/tags/native-e2e-v3",
-  }, { expectedSha: "b".repeat(40), ref: "native-e2e-v3" }), /reviewed pinned SHA/u);
-  assert.deepEqual(inspectPrivateRun({
-    conclusion: "success",
-    event: "workflow_dispatch",
-    head_sha: SHA,
-    id: 42,
-    status: "completed",
-  }, { runId: 42, sha: SHA }), { complete: true, conclusion: "success" });
-  assert.throws(() => inspectPrivateRun({
-    conclusion: "success",
-    event: "workflow_dispatch",
-    head_sha: "b".repeat(40),
-    id: 42,
-    status: "completed",
-  }, { runId: 42, sha: SHA }), /does not match/u);
-});
-
-test("production canary admits only the deployment still behind the production alias", () => {
-  assert.equal(inspectCurrentProductionSha(SHA, SHA), true);
-  assert.throws(
-    () => inspectCurrentProductionSha("b".repeat(40), SHA),
-    /Production alias no longer resolves/u,
-  );
-});
-
-test("destructive database reset is limited to an explicitly E2E-named database", () => {
-  assert.equal(inspectE2eDatabaseUrls({
-    databaseUrl: "postgresql://runtime@pool.example.test/native_ios_e2e?sslmode=require",
-    directDatabaseUrl: "postgresql://owner@db.example.test/native_ios_e2e?sslmode=require",
-  }), "native_ios_e2e");
-  assert.throws(() => inspectE2eDatabaseUrls({
-    databaseUrl: "postgresql://runtime@pool.example.test/native_ios_e2e",
-    directDatabaseUrl: "postgresql://owner@db.example.test/other_e2e",
-  }), /must target the same database/u);
-  for (const databaseName of ["production", "contest", "nativeios-prod"]) {
-    assert.throws(() => inspectE2eDatabaseUrls({
-      databaseUrl: `postgresql://runtime@pool.example.test/${databaseName}`,
-      directDatabaseUrl: `postgresql://owner@db.example.test/${databaseName}`,
-    }), /explicitly E2E\/test database/u);
-  }
-});
-
-test("destructive database reset assumes the canonical schema owner", () => {
-  const ownedConnectionString = withDedicatedDatabaseOwner(
-    "postgresql://credential@db.example.test/native_ios_e2e?sslmode=require&options=-c%20statement_timeout%3D10000",
-  );
-  assert.equal(
-    ownedConnectionString,
-    "postgresql://credential@db.example.test/native_ios_e2e?sslmode=require&options=-c%20statement_timeout%3D10000%20-c%20role%3Dpostgres",
-  );
-  const ownedUrl = new URL(ownedConnectionString);
-  assert.equal(ownedUrl.searchParams.get("sslmode"), "require");
-  assert.equal(
-    ownedUrl.searchParams.get("options"),
-    "-c statement_timeout=10000 -c role=postgres",
-  );
-  assert.equal(
-    ownedUrl.search,
-    "?sslmode=require&options=-c%20statement_timeout%3D10000%20-c%20role%3Dpostgres",
-  );
-});
-
-test("Junction cleanup isolates one E2E namespace inside a shared sandbox team", () => {
-  const expectedTeamId = "11111111-1111-4111-8111-111111111111";
-  const owned = {
-    client_user_id: "murph_e2e_expectedclient",
-    team_id: expectedTeamId,
-    user_id: "22222222-2222-4222-8222-222222222222",
-  };
-  const unrelated = {
-    client_user_id: "murph_existingdeveloper",
-    team_id: expectedTeamId,
-    user_id: "33333333-3333-4333-8333-333333333333",
-  };
-  assert.deepEqual(inspectNamespacedJunctionUsers({
-    limit: 500,
-    offset: 0,
-    total: 2,
-    users: [unrelated, owned],
-  }, { expectedNamespace: "e2e", expectedTeamId }), {
-    clientUserId: owned.client_user_id,
-    userId: owned.user_id,
-  });
-  assert.equal(inspectNamespacedJunctionUsers({
-    limit: 500,
-    offset: 0,
-    total: 1,
-    users: [unrelated],
-  }, { expectedNamespace: "e2e", expectedTeamId }), null);
-  assert.throws(() => inspectNamespacedJunctionUsers({
-    limit: 500,
-    offset: 0,
-    total: 1,
-    users: [{ ...unrelated, team_id: "44444444-4444-4444-8444-444444444444" }],
-  }, { expectedNamespace: "e2e", expectedTeamId }), /unexpected team/u);
-  assert.throws(() => inspectNamespacedJunctionUsers({
-    limit: 500,
-    offset: 0,
-    total: 2,
-    users: [
-      owned,
-      { ...owned, user_id: "55555555-5555-4555-8555-555555555555" },
-    ],
-  }, { expectedNamespace: "e2e", expectedTeamId }), /more than one user/u);
-  assert.throws(() => inspectNamespacedJunctionUsers({
-    limit: 500,
-    offset: 0,
-    total: 2,
-    users: [unrelated],
-  }, { expectedNamespace: "e2e", expectedTeamId }), /incomplete/u);
-  assert.throws(() => inspectNamespacedJunctionUsers({
-    limit: 500,
-    offset: 0,
-    total: 1,
-    users: [{ ...unrelated, client_user_id: null }],
-  }, { expectedNamespace: "e2e", expectedTeamId }), /client user id/u);
-  assert.throws(() => inspectNamespacedJunctionUsers({
-    limit: 500,
-    offset: 0,
-    total: 0,
-    users: [],
-  }, { expectedNamespace: "", expectedTeamId }), /non-empty client user namespace/u);
-});
-
-test("cleanup ownership enumerates the namespace before and after deletion", async () => {
-
-  const identitySource = await readFile(
-    path.join(REPO_ROOT, "scripts", "native-ios-hosted-e2e-identity.mjs"),
-    "utf8",
-  );
-  const cleanupStart = identitySource.indexOf("export async function cleanupE2e(junctionClientUserIdNamespace)");
-  const cleanupConfigStart = identitySource.indexOf("function e2eCleanupConfig(junctionClientUserIdNamespace)", cleanupStart);
-  const identityConfigStart = identitySource.indexOf("function e2eIdentityConfig(junctionClientUserIdNamespace)", cleanupConfigStart);
-  const cleanupSource = identitySource.slice(cleanupStart, cleanupConfigStart);
-  const cleanupConfigSource = identitySource.slice(cleanupConfigStart, identityConfigStart);
-  assert.ok(cleanupStart >= 0 && cleanupConfigStart > cleanupStart && identityConfigStart > cleanupConfigStart);
-  assert.equal(
-    cleanupSource.match(/listNamespacedJunctionUser/gu)?.length,
-    2,
-    "cleanup must enumerate the exact namespace before and after deletion",
-  );
-  assert.doesNotMatch(cleanupSource, /buildJunctionClientUserId|e2eIdentityConfig/u);
-  const resetIndex = cleanupSource.indexOf("resetDedicatedDatabase");
-  const postResetReadIndex = cleanupSource.indexOf("readDedicatedMemberRecord");
-  assert.ok(
-    resetIndex >= 0 && postResetReadIndex > resetIndex,
-    "database contents may be read only after the isolated reset",
-  );
-  assert.doesNotMatch(
-    cleanupConfigSource,
-    /NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET|NATIVE_IOS_E2E_PRIVY_TEST_PHONE/u,
-  );
-  assert.doesNotMatch(
-    cleanupConfigSource,
-    /NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
-  );
-});
-
-test("database reset failure emits only the allowlisted command reason", async () => {
-  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-database-reset-"));
-  const binDir = path.join(tempDir, "bin");
-  const fakePnpm = path.join(binDir, "pnpm");
-  const envNames = [
-    "NATIVE_IOS_E2E_DATABASE_URL",
-    "NATIVE_IOS_E2E_DIRECT_DATABASE_URL",
-    "NATIVE_IOS_E2E_JUNCTION_API_KEY",
-    "NATIVE_IOS_E2E_JUNCTION_TEAM_ID",
-    "PATH",
-  ];
-  const originalEnv = new Map(envNames.map((name) => [name, process.env[name]]));
-  const originalFetch = globalThis.fetch;
-  const originalLog = console.log;
-  const logs = [];
-  try {
-    await mkdir(binDir, { recursive: true });
-    await writeFile(fakePnpm, [
-      "#!/bin/sh",
-      "printf 'provider output must stay hidden\\n' >&2",
-      "exit 42",
-    ].join("\n") + "\n", { mode: 0o755 });
-    process.env.NATIVE_IOS_E2E_DATABASE_URL = "postgresql://owner@db.example.test/native_ios_e2e";
-    process.env.NATIVE_IOS_E2E_DIRECT_DATABASE_URL = "postgresql://owner@db.example.test/native_ios_e2e";
-    process.env.NATIVE_IOS_E2E_JUNCTION_API_KEY = "sk_us_test";
-    process.env.NATIVE_IOS_E2E_JUNCTION_TEAM_ID = "11111111-1111-4111-8111-111111111111";
-    process.env.PATH = `${binDir}:${originalEnv.get("PATH") ?? ""}`;
-    globalThis.fetch = async () => new Response(JSON.stringify({
-      limit: 500,
-      offset: 0,
-      total: 0,
-      users: [],
-    }), { headers: { "content-type": "application/json" } });
-    console.log = (...args) => logs.push(args.join(" "));
-
-    await assert.rejects(() => cleanupE2e("e2e"), /E2E database reset failed/u);
-    assert.deepEqual(logs, [
-      "::notice::native-ios-e2e stage=junction_cleanup result=absent",
-      "::notice::native-ios-e2e stage=database_reset result=started",
-      "::error::native-ios-e2e stage=database_reset result=failure reason=command_exit",
-    ]);
-    assert.doesNotMatch(logs.join("\n"), /provider output/u);
-  } finally {
-    console.log = originalLog;
-    globalThis.fetch = originalFetch;
-    for (const [name, value] of originalEnv) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-    await rm(tempDir, { force: true, recursive: true });
-  }
-});
-
-test("database validator declares its PostgreSQL runtime at the controller root", async () => {
-  const rootPackage = JSON.parse(await readFile(path.join(REPO_ROOT, "package.json"), "utf8"));
-  assert.equal(rootPackage.devDependencies?.pg, "8.20.0");
-  assert.equal(typeof (await import("pg")).default?.Pool, "function");
-});
-
-test("database and child-command timeout contracts are explicit and fail closed", () => {
-  assert.deepEqual(buildDedicatedDatabasePoolOptions("postgresql://owner@db.example.test/native_ios_e2e"), {
-    connectionString: "postgresql://owner@db.example.test/native_ios_e2e",
-    connectionTimeoutMillis: 5_000,
-    max: 1,
-    query_timeout: 10_000,
-    statement_timeout: 10_000,
-  });
+test("bounded command result is explicit and fail closed", () => {
   assert.equal(inspectBoundedCommandResult({
     code: 0,
     label: "test command",
@@ -1061,253 +428,6 @@ test("bounded command success waits for its wrapper and grandchild", {
   }
 });
 
-test("Privy postcondition requires the fixed principal to have been freshly created", () => {
-  const startedAtMs = 1_700_000_000_000;
-  assert.deepEqual(inspectFreshPrivyPrincipal({
-    created_at: startedAtMs / 1000 + 5,
-    id: "did:privy:e2e",
-  }, {
-    observedAtMs: startedAtMs + 10_000,
-    startedAtMs,
-  }), {
-    createdAtMs: startedAtMs + 5_000,
-    id: "did:privy:e2e",
-  });
-  assert.throws(() => inspectFreshPrivyPrincipal({
-    created_at: (startedAtMs - 10 * 60_000) / 1000,
-    id: "did:privy:old",
-  }, {
-    observedAtMs: startedAtMs + 10_000,
-    startedAtMs,
-  }), /not freshly created during this run/u);
-});
-
-test("Junction postcondition requires a connected real Apple Health provider", () => {
-  assert.equal(inspectJunctionAppleHealthConnection({
-    providers: [{ slug: "apple_health_kit", status: "connected" }],
-  }), true);
-  for (const providers of [
-    [],
-    [{ slug: "apple_health_kit", status: "disconnected" }],
-    [{ slug: "oura", status: "connected" }],
-  ]) {
-    assert.throws(() => inspectJunctionAppleHealthConnection({ providers }), /Apple Health connection/u);
-  }
-});
-
-test("candidate postconditions bind phone derivation, Junction client id, and Apple Health", () => {
-  const expectedTeamId = "11111111-1111-4111-8111-111111111111";
-  const member = inspectDedicatedMemberIdentity({
-    maskedPhoneNumberHint: "*** 0100",
-    memberId: "owner-internal-id-123",
-  }, { testPhone: TEST_PHONE });
-  const expectedClientUserId = buildJunctionClientUserId(
-    "junction-client-user-id-secret",
-    member.memberId,
-    "e2e",
-  );
-  assert.equal(expectedClientUserId, "murph_e2e_jnqpm4zu2il556kgyffrxn");
-  assert.deepEqual(inspectResolvedJunctionUser({
-    client_user_id: expectedClientUserId,
-    team_id: expectedTeamId,
-    user_id: "22222222-2222-4222-8222-222222222222",
-  }, { expectedClientUserId, expectedTeamId }), {
-    userId: "22222222-2222-4222-8222-222222222222",
-  });
-  assert.equal(inspectJunctionAppleHealthConnection({
-    providers: [{ slug: "apple_health_kit", status: "connected" }],
-  }), true);
-  assert.throws(() => inspectDedicatedMemberIdentity({
-    maskedPhoneNumberHint: "*** 9999",
-    memberId: member.memberId,
-  }, { testPhone: TEST_PHONE }), /fixed test phone hint/u);
-  assert.throws(() => inspectResolvedJunctionUser({
-    client_user_id: "candidate-created-wrong-client-id",
-    team_id: expectedTeamId,
-    user_id: "22222222-2222-4222-8222-222222222222",
-  }, { expectedClientUserId, expectedTeamId }), /dedicated team identity/u);
-});
-
-test("bad candidate identity stays red, final cleanup succeeds, and the next lifecycle deploys", async () => {
-  const expectedTeamId = "11111111-1111-4111-8111-111111111111";
-  const secret = "junction-client-user-id-secret";
-  const namespace = "e2e";
-  const unrelatedUser = {
-    client_user_id: "murph_existingdeveloper",
-    team_id: expectedTeamId,
-    user_id: "33333333-3333-4333-8333-333333333333",
-  };
-  const emptyJunctionNamespace = () => ({
-    limit: 500,
-    offset: 0,
-    total: 1,
-    users: [unrelatedUser],
-  });
-  let databaseMember = null;
-  let deployments = 0;
-  let junctionTeam = emptyJunctionNamespace();
-
-  const cleanup = async () => {
-    const owned = inspectNamespacedJunctionUsers(junctionTeam, {
-      expectedNamespace: namespace,
-      expectedTeamId,
-    });
-    if (owned) junctionTeam = emptyJunctionNamespace();
-    databaseMember = null;
-  };
-  const deploy = async () => {
-    deployments += 1;
-    assert.equal(databaseMember, null, "deployment must start after database cleanup");
-    assert.equal(
-      inspectNamespacedJunctionUsers(junctionTeam, {
-        expectedNamespace: namespace,
-        expectedTeamId,
-      }),
-      null,
-      "deployment must start after Junction cleanup",
-    );
-    databaseMember = {
-      maskedPhoneNumberHint: deployments === 1 ? "*** 9999" : "*** 0100",
-      memberId: `member-${deployments}`,
-    };
-    const expectedClientUserId = buildJunctionClientUserId(
-      secret,
-      databaseMember.memberId,
-      namespace,
-    );
-    junctionTeam = {
-      limit: 500,
-      offset: 0,
-      total: 2,
-      users: [unrelatedUser, {
-        client_user_id: deployments === 1
-          ? "murph_e2e_candidatewrongid"
-          : expectedClientUserId,
-        team_id: expectedTeamId,
-        user_id: "22222222-2222-4222-8222-222222222222",
-      }],
-    };
-    return `https://candidate-${deployments}.example`;
-  };
-  const postconditions = async () => {
-    const expectedClientUserId = buildJunctionClientUserId(
-      secret,
-      databaseMember.memberId,
-      namespace,
-    );
-    const listed = junctionTeam.users[1];
-    if (deployments === 1) {
-      assert.throws(() => inspectDedicatedMemberIdentity(
-        databaseMember,
-        { testPhone: TEST_PHONE },
-      ), /fixed test phone hint/u);
-      assert.throws(() => inspectResolvedJunctionUser(listed, {
-        expectedClientUserId,
-        expectedTeamId,
-      }), /dedicated team identity/u);
-      throw new Error("candidate identity postconditions failed");
-    }
-    const member = inspectDedicatedMemberIdentity(
-      databaseMember,
-      { testPhone: TEST_PHONE },
-    );
-    assert.equal(member.memberId, "member-2");
-    assert.deepEqual(inspectResolvedJunctionUser(listed, {
-      expectedClientUserId,
-      expectedTeamId,
-    }), { userId: listed.user_id });
-    assert.equal(inspectJunctionAppleHealthConnection({
-      providers: [{ slug: "apple_health_kit", status: "connected" }],
-    }), true);
-  };
-  const lifecycle = () => runPrLifecycle({
-    cleanup,
-    deploy,
-    dispatch: async () => undefined,
-    now: () => 123,
-    postconditions,
-    retire: async () => undefined,
-  });
-
-  await assert.rejects(lifecycle, /candidate identity postconditions failed/u);
-  assert.equal(databaseMember, null);
-  assert.equal(inspectNamespacedJunctionUsers(junctionTeam, {
-    expectedNamespace: namespace,
-    expectedTeamId,
-  }), null);
-
-  await lifecycle();
-  assert.equal(deployments, 2);
-});
-
-test("PR lifecycle proves backend state before retirement and cleans in fail-closed order", async () => {
-  const calls = [];
-  await runPrLifecycle({
-    cleanup: async () => calls.push("cleanup"),
-    deploy: async () => { calls.push("deploy"); return "https://candidate.example"; },
-    dispatch: async (url) => calls.push(`dispatch:${url}`),
-    now: () => { calls.push("boundary"); return 123; },
-    postconditions: async (startedAtMs) => calls.push(`postconditions:${startedAtMs}`),
-    retire: async () => calls.push("retire"),
-  });
-  assert.deepEqual(calls, [
-    "retire",
-    "cleanup",
-    "boundary",
-    "deploy",
-    "dispatch:https://candidate.example",
-    "postconditions:123",
-    "retire",
-    "cleanup",
-  ]);
-});
-
-test("PR lifecycle stays red when final cleanup fails", async () => {
-  let cleanupCalls = 0;
-  const cleanupError = new Error("cleanup failed");
-  await assert.rejects(() => runPrLifecycle({
-    cleanup: async () => {
-      cleanupCalls += 1;
-      if (cleanupCalls === 2) throw cleanupError;
-    },
-    deploy: async () => "https://candidate.example",
-    dispatch: async () => undefined,
-    now: () => 123,
-    postconditions: async () => undefined,
-    retire: async () => undefined,
-  }), (error) => {
-    assert.equal(error.message, "Native iOS E2E finalization failed at cleanup_after_run.");
-    assert.equal(error.cause, cleanupError);
-    return true;
-  });
-});
-
-test("PR lifecycle retains secret-safe stages and both failure causes", async () => {
-  let cleanupCalls = 0;
-  const primaryError = new Error("candidate payload must stay hidden");
-  const cleanupError = new Error("provider payload must stay hidden");
-  await assert.rejects(() => runPrLifecycle({
-    cleanup: async () => {
-      cleanupCalls += 1;
-      if (cleanupCalls === 2) throw cleanupError;
-    },
-    deploy: async () => { throw primaryError; },
-    dispatch: async () => undefined,
-    now: () => 123,
-    postconditions: async () => undefined,
-    retire: async () => undefined,
-  }), (error) => {
-    assert.ok(error instanceof AggregateError);
-    assert.equal(
-      error.message,
-      "Native iOS E2E failed at deploy; fail-closed finalization failed at cleanup_after_run.",
-    );
-    assert.deepEqual(error.errors, [primaryError, cleanupError]);
-    assert.doesNotMatch(error.message, /provider payload|candidate payload/u);
-    return true;
-  });
-});
-
 function extractWorkflowStepScript(workflow, stepName) {
   const stepStart = workflow.indexOf(`      - name: ${stepName}\n`);
   assert.ok(stepStart >= 0, `${stepName} step must exist`);
@@ -1327,52 +447,6 @@ function jsonResponse(value) {
   return new Response(JSON.stringify(value), {
     headers: { "content-type": "application/json" },
   });
-}
-
-
-async function runVercelBuild(environment) {
-  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-vercel-build-"));
-  const binDir = path.join(tempDir, "bin");
-  const logFile = path.join(tempDir, "pnpm.log");
-  const fakePnpm = path.join(binDir, "pnpm");
-  try {
-    await mkdir(binDir, { recursive: true });
-    await writeFile(fakePnpm, [
-      "#!/bin/sh",
-      "set -eu",
-      "printf '%s|direct=%s|generated=%s\\n' \"$*\" \"${MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS:-}\" \"${MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS:-}\" >> \"${PNPM_LOG}\"",
-      "if [ -n \"${FAIL_PNPM_COMMAND:-}\" ] && [ \"$*\" = \"${FAIL_PNPM_COMMAND}\" ]; then",
-      "  exit 42",
-      "fi",
-    ].join("\n") + "\n", { mode: 0o755 });
-    const result = spawnSync("sh", [VERCEL_BUILD_SCRIPT], {
-      cwd: WEB_ROOT,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        FAIL_PNPM_COMMAND: "",
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        PNPM_LOG: logFile,
-        VERCEL_ENV: "",
-        VERCEL_TARGET_ENV: "",
-        ...environment,
-      },
-    });
-    let calls = [];
-    try {
-      calls = (await readFile(logFile, "utf8")).split("\n").filter(Boolean);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-    return {
-      calls,
-      status: result.status,
-      stderr: result.stderr,
-      stdout: result.stdout,
-    };
-  } finally {
-    await rm(tempDir, { force: true, recursive: true });
-  }
 }
 
 async function assertOwnedProcessesGone(pidFile) {
