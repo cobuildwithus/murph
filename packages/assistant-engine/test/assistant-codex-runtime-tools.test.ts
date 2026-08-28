@@ -101,20 +101,6 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
             }),
           )
 
-          const progressMessages = await waitForRpcMessages(child, 5)
-          expect(progressMessages[4]).toEqual({
-            id: 99,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'tool was not offered for this turn',
-                },
-              ],
-            },
-          })
-
           child.stdout.write(
             jsonLine({
               id: 99,
@@ -1006,6 +992,18 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
               },
             }),
           )
+          await expect(waitForRpcResponse(child, 99)).resolves.toEqual({
+            id: 99,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'tool was not offered for this turn',
+                },
+              ],
+            },
+          })
           child.stdout.write(
             jsonLine({
               id: 100,
@@ -1019,9 +1017,7 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
               },
             }),
           )
-
-          const messages = await waitForRpcMessages(child, 6)
-          expect(messages[5]).toEqual({
+          await expect(waitForRpcResponse(child, 100)).resolves.toEqual({
             id: 100,
             result: {
               success: false,
