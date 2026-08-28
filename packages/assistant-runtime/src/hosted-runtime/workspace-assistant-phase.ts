@@ -6671,7 +6671,6 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           systemMailboxWake: ownerAwareStatusSystemMailboxWake,
         });
     const statusNextWake = selectHostedRuntimeWakeCandidate([
-      statusSystemMailboxWake,
       backgroundWake,
       createHostedRuntimeWakeCandidate(
         input.deferredSystemMailboxDeliveryWakeAt,

@@ -3111,6 +3111,65 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     ).toBe("2026-04-27T00:10:00.000Z");
   });
 
+  it("keeps pending input ahead when recording exposes an older model-free wake", async () => {
+    const foregroundWakeAt = "2026-04-27T00:10:00.000Z";
+    const systemWakeAt = "2026-04-27T00:09:59.000Z";
+    let systemItemRecorded = false;
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(foregroundWakeAt);
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) => {
+        if (
+          (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+        ) {
+          return { at: null, executionClass: null, reason: null };
+        }
+        return systemItemRecorded
+          ? {
+              at: systemWakeAt,
+              executionClass: "model_free",
+              reason: "mailbox",
+            }
+          : { at: null, executionClass: null, reason: null };
+      },
+    );
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementationOnce(
+      async () => {
+        systemItemRecorded = true;
+        return {
+          failed: 0,
+          nextWakeAt: systemWakeAt,
+          nextWakeReason: "mailbox",
+          recorded: 1,
+        };
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => foregroundWakeAt,
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      nextWakeAt: foregroundWakeAt,
+      nextWakeReason: "assistant",
+    }));
+  });
+
   it("probes pending input when imported conversations have no eligible foreground ids", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
