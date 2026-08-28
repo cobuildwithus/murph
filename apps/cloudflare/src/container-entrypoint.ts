@@ -301,6 +301,7 @@ export async function startHostedContainerEntrypoint(input: {
     let claimedRunnerSlot = false;
     let conversationActivityObservedForInvocation = false;
     let conversationActivitySettled = false;
+    let workspaceRestorePreparation: Promise<HostedWorkspaceRestorePreparation> | null = null;
     let runtimeWakeForRequest: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
@@ -817,14 +818,16 @@ export async function startHostedContainerEntrypoint(input: {
         processApi: runtime.processApi,
       });
 
-      const workspaceRestorePreparation = runtime.prepareWorkspaceRestore({
+      workspaceRestorePreparation = runtime.prepareWorkspaceRestore({
         job,
         signal: invocationAbort.signal,
       });
-      const [heavyRuntime, preparedWorkspaceRestore] = await Promise.all([
-        hydrateHeavyRuntime(),
-        workspaceRestorePreparation,
-      ]);
+      const heavyRuntimeHydration = hydrateHeavyRuntime();
+      const preparedWorkspaceRestore = await workspaceRestorePreparation;
+      const heavyRuntime = await raceHostedContainerInvocationAbort(
+        heavyRuntimeHydration,
+        invocationAbort.signal,
+      );
 
       const result = await heavyRuntime.runWorkspaceInvocation(job, {
         onConversationActivityObserved() {
@@ -899,11 +902,33 @@ export async function startHostedContainerEntrypoint(input: {
       response.statusCode = 200;
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
-    } catch (error) {
+    } catch (caughtError) {
+      let error = caughtError;
       if (job) {
         settleConversationActivity();
       }
       const responseUnavailable = requestAbort.signal.aborted || response.destroyed;
+
+      if (
+        invocationAbort.signal.aborted
+        && error === invocationAbort.signal.reason
+        && workspaceRestorePreparation
+      ) {
+        try {
+          await (await workspaceRestorePreparation).promise;
+        } catch (restoreError) {
+          if (restoreError !== invocationAbort.signal.reason) {
+            error = restoreError;
+          }
+        }
+        if (error === invocationAbort.signal.reason) {
+          if (!responseUnavailable) {
+            response.statusCode = 204;
+            response.end();
+          }
+          return;
+        }
+      }
 
       if (!responseUnavailable) {
         emitHostedExecutionStructuredLog({
@@ -925,20 +950,6 @@ export async function startHostedContainerEntrypoint(input: {
         settleConversationActivity();
       }
       stopActiveJobDiagnostics?.();
-      if (claimedRunnerSlot && invocationAbort.signal.aborted) {
-        try {
-          await stopWarmCodexWithLifecycleLog(await hydrateHeavyRuntime(), {
-            failureMessage:
-              "Hosted container entrypoint failed to stop warm Codex after invocation abort.",
-            reason: "workspace-invocation-abort",
-          });
-        } catch (error) {
-          poisonHostedContainerAndScheduleExitOnce(
-            error,
-            "Hosted container entrypoint failed to stop warm Codex after invocation abort.",
-          );
-        }
-      }
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
         activeRuntimeWakeAttemptId = null;
@@ -1564,6 +1575,30 @@ function createHostedContainerStartupConfig(): HostedContainerStartupConfig {
     hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     runnerBundleManifestPath: path.join(appRoot, ".murph-runner-bundle-manifest.json"),
     supervisorEnv,
+  });
+}
+
+function raceHostedContainerInvocationAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(signal.reason);
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
   });
 }
 

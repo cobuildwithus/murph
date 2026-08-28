@@ -305,7 +305,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Poisoning failed hydration and bounding shutdown while hydration is unsettled
 // add 1,186B to the entry/static closure and total while leaving the static
 // chunk count unchanged; existing startup tolerances cover that bounded growth.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_434_679;
+// Clean exact-preemption handoff adds 586B to total output while remaining
+// inside the fixed entry, static-closure, and chunk-count startup budgets.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_435_265;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 64_257;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 1_950_662;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-26
-Updated: 2026-08-27
+Updated: 2026-08-28
 
 ## Goal
 
@@ -97,6 +97,14 @@ Updated: 2026-08-27
   1,950,662-byte static boot closure across 22 chunks, down from the recorded
   8,571,156-byte / 49-chunk baseline. The bundle gate now caps both startup
   bytes and chunk count.
+- Exact preemption no longer waits for heavy hydration or tears down the warm
+  app/container. The old invocation uses its existing abort signal, retains the
+  single-job slot only until its workspace restore settles, and then lets the
+  replacement reuse the same process-scoped hydration promise.
+- After the preemption fix, exact production assembly measures a 66,029-byte
+  entry and a 1,952,434-byte static boot closure across the same 22 chunks. The
+  586-byte total-output increase remains within the fixed startup budgets.
 - Focused assistant-runtime and Cloudflare entrypoint/abort/restore tests,
-  affected typechecks, package builds, bundle-gate tests, and exact production
-  runner assembly pass. PR-gate ReviewGPT and exact-head CI remain pending.
+  all 2,706 Cloudflare tests, affected typechecks, package builds, bundle-gate
+  tests, and exact production runner assembly pass. Final exact-head ReviewGPT
+  and CI remain pending.

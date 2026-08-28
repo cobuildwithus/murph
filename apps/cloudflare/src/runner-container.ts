@@ -1830,7 +1830,7 @@ export class RunnerContainer extends Container {
     const logContext: RunnerContainerLogContext = {
       userId: routeUserId,
     };
-    let completedSuccessfully = false;
+    let preserveWarmContainer = false;
     this.currentLogContext = logContext;
     let activeOperationAcquired = false;
     let cleanupWarmContainerOnFailure = false;
@@ -1919,6 +1919,11 @@ export class RunnerContainer extends Container {
       }
       this.noteRunnerActivity("runner-response-received");
 
+      if (response.status === 204 && operation.abortResult) {
+        preserveWarmContainer = true;
+        throw new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE);
+      }
+
       if (!response.ok) {
         const runnerError = await classifyHostedRunnerContainerErrorResponse(response);
         emitHostedExecutionStructuredLog({
@@ -1956,7 +1961,7 @@ export class RunnerContainer extends Container {
         throw error;
       }
       const result = assertHostedExecutionRunnerJobResult(responsePayload, input.job);
-      completedSuccessfully = true;
+      preserveWarmContainer = true;
       return result;
     } catch (error) {
       invokeFailure = error;
@@ -1991,7 +1996,7 @@ export class RunnerContainer extends Container {
       let cleanupSettled = false;
       try {
         if (activeOperationAcquired) {
-          if (!completedSuccessfully) {
+          if (!preserveWarmContainer) {
             if (!preserveActiveOperationAfterTransportFailure) {
               await this.stopWarmContainer({
                 failClosed: !(invokeFailure instanceof HostedRunnerContainerShuttingDownError),
