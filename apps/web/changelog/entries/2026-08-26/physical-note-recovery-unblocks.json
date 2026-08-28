@@ -9,6 +9,6 @@
     "summary": "When an older physical-note attempt never reached the printer, Murph can now confirm that and clear the old submission so a separate future note request is no longer blocked.",
     "details": "Recovery still never sends or retries a note. Accepted notes stay protected, and uncertain printer outcomes remain pending until Murph has conclusive evidence.",
     "relevanceTags": ["assistant", "physical-notes", "reliability"],
-    "sourcePullRequests": [2327]
+    "sourcePullRequests": [2327, 2343]
   }
 }

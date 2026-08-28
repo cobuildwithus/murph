@@ -66,8 +66,11 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(hostedDirectLayers.threadContextPrompt).toContain(
       "use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise",
     )
+    expect(hostedGroupLayers.staticCacheableCorePrompt).toContain(
+      'The room runtime is not a participant.',
+    )
     expect(hostedGroupLayers.threadContextPrompt).toContain(
-      'The runtime member is a synthetic room container, not the human speaker',
+      'Keep personal account settings, billing, wearable connection',
     )
     expect(hostedGroupLayers.threadContextPrompt).not.toContain(
       'use the user\'s current local time',

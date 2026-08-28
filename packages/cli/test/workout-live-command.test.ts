@@ -78,6 +78,8 @@ interface WorkoutResult {
       name: string
       note?: string
       sourceExerciseId?: string
+      targetWeightPerSet?: number
+      targetWeightUnit?: string
       order: number
       setPlanIsFinite?: boolean
       sets: Array<Record<string, unknown>>
@@ -273,6 +275,74 @@ test('live workout commands target exact records without a global active singlet
     'workout', 'show', overlapping.eventId, '--vault', vaultRoot,
   ])).envelope)
   assert.equal(shownOther.entity.data.workout.endedAt, undefined)
+})
+
+test('ad-hoc workout start preserves exact per-set weight and reps targets', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-targets-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  assert.equal(requireData((await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])).envelope).created, true)
+  const started = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Bench session',
+    '--exercise',
+    'name=Bench press;sets=3;reps=8;targetWeight=135;targetWeightUnit=lb',
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  assert.ok(started.workout)
+  assert.deepEqual(started.workout.exercises[0], {
+    name: 'Bench press',
+    order: 1,
+    mode: 'weight_reps',
+    unitOverride: 'lb',
+    memberRepsPerSet: 8,
+    targetWeightPerSet: 135,
+    targetWeightUnit: 'lb',
+    setPlanIsFinite: true,
+    sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
+  })
+})
+
+test('ad-hoc workout start accepts canonical decimal planned loads', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-decimal-targets-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  requireData((await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])).envelope)
+
+  for (const targetWeight of ['1.1', '2.2', '72.6', '0.29']) {
+    const started = requireData((await run<WorkoutResult>(cli, [
+      'workout', 'start', `Decimal ${targetWeight}`,
+      '--exercise',
+      `name=Bench press;sets=3;reps=8;targetWeight=${targetWeight};targetWeightUnit=kg`,
+      '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(
+      started.workout?.exercises[0]?.targetWeightPerSet,
+      Number(targetWeight),
+    )
+  }
+
+  const rejected = await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Invalid precision',
+    '--exercise',
+    'name=Bench press;sets=3;reps=8;targetWeight=2.201;targetWeightUnit=kg',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(rejected.envelope.ok, false)
+  if (rejected.envelope.ok) {
+    throw new Error('Expected a third-decimal planned load to fail.')
+  }
+  assert.equal(rejected.envelope.error.code, 'invalid_payload')
 })
 
 test('workout start writes one complete ordered exercise batch in one canonical creation', async () => {

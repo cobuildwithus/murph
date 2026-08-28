@@ -640,6 +640,19 @@
                     "minimum": 1,
                     "maximum": 999
                   },
+                  "targetWeightPerSet": {
+                    "type": "number",
+                    "minimum": 0.01,
+                    "maximum": 9999,
+                    "multipleOf": 0.01
+                  },
+                  "targetWeightUnit": {
+                    "type": "string",
+                    "enum": [
+                      "lb",
+                      "kg"
+                    ]
+                  },
                   "setPlanIsFinite": {
                     "type": "boolean"
                   },
@@ -1008,6 +1021,19 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 999
+              },
+              "targetWeightPerSet": {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 9999,
+                "multipleOf": 0.01
+              },
+              "targetWeightUnit": {
+                "type": "string",
+                "enum": [
+                  "lb",
+                  "kg"
+                ]
               },
               "setPlanIsFinite": {
                 "type": "boolean"
