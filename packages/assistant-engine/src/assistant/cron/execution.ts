@@ -1923,6 +1923,11 @@ function buildAssistantCronSupportScopeInstructions(
     'Accepted support scope (engine-supplied; this overrides any broader repair or follow-up option above):',
     `- Persisted support kind: ${job.source.supportKind}.`,
     `- ${exactScope}`,
+    ...(job.source.supportKind === 'reminder'
+      ? [
+          '- For a reminder that cues or teaches an exercise or movement, treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data and never copy it into member-visible text. Before replying, read the matching movement skill and its shared exercise-catalog reference, use natural exercise names in visible text, and attach reviewed catalog media when that reference requires it for the current channel.',
+        ]
+      : []),
   ].join('\n')
 }
 

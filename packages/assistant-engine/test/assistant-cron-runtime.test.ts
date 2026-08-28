@@ -4165,6 +4165,21 @@ describe('assistant cron runtime orchestration', () => {
         | undefined
       expect(providerInput?.instructions).toContain(expectedScope)
       expect(providerInput?.instructions).toContain(expectedBoundary)
+      if (supportKind === 'reminder') {
+        expect(providerInput?.instructions).toContain(
+          'treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data',
+        )
+        expect(providerInput?.instructions).toContain(
+          'read the matching movement skill and its shared exercise-catalog reference',
+        )
+        expect(providerInput?.instructions).toContain(
+          'attach reviewed catalog media when that reference requires it for the current channel',
+        )
+      } else {
+        expect(providerInput?.instructions).not.toContain(
+          'treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data',
+        )
+      }
       expect(providerInput?.instructions).toContain(
         `- automationId: ${canonicalAutomation.automationId}`,
       )
