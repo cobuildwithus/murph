@@ -1,6 +1,6 @@
 # Remove duplicate hosted response attachment guard
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-28
 
@@ -79,3 +79,16 @@ Updated: 2026-08-28
   - Assistant-engine focused outbox test passed: 1 test, 127 skipped.
   - Hosted-execution and assistant-runtime package typechecks passed.
   - `git diff --check` passed.
+  - Preliminary `completion-specialists` ReviewGPT passed at
+    `5a33c26348b87b6f03f7cf9dacd9e357c28d6ed1` with no findings.
+  - Final ReviewGPT round 1 passed at the same immutable source head with no
+    qualifying findings.
+  - Required CI is blocked by a pre-existing failure in
+    `assistant-codex-group-tool.test.ts` (`advertises family-bounded schemas`):
+    the expected `participantTarget` key is absent. The exact focused command
+    `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-group-tool.test.ts -t "advertises family-bounded schemas"`
+    reproduced 1 failure with 97 skipped. This branch does not touch that
+    schema or test, and the owning correction remains isolated in another live
+    draft PR, so this task must not duplicate or cherry-pick it.
+  - `git merge-tree --write-tree HEAD origin/main` passed at the unchanged base.
+Completed: 2026-08-28
