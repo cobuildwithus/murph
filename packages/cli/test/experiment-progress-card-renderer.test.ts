@@ -15,13 +15,52 @@ import {
 } from "@murphai/core";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import sharp from "sharp";
-import { test } from "vitest";
+import { afterEach, test, vi } from "vitest";
+
+const progressCardFsMock = vi.hoisted(() => ({
+  failTempRemoval: false,
+  failTempWrite: false,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      if (
+        progressCardFsMock.failTempRemoval &&
+        /(?:^|[\\/])murph-progress-card-[^\\/]+$/u.test(String(args[0]))
+      ) {
+        throw Object.assign(new Error("private temp removal failure"), {
+          code: "EACCES",
+        });
+      }
+      return await actual.rm(...args);
+    },
+    writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+      if (
+        progressCardFsMock.failTempWrite &&
+        String(args[0]).includes("murph-progress-card-")
+      ) {
+        throw Object.assign(new Error("private temp write failure"), {
+          code: "EACCES",
+        });
+      }
+      return await actual.writeFile(...args);
+    },
+  };
+});
 
 import {
   buildExperimentProgressCardSvg,
   renderAndSaveExperimentProgressCard,
 } from "../src/commands/experiment-progress-card-image.js";
 import { MURPH_LOGO_SVG } from "../src/commands/murph-logo-svg.js";
+
+afterEach(() => {
+  progressCardFsMock.failTempRemoval = false;
+  progressCardFsMock.failTempWrite = false;
+});
 
 const CARD = experimentProgressCardSchema.parse({
   v: 2,
@@ -414,6 +453,91 @@ test("progress-card persistence reports a stable integrity stage without exposin
       assert.equal(encoded.includes(forbidden), false, forbidden);
     }
   } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("progress-card cleanup failure explains deterministic recovery after persistence", async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-progress-card-cleanup-recovery-"),
+  );
+  const input = {
+    card: CARD,
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFS",
+    vaultRoot,
+  };
+  try {
+    await initializeVault({ vaultRoot });
+    progressCardFsMock.failTempRemoval = true;
+
+    let captured: unknown;
+    try {
+      await renderAndSaveExperimentProgressCard(input);
+    } catch (error) {
+      captured = error;
+    }
+
+    assert.ok(captured instanceof VaultCliError);
+    assert.equal(captured.code, "progress_card_cleanup_failed");
+    assert.equal(captured.context?.stage, "filesystem");
+    assert.equal(captured.context?.retryable, true);
+    assert.match(captured.message, /was saved/u);
+    assert.match(captured.message, /same command again/u);
+    assert.doesNotMatch(captured.message, /private temp removal failure/u);
+    assert.equal(captured.message.includes(vaultRoot), false);
+
+    progressCardFsMock.failTempRemoval = false;
+    const recovered = await renderAndSaveExperimentProgressCard(input);
+    const lookup = await findCaptureByLookup({
+      lookupKey:
+        `murph.experiment-progress-card.capture.v1:${input.experimentId}:${CARD.asOf}:${recovered.sha256}`,
+      vaultRoot,
+    });
+    assert.equal(lookup.status, "live");
+    if (lookup.status !== "live") {
+      assert.fail("expected the saved progress card to remain recoverable");
+    }
+    assert.equal(recovered.ref, lookup.attachmentRef);
+  } finally {
+    progressCardFsMock.failTempRemoval = false;
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("progress-card cleanup failure does not replace a pre-persistence failure", async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-progress-card-primary-failure-"),
+  );
+  try {
+    await initializeVault({ vaultRoot });
+    progressCardFsMock.failTempWrite = true;
+    progressCardFsMock.failTempRemoval = true;
+
+    let captured: unknown;
+    try {
+      await renderAndSaveExperimentProgressCard({
+        card: CARD,
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFT",
+        vaultRoot,
+      });
+    } catch (error) {
+      captured = error;
+    }
+
+    assert.ok(captured instanceof VaultCliError);
+    assert.equal(captured.code, "permission_denied");
+    assert.notEqual(captured.code, "progress_card_cleanup_failed");
+    assert.equal(captured.context?.stage, "filesystem");
+    assert.equal(captured.context?.retryable, false);
+    const encoded = JSON.stringify({
+      context: captured.context,
+      message: captured.message,
+    });
+    assert.doesNotMatch(encoded, /private temp write failure|private temp removal failure/u);
+    assert.equal(encoded.includes(vaultRoot), false);
+  } finally {
+    progressCardFsMock.failTempRemoval = false;
+    progressCardFsMock.failTempWrite = false;
     await rm(vaultRoot, { force: true, recursive: true });
   }
 });

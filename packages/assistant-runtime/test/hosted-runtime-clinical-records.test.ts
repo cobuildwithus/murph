@@ -145,10 +145,13 @@ describe("hosted clinical records maintenance", () => {
 
   it("resumes repeated resource types as independent query slices after preemption", async () => {
     const queryRun = createQueryRun(["observation-labs", "observation-vitals"]);
-    const fetchPage = vi.fn().mockResolvedValue({
-      body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
-      nextCursor: null,
-      status: "page",
+    const fetchPage = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return {
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: null,
+        status: "page" as const,
+      };
     });
     const importSnapshot = vi.fn().mockResolvedValue({
       canonical: {

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import type { JsonObject } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { toVaultCliFilesystemError } from './usecases/vault-usecase-helpers.js'
 
 export const inputFileOptionSchema = z
   .string()
@@ -73,10 +74,17 @@ export async function loadTextInput(
   try {
     return await readFile(filePath, 'utf8')
   } catch (error) {
+    const mapped = toVaultCliFilesystemError(error, {
+      message: `Failed to read ${label} file.`,
+      fieldPath: 'file',
+    })
+    if (mapped !== error) {
+      throw mapped
+    }
     throw new VaultCliError(
       'command_failed',
       `Failed to read ${label} file.`,
-      { cause: error instanceof Error ? error.message : String(error) },
+      { retryable: false, stage: 'filesystem' },
     )
   }
 }
@@ -101,9 +109,13 @@ async function readStdinText(
     }
   } catch (error) {
     throw new VaultCliError(
-      'command_failed',
+      'stdin_read_failed',
       `Failed to read ${label} from stdin.`,
-      { cause: error instanceof Error ? error.message : String(error) },
+      {
+        retryable: false,
+        stage: 'read',
+        hint: options?.stdinHint ?? 'Pass --input @file or pipe text to --input -.',
+      },
     )
   }
 
@@ -123,9 +135,11 @@ function missingStdinError(
   },
 ) {
   return new VaultCliError(
-    'command_failed',
+    'invalid_payload',
     `No ${label} was piped to stdin.`,
     {
+      retryable: false,
+      stage: 'validation',
       hint: options?.stdinHint ?? 'Pass --input @file or pipe text to --input -.',
     },
   )

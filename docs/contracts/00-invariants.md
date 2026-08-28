@@ -90,9 +90,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   publish, clear, reserve, or replace a newer process.
   Speculative preparation never evicts a healthy claimable resident with another
   launch identity; only authoritative foreground acquisition may replace it.
-- Prompts, session/thread/turn ids, delivery routes, and invocation-scoped
-  automation or device authority are request facts, not App Server launch
-  identity or ambient child-process authority. Expose invocation-scoped
+- Prompts, session/thread/turn ids, working directories, thread capability
+  configuration, delivery routes, and invocation-scoped automation or device
+  authority are request facts, not App Server launch identity or ambient
+  child-process authority. Apply thread capability configuration on both start
+  and resume. Expose invocation-scoped
   authority only through narrow typed tools on the current root turn; keep it
   out of the App Server and descendant shell environments.
 - No user-promised work may be owned only by App Server or descendant process

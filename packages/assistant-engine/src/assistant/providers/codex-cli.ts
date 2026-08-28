@@ -30,9 +30,9 @@ import {
 } from '../bindings.js'
 import {
   extractCodexAssistantProviderUsage,
-  mergeCodexConfigOverrides,
   resolveAssistantProviderFlatPromptConversationHistorySection,
   resolveAssistantProviderPrompt,
+  resolveCodexModelProviderConfigOverrides,
 } from './helpers.js'
 import {
   supportsAnyAssistantRichUserMessageContent,
@@ -158,10 +158,8 @@ export const CODEX_ASSISTANT_CAPABILITIES: AssistantProviderCapabilities = {
 
 type CodexAssistantProcessPreparationInput = Pick<
   AssistantProviderTurnExecutionInput,
-  | 'codexConfigOverrides'
   | 'env'
   | 'providerConfig'
-  | 'showThinkingTraces'
   | 'workingDirectory'
 >
 
@@ -261,7 +259,7 @@ export async function executeCodexAssistantTurnAttempt(
     onboardingFirstReadCompletionTransitionAvailable:
       input.onboardingFirstReadCompletionTransitionAvailable ?? false,
     publicInternetFetch: input.publicInternetFetch ?? null,
-    threadConfig: input.codexThreadConfig ?? null,
+    threadConfig: resolveCodexAssistantThreadConfig(input),
     trustedContextReferences: input.trustedContextReferences ?? null,
     onFirstAssistantResponseCompleted:
       input.activeTurnSteering
@@ -579,23 +577,37 @@ function resolveCodexAssistantProcessLaunchInput(
   input: CodexAssistantProcessPreparationInput,
 ): CodexAssistantProcessLaunchInput {
   const providerConfig = input.providerConfig
-  const configOverrides = [
-    ...(mergeCodexConfigOverrides({
-      modelProvider: providerConfig.target.modelProvider,
-      showThinkingTraces: input.showThinkingTraces ?? false,
-    }) ?? []),
-    ...(input.codexConfigOverrides ?? []),
-  ]
+  const configOverrides = resolveCodexModelProviderConfigOverrides(
+    providerConfig.target.modelProvider,
+  )
 
   return {
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
-    configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
+    configOverrides,
     env: prepareCodexProcessEnv(input.env ?? process.env),
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
     workingDirectory: input.workingDirectory,
   }
+}
+
+function resolveCodexAssistantThreadConfig(
+  input: Pick<
+    AssistantProviderTurnExecutionInput,
+    'codexThreadConfig' | 'showThinkingTraces'
+  >,
+): Readonly<Record<string, unknown>> | null {
+  const config = {
+    ...(input.codexThreadConfig ?? {}),
+    ...(input.showThinkingTraces
+      ? {
+          hide_agent_reasoning: false,
+          model_reasoning_summary: 'auto',
+        }
+      : {}),
+  }
+  return Object.keys(config).length > 0 ? config : null
 }
 
 function prepareCodexProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

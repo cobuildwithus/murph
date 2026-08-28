@@ -11,9 +11,11 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
+  acquireHostedLinqChatOwnershipLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   claimHostedLinqProactiveConversationCapacityTx: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
+  finalizeHostedMemberActivationLinqRouteTx: vi.fn(),
   listHostedLinqAssignableHomeLines: vi.fn(),
   readHostedLinqIncomingLineState: vi.fn(),
   readHostedLinqRecentMessageEffectCountsTx: vi.fn(),
@@ -25,9 +27,16 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   acquireHostedMemberHomeLinqRouteLockTx: mocks.acquireHostedMemberHomeLinqRouteLockTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
+  finalizeHostedMemberActivationLinqRouteTx:
+    mocks.finalizeHostedMemberActivationLinqRouteTx,
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
   upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx: mocks.upsertHostedMemberHomeLinqRecipientPhoneTx,
+}));
+
+vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
+  acquireHostedLinqChatOwnershipLockTx:
+    mocks.acquireHostedLinqChatOwnershipLockTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-planning-load", () => ({
@@ -102,6 +111,7 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acquireHostedLinqChatOwnershipLockTx.mockResolvedValue(undefined);
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(null);
     mocks.readHostedMemberRoutingState.mockResolvedValue(buildMaterializationRouting());
@@ -120,6 +130,10 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     })).resolves.toEqual({ kind: "materialized" });
 
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenCalledWith({
+      chatId: linqChatId,
+      tx: prisma,
+    });
     expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledWith({
       memberId,
       prisma,
@@ -138,6 +152,9 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
       prisma,
       recipientPhone: fromPhoneNumber,
     });
+    expect(
+      mocks.acquireHostedLinqChatOwnershipLockTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(prisma.$queryRaw.mock.invocationCallOrder[0]);
     expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
     );
@@ -622,6 +639,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
     mocks.readHostedLinqIncomingLineState.mockResolvedValue({ kind: "unmanaged" });
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+    mocks.finalizeHostedMemberActivationLinqRouteTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
   });
@@ -652,9 +670,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
-      clearPending: true,
-      linqChatId: "chat_home",
+    expect(mocks.finalizeHostedMemberActivationLinqRouteTx).toHaveBeenCalledWith({
+      chatId: "chat_home",
+      kind: "home",
       memberId: "member_123",
       participantContact: {
         kind: "phone",
@@ -914,9 +932,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       prisma: {} as never,
     });
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
-      clearPending: true,
-      linqChatId: "chat_pending",
+    expect(mocks.finalizeHostedMemberActivationLinqRouteTx).toHaveBeenCalledWith({
+      chatId: "chat_pending",
+      kind: "pending",
       memberId: "member_123",
       participantContact: {
         kind: "phone",
@@ -982,9 +1000,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       prisma: {} as never,
     });
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
-      clearPending: true,
-      linqChatId: "chat_pending_email",
+    expect(mocks.finalizeHostedMemberActivationLinqRouteTx).toHaveBeenCalledWith({
+      chatId: "chat_pending_email",
+      kind: "pending",
       memberId: "member_123",
       participantContact: {
         kind: "email",
@@ -1023,9 +1041,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       prisma: {} as never,
     });
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
-      clearPending: true,
-      linqChatId: "chat_pending",
+    expect(mocks.finalizeHostedMemberActivationLinqRouteTx).toHaveBeenCalledWith({
+      chatId: "chat_pending",
+      kind: "pending",
       memberId: "member_123",
       participantContact: {
         kind: "phone",
@@ -1059,9 +1077,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     // The pending route must promote, not be cleared by a bare recipient
     // write that drops the pending chat.
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
-      clearPending: true,
-      linqChatId: "chat_pending",
+    expect(mocks.finalizeHostedMemberActivationLinqRouteTx).toHaveBeenCalledWith({
+      chatId: "chat_pending",
+      kind: "pending",
       memberId: "member_123",
       participantContact: {
         kind: "phone",
@@ -1100,9 +1118,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     // does not read the pool or claim new capacity.
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
-      clearPending: true,
-      linqChatId: "chat_pending",
+    expect(mocks.finalizeHostedMemberActivationLinqRouteTx).toHaveBeenCalledWith({
+      chatId: "chat_pending",
+      kind: "pending",
       memberId: "member_123",
       participantContact: {
         kind: "phone",

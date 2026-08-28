@@ -115,6 +115,11 @@ export interface HostedWorkspaceRuntimeRestoreResult
   restoreTiming: HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | null;
 }
 
+export type HostedWorkspaceRuntimeRestorePlatform = Pick<
+  HostedRuntimePlatform,
+  "artifactStore" | "logPort" | "workspaceSnapshotPort"
+>;
+
 export type HostedWorkspaceWarmIdleCheckpointOpenResult =
   | {
       ok: true;
@@ -137,7 +142,7 @@ export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
 
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   logContext?: HostedRuntimeLogContext | null;
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   signal?: AbortSignal | null;
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
@@ -461,7 +466,7 @@ interface HostedWorkspaceCleanCheckpointReceiptMarkerFields {
 
 async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
   logContext: HostedRuntimeLogContext | null;
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   restored: HostedRestoredExecutionContext;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
   workspace: HostedWorkspaceState | null;
@@ -1016,7 +1021,7 @@ async function restoreHostedWorkspaceRuntimeHotLayer(input: {
   hotSnapshotRef: HostedExecutionBundleRef;
   input: {
     logContext?: HostedRuntimeLogContext | null;
-    platform: HostedRuntimePlatform;
+    platform: HostedWorkspaceRuntimeRestorePlatform;
   };
   restored: HostedRestoredExecutionContext;
 }): Promise<Uint8Array | ArrayBuffer> {
@@ -1041,7 +1046,7 @@ async function restoreHostedWorkspaceRuntimeHotLayer(input: {
 
 function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
   materializedArtifactPaths: Set<string>;
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   readBundles: readonly (() => Promise<Uint8Array | ArrayBuffer | null>)[];
   restored: HostedRestoredExecutionContext;
 }): HostedWorkspaceArtifactMaterializer {
@@ -1058,7 +1063,7 @@ function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
 
 async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
 }): Promise<number> {
@@ -1116,7 +1121,7 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
 }
 
 async function readHostedCanonicalWritePayloadForRestore(input: {
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   ref: HostedCanonicalWriteReceiptContentRef;
 }): Promise<Uint8Array | ArrayBuffer | null> {
   return await input.platform.artifactStore.get(input.ref.sha256, {
@@ -1428,7 +1433,7 @@ function resolveHostedWorkspaceCleanCheckpointMarkerPath(vaultRoot: string): str
 async function restoreHostedWorkspaceRuntimeBundle(input: {
   appendSkippedInlineFiles?: boolean;
   bundle?: Uint8Array | ArrayBuffer | null;
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   ref: HostedExecutionBundleRef;
   restored: HostedRestoredExecutionContext;
   trackSkippedInlineFiles: boolean;
@@ -1517,7 +1522,7 @@ async function appendHostedWorkspaceSkippedInlineFiles(input: {
 }
 
 async function readHostedWorkspaceRuntimeBundle(input: {
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   ref: HostedExecutionBundleRef;
 }): Promise<Uint8Array | ArrayBuffer> {
   const bundle = await input.platform.artifactStore.get(input.ref.hash, {

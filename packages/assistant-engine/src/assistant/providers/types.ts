@@ -113,6 +113,7 @@ export interface AssistantProviderRequestStartedEvent
 export interface AssistantProviderFinishWithoutReplyAcceptedEvent {
   deliveryContextOrdinal: number
   messageReactionPending: boolean
+  precedingReplyDeliveryContextOrdinal: number | null
 }
 
 /**
@@ -148,7 +149,6 @@ export interface AssistantProviderTurn {
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
-  codexConfigOverrides?: readonly string[] | null
   codexThreadConfig?: Readonly<Record<string, unknown>> | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null

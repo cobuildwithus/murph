@@ -1964,13 +1964,22 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
   signal: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedWorkspaceRunnerAssistantInputBatch | null> {
-  const foregroundReplyDeferredForImmediateAssistantWork =
+  const foregroundReplyDeferredForLocalRerun =
     input.assistantPhaseResult.foregroundReplyFailed === undefined
-    && input.assistantPhaseResult.nextWakeReason === "assistant"
-    && typeof input.assistantPhaseResult.nextWakeAt === "string"
-    && hostedWorkspaceRunnerWakeIsImmediate(
-      input.assistantPhaseResult.nextWakeAt,
-      input.now,
+    && (
+      (
+        input.latestAssistantInputBatch === null
+        && input.assistantPhaseResult
+          .afterCheckpointKeepsForegroundImportLoop === true
+      )
+      || (
+        input.assistantPhaseResult.nextWakeReason === "assistant"
+        && typeof input.assistantPhaseResult.nextWakeAt === "string"
+        && hostedWorkspaceRunnerWakeIsImmediate(
+          input.assistantPhaseResult.nextWakeAt,
+          input.now,
+        )
+      )
     );
   const foregroundReplyCompletedCleanly =
     input.assistantPhaseResult.foregroundReplyFailed === 0;
@@ -1978,7 +1987,7 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
     input.acceptedInitialAssistantInputBatch === null
     || input.assistantPhaseResult.progressed !== true
     || (
-      !foregroundReplyDeferredForImmediateAssistantWork
+      !foregroundReplyDeferredForLocalRerun
       && !foregroundReplyCompletedCleanly
     )
     || input.selectedInitialAssistantInputIds.length === 0
@@ -1999,16 +2008,16 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
   const pendingSelectedInputIds = input.selectedInitialAssistantInputIds.filter(
     (inputId) => pendingInputIds.has(inputId),
   );
-  // Bounded assistant-owned system work can make durable progress and yield an
-  // immediate wake before the foreground reply phase starts. In that case every
-  // selected input is still pending and must be restored to the invocation-local
-  // rerun batch. Once a reply phase has run, retain the narrower handled-prefix
-  // repair behavior below.
+  // Foreground-causal system work can checkpoint before the foreground reply
+  // starts while deliberately retaining its import loop. With no distinct
+  // boundary tail, the still-pending selection must remain invocation-local
+  // even when the next owner wake is for model-free work. Once a reply phase
+  // has run, retain the narrower handled-prefix repair behavior below.
   if (
     pendingSelectedInputIds.length === 0
     || (
       pendingSelectedInputIds.length === input.selectedInitialAssistantInputIds.length
-      && !foregroundReplyDeferredForImmediateAssistantWork
+      && !foregroundReplyDeferredForLocalRerun
     )
   ) {
     return input.latestAssistantInputBatch;

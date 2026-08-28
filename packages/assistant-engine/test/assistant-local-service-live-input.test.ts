@@ -360,6 +360,143 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   assert.equal(steeredResult.response, 'final after late input')
 })
 
+test('sendAssistantMessageLocal delivers the earlier answer once when a pre-cutoff acknowledgement settles late', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: true,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const acknowledgementAdmissionStarted = createDeferred<void>()
+  const releaseAcknowledgementAdmission = createDeferred<void>()
+  const acknowledgementSteered = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+  const noReplyAccepted = vi.fn()
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-thread-acknowledgement',
+      providerTurnId: 'provider-turn-acknowledgement',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+        acknowledgementSteered.resolve()
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await acknowledgementAdmissionStarted.promise
+    providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+    releaseAcknowledgementAdmission.resolve()
+    await acknowledgementSteered.promise
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 1,
+      messageReactionPending: false,
+      precedingReplyDeliveryContextOrdinal: 0,
+    })
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        acceptedNoReplyDeliveryContextOrdinals: [1],
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-acknowledgement',
+        finalAction: { kind: 'none' },
+        precedingResponseSegments: [{
+          deliveryContextOrdinal: 0,
+          media: [],
+          response: 'Earlier useful answer.',
+        }],
+        response: '',
+        responseDeliveryContextOrdinal: 1,
+        route: {
+          routeId: 'route-acknowledgement',
+        },
+        session,
+        transcriptResponse: null,
+      },
+    }
+  })
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      expect(acceptedInputs).toEqual([
+        expect.objectContaining({
+          promptFallbackText: 'Thanks, that answered it—no need to reply.',
+        }),
+      ])
+      acknowledgementAdmissionStarted.resolve()
+      await releaseAcknowledgementAdmission.promise
+    },
+    deliverResponse: true,
+    onFinishWithoutReplyAccepted: noReplyAccepted,
+    prompt: 'Initial question',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const acknowledgementResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      directness: 'direct',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Thanks, that answered it—no need to reply.',
+    vault: '/vaults/test',
+  })
+
+  const [initialResult, acknowledgementResult] = await Promise.all([
+    initialResultPromise,
+    acknowledgementResultPromise,
+  ])
+
+  expect(liveSteeredPrompts).toEqual([
+    'Thanks, that answered it—no need to reply.',
+  ])
+  expect(initialResult).toMatchObject({
+    response: '',
+    responseDisposition: 'none',
+  })
+  expect(acknowledgementResult).toMatchObject({
+    response: '',
+    responseDisposition: 'none',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  expect(noReplyAccepted).toHaveBeenCalledWith({
+    acceptedInputIds: ['manual-1'],
+    deliveryContextOrdinal: 1,
+    messageReactionPending: false,
+    precedingReplyDeliveryContextOrdinal: 0,
+  })
+  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledOnce()
+  expect(
+    mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments,
+  ).toEqual([
+    expect.objectContaining({
+      response: 'Earlier useful answer.',
+    }),
+  ])
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+})
+
 test('sendAssistantMessageLocal leaves an acknowledged uncovered steer pending after provider success', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-uncovered-steer-',
@@ -3709,6 +3846,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: true,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         kind: 'succeeded',
@@ -3762,6 +3900,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     acceptedInputIds: ['initial', 'manual-1'],
     deliveryContextOrdinal: 1,
     messageReactionPending: true,
+    precedingReplyDeliveryContextOrdinal: null,
   })
   expect(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
@@ -3789,6 +3928,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       abortedSilenceDraftReady.resolve()
       return {
@@ -3844,6 +3984,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       quietSilenceDraftReady.resolve()
       return {
@@ -3929,6 +4070,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         acceptedNoReplyDeliveryContextOrdinals: [0],
@@ -3988,6 +4130,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         acceptedNoReplyDeliveryContextOrdinals: [0],
@@ -4282,6 +4425,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         kind: 'succeeded',
