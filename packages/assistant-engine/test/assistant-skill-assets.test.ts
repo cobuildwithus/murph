@@ -1581,6 +1581,12 @@ describe('assistant skill assets', () => {
       'vault-cli exercise show <id-or-slug>\n   --format json',
     )
     expect(compactCatalog).toContain(
+      'Returned ids, slugs, and `exercise_catalog:*` source values are tool-routing data, not member-facing labels.',
+    )
+    expect(compactCatalog).toContain(
+      'never append a catalog id in parentheses or expose a source token.',
+    )
+    expect(compactCatalog).toContain(
       'Decide likely familiarity per movement from the current conversation and durable context.',
     )
     expect(compactCatalog).toContain(
@@ -1632,13 +1638,22 @@ describe('assistant skill assets', () => {
       'do not pad a short plan to sound more substantial.',
     )
     expect(compactCatalog).toContain(
-      'Exercise images are optional, but use them when available and helpful',
+      'Exercise images are optional generally, but use them when available and helpful',
     )
     expect(compactCatalog).toContain(
       'especially for unfamiliar or technique-sensitive movements',
     )
     expect(compactCatalog).toContain(
       'Choose the smallest useful set and keep the complete response at eight images or fewer.',
+    )
+    expect(compactCatalog).toContain(
+      'a just-in-time scheduled movement instruction or an explicit request to see the exercise must attach the smallest useful returned catalog image set with `murph.attach_response_media` when one exists.',
+    )
+    expect(compactCatalog).toContain(
+      'A request for a missing exercise picture is a presentation repair, not a request for a newly generated substitute.',
+    )
+    expect(compactCatalog).toContain(
+      'Do not call `murph.generate_image` for that repair or as a substitute for useful catalog media unless the user explicitly asks for a new or custom image.',
     )
     expect(compactCatalog).toContain(
       'Construct its source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`',

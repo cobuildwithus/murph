@@ -3463,6 +3463,172 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps exercise catalog ids private and repairs missing Linq media without generation',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-linq-exercise-media-repair-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          dynamicTools: [
+            MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+            MURPH_GENERATE_IMAGE_TOOL,
+          ],
+          env: {
+            ...config.env,
+            OPENAI_API_KEY: '',
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const scheduled = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({
+              channel: 'linq',
+              scheduledOccurrenceAt: '2026-08-12T11:30:00.000Z',
+            }),
+            exerciseGuidance,
+          ].join('\n\n'),
+          prompt: [
+            'Teach the saved one-movement doorway stretch routine now.',
+            'Use 8 repetitions over 60 seconds and stop if pain increases.',
+            'Use the reviewed catalog picture when it helps show the setup.',
+          ].join(' '),
+        })
+        const scheduledDecision = parseAssistantNotificationDecision(
+          scheduled.finalMessage,
+        )
+        expect(scheduledDecision.kind).toBe('send_message')
+        if (scheduledDecision.kind !== 'send_message') {
+          throw new Error('Expected the scheduled exercise cue to send.')
+        }
+
+        const repaired = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({
+              channel: 'linq',
+            }),
+            exerciseGuidance,
+          ].join('\n\n'),
+          prompt: [
+            'Recent conversation history for context only; do not answer these prior messages:',
+            'Assistant: Doorway stretch — 8 comfortable repetitions over 60 seconds. Stop if pain increases.',
+            '',
+            'User message:',
+            'The exercise picture is missing. Please show it.',
+          ].join('\n'),
+        })
+
+        const journeys = [
+          {
+            actions: readCapabilityRoutingActions(scheduled.jsonEvents),
+            label: 'scheduled cue',
+            media: scheduled.responseMedia,
+            text: scheduledDecision.text,
+          },
+          {
+            actions: readCapabilityRoutingActions(repaired.jsonEvents),
+            label: 'missing-media repair',
+            media: repaired.responseMedia,
+            text: repaired.finalMessage,
+          },
+        ]
+
+        process.stdout.write(
+          `[linq-exercise-media-repair-e2e] ${JSON.stringify({
+            repairReply: repaired.finalMessage,
+            scheduledReply: scheduledDecision.text,
+          })}\n`,
+        )
+
+        for (const journey of journeys) {
+          const showAction = journey.actions.find((action) =>
+            action.kind === 'command'
+            && /vault-cli exercise show (?:doorway-stretch|ST170) --format json/iu
+              .test(action.command)
+          )
+          const dynamicActions = journey.actions.filter((action) =>
+            action.kind === 'dynamic'
+          )
+          const mediaCalls = dynamicActions.filter((action) =>
+            action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+          )
+          const generationCalls = dynamicActions.filter((action) =>
+            action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+          )
+
+          expect(showAction, `${journey.label} catalog show`).toBeDefined()
+          expect(mediaCalls, `${journey.label} media calls`).toHaveLength(1)
+          expect(
+            mediaCalls[0]?.argumentsValue,
+            `${journey.label} exact catalog media`,
+          ).toMatchObject({
+            media: [{
+              alt: 'Person with a forearm resting on a door frame.',
+              source: 'exercise_catalog:ST170:1',
+              url: 'https://cdn.example.test/doorway-stretch.png',
+            }],
+          })
+          expect(
+            generationCalls,
+            `${journey.label} generated substitutes`,
+          ).toEqual([])
+          expect(
+            showAction?.eventIndex,
+            `${journey.label} lookup before attachment`,
+          ).toBeLessThan(mediaCalls[0]?.eventIndex ?? -1)
+          expect(journey.media, `${journey.label} delivered media`).toEqual([
+            expect.objectContaining({
+              alt: 'Person with a forearm resting on a door frame.',
+              source: 'exercise_catalog:ST170:1',
+              url: 'https://cdn.example.test/doorway-stretch.png',
+            }),
+          ])
+          expect(journey.text, `${journey.label} natural exercise name`).toMatch(
+            /doorway|stretch/iu,
+          )
+          expect(journey.text, `${journey.label} internal catalog data`).not.toMatch(
+            /ST170|doorway-stretch|exercise_catalog/iu,
+          )
+        }
+        expect(scheduledDecision.text).toMatch(/8/iu)
+        expect(scheduledDecision.text).toMatch(/60|minute/iu)
+        expect(scheduledDecision.text).toMatch(/pain/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps phase-grouped Telegram movements through bounded card repair',
     async () => {
       const config = await resolveRealCodexE2eConfig()

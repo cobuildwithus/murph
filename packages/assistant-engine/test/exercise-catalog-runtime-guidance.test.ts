@@ -26,7 +26,16 @@ describe('exercise catalog runtime guidance', () => {
       'A missing catalog match must never block, rename, merge, omit, or substitute a member-supplied exercise in the workout.',
     )
     expect(compact).toContain(
-      'Exercise images are optional, but use them when available and helpful, especially for unfamiliar or technique-sensitive movements.',
+      'Exercise images are optional generally, but use them when available and helpful, especially for unfamiliar or technique-sensitive movements.',
+    )
+    expect(compact).toContain(
+      'a just-in-time scheduled movement instruction or an explicit request to see the exercise must attach the smallest useful returned catalog image set with `murph.attach_response_media` when one exists.',
+    )
+    expect(compact).toContain(
+      'A request for a missing exercise picture is a presentation repair, not a request for a newly generated substitute.',
+    )
+    expect(compact).toContain(
+      'never append a catalog id in parentheses or expose a source token.',
     )
     expect(compact).toContain(
       'Choose the smallest useful set and keep the complete response at eight images or fewer.',
