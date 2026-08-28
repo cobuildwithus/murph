@@ -2561,15 +2561,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         return true;
       };
       const consumeForegroundWake = (): boolean => {
-        if (foregroundWakeObserved) {
-          return true;
-        }
-        return observeForegroundWake(
+        const pendingWakeObserved = observeForegroundWake(
           consumePendingRuntimeWakeUnlessShuttingDown({
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
             shutdownSignal: options.shutdownSignal ?? null,
           }),
         );
+        return pendingWakeObserved || foregroundWakeObserved;
       };
       const shouldYieldSystemMailboxWork = (): boolean =>
         consumeForegroundWake()
@@ -2607,7 +2605,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ...extraCandidates,
       ]);
       const finishInitialImportEffectsOnce = async () => {
-        if (!checkpointed) {
+        if (!checkpointed || shouldYieldSystemMailboxWork()) {
           return;
         }
         if (!initialMailboxImportPostCheckpointEffectsFinished) {

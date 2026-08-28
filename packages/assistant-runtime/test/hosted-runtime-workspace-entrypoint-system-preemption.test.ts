@@ -1146,6 +1146,108 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
+  test("checkpoint-reported foreground input defers initial mailbox enrichment", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItem = createMailboxItem({
+      dedupeKey: "meal-photo:preempt-initial-enrichment",
+      id: "mailbox_item_system_mailbox_preempt_initial_enrichment",
+      kind: "meal-photo.captured",
+      lane: "system",
+      laneSeq: "1",
+    });
+    let enrichmentCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-preempt-initial-enrichment.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_preempt_initial_enrichment",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-preempt-initial-enrichment-after.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return {
+              afterCheckpoint: async () => {
+                enrichmentCalls += 1;
+                return {
+                  attachmentEvidenceUpdated: null,
+                  kind: "meal_photo_cleanup" as const,
+                  projectionUpdated: null,
+                  reasonCode: "meal_photo.deleted",
+                  status: "succeeded" as const,
+                };
+              },
+              reasonCode: "meal_photo.imported",
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            mailboxPort: createMailboxPort({ events, items: [mailboxItem] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointResponse(request) {
+                runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+                return {
+                  checkpointed: true,
+                  conversationInputAhead: true,
+                  workspace: createWorkspaceState({
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  }),
+                };
+              },
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            throw new Error("System mailbox mode must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(enrichmentCalls, 0);
+      assert.equal(checkpointRequests.length, 1);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("exact wake interrupts dirty acknowledgement and a later system pass resumes it", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
