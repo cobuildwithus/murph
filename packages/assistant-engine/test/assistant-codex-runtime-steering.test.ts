@@ -54,6 +54,7 @@ describe('steered final segments', () => {
         event: Record<string, unknown>
       }
     | {
+        deferResponse?: boolean
         expectedSuccess?: boolean
         expectedText: string
         id: number
@@ -229,7 +230,7 @@ describe('steered final segments', () => {
 
       queueMicrotask(() => {
         void (async () => {
-          const deferredCardResponses: Promise<unknown>[] = []
+          const deferredToolResponses: Promise<unknown>[] = []
           const initialize = await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
@@ -295,7 +296,7 @@ describe('steered final segments', () => {
                 },
               })
               if (step.deferResponse === true) {
-                deferredCardResponses.push(responseAssertion)
+                deferredToolResponses.push(responseAssertion)
               } else {
                 await responseAssertion
               }
@@ -315,7 +316,9 @@ describe('steered final segments', () => {
                   turnId: 'turn-steered-finals',
                 },
               }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+              const responseAssertion = expect(
+                waitForRpcResponse(child, step.id),
+              ).resolves.toEqual({
                 id: step.id,
                 result: {
                   success: step.expectedSuccess ?? true,
@@ -327,6 +330,11 @@ describe('steered final segments', () => {
                   ],
                 },
               })
+              if (step.deferResponse === true) {
+                deferredToolResponses.push(responseAssertion)
+              } else {
+                await responseAssertion
+              }
               continue
             }
 
@@ -541,7 +549,7 @@ describe('steered final segments', () => {
             child.stdout.write(jsonLine(normalizeScriptedSteeredFinalEvent(step)))
           }
 
-          await Promise.all(deferredCardResponses)
+          await Promise.all(deferredToolResponses)
 
           child.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -1351,6 +1359,64 @@ describe('steered final segments', () => {
       expect(result.providerAuthoredFinalMessage).toBe('Latest-context answer.')
     },
   )
+
+  it('rejects in-flight response media after accepted input advances', async () => {
+    const executionStarted = createDeferred<void>()
+    const releaseExecution = createDeferred<void>()
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-before-in-flight-media',
+        type: 'user_message',
+        message: 'Attach the image to this answer',
+      }),
+      {
+        deferResponse: true,
+        expectedSuccess: false,
+        expectedText: 'response media unavailable for this final response',
+        id: 862,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Old-context image',
+          source: 'old-context',
+          url: 'https://cdn.example.test/assistant/old-context.png',
+        }],
+      },
+      completedItemEvent({
+        id: 'user-after-in-flight-media',
+        type: 'user_message',
+        message: 'Answer this newer request without that image',
+      }),
+      {
+        kind: 'callback',
+        run: async () => {
+          await executionStarted.promise
+          await Promise.resolve()
+          releaseExecution.resolve()
+        },
+      },
+      completedItemEvent({
+        id: 'assistant-after-in-flight-media',
+        type: 'assistant_message',
+        message: 'Latest-context answer without old media.',
+      }),
+    ], {
+      hostedToolContext: createHostedToolContext({
+        beforeToolExecution: async (deliveryContextOrdinal) => {
+          expect(deliveryContextOrdinal).toBe(0)
+          executionStarted.resolve()
+          await releaseExecution.promise
+        },
+      }),
+    })
+
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.finalMessage).toBe('Latest-context answer without old media.')
+    expect(result.providerAuthoredFinalMessage).toBe(
+      'Latest-context answer without old media.',
+    )
+  })
 
   it('keeps independent last-successful reply and reaction targets per steered segment', async () => {
     const firstReplyRef = `ain_${'1'.repeat(32)}`
@@ -2399,7 +2465,7 @@ describe('steered final segments', () => {
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
-  it('rejects a later no-reply while an earlier steered answer is still pending', async () => {
+  it('accepts a later no-reply while preserving an earlier pending answer', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-1',
@@ -2419,19 +2485,22 @@ describe('steered final segments', () => {
       {
         kind: 'finish-without-reply',
         id: 74,
-        expectedSuccess: false,
-        expectedText: 'finish_without_reply unavailable after assistant output',
+        expectedText: 'finished without reply',
       },
     ])
 
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
-    expect(result.finalMessage).toBe('Answer one.')
-    expect(result.finalAction).toBeNull()
-    expect(result.finalActionExplicit).toBe(false)
-    expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
+    expect(result.finalMessage).toBe('')
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalActionExplicit).toBe(true)
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      response: 'Answer one.',
+    }])
   })
 
-  it('rejects a later no-reply after an earlier steered answer was promoted', async () => {
+  it('accepts a later no-reply after preserving an earlier promoted answer', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-1',
@@ -2456,15 +2525,14 @@ describe('steered final segments', () => {
       {
         kind: 'finish-without-reply',
         id: 75,
-        expectedSuccess: false,
-        expectedText: 'finish_without_reply unavailable after assistant output',
+        expectedText: 'finished without reply',
       },
     ])
 
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
-    expect(result.finalMessage).toBe('Answer two.')
-    expect(result.finalAction).toBeNull()
-    expect(result.finalActionExplicit).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
+    expect(result.finalMessage).toBe('')
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalActionExplicit).toBe(true)
     expect(result.precedingAgentMessageSegments).toEqual([
       {
         deliveryContextOrdinal: 0,

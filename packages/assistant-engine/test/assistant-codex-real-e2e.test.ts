@@ -15300,6 +15300,99 @@ describeRealCodex('real Codex latest-context nutrition-card e2e', () => {
   })
 })
 
+describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
+  it('keeps the earlier answer and stays quiet for the later acknowledgement', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-steered-acknowledgement-real-e2e-'),
+    )
+    const steerCompleted = createDeferred<void>()
+    let steerAcknowledgement: (() => Promise<void>) | null = null
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: [
+          buildDirectConversationDeveloperInstructions(),
+          'When the latest user message explicitly needs no response, call finish_without_reply and emit no text.',
+        ].join('\n\n'),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        onFirstAssistantResponseCompleted: () => {
+          const steer = steerAcknowledgement
+          if (!steer) {
+            steerCompleted.reject(
+              new Error('Expected a live turn before the first completed answer.'),
+            )
+            return
+          }
+          void steer().then(
+            () => steerCompleted.resolve(),
+            (error) => steerCompleted.reject(error),
+          )
+        },
+        onLiveTurn: (turn) => {
+          steerAcknowledgement = () => turn.steer({
+            prompt: [
+              'Thanks, that answered it.',
+              'Do not send another message.',
+              'Call finish_without_reply now and emit no text.',
+            ].join(' '),
+          })
+        },
+        prompt: [
+          'Reply with exactly "ORBIT." and no other text.',
+          'Do not call any tools for this first reply.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      await steerCompleted.promise
+
+      const finishAttempts = readDynamicToolAttempts(result.jsonEvents).filter(
+        (attempt) => attempt.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name,
+      )
+      const earlierReply = result.precedingAgentMessageSegments[0]?.response.trim()
+
+      process.stdout.write(
+        `[steered-acknowledgement-no-reply-e2e] ${JSON.stringify({
+          earlierReply,
+          finalAction: result.finalAction,
+          finalMessage: result.finalMessage,
+          finishAttemptCount: finishAttempts.length,
+        })}\n`,
+      )
+
+      expect(earlierReply).toBe('ORBIT.')
+      expect(result.precedingAgentMessageSegments).toHaveLength(1)
+      expect(result.precedingAgentMessageSegments[0]?.deliveryContextOrdinal).toBe(0)
+      expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
+      expect(result.finalAction).toEqual({ kind: 'none' })
+      expect(result.finalActionExplicit).toBe(true)
+      expect(result.finalMessage).toBe('')
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseCard).toBeNull()
+      expect(finishAttempts).toHaveLength(1)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
 async function materializeAutomaticMealCloseoutVaultCli(input: {
   binDirectory: string
   commandLogPath: string
