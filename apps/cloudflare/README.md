@@ -541,12 +541,18 @@ Foreground progress recovery is write-fenced instead of container-destroy
 driven. A write fence is commit authority, not liveness proof; the exact wake,
 replacement, ambiguous-wake, and fresh-startup retry contract is documented in
 `agent-docs/references/hosted-runtime-protocol.md`. Durable Object activation
-migrates legacy persisted active-invocation identity into the current write
-fence so dormant objects retain commit authority; it does not restore retired
-wake, backoff, or deadline state. Live runner side effects validate the
-runtime-kind write fence by attempt, generation, and user identity. Hosted
-OpenAI and Venice provider egress paths validate the signed Murph provider
-credential's user and runner against UserRunner's current active runtime state.
+always ensures `runner_schema_meta` and reads its version before touching
+`runner_meta`. An exact-current version returns immediately; missing, invalid,
+zero, or older versions retain the full create, migration, retired-table
+cleanup, version-mark, and final-assertion path, while a future version fails
+before `runner_meta` or retired-table mutation. Activation migrates
+legacy persisted active-invocation identity into the current write fence so
+dormant objects retain commit authority; it does not restore retired wake,
+backoff, or deadline state.
+Live runner side effects validate the runtime-kind write fence by attempt,
+generation, and user identity. Hosted OpenAI and Venice provider egress paths
+validate the signed Murph provider credential's user and runner against
+UserRunner's current active runtime state.
 Workspace version remains a checkpoint/restore freshness guard, not generic
 side-effect authority.
 Active, unsupported, error, and timeout liveness outcomes preserve the write
