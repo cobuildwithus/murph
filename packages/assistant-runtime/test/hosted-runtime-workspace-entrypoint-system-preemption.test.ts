@@ -2355,6 +2355,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(input.deadlineMs, Date.parse(reminderAt));
       vi.setSystemTime(new Date(reminderAt));
       return {
+        refreshStage: "replica_write" as const,
         source: { fileCount: 0, totalBytes: 0 },
         status: "deferred_timeout" as const,
       };
