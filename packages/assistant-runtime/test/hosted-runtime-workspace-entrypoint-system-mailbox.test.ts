@@ -11,6 +11,7 @@ import {
   createEmptyDeviceSyncPort,
   createMailboxItem,
   createMailboxPort,
+  createOperatorTaskAssistantAskRequestedWake,
   createPlatform,
   createResolvedAssistantAskSystemMailboxItem,
   createResolvedDeviceSyncSystemMailboxItem,
@@ -4632,10 +4633,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
   });
 
   test.each([
-    { approvedAskCount: 1 },
-    { approvedAskCount: 2 },
-  ])("keeps the exact durable-head ask ahead of $approvedAskCount pre-barrier approved follow-up(s) and device work", async ({
+    { approvedAskCount: 1, ownerKind: "member ask" },
+    { approvedAskCount: 2, ownerKind: "member ask" },
+    { approvedAskCount: 0, ownerKind: "operator diagnostic" },
+  ])("keeps the exact $ownerKind durable-head ask ahead of $approvedAskCount pre-barrier approved follow-up(s) and device work", async ({
     approvedAskCount,
+    ownerKind,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -4682,9 +4685,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       await enqueueHostedSystemMailboxItem({
         item: createResolvedAssistantAskSystemMailboxItem(firstAsk),
         vaultRoot,
-        wake: createConsentedMemberAssistantAskRequestedWake({
-          eventId: firstAsk.dedupeKey,
-        }),
+        wake: ownerKind === "operator diagnostic"
+          ? createOperatorTaskAssistantAskRequestedWake({
+              eventId: firstAsk.dedupeKey,
+            })
+          : createConsentedMemberAssistantAskRequestedWake({
+              eventId: firstAsk.dedupeKey,
+            }),
       });
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
@@ -4831,10 +4838,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
   }, 90_000);
 
   test.each([
-    { approved: false, laterKind: "ordinary" },
-    { approved: true, laterKind: "approved" },
-  ])("retires an unstarted exact ask across a foreground causal rerun with a $laterKind later ask", async ({
+    { approved: false, laterKind: "ordinary", ownerKind: "member ask" },
+    { approved: true, laterKind: "approved", ownerKind: "member ask" },
+    {
+      approved: false,
+      laterKind: "ordinary",
+      ownerKind: "operator diagnostic",
+    },
+  ])("retires an unstarted exact $ownerKind across a foreground causal rerun with a $laterKind later ask", async ({
     approved,
+    ownerKind,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -4902,9 +4915,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       await enqueueHostedSystemMailboxItem({
         item: createResolvedAssistantAskSystemMailboxItem(firstAsk),
         vaultRoot,
-        wake: createConsentedMemberAssistantAskRequestedWake({
-          eventId: firstAsk.dedupeKey,
-        }),
+        wake: ownerKind === "operator diagnostic"
+          ? createOperatorTaskAssistantAskRequestedWake({
+              eventId: firstAsk.dedupeKey,
+            })
+          : createConsentedMemberAssistantAskRequestedWake({
+              eventId: firstAsk.dedupeKey,
+            }),
       });
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
@@ -5349,7 +5366,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   }, 45_000);
 
-  test("resumes approved asks after foreground requeues an active exact ask", async () => {
+  test.each([
+    { ownerKind: "member ask" },
+    { ownerKind: "operator diagnostic" },
+  ])("resumes approved asks after foreground requeues an active exact $ownerKind", async ({
+    ownerKind,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -5415,9 +5437,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       await enqueueHostedSystemMailboxItem({
         item: createResolvedAssistantAskSystemMailboxItem(firstAsk),
         vaultRoot,
-        wake: createConsentedMemberAssistantAskRequestedWake({
-          eventId: firstAsk.dedupeKey,
-        }),
+        wake: ownerKind === "operator diagnostic"
+          ? createOperatorTaskAssistantAskRequestedWake({
+              eventId: firstAsk.dedupeKey,
+            })
+          : createConsentedMemberAssistantAskRequestedWake({
+              eventId: firstAsk.dedupeKey,
+            }),
       });
       const importState = createEmptyHostedMailboxImportState();
       importState.watermarks.system = "1";

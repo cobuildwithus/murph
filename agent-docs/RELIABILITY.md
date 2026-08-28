@@ -2511,7 +2511,12 @@ mailbox item. Stable caller idempotency maps to one task and mailbox identity;
 the persisted request-shape digest makes replay with different authority or
 content fail closed. Runtime wake is only a post-commit hint. Diagnostics use
 the existing retrying detached Assistant Ask controller and idempotent
-completion callback. Messages reauthorize the task before provider work and at
+completion callback. A diagnostic at the durable system-mailbox head receives
+one exact attempt before later device maintenance. Current member conversation
+work retains foreground priority: it leaves an unstarted diagnostic pending or
+aborts and durably requeues an active diagnostic without duplicating it. The
+existing ten-minute request expiry bounds those retries, and diagnostic results
+remain operator-only. Messages reauthorize the task before provider work and at
 the existing pre-delivery hook, then mark the task complete only after exactly
 one queue-only delivery intent exists. The existing notification identity,
 route check, transcript commit, outbox dedupe, line-health, and provider retry
