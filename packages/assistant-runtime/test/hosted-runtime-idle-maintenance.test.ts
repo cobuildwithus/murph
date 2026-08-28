@@ -1,3 +1,7 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import {
@@ -42,6 +46,12 @@ vi.mock("@murphai/core", async (importOriginal) => ({
 }));
 
 import {
+  initializeVault,
+  readEvent,
+  upsertEvent,
+} from "@murphai/core";
+
+import {
   HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS,
   HOSTED_IDLE_ARCHIVE_TIMEOUT_MS,
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
@@ -50,6 +60,24 @@ import {
   runHostedIdleCheckpointMaintenance,
 } from "../src/hosted-runtime/idle-maintenance.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
+
+async function waitForAtomicArchiveTempFile(
+  directoryPath: string,
+  archiveFileName: string,
+): Promise<string> {
+  const prefix = `.${archiveFileName}.`;
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const match = (await fs.readdir(directoryPath)).find(
+      (entry) => entry.startsWith(prefix) && entry.endsWith(".tmp"),
+    );
+    if (match) {
+      return match;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error("Timed out waiting for the event archive temporary file.");
+}
 
 beforeEach(() => {
   compactWarmCodexThread.mockReset();
@@ -1097,6 +1125,130 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const eventSignal = archiveClosedEventLedgerShards.mock.calls[0]?.[0]?.signal;
     const integrationSignal = archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.signal;
     expect(integrationSignal).toBe(eventSignal);
+  });
+
+  it("archives a real closed event shard through true idle maintenance", async () => {
+    const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-idle-event-archive-"));
+    try {
+      await initializeVault({ vaultRoot, createdAt: "2020-01-01T00:00:00.000Z" });
+      const historical = await upsertEvent({
+        vaultRoot,
+        payload: {
+          kind: "note",
+          occurredAt: "2020-01-12T09:00:00.000Z",
+          note: "idle checkpoint compression ".repeat(80),
+          title: "Historical event",
+        },
+      });
+      const rawAbsolutePath = path.join(vaultRoot, historical.ledgerFile);
+      const sourceBytes = await fs.readFile(rawAbsolutePath);
+      const actualCore = await vi.importActual<typeof import("@murphai/core")>(
+        "@murphai/core",
+      );
+      archiveClosedEventLedgerShards.mockImplementation(
+        actualCore.archiveClosedEventLedgerShards,
+      );
+
+      compactWarmCodexThread.mockResolvedValue({
+        kind: "skipped",
+        reason: "below_threshold",
+        threadContextTokensBefore: 20_000,
+      });
+
+      await expect(runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_event_archive",
+        model: "gpt-5.6-terra",
+        pendingWork: false,
+        providerName: "hosted-openai",
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot,
+        wakeSignal: null,
+      })).resolves.toEqual({
+        kind: "skipped",
+        reason: "below_threshold",
+        threadContextTokensBefore: 20_000,
+      });
+
+      await expect(fs.access(rawAbsolutePath)).rejects.toThrow();
+      const archiveBytes = await fs.readFile(`${rawAbsolutePath}.gz`);
+      expect(archiveBytes.byteLength).toBeLessThan(sourceBytes.byteLength);
+      await expect(readEvent({
+        eventId: historical.eventId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        event: { title: "Historical event" },
+      });
+    } finally {
+      await fs.rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("aborts a real in-progress event archive when foreground work wakes", async () => {
+    const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-idle-event-wake-"));
+    try {
+      await initializeVault({ vaultRoot, createdAt: "2020-01-01T00:00:00.000Z" });
+      const historical = await upsertEvent({
+        vaultRoot,
+        payload: {
+          kind: "note",
+          occurredAt: "2020-01-12T09:00:00.000Z",
+          note: "preserve this event when foreground work wakes",
+          title: "Interrupted historical event",
+        },
+      });
+      const rawAbsolutePath = path.join(vaultRoot, historical.ledgerFile);
+      const eventLine = await fs.readFile(rawAbsolutePath, "utf8");
+      const repeatedByteCount = 16 * 1024 * 1024;
+      await fs.writeFile(
+        rawAbsolutePath,
+        eventLine.repeat(Math.ceil(repeatedByteCount / Buffer.byteLength(eventLine))),
+        "utf8",
+      );
+      const actualCore = await vi.importActual<typeof import("@murphai/core")>(
+        "@murphai/core",
+      );
+      archiveClosedEventLedgerShards.mockImplementation(
+        actualCore.archiveClosedEventLedgerShards,
+      );
+      const wakeSignal = createCoalescingRuntimeWakeSignal();
+      const wakeAt = Date.now();
+      const archiveFileName = `${path.basename(rawAbsolutePath)}.gz`;
+      const shardDirectory = path.dirname(rawAbsolutePath);
+
+      const maintenance = runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_event_archive_wake",
+        model: "gpt-5.6-terra",
+        pendingWork: false,
+        providerName: "hosted-openai",
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot,
+        wakeSignal,
+      });
+      await waitForAtomicArchiveTempFile(shardDirectory, archiveFileName);
+      wakeSignal.notify(wakeAt);
+
+      await expect(maintenance).resolves.toEqual({
+        kind: "skipped",
+        reason: "pending_work",
+        threadContextTokensBefore: null,
+      });
+      await expect(fs.access(rawAbsolutePath)).resolves.toBeUndefined();
+      await expect(fs.access(`${rawAbsolutePath}.gz`)).rejects.toThrow();
+      expect((await fs.readdir(shardDirectory)).filter(
+        (entry) => entry.startsWith(`.${archiveFileName}.`) && entry.endsWith(".tmp"),
+      )).toEqual([]);
+      expect(archiveClosedIntegrationIngestShards).not.toHaveBeenCalled();
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+      expect(wakeSignal.consumePending()).toEqual({ notifiedAtEpochMs: wakeAt });
+    } finally {
+      await fs.rm(vaultRoot, { force: true, recursive: true });
+    }
   });
 
   it("keeps idle checkpoint maintenance fail-open when event archiving fails", async () => {

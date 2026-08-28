@@ -136,6 +136,63 @@ test("a malformed closed event shard does not starve later valid months", async 
   await fs.access(path.join(vaultRoot, `${valid.ledgerFile}.gz`));
 });
 
+test("event archiving leaves differing representations intact and continues later months", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-ledger-archive-conflict");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+  const conflicting = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-01-12T09:00:00.000Z",
+      note: "This month will retain two different representations.",
+      title: "Conflicting month",
+    },
+  });
+  await archiveClosedEventLedgerShards({
+    now: new Date("2026-02-01T00:00:00.000Z"),
+    vaultRoot,
+  });
+  const conflictRawPath = path.join(vaultRoot, conflicting.ledgerFile);
+  const conflictArchivePath = `${conflictRawPath}.gz`;
+  const conflictArchiveBefore = await fs.readFile(conflictArchivePath);
+  const conflictingRows = gunzipSync(conflictArchiveBefore)
+    .toString("utf8")
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  assert.ok(conflictingRows[0]);
+  conflictingRows[0].title = "Different plain representation";
+  await fs.writeFile(
+    conflictRawPath,
+    `${conflictingRows.map((row) => JSON.stringify(row)).join("\n")}\n`,
+  );
+  const conflictRawBefore = await fs.readFile(conflictRawPath);
+
+  const valid = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-02-12T09:00:00.000Z",
+      note: "This later valid month should still archive.",
+      title: "Valid later month",
+    },
+  });
+
+  const result = await archiveClosedEventLedgerShards({
+    now: new Date("2026-03-01T00:00:00.000Z"),
+    vaultRoot,
+  });
+
+  assert.equal(result.archivedShardCount, 1);
+  assert.equal(result.blockedShardCount, 1);
+  assert.equal(result.repairedShardCount, 0);
+  assert.deepEqual(await fs.readFile(conflictRawPath), conflictRawBefore);
+  assert.deepEqual(await fs.readFile(conflictArchivePath), conflictArchiveBefore);
+  const validRawPath = path.join(vaultRoot, valid.ledgerFile);
+  await assert.rejects(fs.access(validRawPath));
+  await fs.access(`${validRawPath}.gz`);
+});
+
 test("backdated writes and hosted replay amend archived event shards exactly once", async () => {
   const vaultRoot = await makeTempDirectory("murph-event-ledger-amend");
   const replayRoot = await makeTempDirectory("murph-event-ledger-replay");

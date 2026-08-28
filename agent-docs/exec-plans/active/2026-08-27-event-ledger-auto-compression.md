@@ -40,9 +40,11 @@ Updated: 2026-08-27
 - Product/process constraints: Product UX Patch. Outcome: established members
   with older event history carry smaller encrypted checkpoints automatically.
   Reaches: ordinary hosted idle checkpointing and later event reads/writes.
-  Proof: a real closed shard compresses before checkpoint maintenance returns,
-  while a wake-interrupted pass preserves the raw shard and skips model
-  compaction. No member action, message, file request, or new UI is introduced.
+  Proof: a production-format encrypted snapshot is smaller after real event
+  archiving and restores with the archived event readable; true idle invokes
+  that real core path, while a wake observed during its atomic streaming write
+  preserves the raw shard and skips later maintenance. No member action,
+  message, file request, or new UI is introduced.
 
 ## Risks and mitigations
 
@@ -94,9 +96,9 @@ Updated: 2026-08-27
 ## Verification
 
 - Commands to run: focused `@murphai/core` event-ledger tests; focused
-  `@murphai/assistant-runtime` idle-maintenance tests; both package typechecks;
-  `git diff --check`; a synthetic closed-month size/readback scenario; required
-  ReviewGPT passes; exact-head GitHub Actions.
+  `@murphai/assistant-runtime` idle-maintenance tests; the Cloudflare local
+  encrypted-snapshot test; all three affected package typechecks;
+  `git diff --check`; required ReviewGPT passes; exact-head GitHub Actions.
 - Expected outcomes: gzip is smaller and byte-equivalent, the raw closed shard
   disappears only after verification, current-month JSONL remains, a wake
   aborts archiving and preserves the pending notification, checkpointing stays
