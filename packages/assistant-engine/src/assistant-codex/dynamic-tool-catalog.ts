@@ -1287,11 +1287,11 @@ type MurphGroupConsultAction =
 
 const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
   ask: {
-    optional: ['groupLabel'],
+    optional: ['groupLabel', 'participantTarget'],
     required: ['question'],
   },
   handoff: {
-    optional: ['groupLabel'],
+    optional: ['groupLabel', 'participantTarget'],
     required: ['context'],
   },
   ask_current_sender: {
@@ -1390,7 +1390,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'Ask/hand off; host binds. Named group: use groupLabel; never list. Before unnamed handoff, vault-cli memory show; fallback "a member". Sender intent: ask_current_sender=group, ask_current_sender_privately=private, clarify_current_sender=genuine ambiguity; continuations resume. Handoff accepted=queued, not sent/shared.',
+    'ask=group answer; handoff=tell/post/share. title=groupLabel; people/count=participantTarget; names not groupLabel; no list. Unnamed: memory show, else "a member". ask_current_sender=group; ask_current_sender_privately=private; clarify=genuine ambiguity; continuations resume. accepted=queued, not sent/shared.',
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 

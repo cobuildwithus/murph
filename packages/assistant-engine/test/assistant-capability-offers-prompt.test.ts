@@ -216,6 +216,16 @@ describe('assistant capability-offers prompt contract', () => {
 
     expect(directLayers.prompt).toContain('last resort for a generic group cue')
     expect(directSection).toContain(
+      'you can ask or hand off to a group only when Murph has already joined it',
+    )
+    expect(directSection).toContain('cannot access an unjoined device chat')
+    expect(directSection).toContain(
+      'State that distinction for capability questions',
+    )
+    expect(directSection).toContain(
+      'search/load deferred `murph.group_consult` via `tool_search` or code-mode `ALL_TOOLS` before redirecting or denying',
+    )
+    expect(directSection).toContain(
       'names a visible group',
     )
     expect(directSection).toContain(
@@ -258,6 +268,8 @@ describe('assistant capability-offers prompt contract', () => {
     )
     expect(groupPrompt).not.toContain('last resort for a generic group cue')
     expect(unverifiedPrompt).not.toContain('last resort for a generic group cue')
+    expect(groupPrompt).not.toContain('cannot access an unjoined device chat')
+    expect(unverifiedPrompt).not.toContain('cannot access an unjoined device chat')
     expect(groupPrompt).not.toContain('names a visible group')
     expect(unverifiedPrompt).not.toContain('names a visible group')
   })

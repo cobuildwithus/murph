@@ -4653,6 +4653,18 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
+    response.action === 'handoff'
+    && response.result.status === 'accepted'
+  ) {
+    return {
+      ...response,
+      result: {
+        ...response.result,
+        status: 'queued',
+      },
+    }
+  }
+  if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
   ) {
