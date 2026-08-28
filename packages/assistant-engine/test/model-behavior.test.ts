@@ -1270,10 +1270,10 @@ describe('assistant execution prompt contract', () => {
       "Complete the user's in-scope request end to end",
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Use tools directly instead of telling the user',
+      'Use tools instead of giving the user work you can do',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Make reasonable assumptions for reversible, low-risk work',
+      'Assume reversible, low-risk details',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'ask only when a missing choice materially changes the result',
@@ -1413,8 +1413,21 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).toContain('Prefer a structured integration')
     expect(computerSection).toContain('private untrusted data')
     expect(computerSection).toContain('Use secure user handoff')
+    expect(computerSection).toContain(
+      'password or full payment-card entry',
+    )
+    expect(computerSection).toContain(
+      'smallest exact-point takeover for a human-only authentication challenge',
+    )
+    expect(computerSection).toContain('resume and finish the rest yourself')
+    expect(computerSection).not.toContain('other private input')
+    expect(computerSection).not.toContain(
+      'credentials, full payment details, and one-time codes',
+    )
     expect(computerSection).toContain('exact final terms or explicit bounds')
-    expect(computerSection).toContain('verify the requested result on the site')
+    expect(computerSection).toContain(
+      'After site verification, call `computer_finish_run` before the final reply',
+    )
     expect(computerSection).not.toContain(
       'The returned `handoffUrl` is bound to a single pause/checkpoint.',
     )

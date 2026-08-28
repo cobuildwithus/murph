@@ -99,13 +99,16 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription.length).toBeLessThanOrEqual(320);
     expect(actDescription).toMatch(/macro-step/iu);
     expect(actDescription).toContain("current authorized run");
-    expect(actDescription).toContain("No missing or sensitive input or final confirmation");
-    expect(actDescription).toContain("Before browser call two this turn");
     expect(actDescription).toContain(
-      "call send_progress_update if available and not yet sent",
+      "specifically authorized non-credential identity/health input",
     );
-    expect(actDescription).toContain("outcome uncertain");
-    expect(actDescription).toContain("call computer_open before retry/next action");
+    expect(actDescription).toContain("approved final terms");
+    expect(actDescription).toContain("Never invent data");
+    expect(actDescription).toContain("enter credentials/OTP/payment");
+    expect(actDescription).toContain("bypass CAPTCHA");
+    expect(actDescription).toContain("accept material consent");
+    expect(actDescription).toContain("retry unknown effects");
+    expect(actDescription).toContain("After failure, call computer_open");
 
     expect(openDescription.length).toBeLessThanOrEqual(250);
     expect(openDescription).toContain("authorized browser");
