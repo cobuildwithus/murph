@@ -51,7 +51,7 @@ const TARGET_TOOL_DESCRIPTION_BUDGETS = [
     MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
     350,
   ],
-  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 320],
+  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 500],
   ["group_data", MURPH_GROUP_DATA_TOOL, 410],
   ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL, 350],
   ["group_usage", MURPH_GROUP_USAGE_TOOL, 360],
@@ -90,7 +90,13 @@ describe("assistant tool description call contracts", () => {
   it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Named group: use groupLabel; never list",
+      "Exact title=groupLabel",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "People use participantTarget.participants; stated total also needs participantCount=total-1",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "Never combine targets/list groups",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       'Unnamed handoff: vault-cli memory show; fallback "a member"',
@@ -102,16 +108,19 @@ describe("assistant tool description call contracts", () => {
       "ask_current_sender_privately=private",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "clarify_current_sender=genuine ambiguity",
+      "clarify_current_sender=ambiguity",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "continuations resume",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Accepted=queued: say queued",
+      "Accepted ask reply MUST say checking privately and nothing will be posted in group",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "never passed/sent/delivered/told/shared/posted",
+      "Accepted handoff: reply only queued",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "never claim reached/posted",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
       "message_current_sender",

@@ -210,14 +210,20 @@ describe("murph.group dynamic tool", () => {
       .toContain('state="armed"');
     expect(GROUP_TOOL_INPUT_PROPERTIES.groupLabel.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
+    expect(GROUP_TOOL_INPUT_PROPERTIES.groupLabel.description)
+      .toContain("Never set this from a person name or alongside participantTarget");
     expect(
       GROUP_TOOL_INPUT_PROPERTIES.participantTarget.properties
         .participantCount.description,
-    ).toContain("excluding the requesting member");
+    ).toContain("Counts other people only");
     expect(
       GROUP_TOOL_INPUT_PROPERTIES.participantTarget.properties
         .participantCount.description,
-    ).toContain("subtract that self entry before setting this count");
+    ).toContain("REQUIRED when the member states a total chat size: set total minus one");
+    expect(
+      GROUP_TOOL_INPUT_PROPERTIES.participantTarget.properties
+        .participants.description,
+    ).toContain("participantCount supplements these names and never replaces them");
     expect(GROUP_TOOL_INPUT_PROPERTIES.participantTarget.description)
       .toContain("Include each non-requester once");
     expect(GROUP_TOOL_INPUT_PROPERTIES.permissionText.maxLength)

@@ -58,7 +58,10 @@ Updated: 2026-08-28
 - Clarify that `participantCount` counts other people only and subtracts an
   explicitly included requester/self entry.
 - Keep accepted handoff language truthful at the deferred-tool boundary:
-  accepted means queued, never passed, sent, delivered, told, shared, or posted.
+  accepted means queued and must not be described as having reached or been
+  posted to the group; ordinary asks keep their private-check explanation.
+- Keep the public changelog scoped to the supported iMessage/SMS path rather
+  than implying that Telegram participant targeting is available.
 
 ## Product UX walkthrough
 
@@ -67,7 +70,8 @@ Updated: 2026-08-28
 - A private member gives a total chat size and two other participants: Murph
   sends both names with a count of two and does not include the requester.
 - A private member explicitly lists themself with two other participants:
-  Murph omits the requester and sends only the other two names.
+  Murph makes one private ask, omits the requester, sends a count of two, and
+  explains that the check is private and nothing will be posted to the group.
 - Existing exact-title targeting, host resolution, authorization, and delivery
   behavior remain unchanged.
 
@@ -77,6 +81,11 @@ Updated: 2026-08-28
 - Assistant Engine typecheck: passed.
 - Changelog archive rendering: 9 tests passed.
 - Focused live journey: `gpt-5.6-terra`, local subscription, three synthetic
-  participant-description cases, one direct handoff each, no membership lookup,
-  requester excluded, truthful queued replies; reply review verdict `Ready`.
-- Remaining: exact-head ReviewGPT/CI and current-base merge-tree proof.
+  participant-description cases, two direct handoffs and one private ask, no
+  membership lookup, requester excluded, explicit total converted to two,
+  truthful queued/no-post replies; reply review verdict `Ready`.
+- Preliminary ReviewGPT returned three accepted findings: narrow the changelog
+  to iMessage/SMS, scope queued semantics to handoffs, and prove both ask and
+  exact-count behavior in the live journey. All three are remediated and the
+  focused deterministic and live proof passes.
+- Remaining: exact-head CI and current-base merge-tree.
