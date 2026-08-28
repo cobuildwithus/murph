@@ -5106,14 +5106,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           nowMs,
         });
         pendingWake = wakeResolution.pendingWake;
-        if (
-          (input.request.processingMode ?? "default") === "default"
-          && pendingWake.nextWakeReason === "mailbox"
-          && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt, nowMs)
-        ) {
-          runtimeOwnerHandoffRequested = true;
-          markIdleCheckpointTimerAfterDirtyWork();
-        }
         // The older due token remains checkpoint authority until its hot
         // service attempt is committed. Retain a distinct later assistant
         // obligation in the existing successor slot instead of dropping it.
@@ -5306,6 +5298,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         let continueForegroundCausalPass =
           !runtimeOwnerHandoffRequested
           && shouldContinueForegroundCausalPass(passResult);
+        const requestDueMailboxOwnerHandoffIfForegroundIdle = (): void => {
+          if (
+            runtimeOwnerHandoffRequested
+            || rerunAssistantInputBatch !== null
+            || continueForegroundCausalPass
+            || (input.request.processingMode ?? "default") !== "default"
+            || pendingWake.nextWakeReason !== "mailbox"
+            || !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
+          ) {
+            return;
+          }
+          runtimeOwnerHandoffRequested = true;
+          markIdleCheckpointTimerAfterDirtyWork();
+        };
+        requestDueMailboxOwnerHandoffIfForegroundIdle();
         while (
           options.shutdownSignal?.aborted !== true
           && (rerunAssistantInputBatch || continueForegroundCausalPass)
@@ -5350,6 +5357,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           continueForegroundCausalPass =
             !runtimeOwnerHandoffRequested
             && shouldContinueForegroundCausalPass(passResult);
+          requestDueMailboxOwnerHandoffIfForegroundIdle();
         }
         return passResult;
       };

@@ -563,6 +563,95 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("retains a sole pre-reply input ahead of a due mailbox owner wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-sole-pre-reply-input-"));
+    const mailboxItem = createMailboxItem({
+      id: "mailbox_sole_pre_reply_input",
+      laneSeq: "1",
+      occurredAt: "2026-04-26T00:00:01.000Z",
+    });
+    let importedInputId: string | null = null;
+    let importedInput: Awaited<ReturnType<typeof upsertAssistantInputEvent>> | null = null;
+    const { mailboxPort } = createMailboxPort({ items: [mailboxItem] });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_sole_pre_reply_input",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          const stored = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              "sole pre-reply input",
+            ),
+            vault: vaultRoot,
+          });
+          importedInputId = stored.inputId;
+          importedInput = stored;
+          await enqueueHostedPendingAssistantInputId({
+            inputId: stored.inputId,
+            vaultRoot,
+          });
+          return {
+            assistantInputId: stored.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+        }),
+        requestId: "request_synthetic_sole_pre_reply_input",
+        async runAssistantPhase(phaseInput) {
+          const selection = await selectHostedAssistantInputIds({
+            freshAssistantInputIds:
+              phaseInput.initialMailboxImport.importResult.assistantInputIds ?? [],
+            mode: "foreground",
+            vaultRoot,
+          });
+          assert.deepEqual(selection.inputIds, [importedInputId]);
+          assert.ok(importedInput);
+          await saveAssistantAutomationState(vaultRoot, {
+            autoReply: [{
+              channel: "linq",
+              eligibleAfter: importedInput.cursor,
+              enabledAt: TEST_NOW,
+            }],
+            updatedAt: TEST_NOW,
+            version: 1,
+          });
+          return {
+            afterCheckpointKeepsForegroundImportLoop: true,
+            checkpointReason: "system_mailbox_receipt",
+            nextWakeAt: TEST_NOW,
+            nextWakeReason: "mailbox",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.ok(importedInputId);
+      assert.deepEqual(
+        result.latestAssistantInputBatch?.assistantInputIds,
+        [importedInputId],
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("keeps the precomputed boundary tail when every multi-input selection remains pending", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-all-pending-selection-"));
     const mailboxItems = Array.from({ length: 4 }, (_, index) => {
