@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-28",
+  "order": 200,
+  "item": {
+    "id": "calendar-links-from-imessage",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Appointments open in Calendar",
+    "summary": "In a private iMessage, Murph can prepare appointment details as a link you can review and open in Apple Calendar.",
+    "details": "Nothing is added until you confirm in Calendar, and Murph asks when a required time detail is missing.",
+    "relevanceTags": ["assistant", "calendar", "imessage"],
+    "sourcePullRequests": [2508]
+  }
+}
