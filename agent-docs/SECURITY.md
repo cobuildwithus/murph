@@ -367,10 +367,18 @@ Last verified: 2026-08-27
   replies only because snapshot exclusion is the independent persistence
   boundary. An explicit canonical event raw reference is the sole durable-save
   exception and keeps its separately authorized lifecycle. The tool
-  pins Gemini 3.7 Flash, 1 FPS, low thinking, one call, no retry, a 14 MiB raw
-  cap, a 90-second timeout, and a bounded response. The Worker must revalidate
-  the exact request and use manual redirects before replacing the runner
-  sentinel with `GEMINI_API_KEY`. A protocol-valid successful response must be
+  pins Gemini 3.7 Flash and maps only `standard` to 1 FPS or
+  `detailed_motion` to 5 FPS. Murph chooses that semantic mode before egress;
+  raw FPS remains unavailable to the model and member. Both current profiles
+  use medium thinking, omit an explicit output-token cap, allow one call, do
+  not retry, keep the 14 MiB raw cap and 90-second timeout, and bound both the
+  delivered response and tool result. The Worker must revalidate the exact
+  request and use manual redirects before replacing the runner sentinel with
+  `GEMINI_API_KEY`. During rollout it may also accept only the exact deployed
+  legacy profile of 1 FPS, low thinking, and a 1,800-token output cap from a
+  warm old runner; mixed profiles remain denied, new runners never emit the
+  legacy shape, and the compatibility reader is removed after the rollback
+  floor advances. A protocol-valid successful response must be
   withheld until Web durably accepts its exact usage record; callback rejection
   fails the tool closed. An upstream response above the 1 MiB delivery cap is a
   protocol violation: reject it without widening the buffer, let Murph absorb
@@ -385,11 +393,21 @@ Last verified: 2026-08-27
   usable idempotency key. Treat this as a bounded v1 at-least-once residual,
   not permission to retry within a turn. Do not add durable video/result state
   without a separate retention and recovery design.
-  Completed turns use trusted failure text when the model returns blank or
-  selects no reply, while non-empty model/card wording wins. A terminal primary
-  provider failure after the tool result remains under ordinary outer-turn
-  retry ownership; the failed attempt does not independently deliver that
-  fallback.
+  The existing in-memory turn state binds the first completed provider result
+  to its accepted message ref, attachment ordinal, complete question, and
+  sampling mode across group-draft reconsideration. An exact repeat returns
+  that result without provider egress. A distinct later request receives no
+  provider call and must keep the earlier result attributed only to its earlier
+  request while saying the later request was not analyzed. It must neither
+  replace the completed result with an internal duplicate-call status nor use
+  earlier-video evidence to answer the later request.
+  Codex owns every non-empty semantic reply; the runtime does not classify,
+  replace, or append to model wording. The runtime retains the latest
+  structured video-tool fallback only for blank or no-reply recovery,
+  including the composed status for a distinct later request. A terminal
+  primary provider failure after the tool result remains under ordinary
+  outer-turn retry ownership; the failed attempt does not independently
+  deliver that fallback.
 - Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
   flow for the authenticated member's exact current Customer, Subscription,
   Subscription Item, and server-selected target Price. The browser chooses no
@@ -1493,7 +1511,7 @@ locally readable.
   identity, late initialization response, or merely resident process may
   substitute for current turn or signed provider authority.
 - Model-backed detached system-mailbox notifications without a valid scheduled occurrence must remain isolated output-only provider work. Except for the exact private-to-group context-handoff profile, they receive no conversation history or private context. That handoff may read only the canonical target group's committed transcript plus its bounded, delimiter-safe handoff context and trusted consented `profile-name.v0` attribution. Every such turn receives no native resume, dynamic or hosted tool context, shell, browser, apps, plugins, web search, provider fetch, public fetch, artifact materializer, image-generation launcher, progress delivery, or delegated-agent surface. Treat embedded provider, callee, webhook, Family, and handoff context text only as untrusted data; only the final delivery adapter may send the formatted result. Run them as fresh isolated threads under the native capability deny set without layering a legacy sandbox override onto that policy. A handoff commits its standalone message to the canonical conversation session and clears stale native resume state so ordinary follow-up reconstructs from durable history; no notification persists a resumable provider thread.
-- `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. Web derives the target runtime, exact membership generation, origin, expiry, and private return route from the signed caller; the model cannot supply them. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Leaving, rejoining, expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.
+- `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. Web derives the target runtime, exact membership generation, origin, expiry, and private return route from the signed caller; the model cannot supply them. A private current member may describe one joined Linq/iMessage/SMS group through the closed participant-target contract, but Web must use only that requester's current memberships and Contacts projection. Full provider handles never enter model-visible output or new persistence; non-contact clarification exposes only participant count, NANP area code plus last four, international last four, or a generic email marker. Another member's or the group owner's Contacts cannot substitute, and ownership cannot widen selection. Every eligible provider roster must be complete, distinct participant clues must bind distinct roster entries, and exactly one current route may match before the final membership and route recheck. Persist only the normalized target digest beside the encrypted request so changed replay evidence conflicts. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Leaving, rejoining, expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.
 - Except for that explicitly confined Assistant Ask child, Codex running inside the local Murph runtime or hosted execution container is assumed to have full access to that local/container filesystem. Passing repo-relative, vault-relative, or container-local paths to Codex so it can inspect or modify files is not a privacy leak by itself. Those paths still must not escape into user-facing messaging copy, public API responses, persisted logs/diagnostics, fixtures, generated docs, screenshots, provider requests, external review bundles, or other third-party outputs unless the surface has an explicit safe path policy.
 - Assistant turns may execute the same canonical local assistant/vault tool catalog shape through the active vault's per-turn Murph runtime context. Message-triggered assistant auto-reply now has the same full Murph autonomy as other assistant turns, including assistant runtime control plus canonical `memory` / `automation` and canonical vault write surfaces, so any accepted inbound channel message is effectively an operator-authorized action for that bound user and vault. The hard-cut assistant command surface is Codex App Server only: it may run with normal local CLI/filesystem/env authority through Codex-specific launch/config options, while legacy OpenAI-compatible endpoint flags are not part of the command surface. That privileged Codex App Server posture still does not grant hosted-control-plane authority outside the local runtime boundary.
 

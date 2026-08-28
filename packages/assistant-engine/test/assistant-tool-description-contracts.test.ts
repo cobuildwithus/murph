@@ -51,7 +51,7 @@ const TARGET_TOOL_DESCRIPTION_BUDGETS = [
     MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
     350,
   ],
-  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 460],
+  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 320],
   ["group_data", MURPH_GROUP_DATA_TOOL, 410],
   ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL, 350],
   ["group_usage", MURPH_GROUP_USAGE_TOOL, 360],
@@ -87,17 +87,21 @@ describe("assistant tool description call contracts", () => {
     expect(total).toBeLessThanOrEqual(6_700);
   });
 
-  it("keeps group handoff discovery and pending-state semantics explicit", () => {
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
+  it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("handoff");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Named group: pass groupLabel; never list first",
+      "Title=groupLabel",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("once");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      '"Group/chat with [people]" or count=participantTarget',
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("memory show");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Handoff context stays identity-neutral; host supplies attribution",
+      "Handoff context identity-neutral",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "After acceptance, say queued",
+      "If queued, say queued/pending; never sent/delivered",
     );
   });
 
@@ -118,19 +122,16 @@ describe("assistant tool description call contracts", () => {
 
   it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "ask_current_sender returns to group",
+      "ask_current_sender=group",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "message_current_sender only for explicit private answer; pass only message_ref",
+      "message_current_sender=private only",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Use clarify_current_sender before needed follow-up",
+      "Clarify if ambiguous",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "continuations only for later reply",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "never fresh request",
+      "follow-ups resume replies",
     );
   });
 });

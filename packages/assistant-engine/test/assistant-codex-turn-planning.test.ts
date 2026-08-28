@@ -5200,31 +5200,49 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('starts a fresh thread when the dynamic tool contract changes', async () => {
+  it('starts a fresh thread when the exercise routine card contract changes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: true,
     })
     const route = createRoute()
+    const currentPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    const oldDynamicTools = currentPlan.dynamicTools.map((tool) =>
+      tool.name === 'attach_exercise_routine_card'
+        ? {
+            ...tool,
+            inputSchema: {
+              ...tool.inputSchema,
+              required: [
+                ...(tool.inputSchema.required ?? []),
+                'footer',
+                'subtitle',
+              ],
+            },
+          }
+        : tool)
+    expect(currentPlan.dynamicTools).toContainEqual(
+      expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+    )
     const oldToolContractFingerprint = buildAssistantCodexContractFingerprint({
-      developerInstructions: (await resolveAssistantRouteTurnPlan({
-        executionContext: null,
-        input: createMessageInput(),
-        profile: {
-          promptProfile: 'conversation',
-          threadScope: 'session-thread',
-          toolProfile: 'provider-turn',
-        },
-        promptTimeContext: {
-          currentLocalDate: '2026-05-04',
-          currentTimeZone: 'Asia/Kuala_Lumpur',
-        },
-        route,
-        session: createSession(),
-        sharedPlan: createSharedPlan(),
-      })).developerInstructions,
-      dynamicTools: resolveMurphDynamicTools({}).slice(0, 1),
+      developerInstructions: currentPlan.developerInstructions,
+      dynamicTools: oldDynamicTools,
       routeFingerprint: route.routeFingerprint ?? route.routeId,
     })
 

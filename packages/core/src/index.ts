@@ -422,4 +422,23 @@ export type {
   RecoverInterruptedClosedIntegrationIngestArchivesResult,
   StoredIntegrationIngestEntry,
 } from "./integration-ingests.ts";
+export {
+  MAX_EVENT_LEDGER_ARCHIVE_BYTES,
+  MAX_EVENT_LEDGER_SHARD_BYTES,
+  archiveClosedEventLedgerShards,
+  isEventLedgerLogicalPath,
+  listEventLedgerShardPaths,
+  listEventLedgerShardPathsInterruptible,
+  listEventLedgerShardSources,
+  readEventLedgerShardRecords,
+  readEventLedgerShardRows,
+  readEventLedgerShardText,
+  resolveEventLedgerShardSource,
+  visitEventLedgerShardRecordsInterruptible,
+} from "./event-ledger-storage.ts";
+export type {
+  ArchiveClosedEventLedgerShardsResult,
+  EventLedgerShardContentReceipt,
+  EventLedgerShardSource,
+} from "./event-ledger-storage.ts";
 export * from "./integration-ingest-migration.ts";

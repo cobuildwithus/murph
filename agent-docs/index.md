@@ -88,15 +88,28 @@ are specified by
 Changes that can alter Murph's interpretation, tool behavior, silence
 decision, or user-visible reply require deterministic boundary proof plus one
 focused production-derived real-Codex journey and manual review of the actual
-synthetic replies. When the default subscription is usage-limited before any
-provider action, the repository grants one bounded retry through a discovered
-already-authenticated alternate Codex home without reading or copying auth or
-cycling profiles. The one-command local subscription runner, provider-key
-boundary, UX verdict, and PR evidence contract are specified by
+synthetic replies. When the default subscription fails before any provider
+action, the repository tries each discovered authenticated local Codex home
+once in stable order without repeated approval or reading or copying auth.
+It stops rotating homes when a run reaches provider action. The one-command
+local subscription runner, provider-key boundary, UX verdict, and PR evidence
+contract are specified by
 `.agents/skills/verify-murph-assistant/SKILL.md`,
 `agent-docs/operations/completion-workflow.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
+
+Private-to-joined-group ask and handoff may target an existing Linq/iMessage/SMS
+group by exact title or complete live participant evidence. Participant names
+come only from the authenticated requester's shared Contacts projection;
+otherwise the model sees bounded area-code/last-four or generic email hints.
+Selection fails closed on incomplete evidence and persists only a normalized
+evidence-digest binding in existing encrypted request fields. Provider titles
+are sanitized and stored only when a new group row is materialized, with no backfill or rename
+sync. The ownership, privacy, and load boundaries are specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
+`agent-docs/product-specs/ios-address-book-advisory-names.md`, and
+`agent-docs/product-specs/private-group-consultation.md`.
 
 Required Temporal compatibility tolerates only the bounded `404` visibility
 window for the exact private run id returned by an accepted dispatch. It never
@@ -201,11 +214,19 @@ external groups omit it. The tool may be present before the input has video
 authority because provider tools freeze at turn start and the first video may
 arrive through live steering. Murph freezes attachment metadata before Codex
 can act on each initial or live-steered input, verifies the exact bytes before
-cross-provider egress, pins 1 FPS and bounded output, and keeps credentials at
-the Worker boundary. Ordinary inbound hosted video
-bytes stay outside workspace snapshots and become immediately
-retention-eligible when active input no longer needs them; explicit canonical
-durable references are the exception. The
+cross-provider egress, maps standard and detailed-motion intent to allowlisted
+1 or 5 FPS profiles with medium thinking, bounds delivered output without an
+explicit request token cap, and keeps credentials at the Worker boundary.
+Ordinary inbound hosted video bytes stay outside workspace
+snapshots and become immediately retention-eligible when active input no longer
+needs them; explicit canonical durable references are the exception. The first
+completed provider result remains bound in turn memory to its accepted message,
+attachment ordinal, complete question, and sampling mode across group-draft
+reconsideration. Exact repeats reuse it without another Gemini call; distinct
+later requests remain explicitly unanalyzed and cannot inherit its evidence.
+Codex owns every non-empty semantic reply; the runtime retains only the latest
+structured result for blank or no-reply recovery. There is no prose classifier
+or durable result state. The
 architecture, security, deployment order, and
 verification owners are `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and
@@ -639,7 +660,7 @@ payloads reuse the set-based root unwrap path. This contract is specified by
 | `agent-docs/product-specs/companion-app.md` | Native iOS and Android health companions: canonical account admission with a capacity-gated first iMessage, no-line activation and managed-line inbound-first recovery, Web-only welcome email, exact pending-activation runtime-wake retry, broad Apple Health sync, closed WHOOP enrichment, scheduled overnight PRV on iOS, and a narrow Health Connect bridge on Android. | Companion app plan | High | 2026-08-13 |
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-07-22 |
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec plus bounded WHOOP metadata enrichment and the strict scheduled six-field overnight-PRV beta: one-time enrollment, constant-memory five-minute windows, protected scalar recovery, one immutable nightly summary, metric separation, bounded retention, and deployment/physical-validation gates. | Companion app build plan | High | 2026-07-14 |
-| `agent-docs/product-specs/ios-address-book-advisory-names.md` | Optional iOS Contacts projection with bounded one-to-four-label alternatives, member-scoped KMS MAC tokens, encrypted advisory labels, route-authorized iMessage/SMS roster lookup and sender attribution with one hosted-group access workflow, typed provider capability gaps, participant-access reconciliation, CAS deletion/retention, residual threat model, and rollout order. | Companion/group privacy contract | High | 2026-07-30 |
+| `agent-docs/product-specs/ios-address-book-advisory-names.md` | Optional iOS Contacts projection with bounded one-to-four-label alternatives, member-scoped KMS MAC tokens, encrypted advisory labels, requester-scoped joined-group participant targeting, route-authorized iMessage/SMS roster lookup and sender attribution with one hosted-group access workflow, typed provider capability gaps, participant-access reconciliation, CAS deletion/retention, residual threat model, and rollout order. | Companion/group privacy contract | High | 2026-08-26 |
 | `agent-docs/product-specs/habitat.md` | Habitat progressive member life-context: domains, `habitat` bank family, domain catalog, coverage derivation, context-dividend collection rules, environment/workspace v1 indicators, and bounded Environment voice-to-Browser-Vault replica convergence and recovery. | Habitat product spec | High | 2026-08-11 |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step with member-chosen contact-card avatar, independent from `/home` first-visit personalization. | Contact-card picker spec | Medium | 2026-07-22 |
 | `agent-docs/product-specs/murph-personas.md` | Six base personalities, 36 premade ordered combinations, direct `/home` first-visit picker ownership, combination-id persistence, main-owned voice/tone defaults, legacy read normalization, and six-set preview ownership. | Murph persona behavior | High | 2026-07-22 |
@@ -652,7 +673,7 @@ payloads reuse the set-based root unwrap path. This contract is specified by
 | `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful complete or partial group-challenge standings, evidence-ordered missing-data guidance with explicit first-projection `pending` versus completed-empty `missing` states, group-authorized fresh exact-scope reads, consent-fenced member-reported Manual corrections, source-tagged multi-source health shares without cross-source selection, rollback-readable legacy sleep compatibility, destination-paged projection delivery with source-version retry progress, and connection/source-epoch-coherent privacy-bounded `device-sync-status.v0` observations. | Group challenge diagnostics | High | 2026-08-26 |
 | `agent-docs/product-specs/challenge-standings-card.md` | Native Messages presentation contract for individual, team, and collective challenge standings with truthful partial and unscored states, authenticated Linq group-only delivery, complete semantic captions, and an identity-free static-image projection with the canonical Murph badge. | Group challenge standings response card | High | 2026-08-11 |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to hosted-group memberships, including independent opaque pagination for detailed memberships and disclosure grants, owner discoverability for organic routed groups without implicit vault sharing, ordinary-owner composition with existing membership-gated group actions, requested permissions, active self grants, and owner-authorized permission links. | Hosted group self-awareness | High | 2026-08-26 |
-| `agent-docs/product-specs/private-group-consultation.md` | Implemented Assistant Ask request/reply primitive plus the separate target-authored private-to-group context handoff, with exact normalized named-group resolution across all active memberships, up to 64 lightweight clarification labels, exact requester identity, host-owned consented participant attribution, provider-free cached-root admission transactions, pinned transport and mailbox replay after lost responses or membership-count changes, canonical durable follow-up context, delimiter-safe untrusted context, plain-text model output with runtime-owned delivery, deterministic causal unavailable delivery, bounded foreground-causal draining, bounded opaque failure correlation, and post-Temporal direct latency hints. | Hosted group consultation | High | 2026-08-27 |
+| `agent-docs/product-specs/private-group-consultation.md` | Implemented Assistant Ask request/reply primitive plus the separate target-authored private-to-group context handoff, with exact normalized named-group resolution across all active memberships, up to 64 lightweight clarification labels, complete live participant targeting for any current member, requester-only Contacts names and masked fallbacks, exact requester identity, host-owned consented participant attribution, provider-free cached-root admission transactions, first-write-wins stored-target and pinned mailbox replay, canonical durable follow-up context, delimiter-safe untrusted context, plain-text model output with runtime-owned delivery, deterministic causal unavailable delivery, bounded foreground-causal draining, bounded opaque failure correlation, and post-Temporal direct latency hints. | Hosted group consultation | High | 2026-08-27 |
 | `agent-docs/product-specs/consented-group-disclosure.md` | Exact-grant group-to-member Assistant Ask plus exact-message current-sender requests, with independently paged active grant projections, no lifetime permission or grant admission ceiling, independent valid sources in one accepted turn, model-inferred natural-language audience and clarification, Web-owned exact sender/source/route admission, same-channel private-route proof, group notice before a personal read, fail-closed unmarked group rollout skew, one outgoing allow/deny review, mutually exclusive private/group terminal retry, non-disclosing fallback, replay/concurrency ownership, and bounded private/persisted legacy drain. | Hosted group disclosure | High | 2026-08-26 |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | First-join private Murph confirmation with a sanitized group name, deterministic web or reaction copy, first-party sharing-editor link, and one durable member-row owner for Linq routing, activation, invite, and mailbox writes. | Hosted group membership behavior | High | 2026-07-23 |
 | `agent-docs/product-specs/clinical-records-intake.md` | Epic SMART clinical-record connection, exact API-registration catalog, all-24 primary query activation across 17 permissions, provider-directory, credential/control-plane, query-slice-bound retrieval, raw-first vault import, privacy, recovery, and rollout contract. | Clinical Records intake behavior | High | 2026-07-21 |
@@ -698,7 +719,7 @@ payloads reuse the set-based root unwrap path. This contract is specified by
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, one-shot first-visit persona picker handoff, fixed-pack usage-credit Checkout plus capped monthly group authorization and explicit saved-card PaymentIntents, metadata-only Stripe failure alert configuration, canonical purchase/referral credit-entry ownership and remaining projections, conversational referral state, product-label database restore and constraint rollout order, gated OpenAI/Venice assistant Settings projection, signed conversation convergence, and cross-lane mailbox causal-sequence ownership, hosted AI usage allowance ownership, hosted computer-use run/handoff ownership, hosted Linq first-contact decision retention and iMessage app-fallback screening boundary, health-data revocation rollback floor, approval-read rollback floor, Temporal reconciliation-facts boundary, and app-source/testkit ownership split. | `apps/web/**` | Medium | 2026-08-09 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract, including payloadless direct Linq and Assistant Ask latency wakes, strict plan-usage consumer rollout order, Worker-owned provider egress allowlists, runner-scoped OpenAI and Venice egress credentials, asynchronous private generated-image delivery, and encrypted temporary group-avatar staging. | `apps/cloudflare/**` | Medium | 2026-07-29 |
-| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including the coordinated health-data revocation Web/Worker rollback floor, gated Venice provider activation, Web-first Gemini video-analysis pricing and immediate Worker/runner activation, rollout and rollback floors for shared message targeting, direct support escalation, and group room-model maintenance, hard-cut Assistant Ask and consented group disclosure rollback floors, phone-call fail-closed direct-origin/result/stop rollout with deterministic-item rollback proof and fence drain, group-funding urgency/capability rollout order, additive failed-request diagnostic rollout, native permission smoke, Blacksmith deploy handoff validation, private generated-image delivery and group-avatar staging, the approval-read web/runtime compatibility floor, the gated personality projection-convergence hard cut, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-08-20 |
+| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including the coordinated health-data revocation Web/Worker rollback floor, gated Venice provider activation, Web-first Gemini video-analysis pricing plus selectable-sampling reader-first compatibility, rollout and rollback floors for shared message targeting, direct support escalation, and group room-model maintenance, hard-cut Assistant Ask and consented group disclosure rollback floors, phone-call fail-closed direct-origin/result/stop rollout with deterministic-item rollback proof and fence drain, group-funding urgency/capability rollout order, additive failed-request diagnostic rollout, native permission smoke, Blacksmith deploy handoff validation, private generated-image delivery and group-avatar staging, the approval-read web/runtime compatibility floor, the gated personality projection-convergence hard cut, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-08-26 |
 | `packages/assistantd/README.md` | Local assistant daemon boundary and control-plane contract. | `packages/assistantd/**` | Medium | 2026-03-30 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare, including bounded same-conversation exact-successor provider-turn batches, terminal input-id authority for Web-derived preference order, mailbox-causal assistant-preference application, and legacy pending-item replay. | `packages/assistant-runtime/**` | Medium | 2026-07-15 |
 | `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |

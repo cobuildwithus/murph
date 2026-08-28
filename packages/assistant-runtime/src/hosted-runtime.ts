@@ -62,6 +62,7 @@ import {
   readAssistantProviderStartMonotonicTickMs,
   recordAssistantRuntimeIssueInputsBestEffort,
   resolveAssistantDiagnosticsPolicy,
+  stampAssistantProviderStartCriticalPath,
   type AssistantProviderStartCriticalPathContext,
 } from "@murphai/assistant-engine";
 import {
@@ -3535,6 +3536,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       signal?: AbortSignal;
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedWorkspaceRunnerResult> => {
+      const providerStartAtWorkspaceForegroundPass =
+        stampAssistantProviderStartCriticalPath(
+          passInput.providerStartCriticalPath,
+          "workspaceForegroundPassStartedAtMonotonicMs",
+        );
       const passSignal = passInput.signal ?? runtimeAbortController.signal;
       if (passSignal.aborted) {
         throw readHostedRuntimeAbortReason(passSignal);
@@ -3586,10 +3592,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           initialMailboxImportLanes: passInput.initialMailboxImportLanes,
           initialMailboxPrefetch: passInput.initialMailboxPrefetch ?? null,
           requestId: passInput.requestId,
-          ...(passInput.providerStartCriticalPath
+          ...(providerStartAtWorkspaceForegroundPass
             ? {
                 providerStartCriticalPath:
-                  passInput.providerStartCriticalPath,
+                  providerStartAtWorkspaceForegroundPass,
               }
             : {}),
           runtimePassDiagnostics: {
@@ -3598,6 +3604,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             startedAtEpochMs: passStartedAtEpochMs,
           },
           runAssistantPhase: async (phaseInput) => {
+            const providerStartAtAssistantPhaseCallback =
+              stampAssistantProviderStartCriticalPath(
+                phaseInput.providerStartCriticalPath,
+                "assistantPhaseCallbackStartedAtMonotonicMs",
+              );
             recordForegroundConversationInputsFromImport(
               phaseInput.initialMailboxImport,
             );
@@ -3641,6 +3652,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
+                ...(providerStartAtAssistantPhaseCallback
+                  ? {
+                      providerStartCriticalPath:
+                        providerStartAtAssistantPhaseCallback,
+                    }
+                  : {}),
                 foregroundCausalOnly:
                   passInput.foregroundCausalOnly === true,
                 currentAssistantInputId: () => currentAssistantInputId,
@@ -5037,6 +5054,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
         signal?: AbortSignal;
       }): Promise<HostedWorkspaceRunnerResult> => {
+        const providerStartAtForegroundPass =
+          stampAssistantProviderStartCriticalPath(
+            wakeInput.providerStartCriticalPath,
+            "foregroundPassStartedAtMonotonicMs",
+          );
         const resolveForegroundRerunAssistantInputBatch = (
           passResult: HostedWorkspaceRunnerResult,
         ): HostedWorkspaceRunnerAssistantInputBatch | null =>
@@ -5107,7 +5129,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           return result;
         };
 
-        let passResult = await runSingleForegroundPass(wakeInput);
+        let passResult = await runSingleForegroundPass(
+          providerStartAtForegroundPass
+            ? {
+                ...wakeInput,
+                providerStartCriticalPath: providerStartAtForegroundPass,
+              }
+            : wakeInput,
+        );
         // Generation can finish during a provider pass. Stage it before
         // choosing the rerun batch so it enters the next Codex context ahead
         // of conversation input captured by the live foreground watcher.

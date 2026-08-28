@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   listMurphDynamicToolNames,
+  MURPH_GROUP_CONSULT_TOOL,
   MURPH_GROUP_FAMILY_TOOLS,
   MURPH_GROUP_TOOL_FAMILY_ACTIONS,
   MURPH_GROUP_TOOL_NAME,
@@ -130,6 +131,22 @@ function groupToolCall(
   };
 }
 
+function schemaAdvertisesGroupConsultObjectShape(
+  argumentsValue: Record<string, unknown>,
+): boolean {
+  const branch = MURPH_GROUP_CONSULT_TOOL.inputSchema.oneOf.find(
+    (candidate) =>
+      candidate.properties.action.enum[0] === argumentsValue.action,
+  );
+  if (!branch || branch.additionalProperties !== false) {
+    return false;
+  }
+  return branch.required.every((key) => Object.hasOwn(argumentsValue, key))
+    && Object.keys(argumentsValue).every(
+      (key) => Object.hasOwn(branch.properties, key),
+    );
+}
+
 describe("murph.group parser-first family compatibility", () => {
   it("partitions all 31 advertised actions exactly once", () => {
     const familyActions = Object.values(GROUP_FAMILY_ACTIONS).flat();
@@ -186,6 +203,7 @@ describe("murph.group parser-first family compatibility", () => {
 
     for (const action of [
       "ask_current_sender",
+      "message_current_sender",
       "clarify_current_sender",
       "continue_current_sender_in_group",
       "continue_current_sender_privately",
@@ -202,7 +220,51 @@ describe("murph.group parser-first family compatibility", () => {
     }
   });
 
-  it("does not treat unknown actions as read_current", () => {
+  it("advertises strict group_consult shapes that agree with the parser", () => {
+    expect(MURPH_GROUP_CONSULT_TOOL.inputSchema.oneOf.map(
+      (branch) => branch.properties.action.enum[0],
+    )).toEqual([...GROUP_FAMILY_ACTIONS.group_consult]);
+
+    for (const action of GROUP_FAMILY_ACTIONS.group_consult) {
+      const argumentsValue = GROUP_ACTION_FIXTURES[action];
+
+      expect(
+        schemaAdvertisesGroupConsultObjectShape(argumentsValue),
+        action,
+      ).toBe(true);
+      expect(
+        readMurphDynamicToolRequest(
+          groupToolCall("group_consult", argumentsValue),
+        ),
+        action,
+      ).toMatchObject({ kind: "group" });
+    }
+
+    const crossActionArguments = {
+      action: "ask_current_sender",
+      context: "Synthetic group context.",
+      message_ref: MESSAGE_REF,
+    };
+    expect(schemaAdvertisesGroupConsultObjectShape(crossActionArguments))
+      .toBe(false);
+    expect(readMurphDynamicToolRequest(
+      groupToolCall("group_consult", crossActionArguments),
+    )).toMatchObject({
+      kind: "invalid-group-arguments",
+      validationDigest: { issueCodes: ["unrecognized_key"] },
+    });
+
+    const legacyArguments = {
+      action: "ask_current_sender_privately",
+      message_ref: MESSAGE_REF,
+    };
+    expect(schemaAdvertisesGroupConsultObjectShape(legacyArguments)).toBe(false);
+    expect(readMurphDynamicToolRequest(
+      groupToolCall("group_consult", legacyArguments),
+    )).toMatchObject({ kind: "invalid-group-arguments" });
+  });
+
+  it("does not treat unknown or legacy-only actions as read_current", () => {
     expect(readMurphDynamicToolRequest(groupToolCall("group_membership", {
       action: "future_group_action",
     }))).toMatchObject({ kind: "invalid-group-arguments" });

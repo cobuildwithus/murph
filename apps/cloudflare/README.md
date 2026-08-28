@@ -477,12 +477,16 @@ activities that begin after runner acceptance are active wakes, not startup
 candidates, and are removed before ambiguity is assessed. Conflicting
 launch-owner evidence also fails closed. Warm direct
 wakes are omitted because they create no new runner job. The final table splits
-the same causal direct samples across Durable Object dispatch,
-consent locking, the existing health-data admission callback, runner-state
-operations, the parallel container-readiness and invocation-preparation
-branches, invocation launch, and runner-job acceptance. Per-phase chronology
-guards omit unavailable or reversed cross-runtime clock samples. It returns no
-member, mailbox, trace, or attempt identifiers.
+the same causal direct samples across Durable Object dispatch, UserRunner
+constructor initialization, consent locking, the existing health-data admission
+callback, runner-state operations, the parallel container-readiness and
+invocation-preparation branches, invocation launch, and runner-job acceptance.
+The three activation-only slices require route-through-first-ensure chronology
+and require the instance's first-ensure timestamp to equal the current RPC-entry
+timestamp; a warm instance therefore remains eligible only for the existing
+route-to-RPC aggregate. Other per-phase chronology guards omit unavailable or
+reversed cross-runtime clock samples. The report returns no member, mailbox,
+trace, or attempt identifiers.
 
 ## Runner Container Lifecycle
 
@@ -541,12 +545,18 @@ Foreground progress recovery is write-fenced instead of container-destroy
 driven. A write fence is commit authority, not liveness proof; the exact wake,
 replacement, ambiguous-wake, and fresh-startup retry contract is documented in
 `agent-docs/references/hosted-runtime-protocol.md`. Durable Object activation
-migrates legacy persisted active-invocation identity into the current write
-fence so dormant objects retain commit authority; it does not restore retired
-wake, backoff, or deadline state. Live runner side effects validate the
-runtime-kind write fence by attempt, generation, and user identity. Hosted
-OpenAI and Venice provider egress paths validate the signed Murph provider
-credential's user and runner against UserRunner's current active runtime state.
+always ensures `runner_schema_meta` and reads its version before touching
+`runner_meta`. An exact-current version returns immediately; missing, invalid,
+zero, or older versions retain the full create, migration, retired-table
+cleanup, version-mark, and final-assertion path, while a future version fails
+before `runner_meta` or retired-table mutation. Activation migrates
+legacy persisted active-invocation identity into the current write fence so
+dormant objects retain commit authority; it does not restore retired wake,
+backoff, or deadline state.
+Live runner side effects validate the runtime-kind write fence by attempt,
+generation, and user identity. Hosted OpenAI and Venice provider egress paths
+validate the signed Murph provider credential's user and runner against
+UserRunner's current active runtime state.
 Workspace version remains a checkpoint/restore freshness guard, not generic
 side-effect authority.
 Active, unsupported, error, and timeout liveness outcomes preserve the write

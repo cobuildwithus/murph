@@ -46,6 +46,9 @@ import {
   notifyAssistantActiveTurnInputAvailableForInputIds,
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
+import {
+  writeAssistantAutoReplySuppressionEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
 import type {
   AssistantModelTarget,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -111,6 +114,8 @@ const ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512;
 const RUNTIME_WAKE_NOTIFY_STALE_SKEW_TOLERANCE_MS = 5_000;
 const CONVERSATION_MODULE_LOAD_FAILED_CODE =
   "conversation-module-load-failed";
+const SELF_AUTHORED_LINQ_INPUT_SUPPRESSION_REASON =
+  "imported self-authored Linq input is not reply eligible";
 
 type HostedConversationEventsModule = typeof import("./events/conversation.ts");
 
@@ -1019,7 +1024,9 @@ async function stageHostedConversationAssistantInputEvent(input: {
     }),
     vault: input.vaultRoot,
   });
-  const replyToMessageId = linqWake?.message.linqMessage.isFromMe === true
+  const selfAuthoredLinq =
+    linqWake?.message.linqMessage.isFromMe === true;
+  const replyToMessageId = selfAuthoredLinq
     ? normalizeHostedAssistantInputSourceMetadataToken(
         linqWake.message.linqMessage.replyToMessageId ?? null,
       )
@@ -1056,6 +1063,24 @@ async function stageHostedConversationAssistantInputEvent(input: {
     mailboxItemId: input.item.item.id,
     vault: input.vaultRoot,
   });
+  if (selfAuthoredLinq) {
+    // Publish terminal proof before indexing. If the evidence write fails, the
+    // import fails and no indexed self-authored event can become runnable.
+    await writeAssistantAutoReplySuppressionEvidence({
+      captureIds: event.projection.captureId
+        ? [event.projection.captureId]
+        : [],
+      inputIds: [event.inputId],
+      reason: SELF_AUTHORED_LINQ_INPUT_SUPPRESSION_REASON,
+      vault: input.vaultRoot,
+    });
+    if (input.item.durablyConsumed !== true) {
+      await enqueueHostedPendingAssistantInputId({
+        inputId: event.inputId,
+        vaultRoot: input.vaultRoot,
+      });
+    }
+  }
   const projectionRequired = requiresHostedConversationInboxProjection({
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
     wake: input.wake,

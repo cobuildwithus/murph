@@ -101,9 +101,10 @@ generic-table balloon. Provider chrome is intentionally bounded to the title
 plus derived progress for structured workouts; it does not repeat the image's
 sets below the balloon. Generic-table provider chrome likewise retains only the
 title instead of repeating the image's subtitle, rows, or footer. The complete
-semantic text renderer remains the recovery owner, and the value-free fallback
-identifies the message as the member's workout or summary before telling them
-how to request that complete text without exposing its values outside the card.
+semantic text renderer remains the recovery owner. The value-free fallback only
+identifies the message as the member's workout or summary without exposing its
+values outside the card; capability failure or definitive pre-acceptance
+rejection still uses the existing automatic text-only recovery.
 
 The bitmap remains rectangular because Messages owns the outer mask and
 caption. Because the provider request omits an App Store id, the app-absent
