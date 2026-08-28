@@ -7,13 +7,6 @@ Last verified: 2026-08-28
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
-Vercel owns hosted Web usage and function-error anomaly detection. Its signed,
-event-driven alert webhook reuses the operational Resend transport without a
-second poller, receipt store, queue, or alert lifecycle; authentication,
-aggregate-only disclosure, bounded retry, and focused proof are specified by
-`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
-`apps/web/README.md`, and `agent-docs/references/testing-ci-map.md`.
-
 Receipt-owned positive Stripe payment notifications cover subscription starts
 and renewals, paid plan-change and recurring-usage invoices, and fulfilled
 usage-credit payments without exposing member or customer identity. Their

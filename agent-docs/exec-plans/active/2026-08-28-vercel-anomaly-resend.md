@@ -140,18 +140,36 @@ Updated: 2026-08-28
   bounded formatting, and the shared operational-email call. Replayed invalid
   signature, malformed payload, missing email configuration, and Resend
   rejection recovery paths. Members remain outside the path.
-- Evidence: 19 focused handler/route tests inspect the exact email, observed
+- Evidence: 20 focused handler/route tests inspect the exact email, observed
   and baseline aggregates, recipients, stable retry identity, stripped URL
-  query/fragment values, unsafe-field exclusion, failure status, body cap, and
-  absence from Vercel cron registration.
-- Differences from plan: none. The implementation remains event-driven and
-  adds no database, queue, custom detector, dashboard, or member-visible state.
+  query/fragment values, small nonzero precision, action-first 20-alert
+  formatting, unsafe-field exclusion, failure status, body cap, and absence
+  from Vercel cron registration.
+- Differences from plan: the specialist review tightened numeric precision and
+  moved the investigation link ahead of compact detail blocks. The
+  implementation remains event-driven and adds no database, queue, custom
+  detector, dashboard, or member-visible state.
 - Result: Ready.
 
 ## Verification Results
 
-- Focused Vitest: passed, 2 files and 19 tests.
+- Focused Vitest: passed after specialist remediation, 2 files and 20 tests.
 - Web typecheck: passed.
 - Scoped ESLint: passed.
 - Agent docs drift guard: passed.
 - `git diff --check`: passed.
+
+## Review Results
+
+- Preliminary specialist review: findings. Accepted all three: preserve tiny
+  nonzero aggregate values, move the investigation action before bounded alert
+  details and compact repeated labels, and remove the narrow feature summary
+  from the mandatory agent index. The corrected focused proof passes.
+- Corrected Product UX purpose verdict: Ready. The irreducible purpose is a
+  truthful, skimmable, action-first anomaly email that lets an operator judge
+  magnitude and open the affected Vercel investigation. The corrected email
+  preserves every promised aggregate, keeps small values nonzero, and places
+  the action before the first detail block at maximum visible cardinality.
+- Final ReviewGPT round 1 at the immutable first-reviewed head: pass with no
+  qualifying cross-cutting findings. A substantive round 2 is required for the
+  behavior-bearing specialist remediation.

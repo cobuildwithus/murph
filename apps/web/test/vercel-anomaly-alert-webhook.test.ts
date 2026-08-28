@@ -236,6 +236,40 @@ describe("hosted Vercel anomaly alert webhook", () => {
     );
   });
 
+  it("keeps tiny baselines visible and puts investigation before bounded details", async () => {
+    const sendEmail = createSendEmailMock();
+    const alerts = Array.from({ length: 21 }, (_, index) => buildAlert({
+      alertId: `alrt_${index + 1}`,
+      ...(index === 0
+        ? {
+            average: 0.004,
+            stddev: 0.0008,
+          }
+        : {}),
+      title: `Function invocation anomaly ${index + 1}`,
+    }));
+    const rawBody = JSON.stringify(buildAlertEvent({
+      payload: { alerts },
+    }));
+
+    await handleHostedVercelAnomalyWebhook({
+      env: ALERT_ENV,
+      rawBody,
+      sendEmail,
+      signature: sign(rawBody),
+    });
+
+    const text = sendEmail.mock.calls[0]?.[0].text ?? "";
+    expect(text).toContain("Baseline: 0.004 requests");
+    expect(text).toContain("Standard deviation: 0.0008 requests");
+    expect(text).toContain("Additional grouped alerts omitted: 1");
+    expect(text).toContain("20. Function invocation anomaly 20");
+    expect(text).not.toContain("21. Function invocation anomaly 21");
+    expect(text.indexOf("Open in Vercel:")).toBeLessThan(
+      text.indexOf("1. Function invocation anomaly 1"),
+    );
+  });
+
   it("fails visibly when shared operational email config is incomplete", async () => {
     const sendEmail = createSendEmailMock();
     const rawBody = JSON.stringify(buildAlertEvent());

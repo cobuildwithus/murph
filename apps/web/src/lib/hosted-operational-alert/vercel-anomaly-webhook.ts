@@ -235,13 +235,16 @@ function buildHostedVercelAlertEmail(
 ): string {
   const alertSections = event.alerts.map((alert, index) => [
     `${index + 1}. ${alert.title}`,
-    `Type: ${alert.type}`,
-    `Metric: ${alert.metric}`,
-    `Observed: ${formatAlertNumber(alert.count)} ${alert.unit}`,
-    `Baseline average: ${formatAlertNumber(alert.average)} ${alert.unit}`,
-    `Standard deviation: ${formatAlertNumber(alert.stddev)} ${alert.unit}`,
-    `Z-score: ${formatAlertNumber(alert.zscore)}`,
-    `Trigger threshold: ${formatAlertNumber(alert.zscoreThreshold)}`,
+    `Type: ${alert.type} | Metric: ${alert.metric}`,
+    [
+      `Observed: ${formatAlertNumber(alert.count)} ${alert.unit}`,
+      `Baseline: ${formatAlertNumber(alert.average)} ${alert.unit}`,
+      `Standard deviation: ${formatAlertNumber(alert.stddev)} ${alert.unit}`,
+    ].join(" | "),
+    [
+      `Z-score: ${formatAlertNumber(alert.zscore)}`,
+      `Trigger threshold: ${formatAlertNumber(alert.zscoreThreshold)}`,
+    ].join(" | "),
     `Started: ${alert.startedAt}`,
   ].join("\n"));
   const omittedAlertCount = event.totalAlertCount - event.alerts.length;
@@ -254,12 +257,12 @@ function buildHostedVercelAlertEmail(
     `Detected: ${event.createdAt}`,
     `Alert count: ${event.totalAlertCount}`,
     "",
+    ...(event.observabilityUrl
+      ? [`Open in Vercel: ${event.observabilityUrl}`, ""]
+      : []),
     ...alertSections.flatMap((section) => [section, ""]),
     ...(omittedAlertCount > 0
       ? [`Additional grouped alerts omitted: ${omittedAlertCount}`, ""]
-      : []),
-    ...(event.observabilityUrl
-      ? [`Open in Vercel: ${event.observabilityUrl}`, ""]
       : []),
     "This email contains Vercel aggregate alert metrics only; it does not include request or member data.",
   ].join("\n");
@@ -374,6 +377,9 @@ function readVercelObservabilityUrl(value: unknown): string | null {
 }
 
 function formatAlertNumber(value: number): string {
+  if (value !== 0 && Math.abs(value) < 0.01) {
+    return Number(value.toPrecision(3)).toString();
+  }
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 2,
   }).format(value);
