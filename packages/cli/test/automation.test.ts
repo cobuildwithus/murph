@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -378,6 +379,8 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal("includeBody" in listSchema.options.properties, false);
   assert.equal("supportSeriesId" in listSchema.options.properties, true);
   assert.equal("cursor" in listSchema.options.properties, true);
+  assert.equal("compact" in listSchema.options.properties, true);
+  assert.match(optionDescription(listSchema, "compact"), /automation show/u);
 });
 
 interface AutomationPublicPathCase {
@@ -1534,6 +1537,250 @@ test("automation save, import-json, and reactivation hard-cut local email delive
     );
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation compact list preserves empty page semantics", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-compact-empty-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation compact empty test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const listed = await runInProcessJsonCli<{
+      compact: true;
+      count: number;
+      items: unknown[];
+      nextCursor: string | null;
+      totalCount: number;
+    }>(cli, [
+      "automation",
+      "list",
+      "--compact",
+      "--limit",
+      "25",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(listed.exitCode, null);
+    assert.equal(listed.envelope.ok, true);
+    assert.equal(listed.envelope.data?.compact, true);
+    assert.equal(listed.envelope.data?.count, 0);
+    assert.equal(listed.envelope.data?.totalCount, 0);
+    assert.equal(listed.envelope.data?.nextCursor, null);
+    assert.deepEqual(listed.envelope.data?.items, []);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("automation compact list retains enumeration state and materially reduces a 25-item page", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-compact-series-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation compact fixture test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    const seriesId = "experiment:exp_compact_fixture";
+    const supportSeriesTag = buildAutomationSupportSeriesTag(seriesId);
+    const idAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+    await Promise.all(Array.from({ length: 25 }, (_, index) => {
+      const payload = createAutomationScaffoldPayload();
+      const suffix = idAlphabet[index];
+      if (suffix === undefined) {
+        throw new Error("Expected a deterministic automation id suffix.");
+      }
+      return upsertAutomation({
+        ...payload,
+        activeUntil: "2026-12-31T23:59:59.000Z",
+        assistantTargetOverride: {
+          model: "gpt-5.6-terra",
+          modelProvider: "vercel-ai-gateway",
+          reasoningEffort: "low",
+        },
+        automationId: `automation_01ARZ3NDEKTSV4RRFFQ69G5FA${suffix}`,
+        contextReferences: [{
+          entityId: "exp_compact_fixture",
+          entityKind: "experiment",
+        }],
+        plannedOccurrenceOffsetMs: index * 60_000,
+        route: {
+          channel: "telegram",
+          deliveryTarget: `telegram:compact-fixture-${String(index).padStart(2, "0")}`,
+          identityId: `identity_compact_fixture_${String(index).padStart(2, "0")}`,
+          participantId: `participant_compact_fixture_${String(index).padStart(2, "0")}`,
+          threadId: `thread_compact_fixture_${String(index).padStart(2, "0")}`,
+        },
+        schedule: {
+          expression: `${index % 60} 9 * * 1`,
+          kind: "cron",
+          timeZone: "America/New_York",
+        },
+        slug: `compact-fixture-${String(index).padStart(2, "0")}`,
+        status: index % 3 === 0 ? "paused" : "active",
+        summary: `Synthetic support inventory summary ${String(index).padStart(2, "0")} with enough bounded context to distinguish its purpose.`,
+        supportKind: index % 2 === 0 ? "reminder" : "review",
+        tags: [
+          ...(payload.tags ?? []),
+          "compact-inventory-fixture",
+          `compact-inventory-segment-${String(index).padStart(2, "0")}`,
+          supportSeriesTag,
+        ],
+        title: `Synthetic support inventory ${String(index).padStart(2, "0")}`,
+        vaultRoot,
+      });
+    }));
+
+    type ListEnvelope = {
+      compact?: true;
+      count: number;
+      filters: {
+        cursor: string | null;
+        limit: number;
+        status: string[] | null;
+        supportSeriesId: string | null;
+        text: string | null;
+      };
+      items: Array<Record<string, unknown> & {
+        automationId: string;
+      }>;
+      nextCursor: string | null;
+      totalCount: number;
+    };
+    const listArgs = [
+      "automation",
+      "list",
+      "--support-series-id",
+      seriesId,
+      "--limit",
+      "25",
+      "--vault",
+      vaultRoot,
+    ];
+    const full = await runInProcessJsonCli<ListEnvelope>(cli, listArgs);
+    const compact = await runInProcessJsonCli<ListEnvelope>(cli, [
+      ...listArgs.slice(0, 2),
+      "--compact",
+      ...listArgs.slice(2),
+    ]);
+
+    assert.equal(full.exitCode, null);
+    assert.equal(full.envelope.ok, true);
+    assert.equal(compact.exitCode, null);
+    assert.equal(compact.envelope.ok, true);
+    const fullData = full.envelope.data;
+    const compactData = compact.envelope.data;
+    if (fullData === undefined || compactData === undefined) {
+      throw new Error("Expected full and compact automation list data.");
+    }
+
+    assert.equal("compact" in fullData, false);
+    assert.equal(compactData.compact, true);
+    assert.equal(fullData.count, 25);
+    assert.equal(compactData.count, fullData.count);
+    assert.equal(compactData.totalCount, fullData.totalCount);
+    assert.equal(compactData.nextCursor, fullData.nextCursor);
+    assert.deepEqual(compactData.filters, fullData.filters);
+    assert.deepEqual(
+      compactData.items.map((item) => item.automationId),
+      fullData.items.map((item) => item.automationId),
+    );
+
+    const compactItem = compactData.items[0];
+    const fullItem = fullData.items[0];
+    assert.ok(compactItem);
+    assert.ok(fullItem);
+    assert.deepEqual(Object.keys(compactItem).sort(), [
+      "activeUntil",
+      "automationId",
+      "schedule",
+      "slug",
+      "status",
+      "summary",
+      "supportKind",
+      "title",
+    ]);
+    for (const retainedField of [
+      "automationId",
+      "slug",
+      "title",
+      "status",
+      "summary",
+      "activeUntil",
+      "schedule",
+      "supportKind",
+    ]) {
+      assert.deepEqual(compactItem[retainedField], fullItem[retainedField]);
+    }
+    for (const omittedField of [
+      "route",
+      "assistantTargetOverride",
+      "plannedOccurrenceOffsetMs",
+      "contextReferences",
+      "continuityPolicy",
+      "tags",
+      "createdAt",
+      "scheduleAnchorAt",
+      "updatedAt",
+      "relativePath",
+      "instructions",
+      "markdown",
+    ]) {
+      assert.equal(omittedField in compactItem, false, omittedField);
+    }
+
+    const fullBytes = Buffer.byteLength(JSON.stringify(fullData.items), "utf8");
+    const compactBytes = Buffer.byteLength(
+      JSON.stringify(compactData.items),
+      "utf8",
+    );
+    assert.ok(
+      compactBytes <= fullBytes * 0.55,
+      `compact automation list emitted ${compactBytes} bytes versus ${fullBytes} full bytes`,
+    );
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        automationId: string;
+        instructions: string;
+        route: { deliveryTarget: string | null };
+        tags: string[];
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      compactItem.automationId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(
+      shown.envelope.data?.automation?.automationId,
+      compactItem.automationId,
+    );
+    assert.match(shown.envelope.data?.automation?.instructions ?? "", /scheduled assistant instructions/u);
+    assert.match(
+      shown.envelope.data?.automation?.route.deliveryTarget ?? "",
+      /^telegram:compact-fixture-/u,
+    );
+    assert.equal(
+      shown.envelope.data?.automation?.tags.includes(supportSeriesTag),
+      true,
+    );
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
   }
 });
 

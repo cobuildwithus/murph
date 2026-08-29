@@ -135,7 +135,20 @@ export const automationListItemSchema = automationRecordSchema
   })
   .strict();
 
-export const automationListResultSchema = z.object({
+export const automationCompactListItemSchema = automationRecordSchema
+  .pick({
+    automationId: true,
+    slug: true,
+    title: true,
+    status: true,
+    summary: true,
+    activeUntil: true,
+    schedule: true,
+    supportKind: true,
+  })
+  .strict();
+
+const automationListResultFields = {
   vault: pathSchema,
   filters: z.object({
     status: z.array(z.enum(automationStatusValues)).nullable(),
@@ -147,8 +160,23 @@ export const automationListResultSchema = z.object({
   count: z.number().int().nonnegative(),
   totalCount: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
+};
+
+export const automationCompactListResultSchema = z.object({
+  ...automationListResultFields,
+  compact: z.literal(true),
+  items: z.array(automationCompactListItemSchema),
+});
+
+export const automationFullListResultSchema = z.object({
+  ...automationListResultFields,
   items: z.array(automationListItemSchema),
 });
+
+export const automationListResultSchema = z.union([
+  automationCompactListResultSchema,
+  automationFullListResultSchema,
+]);
 
 export const automationShowResultSchema = z.object({
   vault: pathSchema,
@@ -194,6 +222,21 @@ function automationListItem(
   void instructions;
   void markdown;
   return item;
+}
+
+function automationCompactListItem(
+  record: z.infer<typeof automationRecordSchema>,
+): z.infer<typeof automationCompactListItemSchema> {
+  return {
+    automationId: record.automationId,
+    slug: record.slug,
+    title: record.title,
+    status: record.status,
+    summary: record.summary,
+    activeUntil: record.activeUntil,
+    schedule: record.schedule,
+    supportKind: record.supportKind,
+  };
 }
 
 function invalidAutomationOption(
@@ -1237,6 +1280,9 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe("Continue an exact support-series listing after this automation id."),
+      compact: z.boolean().default(false).describe(
+        "Return identifiers and basic lifecycle and schedule state only; use automation show for complete details.",
+      ),
       limit: z.number().int().positive().max(200).default(10),
     }),
     output: automationListResultSchema,
@@ -1258,7 +1304,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         text: context.options.text,
       });
 
-      return {
+      const result = {
         vault: context.options.vault,
         filters: {
           status: context.options.status ?? null,
@@ -1270,6 +1316,18 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         count: page.items.length,
         totalCount: page.totalCount,
         nextCursor: page.nextCursor,
+      };
+
+      if (context.options.compact) {
+        return {
+          ...result,
+          compact: true,
+          items: page.items.map((item) => automationCompactListItem(item)),
+        };
+      }
+
+      return {
+        ...result,
         items: page.items.map((item) => automationListItem(item)),
       };
     },
