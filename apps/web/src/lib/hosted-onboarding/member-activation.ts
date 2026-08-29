@@ -398,25 +398,6 @@ async function prewarmHostedMemberActivationWriteDomainRoots(input: {
   }
 }
 
-export function buildHostedMemberActivationWelcomeRoute(input: {
-  emailAddress?: string | null;
-  emailLookupKey?: string | null;
-  linqChatId: string | null;
-  linqContactLookupKey?: string | null;
-  linqRecipientPhone?: string | null;
-  memberId: string;
-  memberPhoneNumber?: string | null;
-  phoneLookupKey: string | null;
-  pendingLinqChatId?: string | null;
-  pendingLinqParticipantContact?: {
-    lookupKey?: string | null;
-  } | null;
-  telegramThreadId: string | null;
-  telegramUserId: string | null;
-}): HostedExecutionAssistantNotificationRoute | null {
-  return buildHostedMemberActivationOnboardingFollowupRoute(input);
-}
-
 export function buildHostedMemberActivationOnboardingFollowupRoute(input: {
   emailAddress?: string | null;
   emailLookupKey?: string | null;

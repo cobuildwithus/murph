@@ -105,7 +105,6 @@ import {
   activateHostedMemberForFamilySponsorshipTx,
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationOnboardingFollowupRoute,
-  buildHostedMemberActivationWelcomeRoute,
   hasHostedMemberActivationProof,
   readHostedMemberActivationProofMemberIds,
 } from "@/src/lib/hosted-onboarding/member-activation";
@@ -1161,8 +1160,8 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
-  it("builds a proactive Telegram welcome route after an inbound thread exists", () => {
-    expect(buildHostedMemberActivationWelcomeRoute({
+  it("builds a Telegram onboarding follow-up route after an inbound thread exists", () => {
+    expect(buildHostedMemberActivationOnboardingFollowupRoute({
       linqChatId: null,
       linqRecipientPhone: null,
       memberId: "member_telegram_route",
@@ -1179,8 +1178,8 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
-  it("builds a verified-email welcome fallback with blinded identity", () => {
-    expect(buildHostedMemberActivationWelcomeRoute({
+  it("builds a verified-email onboarding fallback with blinded identity", () => {
+    expect(buildHostedMemberActivationOnboardingFollowupRoute({
       emailAddress: "member@example.test",
       emailLookupKey: "hbidx:email:v1:member",
       linqChatId: null,
@@ -1199,8 +1198,8 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
-  it("builds a Linq participant welcome route when activation only knows the chosen home line", () => {
-    expect(buildHostedMemberActivationWelcomeRoute({
+  it("builds a Linq participant onboarding route when activation only knows the chosen home line", () => {
+    expect(buildHostedMemberActivationOnboardingFollowupRoute({
       linqChatId: null,
       linqRecipientPhone: "+15550100099",
       memberId: "member_linq_participant_route",
@@ -1214,13 +1213,13 @@ describe("hosted onboarding member activation", () => {
     }));
   });
 
-  it("builds a Linq thread welcome route with blinded assistant identifiers", () => {
+  it("builds a Linq thread onboarding route with blinded assistant identifiers", () => {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
       secret: "hbidx:phone:v1:lookup",
       userId: "member_linq_thread_route",
     });
 
-    expect(buildHostedMemberActivationWelcomeRoute({
+    expect(buildHostedMemberActivationOnboardingFollowupRoute({
       linqChatId: "chat_home_123",
       linqContactLookupKey: "hbidx:phone:v1:lookup",
       linqRecipientPhone: null,

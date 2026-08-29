@@ -4,25 +4,20 @@ import {
   assertHostedMemberBillingStartMessagingReady,
 } from "@/src/lib/hosted-onboarding/billing-start-preconditions";
 
-function makePrisma(verifiedEmailVerifiedAt: Date | null) {
+function makePrisma() {
   return {
     hostedMemberEmailAuthorization: {
-      findUnique: vi.fn().mockResolvedValue(
-        verifiedEmailVerifiedAt
-          ? { verifiedEmailVerifiedAt }
-          : null,
-      ),
+      findUnique: vi.fn(),
     },
   };
 }
 
 describe("hosted billing messaging readiness", () => {
   it("accepts a verified phone without reading email state", async () => {
-    const prisma = makePrisma(null);
+    const prisma = makePrisma();
 
     await expect(assertHostedMemberBillingStartMessagingReady({
       identity: {
-        memberId: "member_phone",
         phoneLookupKey: "hbidx:phone:v1:ready",
       },
       prisma: prisma as never,
@@ -33,12 +28,11 @@ describe("hosted billing messaging readiness", () => {
   });
 
   it("requires a conversational channel even when email is verified", async () => {
-    const verifiedAt = new Date("2026-07-31T10:00:00.000Z");
-    const prisma = makePrisma(verifiedAt);
+    const prisma = makePrisma();
 
     await expect(assertHostedMemberBillingStartMessagingReady({
       identity: {
-        memberId: "member_email",
+        emailLinked: true,
         phoneLookupKey: null,
       },
       prisma: prisma as never,
@@ -47,22 +41,14 @@ describe("hosted billing messaging readiness", () => {
       code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
     });
 
-    expect(prisma.hostedMemberEmailAuthorization.findUnique).toHaveBeenCalledWith({
-      select: {
-        verifiedEmailVerifiedAt: true,
-      },
-      where: {
-        memberId: "member_email",
-      },
-    });
+    expect(prisma.hostedMemberEmailAuthorization.findUnique).not.toHaveBeenCalled();
   });
 
   it("still rejects a member with no reachable messaging channel", async () => {
-    const prisma = makePrisma(null);
+    const prisma = makePrisma();
 
     await expect(assertHostedMemberBillingStartMessagingReady({
       identity: {
-        memberId: "member_unreachable",
         phoneLookupKey: null,
       },
       prisma: prisma as never,
@@ -73,21 +59,5 @@ describe("hosted billing messaging readiness", () => {
       message:
         "Verify a phone number or connect Telegram before checkout so Murph can message you.",
     });
-  });
-
-  it("fails closed when an incomplete snapshot cannot name the member", async () => {
-    const prisma = makePrisma(new Date("2026-07-31T10:00:00.000Z"));
-
-    await expect(assertHostedMemberBillingStartMessagingReady({
-      identity: {
-        phoneLookupKey: null,
-      },
-      prisma: prisma as never,
-      routing: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
-    });
-
-    expect(prisma.hostedMemberEmailAuthorization.findUnique).not.toHaveBeenCalled();
   });
 });
