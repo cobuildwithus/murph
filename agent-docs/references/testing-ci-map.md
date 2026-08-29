@@ -690,14 +690,6 @@ gate unset and makes no paid request.
   `EXISTS` query shape without a private usage-row join. The separate
   `hosted-ai-usage-overshoot-alert-monitor-postgres.test.ts` proof executes that
   query against zero-cap and positive-cap current blocked periods.
-- `apps/web/test/vercel-anomaly-alert-webhook{,-route}.test.ts` proves the
-  independent event-driven Vercel platform anomaly path: a 64-KiB raw-body cap,
-  exact HMAC-SHA1 verification before parsing, documented aggregate-field
-  normalization, account/member/raw-payload exclusion, an allowlisted
-  observability link, stable hashed event idempotency, ignored unsupported
-  signed events, visible incomplete configuration, and retryable Resend
-  failure. It also proves the route waits for Resend admission before returning
-  2xx and adds no cron registration.
 - `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
   opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
   latency monitor. It runs the production query against 50,000 stale rows per
