@@ -271,7 +271,10 @@ describe('experiment onboarding skill guidance', () => {
       'do not leave related future session-support automations blindly active',
     )
     expect(raw).toContain(
-      'vault-cli automation list --support-series-id experiment:<experimentId>',
+      'vault-cli automation list --support-series-id experiment:<experimentId> --compact',
+    )
+    expect(raw).toContain(
+      'vault-cli automation show <automationId>` only when a fact needed for the reconciliation decision is absent from that compact inventory',
     )
     expect(raw).toContain(
       'never infer ownership from an experiment slug, generic tag, title, or text prefix',

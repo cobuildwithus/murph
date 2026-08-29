@@ -262,6 +262,11 @@ const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
 const REPEATED_SET_REGIMEN_ID = 'reg_01JNV447V6K3SW1Q9NJ7XVQZ7P'
 const REPEATED_SET_ALPHA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7Q'
 const REPEATED_SET_BETA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7R'
+const COMPACT_SUPPORT_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7S'
+const COMPACT_SUPPORT_KEEP_AUTOMATION_ID =
+  'automation_01JNV447V6K3SW1Q9NJ7XVQZ7T'
+const COMPACT_SUPPORT_STALE_AUTOMATION_ID =
+  'automation_01JNV447V6K3SW1Q9NJ7XVQZ7V'
 const REPEATED_SET_ALPHA_EVENT_IDS = Array.from(
   { length: 5 },
   (_, index) => `evt_01JNV447V6K3SW1Q9NJ7XVQZ7${index + 1}`,
@@ -11412,6 +11417,170 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
 })
 
 describeRealCodex('real Codex experiment onboarding e2e', () => {
+  it(
+    'reconciles exact experiment support from compact inventory without an automation detail read',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-compact-automation-support-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(
+        workingDirectory,
+        'automation-commands.log',
+      )
+      const supportSeriesId = `experiment:${COMPACT_SUPPORT_EXPERIMENT_ID}`
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'experiment-onboarding',
+        })
+        await materializeExperimentSupportInventoryVaultCli({
+          binDirectory,
+          commandLogPath,
+        })
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildExperimentOnboardingDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                automationRequests.push(request)
+                if (
+                  request.action !== 'reconcile'
+                  || request.supportSeriesId !== supportSeriesId
+                  || request.desiredAutomationIds.length !== 1
+                  || request.desiredAutomationIds[0]
+                    !== COMPACT_SUPPORT_KEEP_AUTOMATION_ID
+                ) {
+                  throw new Error(
+                    'Expected exact compact-inventory support reconciliation.',
+                  )
+                }
+                return {
+                  action: 'reconcile',
+                  archivedCount: 1,
+                  matchedCount: 2,
+                  missingDesiredAutomationIds: [],
+                  supportSeriesId,
+                  unchangedCount: 1,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'A synthetic active experiment has one accepted support purpose: keep its current active reminder and retire its stale review.',
+            `The exact canonical experiment id is ${COMPACT_SUPPORT_EXPERIMENT_ID}.`,
+            'Use the experiment-onboarding skill and the exact compact support-series inventory, then reconcile through the hosted automation tool now.',
+            'The compact fields are sufficient for this decision, so do not read automation detail.',
+            'The synthetic host result does not verify the next delivery time. Briefly report what remains, what stale support was retired, and that limitation without exposing internal identifiers.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('experiment-onboarding/SKILL.md')
+          && action.output.includes('# Experiment onboarding')
+        )
+        const listCall = actions.find((action) =>
+          action.kind === 'command'
+          && action.ok
+          && action.command.includes('vault-cli automation list')
+          && action.command.includes('--support-series-id')
+          && action.command.includes(COMPACT_SUPPORT_EXPERIMENT_ID)
+          && action.command.includes('--compact')
+        )
+        const showCalls = actions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes('vault-cli automation show')
+        )
+        const reconcileCall = actions.find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+
+        expect(skillRead, 'experiment-onboarding skill read').toBeDefined()
+        expect(listCall, 'compact exact-series inventory read').toBeDefined()
+        expect(showCalls).toHaveLength(0)
+        expect(reconcileCall, 'hosted reconciliation call').toBeDefined()
+        expect(listCall?.eventIndex).toBeGreaterThan(
+          skillRead?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(reconcileCall?.eventIndex).toBeGreaterThan(
+          listCall?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(automationRequests).toEqual([{
+          action: 'reconcile',
+          desiredAutomationIds: [COMPACT_SUPPORT_KEEP_AUTOMATION_ID],
+          supportSeriesId,
+        }])
+
+        const commandLog = await readFile(commandLogPath, 'utf8')
+        expect(commandLog).toContain('automation list')
+        expect(commandLog).toContain('--compact')
+        expect(commandLog).toContain(COMPACT_SUPPORT_EXPERIMENT_ID)
+        expect(commandLog).not.toContain('automation show')
+
+        const reply = result.finalMessage.trim()
+        expect(reply).toMatch(/reminder/iu)
+        expect(reply).toMatch(/kept|remain|still active/iu)
+        expect(reply).toMatch(/review|stale support/iu)
+        expect(reply).toMatch(/archiv|retir|removed|ended/iu)
+        expect(reply).toMatch(
+          /(?:next (?:delivery|reminder)|delivery timing|timing).{0,100}(?:could not|couldn't|not|unable).{0,60}(?:confirm|verify)|(?:could not|couldn't|did not|unable).{0,60}(?:confirm|verify).{0,100}(?:next (?:delivery|reminder)|delivery timing|timing)/iu,
+        )
+        expect(reply).not.toContain(COMPACT_SUPPORT_EXPERIMENT_ID)
+        expect(reply).not.toContain(COMPACT_SUPPORT_KEEP_AUTOMATION_ID)
+        expect(reply).not.toContain(COMPACT_SUPPORT_STALE_AUTOMATION_ID)
+        expect(reply).not.toContain(supportSeriesId)
+        expect(reply).not.toMatch(/\b(?:automation|exp)_[0-9A-Z]/u)
+        process.stdout.write(
+          `[automation-list-compact-support-series-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'exact-support-series-reconciliation',
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'resolves a name-first experiment start without replacing the exact match with its starter',
     async () => {
@@ -23009,6 +23178,96 @@ async function materializeConnectedHealthVaultCli(input: {
       '',
     ].join('\n'),
     { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function materializeExperimentSupportInventoryVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+}): Promise<void> {
+  const supportSeriesId = `experiment:${COMPACT_SUPPORT_EXPERIMENT_ID}`
+  const inventoryResult = JSON.stringify({
+    data: {
+      compact: true,
+      count: 2,
+      filters: {
+        cursor: null,
+        limit: 10,
+        status: null,
+        supportSeriesId,
+        text: null,
+      },
+      items: [
+        {
+          activeUntil: '2026-09-12T23:59:59.000Z',
+          automationId: COMPACT_SUPPORT_KEEP_AUTOMATION_ID,
+          schedule: {
+            kind: 'dailyLocal',
+            localTime: '08:30',
+            timeZone: 'America/New_York',
+          },
+          slug: 'synthetic-mobility-session-reminder',
+          status: 'active',
+          summary: 'Current accepted session reminder.',
+          supportKind: 'reminder',
+          title: 'Synthetic mobility session reminder',
+        },
+        {
+          activeUntil: '2026-09-12T23:59:59.000Z',
+          automationId: COMPACT_SUPPORT_STALE_AUTOMATION_ID,
+          schedule: {
+            expression: '0 18 * * 5',
+            kind: 'cron',
+            timeZone: 'America/New_York',
+          },
+          slug: 'synthetic-mobility-weekly-review',
+          status: 'active',
+          summary: 'Stale review that is no longer accepted.',
+          supportKind: 'review',
+          title: 'Synthetic mobility weekly review',
+        },
+      ],
+      nextCursor: null,
+      totalCount: 2,
+      vault: '/synthetic/private-free-vault',
+    },
+    meta: {
+      command: 'automation list',
+      duration: '0ms',
+    },
+    ok: true,
+  })
+  await mkdir(input.binDirectory, { recursive: true })
+  await writeFile(input.commandLogPath, '', 'utf8')
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      '  *"automation list"*)',
+      '    case "$*" in *"--compact"*) ;; *) printf \'%s\\n\' \'{"error":"compact inventory required"}\' >&2; exit 64 ;; esac',
+      `    case "$*" in *${quoteNutritionShellLiteral(supportSeriesId)}*) ;; *) printf '%s\\n' '{"error":"exact support series required"}' >&2; exit 64 ;; esac`,
+      `    printf '%s\\n' ${quoteNutritionShellLiteral(inventoryResult)}`,
+      '    ;;',
+      '  *"automation show"*)',
+      '    printf \'%s\\n\' \'{"error":"compact inventory already contains the required decision fields"}\' >&2',
+      '    exit 64',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"error":"unexpected synthetic vault command"}\' >&2',
+      '    exit 64',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    {
+      encoding: 'utf8',
+      mode: 0o700,
+    },
   )
   await chmod(executablePath, 0o700)
 }
