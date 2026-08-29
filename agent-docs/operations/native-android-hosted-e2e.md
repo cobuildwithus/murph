@@ -4,15 +4,18 @@
 
 `.github/workflows/native-android-hosted-e2e.yml` is the trusted default-branch
 production canary controller. It runs at minute 47 every six hours, after the
-iOS controller's minute-17 slot. It admits no pull-request, deployment-status,
-or manual event and publishes no required commit status.
+iOS controller's minute-17 slot. It admits no pull-request or deployment-status
+event and publishes no required commit status. Authenticated manual recovery is
+limited to `refs/heads/main` at the exact current `main` SHA; an arbitrary or
+stale branch dispatch fails in the read-only selection job before protected
+environment access.
 
 The read-only selection job inspects the latest completed scheduled run of this
 exact workflow. It skips paid work only when that run succeeded at the current
 protected-`main` SHA. A missing checkpoint, changed SHA, or latest failure runs
-the canary; an explicit rerun of the trusted schedule bypasses the skip. Fixed,
-non-canceling concurrency prevents overlap without creating a waiter for every
-commit or deployment event.
+the canary; an explicit rerun of the trusted controller attempt bypasses the
+skip. Fixed, non-canceling concurrency prevents overlap without creating a
+waiter for every commit or deployment event.
 
 The canary checks out that exact `main` SHA and proves it remains in protected
 history. Native source pins are versioned in
@@ -79,8 +82,9 @@ For each Android revision, create a new protected lightweight tag pointing
 directly to its reviewed commit, then update the Android `privateRef` and
 `privateSha` together in `.github/native-hosted-e2e-controller.json`. Never move
 or recreate an existing tag. Merge the policy update before enabling the
-controller; the next scheduled slot sees the new `main` checkpoint, and an
-explicit rerun of that trusted schedule provides immediate recovery.
+controller; the next scheduled slot sees the new `main` checkpoint. If GitHub
+drops that schedule event, dispatch the controller manually against `main`;
+the selection job revalidates the exact current SHA before paid work.
 
 The canary is informational and must not become a required commit status.
 

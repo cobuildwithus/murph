@@ -166,20 +166,22 @@ supplement that proof, but it cannot establish runtime cleanup behavior.
 
 Native iOS and Android hosted E2E are production canaries, not pull-request
 statuses. The trusted default-branch controllers run on staggered six-hour
-schedules: iOS at minute 17 and Android at minute 47. Each cheap selection job
-reads the latest completed scheduled outcome for its own workflow and skips the
-native job only when that outcome succeeded at the current protected-`main`
-SHA. Missing history, a newer SHA, or a latest failure admits the canary. An
-explicit rerun of the same trusted schedule attempt bypasses the no-change
-skip. Reviewed native source pins live in
+schedules: iOS at minute 17 and Android at minute 47. An authenticated manual
+dispatch is the scheduler-drop recovery path, but its event ref must be
+`refs/heads/main` and its exact event SHA must still equal current `main` when
+the selection job runs. Each cheap selection job reads the latest completed
+scheduled outcome for its own workflow and skips the native job only when that
+outcome succeeded at the selected protected-`main` SHA. Missing history, a
+newer SHA, or a latest failure admits the canary. An explicit rerun of the same
+trusted controller attempt bypasses the no-change skip. Reviewed native source pins live in
 `.github/native-hosted-e2e-controller.json`, so a source rotation advances the
 protected-main checkpoint.
 
-Neither controller admits `workflow_run`, `deployment_status`, or
-branch-selectable `workflow_dispatch` events, and neither publishes a commit
-status. Fixed non-canceling workflow concurrency bounds each platform to one
-running and one pending controller. The workflows do not receive the destructive
-PR database, Privy, Junction-namespace, or candidate-deployment authority.
+Neither controller admits `workflow_run`, `deployment_status`, or an arbitrary
+branch dispatch, and neither publishes a commit status. Fixed non-canceling
+workflow concurrency bounds each platform to one running and one pending
+controller. The workflows do not receive the destructive PR database, Privy,
+Junction-namespace, or candidate-deployment authority.
 
 A scheduled native pass is production-shaped evidence for the current
 protected-`main` checkpoint and the exact deployed Web SHA it dispatches.
