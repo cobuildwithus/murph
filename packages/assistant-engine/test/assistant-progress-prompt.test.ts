@@ -8,7 +8,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 describe('assistant progress prompt contract', () => {
-  it('orients the member before noticeable multi-source or long work', () => {
+  it('orients the member only before genuinely noticeable work', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
     })
@@ -23,19 +23,19 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Send one early update before direct reply-critical work spanning multiple sources or several substantive tool steps, including cross-owner evidence, long research, parsing/scans, or content inspection',
+      'Send one early update before direct reply-critical work that requires three or more distinct substantive checks or tool actions',
     )
     expect(prompt).toContain(
-      'Before the first read, orient the member even when each lookup is routine',
+      'Source count alone does not trigger it: routine context reads, especially during onboarding or setup, and one or two quick calls stay silent and answer directly',
     )
     expect(prompt).toContain(
-      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
+      'Also skip progress for ordinary conversation, choosing a straightforward next step, and quick resume checks',
+    )
+    expect(prompt).toContain(
+      'Send a child-wait update after spawning',
     )
     expect(prompt).toContain(
       'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement',
-    )
-    expect(prompt).toContain(
-      'Reconsider this on each follow-up or resumed turn; earlier updates do not count',
     )
     expect(prompt).toContain(
       'A single routine daily-card read alone does not trigger progress',
@@ -69,6 +69,7 @@ describe('assistant progress prompt contract', () => {
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
+    expect(prompt).not.toContain('orient the member even when each lookup is routine')
   })
 
   it('does not instruct routes without progress delivery to call the tool', () => {
@@ -82,7 +83,7 @@ describe('assistant progress prompt contract', () => {
       'Member-visible interim progress is unavailable on this route',
     )
     expect(prompt).not.toContain('murph.send_progress_update')
-    expect(prompt).not.toContain('Send an update before reply-critical multi-source')
+    expect(prompt).not.toContain('Send one early update before direct reply-critical work')
     expect(prompt).not.toContain('may outlast ordinary response time')
   })
 

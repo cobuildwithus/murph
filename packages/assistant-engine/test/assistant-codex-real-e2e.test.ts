@@ -997,6 +997,64 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   )
 
   it(
+    'answers a simple onboarding next-step turn without a progress update',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const temporaryPaths = [...config.temporaryPaths]
+      const progressUpdates: string[] = []
+
+      try {
+        const workingDirectory = await prepareRealCodexOnboardingDirectory()
+        temporaryPaths.unshift(workingDirectory)
+        await writeRealCodexOnboardingResumeContext(workingDirectory, 'later')
+        const turnInput = buildRealCodexOnboardingTurnInput({
+          config,
+          workingDirectory,
+        })
+        const result = await executeRealCodexAppServerTurn({
+          ...turnInput,
+          dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          excludeResumeTurns: true,
+          progressDelivery: {
+            async send(text) {
+              progressUpdates.push(text)
+              return { kind: 'sent', source: 'model' }
+            },
+          },
+          prompt: [
+            'We finished the health-background questions after talking through why steadier sleep matters to me.',
+            'I want to work on that sleep goal now. What is one useful place to start?',
+          ].join(' '),
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const progressCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        )
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(
+          `[onboarding-simple-next-step-e2e] ${JSON.stringify({
+            progressUpdateCount: progressUpdates.length,
+            reply,
+          })}\n`,
+        )
+
+        expect(progressUpdates).toEqual([])
+        expect(progressCalls).toEqual([])
+        expect(reply).toMatch(/sleep|bed|wake|wind[- ]down|routine/iu)
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).not.toMatch(
+          /checking a few things|pulling your data|while i work|sit tight/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it(
     'continues foundation after a member defers an optional wearable connection',
     async () => {
       const config = await resolveRealCodexE2eConfig()
