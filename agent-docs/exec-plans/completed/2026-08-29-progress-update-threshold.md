@@ -1,6 +1,6 @@
 # Progress Update Threshold
 
-Status: active
+Status: completed
 Created: 2026-08-29
 Updated: 2026-08-29
 
@@ -66,3 +66,8 @@ long reply-critical work can still send one useful update.
   three-check recovery journey still sent exactly one. Four focused
   deterministic files passed (139 assertions, 7 skipped), and Assistant Engine
   typecheck passed.
+- Parent final review found and removed one stray unused test declaration from
+  the earlier remediation edit. Product UX remains Ready: the negative and
+  positive boundaries are both directly proven, and the final architecture has
+  one prompt owner with no added state, service, dependency, or timing logic.
+Completed: 2026-08-29

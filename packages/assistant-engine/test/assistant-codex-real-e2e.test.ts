@@ -14757,7 +14757,6 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
         body: Record<string, unknown>
         url: string
       }> = []
-      const progressUpdates: string[] = []
       let actCount = 0
       let authenticatedPortalInspected = false
       let checkInCompleted = false
