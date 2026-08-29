@@ -35,6 +35,9 @@ import {
   tryHostedLinqFirstContactAdmissionDeterministicDecision,
   type HostedLinqFirstContactAdmissionRequest,
 } from "@/src/lib/hosted-onboarding/linq-first-contact-admission";
+import {
+  createHostedLinqDeliverySourceRefLookupKey,
+} from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 
 const BASE_REQUEST: HostedLinqFirstContactAdmissionRequest = {
   eventId: "evt_123",
@@ -84,10 +87,18 @@ function makeCanaryDelivery(
     payloadOwnerMemberId: null,
     payloadSchema: null,
     skippedAt: null,
-    sourceRef: BASE_REQUEST.eventId,
+    sourceRef: requireDeliverySourceRef(BASE_REQUEST.eventId),
     status: "attempted",
     ...overrides,
   };
+}
+
+function requireDeliverySourceRef(eventId: string): string {
+  const sourceRef = createHostedLinqDeliverySourceRefLookupKey(eventId);
+  if (!sourceRef) {
+    throw new TypeError("Expected a delivery source-reference lookup key.");
+  }
+  return sourceRef;
 }
 
 function makeCanaryResetTx(input: {
@@ -1036,7 +1047,12 @@ describe("Linq first-contact admission", () => {
     expect(tx.hostedLinqDelivery.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          sourceRef: { in: ["evt_canary_1", "evt_canary_2"] },
+          sourceRef: {
+            in: [
+              requireDeliverySourceRef("evt_canary_1"),
+              requireDeliverySourceRef("evt_canary_2"),
+            ],
+          },
           template: "instant_first_turn_v1",
         },
       }),

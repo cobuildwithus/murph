@@ -129,8 +129,10 @@ export async function deleteHostedLinqInstantFirstTurnCanaryPreProviderClaimsTx(
     prisma: HostedLinqInstantFirstTurnCanaryResetStore;
   },
 ): Promise<number> {
-  const eventIds = [...new Set(input.eventIds.filter(Boolean))];
-  if (eventIds.length === 0) {
+  const sourceRefs = [...new Set(input.eventIds
+    .map(createHostedLinqDeliverySourceRefLookupKey)
+    .filter((sourceRef): sourceRef is string => sourceRef !== null))];
+  if (sourceRefs.length === 0) {
     return 0;
   }
 
@@ -155,7 +157,7 @@ export async function deleteHostedLinqInstantFirstTurnCanaryPreProviderClaimsTx(
       status: true,
     },
     where: {
-      sourceRef: { in: eventIds },
+      sourceRef: { in: sourceRefs },
       template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
     },
   });
