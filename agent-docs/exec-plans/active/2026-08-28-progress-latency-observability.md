@@ -2,14 +2,14 @@
 
 Status: active
 Created: 2026-08-28
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 ## Goal
 
 - Make one early member-visible progress update more likely for reply-critical
   multi-source or multi-step work without increasing routine status chatter.
 - Make slow-reply investigations distinguish no model attempt, a late attempt,
-  and failed progress delivery without retaining content or raw provider ids.
+  and unsent progress delivery without retaining content or raw provider ids.
 
 ## Scope
 
@@ -22,11 +22,12 @@ Updated: 2026-08-28
 
 ## Tasks
 
-1. Replace redundant progress wording with two high-level sentences that favor
-   one early update for distinct-source or multi-step work and reconsider the
+1. Replace redundant progress wording with one ordered rule that favors one
+   early update for distinct-source or multi-step work and reconsiders the
    decision on resumed turns.
-2. Add bounded provider-turn correlation plus progress call, sent, failed, and
-   first-call timing fields to metadata-only diagnostics.
+2. Add bounded provider-turn correlation plus progress call, sent, and
+   first-call timing fields to metadata-only diagnostics; derive unsent calls
+   from completed calls minus sent outcomes.
 3. Prove prompt size, action aggregation, log redaction/projection, shared
    correlation, type safety, and privacy guards.
 4. Run and review one focused production-derived real-model journey.
@@ -56,3 +57,9 @@ Updated: 2026-08-28
   payloads were removed.
 - `pnpm logs:guard` and `pnpm docs:drift` passed. `git diff --check` and the
   final privacy scan passed after the implementation; repeat both at handoff.
+- After final-review remediation, `pnpm logs:guard`, `pnpm docs:drift`, JSON
+  parsing, and `git diff --check` passed again. Focused local Vitest runs entered
+  the runner but produced no test result after 15 minutes, and the package
+  typecheck produced no diagnostic or result after 10 minutes; only the exact
+  owned processes were stopped. Exact-head PR CI remains the required
+  test/typecheck gate before merge.

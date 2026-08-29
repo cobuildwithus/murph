@@ -6,7 +6,7 @@
     "kind": "improvement",
     "priority": 3,
     "title": "More timely progress updates",
-    "summary": "Murph now gives an earlier update when a direct request needs several sources or substantive steps before the answer is ready.",
+    "summary": "Murph is now more likely to give an earlier update when a direct request needs several sources or substantive steps before the answer is ready.",
     "details": "Short, routine requests stay concise, while longer work can surface one useful progress update without becoming noisy.",
     "relevanceTags": ["assistant", "reliability", "messaging"],
     "sourcePullRequests": [2509]

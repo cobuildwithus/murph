@@ -14867,12 +14867,20 @@ describeRealCodex('real Codex proactive progress e2e', () => {
         process.stdout.write(
           `[proactive-progress-e2e] ${JSON.stringify({
             commandCount: commands.length,
+            progressUpdate: progressUpdates[0] ?? null,
             progressUpdateCount: progressUpdates.length,
             reply,
           })}\n`,
         )
 
         expect(progressUpdates).toHaveLength(1)
+        const progressUpdate = progressUpdates[0] ?? ''
+        expect(progressUpdate).toMatch(
+          /check|look|review|compare|pull|gather|assess/iu,
+        )
+        expect(progressUpdate).toMatch(/activity|meals?|sleep|recovery/iu)
+        expect(progressUpdate).not.toMatch(/vault-cli|command|tool|json|terminal/iu)
+        expect(progressUpdate).not.toMatch(/7,?800|7\.4|3 meals?|three meals?/iu)
         expect(progressCalls).toHaveLength(1)
         expect(overviewReads.length).toBeGreaterThanOrEqual(1)
         expect(progressCalls[0]?.eventIndex).toBeLessThan(

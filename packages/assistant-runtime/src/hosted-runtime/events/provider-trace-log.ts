@@ -335,6 +335,10 @@ const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_NUMBER_KEYS = [
   "codexTransportRetryMax",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
+  "codexActionTurnCorrelation",
+  "codexActionProgressUpdateCallCount",
+  "codexActionProgressUpdateFirstCallElapsedMs",
+  "codexActionProgressUpdateSentCount",
   "codexActionCachedInputUnitMax",
   "codexActionCommandCount",
   "codexActionCompletedCount",
@@ -355,16 +359,10 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
   "codexActionOutputBytesTotal",
   "codexActionOutputItemCount",
   "codexActionOutputUnitMax",
-  "codexActionProgressUpdateCallCount",
-  "codexActionProgressUpdateFailedCount",
-  "codexActionProgressUpdateFirstCallElapsedMs",
-  "codexActionProgressUpdateSentCount",
   "codexActionProviderActionCount",
-  "codexActionProviderRequestOrdinal",
   "codexActionReasoningOutputUnitMax",
   "codexActionStartedCount",
   "codexActionTotalUnitMax",
-  "codexActionTurnCorrelation",
   "codexActionUsageSampleCount",
   "codexActionWebSearchCount",
 ] as const;

@@ -2085,11 +2085,9 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       codexActionOutputBytesTotal: 149,
       codexActionOutputItemCount: 6,
       codexActionProgressUpdateCallCount: 1,
-      codexActionProgressUpdateFailedCount: 0,
       codexActionProgressUpdateFirstCallElapsedMs: expect.any(Number),
       codexActionProgressUpdateSentCount: 1,
       codexActionProviderActionCount: 3,
-      codexActionProviderRequestOrdinal: 4,
       codexActionSlowDurationMs: [123, 80, 60],
       codexActionSlowKinds: [
         'dynamic.tool.call',
@@ -2716,7 +2714,6 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const trace = reducer.buildTraceEvent({
       codexThreadId: 'thread-current',
       providerActionCount: 0,
-      providerRequestOrdinal: 0,
       providerStartedAtMs: 0,
       turnCorrelation: 1234,
       turnId: activeTurnId,
@@ -2732,9 +2729,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       codexActionOutputItemCount: 1,
       codexActionOutputUnitMax: 45,
       codexActionProgressUpdateCallCount: 0,
-      codexActionProgressUpdateFailedCount: 0,
       codexActionProgressUpdateSentCount: 0,
-      codexActionProviderRequestOrdinal: 0,
       codexActionStartedCount: 1,
       codexActionToolSummaries: [
         {
@@ -2831,7 +2826,6 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const trace = reducer.buildTraceEvent({
       codexThreadId: 'thread-progress-diagnostics',
       providerActionCount: 2,
-      providerRequestOrdinal: 3,
       providerStartedAtMs: 1_000,
       turnCorrelation: 5678,
       turnId: activeTurnId,
@@ -2839,12 +2833,14 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(trace).toMatchObject({
       codexActionProgressUpdateCallCount: 2,
-      codexActionProgressUpdateFailedCount: 1,
       codexActionProgressUpdateFirstCallElapsedMs: 200,
       codexActionProgressUpdateSentCount: 1,
-      codexActionProviderRequestOrdinal: 3,
       codexActionTurnCorrelation: 5678,
     })
+    expect(
+      Number(trace?.codexActionProgressUpdateCallCount)
+      - Number(trace?.codexActionProgressUpdateSentCount),
+    ).toBe(1)
     expect(JSON.stringify(trace)).not.toContain('best-effort delivery')
     expect(JSON.stringify(trace)).not.toContain('thread-progress-diagnostics')
     expect(JSON.stringify(trace)).not.toContain(activeTurnId)

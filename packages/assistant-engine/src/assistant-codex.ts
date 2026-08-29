@@ -5588,7 +5588,6 @@ async function runCodexAppServerTurnOnProcess(
     const rawEvent = actionDiagnostics.buildTraceEvent({
       codexThreadId,
       providerActionCount,
-      providerRequestOrdinal: input.providerRequestOrdinal ?? null,
       providerStartedAtMs: codexProviderRequestStartedAtMs,
       turnCorrelation:
         turnId === null ? null : buildCodexTurnCorrelation(turnId),

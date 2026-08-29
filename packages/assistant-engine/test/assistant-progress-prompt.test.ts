@@ -23,7 +23,7 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Send an update before reply-critical multi-source or cross-owner evidence, several substantive tool calls, long research, parsing/scans, or content inspection',
+      'Send one early update before direct reply-critical work spanning multiple sources or several substantive tool steps, including cross-owner evidence, long research, parsing/scans, or content inspection',
     )
     expect(prompt).toContain(
       'Before the first read, orient the member even when each lookup is routine',
@@ -33,9 +33,6 @@ describe('assistant progress prompt contract', () => {
     )
     expect(prompt).toContain(
       'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement',
-    )
-    expect(prompt).toContain(
-      'Send one early update before direct reply-critical work spanning multiple sources or substantive steps, even when each lookup looks fast or routine',
     )
     expect(prompt).toContain(
       'Reconsider this on each follow-up or resumed turn; earlier updates do not count',

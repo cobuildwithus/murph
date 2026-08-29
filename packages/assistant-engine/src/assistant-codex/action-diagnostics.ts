@@ -104,7 +104,6 @@ export interface CodexActionDiagnosticsReducer {
   buildTraceEvent(input: {
     codexThreadId: string | null
     providerActionCount: number
-    providerRequestOrdinal: number | null
     providerStartedAtMs: number | null
     turnCorrelation: number | null
     turnId: string | null
@@ -268,7 +267,6 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   let finalReasoningOutputTokens: number | null = null
   let finalTotalTokens: number | null = null
   let progressUpdateCallCount = 0
-  let progressUpdateFailedCount = 0
   let progressUpdateFirstCallObservedAtMs: number | null = null
   let progressUpdateSentCount = 0
 
@@ -423,7 +421,6 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionOutputItemCount: outputItemCount,
         codexActionOutputUnitMax: outputTokensMax,
         codexActionProgressUpdateCallCount: progressUpdateCallCount,
-        codexActionProgressUpdateFailedCount: progressUpdateFailedCount,
         codexActionProgressUpdateFirstCallElapsedMs:
           input.providerStartedAtMs === null
           || progressUpdateFirstCallObservedAtMs === null
@@ -434,7 +431,6 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
               ),
         codexActionProgressUpdateSentCount: progressUpdateSentCount,
         codexActionProviderActionCount: input.providerActionCount,
-        codexActionProviderRequestOrdinal: input.providerRequestOrdinal,
         codexActionReasoningOutputUnitMax: reasoningOutputTokensMax,
         codexActionSlowDurationMs: slowActions.map((action) => action.durationMs),
         codexActionSlowKinds: slowActions.map((action) => action.kind),
@@ -527,9 +523,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
       }
       if (isProgressUpdate) {
         progressUpdateCallCount += 1
-        if (structurallyFailed) {
-          progressUpdateFailedCount += 1
-        } else {
+        if (!structurallyFailed) {
           progressUpdateSentCount += 1
         }
         if (progressUpdateFirstCallObservedAtMs === null) {

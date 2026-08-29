@@ -421,6 +421,10 @@ confirmation-failure ownership, and provider-no-replay recovery, are jointly
 specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Content-free provider-turn correlation with progress call, sent, and first-call
+timing diagnostics—and unsent delivery derived from the call/sent delta—is
+specified by `agent-docs/references/hosted-runtime-protocol.md`.
+
 Silent member-memory consolidation reuses the shared restricted one-shot turn,
 grants the exact built-in automation its canonical host-owned memory state tool,
 suppresses native effects at the host boundary, and has no dedicated permission

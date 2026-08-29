@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { buildHostedExecutionRuntimeControlWake } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
@@ -143,6 +144,9 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
 }));
 
+import {
+  emitHostedAssistantProviderTraceLog,
+} from "../src/hosted-runtime/events.ts";
 import {
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
@@ -458,19 +462,18 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
 
   it("preserves bounded Codex action tool diagnostics in durable detail logs", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-      nextWakeAt: null,
-      parserProcessed: 0,
-      postCheckpointRecord: null,
-      progressed: false,
-      redactedLogEntries: [{
-        component: "runtime.provider",
-        level: "info",
-        message: "Hosted assistant Codex action diagnostics captured.",
-        phase: "wake.running",
-        redacted: {
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "evt_synthetic_action_diagnostics",
+      kind: "runtime.manual-requested",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    });
+    const providerEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_synthetic_phase" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-action-diagnostics.v1",
+          type: "assistant.codex.action_diagnostics",
           codexActionCachedInputUnitMax: 1000,
           codexActionCommandCount: 1,
           codexActionCompletedCount: 2,
@@ -493,11 +496,9 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
           codexActionOutputItemCount: 3,
           codexActionOutputUnitMax: 1200,
           codexActionProgressUpdateCallCount: 1,
-          codexActionProgressUpdateFailedCount: 0,
           codexActionProgressUpdateFirstCallElapsedMs: 2_400,
           codexActionProgressUpdateSentCount: 1,
           codexActionProviderActionCount: 2,
-          codexActionProviderRequestOrdinal: 0,
           codexActionReasoningOutputUnitMax: 300,
           codexActionSlowDurationMs: [123, 60],
           codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
@@ -520,15 +521,26 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
             },
           ],
           codexActionTotalUnitMax: 82500,
-          codexActionTraceType: "action-diagnostics",
           codexActionTurnCorrelation: 281_474_976_710_655,
           codexActionTurnIdPresent: true,
           codexActionUsageSampleCount: 1,
           codexActionWebSearchCount: 0,
-          providerTraceKind: "codex.action_diagnostics",
-          schema: "murph.assistant-codex-action-diagnostics.v1",
         },
-      }],
+      },
+      wake,
+    });
+    if (!providerEntry) {
+      throw new Error("Expected a synthetic Codex action diagnostics entry.");
+    }
+    expect(Object.keys(providerEntry.redacted)).toHaveLength(40);
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: false,
+      redactedLogEntries: [providerEntry],
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
@@ -542,10 +554,8 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
         codexActionKinds: ["dynamic.tool.call", "command.execution"],
         codexActionOutputBytesTotal: 128,
         codexActionProgressUpdateCallCount: 1,
-        codexActionProgressUpdateFailedCount: 0,
         codexActionProgressUpdateFirstCallElapsedMs: 2_400,
         codexActionProgressUpdateSentCount: 1,
-        codexActionProviderRequestOrdinal: 0,
         codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
         codexActionToolSummaries: [
           {
@@ -568,6 +578,12 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
         schema: "murph.assistant-codex-action-diagnostics.v1",
       }),
     }));
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toHaveProperty(
+      "codexActionProgressUpdateFailedCount",
+    );
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toHaveProperty(
+      "codexActionProviderRequestOrdinal",
+    );
   });
 });
 
