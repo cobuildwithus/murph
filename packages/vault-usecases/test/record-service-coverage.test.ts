@@ -1564,13 +1564,19 @@ describe("record service seams", () => {
     expect(eventUpsert.mock.calls[1]?.[0]).toMatchObject({
       payload: { durationMinutes: 30 },
     });
-    await expect(intervention.addInterventionRecord({
-      vault: "./vault",
-      text: "Sauna for one hour or maybe two.",
-    })).rejects.toMatchObject({
-      code: "invalid_option",
-      message: expect.stringMatching(/duration is ambiguous/iu),
-    });
+    for (const text of [
+      "Sauna for one hour or maybe two.",
+      "Sauna for an hour and a half, maybe two.",
+      "Sauna for one hour and 20 minutes, maybe two hours.",
+    ]) {
+      await expect(intervention.addInterventionRecord({
+        vault: "./vault",
+        text,
+      })).rejects.toMatchObject({
+        code: "invalid_option",
+        message: expect.stringMatching(/duration is ambiguous/iu),
+      });
+    }
     const editedIntervention = await intervention.editInterventionRecord({
       vault: "./vault",
       lookup: "evt_1",

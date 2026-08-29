@@ -169,6 +169,9 @@ describe("text-duration", () => {
     assert.equal(inferDurationMinutes("Yoga an hour before breakfast."), "ambiguous");
     assert.equal(inferDurationMinutes("I worked out for one hour or maybe two."), "ambiguous");
     assert.equal(inferDurationMinutes("I worked out for one hour, maybe two."), "ambiguous");
+    assert.equal(inferDurationMinutes("I worked out for an hour and a half, maybe two."), "ambiguous");
+    assert.equal(inferDurationMinutes("I worked out for one hour and 20 minutes, maybe two hours."), "ambiguous");
+    assert.equal(inferDurationMinutes("I did yoga for 30 minutes, an hour and a half after lunch."), "ambiguous");
     assert.equal(inferDurationMinutes("I did yoga, but not for one hour—I stopped early."), "ambiguous");
     assert.equal(inferDurationMinutes("Yoga lasted about an hour."), "ambiguous");
     assert.equal(inferDurationMinutes("unclear text"), null);

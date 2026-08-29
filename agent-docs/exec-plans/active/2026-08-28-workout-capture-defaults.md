@@ -185,3 +185,16 @@ candidate now:
   rebuilt CLI workout-capture slice 6 passed; vault-usecases and CLI typechecks
   and builds passed. Direct built CLI proof now rejects both hedged workout and
   intervention examples with `invalid_option` and writes neither event.
+- ReviewGPT round 5 accepted one review-induced High: compound word-hour
+  branches still returned 90 or 60-plus-minutes before the bounded role check.
+  Direct built CLI proof reproduced a hedged compound workout and intervention
+  as 90, and reproduced a clearer 30-minute workout plus an occurrence-offset
+  compound as an incorrect 90-minute write.
+- Round-5 complexity collapse: unconditional compound returns are deleted.
+  Simple and compound word-hour candidates now share one bounded role decision;
+  competing duration evidence or an unsupported suffix returns `ambiguous`.
+  The existing half-hour rule remains ahead of the embedded `an hour` candidate.
+- Round-5 correction proof: parser/format/intervention focused cases 4 passed;
+  rebuilt CLI workout-capture slice 6 passed; vault-usecases and CLI typechecks
+  and builds passed. Direct built CLI proof now rejects both compound examples
+  and the competing-duration example with `invalid_option`, writing no event.

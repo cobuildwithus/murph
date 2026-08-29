@@ -17,12 +17,11 @@ const wordHourAndHalfPattern =
 const wordHourAndMinutesPattern =
   /\b(?:an|one)\s+hour\s+(?:and\s+)?(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|min|m)\b/iu
 const wordHourOnlyPattern = /\b(?:an|one)\s+hour\b/iu
-const definiteWordHourOnlyPatterns = [
-  /^\s*(?:an|one)\s+hour\s*[.!?]?\s*$/iu,
-  /^\s*(?:an|one)\s+hour\s+of\b/iu,
-  /\bfor\s+(?:an|one)\s+hour(?=\s*[.!?]?\s*$)/iu,
-  /\bfor\s+(?:an|one)\s+hour\s+(?:before|after)\s+\p{L}[\p{L}'-]*\s*[.!?]?\s*$/iu,
-] as const
+const terminalDurationSuffixPattern = /^\s*[.!?]?\s*$/u
+const activityDurationSuffixPattern =
+  /^\s+of\s+\p{L}[\p{L}'-]*\s*[.!?]?\s*$/iu
+const scheduledDurationSuffixPattern =
+  /^\s+(?:before|after)\s+\p{L}[\p{L}'-]*\s*[.!?]?\s*$/iu
 const hourOnlyPattern =
   /\b(\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h)\b/iu
 const minuteOnlyPatterns = [
@@ -50,25 +49,16 @@ export function inferDurationMinutes(text: string): number | 'ambiguous' | null 
     return 'ambiguous'
   }
 
-  if (wordHourAndHalfPattern.test(durationText)) {
-    return 90
-  }
-
-  const wordHourAndMinutesMatch = durationText.match(
-    wordHourAndMinutesPattern,
-  )
-  if (wordHourAndMinutesMatch) {
-    const minutes = Number.parseFloat(wordHourAndMinutesMatch[1] ?? '')
-    if (Number.isFinite(minutes)) {
-      return validateDurationMinutes(60 + minutes)
-    }
-  }
-
   if (
     /\bhalf(?: an)? hour\b/iu.test(durationText)
     || /\bhalf-hour\b/iu.test(durationText)
   ) {
     return 30
+  }
+
+  const wordHourDuration = inferBoundedWordHourDuration(durationText)
+  if (wordHourDuration !== null) {
+    return wordHourDuration
   }
 
   for (const pattern of combinedDurationPatterns) {
@@ -84,20 +74,11 @@ export function inferDurationMinutes(text: string): number | 'ambiguous' | null 
     }
   }
 
-  const wordHourMatch = durationText.match(wordHourOnlyPattern)
   const hourMatch = durationText.match(hourOnlyPattern)
   const minuteMatch = findMinuteDurationMatch(durationText)
 
-  if ((wordHourMatch || hourMatch) && minuteMatch) {
+  if (hourMatch && minuteMatch) {
     return 'ambiguous'
-  }
-
-  if (wordHourMatch) {
-    return definiteWordHourOnlyPatterns.some((pattern) =>
-      pattern.test(durationText)
-    )
-      ? 60
-      : 'ambiguous'
   }
 
   if (hourMatch) {
@@ -111,6 +92,56 @@ export function inferDurationMinutes(text: string): number | 'ambiguous' | null 
   }
 
   return null
+}
+
+function inferBoundedWordHourDuration(
+  text: string,
+): number | 'ambiguous' | null {
+  const halfMatch = text.match(wordHourAndHalfPattern)
+  const minutesMatch = text.match(wordHourAndMinutesPattern)
+  const match = halfMatch ?? minutesMatch ?? text.match(wordHourOnlyPattern)
+  if (!match) {
+    return null
+  }
+
+  const start = match.index ?? 0
+  const end = start + match[0].length
+  const prefix = text.slice(0, start)
+  const suffix = text.slice(end)
+  const remainingText = `${prefix}${' '.repeat(match[0].length)}${suffix}`
+  if (
+    hourOnlyPattern.test(remainingText)
+    || findMinuteDurationMatch(remainingText)
+  ) {
+    return 'ambiguous'
+  }
+
+  const startsRecord = prefix.trim().length === 0
+  const framedByFor = /\bfor\s*$/iu.test(prefix)
+  const hasBoundedRole =
+    (startsRecord
+      && (
+        terminalDurationSuffixPattern.test(suffix)
+        || activityDurationSuffixPattern.test(suffix)
+      ))
+    || (framedByFor
+      && (
+        terminalDurationSuffixPattern.test(suffix)
+        || scheduledDurationSuffixPattern.test(suffix)
+      ))
+  if (!hasBoundedRole) {
+    return 'ambiguous'
+  }
+
+  if (halfMatch) {
+    return 90
+  }
+  if (minutesMatch) {
+    return validateDurationMinutes(
+      60 + Number.parseFloat(minutesMatch[1] ?? ''),
+    )
+  }
+  return 60
 }
 
 export function validateDurationMinutes(value: number, label = 'Duration') {
