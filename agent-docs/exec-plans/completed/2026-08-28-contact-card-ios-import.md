@@ -1,6 +1,6 @@
 # Restore the settings contact-card portrait flow
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-28
 
@@ -104,3 +104,4 @@ Result: ready for exact-head review.
   `/api/murph-contact-card` route. Its route trace contains exactly all 11
   selectable portrait and logo assets, no unused full-resolution portraits,
   and 1,685,492 traced avatar bytes instead of the prior 16,038,991.
+Completed: 2026-08-28
