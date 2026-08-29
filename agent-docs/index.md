@@ -424,7 +424,8 @@ specified by `agent-docs/RELIABILITY.md` and
 Content-free provider-turn correlation with progress call, sent, and first-call
 timing diagnostics—and unsent delivery derived from the call/sent delta—is
 specified by `agent-docs/references/hosted-runtime-protocol.md`; the composed
-proof preserves real parser order through both existing detail caps.
+proof preserves real parser order through both existing detail caps, and the
+focused live journey owns progress-before-read and natural-copy evidence.
 
 Silent member-memory consolidation reuses the shared restricted one-shot turn,
 grants the exact built-in automation its canonical host-owned memory state tool,

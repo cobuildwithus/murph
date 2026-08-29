@@ -14880,7 +14880,7 @@ describeRealCodex('real Codex proactive progress e2e', () => {
         )
         expect(progressUpdate).toMatch(/activity|meals?|sleep|recovery/iu)
         expect(progressUpdate).not.toMatch(/vault-cli|command|tool|json|terminal/iu)
-        expect(progressUpdate).not.toMatch(/7,?800|7\.4|3 meals?|three meals?/iu)
+        expect(progressUpdate).not.toMatch(/7,?800|7\.4|3 meals?|three[- ]meals?/iu)
         expect(progressCalls).toHaveLength(1)
         expect(overviewReads.length).toBeGreaterThanOrEqual(1)
         expect(progressCalls[0]?.eventIndex).toBeLessThan(
@@ -14893,7 +14893,7 @@ describeRealCodex('real Codex proactive progress e2e', () => {
         ]))
         expect(reply).toMatch(/7,?800/iu)
         expect(reply).toMatch(/7\.4/iu)
-        expect(reply).toMatch(/3 meals?|three (?:balanced )?meals?/iu)
+        expect(reply).toMatch(/3 meals?|three (?:balanced )?meals?|three-meal/iu)
         expect(reply).toMatch(/takeaway|overall|balance|solid|steady|good/iu)
       } finally {
         await removeRealCodexTemporaryPaths([

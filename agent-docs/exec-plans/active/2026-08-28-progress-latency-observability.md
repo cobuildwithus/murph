@@ -66,4 +66,17 @@ Updated: 2026-08-29
 - The first remediation head reached PR CI and exposed two test-only TypeScript
   narrowing errors in the new composed cap proof; production sources compiled.
   The follow-up narrows the redacted detail shape without changing runtime
-  behavior, and the replacement exact head must rerun review and CI.
+  behavior. The replacement exact head passed the full required PR CI matrix,
+  including release build/typecheck, Web verification, package coverage, repo
+  hygiene, and deployment checks. Its exact-head ReviewGPT round passed with no
+  qualifying findings.
+- The final-prompt subscription journey sent exactly one natural update before
+  the source reads, oriented to activity/meals/sleep and the full-day takeaway,
+  disclosed no result or internal mechanic, and returned all fixture facts. UX
+  verdict: Ready. Its only failed assertion rejected the natural compound
+  phrase "three-meal day" while accepting "three meals"; the focused proof now
+  accepts both forms. A post-adjustment subscription rerun remained silent in
+  the local transform/import harness for 30 minutes and was stopped through its
+  exact owned session without a test result; the completed journey remains the
+  behavioral evidence because neither production code nor generated output
+  changed.
