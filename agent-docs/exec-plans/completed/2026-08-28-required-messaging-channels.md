@@ -1,9 +1,9 @@
 # Required Messaging Channels Across Web And iOS
 
-Status: active
+Status: completed
 Owner: Codex
 Started: 2026-08-28
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 ## Goal
 
@@ -151,7 +151,7 @@ email when the account is still email-only.
 - [x] Implement the Web/server contract and focused proof.
 - [x] Implement the iOS gate, recovery, and focused proof.
 - [x] Update canonical documentation and changelog after both PR numbers exist.
-- [ ] Run scoped verification, assistant journey, required reviews, and
+- [x] Run scoped verification, assistant journey, required reviews, and
       exact-head CI; simulator visual proof is captured.
 - [x] Commit, open coordinated PRs, and record the Web-first deploy order.
 
@@ -162,6 +162,15 @@ real-Codex assistant journey, `xcodegen generate`, `swiftformat --lint .`, and
 focused/full simulator tests required by the iOS repository. Broad acceptance
 remains owned by exact-head GitHub Actions.
 
+Completed proof: 60 focused Web onboarding tests, 213 assistant cron tests,
+59 hosted-runtime event tests, the focused real-Codex journey, and the Web,
+assistant-engine, and assistant-runtime typechecks passed. The companion retry
+regression proves 503-before-convergence and 200-after-convergence. The hosted
+email automation regression proves local-profile rejection, hosted-profile
+persistence, and one due email delivery. Final ReviewGPT round 3 returned
+`ROUND_OUTCOME: PASS`; the coordinated iOS PR passed its final review and native
+verification.
+
 ## Rollout
 
 Deploy Web before releasing iOS. The additive optional projection keeps the
@@ -169,3 +178,4 @@ new iOS build compatible with old Web during review, but enforcement becomes
 canonical only after Web is live. Verify one email-authenticated and one
 phone-authenticated journey, then one Telegram link, before declaring the
 native release complete.
+Completed: 2026-08-29
