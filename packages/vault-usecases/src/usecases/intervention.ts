@@ -192,7 +192,10 @@ export async function editInterventionRecord(input: {
     expectedKinds: ['intervention_session'],
   })
 
-  return showEventRecord(input.vault, result.lookupId)
+  return {
+    vault: input.vault,
+    entity: result.entity,
+  }
 }
 
 async function assertExperimentLinkedEditIsSafe(input: {

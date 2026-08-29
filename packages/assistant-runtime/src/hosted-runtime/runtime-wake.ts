@@ -1,16 +1,19 @@
 import type {
   HostedRuntimeOrchestrationLatencyDiagnostics,
+  HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 
 export interface RuntimeWakeNotifyInput {
   notifiedAtEpochMs?: number | null;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
 }
 
 export interface RuntimeWakeNotification {
   latestNotifiedAtEpochMs?: number;
   notifiedAtEpochMs: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
 }
 
 export interface RuntimeWakeSignal {
@@ -34,6 +37,7 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   let latestPendingNotifyAtEpochMs: number | null = null;
   let pendingNotifyAtEpochMs: number | null = null;
   let pendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
+  let pendingRequestedProcessingMode: HostedWorkspaceInvocationProcessingMode | null = null;
   let pending = false;
   let flushScheduled = false;
   const waiters = new Set<(notification: RuntimeWakeNotification) => void>();
@@ -47,10 +51,14 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         : {}),
       notifiedAtEpochMs,
       ...(pendingOrchestration ? { orchestration: pendingOrchestration } : {}),
+      ...(pendingRequestedProcessingMode
+        ? { requestedProcessingMode: pendingRequestedProcessingMode }
+        : {}),
     };
     latestPendingNotifyAtEpochMs = null;
     pendingNotifyAtEpochMs = null;
     pendingOrchestration = null;
+    pendingRequestedProcessingMode = null;
     return notification;
   };
   const flushWaiters = () => {
@@ -82,6 +90,7 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         latestPendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
         pendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
         pendingOrchestration = notification.orchestration ?? null;
+        pendingRequestedProcessingMode = notification.requestedProcessingMode ?? null;
       } else {
         latestPendingNotifyAtEpochMs = Math.max(
           latestPendingNotifyAtEpochMs
@@ -92,6 +101,9 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         if (!pendingOrchestration && notification.orchestration) {
           pendingOrchestration = notification.orchestration;
         }
+        pendingRequestedProcessingMode =
+          notification.requestedProcessingMode
+          ?? pendingRequestedProcessingMode;
       }
       pending = true;
       if (waiters.size > 0 && !flushScheduled) {
@@ -147,6 +159,9 @@ function normalizeRuntimeWakeNotifyInput(
   return {
     ...(input?.orchestration ? { orchestration: input.orchestration } : {}),
     notifiedAtEpochMs: input?.notifiedAtEpochMs ?? Date.now(),
+    ...(input?.requestedProcessingMode
+      ? { requestedProcessingMode: input.requestedProcessingMode }
+      : {}),
   };
 }
 

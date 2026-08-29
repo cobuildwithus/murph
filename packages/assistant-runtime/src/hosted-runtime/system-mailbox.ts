@@ -43,7 +43,7 @@ import {
   findNextHostedSystemMailboxQueueItem,
   isHostedGroupContextHandoffSystemMailboxItem,
   mergeHostedSystemMailboxRollbackItems,
-  projectHostedSystemMailboxModelFreeNotificationFrontier,
+  projectHostedSystemMailboxModelFreeFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeAt,
@@ -317,7 +317,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   >(
     input.vaultRoot,
     (state) => {
-      const notificationProjectedState =
+      const modelFreeProjectedState =
         input.allowedRouteActions?.includes(
           "dispatch-assistant-notification",
         ) === true
@@ -328,10 +328,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         && input.allowedWakeKinds?.includes(
           "assistant.notification.requested",
         ) === true
-          ? projectHostedSystemMailboxModelFreeNotificationFrontier(state)
+          ? projectHostedSystemMailboxModelFreeFrontier(state)
           : state;
       const selectionState = {
-        pending: notificationProjectedState.pending.filter((item) =>
+        pending: modelFreeProjectedState.pending.filter((item) =>
           (
             input.allowedRouteActions != null
             || item.routeAction !== "run-assistant-ask"

@@ -4458,6 +4458,233 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps an ordinary production-shaped scheduled exercise cue natural and attaches reviewed media',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-scheduled-exercise-cue-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        await Promise.all([
+          materializeRoutinePresentationVaultCli(binDirectory),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'mobility-posture',
+          }),
+          materializeAssistantSkillAsset({
+            relativePath: path.join(
+              'shared',
+              'exercise-catalog-runtime.md',
+            ),
+            skillsRoot,
+          }),
+        ])
+        const savedInstructions = [
+          'Send the saved two-minute non-pain mobility break now.',
+          'Alternate 30 seconds of Ankle circles (MB101) with 30 seconds of Torso turns (MB102), repeated twice.',
+          'Use stable support and skip any movement that causes pain.',
+        ].join(' ')
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: savedInstructions,
+          now: new Date('2026-08-28T12:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: 'synthetic-mobility-reminder',
+            identityId: null,
+            participantId: null,
+            threadId: 'synthetic-mobility-reminder',
+            threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '14:00' },
+          slug: 'synthetic-mobility-reminder',
+          status: 'active',
+          tags: [],
+          title: 'Synthetic mobility reminder',
+          vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory),
+          createdAutomation.record.automationId,
+        )
+        expect(source?.kind).toBe('automation')
+        if (!source || source.kind !== 'automation') {
+          throw new Error('Expected the canonical reminder automation source.')
+        }
+        expect(source.supportKind).toBeNull()
+        const jobId = resolveCanonicalAssistantCronJobId(source)
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: '2026-08-28T12:00:00.000Z',
+        })
+        const instructions = buildAssistantCronExecutionInstructions(
+          {
+            job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+            kind: 'canonical',
+            runtimeState,
+            source,
+          },
+          { automationId: null, contextReferences: [] },
+        )
+        const occurrenceAt = '2026-08-28T18:00:00.000Z'
+        const notificationInput = {
+          instructions,
+          outboxAutomationAuthority: {
+            automationId: createdAutomation.record.automationId,
+            expectedUpdatedAt: createdAutomation.record.updatedAt,
+          },
+          recurringReminderConversation: true,
+          scheduledAutomationScheduleKind: source.schedule.kind,
+          scheduledInvocationAuthority: {
+            automationId: createdAutomation.record.automationId,
+            occurrenceAt,
+          },
+          turnTrigger: 'automation-cron',
+          vault: workingDirectory,
+          workingDirectory,
+        } satisfies AssistantNotificationInput
+        const preparedInput = await prepareAssistantCronNotificationInput(
+          notificationInput,
+          { sessionId: 'session-synthetic-mobility-reminder' },
+        )
+
+        expect(preparedInput.instructions).toContain(savedInstructions)
+        expect(preparedInput.instructions).toContain(
+          'read the matching movement skill and its shared exercise-catalog reference',
+        )
+        expect(preparedInput.instructions.indexOf(savedInstructions)).toBeLessThan(
+          preparedInput.instructions.indexOf(
+            'read the matching movement skill and its shared exercise-catalog reference',
+          ),
+        )
+
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: preparedInput.instructions,
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') {
+          throw new Error('Expected the scheduled exercise cue to send.')
+        }
+
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const movementSkillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('mobility-posture/SKILL.md')
+        )
+        const catalogReferenceRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('shared/exercise-catalog-runtime.md')
+        )
+        const ankleShow = actions.find((action) =>
+          action.kind === 'command'
+          && /vault-cli exercise show (?:ankle-circles|MB101) --format json/iu
+            .test(action.command)
+        )
+        const torsoShow = actions.find((action) =>
+          action.kind === 'command'
+          && /vault-cli exercise show (?:torso-turns|MB102) --format json/iu
+            .test(action.command)
+        )
+        const mediaCalls = actions.filter(
+          (action): action is Extract<
+            CapabilityRoutingAction,
+            { kind: 'dynamic' }
+          > =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
+        )
+
+        expect(movementSkillRead, 'movement skill read').toBeDefined()
+        expect(catalogReferenceRead, 'catalog reference read').toBeDefined()
+        expect(ankleShow, 'ankle catalog show').toBeDefined()
+        expect(torsoShow, 'torso catalog show').toBeDefined()
+        expect(mediaCalls, 'response-media calls').toHaveLength(1)
+        expect(
+          catalogReferenceRead?.eventIndex,
+          'catalog guidance before catalog lookup',
+        ).toBeLessThan(ankleShow?.eventIndex ?? -1)
+        expect(ankleShow?.eventIndex, 'catalog lookup before attachment')
+          .toBeLessThan(mediaCalls[0]?.eventIndex ?? -1)
+        expect(torsoShow?.eventIndex, 'catalog lookup before attachment')
+          .toBeLessThan(mediaCalls[0]?.eventIndex ?? -1)
+        expect(mediaCalls[0]?.argumentsValue).toMatchObject({
+          media: [
+            {
+              alt: 'Person making a small ankle circle while standing with support.',
+              source: 'exercise_catalog:MB101:1',
+              url: 'https://cdn.example.test/ankle-circles.png',
+            },
+            {
+              alt: 'Person turning the torso gently while standing.',
+              source: 'exercise_catalog:MB102:1',
+              url: 'https://cdn.example.test/torso-turns.png',
+            },
+          ],
+        })
+        expect(result.responseMedia).toEqual([
+          expect.objectContaining({
+            source: 'exercise_catalog:MB101:1',
+            url: 'https://cdn.example.test/ankle-circles.png',
+          }),
+          expect.objectContaining({
+            source: 'exercise_catalog:MB102:1',
+            url: 'https://cdn.example.test/torso-turns.png',
+          }),
+        ])
+        expect(decision.text).toMatch(/ankle circles/iu)
+        expect(decision.text).toMatch(/torso turns/iu)
+        expect(decision.text).not.toMatch(
+          /MB101|MB102|ankle-circles|torso-turns|exercise_catalog/iu,
+        )
+        process.stdout.write(
+          `[real-codex scheduled exercise cue] ${JSON.stringify({
+            mediaCount: result.responseMedia.length,
+            reply: decision.text.replaceAll(/\s+/gu, ' ').trim(),
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps exercise ids private, uses catalog media, and generates only when catalog media is missing',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -11181,6 +11408,203 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
 })
 
 describeRealCodex('real Codex hosted usage behavior e2e', () => {
+  it(
+    'keeps group-email shell restrictions isolated across one warm Codex process',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-email-shell-isolation-e2e-'),
+      )
+      const canaries = {
+        ordinaryAfter: 'ordinary-after-canary-79c4e1',
+        ordinaryBefore: 'ordinary-before-canary-3f8a26',
+        restrictedFresh: 'restricted-fresh-canary-a51d97',
+        restrictedResume: 'restricted-resume-canary-c8204b',
+      } as const
+      const canaryPaths = {
+        ordinaryAfter: path.join(workingDirectory, 'ordinary-after.txt'),
+        ordinaryBefore: path.join(workingDirectory, 'ordinary-before.txt'),
+        restrictedFresh: path.join(workingDirectory, 'restricted-fresh.txt'),
+        restrictedResume: path.join(workingDirectory, 'restricted-resume.txt'),
+      } as const
+      const groupEmailThreadConfig = {
+        'features.multi_agent': false,
+        'features.multi_agent_v2': false,
+        'features.shell_tool': false,
+        'features.tool_suggest': false,
+      } as const
+      const ordinaryInstructions = [
+        buildDirectConversationDeveloperInstructions(),
+        'Synthetic provider-boundary probe: if a shell tool is available, use it exactly once to read the requested canary file. If it is unavailable, do not guess the file contents and say the filesystem is unavailable.',
+      ].join('\n\n')
+      const groupEmailInstructions = [
+        buildHostedUsageProgressDeveloperInstructions('email'),
+        'Synthetic provider-boundary probe: if a shell tool is available, use it exactly once to read the requested canary file. If it is unavailable, do not guess the file contents and say the filesystem is unavailable.',
+      ].join('\n\n')
+      const commonInput = {
+        approvalPolicy: 'never' as const,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        processLifetime: 'warm' as const,
+        reasoningEffort: 'low' as const,
+        sandbox: 'read-only' as const,
+        workingDirectory,
+      }
+      const runProbe = async (input: {
+        canaryPath: string
+        developerInstructions: string
+        groupConversation?: boolean
+        resumeSessionId?: string
+        threadConfig?: Readonly<Record<string, unknown>>
+      }) => {
+        const traceEvents: unknown[] = []
+        const result = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: input.developerInstructions,
+          groupConversation: input.groupConversation,
+          onTraceEvent: (event) => traceEvents.push(event),
+          prompt:
+            `Read ${input.canaryPath} with the shell exactly once and reply with only its contents.`,
+          resumeSessionId: input.resumeSessionId,
+          threadConfig: input.threadConfig,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        return {
+          actions,
+          commands: actions.filter((action) => action.kind === 'command'),
+          result,
+          traceEvents,
+        }
+      }
+
+      try {
+        await Promise.all([
+          writeFile(canaryPaths.ordinaryAfter, canaries.ordinaryAfter, 'utf8'),
+          writeFile(canaryPaths.ordinaryBefore, canaries.ordinaryBefore, 'utf8'),
+          writeFile(canaryPaths.restrictedFresh, canaries.restrictedFresh, 'utf8'),
+          writeFile(canaryPaths.restrictedResume, canaries.restrictedResume, 'utf8'),
+        ])
+
+        const ordinaryBefore = await runProbe({
+          canaryPath: canaryPaths.ordinaryBefore,
+          developerInstructions: ordinaryInstructions,
+        })
+
+        expect(ordinaryBefore.commands).toHaveLength(1)
+        expect(ordinaryBefore.commands[0]?.output).toContain(
+          canaries.ordinaryBefore,
+        )
+        expect(ordinaryBefore.result.finalMessage.trim()).toBe(
+          canaries.ordinaryBefore,
+        )
+
+        const restrictedFresh = await runProbe({
+          canaryPath: canaryPaths.restrictedFresh,
+          developerInstructions: groupEmailInstructions,
+          groupConversation: true,
+          threadConfig: groupEmailThreadConfig,
+        })
+
+        expect(restrictedFresh.commands).toHaveLength(0)
+        expect(restrictedFresh.result.finalMessage).not.toContain(
+          canaries.restrictedFresh,
+        )
+        expect(restrictedFresh.result.finalMessage).toMatch(
+          /(?:filesystem|shell).*(?:unavailable|access)|(?:can(?:not|'t)|unable).*(?:read|access)/iu,
+        )
+        expect(hasCodexTimingStage(restrictedFresh.traceEvents, 'warm-reused')).toBe(
+          true,
+        )
+
+        if (!restrictedFresh.result.sessionId) {
+          throw new Error('Restricted fresh turn did not return a session id.')
+        }
+        const restrictedResume = await runProbe({
+          canaryPath: canaryPaths.restrictedResume,
+          developerInstructions: groupEmailInstructions,
+          groupConversation: true,
+          resumeSessionId: restrictedFresh.result.sessionId,
+          threadConfig: groupEmailThreadConfig,
+        })
+
+        expect(restrictedResume.result.sessionId).toBe(
+          restrictedFresh.result.sessionId,
+        )
+        expect(restrictedResume.commands).toHaveLength(0)
+        expect(restrictedResume.result.finalMessage).not.toContain(
+          canaries.restrictedResume,
+        )
+        expect(restrictedResume.result.finalMessage).toMatch(
+          /(?:filesystem|shell).*(?:unavailable|access)|(?:can(?:not|'t)|unable).*(?:read|access)/iu,
+        )
+        expect(hasCodexTimingStage(restrictedResume.traceEvents, 'warm-reused')).toBe(
+          true,
+        )
+        expect(
+          hasCodexTimingStage(restrictedResume.traceEvents, 'thread-resumed'),
+        ).toBe(true)
+
+        const ordinaryAfter = await runProbe({
+          canaryPath: canaryPaths.ordinaryAfter,
+          developerInstructions: ordinaryInstructions,
+        })
+
+        expect(ordinaryAfter.commands).toHaveLength(1)
+        expect(ordinaryAfter.commands[0]?.output).toContain(canaries.ordinaryAfter)
+        expect(ordinaryAfter.result.finalMessage.trim()).toBe(
+          canaries.ordinaryAfter,
+        )
+        expect(hasCodexTimingStage(ordinaryAfter.traceEvents, 'warm-reused')).toBe(
+          true,
+        )
+        process.stdout.write(
+          `group-email-shell-isolation-e2e ${JSON.stringify({
+            commandCounts: {
+              ordinaryAfter: ordinaryAfter.commands.length,
+              ordinaryBefore: ordinaryBefore.commands.length,
+              restrictedFresh: restrictedFresh.commands.length,
+              restrictedResume: restrictedResume.commands.length,
+            },
+            processStages: {
+              ordinaryAfterWarmReused: hasCodexTimingStage(
+                ordinaryAfter.traceEvents,
+                'warm-reused',
+              ),
+              restrictedFreshWarmReused: hasCodexTimingStage(
+                restrictedFresh.traceEvents,
+                'warm-reused',
+              ),
+              restrictedResumeWarmReused: hasCodexTimingStage(
+                restrictedResume.traceEvents,
+                'warm-reused',
+              ),
+            },
+            replies: {
+              ordinaryAfter: ordinaryAfter.result.finalMessage.trim(),
+              ordinaryBefore: ordinaryBefore.result.finalMessage.trim(),
+              restrictedFresh: restrictedFresh.result.finalMessage.trim(),
+              restrictedResume: restrictedResume.result.finalMessage.trim(),
+            },
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    1_200_000,
+  )
+
   it.each([
     { channel: 'linq', filesystemAccess: true, result: 64 },
     { channel: 'linq', filesystemAccess: true, result: 100 },
@@ -11214,14 +11638,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          configOverrides: filesystemAccess
+          threadConfig: filesystemAccess
             ? undefined
-            : [
-                'features.shell_tool=false',
-                'features.multi_agent=false',
-                'features.multi_agent_v2=false',
-                'features.tool_suggest=false',
-              ],
+            : {
+                'features.multi_agent': false,
+                'features.multi_agent_v2': false,
+                'features.shell_tool': false,
+                'features.tool_suggest': false,
+              },
           developerInstructions:
             buildHostedUsageProgressDeveloperInstructions(channel),
           dynamicTools: [MURPH_GROUP_USAGE_TOOL],
@@ -11316,6 +11740,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(response.finalMessage).not.toMatch(
           /messages? left|remaining percent|\b0% left\b|\bexhausted\b|\bout of usage\b/iu,
         )
+        if (!filesystemAccess && usageResult === 64) {
+          process.stdout.write(
+            `group-email-thread-config-e2e ${JSON.stringify({
+              actionCount: actions.length,
+              reply: response.finalMessage.trim(),
+            })}\n`,
+          )
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -16937,6 +17369,105 @@ describeRealCodex('real Codex latest-context nutrition-card e2e', () => {
       )
     } finally {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  })
+})
+
+describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
+  it('keeps the earlier answer and stays quiet for the later acknowledgement', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-steered-acknowledgement-real-e2e-'),
+    )
+    const steerCompleted = createDeferred<void>()
+    let steerAcknowledgement: (() => Promise<void>) | null = null
+    let steerStarted = false
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        onTraceEvent: ({ rawEvent }) => {
+          if (
+            steerStarted ||
+            readRecord(rawEvent)?.method !== 'item/agentMessage/delta'
+          ) {
+            return
+          }
+          steerStarted = true
+          const steer = steerAcknowledgement
+          if (!steer) {
+            steerCompleted.reject(
+              new Error('Expected a live turn before the first answer delta.'),
+            )
+            return
+          }
+          void steer().then(
+            () => steerCompleted.resolve(),
+            (error) => steerCompleted.reject(error),
+          )
+        },
+        onLiveTurn: (turn) => {
+          steerAcknowledgement = () => turn.steer({
+            prompt: 'Thanks, that answered it—no need to reply.',
+          })
+        },
+        prompt: [
+          'Reply with exactly "ORBIT." and no other text.',
+          'Do not call any tools for this first reply.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      if (!steerStarted) {
+        throw new Error(
+          'Expected the acknowledgement steer to begin before the first answer completed.',
+        )
+      }
+      await steerCompleted.promise
+
+      const finishAttempts = readDynamicToolAttempts(result.jsonEvents).filter(
+        (attempt) => attempt.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name,
+      )
+      const earlierReply = result.precedingAgentMessageSegments[0]?.response.trim()
+
+      process.stdout.write(
+        `[steered-acknowledgement-no-reply-e2e] ${JSON.stringify({
+          earlierReply,
+          finalAction: result.finalAction,
+          finalMessage: result.finalMessage,
+          finishAttemptCount: finishAttempts.length,
+        })}\n`,
+      )
+
+      expect(earlierReply).toBe('ORBIT.')
+      expect(result.precedingAgentMessageSegments).toHaveLength(1)
+      expect(result.precedingAgentMessageSegments[0]?.deliveryContextOrdinal).toBe(0)
+      expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
+      expect(result.finalAction).toEqual({ kind: 'none' })
+      expect(result.finalActionExplicit).toBe(true)
+      expect(result.finalMessage).toBe('')
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseCard).toBeNull()
+      expect(finishAttempts).toHaveLength(1)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
     }
   })
 })

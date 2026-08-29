@@ -210,7 +210,8 @@ export async function attachInterventionSessionToExperiment(input: {
   })
 
   return {
-    ...(await showEventRecord(input.vault, result.lookupId)),
+    vault: input.vault,
+    entity: result.entity,
     eventId: result.eventId,
     lookupId: result.lookupId,
     experimentId: experiment.experimentId,
@@ -262,7 +263,8 @@ export async function detachInterventionSessionFromExperiment(input: {
   })
 
   return {
-    ...(await showEventRecord(input.vault, result.lookupId)),
+    vault: input.vault,
+    entity: result.entity,
     eventId: result.eventId,
     lookupId: result.lookupId,
     experimentId: null,

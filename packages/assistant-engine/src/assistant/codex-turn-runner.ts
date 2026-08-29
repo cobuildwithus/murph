@@ -155,42 +155,33 @@ const ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG = {
   ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
   ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
 } as const
-const ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
-  'memories.generate_memories=false',
-  'web_search="disabled"',
-  'features.web_search_request=false',
-  'features.standalone_web_search=false',
-  'features.apps=false',
-  'features.enable_mcp_apps=false',
-  'features.browser_use=false',
-  'features.plugins=false',
-  'features.multi_agent=false',
-  'features.multi_agent_v2=false',
-  'features.tool_suggest=false',
-] as const
-const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
-  'features.shell_tool=false',
-  'features.multi_agent=false',
-  'features.multi_agent_v2=false',
-  'features.tool_suggest=false',
-] as const
-
-function resolveAssistantCodexConfigOverrides(input: {
-  filesystemDisabledTurn: boolean
-  shellPreservingCapabilitiesRestrictedTurn: boolean
-  requested: readonly string[] | null
-}): readonly string[] | null {
-  if (input.shellPreservingCapabilitiesRestrictedTurn) {
-    return ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES
-  }
-  if (!input.filesystemDisabledTurn) {
-    return input.requested
-  }
-  return [
-    ...(input.requested ?? []),
-    ...ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES,
-  ]
-}
+const ASSISTANT_SHELL_PRESERVING_RESTRICTED_THREAD_CONFIG = {
+  'features.apps': false,
+  'features.browser_use': false,
+  'features.enable_mcp_apps': false,
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.plugins': false,
+  'features.standalone_web_search': false,
+  'features.tool_suggest': false,
+  'features.web_search_request': false,
+  'memories.generate_memories': false,
+  web_search: 'disabled',
+} as const
+const ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG = {
+  ...ASSISTANT_SHELL_PRESERVING_RESTRICTED_THREAD_CONFIG,
+  ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+} as const
+const ASSISTANT_GROUP_EMAIL_THREAD_CONFIG = {
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.shell_tool': false,
+  'features.tool_suggest': false,
+} as const
+const ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG = {
+  'memories.generate_memories': false,
+  'memories.use_memories': false,
+} as const
 
 export {
   resolveAssistantCodexThreadScope,
@@ -556,6 +547,9 @@ async function executeAssistantCodexAttempt(input: {
         MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
     const toolOnlyMaintenanceTurn =
       groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
+    const habitatVoiceMaintenanceTurn =
+      executionPlan.profile.toolProfile === 'maintenance-turn' &&
+      executionPlan.input.maintenanceProfile === 'habitat-voice'
     const restrictedOneShotTurn =
       groupRoomModelMaintenanceTurn ||
       memberMemoryMaintenanceTurn ||
@@ -617,20 +611,18 @@ async function executeAssistantCodexAttempt(input: {
           ),
         authorizeAcceptedMessageTarget:
           executionPlan.authorizeAcceptedMessageTarget ?? null,
-        codexConfigOverrides: resolveAssistantCodexConfigOverrides({
-          filesystemDisabledTurn: groupEmailTurn,
-          shellPreservingCapabilitiesRestrictedTurn:
-            readOnlyAutomationTurn,
-          requested: executionPlan.input.codexConfigOverrides ?? null,
-        }),
         codexThreadConfig:
           nativeCapabilitiesRestrictedTurn
             ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
             : toolOnlyMaintenanceTurn
               ? ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG
               : readOnlyAutomationTurn
-                ? ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG
-                : null,
+                ? ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG
+                : habitatVoiceMaintenanceTurn
+                  ? ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG
+                  : groupEmailTurn
+                    ? ASSISTANT_GROUP_EMAIL_THREAD_CONFIG
+                    : null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,

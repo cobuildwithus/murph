@@ -21,10 +21,8 @@ import {
 
 export interface RunnerWriteFenceToken {
   attemptId: string;
-  expiresAt: string | null;
   generation: string;
   kind: RunnerWriteFenceKind;
-  leaseGeneration: string;
   processingMode: RunnerRuntimeProcessingMode;
   providerEgressToken: string | null;
   runnerContainerName: string | null;
@@ -246,10 +244,8 @@ export class RunnerStateStore {
 
     return {
       attemptId,
-      expiresAt: null,
       generation: nextGeneration.toString(),
       kind,
-      leaseGeneration: nextGeneration.toString(),
       processingMode,
       providerEgressToken,
       runnerContainerName: meta.active_runner_container_name,
@@ -596,7 +592,7 @@ export class RunnerStateStore {
       ...(meta.active_custom_inference_envelope
         ? { customInferenceEnvelope: meta.active_custom_inference_envelope }
         : {}),
-      leaseGeneration: token.leaseGeneration,
+      leaseGeneration: token.generation,
       owns: true,
       ...(meta.active_platform_ai_allowed === null
         ? {}
@@ -665,7 +661,7 @@ export class RunnerStateStore {
 
     return {
       attemptId: token.attemptId,
-      leaseGeneration: token.leaseGeneration,
+      leaseGeneration: token.generation,
       owns: true,
       ...(meta.active_platform_ai_allowed === null
         ? {}
@@ -835,10 +831,8 @@ export class RunnerStateStore {
 
     return {
       attemptId: meta.active_attempt_id,
-      expiresAt: null,
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
       kind,
-      leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
       processingMode: readRunnerRuntimeProcessingMode(meta.active_reason),
       providerEgressToken: null,
       runnerContainerName: normalizeRunnerContainerNameOrNull(meta.active_runner_container_name),

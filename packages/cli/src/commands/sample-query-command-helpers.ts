@@ -132,9 +132,6 @@ async function readSampleLedgerFile(
     }
 
     const parsed = parseJsonLine(trimmed, relativePath, index + 1)
-    if (!parsed) {
-      return
-    }
 
     const id = getString(parsed.id)
     const recordedAt = getString(parsed.recordedAt)
@@ -221,16 +218,23 @@ function isSampleLedgerFileName(fileName: string): boolean {
   return fileName.endsWith('.jsonl') || fileName.endsWith('.ndjson')
 }
 
-function parseJsonLine(line: string, relativePath: string, lineNumber: number): JsonObject | null {
+function parseJsonLine(line: string, relativePath: string, lineNumber: number): JsonObject {
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(line) as unknown
-    return isJsonObject(parsed) ? parsed : null
+    parsed = JSON.parse(line) as unknown
   } catch {
     throw new VaultCliError(
       'invalid_record',
       `Sample ledger record at ${relativePath}:${lineNumber} is not valid JSON.`,
     )
   }
+  if (!isJsonObject(parsed)) {
+    throw new VaultCliError(
+      'invalid_record',
+      `Sample ledger record at ${relativePath}:${lineNumber} must be a JSON object.`,
+    )
+  }
+  return parsed
 }
 
 function isJsonObject(value: unknown): value is JsonObject {

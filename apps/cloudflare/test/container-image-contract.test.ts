@@ -564,6 +564,12 @@ describe("hosted runner container image contract", () => {
     const finalLocalBuildIdLabelIndex = finalDockerfile.indexOf(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
+    const finalLocalWorkerNameArgIndex = finalDockerfile.indexOf(
+      "ARG HOSTED_RUNNER_LOCAL_WORKER_NAME=murph-hosted",
+    );
+    const finalLocalWorkerNameLabelIndex = finalDockerfile.indexOf(
+      'LABEL murph.hosted.local-worker-name="${HOSTED_RUNNER_LOCAL_WORKER_NAME}"',
+    );
     expect(permissionStageRootUserIndex).toBeGreaterThan(-1);
     expect(finalRunnerBundleDirArgIndex).toBeGreaterThan(permissionStageRootUserIndex);
     expect(permissionStageBundleCopyIndex).toBeGreaterThan(finalRunnerBundleDirArgIndex);
@@ -577,6 +583,8 @@ describe("hosted runner container image contract", () => {
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerUserIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
     expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
+    expect(finalLocalWorkerNameArgIndex).toBeGreaterThan(finalRunnerUserIndex);
+    expect(finalLocalWorkerNameLabelIndex).toBeGreaterThan(finalLocalWorkerNameArgIndex);
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle");
     for (const slug of hostedRunnerProductModelSlugs) {
@@ -590,6 +598,9 @@ describe("hosted runner container image contract", () => {
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
+    );
+    expect(finalDockerfile).toContain(
+      'LABEL murph.hosted.local-worker-name="${HOSTED_RUNNER_LOCAL_WORKER_NAME}"',
     );
     expect(finalDockerfile).toContain(
       "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",

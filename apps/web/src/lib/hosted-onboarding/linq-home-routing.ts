@@ -5,6 +5,7 @@ import {
 } from "./contact-privacy";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
+  finalizeHostedMemberActivationLinqRouteTx,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
@@ -42,6 +43,7 @@ import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 import { lockHostedMemberRow } from "./shared";
+import { acquireHostedLinqChatOwnershipLockTx } from "../hosted-routing/linq-chat-ownership-lock";
 import type { Prisma } from "@prisma/client";
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
@@ -148,9 +150,14 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
     throwHostedSignupWelcomeRouteAuthorityInvalid();
   }
 
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: linqChatId,
+    tx: input.prisma,
+  });
+
   // Identity reconciliation locks the member row before mutating verified
-  // identity. Taking the same lock closes the send-to-callback phone-change
-  // race without persisting the raw participant target.
+  // identity. Taking the same lock after chat ownership closes the
+  // send-to-callback phone-change race without reversing the routing order.
   await lockHostedMemberRow(input.prisma, input.memberId);
   await acquireHostedMemberHomeLinqRouteLockTx({
     memberId: input.memberId,
@@ -515,9 +522,9 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
 
   if (authority.kind === "home") {
     if (routing?.pendingLinqChatId) {
-      await upsertHostedMemberHomeLinqBindingTx({
-        clearPending: true,
-        linqChatId: authority.chatId,
+      await finalizeHostedMemberActivationLinqRouteTx({
+        chatId: authority.chatId,
+        kind: "home",
         memberId: input.member.core.id,
         participantContact: authority.participantContact,
         prisma: input.prisma,
@@ -546,9 +553,9 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
       memberPhoneNumber,
     })
   ) {
-    await upsertHostedMemberHomeLinqBindingTx({
-      clearPending: true,
-      linqChatId: authority.chatId,
+    await finalizeHostedMemberActivationLinqRouteTx({
+      chatId: authority.chatId,
+      kind: "pending",
       memberId: input.member.core.id,
       participantContact: authority.participantContact,
       prisma: input.prisma,

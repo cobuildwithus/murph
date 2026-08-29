@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { AUDIT_STATUSES } from '@murphai/contracts'
 import {
   emptyArgsSchema,
   withBaseOptions,
@@ -16,6 +17,7 @@ import {
   showAudit,
 } from './audit-command-helpers.js'
 import type { VaultServices } from '@murphai/vault-usecases'
+import { assertOrderedDateRange } from './command-factory-primitives.js'
 
 const auditIdSchema = z
   .string()
@@ -83,10 +85,9 @@ export function registerAuditCommands(
         .optional()
         .describe('Optional audit actor filter such as cli, assistant, import, or system.'),
       status: z
-        .string()
-        .min(1)
+        .enum(AUDIT_STATUSES)
         .optional()
-        .describe('Optional audit status filter such as success, warning, or error.'),
+        .describe('Optional audit status filter: success or failure.'),
       from: localDateSchema
         .optional()
         .describe('Inclusive lower occurredAt date bound in YYYY-MM-DD form.'),
@@ -107,6 +108,7 @@ export function registerAuditCommands(
     }),
     output: auditListResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       return listAuditRecords(options.vault, {
         action: options.action,
         actor: options.actor,

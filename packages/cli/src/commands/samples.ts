@@ -38,6 +38,10 @@ import {
   showSample as showSampleWithArtifacts,
   summarizeSampleWindow as summarizeSampleWindowWithArtifacts,
 } from './sample-query-command-helpers.js'
+import {
+  assertOrderedDateRange,
+  assertOrderedTimestampRange,
+} from './command-factory-primitives.js'
 import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
 
 const sampleIdSchema = z
@@ -858,7 +862,7 @@ export function registerSamplesCommands(
     description: 'Summarize stored samples for one stream across a time window.',
     args: emptyArgsSchema,
     options: withBaseOptions({
-      stream: z.string().min(1).describe('Sample stream to summarize, such as spo2 or heart_rate.'),
+      stream: z.enum(SAMPLE_STREAMS).describe('Sample stream to summarize, such as spo2 or heart_rate.'),
       from: z
         .string()
         .pipe(isoTimestampSchema)
@@ -882,6 +886,7 @@ export function registerSamplesCommands(
     }),
     output: samplesSummarizeResultSchema,
     async run({ options }) {
+      assertOrderedTimestampRange(options.from, options.to)
       const summary = await summarizeSampleWindowWithArtifacts(options.vault, {
         stream: options.stream,
         from: options.from,
@@ -917,7 +922,7 @@ export function registerSamplesCommands(
     description: 'List sample records with optional stream, date-range, and quality filters.',
     args: emptyArgsSchema,
     options: withBaseOptions({
-      stream: z.string().min(1).optional(),
+      stream: z.enum(SAMPLE_STREAMS).optional(),
       from: localDateSchema.optional(),
       to: localDateSchema.optional(),
       quality: z.string().min(1).optional(),
@@ -925,6 +930,7 @@ export function registerSamplesCommands(
     }),
     output: samplesListResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       const items = await listSamplesWithArtifacts(options.vault, {
         from: options.from,
         limit: options.limit,
@@ -974,13 +980,14 @@ export function registerSamplesCommands(
     description: 'List imported sample batches from raw sample manifests.',
     args: emptyArgsSchema,
     options: withBaseOptions({
-      stream: z.string().min(1).optional(),
+      stream: z.enum(SAMPLE_STREAMS).optional(),
       from: localDateSchema.optional(),
       to: localDateSchema.optional(),
       limit: z.number().int().positive().max(200).default(10),
     }),
     output: sampleBatchListResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       const items = await listSampleBatchesWithArtifacts(options.vault, {
         from: options.from,
         limit: options.limit,
