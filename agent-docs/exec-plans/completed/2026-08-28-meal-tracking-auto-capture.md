@@ -1,6 +1,6 @@
 # Surface automatic meal capture on the first tracking request
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-28
 
@@ -150,3 +150,4 @@ Updated: 2026-08-28
     The delta is confined to assembled private instructions; deferred skill
     bodies and their broadened catalog hints are absent from the first provider
     request.
+Completed: 2026-08-28
