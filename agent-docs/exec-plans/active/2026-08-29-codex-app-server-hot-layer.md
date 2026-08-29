@@ -69,6 +69,14 @@ Updated: 2026-08-29
 4. Push the candidate, run the required preliminary specialist and final
    ReviewGPT gates concurrently with CI, and resolve every accepted finding.
 
+### Local results
+
+- Container image contract: 11 tests passed.
+- Cloudflare package typecheck: passed.
+- Changelog production-renderer contract: 9 tests passed.
+- Local Docker was unavailable, so the native Linux image build, Codex command,
+  and sandbox proof remain assigned to exact-head CI.
+
 ## Deployment concerns
 
 - The change is runner-image-only. It requires a new immutable runner image and
