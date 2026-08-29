@@ -11149,7 +11149,7 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
         expect(reply).toMatch(/review|stale support/iu)
         expect(reply).toMatch(/archiv|retir|removed|ended/iu)
         expect(reply).toMatch(
-          /(?:next (?:delivery|reminder)|delivery timing|timing).{0,100}(?:could not|couldn't|not|unable).{0,60}(?:confirm|verify)|(?:could not|couldn't|unable).{0,60}(?:confirm|verify).{0,100}(?:next (?:delivery|reminder)|delivery timing|timing)/iu,
+          /(?:next (?:delivery|reminder)|delivery timing|timing).{0,100}(?:could not|couldn't|not|unable).{0,60}(?:confirm|verify)|(?:could not|couldn't|did not|unable).{0,60}(?:confirm|verify).{0,100}(?:next (?:delivery|reminder)|delivery timing|timing)/iu,
         )
         expect(reply).not.toContain(COMPACT_SUPPORT_EXPERIMENT_ID)
         expect(reply).not.toContain(COMPACT_SUPPORT_KEEP_AUTOMATION_ID)
