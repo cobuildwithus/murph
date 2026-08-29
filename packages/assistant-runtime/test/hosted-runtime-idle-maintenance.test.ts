@@ -47,7 +47,7 @@ vi.mock("@murphai/core", async (importOriginal) => ({
 
 import {
   initializeVault,
-  readEvent,
+  readEventLedgerShardRecords,
   upsertEvent,
 } from "@murphai/core";
 
@@ -1127,19 +1127,30 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(integrationSignal).toBe(eventSignal);
   });
 
-  it("archives a real closed event shard through true idle maintenance", async () => {
+  it("archives later healthy history after a long malformed event shard", async () => {
     const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-idle-event-archive-"));
     try {
       await initializeVault({ vaultRoot, createdAt: "2020-01-01T00:00:00.000Z" });
-      const historical = await upsertEvent({
+      const malformed = await upsertEvent({
         vaultRoot,
         payload: {
           kind: "note",
           occurredAt: "2020-01-12T09:00:00.000Z",
+          note: "This older shard will remain available for repair.",
+          title: "Malformed historical event",
+        },
+      });
+      const historical = await upsertEvent({
+        vaultRoot,
+        payload: {
+          kind: "note",
+          occurredAt: "2020-02-12T09:00:00.000Z",
           note: "idle checkpoint compression ".repeat(80),
           title: "Historical event",
         },
       });
+      const malformedRawAbsolutePath = path.join(vaultRoot, malformed.ledgerFile);
+      await fs.appendFile(malformedRawAbsolutePath, `${"x".repeat(2 * 1024 * 1024)}\n`);
       const rawAbsolutePath = path.join(vaultRoot, historical.ledgerFile);
       const sourceBytes = await fs.readFile(rawAbsolutePath);
       const actualCore = await vi.importActual<typeof import("@murphai/core")>(
@@ -1172,15 +1183,21 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         threadContextTokensBefore: 20_000,
       });
 
+      await expect(fs.access(malformedRawAbsolutePath)).resolves.toBeUndefined();
+      await expect(fs.access(`${malformedRawAbsolutePath}.gz`)).rejects.toThrow();
       await expect(fs.access(rawAbsolutePath)).rejects.toThrow();
       const archiveBytes = await fs.readFile(`${rawAbsolutePath}.gz`);
       expect(archiveBytes.byteLength).toBeLessThan(sourceBytes.byteLength);
-      await expect(readEvent({
-        eventId: historical.eventId,
+      expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
+      expect(
+        archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.signal?.aborted,
+      ).toBe(false);
+      await expect(readEventLedgerShardRecords({
+        relativePath: historical.ledgerFile,
         vaultRoot,
-      })).resolves.toMatchObject({
-        event: { title: "Historical event" },
-      });
+      })).resolves.toEqual([
+        expect.objectContaining({ title: "Historical event" }),
+      ]);
     } finally {
       await fs.rm(vaultRoot, { force: true, recursive: true });
     }

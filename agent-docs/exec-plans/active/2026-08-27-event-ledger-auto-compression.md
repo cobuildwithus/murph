@@ -85,6 +85,8 @@ Updated: 2026-08-27
   migration service, feature flag, or persisted cursor.
 - Remaining plain closed shards are the durable worklist; successful archive
   replacement deletes work instead of recording another completion state.
+- Validate JSONL in one pass over decoded chunks; retain only unfinished line
+  fragments and join them once, without a cursor or retry state.
 - Share one 30-second idle archive budget across event and integration history
   so activation does not extend the checkpoint publication bound.
 - Compress event history before integration history because this activation is
@@ -101,5 +103,6 @@ Updated: 2026-08-27
   `git diff --check`; required ReviewGPT passes; exact-head GitHub Actions.
 - Expected outcomes: gzip is smaller and byte-equivalent, the raw closed shard
   disappears only after verification, current-month JSONL remains, a wake
-  aborts archiving and preserves the pending notification, checkpointing stays
+  aborts archiving and preserves the pending notification, a long malformed
+  month cannot starve later event or integration history, checkpointing stays
   fail open on archive errors, and all exact-head required checks pass.

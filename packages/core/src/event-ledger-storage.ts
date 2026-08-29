@@ -554,19 +554,32 @@ function createEventLedgerJsonlReceiptMeter(input: {
   const hash = createHash("sha256");
   let byteLength = 0;
   let lineNumber = 0;
-  let pending = "";
+  const pendingFragments: string[] = [];
   let receipt: EventLedgerShardContentReceipt | null = null;
 
-  const parseCompleteLines = (): void => {
-    let newlineIndex = pending.indexOf("\n");
+  const parseLine = (finalFragment: string): void => {
+    let line = finalFragment;
+    if (pendingFragments.length > 0) {
+      pendingFragments.push(finalFragment);
+      line = pendingFragments.join("");
+      pendingFragments.length = 0;
+    }
+    lineNumber += 1;
+    if (line.length > 0) {
+      parseEventLedgerRow(line, lineNumber, input.relativePath);
+    }
+  };
+
+  const parseDecodedText = (text: string): void => {
+    let lineStart = 0;
+    let newlineIndex = text.indexOf("\n", lineStart);
     while (newlineIndex >= 0) {
-      const line = pending.slice(0, newlineIndex);
-      pending = pending.slice(newlineIndex + 1);
-      lineNumber += 1;
-      if (line.length > 0) {
-        parseEventLedgerRow(line, lineNumber, input.relativePath);
-      }
-      newlineIndex = pending.indexOf("\n");
+      parseLine(text.slice(lineStart, newlineIndex));
+      lineStart = newlineIndex + 1;
+      newlineIndex = text.indexOf("\n", lineStart);
+    }
+    if (lineStart < text.length) {
+      pendingFragments.push(text.slice(lineStart));
     }
   };
 
@@ -585,8 +598,7 @@ function createEventLedgerJsonlReceiptMeter(input: {
           return;
         }
         hash.update(bytes);
-        pending += decoder.write(bytes);
-        parseCompleteLines();
+        parseDecodedText(decoder.write(bytes));
         callback(null, bytes);
       } catch (error) {
         callback(error instanceof Error ? error : new Error(String(error)));
@@ -595,11 +607,9 @@ function createEventLedgerJsonlReceiptMeter(input: {
     flush(callback) {
       try {
         input.signal?.throwIfAborted();
-        pending += decoder.end();
-        parseCompleteLines();
-        if (pending.length > 0) {
-          lineNumber += 1;
-          parseEventLedgerRow(pending, lineNumber, input.relativePath);
+        parseDecodedText(decoder.end());
+        if (pendingFragments.length > 0) {
+          parseLine("");
         }
         receipt = {
           byteLength,

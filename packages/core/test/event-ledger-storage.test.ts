@@ -100,7 +100,7 @@ test("event archiving is abortable before publication and leaves the raw shard i
   await assert.rejects(fs.access(path.join(vaultRoot, `${event.ledgerFile}.gz`)));
 });
 
-test("a malformed closed event shard does not starve later valid months", async () => {
+test("a long malformed closed event shard does not starve later valid months", async () => {
   const vaultRoot = await makeTempDirectory("murph-event-ledger-archive-blocked");
   await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
   const malformed = await upsertEvent({
@@ -121,10 +121,12 @@ test("a malformed closed event shard does not starve later valid months", async 
       title: "Valid month",
     },
   });
-  await fs.appendFile(path.join(vaultRoot, malformed.ledgerFile), "{invalid json}\n");
+  const malformedLine = "x".repeat(16 * 1024 * 1024);
+  await fs.appendFile(path.join(vaultRoot, malformed.ledgerFile), `${malformedLine}\n`);
 
   const result = await archiveClosedEventLedgerShards({
     now: new Date("2026-03-15T12:00:00.000Z"),
+    signal: AbortSignal.timeout(5_000),
     vaultRoot,
   });
 
@@ -134,7 +136,7 @@ test("a malformed closed event shard does not starve later valid months", async 
   await assert.rejects(fs.access(path.join(vaultRoot, `${malformed.ledgerFile}.gz`)));
   await assert.rejects(fs.access(path.join(vaultRoot, valid.ledgerFile)));
   await fs.access(path.join(vaultRoot, `${valid.ledgerFile}.gz`));
-});
+}, 30_000);
 
 test("event archiving leaves differing representations intact and continues later months", async () => {
   const vaultRoot = await makeTempDirectory("murph-event-ledger-archive-conflict");
