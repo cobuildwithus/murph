@@ -16461,7 +16461,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           request.schedule.timeZone,
         )
         expect(reply).toMatch(
-          /active|done|moved|saved|set|updated/iu,
+          /\b(?:active|done|moved|saved|set|updated|now runs daily)\b/iu,
         )
         expect(reply).toMatch(
           /10\s*(?::00)?\s*p\.?m\.?|22:00/iu,
