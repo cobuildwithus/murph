@@ -389,6 +389,7 @@ test("trusted Android controller is six-hour, latest-outcome gated, and producti
   );
 
   assert.match(workflow, /schedule:\n\s+- cron: "47 \*\/6 \* \* \*"/u);
+  assert.match(workflow, /schedule:\n\s+- cron: "47 \*\/6 \* \* \*"\n\s+workflow_dispatch:/u);
   assert.match(workflow, /actions: read\n\s+contents: read/u);
   assert.match(workflowConcurrency, /group: native-android-production-canary/u);
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);
@@ -398,6 +399,9 @@ test("trusted Android controller is six-hour, latest-outcome gated, and producti
   );
   assert.doesNotMatch(workflow, /status=success/u);
   assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
+  assert.match(workflow, /EVENT_NAME: \$\{\{ github\.event_name \}\}/u);
+  assert.match(workflow, /EVENT_REF: \$\{\{ github\.ref \}\}/u);
+  assert.match(workflow, /git\/ref\/heads\/main/u);
   assert.match(workflow, /if: \$\{\{ needs\.select-main\.outputs\.should_run == 'true' \}\}/u);
   assert.match(workflow, /environment: native-android-production-canary/u);
   assert.match(workflow, /node scripts\/native-android-hosted-e2e\.mjs canary/u);
@@ -408,7 +412,7 @@ test("trusted Android controller is six-hour, latest-outcome gated, and producti
   assert.doesNotMatch(workflow, /NATIVE_ANDROID_E2E_ANDROID_(?:EXPECTED_SHA|REF)/u);
   assert.doesNotMatch(
     workflow,
-    /workflow_run:|deployment_status:|workflow_dispatch:|pull_request:|push:|pull-requests:|statuses: write|node scripts\/native-android-hosted-e2e\.mjs pr/u,
+    /workflow_run:|deployment_status:|pull_request:|push:|pull-requests:|statuses: write|node scripts\/native-android-hosted-e2e\.mjs pr/u,
   );
   assert.doesNotMatch(
     workflow,
@@ -425,7 +429,7 @@ test("trusted Android controller is six-hour, latest-outcome gated, and producti
   }
 });
 
-test("Android schedule skips only a same-SHA successful latest outcome", async () => {
+test("Android controller admits only current-main manual recovery and skips same-SHA success", async () => {
   const workflow = await readFile(
     path.join(ROOT, ".github", "workflows", "native-android-hosted-e2e.yml"),
     "utf8",
@@ -440,6 +444,12 @@ test("Android schedule skips only a same-SHA successful latest outcome", async (
 set -euo pipefail
 [[ "$#" == 4 ]] || exit 64
 [[ "$1" == api ]] || exit 64
+if [[ "$2" == "repos/\${GITHUB_REPOSITORY}/git/ref/heads/main" ]]; then
+  [[ "$3" == --jq ]] || exit 64
+  [[ "$4" == '.object.sha // ""' ]] || exit 64
+  printf '%s\n' "\${MAIN_SHA:-}"
+  exit 0
+fi
 [[ "$2" == "repos/\${GITHUB_REPOSITORY}/actions/workflows/native-android-hosted-e2e.yml/runs?event=schedule&status=completed&per_page=1" ]] || exit 64
 [[ "$3" == --jq ]] || exit 64
 [[ "$4" == '.workflow_runs[0] // {}' ]] || exit 64
@@ -451,11 +461,12 @@ else
 fi
 `, { mode: 0o755 });
     const scenarios = [
-      { attempt: "1", conclusion: "", expected: "true", previousSha: "" },
-      { attempt: "1", conclusion: "success", expected: "false", previousSha: WEB_SHA },
-      { attempt: "1", conclusion: "failure", expected: "true", previousSha: WEB_SHA },
-      { attempt: "1", conclusion: "success", expected: "true", previousSha: ANDROID_SHA },
-      { attempt: "2", conclusion: "success", expected: "true", previousSha: WEB_SHA },
+      { attempt: "1", conclusion: "", eventName: "schedule", expected: "true", previousSha: "" },
+      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "false", previousSha: WEB_SHA },
+      { attempt: "1", conclusion: "failure", eventName: "schedule", expected: "true", previousSha: WEB_SHA },
+      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "true", previousSha: ANDROID_SHA },
+      { attempt: "2", conclusion: "success", eventName: "schedule", expected: "true", previousSha: WEB_SHA },
+      { attempt: "1", conclusion: "", eventName: "workflow_dispatch", expected: "true", previousSha: "" },
     ];
     for (const [index, scenario] of scenarios.entries()) {
       const outputPath = path.join(tempDir, `output-${index}`);
@@ -465,9 +476,12 @@ fi
         env: {
           ...process.env,
           CURRENT_SHA: WEB_SHA,
+          EVENT_NAME: scenario.eventName,
+          EVENT_REF: "refs/heads/main",
           FAIL_HISTORY_LOOKUP: scenario.attempt === "2" ? "1" : "0",
           GITHUB_OUTPUT: outputPath,
           GITHUB_REPOSITORY: "example/murph",
+          MAIN_SHA: WEB_SHA,
           PATH: `${tempDir}:${process.env.PATH ?? ""}`,
           PREVIOUS_CONCLUSION: scenario.conclusion,
           PREVIOUS_SHA: scenario.previousSha,
@@ -484,12 +498,34 @@ fi
       assert.deepEqual(output, { should_run: scenario.expected, web_sha: WEB_SHA });
     }
 
+    for (const [invalidIndex, invalid] of [
+      { CURRENT_SHA: WEB_SHA, EVENT_NAME: "workflow_dispatch", EVENT_REF: "refs/heads/topic", MAIN_SHA: WEB_SHA },
+      { CURRENT_SHA: WEB_SHA, EVENT_NAME: "workflow_dispatch", EVENT_REF: "refs/heads/main", MAIN_SHA: ANDROID_SHA },
+      { CURRENT_SHA: WEB_SHA, EVENT_NAME: "push", EVENT_REF: "refs/heads/main", MAIN_SHA: WEB_SHA },
+    ].entries()) {
+      const result = spawnSync("bash", ["-c", script], {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: path.join(tempDir, `invalid-manual-${invalidIndex}`),
+          GITHUB_REPOSITORY: "example/murph",
+          PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+          RUN_ATTEMPT: "1",
+          ...invalid,
+        },
+      });
+      assert.equal(result.status, 1);
+    }
+
     const historyFailure = spawnSync("bash", ["-c", script], {
       cwd: ROOT,
       encoding: "utf8",
       env: {
         ...process.env,
         CURRENT_SHA: WEB_SHA,
+        EVENT_NAME: "schedule",
+        EVENT_REF: "refs/heads/main",
         FAIL_HISTORY_LOOKUP: "1",
         GITHUB_OUTPUT: path.join(tempDir, "history-failure-output"),
         GITHUB_REPOSITORY: "example/murph",
