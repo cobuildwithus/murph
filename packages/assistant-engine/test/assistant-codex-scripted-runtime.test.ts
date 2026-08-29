@@ -8426,6 +8426,129 @@ text(JSON.stringify(result));
 
   it.each([
     {
+      calendarFirst: true,
+      name: 'calendar link first with resolved reminder timing',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-10-14T12:00:00.000Z',
+        status: 'resolved' as const,
+      },
+      reminderMessage: 'I set your appointment reminder for 8:00 AM Eastern.',
+    },
+    {
+      calendarFirst: false,
+      name: 'pending reminder first',
+      occurrenceProjection: { status: 'pending' as const },
+      reminderMessage:
+        'I saved your appointment reminder for 8:00 AM Eastern. Its timing is still being confirmed.',
+    },
+  ])('preserves the semantic reminder result and exact calendar suffix with $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ calendarFirst, occurrenceProjection, reminderMessage }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const event = {
+      title: 'Care appointment',
+      startsAt: '2026-10-14T14:30:00-04:00',
+      endsAt: '2026-10-14T15:15:00-04:00',
+      location: 'Downtown Clinic',
+    } as const
+    const exactUrl = buildCalendarEventUrl(event)
+    const modelCopiedUrl = `${exactUrl.slice(0, -1)}A`
+    const modelFinalMessage = `${reminderMessage}\n${modelCopiedUrl}`
+    const exactFinalMessage = `${reminderMessage}\n${exactUrl}`
+    const providerReminderRequest = {
+      action: 'save' as const,
+      instructions: 'Remind me about my care appointment.',
+      schedule: {
+        kind: 'at' as const,
+        localAt: {
+          date: '2026-10-14',
+          time: '08:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Care appointment reminder',
+    }
+    const calendarCall = {
+      functionCall: {
+        arguments: event,
+        name: 'create_calendar_link',
+        namespace: 'murph',
+      },
+    }
+    const reminderCall = {
+      customToolCall: {
+        input: `
+const result = await tools.murph__automation(${JSON.stringify(providerReminderRequest)});
+text(JSON.stringify(result));
+`,
+        name: 'exec',
+      },
+    }
+    if (calendarFirst) {
+      scenario.stub.queue(calendarCall, reminderCall, { text: modelFinalMessage })
+    } else {
+      scenario.stub.queue(reminderCall, calendarCall, { text: modelFinalMessage })
+    }
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        automationAvailable: true,
+        calendarLinkAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            return {
+              action: 'save',
+              automationId: 'automation-care-appointment',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'care-appointment-reminder',
+              occurrenceProjection,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              updatedAt: '2026-10-01T16:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Prepare my appointment reminder and calendar link.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: providerReminderRequest.instructions,
+      schedule: { at: '2026-10-14T12:00:00.000Z', kind: 'at' },
+      title: providerReminderRequest.title,
+    }])
+    expect(result.providerAuthoredFinalMessage).toBe(modelFinalMessage)
+    expect(result.finalMessage).toBe(exactFinalMessage)
+    expect(result.transcriptMessage).toBe(exactFinalMessage)
+    expect(result.finalMessage).not.toContain(modelCopiedUrl)
+    expect(result.finalMessage.match(
+      /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/gu,
+    )).toEqual([exactUrl])
+    expect(result.finalMessage.endsWith(exactUrl)).toBe(true)
+  })
+
+  it.each([
+    {
       expectedFinalMessage:
         'I found eight visible push-ups. The hips rise before the shoulders on the last two reps.',
       expectedToolOutput: 'Eight visible push-ups',

@@ -39,6 +39,12 @@ describe('assistant calendar link tool', () => {
     expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
       'ask for every missing required detail together',
     )
+    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
+      'does not replace private appointment follow-through',
+    )
+    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
+      'exactly one one-shot reminder',
+    )
   })
 
   it('parses the ordinary dynamic-tool request into one event', () => {
@@ -48,23 +54,19 @@ describe('assistant calendar link tool', () => {
     })
   })
 
-  it('returns a terminal first-party URL and an honest fallback reply', () => {
+  it('returns an exact first-party URL suffix and an honest fallback reply', () => {
     const result = executeCreateCalendarLinkDynamicTool(EVENT)
     expect(result.rpcResult.success).toBe(true)
-    const finalResponse = result.requiredFinalResponseOverride ?? ''
-    const url = finalResponse.match(
-      /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u,
-    )?.[0]
+    const url = result.requiredFinalResponseSuffix
     expect(url?.startsWith(CALENDAR_LINK_URL_PREFIX)).toBe(true)
     expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toEqual({
       instruction:
-        'The runtime owns the exact final confirmation and calendar link. End the turn without copying or repeating a URL.',
+        'Before ending, complete private appointment follow-through: use tool search for `murph automation` to load and call `murph.automation`, then ensure exactly one one-shot reminder unless the member declined it. Then write the rest of the truthful semantic reply without copying or repeating a URL. The runtime appends the exact calendar link.',
       status: 'ready',
     })
-    expect(finalResponse).toBe(`The details are ready.\n${url}`)
     const payload = url?.slice(CALENDAR_LINK_URL_PREFIX.length) ?? ''
     expect(parseCalendarEventPayload(payload)).toEqual(EVENT)
-    expect(result.requiredFinalResponseFallback).toBeUndefined()
+    expect(result.requiredFinalResponseFallback).toBe('The details are ready.')
   })
 
   it('rejects missing offsets and incomplete appointment details', () => {

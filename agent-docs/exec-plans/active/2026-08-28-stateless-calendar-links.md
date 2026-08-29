@@ -92,9 +92,15 @@ Updated: 2026-08-29
   than a provider service-name check; SMS and RCS recipients can use the same
   standards-based `.ics` handoff when their phone supports it.
 - The existing bounded stateless URL design remains unchanged.
-- The runtime, rather than the model, owns the exact final confirmation and
-  opaque URL because a real-Codex journey proved that model copying can alter a
-  payload character. This remains turn-local and adds no state or service.
+- The runtime, rather than the model, owns the exact opaque URL suffix because a
+  real-Codex journey proved that model copying can alter a payload character.
+  Murph's semantic reply remains model-authored so verified appointment-reminder
+  results are preserved beside the link. This remains turn-local and adds no
+  state or service.
+- The focused compound-action live journey exposes the existing automation
+  schema eagerly in its test harness to isolate reminder-plus-link composition;
+  production retains deferred automation discovery, whose planner and routing
+  boundaries have separate deterministic and live proof.
 - A confirmed same-turn live-follow-up race remains unchanged by explicit
   product choice; this task does not add context invalidation for an
   undelivered calendar link after a newer correction or cancellation.
@@ -102,12 +108,14 @@ Updated: 2026-08-29
 ## Product UX walkthrough
 
 - Direct text happy path: the production planner admits the tool after an
-  accepted direct Linq input; the real-Codex reply is one honest confirmation
-  followed by the exact calendar URL, with no claim that the event was added.
+  accepted direct Linq input; the real-Codex reply preserves one verified
+  one-shot appointment reminder and is followed by the exact calendar URL,
+  with no claim that the event was added.
 - Missing details: the existing tool instructions still ask for all missing
   title/time/offset details together before constructing a link.
 - Narrow phone: the title, fact values, and notes can wrap maximum-length
-  unbroken contract-valid text; deployed 320/390/1280 browser proof remains.
+  unbroken contract-valid text; local 320/390/1280 browser proof passes, and the
+  primary action uses the regular rounded button treatment with its arrow.
 - Invalid and desktop paths: the unchanged recovery surface and downloadable
   `.ics` fallback remain available, with calendar-app-neutral confirmation copy.
 
@@ -121,9 +129,11 @@ Updated: 2026-08-29
 - Expected outcomes: all focused checks pass, rendered happy/invalid states are
   usable on phone and desktop, the real reply is accurate and ends in the link,
   CI is green, and both ReviewGPT stages have no unresolved accepted finding.
-- Current results: assistant calendar/planner/scripted tests pass (6); Web
+- Current results: assistant calendar/planner/scripted tests pass (8); Web
   calendar tests pass (6); assistant and Web typechecks pass; scoped Web lint
   passes; `git diff --check` and the identifier scan pass; the focused
-  real-Codex journey passes with a Ready UX verdict and the exact runtime-owned
-  link. The local Playwright server did not reach its health probe before the
-  repository timeout, so exact-head deployed viewport proof is still required.
+  real-Codex compound reminder-and-link journey passes on `gpt-5.6-terra` at
+  medium reasoning with one accepted reminder save, a Ready UX verdict, and the
+  exact runtime-owned URL suffix. Local 320/390/1280 browser proof passes for
+  the review page, including the rounded primary action; exact-head deployed
+  proof remains required.

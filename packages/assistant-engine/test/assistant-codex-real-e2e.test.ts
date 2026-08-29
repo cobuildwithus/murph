@@ -13567,25 +13567,49 @@ describeRealCodex('real Codex physical-note stuck recovery e2e', () => {
 
 describeRealCodex('real Codex stateless calendar link e2e', () => {
   it(
-    'returns one truthful calendar link from explicit details',
+    'preserves the verified appointment reminder beside one exact calendar link',
     async () => {
-      const result = await runRealCodexCalendarLinkTurn([
-        'Make an Add to Calendar link using these exact details.',
+      const { automationRequests, result } = await runRealCodexCalendarLinkTurn([
+        'My care appointment is booked.',
+        'First set a one-shot reminder for 8:00 AM Eastern on October 14, 2026.',
+        'Then make an Add to Calendar link using these exact details.',
         'Use the title "Care appointment".',
         'It starts at 2026-10-14T14:30:00-04:00 and ends at 2026-10-14T15:15:00-04:00.',
         'The location is "Downtown Clinic".',
       ].join(' '))
       const actions = readCapabilityRoutingActions(result.jsonEvents)
-      const calendarActions = actions.filter((action) =>
-        action.kind === 'dynamic'
-        && action.tool === MURPH_CREATE_CALENDAR_LINK_TOOL.name
+      const calendarActions = actions.filter(
+        (action): action is Extract<
+          CapabilityRoutingAction,
+          { kind: 'dynamic' }
+        > =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_CREATE_CALENDAR_LINK_TOOL.name,
+      )
+      const automationActions = actions.filter(
+        (action): action is Extract<
+          CapabilityRoutingAction,
+          { kind: 'dynamic' }
+        > =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name,
+      )
+      const successfulAutomationActions = automationActions.filter(
+        (action) => action.success,
       )
 
       console.info(
         `[real-codex calendar-link explicit] ${result.finalMessage.replace(/https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u, '<calendar-link>').replaceAll(/\s+/gu, ' ').trim()}`,
       )
       expect(calendarActions.length).toBeGreaterThan(0)
-      expect(actions).toEqual(calendarActions)
+      expect(
+        successfulAutomationActions,
+        `automation attempts: ${JSON.stringify(automationActions)}`,
+      ).toHaveLength(1)
+      expect(actions).toEqual(expect.arrayContaining([
+        ...successfulAutomationActions,
+        ...calendarActions,
+      ]))
       for (const action of calendarActions) {
         expect(action).toMatchObject({
           argumentsValue: {
@@ -13607,10 +13631,22 @@ describeRealCodex('real Codex stateless calendar link e2e', () => {
         }
         expect(JSON.parse(action.output)).toEqual({
           instruction:
-            'The runtime owns the exact final confirmation and calendar link. End the turn without copying or repeating a URL.',
+            'Before ending, complete private appointment follow-through: use tool search for `murph automation` to load and call `murph.automation`, then ensure exactly one one-shot reminder unless the member declined it. Then write the rest of the truthful semantic reply without copying or repeating a URL. The runtime appends the exact calendar link.',
           status: 'ready',
         })
       }
+      expect(automationRequests).toHaveLength(1)
+      expect(automationRequests[0]).toMatchObject({
+        action: 'save',
+        instructions: expect.any(String),
+        schedule: {
+          at: '2026-10-14T12:00:00.000Z',
+          kind: 'at',
+        },
+        title: expect.any(String),
+      })
+      expect(result.finalMessage).toMatch(/remind/iu)
+      expect(result.finalMessage).toMatch(/8(?::00)?\s*(?:a\.?m\.?|in the morning)|morning/iu)
       expect(result.finalMessage.trim().endsWith(url ?? '<missing>')).toBe(true)
       expect(result.finalMessage).not.toMatch(/(?:has been|was|is now) added/iu)
       expect(parseCalendarEventPayload(
@@ -13628,12 +13664,13 @@ describeRealCodex('real Codex stateless calendar link e2e', () => {
   it(
     'asks for missing appointment details before creating a calendar link',
     async () => {
-      const result = await runRealCodexCalendarLinkTurn(
+      const { automationRequests, result } = await runRealCodexCalendarLinkTurn(
         'Make an Add to Calendar link for a care appointment next Wednesday afternoon.',
       )
       const actions = readCapabilityRoutingActions(result.jsonEvents)
 
-      expect(actions).toHaveLength(0)
+      expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+      expect(automationRequests).toHaveLength(0)
       expect(result.finalMessage).toMatch(/(?:what time|start|date)/iu)
       expect(result.finalMessage).toMatch(/(?:end time|duration|how long)/iu)
       expect(result.finalMessage).toMatch(/(?:time zone|timezone|UTC offset)/iu)
@@ -13652,9 +13689,24 @@ async function runRealCodexCalendarLinkTurn(prompt: string) {
   const workingDirectory = await mkdtemp(
     path.join(tmpdir(), 'murph-calendar-link-e2e-'),
   )
+  const skillsRoot = path.join(workingDirectory, 'skills')
+  const automationRequests: AssistantHostedAutomationToolRequest[] = []
+  // Deferred discovery has its own production-planner and live routing proof.
+  // Eagerly expose the unchanged schema here so this journey isolates the
+  // compound reminder-plus-calendar actions and final-response composition.
+  const eagerAppointmentAutomationTool = {
+    description: MURPH_AUTOMATION_TOOL.description,
+    inputSchema: MURPH_AUTOMATION_TOOL.inputSchema,
+    name: MURPH_AUTOMATION_TOOL.name,
+    namespace: MURPH_AUTOMATION_TOOL.namespace,
+  } as const
 
   try {
-    return await executeRealCodexAppServerTurn({
+    await materializeAssistantSkill({
+      skillsRoot,
+      slug: 'appointment-scheduling',
+    })
+    const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never',
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       codexCommand:
@@ -13662,16 +13714,55 @@ async function runRealCodexCalendarLinkTurn(prompt: string) {
         ?? undefined,
       codexHome: config.codexHome,
       developerInstructions: buildDirectConversationDeveloperInstructions(),
-      dynamicTools: [MURPH_CREATE_CALENDAR_LINK_TOOL],
-      env: config.env,
+      dynamicTools: [
+        eagerAppointmentAutomationTool,
+        MURPH_CREATE_CALENDAR_LINK_TOOL,
+      ],
+      env: {
+        ...config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
       excludeResumeTurns: true,
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'save' || request.schedule.kind !== 'at') {
+              throw new Error('Expected one exact appointment reminder save.')
+            }
+            return {
+              action: 'save',
+              automationId: 'automation-care-appointment',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'care-appointment-reminder',
+              occurrenceProjection: {
+                nextOccurrenceAt: request.schedule.at,
+                status: 'resolved',
+              },
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              updatedAt: '2026-07-29T16:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
       model: config.model,
       modelProvider: config.modelProvider,
       prompt,
-      reasoningEffort: 'low',
+      reasoningEffort: 'medium',
       sandbox: 'read-only',
       workingDirectory,
     })
+    return { automationRequests, result }
   } finally {
     await removeRealCodexTemporaryPaths([
       workingDirectory,

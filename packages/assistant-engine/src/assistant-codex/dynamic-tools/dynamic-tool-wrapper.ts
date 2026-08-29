@@ -11,10 +11,10 @@ import type { GenerateVoiceMemoToolResult } from '../generate-voice-memo-tool.js
 
 export interface DynamicToolResult {
   /**
-   * Runtime-authored complete response that replaces model text when an exact
+   * Runtime-authored exact text appended after semantic response text when an
    * opaque value cannot safely be copied through the model.
    */
-  requiredFinalResponseOverride?: string
+  requiredFinalResponseSuffix?: string
   /**
    * Runtime-selected text that must be delivered when the model supplies no
    * response text or card. Analyze-video failure text is trusted status;

@@ -718,6 +718,39 @@ function appendRequiredVaultFileApprovalUrls(
   ].filter((part): part is string => part !== null).join('\n\n')
 }
 
+const MODEL_AUTHORED_CALENDAR_LINK_PATTERN =
+  /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/gu
+
+function appendRequiredFinalResponseSuffix(
+  message: string,
+  suffix: string | null,
+  fallback: string | null,
+): string
+function appendRequiredFinalResponseSuffix(
+  message: string | null,
+  suffix: string | null,
+  fallback: string | null,
+): string | null
+function appendRequiredFinalResponseSuffix(
+  message: string | null,
+  suffix: string | null,
+  fallback: string | null,
+): string | null {
+  const normalizedSuffix = normalizeNullableString(suffix)
+  if (normalizedSuffix === null) {
+    return message
+  }
+  const messageWithoutModelAuthoredCalendarLink = normalizeNullableString(
+    message?.replace(MODEL_AUTHORED_CALENDAR_LINK_PATTERN, '') ?? null,
+  )
+  return [
+    messageWithoutModelAuthoredCalendarLink ?? normalizeNullableString(fallback),
+    normalizedSuffix,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n')
+}
+
 interface RequiredAutomationLocalAtClarification {
   code: 'local_at_fold' | 'local_at_gap'
   resolvedLocalDate: string
@@ -3366,7 +3399,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
-  let requiredFinalResponseOverride: string | null = null
+  let requiredFinalResponseSuffix: string | null = null
   let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
@@ -3478,7 +3511,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
-    requiredFinalResponseOverride !== null ||
+    requiredFinalResponseSuffix !== null ||
     requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
@@ -4817,19 +4850,17 @@ async function runCodexAppServerTurnOnProcess(
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
-      if (dynamicToolRequest.kind === 'analyze-video') {
-        const analyzeVideoFallback = normalizeNullableString(
-          result.requiredFinalResponseFallback,
-        )
-        if (analyzeVideoFallback !== null) {
-          requiredFinalResponseFallback = analyzeVideoFallback
-        }
-      }
-      const finalResponseOverride = normalizeNullableString(
-        result.requiredFinalResponseOverride,
+      const finalResponseFallback = normalizeNullableString(
+        result.requiredFinalResponseFallback,
       )
-      if (finalResponseOverride !== null) {
-        requiredFinalResponseOverride = finalResponseOverride
+      if (finalResponseFallback !== null) {
+        requiredFinalResponseFallback = finalResponseFallback
+      }
+      const finalResponseSuffix = normalizeNullableString(
+        result.requiredFinalResponseSuffix,
+      )
+      if (finalResponseSuffix !== null) {
+        requiredFinalResponseSuffix = finalResponseSuffix
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -6044,7 +6075,6 @@ async function runCodexAppServerTurnOnProcess(
   const normalizedSemanticFinalMessage =
     normalizeNullableString(semanticFinalMessage)
   const requiredSemanticFinalMessage =
-    requiredFinalResponseOverride ??
     normalizedSemanticFinalMessage ??
     requiredFinalResponseFallback ??
     semanticFinalMessage
@@ -6054,12 +6084,16 @@ async function runCodexAppServerTurnOnProcess(
     requiredAutomationLocalAtClarificationsInOrder.length === 0
       ? finalResponseCard
       : null
-  const finalMessage = appendRequiredVaultFileApprovalUrls(
-    appendRequiredAutomationLocalAtClarification(
-      requiredSemanticFinalMessage,
-      requiredAutomationLocalAtClarificationsInOrder,
+  const finalMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredVaultFileApprovalUrls(
+      appendRequiredAutomationLocalAtClarification(
+        requiredSemanticFinalMessage,
+        requiredAutomationLocalAtClarificationsInOrder,
+      ),
+      requiredVaultFileApprovalUrls,
     ),
-    requiredVaultFileApprovalUrls,
+    requiredFinalResponseSuffix,
+    requiredFinalResponseFallback,
   )
   const semanticTranscriptMessage = finalResponseCard
     ? requiredAutomationLocalAtClarificationsInOrder.length === 0
@@ -6071,12 +6105,15 @@ async function runCodexAppServerTurnOnProcess(
         )
       : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null)
-  const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    requiredFinalResponseOverride ??
+  const transcriptMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredAutomationLocalAtClarification(
       normalizeNullableString(semanticTranscriptMessage) ??
       requiredFinalResponseFallback ??
       semanticTranscriptMessage,
-    requiredAutomationLocalAtClarificationsInOrder,
+      requiredAutomationLocalAtClarificationsInOrder,
+    ),
+    requiredFinalResponseSuffix,
+    requiredFinalResponseFallback,
   )
   if (
     noReplySelected &&
