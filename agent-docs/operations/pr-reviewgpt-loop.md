@@ -201,6 +201,12 @@ body supplies its short outcome, Product UX result, evidence, and applicable
 risk details. CI may still be `pending`; the preliminary pass runs concurrently
 with it.
 
+In a fresh sanctioned worktree, the wrapper first links only the frozen root
+workspace importer with lifecycle scripts disabled. It rechecks the required
+ReviewGPT, TypeScript-runner, and repo-tools entrypoints under a worktree-local
+OS lock before launching the package, so concurrent preliminary and final runs
+perform at most one setup and never borrow another checkout's `node_modules`.
+
 Do not add `ReviewGPT first-reviewed head` merely for the preliminary pass. When
 final round 1 starts concurrently, add it before launching both jobs and set it
 to their shared exact pushed head. The preliminary pass still does not consume
