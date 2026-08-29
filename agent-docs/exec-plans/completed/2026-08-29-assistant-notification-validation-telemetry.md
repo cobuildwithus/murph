@@ -1,6 +1,6 @@
 # Assistant-notification validation telemetry
 
-Status: active
+Status: completed
 Created: 2026-08-29
 Updated: 2026-08-29
 
@@ -89,8 +89,9 @@ behavior or durable state.
 5. [x] Add focused synthetic tests for all validators, privacy filtering,
    retry scheduling/state, and warning propagation.
 6. [x] Update the durable hosted-runtime observability contract.
-7. [ ] Merge through the public repository review path and deploy only through
-   the protected Cloudflare hosted-runner workflow.
+7. [x] Prepare the public telemetry-only PR for exact-head checks and human
+   merge; do not cross the protected private deployment boundary from this
+   repository-only automation.
 8. [ ] Prove the serving Cloudflare hosted-runner revision after deployment.
 9. [ ] Wait for natural traffic, then run the fixed latest/predecessor four-hour,
    rolling 24-hour, and rolling seven-day aggregate queries documented in
@@ -154,6 +155,20 @@ Candidate evidence:
   the parser remains behavior-equivalent, annotation preserves the typed error
   context, the retry delay and durable state are unchanged, and no device-sync
   path is modified.
+- The preliminary completion-specialists ReviewGPT pass found that the original
+  producer and consumer assertions were not composed through the real mailbox
+  boundary. That finding was accepted.
+- ReviewGPT supplied the one-file, test-only remediation through the declared
+  `@murphai/assistant-engine/assistant-codex` public entrypoint. The applied
+  result has the exact ReviewGPT-declared Git blob
+  `d55974ffc199850ad0005549dd25059a297d2661`; no production source changed.
+- The new real-boundary regression passed alone, all 81 tests in its affected
+  runtime test file passed together, and `@murphai/assistant-runtime` typecheck
+  passed after remediation.
+- Final cross-cutting ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` on the
+  exact production candidate head with no findings. Per the final-gate rule,
+  the later isolated regression-test correction requires focused verification
+  and CI, not another substantive final round.
 
 ## Deployment and rollback
 
@@ -181,3 +196,4 @@ Filter only `event_code = 'mailbox.system_processed'` and
 closed reason, `status`, `wakeKind`, and `routeAction`; return event count,
 privacy-safe distinct-subject count, minimum/maximum attempt count, and
 first/last timestamps. Never return subject keys or raw JSON.
+Completed: 2026-08-29
