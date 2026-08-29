@@ -16,16 +16,21 @@ const minuteOnlyPatterns = [
 ] as const
 
 export function inferDurationMinutes(text: string): number | 'ambiguous' | null {
-  if (ambiguousDurationPattern.test(text)) {
-    return 'ambiguous'
-  }
-
   if (/\bhalf(?: an)? hour\b/iu.test(text) || /\bhalf-hour\b/iu.test(text)) {
     return 30
   }
 
+  const normalizedText = text.replace(
+    /\b(?:an|one)\s+hour\b/giu,
+    '1 hour',
+  )
+
+  if (ambiguousDurationPattern.test(normalizedText)) {
+    return 'ambiguous'
+  }
+
   for (const pattern of combinedDurationPatterns) {
-    const match = text.match(pattern)
+    const match = normalizedText.match(pattern)
     if (!match) {
       continue
     }
@@ -37,8 +42,8 @@ export function inferDurationMinutes(text: string): number | 'ambiguous' | null 
     }
   }
 
-  const hourMatch = text.match(hourOnlyPattern)
-  const minuteMatch = findMinuteDurationMatch(text)
+  const hourMatch = normalizedText.match(hourOnlyPattern)
+  const minuteMatch = findMinuteDurationMatch(normalizedText)
 
   if (hourMatch && minuteMatch) {
     return 'ambiguous'

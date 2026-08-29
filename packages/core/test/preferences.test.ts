@@ -8,6 +8,7 @@ import { afterEach, test } from "vitest";
 import {
   assistantPreferenceMutationStateDocumentSchema,
   assistantPreferenceMutationStateRelativePath,
+  preferencesDocumentSchema,
 } from "@murphai/contracts";
 
 import {
@@ -232,6 +233,55 @@ test("sets and clears the canonical workout capture duration default", async () 
   });
   const validation = await validateVault({ vaultRoot });
   assert.equal(validation.valid, true);
+});
+
+test("unrelated preference writes preserve the old strict document shape", async () => {
+  const vaultRoot = await createTempVault();
+  const preferencesPath = path.join(vaultRoot, "bank/preferences.json");
+  const oldPreferencesDocumentSchema = preferencesDocumentSchema.omit({
+    workoutCapturePreferences: true,
+  });
+  await writeFile(
+    preferencesPath,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      updatedAt: "2026-08-29T10:00:00.000Z",
+      workoutUnitPreferences: {},
+      wearablePreferences: {
+        desiredProviders: [],
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const assertOldReaderCompatible = async () => {
+    const raw = JSON.parse(await readFile(preferencesPath, "utf8")) as unknown;
+    assert.equal(
+      typeof raw === "object"
+        && raw !== null
+        && "workoutCapturePreferences" in raw,
+      false,
+    );
+    oldPreferencesDocumentSchema.parse(raw);
+  };
+
+  await updateWorkoutUnitPreferences({
+    vaultRoot,
+    preferences: { weight: "kg" },
+  });
+  await assertOldReaderCompatible();
+
+  await updateAssistantPreferences({
+    vaultRoot,
+    preferences: { tone: "casual" },
+  });
+  await assertOldReaderCompatible();
+
+  await updateWearablePreferences({
+    vaultRoot,
+    preferences: { desiredProviders: ["oura"] },
+  });
+  await assertOldReaderCompatible();
 });
 
 test("rejects legacy preference documents that still carry the removed distance key", async () => {

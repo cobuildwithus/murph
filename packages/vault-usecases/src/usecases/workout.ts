@@ -187,6 +187,7 @@ interface ParsedStrengthExerciseDetails {
 
 export interface AddWorkoutRecordInput {
   vault: string
+  applyWorkoutDurationDefault?: boolean
   text?: string
   inputFile?: string
   occurredAt?: string
@@ -532,7 +533,9 @@ export async function addStructuredWorkoutRecord(input: {
 
 function shouldReadWorkoutCaptureDefault(input: AddWorkoutRecordInput): boolean {
   if (
-    input.inputFile !== undefined
+    input.applyWorkoutDurationDefault !== true
+    || (input.source !== undefined && input.source !== 'manual')
+    || input.inputFile !== undefined
     || input.durationMinutes !== undefined
   ) {
     return false

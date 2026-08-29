@@ -538,6 +538,7 @@ export function registerWorkoutCommands(
       const workout = buildWorkoutFromTypedOptions(options)
       return addWorkoutRecord({
         vault: options.vault,
+        applyWorkoutDurationDefault: true,
         text,
         durationMinutes: options.duration,
         activityType:

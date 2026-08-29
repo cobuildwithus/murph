@@ -10,6 +10,7 @@ import {
   assistantWebPersonalitySettingIds,
   assistantPreferenceCausalSeqSchema,
   assistantPreferenceMutationStateDocumentSchema,
+  createEmptyPreferencesDocument,
   defaultAssistantPersonalityScores,
   isAssistantPersonalityScore,
   isAssistantPersonalitySettingId,
@@ -143,6 +144,8 @@ describe("assistant personality preference contracts", () => {
     };
 
     expect(preferencesDocumentSchema.parse(oldDocument)).toEqual(oldDocument);
+    expect(createEmptyPreferencesDocument(new Date("2026-08-29T00:00:00.000Z")))
+      .not.toHaveProperty("workoutCapturePreferences");
     expect(
       preferencesDocumentSchema.parse({
         ...oldDocument,

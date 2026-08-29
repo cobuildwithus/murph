@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-28
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 ## Goal
 
@@ -41,7 +41,13 @@ Effort: Product change.
   and atomically promote it into typed state only when the typed value is unset.
 - Resolve duration in this order: explicit command/payload evidence, the saved
   typed capture default, then one eligible legacy value promoted into typed
-  state. The write receipt remains authoritative.
+  state. The default lookup is an explicit member-report capability used only
+  by ordinary `workout add`; imports, devices, derived records, and workout
+  format logging do not opt into it. The write receipt remains authoritative.
+- Keep legacy compatibility narrow: recognize only two affirmative default
+  sentence forms, aggregate all strictly matched values, and fail closed on
+  conflicts. Negated, historical, preference-adjacent, and unrelated prose is
+  ignored.
 - Teach Murph to use the typed preference command for new explicit ongoing
   workout defaults, not duplicate the fact into freeform memory, and try the
   canonical workout write before asking for a missing duration.
@@ -56,6 +62,22 @@ Effort: Product change.
    assistant-instruction regressions.
 4. Add and run one focused real-Codex journey, then complete the required
    Product UX and ReviewGPT gates.
+
+## Review remediation
+
+Final ReviewGPT round 1 found six reachable boundary gaps. The correction
+candidate now:
+
+- recognizes explicit `an hour` and `one hour` workout reports while preserving
+  `half an hour` as 30 minutes;
+- replaces broad legacy-memory inference with bounded affirmative grammar and
+  conflict aggregation;
+- makes saved-default lookup opt-in only for ordinary member-report capture, so
+  workout formats and non-manual sources cannot consume or migrate it;
+- omits an empty workout-capture object from unrelated preference writes to
+  preserve the old strict serialized document shape;
+- prevents route-estimated duration from becoming explicit workout duration;
+  saved member defaults remain authoritative when the member omitted duration.
 
 ## Verification
 
@@ -73,11 +95,25 @@ Effort: Product change.
   - Verdict: Ready. The tested entry, feedback, precedence, recovery, and
     legacy paths match the product promise without changing import semantics.
 - Deterministic proof:
-  - contracts preferences/public-entrypoint/generated-schema tests: 26 passed.
-  - core workout-capture preference test: 1 passed.
-  - CLI workout-capture focused tests: 3 passed.
-  - assistant composed-prompt regression: 1 passed.
+  - contracts preference tests: 10 passed, including old-shape empty-document
+    compatibility.
+  - core preference tests: 2 passed, including unrelated-writer preservation of
+    the old strict serialized shape.
+  - shared duration/parser and workout-format seam tests: 2 passed; the seam
+    proves format logging does not opt into member-report defaults.
+  - built CLI workout-capture slice: 6 passed, including explicit-hour
+    precedence, manual-source boundaries, bounded legacy migration, unsupported
+    prose, clearing, ambiguity, and imports.
+  - assistant composed-prompt route-duration regression: 1 passed.
   - relevant contracts, core, operator-config, vault-usecases, CLI, and
     assistant-engine typechecks passed.
 - Real assistant proof:
   - `pnpm test:assistant:live -- --test "applies a saved workout duration default on a fresh later report"`: 1 passed; actual reply confirmed one logged 60-minute yoga workout and no duration question.
+  - The exact correction candidate added a route-bearing continuation and was
+    attempted twice on 2026-08-29. The second attempt selected the correct
+    `workout defaults set --duration 60` command, but the real CLI process did
+    not return within the assistant tool window under severe host contention;
+    Murph correctly declined to claim the write succeeded, and the journey did
+    not reach the route step. This is recorded as a live-lane environment
+    limitation, not a passing check; the exact built CLI and deterministic
+    prompt/route boundaries above are green.

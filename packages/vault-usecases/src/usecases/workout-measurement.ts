@@ -44,13 +44,18 @@ interface WorkoutMeasurementCoreRuntime {
   }>
 }
 
-const legacyWorkoutDefaultContextPattern =
-  /\b(?:workouts?\b[^.!?\n]{0,180}\bdefault(?:s|ed)?\b|default(?:s|ed)?\b[^.!?\n]{0,180}\bworkouts?\b)/iu
-
-const legacyWorkoutDefaultOmissionPattern =
-  /\b(?:unless|without|when|whenever|if|omit(?:s|ted|ting)?|missing|not\s+(?:stated|specified))\b/iu
-const legacyWorkoutDefaultDurationMentionPattern =
-  /\b(?:\d+(?:\.\d+)?\s*-?\s*(?:minutes?|mins?|min|hours?|hrs?|hr)|half(?:\s+an)?\s+hour|half-hour|(?:an|one)\s+hour)\b/giu
+const legacyWorkoutDefaultDurationText =
+  '(\\d+(?:\\.\\d+)?\\s*-?\\s*(?:minutes?|mins?|min|hours?|hrs?|hr)|half(?:\\s+an)?\\s+hour|half-hour|(?:an|one)\\s+hour)'
+const legacyWorkoutDefaultPatterns = [
+  new RegExp(
+    `\\bworkouts?(?:\\s+(?:I\\s+)?report(?:ed)?\\s+here)?\\s+defaults?\\s+to\\s+${legacyWorkoutDefaultDurationText}\\s+unless\\s+(?:(?:(?:another|a\\s+different)\\s+duration\\s+is\\s+(?:stated|specified|provided))|(?:(?:stated|specified|provided)\\s+otherwise))\\b`,
+    'giu',
+  ),
+  new RegExp(
+    `\\bwhen\\s+(?:the\\s+)?workout\\s+duration\\s+is\\s+(?:omitted|missing|not\\s+(?:stated|specified|provided))\\s*,?\\s*(?:the\\s+)?default\\s+is\\s+${legacyWorkoutDefaultDurationText}\\b`,
+    'giu',
+  ),
+] as const
 
 async function loadWorkoutMeasurementCoreRuntime(): Promise<WorkoutMeasurementCoreRuntime> {
   return loadRuntimeModule<WorkoutMeasurementCoreRuntime>('@murphai/core')
@@ -73,44 +78,30 @@ function normalizeCapturePreferences(
   }
 }
 
-function parseLegacyWorkoutDurationDefault(text: string): number | null {
-  if (
-    !legacyWorkoutDefaultContextPattern.test(text)
-    || !legacyWorkoutDefaultOmissionPattern.test(text)
-    || [...text.matchAll(legacyWorkoutDefaultDurationMentionPattern)].length !== 1
-  ) {
-    return null
-  }
-
-  const normalizedDurationText = text.replace(
-    /\b(?:an|one)\s+hour\b/giu,
-    '1 hour',
+function parseLegacyWorkoutDurationDefaults(text: string): number[] {
+  const matches = legacyWorkoutDefaultPatterns.flatMap((pattern) =>
+    [...text.matchAll(pattern)].flatMap((match) =>
+      match[1] === undefined ? [] : [match[1]],
+    ),
   )
-  try {
-    const duration = inferDurationMinutes(normalizedDurationText)
-    return typeof duration === 'number' ? duration : null
-  } catch {
-    return null
-  }
+
+  return matches.flatMap((match) => {
+    try {
+      const duration = inferDurationMinutes(match)
+      return typeof duration === 'number' ? [duration] : []
+    } catch {
+      return []
+    }
+  })
 }
 
 function resolveLegacyWorkoutDurationDefault(
   memory: WorkoutMemoryDocument,
 ): number | null {
-  const candidateRecords = memory.records.filter(
-    (record) =>
-      record.section === 'Preferences'
-      && legacyWorkoutDefaultContextPattern.test(record.text)
-      && legacyWorkoutDefaultOmissionPattern.test(record.text),
-  )
-  if (candidateRecords.length === 0) {
-    return null
-  }
-
-  const durations = candidateRecords.map((record) =>
-    parseLegacyWorkoutDurationDefault(record.text),
-  )
-  if (durations.some((duration) => duration === null)) {
+  const durations = memory.records
+    .filter((record) => record.section === 'Preferences')
+    .flatMap((record) => parseLegacyWorkoutDurationDefaults(record.text))
+  if (durations.length === 0) {
     return null
   }
 

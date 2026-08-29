@@ -21,6 +21,7 @@ import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
 const WORKOUT_FORMAT_CANONICAL_EVENT_PATH_TIMEOUT_MS = 90_000
+const WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS = 300_000
 
 interface SchemaEnvelope {
   args: {
@@ -1503,6 +1504,30 @@ test('workout capture defaults apply only when a reported workout omits duration
     ])
     assert.equal(flagOverride.ok, true)
     assert.equal(requireData(flagOverride).durationMinutes, 35)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
+
+test('workout capture fails closed for ambiguous, imported, and cleared duration', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+
+  try {
+    await initializeVault({
+      title: 'Synthetic workout default exclusions',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+    const saved = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--duration',
+      '60',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(saved.ok, true)
 
     const ambiguous = await runCli([
       'workout',
@@ -1573,7 +1598,69 @@ test('workout capture defaults apply only when a reported workout omits duration
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
+
+test('workout capture preserves explicit hours and the manual source boundary', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+
+  try {
+    await initializeVault({
+      title: 'Synthetic workout default precedence',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+    const saved = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--duration',
+      '30',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(saved.ok, true)
+
+    for (const report of ['Yoga for an hour.', 'Yoga for one hour.']) {
+      const explicitHour = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        report,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(explicitHour.ok, true)
+      assert.equal(requireData(explicitHour).durationMinutes, 60)
+    }
+
+    const explicitManual = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Manual elliptical session.',
+      '--source',
+      'manual',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(explicitManual.ok, true)
+    assert.equal(requireData(explicitManual).durationMinutes, 30)
+
+    for (const source of ['import', 'device', 'derived']) {
+      const nonManual = await runCli([
+        'workout',
+        'add',
+        `${source} ride.`,
+        '--source',
+        source,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(nonManual.ok, false)
+      assert.match(nonManual.error.message ?? '', /Workout duration is missing/u)
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
 
 test('workout capture promotes one explicit legacy default and rejects conflicts', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
@@ -1656,7 +1743,95 @@ test('workout capture promotes one explicit legacy default and rejects conflicts
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
+
+test('workout capture ignores unsupported legacy prose and non-manual migration', async () => {
+  const unsupportedPreferences = [
+    'Do not default workouts to 60 minutes when duration is omitted.',
+    'No longer default workouts to 60 minutes when duration is omitted.',
+    'I used to default workouts to 60 minutes when duration was omitted.',
+    'Default breakfast is oatmeal when I have a 30-minute workout.',
+    'I prefer 60-minute workouts when possible, and default reminders to off unless I ask.',
+    'My workouts are usually 45 minutes when I do them; default to kilograms unless specified.',
+  ]
+
+  const unsupportedVaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-cli-workout-defaults-'),
+  )
+  try {
+    await initializeVault({
+      title: 'Synthetic unsupported workout default',
+      timezone: 'UTC',
+      vaultRoot: unsupportedVaultRoot,
+    })
+    let preferenceRecordId: string | undefined
+    for (const preference of unsupportedPreferences) {
+      const updated = await upsertMemory(unsupportedVaultRoot, {
+        ...(preferenceRecordId === undefined ? {} : { recordId: preferenceRecordId }),
+        section: 'Preferences',
+        text: preference,
+      })
+      preferenceRecordId = updated.record.id
+
+      const result = await runCli([
+        'workout',
+        'add',
+        'Easy ride.',
+        '--vault',
+        unsupportedVaultRoot,
+      ])
+      assert.equal(result.ok, false)
+      assert.match(result.error.message ?? '', /Workout duration is missing/u)
+      await assert.rejects(
+        access(path.join(unsupportedVaultRoot, 'bank/preferences.json')),
+      )
+    }
+  } finally {
+    await rm(unsupportedVaultRoot, { recursive: true, force: true })
+  }
+
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+  try {
+    await initializeVault({
+      title: 'Synthetic manual-only workout default',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+    await upsertMemory(vaultRoot, {
+      section: 'Preferences',
+      text: 'Workouts reported here default to one hour unless stated otherwise.',
+    })
+
+    for (const source of ['import', 'device', 'derived']) {
+      const result = await runCli([
+        'workout',
+        'add',
+        `${source} ride.`,
+        '--source',
+        source,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(result.ok, false)
+      assert.match(result.error.message ?? '', /Workout duration is missing/u)
+    }
+    await assert.rejects(access(path.join(vaultRoot, 'bank/preferences.json')))
+
+    const manual = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--source',
+      'manual',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(manual.ok, true)
+    assert.equal(requireData(manual).durationMinutes, 60)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
 
 test(
   'workout add surfaces invalid timestamps without needing a custom workout read surface',

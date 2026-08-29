@@ -300,23 +300,22 @@ function buildPreferencesDocument(input: {
   wearablePreferences: WearablePreferences;
   workoutCapturePreferences: WorkoutCapturePreferences;
   workoutUnitPreferences: WorkoutUnitPreferences;
-}): PreferencesDocument & {
-  workoutCapturePreferences: WorkoutCapturePreferences;
-} {
+}): PreferencesDocument {
+  const hasWorkoutCapturePreferences =
+    input.workoutCapturePreferences.defaultDurationMinutes !== undefined
+    || input.workoutCapturePreferences.legacyMemoryMigrationVersion !== undefined;
   const document: PreferencesDocument = {
     schemaVersion: preferencesDocumentSchemaVersion,
     updatedAt: input.updatedAt,
     ...(input.assistant ? { assistant: input.assistant } : {}),
-    workoutCapturePreferences: input.workoutCapturePreferences,
+    ...(hasWorkoutCapturePreferences
+      ? { workoutCapturePreferences: input.workoutCapturePreferences }
+      : {}),
     workoutUnitPreferences: input.workoutUnitPreferences,
     wearablePreferences: input.wearablePreferences,
   };
 
-  const parsed = preferencesDocumentSchema.parse(document);
-  return {
-    ...parsed,
-    workoutCapturePreferences: parsed.workoutCapturePreferences ?? {},
-  };
+  return preferencesDocumentSchema.parse(document);
 }
 
 export async function readPreferencesDocument(
@@ -359,6 +358,7 @@ export async function readPreferencesDocument(
     exists: true,
     sourcePath: resolved.relativePath,
     updatedAt: document.updatedAt,
+    workoutCapturePreferences: document.workoutCapturePreferences ?? {},
   };
 }
 

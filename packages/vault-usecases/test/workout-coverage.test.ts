@@ -149,6 +149,10 @@ function createWorkoutTemplate(): WorkoutTemplate {
 describe("text-duration", () => {
   test("infers durations and validates bounds", () => {
     assert.equal(inferDurationMinutes("half hour walk"), 30);
+    assert.equal(inferDurationMinutes("half an hour walk"), 30);
+    assert.equal(inferDurationMinutes("an hour of yoga"), 60);
+    assert.equal(inferDurationMinutes("one hour of yoga"), 60);
+    assert.equal(inferDurationMinutes("one hour and 20 minutes"), 80);
     assert.equal(inferDurationMinutes("1 hour and 20 minutes"), 80);
     assert.equal(inferDurationMinutes("1h 15m"), 75);
     assert.equal(inferDurationMinutes("45 minutes"), 45);
@@ -883,7 +887,10 @@ describe("workout-format", () => {
   });
 
   test("logs workout formats through the workout record seam", async () => {
-    const addWorkoutRecord = vi.fn(async () => ({ vault: "./vault", created: true }));
+    const addWorkoutRecord = vi.fn(async (_input: unknown) => ({
+      vault: "./vault",
+      created: true,
+    }));
     const readWorkoutFormat = vi.fn(async () => ({
       workoutFormatId: "wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
       slug: "full-body",
@@ -927,6 +934,13 @@ describe("workout-format", () => {
     });
     assert.equal(logged.vault, "./vault");
     assert.equal(addWorkoutRecord.mock.calls.length, 1);
+    const addInput = addWorkoutRecord.mock.calls[0]?.[0];
+    assert.equal(
+      typeof addInput === "object"
+        && addInput !== null
+        && "applyWorkoutDurationDefault" in addInput,
+      false,
+    );
   });
 });
 

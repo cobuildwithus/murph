@@ -573,7 +573,6 @@ export function createEmptyPreferencesDocument(now = new Date()): PreferencesDoc
   return preferencesDocumentSchema.parse({
     schemaVersion: preferencesDocumentSchemaVersion,
     updatedAt: now.toISOString(),
-    workoutCapturePreferences: {},
     workoutUnitPreferences: {},
     wearablePreferences: {
       desiredProviders: [],

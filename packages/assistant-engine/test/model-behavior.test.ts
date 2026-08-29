@@ -1454,6 +1454,15 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'Never infer a default from workout history, a past workout, or conflicting memory',
     )
+    expect(prompt).toContain(
+      'Only a duration stated by the member may populate `workout add --duration`',
+    )
+    expect(prompt).toContain(
+      'never pass route-estimated duration into workout capture',
+    )
+    expect(prompt).not.toContain(
+      'estimated distance, duration, or elevation are often useful fields to recover',
+    )
   })
 
   it('guides automation continuity policy by task size', () => {

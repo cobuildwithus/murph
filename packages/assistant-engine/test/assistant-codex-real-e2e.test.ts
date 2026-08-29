@@ -1868,6 +1868,18 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         await materializeRealWorkoutVaultCli({
           binDirectory,
           commandLogPath,
+          routeEstimateResult: {
+            ok: true,
+            data: {
+              profile: 'walking',
+              summary: {
+                distanceMeters: 2_400,
+                distanceKilometers: 2.4,
+                durationSeconds: 1_080,
+                durationMinutes: 18,
+              },
+            },
+          },
           vaultRoot: workingDirectory,
         })
 
@@ -1883,6 +1895,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
               'vault-cli workout defaults set [--duration <minutes>] [--clear-duration]',
               'vault-cli workout defaults show --format json',
               'vault-cli workout add <text> [--duration <minutes>] --format json',
+              'vault-cli route estimate <origin> <destination> [--profile walking|cycling|driving|driving-traffic] --format json',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
             assistantHostedDeviceConnectAvailable: false,
@@ -1921,6 +1934,21 @@ describeRealCodex('real Codex workout capture default e2e', () => {
             'Use 60 minutes as the ongoing default for workouts I report here unless I give another duration.',
         })
         const savedPreferences = await readPreferencesDocument(workingDirectory)
+        const savedCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        process.stdout.write(
+          `[workout-capture-default-e2e] ${JSON.stringify({
+            capturePreferences: savedPreferences.workoutCapturePreferences,
+            finalMessage: saved.finalMessage,
+            mutationCommands: savedCommands.filter((command) =>
+              command.startsWith('workout defaults set ')
+              || command.startsWith('memory upsert ')
+            ),
+            scenario: 'save-default',
+          })}\n`,
+        )
         expect(savedPreferences.workoutCapturePreferences).toEqual({
           defaultDurationMinutes: 60,
           legacyMemoryMigrationVersion: 1,
@@ -1969,6 +1997,46 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         expect(commands.join('\n')).not.toContain('memory upsert')
         expect(saved.runtimeIssueInputs).toEqual([])
         expect(reported.runtimeIssueInputs).toEqual([])
+
+        const routeReported = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'I ran from Washington Square Park to Times Square this morning. Log it.',
+        })
+        const routeVault = await readVaultRawTolerant(workingDirectory)
+        const routeWorkouts = routeVault.events.filter(
+          (event) => event.kind === 'activity_session',
+        )
+        const routeCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        const routeEstimateCommand = routeCommands.find((command) =>
+          command.startsWith('route estimate '),
+        )
+        const routeWorkoutCommand = routeCommands
+          .filter((command) => command.startsWith('workout add '))
+          .at(-1)
+
+        process.stdout.write(
+          `[workout-capture-default-e2e] ${JSON.stringify({
+            durationMinutes:
+              routeWorkouts.at(-1)?.attributes.durationMinutes ?? null,
+            finalMessage: routeReported.finalMessage,
+            routeEstimateCommand: routeEstimateCommand ?? null,
+            routeWorkoutCommand: routeWorkoutCommand ?? null,
+            scenario: 'route-estimate-does-not-own-duration',
+            workoutCount: routeWorkouts.length,
+          })}\n`,
+        )
+
+        expect(routeWorkouts).toHaveLength(2)
+        expect(routeWorkouts.at(-1)?.attributes.durationMinutes).toBe(60)
+        expect(routeEstimateCommand).toBeDefined()
+        expect(routeWorkoutCommand).toBeDefined()
+        expect(routeWorkoutCommand).not.toMatch(/--duration(?:=|\s)/u)
+        expect(routeReported.finalMessage).not.toMatch(/how long|duration|\?/iu)
+        expect(routeReported.runtimeIssueInputs).toEqual([])
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -1976,7 +2044,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         ])
       }
     },
-    480_000,
+    720_000,
   )
 })
 
@@ -21233,6 +21301,7 @@ async function materializeHabitatVoiceVaultCli(input: {
 async function materializeRealWorkoutVaultCli(input: {
   binDirectory: string
   commandLogPath: string
+  routeEstimateResult?: unknown
   vaultRoot: string
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
@@ -21251,6 +21320,16 @@ async function materializeRealWorkoutVaultCli(input: {
       '#!/bin/sh',
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      ...(input.routeEstimateResult === undefined
+        ? []
+        : [
+            'case "$*" in',
+            '  *"route estimate"*)',
+            `    printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(input.routeEstimateResult) ?? '{}')}`,
+            '    exit 0',
+            '    ;;',
+            'esac',
+          ]),
       `export TSX_TSCONFIG_PATH=${quoteNutritionShellLiteral(tsconfigPath)}`,
       `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
