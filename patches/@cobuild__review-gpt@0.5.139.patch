@@ -1,0 +1,124 @@
+diff --git a/dist/chatgpt-thread-snapshot-lib.mjs b/dist/chatgpt-thread-snapshot-lib.mjs
+index e4ea57ffaaaae4cd0bc55cd03806cc6880de7c94..6420d4745f67882e80ffbc17b47fd4aba1454cd0 100644
+--- a/dist/chatgpt-thread-snapshot-lib.mjs
++++ b/dist/chatgpt-thread-snapshot-lib.mjs
+@@ -89,6 +89,10 @@ function matchesStoredTurnId(liveValue, storedValue) {
+     return String(liveValue ?? '') === String(storedValue ?? '') ||
+         sanitizedCaptureTurnId(liveValue) === String(storedValue ?? '');
+ }
++function matchesStoredOrProvisionalTurnId(liveValue, storedValue, role, turnIndex, signature) {
++    return matchesStoredTurnId(liveValue, storedValue) ||
++        matchesStoredTurnId(`${role}:index:${turnIndex}:signature:${signature}`, storedValue);
++}
+ function matchesCapturedAssistant(snapshot, capture) {
+     return (matchesStoredTurnId(snapshot.assistantTurnId, capture.assistantTurnId) &&
+         snapshot.assistantTurnIndex === capture.assistantTurnIndex &&
+@@ -185,7 +189,7 @@ export function scopeThreadSnapshotToCaptureIdentity(snapshot, capture) {
+     if (!assistantResponse) {
+         if (!capture)
+             return normalized;
+-        const committedUserMatches = normalized.userSnapshots.filter((candidate) => matchesStoredTurnId(candidate.turnId, capture.committedUserTurn.turnId) &&
++        const committedUserMatches = normalized.userSnapshots.filter((candidate) => matchesStoredOrProvisionalTurnId(candidate.turnId, capture.committedUserTurn.turnId, 'user', candidate.turnIndex, candidate.signature) &&
+             candidate.turnIndex === capture.committedUserTurn.turnIndex &&
+             matchesStoredCaptureValue(candidate.signature, capture.committedUserTurn.signature));
+         if (committedUserMatches.length !== 1) {
+@@ -194,7 +198,7 @@ export function scopeThreadSnapshotToCaptureIdentity(snapshot, capture) {
+         if (normalized.userSnapshots.some((candidate) => candidate.turnIndex > capture.committedUserTurn.turnIndex)) {
+             throw new Error('Captured committed user turn is no longer the latest request; refusing to wait on a different turn.');
+         }
+-        const pendingAssistantMatches = normalized.assistantSnapshots.filter((candidate) => matchesStoredTurnId(candidate.precedingUserTurnId, capture.committedUserTurn.turnId) &&
++        const pendingAssistantMatches = normalized.assistantSnapshots.filter((candidate) => matchesStoredOrProvisionalTurnId(candidate.precedingUserTurnId, capture.committedUserTurn.turnId, 'user', candidate.precedingUserTurnIndex, candidate.precedingUserMessageSignature) &&
+             candidate.precedingUserTurnIndex === capture.committedUserTurn.turnIndex &&
+             matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature));
+         if (pendingAssistantMatches.length > 1) {
+@@ -259,6 +263,7 @@ export function completeThreadCaptureIdentity(capture, snapshot) {
+         throw new Error(`Captured committed user turn resolved to ${scoped.assistantSnapshots.length} completed assistant responses; refusing ambiguous capture.`);
+     }
+     const assistant = scoped.assistantSnapshots[0];
++    const committedUserTurn = scoped.userSnapshots[0];
+     if (!assistant.assistantTurnId ||
+         !Number.isInteger(assistant.assistantTurnIndex) ||
+         assistant.assistantTurnIndex < 0 ||
+@@ -276,9 +281,9 @@ export function completeThreadCaptureIdentity(capture, snapshot) {
+         ...capture,
+         schemaVersion: 2,
+         committedUserTurn: {
+-            ...capture.committedUserTurn,
+-            signature: captureIdentityDigest(capture.committedUserTurn.signature),
+-            turnId: sanitizedCaptureTurnId(capture.committedUserTurn.turnId),
++            signature: captureIdentityDigest(committedUserTurn.signature),
++            turnId: sanitizedCaptureTurnId(committedUserTurn.turnId),
++            turnIndex: committedUserTurn.turnIndex,
+         },
+         artifacts: scoped.attachmentButtons.map((attachment) => ({
+             artifactIndexInAssistantTurn: attachment.artifactIndexInAssistantTurn,
+diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-lib.mts
+index ae02b8f6ebe75d0500a9ff14002cd706e694da90..4dff4b8eec15d5d6785e5d566124bca002026cbe 100644
+--- a/src/chatgpt-thread-snapshot-lib.mts
++++ b/src/chatgpt-thread-snapshot-lib.mts
+@@ -217,0 +218,14 @@ function matchesStoredTurnId(liveValue: unknown, storedValue: unknown): boolean
++function matchesStoredOrProvisionalTurnId(
++  liveValue: unknown,
++  storedValue: unknown,
++  role: 'assistant' | 'user',
++  turnIndex: number,
++  signature: string,
++): boolean {
++  return matchesStoredTurnId(liveValue, storedValue) ||
++    matchesStoredTurnId(
++      `${role}:index:${turnIndex}:signature:${signature}`,
++      storedValue,
++    );
++}
++
+@@ -343,7 +357,13 @@ export function scopeThreadSnapshotToCaptureIdentity(
+     if (!capture) return normalized;
+     const committedUserMatches = normalized.userSnapshots.filter(
+       (candidate) =>
+-        matchesStoredTurnId(candidate.turnId, capture.committedUserTurn.turnId) &&
++        matchesStoredOrProvisionalTurnId(
++          candidate.turnId,
++          capture.committedUserTurn.turnId,
++          'user',
++          candidate.turnIndex,
++          candidate.signature,
++        ) &&
+         candidate.turnIndex === capture.committedUserTurn.turnIndex &&
+         matchesStoredCaptureValue(candidate.signature, capture.committedUserTurn.signature),
+     );
+@@ -357,7 +377,13 @@ export function scopeThreadSnapshotToCaptureIdentity(
+     }
+     const pendingAssistantMatches = normalized.assistantSnapshots.filter(
+       (candidate) =>
+-        matchesStoredTurnId(candidate.precedingUserTurnId, capture.committedUserTurn.turnId) &&
++        matchesStoredOrProvisionalTurnId(
++          candidate.precedingUserTurnId,
++          capture.committedUserTurn.turnId,
++          'user',
++          candidate.precedingUserTurnIndex,
++          candidate.precedingUserMessageSignature,
++        ) &&
+         candidate.precedingUserTurnIndex === capture.committedUserTurn.turnIndex &&
+         matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature),
+     );
+@@ -449,6 +475,7 @@ export function completeThreadCaptureIdentity(
+     );
+   }
+   const assistant = scoped.assistantSnapshots[0]!;
++  const committedUserTurn = scoped.userSnapshots[0]!;
+   if (
+     !assistant.assistantTurnId ||
+     !Number.isInteger(assistant.assistantTurnIndex) ||
+@@ -471,9 +498,9 @@ export function completeThreadCaptureIdentity(
+     ...capture,
+     schemaVersion: 2,
+     committedUserTurn: {
+-      ...capture.committedUserTurn,
+-      signature: captureIdentityDigest(capture.committedUserTurn.signature),
+-      turnId: sanitizedCaptureTurnId(capture.committedUserTurn.turnId),
++      signature: captureIdentityDigest(committedUserTurn.signature),
++      turnId: sanitizedCaptureTurnId(committedUserTurn.turnId),
++      turnIndex: committedUserTurn.turnIndex,
+     },
+     artifacts: scoped.attachmentButtons.map((attachment) => ({
+       artifactIndexInAssistantTurn: attachment.artifactIndexInAssistantTurn,
