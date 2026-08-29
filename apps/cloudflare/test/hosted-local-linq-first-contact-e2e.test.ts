@@ -559,6 +559,22 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       userId: directReplyUserId,
     });
     expect(answeredMailboxItem.consumedAt).not.toBeNull();
+    const lifecycleTrace = await waitForAssistantExecutionLifecycleLatencyTrace({
+      mailboxItemId: answeredMailboxItem.id,
+      userId: directReplyUserId,
+    });
+    const pendingReplyAdmittedAtEpochMs =
+      lifecycleTrace.phaseBreakdown?.assistant?.pendingReplyAdmittedAtEpochMs;
+    const assistantInputAcceptedForExecutionAtEpochMs =
+      lifecycleTrace.phaseBreakdown?.assistant
+        ?.assistantInputAcceptedForExecutionAtEpochMs;
+    expect(pendingReplyAdmittedAtEpochMs).toEqual(expect.any(Number));
+    expect(assistantInputAcceptedForExecutionAtEpochMs).toEqual(
+      expect.any(Number),
+    );
+    expect(assistantInputAcceptedForExecutionAtEpochMs!).toBeGreaterThanOrEqual(
+      pendingReplyAdmittedAtEpochMs!,
+    );
     const lateEnsure = await ensureProcessingAfterSyntheticMailboxAppendForTest({
       harness: requireScenario().harness,
       userId: directReplyUserId,
@@ -2235,6 +2251,55 @@ function requireRealInstantFirstTurnOpenAiApiKey(): string {
     );
   }
   return apiKey;
+}
+
+async function waitForAssistantExecutionLifecycleLatencyTrace(input: {
+  mailboxItemId: string;
+  userId: string;
+}) {
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+  let lastObservation = "none";
+  while (Date.now() - startedAt < 30_000) {
+    try {
+      const trace = await readHostedIngressLatencyTraceForTest({
+        environment: requireScenario().runtimeEnv,
+        mailboxItemId: input.mailboxItemId,
+        userId: input.userId,
+      });
+      const assistant = trace.phaseBreakdown?.assistant;
+      const pendingReplyAdmittedAtEpochMs =
+        assistant?.pendingReplyAdmittedAtEpochMs;
+      const assistantInputAcceptedForExecutionAtEpochMs =
+        assistant?.assistantInputAcceptedForExecutionAtEpochMs;
+      lastObservation = [
+        `pendingAdmission=${typeof pendingReplyAdmittedAtEpochMs === "number"
+          ? "present"
+          : "missing"}`,
+        `assistantExecutionAcceptance=${typeof assistantInputAcceptedForExecutionAtEpochMs === "number"
+          ? "present"
+          : "missing"}`,
+      ].join(",");
+      if (
+        typeof pendingReplyAdmittedAtEpochMs === "number"
+        && typeof assistantInputAcceptedForExecutionAtEpochMs === "number"
+      ) {
+        return trace;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(100);
+  }
+
+  const lastErrorKind = lastError instanceof Error
+    ? lastError.name
+    : typeof lastError;
+  throw new Error(
+    "Timed out waiting for assistant execution lifecycle latency milestones. "
+      + `Observation: ${lastObservation}. `
+      + `Last read error kind: ${lastErrorKind}.`,
+  );
 }
 
 async function waitForDirectRetryLatencyTrace(input: {

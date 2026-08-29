@@ -1087,7 +1087,11 @@ export function parseHostedRuntimeAssistantAskControlResponse(
       record.terminalReason,
       "Hosted runtime assistant ask terminalReason",
     );
-    if (terminalReason !== "expired" && terminalReason !== "unavailable") {
+    if (
+      terminalReason !== "content_expired"
+      && terminalReason !== "expired"
+      && terminalReason !== "unavailable"
+    ) {
       throw new TypeError("Hosted runtime assistant ask terminalReason is invalid.");
     }
     return { action, status, terminalReason };
@@ -6662,6 +6666,9 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       assistantLabel,
     );
     breakdown.assistant = {
+      ...requireOptionalNonNegativeInteger(assistant, "pendingReplyAdmittedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "foregroundInputSelectedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "assistantInputAcceptedForExecutionAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "linqTypingRequestStartedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "linqTypingAcceptedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "firstCodexOutputObservedAtEpochMs", assistantLabel),

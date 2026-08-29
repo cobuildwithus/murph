@@ -154,6 +154,9 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+} from '../src/assistant/onboarding-followup-automation.ts'
+import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
   buildAssistantCronExecutionInstructions,
@@ -1265,6 +1268,57 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
     },
     360_000,
   )
+})
+
+describeRealCodex('real Codex email onboarding follow-up e2e', () => {
+  it('renders the finite onboarding continuation as one reply-oriented email question', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await prepareRealCodexOnboardingDirectory()
+
+    try {
+      await writeRealCodexOnboardingResumeContext(
+        workingDirectory,
+        'missing_identity',
+      )
+      const turnInput = buildRealCodexOnboardingTurnInput({
+        config,
+        workingDirectory,
+      })
+      const result = await executeRealCodexAppServerTurn({
+        ...turnInput,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions(
+          'direct',
+          'none',
+          'email',
+        ),
+        prompt: [
+          MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+          'Trusted context for this occurrence:',
+          '- This is the first available day in the finite follow-up window.',
+          '- No earlier follow-up question is unanswered.',
+          '- Recent messages contain no answer, defer, decline, or newer topic.',
+        ].join('\n\n'),
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') {
+        throw new Error('Expected the email onboarding follow-up to send.')
+      }
+      expect(decision.text.match(/\?/gu) ?? []).toHaveLength(1)
+      expect(decision.text).not.toMatch(
+        /automation|follow-up window|internal state|setup completion|final attempt/iu,
+      )
+      process.stdout.write(
+        `[real-codex email onboarding follow-up] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
 })
 
 describe('onboarding policy read detection', () => {
@@ -11609,6 +11663,203 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
 })
 
 describeRealCodex('real Codex hosted usage behavior e2e', () => {
+  it(
+    'keeps group-email shell restrictions isolated across one warm Codex process',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-email-shell-isolation-e2e-'),
+      )
+      const canaries = {
+        ordinaryAfter: 'ordinary-after-canary-79c4e1',
+        ordinaryBefore: 'ordinary-before-canary-3f8a26',
+        restrictedFresh: 'restricted-fresh-canary-a51d97',
+        restrictedResume: 'restricted-resume-canary-c8204b',
+      } as const
+      const canaryPaths = {
+        ordinaryAfter: path.join(workingDirectory, 'ordinary-after.txt'),
+        ordinaryBefore: path.join(workingDirectory, 'ordinary-before.txt'),
+        restrictedFresh: path.join(workingDirectory, 'restricted-fresh.txt'),
+        restrictedResume: path.join(workingDirectory, 'restricted-resume.txt'),
+      } as const
+      const groupEmailThreadConfig = {
+        'features.multi_agent': false,
+        'features.multi_agent_v2': false,
+        'features.shell_tool': false,
+        'features.tool_suggest': false,
+      } as const
+      const ordinaryInstructions = [
+        buildDirectConversationDeveloperInstructions(),
+        'Synthetic provider-boundary probe: if a shell tool is available, use it exactly once to read the requested canary file. If it is unavailable, do not guess the file contents and say the filesystem is unavailable.',
+      ].join('\n\n')
+      const groupEmailInstructions = [
+        buildHostedUsageProgressDeveloperInstructions('email'),
+        'Synthetic provider-boundary probe: if a shell tool is available, use it exactly once to read the requested canary file. If it is unavailable, do not guess the file contents and say the filesystem is unavailable.',
+      ].join('\n\n')
+      const commonInput = {
+        approvalPolicy: 'never' as const,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        processLifetime: 'warm' as const,
+        reasoningEffort: 'low' as const,
+        sandbox: 'read-only' as const,
+        workingDirectory,
+      }
+      const runProbe = async (input: {
+        canaryPath: string
+        developerInstructions: string
+        groupConversation?: boolean
+        resumeSessionId?: string
+        threadConfig?: Readonly<Record<string, unknown>>
+      }) => {
+        const traceEvents: unknown[] = []
+        const result = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: input.developerInstructions,
+          groupConversation: input.groupConversation,
+          onTraceEvent: (event) => traceEvents.push(event),
+          prompt:
+            `Read ${input.canaryPath} with the shell exactly once and reply with only its contents.`,
+          resumeSessionId: input.resumeSessionId,
+          threadConfig: input.threadConfig,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        return {
+          actions,
+          commands: actions.filter((action) => action.kind === 'command'),
+          result,
+          traceEvents,
+        }
+      }
+
+      try {
+        await Promise.all([
+          writeFile(canaryPaths.ordinaryAfter, canaries.ordinaryAfter, 'utf8'),
+          writeFile(canaryPaths.ordinaryBefore, canaries.ordinaryBefore, 'utf8'),
+          writeFile(canaryPaths.restrictedFresh, canaries.restrictedFresh, 'utf8'),
+          writeFile(canaryPaths.restrictedResume, canaries.restrictedResume, 'utf8'),
+        ])
+
+        const ordinaryBefore = await runProbe({
+          canaryPath: canaryPaths.ordinaryBefore,
+          developerInstructions: ordinaryInstructions,
+        })
+
+        expect(ordinaryBefore.commands).toHaveLength(1)
+        expect(ordinaryBefore.commands[0]?.output).toContain(
+          canaries.ordinaryBefore,
+        )
+        expect(ordinaryBefore.result.finalMessage.trim()).toBe(
+          canaries.ordinaryBefore,
+        )
+
+        const restrictedFresh = await runProbe({
+          canaryPath: canaryPaths.restrictedFresh,
+          developerInstructions: groupEmailInstructions,
+          groupConversation: true,
+          threadConfig: groupEmailThreadConfig,
+        })
+
+        expect(restrictedFresh.commands).toHaveLength(0)
+        expect(restrictedFresh.result.finalMessage).not.toContain(
+          canaries.restrictedFresh,
+        )
+        expect(restrictedFresh.result.finalMessage).toMatch(
+          /(?:filesystem|shell).*(?:unavailable|access)|(?:can(?:not|'t)|unable).*(?:read|access)/iu,
+        )
+        expect(hasCodexTimingStage(restrictedFresh.traceEvents, 'warm-reused')).toBe(
+          true,
+        )
+
+        if (!restrictedFresh.result.sessionId) {
+          throw new Error('Restricted fresh turn did not return a session id.')
+        }
+        const restrictedResume = await runProbe({
+          canaryPath: canaryPaths.restrictedResume,
+          developerInstructions: groupEmailInstructions,
+          groupConversation: true,
+          resumeSessionId: restrictedFresh.result.sessionId,
+          threadConfig: groupEmailThreadConfig,
+        })
+
+        expect(restrictedResume.result.sessionId).toBe(
+          restrictedFresh.result.sessionId,
+        )
+        expect(restrictedResume.commands).toHaveLength(0)
+        expect(restrictedResume.result.finalMessage).not.toContain(
+          canaries.restrictedResume,
+        )
+        expect(restrictedResume.result.finalMessage).toMatch(
+          /(?:filesystem|shell).*(?:unavailable|access)|(?:can(?:not|'t)|unable).*(?:read|access)/iu,
+        )
+        expect(hasCodexTimingStage(restrictedResume.traceEvents, 'warm-reused')).toBe(
+          true,
+        )
+        expect(
+          hasCodexTimingStage(restrictedResume.traceEvents, 'thread-resumed'),
+        ).toBe(true)
+
+        const ordinaryAfter = await runProbe({
+          canaryPath: canaryPaths.ordinaryAfter,
+          developerInstructions: ordinaryInstructions,
+        })
+
+        expect(ordinaryAfter.commands).toHaveLength(1)
+        expect(ordinaryAfter.commands[0]?.output).toContain(canaries.ordinaryAfter)
+        expect(ordinaryAfter.result.finalMessage.trim()).toBe(
+          canaries.ordinaryAfter,
+        )
+        expect(hasCodexTimingStage(ordinaryAfter.traceEvents, 'warm-reused')).toBe(
+          true,
+        )
+        process.stdout.write(
+          `group-email-shell-isolation-e2e ${JSON.stringify({
+            commandCounts: {
+              ordinaryAfter: ordinaryAfter.commands.length,
+              ordinaryBefore: ordinaryBefore.commands.length,
+              restrictedFresh: restrictedFresh.commands.length,
+              restrictedResume: restrictedResume.commands.length,
+            },
+            processStages: {
+              ordinaryAfterWarmReused: hasCodexTimingStage(
+                ordinaryAfter.traceEvents,
+                'warm-reused',
+              ),
+              restrictedFreshWarmReused: hasCodexTimingStage(
+                restrictedFresh.traceEvents,
+                'warm-reused',
+              ),
+              restrictedResumeWarmReused: hasCodexTimingStage(
+                restrictedResume.traceEvents,
+                'warm-reused',
+              ),
+            },
+            replies: {
+              ordinaryAfter: ordinaryAfter.result.finalMessage.trim(),
+              ordinaryBefore: ordinaryBefore.result.finalMessage.trim(),
+              restrictedFresh: restrictedFresh.result.finalMessage.trim(),
+              restrictedResume: restrictedResume.result.finalMessage.trim(),
+            },
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    1_200_000,
+  )
+
   it.each([
     { channel: 'linq', filesystemAccess: true, result: 64 },
     { channel: 'linq', filesystemAccess: true, result: 100 },
@@ -11642,14 +11893,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          configOverrides: filesystemAccess
+          threadConfig: filesystemAccess
             ? undefined
-            : [
-                'features.shell_tool=false',
-                'features.multi_agent=false',
-                'features.multi_agent_v2=false',
-                'features.tool_suggest=false',
-              ],
+            : {
+                'features.multi_agent': false,
+                'features.multi_agent_v2': false,
+                'features.shell_tool': false,
+                'features.tool_suggest': false,
+              },
           developerInstructions:
             buildHostedUsageProgressDeveloperInstructions(channel),
           dynamicTools: [MURPH_GROUP_USAGE_TOOL],
@@ -11744,6 +11995,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(response.finalMessage).not.toMatch(
           /messages? left|remaining percent|\b0% left\b|\bexhausted\b|\bout of usage\b/iu,
         )
+        if (!filesystemAccess && usageResult === 64) {
+          process.stdout.write(
+            `group-email-thread-config-e2e ${JSON.stringify({
+              actionCount: actions.length,
+              reply: response.finalMessage.trim(),
+            })}\n`,
+          )
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -15173,6 +15432,167 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
   )
 })
 
+describeRealCodex('real Codex proactive progress e2e', () => {
+  it(
+    'sends one early update before a multi-source recovery overview',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-proactive-progress-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLog = path.join(workingDirectory, 'vault-commands.log')
+      const progressUpdates: string[] = []
+
+      try {
+        await mkdir(binDirectory, { recursive: true })
+        const executablePath = path.join(binDirectory, 'vault-cli')
+        const emit = (value: unknown) =>
+          `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+        await writeFile(
+          executablePath,
+          [
+            '#!/bin/sh',
+            'set -eu',
+            `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(commandLog)}`,
+            'case "$*" in',
+            `  "activity summary --date 2026-08-27 --format json") ${emit({
+              activeMinutes: 32,
+              localDate: '2026-08-27',
+              steps: 7_800,
+            })} ;;`,
+            `  "meal summary --date 2026-08-27 --format json") ${emit({
+              localDate: '2026-08-27',
+              mealCount: 3,
+              status: 'balanced',
+            })} ;;`,
+            `  "sleep summary --date 2026-08-27 --format json") ${emit({
+              hours: 7.4,
+              localDate: '2026-08-27',
+              quality: 'good',
+            })} ;;`,
+            '  *) printf \'unsupported daily-overview fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+            'esac',
+            '',
+          ].join('\n'),
+          { encoding: 'utf8', mode: 0o700 },
+        )
+        await chmod(executablePath, 0o700)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'Use vault-cli for canonical member data.',
+              'For a recovery overview, read all three bounded sources before answering:',
+              '- vault-cli activity summary --date 2026-08-27 --format json',
+              '- vault-cli meal summary --date 2026-08-27 --format json',
+              '- vault-cli sleep summary --date 2026-08-27 --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            assistantProgressUpdatesAvailable: true,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-28',
+            currentTimeZone: 'America/New_York',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            ordinaryInboundTurn: true,
+            turnTrigger: 'automation-auto-reply',
+          }),
+          dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          env: {
+            ...config.env,
+            PATH: [binDirectory, config.env.PATH]
+              .filter((value): value is string => Boolean(value))
+              .join(path.delimiter),
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          progressDelivery: {
+            async send(text) {
+              progressUpdates.push(text)
+              return { kind: 'sent', source: 'model' }
+            },
+          },
+          prompt: [
+            'Look into whether my activity, meals, and sleep from yesterday point to an obvious recovery pattern.',
+            'Check all three before answering and give me the main takeaway.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const progressCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        )
+        const overviewReads = actions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes('vault-cli')
+        )
+        const commands = (await readFile(commandLog, 'utf8'))
+          .trim()
+          .split('\n')
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(
+          `[proactive-progress-e2e] ${JSON.stringify({
+            commandCount: commands.length,
+            progressUpdate: progressUpdates[0] ?? null,
+            progressUpdateCount: progressUpdates.length,
+            reply,
+          })}\n`,
+        )
+
+        expect(progressUpdates).toHaveLength(1)
+        const progressUpdate = progressUpdates[0] ?? ''
+        expect(progressUpdate).toMatch(
+          /check|look|review|compare|pull|gather|assess/iu,
+        )
+        expect(progressUpdate).toMatch(/activity|meals?|sleep|recovery/iu)
+        expect(progressUpdate).not.toMatch(/vault-cli|command|tool|json|terminal/iu)
+        expect(progressUpdate).not.toMatch(/7,?800|7\.4|3 meals?|three[- ]meals?/iu)
+        expect(progressCalls).toHaveLength(1)
+        expect(overviewReads.length).toBeGreaterThanOrEqual(1)
+        expect(progressCalls[0]?.eventIndex).toBeLessThan(
+          overviewReads[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
+        )
+        expect(commands).toEqual(expect.arrayContaining([
+          'activity summary --date 2026-08-27 --format json',
+          'meal summary --date 2026-08-27 --format json',
+          'sleep summary --date 2026-08-27 --format json',
+        ]))
+        expect(reply).toMatch(/7,?800/iu)
+        expect(reply).toMatch(/7\.4/iu)
+        expect(reply).toMatch(/3 meals?|three (?:balanced )?meals?|three-meal/iu)
+        expect(reply).toMatch(/takeaway|overall|balance|solid|steady|good/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex Kernel browser continuation e2e', () => {
   it(
     'opens an account portal, reports setup readiness, and does not enter private information',
@@ -16515,6 +16935,300 @@ describe('real Codex app-server cache usage e2e harness', () => {
   })
 })
 
+function readRecurringMealTrackingSetupOrder(reply: string): {
+  automaticIndex: number
+  automaticLeads: boolean
+  manualIndex: number
+} {
+  const automaticIndex = reply.search(
+    /\bautomatic (?:meal )?capture\b|\bmeal capture (?:can|in|on|picks|uses|will)\b/iu,
+  )
+  const manualIndex = reply.search(
+    /\bmanual(?:ly)?\b|\byou can also (?:log|track)\b|\bas an alternative\b|\bquick text\b|\bvoice note\b/iu,
+  )
+
+  return {
+    automaticIndex,
+    automaticLeads:
+      automaticIndex >= 0
+      && manualIndex >= 0
+      && automaticIndex < manualIndex,
+    manualIndex,
+  }
+}
+
+describe('recurring meal-tracking setup ordering matcher', () => {
+  it('rejects a manual-first answer even when it later mentions automatic capture', () => {
+    const order = readRecurringMealTrackingSetupOrder(
+      'You can log manually with a quick text or photo. Automatic meal capture is also available in the iPhone app.',
+    )
+
+    expect(order.automaticIndex).toBeGreaterThan(order.manualIndex)
+    expect(order.automaticLeads).toBe(false)
+  })
+})
+
+describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
+  it('offers automatic meal capture on the first recurring tracking request', {
+    timeout: 360_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-recurring-meal-tracking-setup-e2e-'),
+    )
+
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await Promise.all([
+        materializeAssistantSkill({
+          skillsRoot,
+          slug: 'automatic-meal-capture',
+        }),
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+      ])
+
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null,
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-28',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt:
+          'I want an easy way to keep a daily food log. What can Murph do?',
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const commandActions = actions.filter(
+        (action) => action.kind === 'command',
+      )
+      const commandText = commandActions
+        .map((action) => action.command)
+        .join('\n')
+      const reply = result.finalMessage.trim()
+      const order = readRecurringMealTrackingSetupOrder(reply)
+
+      process.stdout.write(
+        `[recurring-meal-tracking-setup-e2e] ${JSON.stringify({
+          commandCount: commandActions.length,
+          reply,
+        })}\n`,
+      )
+      expect(commandText).toContain('automatic-meal-capture')
+      expect(commandText).toContain('food-journal')
+      expect(commandText).not.toMatch(
+        /\bvault-cli\s+meal\s+(?:add|edit|import-json|remove-photo)\b/iu,
+      )
+      expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+      expect(reply).toMatch(/automatic|meal capture/iu)
+      expect(reply).toMatch(/iPhone|iOS 26\.1/iu)
+      expect(reply).toContain(
+        'https://apps.apple.com/us/app/murph-ai/id6786145859',
+      )
+      expect(reply).toMatch(/Full Photos|full photo access/iu)
+      expect(reply).toMatch(
+        /best[- ]effort|may (?:be )?delay|not guaranteed|does not guarantee|opening (?:Murph|the app)/iu,
+      )
+      expect(reply).toMatch(
+        /quick text|text (?:me|Murph)|rough (?:message|description)|log meals manually/iu,
+      )
+      expect(reply).toMatch(
+        /food photo|meal photo|sending (?:me|Murph) a photo/iu,
+      )
+      expect(reply).toMatch(/voice note/iu)
+      expect(order.automaticLeads).toBe(true)
+      expect(reply).not.toMatch(
+        /(?:will|always) (?:capture|pick up|log) every (?:meal|food photo)/iu,
+      )
+      expect(reply.match(/\?/gu) ?? []).toHaveLength(0)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+
+  it('respects manual-device, completed-setup, and group boundaries', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-meal-tracking-context-boundaries-e2e-'),
+    )
+
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await Promise.all([
+        materializeAssistantSkill({
+          skillsRoot,
+          slug: 'automatic-meal-capture',
+        }),
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeAssistantSkill({ skillsRoot, slug: 'group-chat' }),
+      ])
+
+      const runScenario = async (input: {
+        conversationScope: 'direct' | 'group'
+        context: string
+        prompt: string
+      }) => {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: null,
+            assistantContextSnapshotPrompt: input.context,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: input.conversationScope,
+            currentLocalDate: '2026-08-28',
+            currentTimeZone: 'America/New_York',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            ordinaryInboundTurn: true,
+            turnTrigger: 'automation-auto-reply',
+          }),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: input.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+
+        return {
+          actions,
+          commandText: actions
+            .filter((action) => action.kind === 'command')
+            .map((action) => action.command)
+            .join('\n'),
+          reply: result.finalMessage.trim(),
+        }
+      }
+
+      const androidManual = await runScenario({
+        context: [
+          'Known member context:',
+          '- Uses an Android phone.',
+          '- Prefers to log meals manually.',
+        ].join('\n'),
+        conversationScope: 'direct',
+        prompt: 'What is the easiest way for me to track my meals every day?',
+      })
+
+      const alreadyEnabled = await runScenario({
+        context: [
+          'Known member context:',
+          '- Uses a compatible iPhone.',
+          '- Automatic meal capture is already enabled.',
+        ].join('\n'),
+        conversationScope: 'direct',
+        prompt: 'How can Murph help me keep tracking my meals each day?',
+      })
+
+      const group = await runScenario({
+        context: 'This is a multi-person group conversation.',
+        conversationScope: 'group',
+        prompt: 'What is an easy way for us to track our meals each day?',
+      })
+      process.stdout.write(
+        `[meal-tracking-context-boundaries-e2e] ${JSON.stringify({
+          alreadyEnabled: alreadyEnabled.reply,
+          androidManual: androidManual.reply,
+          group: group.reply,
+        })}\n`,
+      )
+      expect(androidManual.commandText).toContain('automatic-meal-capture')
+      expect(androidManual.commandText).toContain('food-journal')
+      expect(androidManual.reply).toMatch(
+        /manual logging|text|photo|voice note|message|rough (?:description|line)/iu,
+      )
+      expect(androidManual.reply).not.toContain(
+        'https://apps.apple.com/us/app/murph-ai/id6786145859',
+      )
+      expect(androidManual.reply).not.toMatch(
+        /Full Photos|Settings\s*(?:>|→).*Meal capture/iu,
+      )
+      expect(alreadyEnabled.commandText).toContain('automatic-meal-capture')
+      expect(alreadyEnabled.commandText).toContain('food-journal')
+      expect(alreadyEnabled.reply).toMatch(/automatic|meal capture|Meals/iu)
+      expect(alreadyEnabled.reply).not.toContain(
+        'https://apps.apple.com/us/app/murph-ai/id6786145859',
+      )
+      expect(alreadyEnabled.reply).not.toMatch(/Full Photos|choose Set up/iu)
+      expect(group.commandText).not.toContain('automatic-meal-capture')
+      expect(group.reply).toMatch(
+        /text|photo|voice note|message|rough description/iu,
+      )
+      expect(group.reply).not.toContain(
+        'https://apps.apple.com/us/app/murph-ai/id6786145859',
+      )
+      expect(group.reply).not.toMatch(
+        /Full Photos|Settings\s*(?:>|→).*Meal capture/iu,
+      )
+      for (const scenario of [androidManual, alreadyEnabled, group]) {
+        expect(
+          scenario.actions.filter((action) => action.kind === 'dynamic'),
+        ).toHaveLength(0)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
 describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
   it('resolves an exact menu label before saving a restaurant meal', {
     timeout: 900_000,
@@ -17365,6 +18079,105 @@ describeRealCodex('real Codex latest-context nutrition-card e2e', () => {
       )
     } finally {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  })
+})
+
+describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
+  it('keeps the earlier answer and stays quiet for the later acknowledgement', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-steered-acknowledgement-real-e2e-'),
+    )
+    const steerCompleted = createDeferred<void>()
+    let steerAcknowledgement: (() => Promise<void>) | null = null
+    let steerStarted = false
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        onTraceEvent: ({ rawEvent }) => {
+          if (
+            steerStarted ||
+            readRecord(rawEvent)?.method !== 'item/agentMessage/delta'
+          ) {
+            return
+          }
+          steerStarted = true
+          const steer = steerAcknowledgement
+          if (!steer) {
+            steerCompleted.reject(
+              new Error('Expected a live turn before the first answer delta.'),
+            )
+            return
+          }
+          void steer().then(
+            () => steerCompleted.resolve(),
+            (error) => steerCompleted.reject(error),
+          )
+        },
+        onLiveTurn: (turn) => {
+          steerAcknowledgement = () => turn.steer({
+            prompt: 'Thanks, that answered it—no need to reply.',
+          })
+        },
+        prompt: [
+          'Reply with exactly "ORBIT." and no other text.',
+          'Do not call any tools for this first reply.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      if (!steerStarted) {
+        throw new Error(
+          'Expected the acknowledgement steer to begin before the first answer completed.',
+        )
+      }
+      await steerCompleted.promise
+
+      const finishAttempts = readDynamicToolAttempts(result.jsonEvents).filter(
+        (attempt) => attempt.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name,
+      )
+      const earlierReply = result.precedingAgentMessageSegments[0]?.response.trim()
+
+      process.stdout.write(
+        `[steered-acknowledgement-no-reply-e2e] ${JSON.stringify({
+          earlierReply,
+          finalAction: result.finalAction,
+          finalMessage: result.finalMessage,
+          finishAttemptCount: finishAttempts.length,
+        })}\n`,
+      )
+
+      expect(earlierReply).toBe('ORBIT.')
+      expect(result.precedingAgentMessageSegments).toHaveLength(1)
+      expect(result.precedingAgentMessageSegments[0]?.deliveryContextOrdinal).toBe(0)
+      expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
+      expect(result.finalAction).toEqual({ kind: 'none' })
+      expect(result.finalActionExplicit).toBe(true)
+      expect(result.finalMessage).toBe('')
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseCard).toBeNull()
+      expect(finishAttempts).toHaveLength(1)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
     }
   })
 })
@@ -22076,6 +22889,7 @@ function buildScheduledAutomationDeveloperInstructions(
     | 'families'
     | 'shared_read'
     | 'none' = 'families',
+  channel: 'email' | 'linq' = 'linq',
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -22084,7 +22898,7 @@ function buildScheduledAutomationDeveloperInstructions(
     assistantHostedDeviceConnectProviders: [],
     assistantHostedGroupToolSurface,
     assistantKnowledgeToolsAvailable: false,
-    channel: 'linq',
+    channel,
     cliAccess: {
       rawCommand: 'vault-cli',
       setupCommand: 'murph',

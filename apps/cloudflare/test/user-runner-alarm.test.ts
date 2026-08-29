@@ -54,7 +54,10 @@ import { HostedUserRunnerWithTestControls } from "../src/user-runner/hosted-user
 import {
   HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
 } from "../src/user-runner/runtime-processing-responses.ts";
-import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
+import {
+  RunnerStateStore,
+  type RunnerWriteFenceToken,
+} from "../src/user-runner/runner-state-store.ts";
 import type {
   DurableObjectStateLike,
   DurableObjectStorageLike,
@@ -6330,10 +6333,9 @@ describe("HostedUserRunner execution coordination", () => {
       const status = await runner.runnerStatus() as Awaited<
         ReturnType<HostedUserRunner["runnerStatus"]>
       > & {
-        activeWriteFence: { expiresAt: string | null } | null;
+        activeWriteFence: RunnerWriteFenceToken | null;
       };
 
-      expect(status.activeWriteFence?.expiresAt).toBe(status.nextAlarmAt);
       expect(status).toMatchObject({
         activeWriteFence: {
           attemptId: activeAttemptId,
@@ -6344,6 +6346,8 @@ describe("HostedUserRunner execution coordination", () => {
         nextAlarmAt: null,
         userId: TEST_USER_ID,
       });
+      expect(status.activeWriteFence).not.toHaveProperty("expiresAt");
+      expect(status.activeWriteFence).not.toHaveProperty("leaseGeneration");
       expect(status.activeWriteFence).not.toHaveProperty("reason");
 
       invocationResult.resolve({

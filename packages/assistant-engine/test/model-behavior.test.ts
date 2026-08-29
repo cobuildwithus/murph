@@ -1291,13 +1291,10 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection.',
+      'Send one early update before direct reply-critical work spanning multiple sources or several substantive tool steps, including cross-owner evidence, long research, parsing/scans, or content inspection.',
     )
     expect(prompt).toContain(
-      'Before the first read in that pass, orient the member even when each lookup is routine',
-    )
-    expect(prompt).toContain(
-      'Do not wait until the work is done or the member asks about the delay.',
+      'Before the first read, orient the member even when each lookup is routine',
     )
     expect(prompt).toContain(
       'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
@@ -1306,7 +1303,7 @@ describe('assistant execution prompt contract', () => {
       'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
     )
     expect(prompt).toContain(
-      'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.',
+      'Reconsider this on each follow-up or resumed turn; earlier updates do not count.',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update.',
@@ -1326,11 +1323,6 @@ describe('assistant execution prompt contract', () => {
     expect(
       prompt.match(
         /If it runs unusually long, send up to two more at real milestones; never a fourth\./g,
-      ) ?? [],
-    ).toHaveLength(1)
-    expect(
-      prompt.match(
-        /Linq\/iMessage quota is not a reason to withhold a useful update\./g,
       ) ?? [],
     ).toHaveLength(1)
     expect(

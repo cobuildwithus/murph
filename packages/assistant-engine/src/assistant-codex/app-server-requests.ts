@@ -153,6 +153,9 @@ function buildCodexThreadResumeContextParams(
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots
       ? [...input.runtimeWorkspaceRoots]
       : undefined,
+    config: input.threadConfig
+      ? { ...input.threadConfig }
+      : undefined,
     sandbox: permissions
       ? undefined
       : mapCodexAppServerSandboxMode(input.sandbox),

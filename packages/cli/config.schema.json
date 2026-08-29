@@ -3173,9 +3173,12 @@
                           "minLength": 1
                         },
                         "status": {
-                          "description": "Optional audit status filter such as success, warning, or error.",
+                          "description": "Optional audit status filter: success or failure.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "success",
+                            "failure"
+                          ]
                         },
                         "from": {
                           "description": "Inclusive lower occurredAt date bound in YYYY-MM-DD form.",
@@ -9122,7 +9125,29 @@
                         "kind": {
                           "description": "Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "adverse_effect",
+                            "body_measurement",
+                            "clinical_assertion",
+                            "document",
+                            "encounter",
+                            "exposure",
+                            "meal",
+                            "measurement",
+                            "symptom",
+                            "note",
+                            "observation",
+                            "experiment_event",
+                            "experiment_context",
+                            "immunization",
+                            "medication_intake",
+                            "procedure",
+                            "supplement_intake",
+                            "test",
+                            "activity_session",
+                            "sleep_session",
+                            "intervention_session"
+                          ]
                         },
                         "from": {
                           "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
@@ -10611,7 +10636,16 @@
                         },
                         "stream": {
                           "type": "string",
-                          "minLength": 1,
+                          "enum": [
+                            "heart_rate",
+                            "spo2",
+                            "hrv",
+                            "steps",
+                            "sleep_stage",
+                            "respiratory_rate",
+                            "temperature",
+                            "glucose"
+                          ],
                           "description": "Sample stream to summarize, such as spo2 or heart_rate."
                         },
                         "from": {
@@ -10683,7 +10717,16 @@
                         },
                         "stream": {
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "heart_rate",
+                            "spo2",
+                            "hrv",
+                            "steps",
+                            "sleep_stage",
+                            "respiratory_rate",
+                            "temperature",
+                            "glucose"
+                          ]
                         },
                         "from": {
                           "type": "string",
@@ -10751,7 +10794,16 @@
                                 },
                                 "stream": {
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "heart_rate",
+                                    "spo2",
+                                    "hrv",
+                                    "steps",
+                                    "sleep_stage",
+                                    "respiratory_rate",
+                                    "temperature",
+                                    "glucose"
+                                  ]
                                 },
                                 "from": {
                                   "type": "string",
@@ -15470,7 +15522,12 @@
                         "status": {
                           "description": "Optional supplement status to filter by.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "active",
+                            "paused",
+                            "completed",
+                            "stopped"
+                          ]
                         }
                       }
                     }
@@ -15732,7 +15789,12 @@
                                 "status": {
                                   "description": "Optional supplement status to filter by. Defaults to active for compound rollups.",
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "active",
+                                    "paused",
+                                    "completed",
+                                    "stopped"
+                                  ]
                                 }
                               }
                             }
@@ -15755,7 +15817,12 @@
                                 "status": {
                                   "description": "Optional supplement status to filter by. Defaults to active for compound rollups.",
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "active",
+                                    "paused",
+                                    "completed",
+                                    "stopped"
+                                  ]
                                 }
                               }
                             }
@@ -15812,7 +15879,12 @@
                         "status": {
                           "description": "Optional regimen status to filter by.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "active",
+                            "paused",
+                            "completed",
+                            "stopped"
+                          ]
                         },
                         "limit": {
                           "default": 10,
@@ -16106,7 +16178,10 @@
                         "status": {
                           "description": "Optional private protocol status to filter by.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "available",
+                            "archived"
+                          ]
                         },
                         "commonsProtocol": {
                           "description": "Optional public Health Commons protocol key, slug, or route id to filter by.",

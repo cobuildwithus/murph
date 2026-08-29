@@ -576,6 +576,27 @@ test('showSample and listSamples read explicit raw sample ledgers for filtering 
   )
 })
 
+test('listSamples rejects valid JSON ledger rows that are not objects', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-sample-query-invalid-row-'))
+  cleanupPaths.push(vaultRoot)
+  const ledgerPath = path.join(
+    vaultRoot,
+    'ledger/samples/heart_rate/2026/2026-04.jsonl',
+  )
+  await mkdir(path.dirname(ledgerPath), { recursive: true })
+  await writeFile(ledgerPath, '["not", "a", "record"]\n', 'utf8')
+
+  const { listSamples } = await loadSampleQueryHelpers()
+  await assert.rejects(
+    () => listSamples(vaultRoot),
+    (error) =>
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'invalid_record' &&
+      /must be a JSON object/u.test(error.message),
+  )
+})
+
 test('summarizeSampleWindow summarizes explicit raw sample ledger records', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-sample-summary-'))
   cleanupPaths.push(vaultRoot)

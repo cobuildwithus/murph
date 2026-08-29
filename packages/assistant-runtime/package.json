@@ -41,6 +41,11 @@
       "import": "./dist/hosted-invocation.js",
       "default": "./dist/hosted-invocation.js"
     },
+    "./hosted-workspace-restore-preparation": {
+      "types": "./dist/hosted-workspace-restore-preparation.d.ts",
+      "import": "./dist/hosted-workspace-restore-preparation.js",
+      "default": "./dist/hosted-workspace-restore-preparation.js"
+    },
     "./hosted-checkpoint-bridge": {
       "types": "./dist/hosted-checkpoint-bridge.d.ts",
       "import": "./dist/hosted-checkpoint-bridge.js",

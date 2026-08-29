@@ -14,6 +14,7 @@ import { toAssessmentImportVaultCliError } from '@murphai/vault-usecases/helpers
 import { loadImportersRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { showAssessmentManifest } from './export-intake-read-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { assertOrderedDateRange } from './command-factory-primitives.js'
 
 const payloadSchema = z.record(z.string(), z.unknown())
 const intakeSourceSchema = z.enum(['import', 'manual', 'derived'])
@@ -150,6 +151,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
       }),
       output: listResultSchema,
       async run({ options }) {
+        assertOrderedDateRange(options.from, options.to)
         return healthServices.query.list({
           kind: 'assessment',
           from: options.from,

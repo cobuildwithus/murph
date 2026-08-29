@@ -2421,7 +2421,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Contact Card Picker">
+        <Section id="contact-card-picker" title="Contact Card Picker">
           <p className="text-sm text-muted-foreground">
             Post-signup drawer/dialog where a new member picks the photo on
             Murph&apos;s contact card, then adds Murph as a contact. Drawer under

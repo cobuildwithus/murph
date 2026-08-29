@@ -166,20 +166,22 @@ supplement that proof, but it cannot establish runtime cleanup behavior.
 
 Native iOS and Android hosted E2E are production canaries, not pull-request
 statuses. The trusted default-branch controllers run on staggered six-hour
-schedules: iOS at minute 17 and Android at minute 47. Each cheap selection job
-reads the latest completed scheduled outcome for its own workflow and skips the
-native job only when that outcome succeeded at the current protected-`main`
-SHA. Missing history, a newer SHA, or a latest failure admits the canary. An
-explicit rerun of the same trusted schedule attempt bypasses the no-change
-skip. Reviewed native source pins live in
+schedules: iOS at minute 17 and Android at minute 47. An authenticated manual
+dispatch is the scheduler-drop recovery path, but its event ref must be
+`refs/heads/main` and its exact event SHA must still equal current `main` when
+the selection job runs. Each cheap selection job reads the latest completed
+scheduled outcome for its own workflow and skips the native job only when that
+outcome succeeded at the selected protected-`main` SHA. Missing history, a
+newer SHA, or a latest failure admits the canary. An explicit rerun of the same
+trusted controller attempt bypasses the no-change skip. Reviewed native source pins live in
 `.github/native-hosted-e2e-controller.json`, so a source rotation advances the
 protected-main checkpoint.
 
-Neither controller admits `workflow_run`, `deployment_status`, or
-branch-selectable `workflow_dispatch` events, and neither publishes a commit
-status. Fixed non-canceling workflow concurrency bounds each platform to one
-running and one pending controller. The workflows do not receive the destructive
-PR database, Privy, Junction-namespace, or candidate-deployment authority.
+Neither controller admits `workflow_run`, `deployment_status`, or an arbitrary
+branch dispatch, and neither publishes a commit status. Fixed non-canceling
+workflow concurrency bounds each platform to one running and one pending
+controller. The workflows do not receive the destructive PR database, Privy,
+Junction-namespace, or candidate-deployment authority.
 
 A scheduled native pass is production-shaped evidence for the current
 protected-`main` checkpoint and the exact deployed Web SHA it dispatches.
@@ -772,9 +774,11 @@ cron allowlist, Prisma schema/migration inventory, and Web typecheck. The
 service proof must exercise the Eastern daily window across both DST
 transitions, the dedicated recipient list, fixed empty digest, day-keyed
 idempotency key, the bounded three-kind summary read that selects only the
-kind and summary columns with deterministic ordering, truthful grouped
-per-kind totals with explicit omitted-remainder lines past the row cap,
-observable missing configuration, and a
+kind, member-id, and summary columns with deterministic ordering, neutral
+member grouping without identifier disclosure and with unlinked
+groupchat/anonymous feedback last, and truthful grouped
+per-kind totals with explicit unattributed omitted-remainder lines past the row
+cap, observable missing configuration, and a
 bounded same-hour retry. The
 direct scenario must compose the production sender against an isolated
 loopback Resend fake and prove identical request/key reuse plus one fake
@@ -1178,7 +1182,7 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
   origin used only as an inequality guard. An isolated Vercel preview
   database/crypto/control-plane boundary is a prerequisite; production Web or
   production stateful secrets are never a preview bootstrap fallback.
-- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, patches the native bundled Codex model catalog so `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` support the OpenAI flex service tier, validates those entries, and copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app`; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
+- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, patches the native bundled Codex model catalog so `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` support the OpenAI flex service tier, validates those entries, copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app`, and promotes the pinned native Codex binary plus adjacent sandbox resources into a compact final layer for lazy image loading; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
 - The local assistant daemon entrypoint lives under `packages/assistantd`; `murph-assistantd` binds to one vault, rejects non-loopback hosts, requires a bearer token on every route, sets `MURPH_ASSISTANTD_DISABLE_CLIENT=1` in its own process so daemon-local calls do not recurse back through HTTP, and now fronts the steady-state assistant session/message/options flows plus session/status/outbox/cron inspection and serializable automation control whenever the CLI invocation does not need local-only hooks such as live provider events, foreground inbox events, abort propagation, or local session/transcript snapshots.
 - The current runner scaffold now ships as a preassembled deploy bundle copied into the native image rather than rebuilding the workspace from repo source inside Docker. `apps/cloudflare/DEPLOY.md` is the durable guide for the current staged manual deploy path.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.

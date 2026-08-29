@@ -14,6 +14,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
 import {
+  assertOrderedDateRange,
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
 } from './command-factory-primitives.js'
@@ -136,6 +137,7 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultServices) 
     }),
     output: listResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       const result = await _services.query.listJournals({
         vault: options.vault,
         requestId: requestIdFromOptions(options),

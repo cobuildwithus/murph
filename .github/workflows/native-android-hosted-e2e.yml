@@ -3,11 +3,13 @@ name: Native Android Hosted E2E
 on:
   schedule:
     - cron: "47 */6 * * *"
+  workflow_dispatch:
 
 # This trusted default-branch controller spends native-runner capacity only
 # when the latest completed schedule is not a success for current protected main.
-# A failed canary remains eligible at the next slot; an explicit workflow rerun
-# also retries the same revision immediately. Source pins live in protected main.
+# A failed canary remains eligible at the next slot. Manual recovery is limited
+# to the exact current main SHA; reruns retry that revision. Source pins live in
+# protected main.
 permissions:
   actions: read
   contents: read
@@ -29,12 +31,23 @@ jobs:
         id: select
         env:
           CURRENT_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
           GH_TOKEN: ${{ github.token }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "${CURRENT_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Schedule must identify an exact protected-main SHA."; exit 1; }
+          [[ "${CURRENT_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Controller must identify an exact protected-main SHA."; exit 1; }
+          if [[ "${EVENT_NAME}" == workflow_dispatch ]]; then
+            [[ "${EVENT_REF}" == refs/heads/main ]] || { echo "::error::Manual recovery is limited to the main branch."; exit 1; }
+            main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha // ""')"
+            [[ "${main_sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Current main did not expose an exact SHA."; exit 1; }
+            [[ "${CURRENT_SHA}" == "${main_sha}" ]] || { echo "::error::Manual recovery must target the current main SHA."; exit 1; }
+          elif [[ "${EVENT_NAME}" != schedule ]]; then
+            echo "::error::Unsupported native Android controller event."
+            exit 1
+          fi
           previous_sha=""
           previous_conclusion=""
           if [[ "${RUN_ATTEMPT}" == 1 ]]; then
@@ -59,7 +72,7 @@ jobs:
             echo "should_run=${should_run}"
             echo "web_sha=${CURRENT_SHA}"
           } >> "${GITHUB_OUTPUT}"
-          echo "::notice::native-android-e2e stage=schedule_admission result=${should_run}"
+          echo "::notice::native-android-e2e stage=controller_admission result=${should_run}"
 
   production-canary:
     name: Non-destructive production native Android canary

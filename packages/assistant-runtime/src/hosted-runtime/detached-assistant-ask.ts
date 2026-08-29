@@ -324,9 +324,12 @@ async function runOneHostedDetachedAssistantAsk(input: {
       return "settled";
     }
     if (prepared.status === "terminal") {
-      if (isHostedExecutionAssistantAskCurrentSenderTarget(
-        claimed.wake.ask.target,
-      )) {
+      if (
+        prepared.terminalReason !== "content_expired"
+        && isHostedExecutionAssistantAskCurrentSenderTarget(
+          claimed.wake.ask.target,
+        )
+      ) {
         throw new TypeError(
           "Current-sender assistant ask has no persisted terminal completion.",
         );
@@ -431,6 +434,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
     }
     if (
       completed.status === "terminal"
+      && completed.terminalReason !== "content_expired"
       && isHostedExecutionAssistantAskCurrentSenderTarget(
         claimed.wake.ask.target,
       )

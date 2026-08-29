@@ -240,8 +240,14 @@ test('payload-based commands reject empty stdin with an actionable message', asy
     )
 
     assert.equal(result.ok, false)
-    assert.equal(result.error.code, 'command_failed')
+    assert.equal(result.error.code, 'invalid_payload')
     assert.equal(result.error.message, 'No payload was piped to stdin.')
+    assert.equal(result.error.retryable, false)
+    assert.equal(result.error.stage, 'validation')
+    assert.equal(
+      result.error.hint,
+      'Pass --input @file.json or pipe a JSON object to --input -.',
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

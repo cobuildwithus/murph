@@ -1509,6 +1509,42 @@ test("readOwnedEvent resolves the current meal owner without a query projection"
   assert.equal(owned.event.kind, "meal");
   assert.equal(owned.ledgerFile, meal.eventPath);
 
+  const healthyLedger = await fs.readFile(
+    path.join(vaultRoot, meal.eventPath),
+    "utf8",
+  );
+  const corruptLedger = healthyLedger
+    .trim()
+    .split("\n")
+    .map((line) => {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      return JSON.stringify(
+        record.kind === "meal" && record.mealId === meal.event.mealId
+          ? { ...record, id: null }
+          : record,
+      );
+    })
+    .join("\n");
+  await fs.writeFile(
+    path.join(vaultRoot, meal.eventPath),
+    `${corruptLedger}\n`,
+    "utf8",
+  );
+  await assert.rejects(
+    () => readOwnedEvent({
+      vaultRoot,
+      kind: "meal",
+      ownerId: meal.event.mealId,
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_CONTRACT_INVALID",
+  );
+  await fs.writeFile(
+    path.join(vaultRoot, meal.eventPath),
+    healthyLedger,
+    "utf8",
+  );
+
   await deleteEvent({ vaultRoot, eventId: meal.event.id });
   await assert.rejects(
     () => readOwnedEvent({

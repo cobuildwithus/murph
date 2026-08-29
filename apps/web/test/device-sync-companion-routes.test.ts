@@ -124,6 +124,10 @@ function mockVerifiedPrivyUser(): void {
   mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
     accountGroupMemberships: [],
     billingStatus: ACTIVE_MEMBER.billingStatus,
+    identity: {
+      phoneLookupKey: "synced-phone-lookup-key",
+    },
+    routing: null,
     suspendedAt: ACTIVE_MEMBER.suspendedAt,
     threadContainer: null,
   });

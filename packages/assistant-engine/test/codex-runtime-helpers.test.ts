@@ -4167,7 +4167,7 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
-  it('appends turn-local memory isolation after provider overrides', async () => {
+  it('keeps thread restrictions out of provider launch configuration', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed turn-local override.',
       precedingAgentMessageSegments: [],
@@ -4183,17 +4183,18 @@ describe('Codex assistant registry helpers', () => {
     })
 
     const attempt = await executeCodexAssistantTurnAttempt({
-      codexConfigOverrides: [
-        'memories.use_memories=false',
-        'memories.generate_memories=false',
-        'features.shell_tool=false',
-      ],
+      codexThreadConfig: {
+        'features.shell_tool': false,
+        'memories.generate_memories': false,
+        'memories.use_memories': false,
+      },
       providerConfig: normalizeAssistantProviderConfig({
         codexHome: '/tmp/provider-tests/shared-codex-home',
         provider: 'codex-cli',
         model: 'hosted-model',
         modelProvider: 'venice',
       }),
+      showThinkingTraces: true,
       userPrompt: 'Run with turn-local overrides.',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -4207,10 +4208,14 @@ describe('Codex assistant registry helpers', () => {
       'model_providers.venice.env_key="VENICE_API_KEY"',
       'model_providers.venice.wire_api="responses"',
       'model_providers.venice.requires_openai_auth=false',
-      'memories.use_memories=false',
-      'memories.generate_memories=false',
-      'features.shell_tool=false',
     ])
+    expect(appServerInput?.threadConfig).toEqual({
+      'features.shell_tool': false,
+      'memories.generate_memories': false,
+      'memories.use_memories': false,
+      hide_agent_reasoning: false,
+      model_reasoning_summary: 'auto',
+    })
     expect(appServerInput?.codexHome).toBe('/tmp/provider-tests/shared-codex-home')
   })
 
@@ -4232,21 +4237,21 @@ describe('Codex assistant registry helpers', () => {
       groupAvailable: true,
       progressUpdatesAvailable: false,
     })
-    const codexConfigOverrides = [
-      'memories.use_memories=false',
-      'memories.generate_memories=false',
-      'features.shell_tool=false',
-      'web_search="disabled"',
-      'features.web_search_request=false',
-      'features.standalone_web_search=false',
-      'features.apps=false',
-      'features.enable_mcp_apps=false',
-      'features.browser_use=false',
-      'features.plugins=false',
-      'features.multi_agent=false',
-      'features.multi_agent_v2=false',
-      'features.tool_suggest=false',
-    ]
+    const codexThreadConfig = {
+      'features.apps': false,
+      'features.browser_use': false,
+      'features.enable_mcp_apps': false,
+      'features.multi_agent': false,
+      'features.multi_agent_v2': false,
+      'features.plugins': false,
+      'features.shell_tool': false,
+      'features.standalone_web_search': false,
+      'features.tool_suggest': false,
+      'features.web_search_request': false,
+      'memories.generate_memories': false,
+      'memories.use_memories': false,
+      web_search: 'disabled',
+    }
 
     const attempt = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
@@ -4254,7 +4259,7 @@ describe('Codex assistant registry helpers', () => {
         sandbox: 'read-only',
       },
       turn: {
-        codexConfigOverrides,
+        codexThreadConfig,
         dynamicTools,
         prompt: 'Reason once over the reviewed group answer.',
         providerThreadEphemeral: true,
@@ -4265,7 +4270,7 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.ok).toBe(true)
     const appServerInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
-    expect(appServerInput?.configOverrides).toEqual(codexConfigOverrides)
+    expect(appServerInput?.threadConfig).toEqual(codexThreadConfig)
     expect(appServerInput?.dynamicTools).toEqual(dynamicTools)
     expect(appServerInput?.ephemeral).toBe(true)
     expect(appServerInput?.sandbox).toBe('read-only')

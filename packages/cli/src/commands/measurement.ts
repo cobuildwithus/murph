@@ -37,6 +37,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  assertOrderedDateRange,
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
   createCommonListCommand,
@@ -498,6 +499,7 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
     }),
     output: measurementEntryListResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       return listMeasurementEntries({
         vault: options.vault,
         metrics: options.metric,

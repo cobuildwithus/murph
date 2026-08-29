@@ -7,6 +7,12 @@ import { promisify } from "node:util";
 
 import { describe, expect, it, vi } from "vitest";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import {
+  archiveClosedEventLedgerShards,
+  initializeVault,
+  readEvent,
+  upsertEvent,
+} from "@murphai/core";
 
 import {
   buildHostedWorkspaceSnapshotV2Aad,
@@ -104,6 +110,112 @@ describe("workspace snapshot local restore", () => {
         entry.root === "vault" && entry.relativePath === "note.md"
       )).toBe(true);
     } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("measures closed event archiving at the encrypted snapshot boundary", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-event-archive-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
+    const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const encodedDataKey = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+
+    try {
+      await initializeVault({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        vaultRoot: sourceVaultRoot,
+      });
+      const historicalEvents = [];
+      for (let index = 0; index < 24; index += 1) {
+        historicalEvents.push(await upsertEvent({
+          payload: {
+            kind: "note",
+            note: `closed event history ${index} `.repeat(100),
+            occurredAt: `2026-01-12T09:${String(index).padStart(2, "0")}:00.000Z`,
+            title: `Historical event ${index}`,
+          },
+          vaultRoot: sourceVaultRoot,
+        }));
+      }
+
+      const baselineSnapshotId = "snapshot_event_archive_before";
+      const baselineObjectKey =
+        `users/member_test/workspace-snapshots/${baselineSnapshotId}.snapshot.enc`;
+      const baselineAad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey: baselineObjectKey,
+        snapshotId: baselineSnapshotId,
+        userId: "member_test",
+      });
+      const baselinePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot: sourceDurableRoot,
+        vaultRoot: sourceVaultRoot,
+      });
+      const baseline = await createEncryptedWorkspaceSnapshotFile({
+        aad: baselineAad,
+        archiveEntries: baselinePlan.entries,
+        dataKey: encodedDataKey,
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(
+          Uint8Array.from({ length: 12 }, (_, index) => index + 10),
+        ).toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "baseline-scratch"),
+      });
+
+      await expect(archiveClosedEventLedgerShards({
+        now: new Date("2026-02-01T00:00:00.000Z"),
+        vaultRoot: sourceVaultRoot,
+      })).resolves.toMatchObject({ archivedShardCount: 1, blockedShardCount: 0 });
+
+      const archivedSnapshotId = "snapshot_event_archive_after_";
+      const archivedObjectKey =
+        `users/member_test/workspace-snapshots/${archivedSnapshotId}.snapshot.enc`;
+      const archivedAad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey: archivedObjectKey,
+        snapshotId: archivedSnapshotId,
+        userId: "member_test",
+      });
+      const archivedPlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot: sourceDurableRoot,
+        vaultRoot: sourceVaultRoot,
+      });
+      const archived = await createEncryptedWorkspaceSnapshotFile({
+        aad: archivedAad,
+        archiveEntries: archivedPlan.entries,
+        dataKey: encodedDataKey,
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(
+          Uint8Array.from({ length: 12 }, (_, index) => index + 30),
+        ).toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "archived-scratch"),
+      });
+
+      expect(archived.totalPlainBytes).toBeLessThan(baseline.totalPlainBytes);
+      expect(archived.encryptedByteSize).toBeLessThan(baseline.encryptedByteSize);
+
+      await restoreEncryptedWorkspaceSnapshot({
+        dataKey: encodedDataKey,
+        durableRoot: restoredDurableRoot,
+        encryptedFilePath: archived.encryptedFilePath,
+        ref: createHostedWorkspaceSnapshotTestRef({
+          aad: archivedAad,
+          encrypted: archived,
+          objectKey: archivedObjectKey,
+          snapshotId: archivedSnapshotId,
+          userId: "member_test",
+        }),
+      });
+      await expect(readEvent({
+        eventId: historicalEvents[0]!.eventId,
+        vaultRoot: path.join(restoredDurableRoot, "vault"),
+      })).resolves.toMatchObject({
+        event: { title: "Historical event 0" },
+      });
+    } finally {
+      dataKey.fill(0);
       await rm(tempRoot, { force: true, recursive: true });
     }
   });

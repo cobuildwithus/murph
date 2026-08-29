@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-28",
+  "order": 200,
+  "item": {
+    "id": "settings-contact-card-portraits",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Contact cards keep your chosen portrait",
+    "summary": "When you add Murph from Settings, the downloaded contact card now keeps the portrait you selected.",
+    "details": "The intentional No photo option remains available. If a selected portrait cannot be loaded, Settings now asks you to try again instead of saving a card without it.",
+    "relevanceTags": ["settings", "contacts", "reliability"],
+    "sourcePullRequests": [2517]
+  }
+}
