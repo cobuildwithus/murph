@@ -966,7 +966,19 @@ const automationEditOptionSchemas = {
     .describe("Clear the stored assistant target override."),
 };
 
-export function registerAutomationCommands(cli: Cli.Cli) {
+interface AutomationCommandDependencies {
+  listAutomationPage?: typeof listAutomationPage;
+  showAutomation?: typeof showAutomation;
+}
+
+export function registerAutomationCommands(
+  cli: Cli.Cli,
+  dependencies: AutomationCommandDependencies = {},
+) {
+  const listAutomationPageForCommand =
+    dependencies.listAutomationPage ?? listAutomationPage;
+  const showAutomationForCommand =
+    dependencies.showAutomation ?? showAutomation;
   const automation = Cli.create("automation", {
     description: "Canonical automation registry commands.",
   });
@@ -1108,7 +1120,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     output: automationSaveResultSchema,
     async run(context) {
       const now = new Date().toISOString();
-      const existing = await showAutomation(context.options.vault, context.args.lookup);
+      const existing = await showAutomationForCommand(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
           "automation_not_found",
@@ -1215,7 +1227,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     async run(context) {
       return {
         vault: context.options.vault,
-        automation: await showAutomation(context.options.vault, context.args.lookup),
+        automation: await showAutomationForCommand(context.options.vault, context.args.lookup),
       };
     },
   });
@@ -1230,7 +1242,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      const existing = await showAutomation(context.options.vault, context.args.lookup);
+      const existing = await showAutomationForCommand(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
           "automation_not_found",
@@ -1296,7 +1308,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       const exactTag = supportSeriesId === undefined
         ? undefined
         : requireAutomationSupportSeriesTagFromId(supportSeriesId);
-      const page = await listAutomationPage(context.options.vault, {
+      const page = await listAutomationPageForCommand(context.options.vault, {
         cursor: context.options.cursor,
         exactTag,
         limit: context.options.limit,
