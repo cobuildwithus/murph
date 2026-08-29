@@ -591,7 +591,7 @@ describe("CustomizeMurphSettings", () => {
       avatar: "gremlin",
     });
     expect(rendered.container.querySelector("[role='alert']")?.textContent)
-      .toContain("Couldn't open Safari");
+      .toContain("contact card is temporarily unavailable");
     expect(rendered.container.querySelector("[data-drawer-open='true']"))
       .not.toBeNull();
 
