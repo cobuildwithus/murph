@@ -7,6 +7,8 @@ import { Cli } from "incur";
 import { afterEach, test, vi } from "vitest";
 
 import {
+  AUTOMATION_DOC_TYPE,
+  AUTOMATION_SCHEMA_VERSION,
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   automationAssistantTargetOverrideSchema,
   automationContextReferencesSchema,
@@ -16,6 +18,10 @@ import {
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
 import { upsertAutomation } from "@murphai/core";
+import type {
+  AutomationListPageOptions,
+  AutomationQueryRecord,
+} from "@murphai/query";
 import {
   automationRecordSchema,
   automationScaffoldResultSchema,
@@ -1592,13 +1598,13 @@ test("automation compact list retains enumeration state and materially reduces a
     "experiment:exp_foreign_fixture",
   );
   const idAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-  const fixtureRecords = Array.from({ length: 25 }, (_, index) => {
+  const fixtureRecords: AutomationQueryRecord[] = Array.from({ length: 25 }, (_, index) => {
     const suffix = idAlphabet[index];
     if (suffix === undefined) {
       throw new Error("Expected a deterministic automation id suffix.");
     }
     const fixtureIndex = String(index).padStart(2, "0");
-    return automationRecordSchema.parse({
+    const record = automationRecordSchema.parse({
       activeUntil: "2026-12-31T23:59:59.000Z",
       assistantTargetOverride: {
         model: "gpt-5.6-terra",
@@ -1643,12 +1649,17 @@ test("automation compact list retains enumeration state and materially reduces a
       title: `Synthetic support inventory ${fixtureIndex}`,
       updatedAt: `2026-08-29T12:${fixtureIndex}:00.000Z`,
     });
+    return {
+      schemaVersion: AUTOMATION_SCHEMA_VERSION,
+      docType: AUTOMATION_DOC_TYPE,
+      ...record,
+    };
   });
   const firstFixtureRecord = fixtureRecords[0];
   if (firstFixtureRecord === undefined) {
     throw new Error("Expected at least one compact automation fixture.");
   }
-  const foreignRecord = automationRecordSchema.parse({
+  const foreignRecord: AutomationQueryRecord = {
     ...firstFixtureRecord,
     automationId: "automation_01ARZ3NDEKTSV4RRFFQ69G5FB0",
     contextReferences: [{
@@ -1664,18 +1675,12 @@ test("automation compact list retains enumeration state and materially reduces a
       foreignSupportSeriesTag,
     ],
     title: "Synthetic support inventory foreign owner",
-  });
+  };
   const records = [...fixtureRecords, foreignRecord];
-  const listQueries: Array<{
-    cursor?: string;
-    exactTag?: string;
-    limit: number;
-    status?: readonly string[];
-    text?: string;
-  }> = [];
+  const listQueries: AutomationListPageOptions[] = [];
 
   registerAutomationCommands(cli, {
-    async listAutomationPage(_fixtureVaultRoot, options) {
+    async listAutomationPage(_fixtureVaultRoot, options = {}) {
       listQueries.push(options);
       const normalizedText = options.text?.toLocaleLowerCase("en-US");
       const matches = records
@@ -1695,10 +1700,11 @@ test("automation compact list retains enumeration state and materially reduces a
         : matches.filter((record) =>
           record.automationId.localeCompare(options.cursor ?? "") > 0
         );
-      const items = afterCursor.slice(0, options.limit);
+      const limit = options.limit ?? afterCursor.length;
+      const items = afterCursor.slice(0, limit);
       return {
         items,
-        nextCursor: afterCursor.length > options.limit
+        nextCursor: afterCursor.length > limit
           ? items.at(-1)?.automationId ?? null
           : null,
         totalCount: matches.length,
