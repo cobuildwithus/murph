@@ -241,31 +241,48 @@ describe("hosted Assistant Ask runtime control", () => {
   it("parses the trusted group-tool ask wire arm and bounded outcomes", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "ask",
-      groupLabel: "  100 Club  ",
+      membershipId: "  membership_100_club  ",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       originSessionId: ORIGIN_SESSION_ID,
       question: "  What is today's workout?  ",
     })).toEqual({
       action: "ask",
-      groupLabel: "100 Club",
+      membershipId: "membership_100_club",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       originSessionId: ORIGIN_SESSION_ID,
       question: "What is today's workout?",
     });
-    expect(parseHostedRuntimeGroupToolRequest({
-      action: "ask",
-      groupLabel: null,
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-      originSessionId: ORIGIN_SESSION_ID,
-      question: "What is today's workout?",
-    })).toMatchObject({ groupLabel: null });
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "ask",
-      membershipId: "model_selected_membership",
+      groupLabel: "100 Club",
+      membershipId: "membership_100_club",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      question: "What did we decide?",
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "handoff",
+      context: "A member completed the planned activity.",
+      membershipId: "membership_100_club",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      participantTarget: {
+        participants: [{ emailParticipant: false }],
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask",
+      membershipId: "membership_100_club",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      question: "What did we decide?",
+      route: "model-controlled",
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       originSessionId: ORIGIN_SESSION_ID,
       question: "What is today's workout?",
-    })).toThrow(/not allowed/u);
+    })).toThrow(/membershipId/u);
 
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask",
@@ -341,6 +358,15 @@ describe("hosted Assistant Ask runtime control", () => {
       action: "prepare",
       status: "terminal",
       terminalReason: "expired",
+    });
+    expect(parseHostedRuntimeAssistantAskControlResponse({
+      action: "prepare",
+      status: "terminal",
+      terminalReason: "content_expired",
+    })).toEqual({
+      action: "prepare",
+      status: "terminal",
+      terminalReason: "content_expired",
     });
     expect(parseHostedRuntimeAssistantAskControlResponse({
       action: "complete",

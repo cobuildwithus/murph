@@ -66,7 +66,11 @@ describe("system mailbox delegated direction state", () => {
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         now: () => OCCURRED_AT,
         vaultRoot,
-      })).resolves.toEqual({ at: OCCURRED_AT, reason: "assistant" });
+      })).resolves.toEqual({
+        at: OCCURRED_AT,
+        executionClass: "default_owned",
+        reason: "assistant",
+      });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -105,7 +109,11 @@ describe("system mailbox delegated direction state", () => {
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         now: () => BEFORE_EXPIRY,
         vaultRoot,
-      })).resolves.toEqual({ at: BEFORE_EXPIRY, reason: "assistant" });
+      })).resolves.toEqual({
+        at: BEFORE_EXPIRY,
+        executionClass: "default_owned",
+        reason: "assistant",
+      });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -128,6 +136,13 @@ describe("system mailbox delegated direction state", () => {
       now: OCCURRED_AT,
       state: { pending: [device, consented] },
     })).toEqual(device);
+
+    const laterDevice = createDeviceItem("3");
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: null,
+      now: OCCURRED_AT,
+      state: { pending: [consented, laterDevice] },
+    })).toEqual(consented);
   });
 
   it("excludes an expired handoff from selection, wakes, and handled blocking, then prunes it on mutation", async () => {
@@ -161,7 +176,7 @@ describe("system mailbox delegated direction state", () => {
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         now: () => EXPIRES_AT,
         vaultRoot,
-      })).resolves.toEqual({ at: null, reason: null });
+      })).resolves.toEqual({ at: null, executionClass: null, reason: null });
       expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([handoff]);
 
       await updateHostedSystemMailboxState(

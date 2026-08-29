@@ -1270,10 +1270,10 @@ describe('assistant execution prompt contract', () => {
       "Complete the user's in-scope request end to end",
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Use tools directly instead of telling the user',
+      'Use tools instead of giving the user work you can do',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Make reasonable assumptions for reversible, low-risk work',
+      'Assume reversible, low-risk details',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'ask only when a missing choice materially changes the result',
@@ -1291,13 +1291,10 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection.',
+      'Send one early update before direct reply-critical work spanning multiple sources or several substantive tool steps, including cross-owner evidence, long research, parsing/scans, or content inspection.',
     )
     expect(prompt).toContain(
-      'Before the first read in that pass, orient the member even when each lookup is routine',
-    )
-    expect(prompt).toContain(
-      'Do not wait until the work is done or the member asks about the delay.',
+      'Before the first read, orient the member even when each lookup is routine',
     )
     expect(prompt).toContain(
       'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
@@ -1306,7 +1303,7 @@ describe('assistant execution prompt contract', () => {
       'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
     )
     expect(prompt).toContain(
-      'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.',
+      'Reconsider this on each follow-up or resumed turn; earlier updates do not count.',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update.',
@@ -1326,11 +1323,6 @@ describe('assistant execution prompt contract', () => {
     expect(
       prompt.match(
         /If it runs unusually long, send up to two more at real milestones; never a fourth\./g,
-      ) ?? [],
-    ).toHaveLength(1)
-    expect(
-      prompt.match(
-        /Linq\/iMessage quota is not a reason to withhold a useful update\./g,
       ) ?? [],
     ).toHaveLength(1)
     expect(
@@ -1413,8 +1405,21 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).toContain('Prefer a structured integration')
     expect(computerSection).toContain('private untrusted data')
     expect(computerSection).toContain('Use secure user handoff')
+    expect(computerSection).toContain(
+      'password or full payment-card entry',
+    )
+    expect(computerSection).toContain(
+      'smallest exact-point takeover for a human-only authentication challenge',
+    )
+    expect(computerSection).toContain('resume and finish the rest yourself')
+    expect(computerSection).not.toContain('other private input')
+    expect(computerSection).not.toContain(
+      'credentials, full payment details, and one-time codes',
+    )
     expect(computerSection).toContain('exact final terms or explicit bounds')
-    expect(computerSection).toContain('verify the requested result on the site')
+    expect(computerSection).toContain(
+      'After site verification, call `computer_finish_run` before the final reply',
+    )
     expect(computerSection).not.toContain(
       'The returned `handoffUrl` is bound to a single pause/checkpoint.',
     )
@@ -2862,10 +2867,10 @@ describe('assistant Murph onboarding guidance', () => {
       "The user's immediate health or safety need still comes first.",
     )
     expect(prompt).toContain(
-      'before advancing, declining, or completing onboarding',
+      'before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding',
     )
     expect(prompt).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion.',
     )
     expect(prompt).toContain(
       'During discovery, a stated health goal is context, not an action request.',
@@ -2882,8 +2887,11 @@ describe('assistant Murph onboarding guidance', () => {
     expect(prompt).toContain(
       'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
     )
-    expect(prompt).toContain('Honor pause, defer, skip, and decline.')
     expect(prompt).toContain(
+      'Once a data source is identified, postponing only its optional connection does not pause onboarding. Do not issue or reissue a link; acknowledge the choice, continue to the next unresolved foundation beat unless the user explicitly pauses onboarding itself, and never imply the connection exists until visible evidence proves it.',
+    )
+    expect(prompt).not.toContain('Honor pause, defer, skip, and decline.')
+    expect(prompt).not.toContain(
       'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
     )
     expect(prompt).toContain(
@@ -2942,6 +2950,91 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
+  it('discovers explicit current-sender personal Murph consultation without broadening group authority', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'families',
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupEmailPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'families',
+        channel: 'email',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+
+    const restrictedGroupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'shared_read',
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+    const noToolGroupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'none',
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+
+    expect(groupPrompt).toContain(
+      'search/load deferred `murph.group_consult` via `tool_search` or `ALL_TOOLS` before redirecting or denying',
+    )
+    expect(groupPrompt).toContain(
+      "Current-sender actions are the authorized host-mediated bridge to that sender's personal Murph",
+    )
+    expect(groupPrompt).toContain(
+      'they do not grant direct room-vault access or private-state inspection',
+    )
+    expect(groupPrompt).toContain(
+      "Use only the exact accepted `message_ref` printed beside that sender's complete request or destination answer",
+    )
+    expect(groupPrompt).toContain(
+      'Infer only the requested answer audience from ordinary conversation',
+    )
+    expect(groupPrompt).toContain(
+      '`ask_current_sender` for an explicit answer in the group',
+    )
+    expect(groupPrompt).toContain(
+      '`ask_current_sender_privately` for an explicit private answer',
+    )
+    expect(groupPrompt).toContain(
+      '`clarify_current_sender` only when the answer destination is genuinely ambiguous',
+    )
+    expect(groupPrompt).toContain(
+      'After `clarify_current_sender` returns `clarification_required`, ask one concise natural question in that same turn about whether the answer should be shared in this group or sent privately, without prescribing a reply format. Do not finish that turn silently.',
+    )
+    expect(groupPrompt).toContain(
+      "Use the matching continuation action only when the same sender's next reply solely selects the group or private destination",
+    )
+    expect(groupPrompt).toContain('If that reply adds or changes substance')
+    expect(groupPrompt).toContain(
+      'the host reloads the Message and remains authoritative for identity, route existence, authorization, required notice, replay safety, and the fixed destination',
+    )
+    expect(groupPrompt).toContain(
+      'This lane is only for current-sender consultation, not account/settings actions, other participants, or unsolicited disclosure',
+    )
+    expect(directPrompt).toContain(
+      'From this private conversation, joined-group consultation is available only for groups Murph has already joined',
+    )
+    expect(groupEmailPrompt).not.toContain('search/load deferred `murph.group_consult`')
+    expect(restrictedGroupPrompt).not.toContain(
+      'search/load deferred `murph.group_consult`',
+    )
+    expect(noToolGroupPrompt).not.toContain(
+      'search/load deferred `murph.group_consult`',
+    )
+  })
+
   it('takes explicitly delegated initiative across direct and group scopes without expanding authority', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({

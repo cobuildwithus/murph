@@ -50,6 +50,7 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import {
   getHostedLinqChatHandles,
   getHostedLinqChatSummary,
+  readHostedLinqExplicitGroupDisplayName,
   type HostedLinqChatHandleSummary,
   sendHostedLinqChatMessage,
   sendHostedLinqReactionBoundChatMessage,
@@ -78,7 +79,7 @@ import {
   HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
   readHostedOwnerAddressBookAdvisoryNames,
-  type HostedOwnerAddressBookAdvisoryNamesResult,
+  type HostedAddressBookAdvisoryNamesResult,
 } from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import {
@@ -96,6 +97,9 @@ import {
   HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS,
 } from "./group-private-attribution-policy";
 import { buildHostedGroupJoinUrl } from "./group-links";
+import {
+  readHostedGroupMembershipParticipantRosters,
+} from "./group-membership-participants";
 import {
   requestHostedGroupAssistantAsk,
   requestHostedGroupContextHandoff,
@@ -314,6 +318,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 >;
 
 export async function handleHostedRuntimeGroupTool(input: {
+  includeParticipantRosters?: boolean;
   logger?: Pick<Console, "warn">;
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
@@ -330,8 +335,8 @@ export async function handleHostedRuntimeGroupTool(input: {
 }): Promise<HostedRuntimeGroupToolResponse> {
   if (input.request.action === "ask") {
     const admission = await requestHostedGroupAssistantAsk({
-      groupLabel: input.request.groupLabel,
       memberId: input.memberId,
+      membershipId: input.request.membershipId,
       originAssistantInputId: input.request.originAssistantInputId,
       originSessionId: input.request.originSessionId,
       question: input.request.question,
@@ -345,8 +350,8 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "handoff") {
     const admission = await requestHostedGroupContextHandoff({
       context: input.request.context,
-      groupLabel: input.request.groupLabel,
       memberId: input.memberId,
+      membershipId: input.request.membershipId,
       originAssistantInputId: input.request.originAssistantInputId,
     });
     if (admission.mailboxWake) {
@@ -429,6 +434,7 @@ export async function handleHostedRuntimeGroupTool(input: {
     return handleHostedRuntimeGroupListMemberships({
       cursor: input.request.cursor ?? null,
       disclosureGrantCursor: input.request.disclosureGrantCursor ?? null,
+      includeParticipantRosters: input.includeParticipantRosters ?? true,
       memberId: input.memberId,
     });
   }
@@ -854,6 +860,7 @@ async function handleHostedRuntimeGroupLeaveMembership(input: {
 async function handleHostedRuntimeGroupListMemberships(input: {
   cursor: string | null;
   disclosureGrantCursor: string | null;
+  includeParticipantRosters: boolean;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const access = await readHostedRuntimePersonalActiveAccess(input.memberId);
@@ -911,6 +918,27 @@ async function handleHostedRuntimeGroupListMemberships(input: {
       },
     };
   }
+  let participantRosters: Awaited<
+    ReturnType<typeof readHostedGroupMembershipParticipantRosters>
+  > = new Map();
+  if (input.includeParticipantRosters) {
+    try {
+      participantRosters = await readHostedGroupMembershipParticipantRosters({
+        memberId: input.memberId,
+        memberships,
+        now: new Date(),
+        prisma: access.prisma,
+      });
+    } catch {
+      participantRosters = new Map(memberships.map(({ membershipId }) => [
+        membershipId,
+        {
+          status: "unavailable" as const,
+          unavailableReason: "participant_roster_unavailable",
+        },
+      ]));
+    }
+  }
   const publicBaseUrl = resolveHostedPublicBaseUrl();
   return {
     action: "list_memberships",
@@ -924,11 +952,21 @@ async function handleHostedRuntimeGroupListMemberships(input: {
       ),
       disclosureGrantsTruncated: grants.truncated,
       memberships: memberships.map(({
+        membershipId,
         ownerJoinCode,
         runtimeMemberId,
         ...membership
       }) => ({
         ...membership,
+        membershipId,
+        ...(input.includeParticipantRosters
+          ? {
+              participantRoster: participantRosters.get(membershipId) ?? {
+                status: "unavailable" as const,
+                unavailableReason: "participant_roster_unavailable",
+              },
+            }
+          : {}),
         permissionsUrl: ownerJoinCode
           ? buildHostedGroupJoinUrl({ joinCode: ownerJoinCode, publicBaseUrl })
           : null,
@@ -1851,8 +1889,8 @@ async function handleHostedRuntimeGroupReadChatName(input: {
   let providerDisplayName: string | null;
   try {
     if (authority.channel === "linq") {
-      providerDisplayName = await readHostedLinqExplicitGroupDisplayName(
-        authority.threadId,
+      providerDisplayName = readHostedLinqExplicitGroupDisplayName(
+        await getHostedLinqChatSummary({ chatId: authority.threadId }),
       );
     } else if (authority.channel === "telegram") {
       providerDisplayName = await getHostedTelegramGroupTitle({
@@ -1877,47 +1915,6 @@ async function handleHostedRuntimeGroupReadChatName(input: {
         action: "read_chat_name",
         result: { displayName: null, status: "none" },
       };
-}
-
-async function readHostedLinqExplicitGroupDisplayName(
-  chatId: string,
-): Promise<string | null> {
-  const chat = await getHostedLinqChatSummary({ chatId });
-  if (chat.isGroup !== true) {
-    return null;
-  }
-  const displayName = chat.displayName
-    ? normalizeHostedGroupDisplayName(chat.displayName)
-    : null;
-  if (!displayName) {
-    return null;
-  }
-
-  // Linq defaults display_name to a comma-separated list of handles. Suppress
-  // every current SDK variant so phone numbers and emails never become the
-  // hosted group label.
-  const normalizeHandles = (handles: readonly string[]) =>
-    handles
-      .map((handle) => handle.trim().toLowerCase())
-      .filter(Boolean)
-      .sort()
-      .join("\0");
-  const displayNameKey = normalizeHandles(displayName.split(","));
-  const activeHandles = chat.handles.filter(isActiveHostedLinqChatHandle);
-  const candidateHandleSets = [
-    chat.handles,
-    activeHandles,
-    chat.handles.filter(({ isMe }) => !isMe),
-    activeHandles.filter(({ isMe }) => !isMe),
-  ];
-
-  return displayNameKey
-      && candidateHandleSets.some((handles) =>
-        handles.length > 0
-        && normalizeHandles(handles.map(({ handle }) => handle)) === displayNameKey
-      )
-    ? null
-    : displayName;
 }
 
 function renderHostedGroupJoinOfferScopeSentence(
@@ -2306,7 +2303,7 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
 
 async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
   input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
-): Promise<HostedOwnerAddressBookAdvisoryNamesResult | null> {
+): Promise<HostedAddressBookAdvisoryNamesResult | null> {
   const lookup = readHostedOwnerAddressBookAdvisoryNames(input).then(
     (result) => ({ kind: "completed" as const, result }),
     (error: unknown) => ({

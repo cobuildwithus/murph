@@ -4,7 +4,6 @@ import {
 } from "../runner-email-route.ts";
 import {
   isHostedRunnerProviderEffectPath,
-  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
   HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
 } from "../runner-effects-contract.ts";
 
@@ -46,9 +45,6 @@ import {
   handleRunnerProviderEffectsRequest,
 } from "./provider-effects.ts";
 import {
-  handleRunnerGeneratedImageUploadRequest,
-} from "./generated-images.ts";
-import {
   handleRunnerPrivateImageUrlPublishRequest,
 } from "./private-image-urls.ts";
 
@@ -78,14 +74,6 @@ export async function handleRunnerResultsRequest(input: {
     return handleRunnerProviderEffectsRequest({
       env: input.env,
       pathname: input.url.pathname,
-      request: input.request,
-      userId: input.userId,
-    });
-  }
-
-  if (input.url.pathname === HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH) {
-    return handleRunnerGeneratedImageUploadRequest({
-      env: input.env,
       request: input.request,
       userId: input.userId,
     });

@@ -43,7 +43,10 @@ function isDefaultHiddenMetricObservationEntity(entity: CanonicalEntity): boolea
 }
 
 export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean {
-  if (isDefaultHiddenMetricObservationEntity(entity)) {
+  if (
+    entity.family === "audit" ||
+    isDefaultHiddenMetricObservationEntity(entity)
+  ) {
     return false;
   }
 
@@ -55,5 +58,8 @@ export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean 
 }
 
 export function isSearchIndexedQueryEntity(entity: CanonicalEntity): boolean {
-  return !isDefaultHiddenMetricObservationEntity(entity);
+  return (
+    entity.family !== "audit" &&
+    !isDefaultHiddenMetricObservationEntity(entity)
+  );
 }

@@ -55,6 +55,7 @@ import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
+  inspectHostedRuntimeMailboxToAssistantTimingSubdivision,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
@@ -181,6 +182,8 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupParticipantDisplayNameSource,
+  type HostedRuntimeGroupParticipantLabel,
+  type HostedRuntimeGroupParticipantRoster,
   type HostedRuntimeGroupCurrentSenderDirectResult,
   type HostedRuntimeGroupDailyMetricReportResult,
   type HostedRuntimeGroupMemberAskResult,
@@ -1084,7 +1087,11 @@ export function parseHostedRuntimeAssistantAskControlResponse(
       record.terminalReason,
       "Hosted runtime assistant ask terminalReason",
     );
-    if (terminalReason !== "expired" && terminalReason !== "unavailable") {
+    if (
+      terminalReason !== "content_expired"
+      && terminalReason !== "expired"
+      && terminalReason !== "unavailable"
+    ) {
       throw new TypeError("Hosted runtime assistant ask terminalReason is invalid.");
     }
     return { action, status, terminalReason };
@@ -1125,7 +1132,7 @@ export function parseHostedRuntimeGroupToolRequest(
       record,
       new Set([
         "action",
-        "groupLabel",
+        "membershipId",
         "originAssistantInputId",
         "originSessionId",
         "question",
@@ -1134,18 +1141,11 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return {
       action,
-      ...(record.groupLabel === undefined
-        ? {}
-        : {
-            groupLabel: record.groupLabel === null
-              ? null
-              : parseHostedRuntimeGroupAskBoundedText({
-                  label: "Hosted runtime group tool ask request groupLabel",
-                  maxCodePoints:
-                    HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-                  value: record.groupLabel,
-                }),
-          }),
+      membershipId: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime group tool ask request membershipId",
+        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+        value: record.membershipId,
+      }),
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
     };
   }
@@ -1153,7 +1153,12 @@ export function parseHostedRuntimeGroupToolRequest(
     const label = "Hosted runtime group tool handoff request";
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "context", "groupLabel", "originAssistantInputId"]),
+      new Set([
+        "action",
+        "context",
+        "membershipId",
+        "originAssistantInputId",
+      ]),
       label,
     );
     return {
@@ -1163,18 +1168,11 @@ export function parseHostedRuntimeGroupToolRequest(
         maxCodePoints: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
         value: record.context,
       }),
-      ...(record.groupLabel === undefined
-        ? {}
-        : {
-            groupLabel: record.groupLabel === null
-              ? null
-              : parseHostedRuntimeGroupAskBoundedText({
-                  label: `${label} groupLabel`,
-                  maxCodePoints:
-                    HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-                  value: record.groupLabel,
-                }),
-          }),
+      membershipId: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} membershipId`,
+        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+        value: record.membershipId,
+      }),
       originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
         record.originAssistantInputId,
         `${label} originAssistantInputId`,
@@ -4436,6 +4434,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
         "kind",
         "memberCount",
         "membershipId",
+        "participantRoster",
         "permissionsUrl",
         "requestedVaultShareProjectionScopes",
         "role",
@@ -4485,6 +4484,15 @@ function parseHostedRuntimeGroupMembershipSummaries(
       kind: requireString(record.kind, `${label} entry kind`),
       memberCount,
       membershipId,
+      participantRoster: record.participantRoster === undefined
+        ? {
+            status: "unavailable",
+            unavailableReason: "participant_roster_not_reported",
+          }
+        : parseHostedRuntimeGroupParticipantRoster(
+            record.participantRoster,
+            `${label} entry participantRoster`,
+          ),
       permissionsUrl: readNullableString(
         record.permissionsUrl,
         `${label} entry permissionsUrl`,
@@ -4662,6 +4670,142 @@ function legacyProjectionKindsToScopes(
   return projectionKinds.map((projectionKind) =>
     parseHostedVaultShareProjectionScope(projectionKind, `${label} ${projectionKind}`)
   );
+}
+
+function parseHostedRuntimeGroupParticipantRoster(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupParticipantRoster {
+  const record = requireObject(value, label);
+  const status = requireString(record.status, `${label} status`);
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    return {
+      status,
+      unavailableReason: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} unavailableReason`,
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS,
+        value: record.unavailableReason,
+      }),
+    };
+  }
+  if (status !== "available") {
+    throw new TypeError(`${label} status is invalid.`);
+  }
+  assertAllowedObjectKeys(
+    record,
+    new Set(["participantCount", "participantLabels", "status"]),
+    label,
+  );
+  const participantCount = requireNumber(
+    record.participantCount,
+    `${label} participantCount`,
+  );
+  if (
+    !Number.isInteger(participantCount)
+    || participantCount < 1
+    || participantCount > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+  ) {
+    throw new TypeError(
+      `${label} participantCount must be an integer between 1 and ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX}.`,
+    );
+  }
+  const participantValues = requireArray(
+    record.participantLabels,
+    `${label} participantLabels`,
+  );
+  if (
+    participantValues.length > participantCount
+    || participantValues.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+  ) {
+    throw new TypeError(
+      `${label} participantLabels cannot exceed participantCount or ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
+    );
+  }
+  const participantLabels = participantValues.map(
+    (entry, index): HostedRuntimeGroupParticipantLabel => {
+    const entryLabel = `${label} participantLabels[${index}]`;
+    const participantLabel = requireObject(entry, entryLabel);
+    assertAllowedObjectKeys(
+      participantLabel,
+      new Set(["displayName", "emailParticipant", "phoneHint"]),
+      entryLabel,
+    );
+    const presentKeys = ["displayName", "emailParticipant", "phoneHint"]
+      .filter((key) => participantLabel[key] !== undefined);
+    if (presentKeys.length !== 1) {
+      throw new TypeError(`${entryLabel} must contain exactly one safe label.`);
+    }
+    const displayName = participantLabel.displayName === undefined
+      ? undefined
+      : parseHostedRuntimeGroupAskBoundedText({
+          label: `${entryLabel} displayName`,
+          maxCodePoints:
+            HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+          value: participantLabel.displayName,
+        });
+    if (
+      displayName !== undefined
+      && (
+        /\b[^\s@]+@[^\s@]+\.[^\s@]+\b/u.test(displayName)
+        || /(?:^|\D)\+?\d[\d\s().-]{6,}\d(?:\D|$)/u.test(displayName)
+      )
+    ) {
+      throw new TypeError(
+        `${entryLabel} displayName must not contain a full phone number or email address.`,
+      );
+    }
+    const emailParticipant = participantLabel.emailParticipant;
+    if (emailParticipant !== undefined && emailParticipant !== true) {
+      throw new TypeError(`${entryLabel} emailParticipant must be true when present.`);
+    }
+    let phoneHint: { areaCode?: string; lastFour: string } | undefined;
+    if (participantLabel.phoneHint !== undefined) {
+      const phone = requireObject(
+        participantLabel.phoneHint,
+        `${entryLabel} phoneHint`,
+      );
+      assertAllowedObjectKeys(
+        phone,
+        new Set(["areaCode", "lastFour"]),
+        `${entryLabel} phoneHint`,
+      );
+      const areaCode = phone.areaCode;
+      const lastFour = phone.lastFour;
+      if (areaCode !== undefined && (
+        typeof areaCode !== "string" || !/^\d{3}$/u.test(areaCode)
+      )) {
+        throw new TypeError(`${entryLabel} phoneHint areaCode must contain three digits.`);
+      }
+      if (typeof lastFour !== "string" || !/^\d{4}$/u.test(lastFour)) {
+        throw new TypeError(`${entryLabel} phoneHint lastFour must contain four digits.`);
+      }
+      phoneHint = {
+        ...(areaCode === undefined ? {} : { areaCode }),
+        lastFour,
+      };
+    }
+    if (displayName !== undefined) {
+      return { displayName };
+    }
+    if (emailParticipant === true) {
+      return { emailParticipant };
+    }
+    if (!phoneHint) {
+      throw new TypeError(`${entryLabel} is invalid.`);
+    }
+    return { phoneHint };
+  });
+  return {
+    participantCount,
+    participantLabels,
+    status,
+  };
 }
 
 function parseHostedRuntimeGroupAssistantAskFields(
@@ -6319,6 +6463,9 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "runtimeInvocationOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalBoolean(orchestration, "triggeredByWebDirect", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerConstructorStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerConstructorFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerFirstEnsureRuntimeProcessingAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "userRunnerRpcStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeConsentLockAcquiredAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "healthDataAdmissionReadStartedAtEpochMs", orchestrationLabel),
@@ -6461,6 +6608,10 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     );
     const parsedPreProvider = {
       ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToAssistantPhaseMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToForegroundPassMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "foregroundPassToWorkspaceForegroundPassMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "workspaceForegroundPassToAssistantPhaseCallbackMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "assistantPhaseCallbackToAssistantPhaseMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationLaneToAssistantServiceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationReadinessMs", preProviderLabel),
@@ -6487,6 +6638,14 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanLockWaitMs", preProviderLabel),
       ...requireOptionalBoolean(preProvider, "receiptScanPerformed", preProviderLabel),
     };
+    if (
+      inspectHostedRuntimeMailboxToAssistantTimingSubdivision(parsedPreProvider).kind
+        === "invalid"
+    ) {
+      throw new TypeError(
+        `${preProviderLabel} mailbox-to-assistant timing subdivision must be absent or contain all four leaves summing to mailboxImportDoneToAssistantPhaseMs`,
+      );
+    }
     if (
       inspectHostedRuntimeAutomationLaneTimingSubdivision(parsedPreProvider).kind
         === "invalid"
@@ -6550,7 +6709,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(provider, "admissionMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "preProviderSetupMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "providerPlanAndGateMs", providerLabel),
-      ...requireOptionalNonNegativeInteger(provider, "linqEgressGuardMs", providerLabel),
     };
   }
 

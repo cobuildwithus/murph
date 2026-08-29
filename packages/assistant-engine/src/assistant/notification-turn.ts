@@ -184,11 +184,6 @@ const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
 }
-const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-] as const
-
 export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
@@ -292,6 +287,7 @@ export interface AssistantNotificationInput
   instructions: string
   onGroupEmailPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
+  recurringReminderConversation?: boolean | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
   scheduledAutomationScheduleKind?: AutomationScheduleKind | null
@@ -1273,6 +1269,15 @@ async function runAssistantNotificationBeforeCommit(
   input: AssistantNotificationInput,
   context: AssistantNotificationCommitContext,
 ): Promise<void> {
+  const deliveryAccepted =
+    context.deliveryOutcome?.kind === 'sent' ||
+    (input.deliveryDispatchMode === 'queue-only' &&
+      context.deliveryOutcome?.kind === 'queued')
+  if (deliveryAccepted) {
+    await input.beforeCommit?.(context)
+    return
+  }
+
   throwIfAssistantNotificationAborted(input.abortSignal)
   await input.beforeCommit?.(context)
   throwIfAssistantNotificationAborted(input.abortSignal)
@@ -1555,15 +1560,10 @@ function buildAssistantNotificationMessageInput(
   )
   const maintenanceTurn = isAssistantNotificationMaintenanceExactSkip(input)
   const scheduledOccurrence = isAssistantNotificationScheduledOccurrence(input)
-  const firstContactExactText =
-    input.responsePolicy?.kind === 'require_send_exact_text' &&
-    input.firstContactPolicy?.markSeenOnDeliveryAccepted === true
   // One overlay for each non-user turn boundary, so provider-audit policy
   // cannot drift across caller-specific configuration.
   const executionOverlay = maintenanceTurn
     ? {
-        codexConfigOverrides:
-          ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
     : scheduledOccurrence
@@ -1623,13 +1623,7 @@ function buildAssistantNotificationMessageInput(
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
-    // First-contact exact text does not start a provider. Keep its durable
-    // conversation session on the ordinary target so the next attended turn
-    // continues from the welcome that was already delivered.
-    sandbox:
-      scheduledOccurrence || firstContactExactText
-        ? input.sandbox
-        : 'read-only',
+    sandbox: input.sandbox,
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
@@ -1764,6 +1758,9 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
   input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
 }): AssistantProviderResumeStateAction {
+  if (input.input.notificationPromptProfile === 'context-handoff') {
+    return 'clear'
+  }
   if (
     isAssistantNotificationMaintenanceExactSkip(input.input) ||
     isAssistantOnboardingGoalCheckinNotification(input.input) ||

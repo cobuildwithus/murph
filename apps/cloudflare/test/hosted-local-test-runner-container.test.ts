@@ -50,9 +50,6 @@ import {
   createHostedProviderEgressCredential,
 } from "../src/hosted-provider-egress-credential.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
-} from "../src/runner-effects-contract.ts";
-import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -678,42 +675,6 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       contentType: "application/pdf",
       pathname: "/other-upload/attachment_local_1",
     }).then((response) => response.status)).resolves.toBe(404);
-  });
-
-  it("returns the generated-image URL upload compatibility tombstone", async () => {
-    const handler = readHostedLocalTestOutboundByHost()[
-      HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort
-    ];
-    if (!handler) {
-      throw new Error("Generated-image outbound handler is missing.");
-    }
-    const userId = "member_123";
-
-    const response = await handler(
-      new Request(
-        `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort}`
-          + HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
-        {
-          headers: {
-            [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt-1",
-            [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "1",
-            [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "4",
-            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId,
-          },
-          method: "POST",
-        },
-      ),
-      createOutboundEnv({
-        ownsRuntimeWriteFence: true,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(410);
-    await expect(response.json()).resolves.toEqual({
-      error:
-        "Legacy generated-image URL uploads have moved to private provider attachments.",
-    });
   });
 
   it("returns priceable modality usage from the hosted-local OpenAI Images stub", async () => {

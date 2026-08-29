@@ -2733,22 +2733,26 @@ export async function updateVaultSummary(input: {
       updated: result.updated,
     }
   } catch (error) {
-    throw toVaultCliError(error)
+    throw toVaultMetadataCliError(error)
   }
 }
 
 export async function showVaultStats(vault: string) {
-  const readModel = await readExperimentJournalVault(vault)
+  const query = await loadExperimentJournalVaultQueryRuntime()
+  const [readModel, audits] = await Promise.all([
+    readExperimentJournalVault(vault),
+    query.readCanonicalEntityFamilySource(vault, 'audit'),
+  ])
 
   return {
     vault,
     counts: {
-      totalRecords: readModel.entities.length,
+      totalRecords: readModel.entities.length + audits.length,
       experiments: readModel.experiments.length,
       journalEntries: readModel.journalEntries.length,
       events: readModel.events.length,
       samples: readModel.samples.length,
-      audits: readModel.audits.length,
+      audits: audits.length,
       assessments: readModel.assessments.length,
       goals: readModel.goals.length,
       conditions: readModel.conditions.length,

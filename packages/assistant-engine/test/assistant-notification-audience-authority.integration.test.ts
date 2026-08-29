@@ -244,7 +244,9 @@ describe('notification audience authority integration', () => {
     expect(result.deliveryOutcome?.kind).toBe('sent')
     expect(boundaries.executeProvider).toHaveBeenCalledTimes(1)
     const providerInput = boundaries.executeProvider.mock.calls[0]?.[0]
-    expect(providerInput?.route.providerOptions.sandbox).toBe('read-only')
+    expect(providerInput?.route.providerOptions.sandbox).toBe(
+      'danger-full-access',
+    )
     expect(providerInput?.plan.conversationPolicy.audience).toMatchObject({
       effectiveThreadIsDirect: threadIsDirect,
       explicitTarget: target,
@@ -335,7 +337,7 @@ describe('notification audience authority integration', () => {
     expect(boundaries.deliverMessage).not.toHaveBeenCalled()
   })
 
-  it('keeps unrelated exact text with only reviewed expiry on a detached session', async () => {
+  it('keeps unrelated exact text with only reviewed expiry on the canonical session', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'linq-exact-detached-session-',
     )
@@ -372,7 +374,9 @@ describe('notification audience authority integration', () => {
     })
 
     expect(boundaries.executeProvider).not.toHaveBeenCalled()
-    expect(notification.session.providerOptions.sandbox).toBe('read-only')
+    expect(notification.session.providerOptions.sandbox).toBe(
+      'danger-full-access',
+    )
     expect(boundaries.deliverMessage.mock.calls[0]?.[0]).not.toHaveProperty(
       'privateCompletionContinuitySessionId',
     )
@@ -388,8 +392,8 @@ describe('notification audience authority integration', () => {
       },
     })
 
-    expect(attended.created).toBe(true)
-    expect(attended.session.sessionId).not.toBe(notification.session.sessionId)
+    expect(attended.created).toBe(false)
+    expect(attended.session.sessionId).toBe(notification.session.sessionId)
     expect(attended.session.providerOptions.sandbox).toBe('danger-full-access')
   })
 
@@ -497,7 +501,9 @@ describe('notification audience authority integration', () => {
     )
     expect(completion.deliveryOutcome?.kind).toBe('queued')
     expect(completion.session.sessionId).toBe(ordinaryWithResume.sessionId)
-    expect(completion.session.providerOptions.sandbox).toBe('read-only')
+    expect(completion.session.providerOptions.sandbox).toBe(
+      'danger-full-access',
+    )
     expect(boundaries.saveSession).not.toHaveBeenCalled()
     const storedSessions = await listAssistantSessions(vaultRoot)
     expect(storedSessions).toHaveLength(1)

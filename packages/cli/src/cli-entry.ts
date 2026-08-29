@@ -35,10 +35,18 @@ export async function runMurphCliEntrypoint(
   installBrokenPipeHandler()
   installSqliteExperimentalWarningFilter()
   loadCliEnvFiles()
+  let actionCompleted = false
   try {
     await runMurphCliAction(argv, options)
+    actionCompleted = true
   } finally {
-    await stopWarmCodexAppServerForCliExit()
+    try {
+      await stopWarmCodexAppServerForCliExit()
+    } catch (error) {
+      if (actionCompleted) {
+        throw error
+      }
+    }
   }
 }
 
@@ -444,20 +452,24 @@ function formatProjectedCliErrorForHuman(
 function findExplicitOutputFormat(
   argv: readonly string[],
 ): Formatter.Format | null {
+  let format: Formatter.Format | null = null
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]
     if (token === '--json') {
-      return 'json'
+      format = 'json'
+      continue
     }
     if (token === '--format') {
-      return parseOutputFormat(argv[index + 1])
+      format = parseOutputFormat(argv[index + 1]) ?? format
+      index += 1
+      continue
     }
     if (token?.startsWith('--format=')) {
-      return parseOutputFormat(token.slice('--format='.length))
+      format = parseOutputFormat(token.slice('--format='.length)) ?? format
     }
   }
 
-  return null
+  return format
 }
 
 function parseOutputFormat(value: string | undefined): Formatter.Format | null {

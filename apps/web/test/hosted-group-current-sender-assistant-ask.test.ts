@@ -48,6 +48,20 @@ const mocks = vi.hoisted(() => ({
 
 const fakeTx = {
   $executeRaw: vi.fn(async () => 0),
+  hostedMailboxItem: {
+    update: vi.fn(async ({ data, where }: {
+      data: { retentionDisposition: string | null };
+      where: { id: string };
+    }) => {
+      const item = storedItems.get(where.id);
+      if (!item) {
+        throw new Error(`Missing mailbox item: ${where.id}`);
+      }
+      const updated = { ...item, ...data };
+      storedItems.set(where.id, updated);
+      return updated;
+    }),
+  },
   hostedThreadContainer: {
     findUnique: mocks.hostedThreadContainerFindUnique,
   },
@@ -69,6 +83,8 @@ function asPrismaTransactionClient(
 }
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION:
+    "assistant_ask.current_sender_pending",
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx:
     mocks.appendHostedMailboxEnvelopeWithIdentityTx,
@@ -137,6 +153,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE: "launch.health-data",
   readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
 }));
 
@@ -207,10 +224,12 @@ const DIRECT_ROUTE = {
 };
 
 interface StoredMailboxItem {
+  contentRetiredAt: Date | null;
   dedupeKey: string;
   expiresAt: string | null;
   id: string;
   kind: string;
+  retentionDisposition: string | null;
   userId: string;
 }
 
@@ -382,10 +401,12 @@ function storeLegacyRequest(input: {
     occurredAt: NOW.toISOString(),
   });
   storedItems.set(requestId, {
+    contentRetiredAt: null,
     dedupeKey: requestId,
     expiresAt,
     id: requestId,
     kind: wake.kind,
+    retentionDisposition: null,
     userId: wake.userId,
   });
   storedWakes.set(requestId, wake);
@@ -537,10 +558,12 @@ describe("hosted current-sender Assistant Ask authority", () => {
           return { dedupeConflict: true, item: existing };
         }
         const item = {
+          contentRetiredAt: null,
           dedupeKey: itemId,
           expiresAt: input.expiresAt ?? null,
           id: itemId,
           kind: input.envelope.kind,
+          retentionDisposition: null,
           userId: input.envelope.userId,
         } satisfies StoredMailboxItem;
         storedItems.set(itemId, item);

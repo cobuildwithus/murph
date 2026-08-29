@@ -63,7 +63,6 @@ import {
   buildCodexThreadStartParams,
   buildCodexTurnSteerParams,
   buildCodexTurnStartParams,
-  mapCodexAppServerApprovalPolicy,
   mapCodexAppServerSandboxMode,
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
@@ -81,9 +80,6 @@ import type {
   MurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
 import {
-  MURPH_ASSISTANT_STYLE_TOOL,
-  MURPH_GROUP_ROOM_MODEL_TOOL,
-  MURPH_MEMBER_MEMORY_TOOL,
   type AssistantStyleTurnSettingsOverlay,
 } from './assistant-codex/dynamic-tool-catalog.js'
 import type {
@@ -306,7 +302,11 @@ type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
   coldStartReason: CodexAppServerColdStartReason
 }
 
-type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
+type CodexAppServerPreparedTurnInput = Omit<
+  CodexAppServerTurnInput,
+  'approvalPolicy'
+> & {
+  approvalPolicy: 'never'
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
@@ -494,7 +494,7 @@ export interface CodexAppServerTurnInput {
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
-  approvalPolicy?: string
+  approvalPolicy?: string | null
   configOverrides?: readonly string[]
   codexCommand?: string
   codexHome?: string | null
@@ -957,7 +957,6 @@ async function prepareCodexAppServerProcessInput(
     args,
     codexCommand,
     env,
-    workingDirectory,
   })
   return {
     args,
@@ -973,13 +972,11 @@ function buildCodexAppServerLaunchKey(input: {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
-  workingDirectory: string
 }): string {
   return hashCodexRawString(JSON.stringify({
     args: input.args,
     codexCommand: input.codexCommand,
     env: stableCodexProcessEnv(input.env),
-    workingDirectory: input.workingDirectory,
   }))
 }
 
@@ -2472,7 +2469,6 @@ export async function executeCodexManagedAccountOperation(
     args,
     codexCommand,
     env,
-    workingDirectory,
   })
 
   await stopWarmCodexAppServer('managed-account-operation')
@@ -3037,6 +3033,12 @@ function hashCodexRawString(value: string): string {
     .digest('hex')
 }
 
+function buildCodexTurnCorrelation(turnId: string): number {
+  // Keep the opaque provider id out of logs while preserving a safe-integer
+  // join key shared by this turn's timing and action diagnostics.
+  return Number.parseInt(hashCodexRawString(turnId).slice(0, 12), 16)
+}
+
 function readCodexEventMethod(message: CodexRpcMessage): string | null {
   return typeof message.method === 'string' ? message.method : null
 }
@@ -3378,10 +3380,6 @@ async function runCodexAppServerTurnOnProcess(
     ? createCodexActionDiagnosticsReducer()
     : null
   let actionDiagnosticsTraceEmitted = false
-  let requiredFinalResponseFallbackOutcome:
-    | 'analyze-video-failure'
-    | 'analyze-video-success'
-    | null = null
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
   const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
@@ -3495,15 +3493,29 @@ async function runCodexAppServerTurnOnProcess(
     }
     noReplySettlementStarted = true
     for (const deliveryContextOrdinal of listNoReplyFinalActionPatchOrdinals()) {
+      const precedingReplyDeliveryContextOrdinal = Math.max(
+        -1,
+        ...precedingAgentMessageSegments
+          .map((segment) => segment.deliveryContextOrdinal)
+          .filter((ordinal) => ordinal < deliveryContextOrdinal),
+        trailingSteerCandidate !== null &&
+            trailingSteerCandidate.deliveryContextOrdinal < deliveryContextOrdinal
+          ? trailingSteerCandidate.deliveryContextOrdinal
+          : -1,
+      )
       await input.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal,
         // The accepted event settles the cumulative accepted-turn prefix
-        // through this ordinal, so a reaction recorded for any covered
-        // earlier context must keep terminal suppression evidence deferred
-        // until reaction delivery settles.
+        // only when no earlier reply owns part of that prefix. A reaction
+        // recorded for any covered earlier context must keep terminal
+        // suppression evidence deferred until reaction delivery settles.
         messageReactionPending: reactionPatches.some(
           (entry) => entry.deliveryContextOrdinal <= deliveryContextOrdinal,
         ),
+        precedingReplyDeliveryContextOrdinal:
+          precedingReplyDeliveryContextOrdinal < 0
+            ? null
+            : precedingReplyDeliveryContextOrdinal,
       })
       acceptedNoReplyDeliveryContextOrdinals.push(deliveryContextOrdinal)
       await input.onFinishWithoutReplyRecorded?.({
@@ -3626,6 +3638,9 @@ async function runCodexAppServerTurnOnProcess(
                 ...(typeof input.providerRequestOrdinal === 'number'
                   ? { codexTimingProviderRequestOrdinal: input.providerRequestOrdinal }
                   : {}),
+                ...(turnId === null
+                  ? {}
+                  : { codexTimingTurnCorrelation: buildCodexTurnCorrelation(turnId) }),
                 // This ends when the completion trace is emitted after local
                 // dynamic-tool/progress drains. The outer provider-result
                 // boundary is recorded separately by assistant.turn.timing.
@@ -4073,6 +4088,12 @@ async function runCodexAppServerTurnOnProcess(
     },
     deliveryContextOrdinal: number,
   ): void => {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_CONTEXT_ADVANCED',
+        'Response media cannot attach after accepted input advances the response context.',
+      )
+    }
     if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY',
@@ -4088,18 +4109,6 @@ async function runCodexAppServerTurnOnProcess(
         `Assistant responses may attach at most ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} media items.`,
       )
     }
-    if (responseCard !== null && nextMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response media cannot be combined with a response card.',
-      )
-    }
-    if (responseCardTextFallback !== null && nextMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response media cannot be combined with response card text recovery.',
-      )
-    }
     responseMedia = nextMedia
   }
 
@@ -4107,10 +4116,7 @@ async function runCodexAppServerTurnOnProcess(
     card: AssistantResponseCard,
     deliveryContextOrdinal: number,
   ): void => {
-    if (
-      deliveryContextOrdinal !== 0 ||
-      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
-    ) {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
         'A response card cannot attach after accepted input advances the response context.',
@@ -4120,24 +4126,6 @@ async function runCodexAppServerTurnOnProcess(
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_AFTER_NO_REPLY',
         'A response card cannot be attached after finish_without_reply.',
-      )
-    }
-    if (responseCard !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card may be attached to a final response.',
-      )
-    }
-    if (responseCardTextFallback !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card outcome may be attached to a final response.',
-      )
-    }
-    if (responseMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'A response card cannot be combined with response media.',
       )
     }
     if (requiredVaultFileApprovalUrls.length > 0) {
@@ -4153,10 +4141,7 @@ async function runCodexAppServerTurnOnProcess(
     card: CompactTableWorkoutResponseCardV1,
     deliveryContextOrdinal: number,
   ): void => {
-    if (
-      deliveryContextOrdinal !== 0 ||
-      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
-    ) {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
         'Response card text recovery cannot attach after accepted input advances the response context.',
@@ -4166,18 +4151,6 @@ async function runCodexAppServerTurnOnProcess(
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_AFTER_NO_REPLY',
         'Response card text recovery cannot attach after finish_without_reply.',
-      )
-    }
-    if (responseCard !== null || responseCardTextFallback !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card outcome may be attached to a final response.',
-      )
-    }
-    if (responseMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response card text recovery cannot be combined with response media.',
       )
     }
     if (requiredVaultFileApprovalUrls.length > 0) {
@@ -4190,17 +4163,9 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
-    const trailingSteerCandidateOrdinal =
-      trailingSteerCandidate?.deliveryContextOrdinal
     if (
       externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
       hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
-    ) {
-      return false
-    }
-    if (
-      typeof trailingSteerCandidateOrdinal === 'number' &&
-      trailingSteerCandidateOrdinal < deliveryContextOrdinal
     ) {
       return false
     }
@@ -4211,13 +4176,6 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     if (responseCardTextFallback !== null) {
-      return false
-    }
-    if (
-      precedingAgentMessageSegments.some((segment) =>
-        segment.deliveryContextOrdinal < deliveryContextOrdinal
-      )
-    ) {
       return false
     }
     return true
@@ -4785,23 +4743,8 @@ async function runCodexAppServerTurnOnProcess(
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,
           assistantStyleSettingsOverlay,
-          assistantStyleSettingsAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
-              tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
-          ),
-          groupRoomModelAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_GROUP_ROOM_MODEL_TOOL.namespace &&
-              tool.name === MURPH_GROUP_ROOM_MODEL_TOOL.name,
-          ),
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
-          memberMemoryAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_MEMBER_MEMORY_TOOL.namespace &&
-              tool.name === MURPH_MEMBER_MEMORY_TOOL.name,
-          ),
           memberMemoryMaintenanceAuthorized:
             input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
@@ -4886,13 +4829,7 @@ async function runCodexAppServerTurnOnProcess(
           result.requiredFinalResponseFallback,
         )
         if (analyzeVideoFallback !== null) {
-          if (result.rpcResult.success) {
-            requiredFinalResponseFallback = analyzeVideoFallback
-            requiredFinalResponseFallbackOutcome = 'analyze-video-success'
-          } else if (requiredFinalResponseFallbackOutcome !== 'analyze-video-success') {
-            requiredFinalResponseFallback = analyzeVideoFallback
-            requiredFinalResponseFallbackOutcome = 'analyze-video-failure'
-          }
+          requiredFinalResponseFallback = analyzeVideoFallback
         }
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
@@ -4988,7 +4925,10 @@ async function runCodexAppServerTurnOnProcess(
           const text = error instanceof VaultCliError &&
             error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
             ? 'response media unavailable after finish_without_reply'
-            : 'response media limit reached'
+            : error instanceof VaultCliError &&
+                error.code === 'ASSISTANT_RESPONSE_MEDIA_CONTEXT_ADVANCED'
+              ? 'response media unavailable for this final response'
+              : 'response media limit reached'
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -5127,6 +5067,7 @@ async function runCodexAppServerTurnOnProcess(
     method: string | null,
   ): void => {
     acceptJsonEvent(message)
+    const observedAtMs = Date.now()
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
@@ -5147,7 +5088,6 @@ async function runCodexAppServerTurnOnProcess(
       (shouldCaptureTurnStartedNotification ||
         shouldCaptureTurnCompletedNotification)
     ) {
-      const observedAtMs = Date.now()
       if (shouldCaptureTurnStartedNotification) {
         codexTimingTurnStartedNotificationElapsedMs = Math.max(
           0,
@@ -5176,6 +5116,7 @@ async function runCodexAppServerTurnOnProcess(
     actionDiagnostics?.recordEvent({
       activeTurnId: turnId,
       normalizedEvent,
+      observedAtMs,
       rawEvent: message,
     })
     const transportDiagnosticsTraceEvent = input.onTraceEvent
@@ -5309,8 +5250,8 @@ async function runCodexAppServerTurnOnProcess(
         completedFinalAgentMessage = null
         assistantStreams.clear()
         assistantStreamOrder.length = 0
-        responseMedia = []
       }
+      responseMedia = []
       responseCard = null
       responseCardTextFallback = null
       completedUserMessageOrdinal += 1
@@ -5609,6 +5550,9 @@ async function runCodexAppServerTurnOnProcess(
     const rawEvent = actionDiagnostics.buildTraceEvent({
       codexThreadId,
       providerActionCount,
+      providerStartedAtMs: codexProviderRequestStartedAtMs,
+      turnCorrelation:
+        turnId === null ? null : buildCodexTurnCorrelation(turnId),
       turnId,
     })
     if (!rawEvent) {
@@ -6102,8 +6046,10 @@ async function runCodexAppServerTurnOnProcess(
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
       : modelFinalMessage
+  const normalizedSemanticFinalMessage =
+    normalizeNullableString(semanticFinalMessage)
   const requiredSemanticFinalMessage =
-    normalizeNullableString(semanticFinalMessage) ??
+    normalizedSemanticFinalMessage ??
     requiredFinalResponseFallback ??
     semanticFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
@@ -6352,6 +6298,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
+    request.kind === 'analyze-video' ||
     (request.kind === 'group' &&
       request.request.action === 'ask_current_sender' &&
       request.request.mode !== 'new') ||
@@ -6503,7 +6450,7 @@ function assertCodexResumeContextMatches(input: {
     ],
     [
       'approvalPolicy',
-      mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
+      input.input.approvalPolicy,
       asCodexString(result?.approvalPolicy),
     ],
     ['cwd', input.input.workingDirectory, actualCwd ? path.resolve(actualCwd) : null],

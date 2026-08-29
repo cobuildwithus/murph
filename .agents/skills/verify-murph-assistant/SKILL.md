@@ -43,8 +43,8 @@ the acceptance result.
    `--auth provider` only for an explicitly configured supported provider-key
    lane. Never print, copy, or persist auth material.
 
-   If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT`,
-   follow the alternate-home retry contract in
+   If the default subscription home fails before any provider action, follow
+   the alternate-home retry contract in
    `agent-docs/operations/verification-and-runtime.md` § Expensive And
    Stochastic Proof Order. That section owns its authorization, path, retry,
    and stopping rules.
@@ -72,9 +72,10 @@ the acceptance result.
 - Keep live journeys opt-in. Routine CI compiles them but must not call a paid
   provider or depend on a developer's subscription.
 - The local subscription mode uses the normal local Codex home by default and
-  may select one explicit alternate home, but it never copies auth into a
-  temporary home. It is developer-local evidence, not a hermetic CI lane.
-  Provider-key mode keeps its isolated Codex home and minimal secret allowlist.
+  may try each available authenticated local home once under the owning retry
+  contract, but it never copies auth into a temporary home. It is
+  developer-local evidence, not a hermetic CI lane. Provider-key mode keeps its
+  isolated Codex home and minimal secret allowlist.
 - Do not call production databases, delivery providers, device providers, or
   member-facing channels. Inject synthetic ports and fixtures.
 - A stochastic pass is evidence for the tested model and run, not a guarantee

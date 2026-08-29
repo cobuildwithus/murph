@@ -10,6 +10,8 @@ import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
+  buildHostedExecutionStructuredLogRecord,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -924,6 +926,7 @@ describe("executeHostedMailboxEvent", () => {
     });
     const completionBoundaries = {
       codexTimingProviderRequestOrdinal: 2,
+      codexTimingTurnCorrelation: 281_474_976_710_655,
       codexTimingTurnStartAckElapsedMs: 14,
       codexTimingTurnStartedNotificationElapsedMs: 16,
       codexTimingTurnCompletedNotificationElapsedMs: 5_610,
@@ -947,6 +950,7 @@ describe("executeHostedMailboxEvent", () => {
 
     expect(entry?.redacted).toEqual(expect.objectContaining({
       codexTimingProviderRequestOrdinal: 2,
+      codexTimingTurnCorrelation: 281_474_976_710_655,
       codexTimingTurnCompleteElapsedMs: 5_622,
       codexTimingTurnCompletedNotificationElapsedMs: 5_610,
       codexTimingTurnStartAckElapsedMs: 14,
@@ -1019,8 +1023,11 @@ describe("executeHostedMailboxEvent", () => {
           codexActionEventCount: 8,
           codexActionFailedCount: 0,
           codexActionFileChangeCount: 0,
+          codexActionFinalCachedInputUnit: 900,
           codexActionFinalInputUnit: 81000,
           codexActionFinalOutputUnit: 1200,
+          codexActionFinalReasoningOutputUnit: 300,
+          codexActionFinalTotalUnit: 82500,
           codexActionInputUnitMax: 81000,
           codexActionKinds: ["dynamic.tool.call", "command.execution"],
           codexActionLabels: [
@@ -1029,11 +1036,16 @@ describe("executeHostedMailboxEvent", () => {
             "command.execution",
             "/tmp/raw-path",
           ],
+          codexActionMcpToolCallCount: 0,
           codexActionOutputBytesMax: 64,
           codexActionOutputBytesTotal: 128,
           codexActionOutputItemCount: 3,
           codexActionOutputUnitMax: 1200,
+          codexActionProgressUpdateCallCount: 1,
+          codexActionProgressUpdateFirstCallElapsedMs: 2_400,
+          codexActionProgressUpdateSentCount: 1,
           codexActionProviderActionCount: 2,
+          codexActionReasoningOutputUnitMax: 300,
           codexActionSlowDurationMs: [123, 60],
           codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
           codexActionSlowLabels: [
@@ -1042,6 +1054,7 @@ describe("executeHostedMailboxEvent", () => {
             "command.execution",
             "/tmp/raw-slow-path",
           ],
+          codexActionStartedCount: 2,
           codexActionThreadIdPresent: true,
           codexActionToolCallCounts: [1, 1],
           codexActionToolNames: ["dynamic:vault.readSummary", "command.execution"],
@@ -1074,6 +1087,7 @@ describe("executeHostedMailboxEvent", () => {
             },
           ],
           codexActionTotalUnitMax: 82500,
+          codexActionTurnCorrelation: 281_474_976_710_655,
           codexActionUsageSampleCount: 1,
           codexActionTurnIdPresent: true,
           codexActionWebSearchCount: 0,
@@ -1100,6 +1114,9 @@ describe("executeHostedMailboxEvent", () => {
         codexActionKinds: ["dynamic.tool.call", "command.execution"],
         codexActionOutputBytesMax: 64,
         codexActionOutputBytesTotal: 128,
+        codexActionProgressUpdateCallCount: 1,
+        codexActionProgressUpdateFirstCallElapsedMs: 2_400,
+        codexActionProgressUpdateSentCount: 1,
         codexActionProviderActionCount: 2,
         codexActionSlowDurationMs: [123, 60],
         codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
@@ -1128,11 +1145,30 @@ describe("executeHostedMailboxEvent", () => {
           },
         ],
         codexActionTraceType: "action-diagnostics",
+        codexActionTurnCorrelation: 281_474_976_710_655,
         providerTraceKind: "codex.action_diagnostics",
         requestId: "req_123",
         schema: "murph.assistant-codex-action-diagnostics.v1",
       }),
     });
+    const structuredRecord = buildHostedExecutionStructuredLogRecord({
+      component: "runtime.provider",
+      details: entry?.redacted as
+        | HostedExecutionStructuredLogDetails
+        | null
+        | undefined,
+      eventId: wake.eventId,
+      message: "Hosted assistant Codex action diagnostics captured.",
+      phase: "wake.running",
+      time: "2026-04-08T00:00:00.000Z",
+    });
+    expect(Object.keys(structuredRecord.details ?? {})).toHaveLength(32);
+    expect(structuredRecord.details).toEqual(expect.objectContaining({
+      codexActionProgressUpdateCallCount: 1,
+      codexActionProgressUpdateFirstCallElapsedMs: 2_400,
+      codexActionProgressUpdateSentCount: 1,
+      codexActionTurnCorrelation: 281_474_976_710_655,
+    }));
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-namespace-should-drop");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");

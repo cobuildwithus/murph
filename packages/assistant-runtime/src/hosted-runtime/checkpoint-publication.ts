@@ -3,8 +3,8 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import {
+  HOSTED_IDLE_ARCHIVE_TIMEOUT_MS,
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
-  HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS,
 } from "./idle-maintenance-limits.ts";
 import { readHostedRunnerCommitTimeoutMs } from "./timeouts.ts";
 
@@ -30,7 +30,7 @@ export function resolveHostedRuntimeCheckpointPublicationExpectedByMs(input: {
     readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs)
     * HOSTED_RUNTIME_CHECKPOINT_CONTROL_STEPS;
   const maintenanceBudgetMs =
-    HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS
+    HOSTED_IDLE_ARCHIVE_TIMEOUT_MS
     + HOSTED_IDLE_COMPACT_TIMEOUT_MS;
   // Snapshot construction is bounded by the same single-object size limits as
   // direct upload. Reserve one upload window for local construction and one for

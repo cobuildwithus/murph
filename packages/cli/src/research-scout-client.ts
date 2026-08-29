@@ -370,11 +370,24 @@ function createExaResearchScoutRequestError(input: {
       abortedByCaller: input.abortedByCaller === true,
       failureStage: input.failureStage,
       retryable: classification.retryable,
+      stage: exaFailureStage(input.failureStage),
       status: input.status,
       timedOut: input.timedOut === true,
       transportErrorName: input.transportErrorName,
     },
   )
+}
+
+function exaFailureStage(
+  failureStage: string,
+): 'transport' | 'validation' | 'response' {
+  if (failureStage === 'request_shape') {
+    return 'validation'
+  }
+  if (failureStage === 'sdk' || failureStage === 'request') {
+    return 'transport'
+  }
+  return 'response'
 }
 
 function classifyExaResearchScoutFailure(input: {

@@ -161,13 +161,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'automatic-meal-capture',
     name: 'automatic-meal-capture',
     triggerHint:
-      'Use for Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, the automatic 9pm closeout, retained-photo privacy cleanup, and calorie- or macro-aware enrichment of photo-backed device meals without duplicate logging. Always co-load with food-journal on eligible interactive meal turns.',
+      'Use in a private direct conversation when someone asks how to start recurring meal tracking or how Murph can track meals, even when they do not say automatic, and whenever someone explicitly asks about Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, the automatic 9pm closeout, retained-photo privacy cleanup, or calorie- and macro-aware enrichment of photo-backed device meals without duplicate logging. Co-load food-journal on eligible interactive automatic-capture turns.',
   },
   {
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
-      'Use when the user logs meals, asks what connected carbohydrate data recorded, or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
+      'Use when the user asks how to track meals, starts or maintains recurring meal tracking, logs meals, asks what connected carbohydrate data recorded, or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal. For a private direct request about how to start recurring meal tracking or how Murph can track meals, co-load automatic-meal-capture even when the user does not say automatic.',
   },
   {
     slug: 'nutrition-strategy',
@@ -185,7 +185,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'appointment-scheduling',
     name: 'appointment-scheduling',
     triggerHint:
-      'Use for booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
+      'Use for check-in, intake, booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
   },
   {
     slug: 'connected-apps',

@@ -3554,12 +3554,19 @@ text(result.output);
     })
     expect(currentSpeaker.session.sessionId).toBe(resolved.session.sessionId)
     expect(currentSpeaker.session.binding.actorId).toBe(laterParticipantId)
+    const canCommit = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false)
+    const canFinalize = vi.fn(() => true)
 
     const result = await sendAssistantAskContinuationLocal({
       actorId: currentSpeaker.session.binding.actorId,
       answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
       bindingDeliveryTarget: threadId,
-      canCommit: () => true,
+      canCommit,
+      canFinalize,
       channel: 'telegram',
       conversation: conversationRefFromBinding(currentSpeaker.session.binding),
       deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
@@ -3593,6 +3600,8 @@ text(result.output);
       response: 'First reviewed fact.\n---\nSecond reviewed fact.',
       status: 'completed',
     })
+    expect(canCommit).toHaveBeenCalledTimes(3)
+    expect(canFinalize).toHaveBeenCalledOnce()
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
     expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       expect.objectContaining({
@@ -7452,9 +7461,18 @@ if (!tool) {
       {
         functionCall: {
           arguments: {
+            action: 'list_memberships',
+          },
+          name: 'group_membership',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
             action: 'handoff',
             context: 'I finished the race.',
-            groupLabel: 'Running Club',
+            membershipId: 'membership_running_club',
           },
           name: 'group_consult',
           namespace: 'murph',
@@ -7469,6 +7487,32 @@ if (!tool) {
       hostedToolContext: {
         ...createScriptedGroupToolContext(async (request) => {
           groupRequests.push(request)
+          if (request.action === 'list_memberships') {
+            return {
+              action: 'list_memberships',
+              result: {
+                disclosureGrants: [],
+                memberships: [{
+                  displayName: 'Running Club',
+                  grantedVaultShareProjectionScopes: [],
+                  kind: 'friends',
+                  memberCount: 2,
+                  membershipId: 'membership_running_club',
+                  participantRoster: {
+                    participantCount: 3,
+                    participantLabels: [{ displayName: 'Taylor' }, { phoneHint: { areaCode: '415', lastFour: '9876' } }],
+                    status: 'available',
+                  },
+                  permissionsUrl: null,
+                  requestedVaultShareProjectionScopes: [],
+                  role: 'member',
+                  sponsorshipUrl: null,
+                }],
+                status: 'ok',
+                truncated: false,
+              },
+            }
+          }
           return {
             action: 'handoff',
             result: { status: 'accepted', targetLabel: 'Running Club' },
@@ -7491,16 +7535,17 @@ if (!tool) {
       '"name":"group_consult"',
     )
     expect(groupRequests).toEqual([
+      { action: 'list_memberships' },
       expect.objectContaining({
         action: 'handoff',
         context: 'I finished the race.',
-        groupLabel: 'Running Club',
+        membershipId: 'membership_running_club',
       }),
     ])
     expect(result.finalMessage).toBe(
       'I queued that for Running Club; it has not been sent yet.',
     )
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
   it('keeps physical-note recovery deferred until an explicit request discovers it', {
@@ -8347,7 +8392,7 @@ text(JSON.stringify(result));
     },
     {
       expectedFinalMessage:
-        'I could not analyze that video because the provider is rate-limited right now. Please try again later.',
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
       expectedToolOutput:
         'Video analysis was rate-limited; no analysis was retrieved',
       geminiStatus: 429,
@@ -8437,11 +8482,17 @@ text(JSON.stringify(result));
   it.each([
     {
       allowFinishWithoutReply: false,
+      expectedFallback:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      geminiStatus: 429,
       name: 'the model returns empty text',
       providerResponses: [{ text: '' }],
     },
     {
       allowFinishWithoutReply: true,
+      expectedFallback:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      geminiStatus: 429,
       name: 'the model explicitly selects no reply',
       providerResponses: [
         {
@@ -8454,25 +8505,53 @@ text(JSON.stringify(result));
         { text: '' },
       ],
     },
+    {
+      allowFinishWithoutReply: false,
+      expectedFallback:
+        'Video analysis returned no usable answer. Please try again later.',
+      expectedFinalMessage:
+        'I could not analyze that video because no result returned.',
+      expectedProviderMessage:
+        'I could not analyze that video because no result returned.',
+      geminiStatus: 200,
+      name: 'Gemini returns no usable observation and the model claims no result returned',
+      providerResponses: [{
+        text: 'I could not analyze that video because no result returned.',
+      }],
+    },
   ] satisfies readonly {
     allowFinishWithoutReply: boolean
+    expectedFallback: string
+    expectedFinalMessage?: string
+    expectedProviderMessage?: string
+    geminiStatus: 200 | 429
     name: string
     providerResponses: readonly ScriptedResponse[]
   }[])(
     'delivers the trusted video-analysis failure fallback when $name',
     { timeout: TURN_TIMEOUT_MS },
-    async ({ allowFinishWithoutReply, providerResponses }) => {
+    async ({
+      allowFinishWithoutReply,
+      expectedFallback,
+      expectedFinalMessage,
+      expectedProviderMessage,
+      geminiStatus,
+      providerResponses,
+    }) => {
       const scenario = await prepareScriptedTurnScenario()
       const fixture = await prepareScriptedAnalyzeVideoFixture(
         scenario.turnInput.workingDirectory,
       )
-      const expectedFallback =
-        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.'
       const geminiFetch = vi.fn<typeof fetch>(async () =>
-        new Response(JSON.stringify({ error: 'rate limited' }), {
-          headers: { 'content-type': 'application/json' },
-          status: 429,
-        }),
+        geminiStatus === 200
+          ? Response.json({
+              candidates: [],
+              usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+            })
+          : new Response(JSON.stringify({ error: 'rate limited' }), {
+              headers: { 'content-type': 'application/json' },
+              status: geminiStatus,
+            }),
       )
       scenario.stub.queue(
         {
@@ -8509,14 +8588,132 @@ text(JSON.stringify(result));
       expect(geminiFetch).toHaveBeenCalledOnce()
       expect(result.finalAction).toBeNull()
       expect(result.finalActionExplicit).toBe(false)
-      expect(result.finalMessage).toBe(expectedFallback)
-      expect(result.providerAuthoredFinalMessage).toBe('')
-      expect(result.transcriptMessage).toBe(expectedFallback)
+      expect(result.finalMessage).toBe(
+        expectedFinalMessage ?? expectedFallback,
+      )
+      expect(result.providerAuthoredFinalMessage).toBe(
+        expectedProviderMessage ?? '',
+      )
+      expect(result.transcriptMessage).toBe(result.finalMessage)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(
         allowFinishWithoutReply ? 3 : 2,
       )
     },
   )
+
+  it.each([
+    {
+      name: 'completion first',
+      providerMessage:
+        'The push-up reminder is set for tomorrow. Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+    },
+    {
+      name: 'video status first',
+      providerMessage:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later. The push-up reminder is set for tomorrow.',
+    },
+  ])('preserves a completed reminder and exact video status with $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ providerMessage }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const providerReminderRequest = {
+      action: 'save' as const,
+      instructions: 'Send the push-up reminder.',
+      schedule: {
+        kind: 'at' as const,
+        localAt: {
+          date: '2026-08-28',
+          time: '09:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Push-up reminder',
+    }
+    const expectedReminderAt = '2026-08-28T13:00:00.000Z'
+    const reminderRequest: AssistantHostedAutomationToolRequest = {
+      action: 'save',
+      instructions: providerReminderRequest.instructions,
+      schedule: {
+        at: expectedReminderAt,
+        kind: 'at',
+      },
+      title: providerReminderRequest.title,
+    }
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            message_ref: fixture.inputId,
+            question: 'Count the visible push-ups and describe the form.',
+          },
+          name: 'analyze_video',
+          namespace: 'murph',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(providerReminderRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: providerMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      analyzeVideoRuntime: {
+        apiKey: 'scripted-gemini-key',
+        fetchImpl: vi.fn<typeof fetch>(async () =>
+          new Response(JSON.stringify({ error: 'rate limited' }), {
+            headers: { 'content-type': 'application/json' },
+            status: 429,
+          })),
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        analyzeVideoAvailable: true,
+        automationAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: {
+        ...fixture.hostedToolContext,
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-push-up-reminder',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'push-up-reminder',
+              occurrenceProjection: {
+                nextOccurrenceAt: expectedReminderAt,
+                status: 'resolved',
+              },
+              routeBinding: 'current_conversation',
+              schedule: reminderRequest.schedule,
+              status: 'active',
+              updatedAt: '2026-08-27T20:00:00.000Z',
+            }
+          },
+        },
+      },
+      prompt: 'Analyze my push-ups and remind me tomorrow.',
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(automationRequests).toEqual([reminderRequest])
+    expect(result.providerAuthoredFinalMessage).toBe(providerMessage)
+    expect(result.finalMessage).toBe(providerMessage)
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+  })
 
   it.each([
     {
@@ -8538,14 +8735,44 @@ text(JSON.stringify(result));
         { text: '' },
       ],
     },
+    {
+      allowFinishWithoutReply: false,
+      expectedProviderMessage:
+        'I could not retrieve a usable analysis of the video.',
+      expectedFinalMessage:
+        'I could not retrieve a usable analysis of the video.',
+      name: 'the model falsely claims the successful result was unavailable',
+      providerResponses: [{
+        text: 'I could not retrieve a usable analysis of the video.',
+      }],
+    },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalMessage:
+        'This video cannot establish a diagnosis. I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      expectedProviderMessage:
+        'This video cannot establish a diagnosis. I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      name: 'the model preserves health and camera limits around the observation',
+      providerResponses: [{
+        text:
+          'This video cannot establish a diagnosis. I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      }],
+    },
   ] satisfies readonly {
     allowFinishWithoutReply: boolean
+    expectedFinalMessage?: string
+    expectedProviderMessage?: string
     name: string
     providerResponses: readonly ScriptedResponse[]
   }[])(
     'delivers the trusted video-analysis success fallback when $name',
     { timeout: TURN_TIMEOUT_MS },
-    async ({ allowFinishWithoutReply, providerResponses }) => {
+    async ({
+      allowFinishWithoutReply,
+      expectedFinalMessage,
+      expectedProviderMessage,
+      providerResponses,
+    }) => {
       const scenario = await prepareScriptedTurnScenario()
       const fixture = await prepareScriptedAnalyzeVideoFixture(
         scenario.turnInput.workingDirectory,
@@ -8599,25 +8826,29 @@ text(JSON.stringify(result));
       expect(geminiFetch).toHaveBeenCalledOnce()
       expect(result.finalAction).toBeNull()
       expect(result.finalActionExplicit).toBe(false)
-      expect(result.finalMessage).toContain('Eight visible push-ups')
-      expect(result.finalMessage).toContain('Gemini video analysis below')
-      expect(result.providerAuthoredFinalMessage).toBe('')
-      expect(result.transcriptMessage).toContain('Eight visible push-ups')
+      expect(result.finalMessage).toBe(
+        expectedFinalMessage ??
+          'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+      )
+      expect(result.finalMessage).not.toContain('Gemini video observation below')
+      expect(result.providerAuthoredFinalMessage).toBe(
+        expectedProviderMessage ?? '',
+      )
+      expect(result.transcriptMessage).toBe(result.finalMessage)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(
         allowFinishWithoutReply ? 3 : 2,
       )
     },
   )
 
-  it('preserves the first successful video-analysis fallback after a later limit failure', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
-    const fixture = await prepareScriptedAnalyzeVideoFixture(
-      scenario.turnInput.workingDirectory,
-    )
-    const geminiFetch = vi.fn<typeof fetch>(async () =>
-      Response.json({
+  it.each([
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalFallback:
+        'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+      expectedFirstFallback: 'Eight visible push-ups',
+      expectedSecondToolOutput: 'Eight visible push-ups',
+      geminiPayload: {
         candidates: [{
           content: {
             parts: [{
@@ -8628,7 +8859,89 @@ text(JSON.stringify(result));
           },
           finishReason: 'STOP',
         }],
-      }),
+      },
+      name: 'successful observation after an exact repeat',
+      providerResponses: [{ text: '' }],
+      secondQuestion: 'Count the visible push-ups and describe the form.',
+    },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalFallback:
+        'Video analysis returned no usable answer. Please try again later.',
+      expectedFirstFallback: 'Video analysis returned no usable answer',
+      expectedSecondToolOutput: 'Video analysis returned no usable answer',
+      geminiPayload: {
+        candidates: [],
+        usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+      },
+      name: 'failure status after an exact repeat',
+      providerResponses: [{ text: '' }],
+      secondQuestion: 'Count the visible push-ups and describe the form.',
+    },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalFallback:
+        'Eight visible push-ups. The hips rise before the shoulders on the last two reps.\n\nI did not analyze the later video request.',
+      expectedFirstFallback: 'Eight visible push-ups',
+      expectedSecondToolOutput:
+        'later video request was not analyzed because this turn already used its one video-analysis attempt',
+      geminiPayload: {
+        candidates: [{
+          content: {
+            parts: [{
+              text:
+                'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+            }],
+            role: 'model',
+          },
+          finishReason: 'STOP',
+        }],
+      },
+      name: 'successful observation plus a distinct unanalyzed request',
+      providerResponses: [{ text: '' }],
+      secondQuestion: 'Check whether the hips rise before the shoulders.',
+    },
+    {
+      allowFinishWithoutReply: true,
+      expectedFinalFallback:
+        'Video analysis returned no usable answer. Please try again later.\n\nThe later video request was not analyzed.',
+      expectedFirstFallback: 'Video analysis returned no usable answer',
+      expectedSecondToolOutput:
+        'later video request was not analyzed because this turn already used its one video-analysis attempt',
+      geminiPayload: {
+        candidates: [],
+        usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+      },
+      name: 'failure status plus a distinct unanalyzed request after no reply',
+      providerResponses: [
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      ],
+      secondQuestion: 'Check whether the hips rise before the shoulders.',
+    },
+  ])('recovers the first video-analysis $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    allowFinishWithoutReply,
+    expectedFinalFallback,
+    expectedFirstFallback,
+    expectedSecondToolOutput,
+    geminiPayload,
+    providerResponses,
+    secondQuestion,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const geminiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json(geminiPayload),
     )
     const analyzeCall = {
       functionCall: {
@@ -8642,17 +8955,27 @@ text(JSON.stringify(result));
     } satisfies ScriptedResponse
     scenario.stub.queue(
       analyzeCall,
-      analyzeCall,
-      { text: '' },
+      {
+        functionCall: {
+          ...analyzeCall.functionCall,
+          arguments: {
+            ...analyzeCall.functionCall.arguments,
+            question: secondQuestion,
+          },
+        },
+      },
+      ...providerResponses,
     )
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      allowFinishWithoutReply,
       analyzeVideoRuntime: {
         apiKey: 'scripted-gemini-key',
         fetchImpl: geminiFetch,
       },
       dynamicTools: resolveMurphDynamicTools({
+        allowFinishWithoutReply,
         analyzeVideoAvailable: true,
         progressUpdatesAvailable: false,
       }),
@@ -8663,17 +8986,18 @@ text(JSON.stringify(result));
     })
 
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
-      .flatMap((summary) => summary.functionCallOutputs ?? [])
-    expect(toolOutputs).toEqual(expect.arrayContaining([
-      expect.stringContaining('Eight visible push-ups'),
-      expect.stringContaining('Video analysis limit reached for this turn'),
-    ]))
+      .find((summary) => (summary.functionCallOutputs?.length ?? 0) >= 2)
+      ?.functionCallOutputs ?? []
+    expect(toolOutputs).toHaveLength(2)
+    expect(toolOutputs[0]).toContain(expectedFirstFallback)
+    expect(toolOutputs[1]).toContain(expectedSecondToolOutput)
     expect(geminiFetch).toHaveBeenCalledOnce()
-    expect(result.finalMessage).toContain('Eight visible push-ups')
-    expect(result.finalMessage).not.toContain('Video analysis limit reached')
+    expect(result.finalMessage).toBe(expectedFinalFallback)
     expect(result.providerAuthoredFinalMessage).toBe('')
-    expect(result.transcriptMessage).toContain('Eight visible push-ups')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(result.transcriptMessage).toBe(expectedFinalFallback)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(
+      allowFinishWithoutReply ? 4 : 3,
+    )
   })
 
   it('ends an accepted group email effect without another provider request', {

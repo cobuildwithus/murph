@@ -152,7 +152,7 @@ import {
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test("late foreground input during system work runs before idle checkpointing", async () => {
+describe("hosted workspace runtime entrypoint", () => {test("late foreground input outranks a due mailbox owner handoff before idle checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-preempt-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -160,7 +160,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const idleCheckpointDelayMs = 25;
-    const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
+    const systemFollowUpWakeAt = TEST_NOW;
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_foreground_preempt_system",
@@ -302,14 +302,14 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                   return {
                     checkpointReason: "system_mailbox_receipt" as const,
                     nextWakeAt: systemFollowUpWakeAt,
-                    nextWakeReason: "device-sync.reconcile",
+                    nextWakeReason: "mailbox",
                     redactedStatus: systemRedactedStatus,
                   };
                 },
                 afterCheckpointKeepsForegroundImportLoop: true,
                 checkpointReason: "system_mailbox_receipt" as const,
                 nextWakeAt: systemFollowUpWakeAt,
-                nextWakeReason: "device-sync.reconcile",
+                nextWakeReason: "mailbox",
                 progressed: true,
                 redactedStatus: systemRedactedStatus,
               };

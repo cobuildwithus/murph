@@ -1201,9 +1201,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
   it("preserves a pending system-mailbox wake matching a consumed assistant wake after delivery", async () => {
     let now = "2026-05-08T16:00:00.000Z";
     const consumedWakeAt = "2026-05-08T16:00:05.000Z";
-    mocks.resolveHostedSystemMailboxNextWakeAt
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(consumedWakeAt);
+    mocks.resolveHostedSystemMailboxNextWakeAt.mockImplementation(async () =>
+      now === "2026-05-08T16:00:00.000Z" ? null : consumedWakeAt
+    );
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationProgressed: true,
       nextWakeAt: consumedWakeAt,
@@ -1246,7 +1246,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       }),
     }));
 
-    expect(mocks.resolveHostedSystemMailboxNextWakeAt).toHaveBeenCalledTimes(2);
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: consumedWakeAt,
@@ -4097,9 +4096,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
 
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
-      nextWakeAt: staleSystemMailboxWakeAt,
       progressed: true,
     }));
+    expect(result).not.toHaveProperty("nextWakeAt");
 
     const postCheckpoint = await result.afterCheckpoint?.();
 

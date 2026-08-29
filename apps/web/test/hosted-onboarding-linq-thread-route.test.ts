@@ -3682,6 +3682,75 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.readPendingParticipantAddition()).toBe(false);
   });
 
+  it("locks the routed group before its verified participant and reuses both locks", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValueOnce({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_active_participant_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<
+        ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
+      >);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      allowanceSource: "thread_container",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      planResetAt: null,
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
+    });
+
+    await expect(planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-thread-route",
+      },
+    });
+
+    expect(prisma.$executeRaw).toHaveBeenCalled();
+    expect(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).toHaveBeenCalledOnce();
+    const memberLockCallIndex = prisma.$queryRaw.mock.calls.findIndex(
+      ([query]) =>
+        Array.isArray(query)
+        && query.join("").includes('from "hosted_member"')
+        && query.join("").includes("for update"),
+    );
+    expect(memberLockCallIndex).toBeGreaterThanOrEqual(0);
+    const memberLockCallOrder =
+      prisma.$queryRaw.mock.invocationCallOrder[memberLockCallIndex];
+    const chatLockCallOrder = prisma.$executeRaw.mock.invocationCallOrder[0];
+    const demotionCallOrder = vi.mocked(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).mock.invocationCallOrder[0];
+    expect(chatLockCallOrder).toBeLessThan(memberLockCallOrder);
+    expect(memberLockCallOrder).toBeLessThan(demotionCallOrder!);
+    expect(
+      memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+    ).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the newest ten reaction contexts in insertion order", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
@@ -6702,7 +6771,10 @@ describe("Linq group chat auto-provision", () => {
     ]);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      displayName: "Weekend Warriors",
+      handleCount: 0,
       handles: [],
+      handlesComplete: true,
       isGroup: true,
     });
     vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
@@ -6732,6 +6804,15 @@ describe("Linq group chat auto-provision", () => {
         prisma,
       });
       expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+      const createdContainerMemberId = prisma.hostedThreadContainer.create
+        .mock.calls[0]?.[0].data.memberId;
+      expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+        .toHaveBeenCalledWith({
+          containerMemberId: createdContainerMemberId,
+          initialDisplayName: "Weekend Warriors",
+          now: new Date("2026-06-24T12:00:00.000Z"),
+          tx: prisma,
+        });
       expect(
         vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx)
           .mock.invocationCallOrder[0],

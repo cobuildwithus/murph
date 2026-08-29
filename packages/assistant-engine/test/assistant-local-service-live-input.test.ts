@@ -28,6 +28,12 @@ import {
 import {
   readAutomationDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools/automation.ts'
+import {
+  createAnalyzeVideoToolRuntimeFromEnv,
+  executeAnalyzeVideoTool,
+  type AnalyzeVideoToolResult,
+  type AnalyzeVideoTurnState,
+} from '../src/assistant-codex/analyze-video-tool.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -352,6 +358,143 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   assert.equal(initialResult.response, 'final after late input')
   assert.equal(steeredResult.prompt, 'Late follow up')
   assert.equal(steeredResult.response, 'final after late input')
+})
+
+test('sendAssistantMessageLocal delivers the earlier answer once when a pre-cutoff acknowledgement settles late', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: true,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const acknowledgementAdmissionStarted = createDeferred<void>()
+  const releaseAcknowledgementAdmission = createDeferred<void>()
+  const acknowledgementSteered = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+  const noReplyAccepted = vi.fn()
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-thread-acknowledgement',
+      providerTurnId: 'provider-turn-acknowledgement',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+        acknowledgementSteered.resolve()
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await acknowledgementAdmissionStarted.promise
+    providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+    releaseAcknowledgementAdmission.resolve()
+    await acknowledgementSteered.promise
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 1,
+      messageReactionPending: false,
+      precedingReplyDeliveryContextOrdinal: 0,
+    })
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        acceptedNoReplyDeliveryContextOrdinals: [1],
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-acknowledgement',
+        finalAction: { kind: 'none' },
+        precedingResponseSegments: [{
+          deliveryContextOrdinal: 0,
+          media: [],
+          response: 'Earlier useful answer.',
+        }],
+        response: '',
+        responseDeliveryContextOrdinal: 1,
+        route: {
+          routeId: 'route-acknowledgement',
+        },
+        session,
+        transcriptResponse: null,
+      },
+    }
+  })
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+      expect(acceptedInputs).toEqual([
+        expect.objectContaining({
+          promptFallbackText: 'Thanks, that answered it—no need to reply.',
+        }),
+      ])
+      acknowledgementAdmissionStarted.resolve()
+      await releaseAcknowledgementAdmission.promise
+    },
+    deliverResponse: true,
+    onFinishWithoutReplyAccepted: noReplyAccepted,
+    prompt: 'Initial question',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const acknowledgementResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      directness: 'direct',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Thanks, that answered it—no need to reply.',
+    vault: '/vaults/test',
+  })
+
+  const [initialResult, acknowledgementResult] = await Promise.all([
+    initialResultPromise,
+    acknowledgementResultPromise,
+  ])
+
+  expect(liveSteeredPrompts).toEqual([
+    'Thanks, that answered it—no need to reply.',
+  ])
+  expect(initialResult).toMatchObject({
+    response: '',
+    responseDisposition: 'none',
+  })
+  expect(acknowledgementResult).toMatchObject({
+    response: '',
+    responseDisposition: 'none',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  expect(noReplyAccepted).toHaveBeenCalledWith({
+    acceptedInputIds: ['manual-1'],
+    deliveryContextOrdinal: 1,
+    messageReactionPending: false,
+    precedingReplyDeliveryContextOrdinal: 0,
+  })
+  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledOnce()
+  expect(
+    mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments,
+  ).toEqual([
+    expect.objectContaining({
+      response: 'Earlier useful answer.',
+    }),
+  ])
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
 })
 
 test('sendAssistantMessageLocal leaves an acknowledged uncovered steer pending after provider success', async () => {
@@ -3703,6 +3846,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: true,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         kind: 'succeeded',
@@ -3756,6 +3900,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     acceptedInputIds: ['initial', 'manual-1'],
     deliveryContextOrdinal: 1,
     messageReactionPending: true,
+    precedingReplyDeliveryContextOrdinal: null,
   })
   expect(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
@@ -3783,6 +3928,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       abortedSilenceDraftReady.resolve()
       return {
@@ -3838,6 +3984,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       quietSilenceDraftReady.resolve()
       return {
@@ -3923,6 +4070,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         acceptedNoReplyDeliveryContextOrdinals: [0],
@@ -3982,6 +4130,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         acceptedNoReplyDeliveryContextOrdinals: [0],
@@ -4276,6 +4425,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         kind: 'succeeded',
@@ -4339,9 +4489,99 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
   )
 })
 
-test('sendAssistantMessageLocal reconsiders group input live-steered into request zero', async () => {
+test.each([
+  {
+    expectedFirstResponse:
+      'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+    firstSucceeded: true,
+    geminiPayload: {
+      candidates: [{
+        content: {
+          parts: [{
+            text:
+              'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+          }],
+          role: 'model',
+        },
+        finishReason: 'STOP',
+      }],
+    },
+    name: 'successful video result',
+  },
+  {
+    expectedFirstResponse:
+      'Video analysis returned no usable answer. Please try again later.',
+    firstSucceeded: false,
+    geminiPayload: {
+      candidates: [],
+      usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+    },
+    name: 'no-usable-answer video result',
+  },
+])('sendAssistantMessageLocal keeps a $name attributed during distinct group reconsideration', async ({
+  expectedFirstResponse,
+  firstSucceeded,
+  geminiPayload,
+}) => {
   vi.useFakeTimers()
   try {
+    const context = await createTempVaultContext(
+      'assistant-local-service-group-video-reconsideration-',
+    )
+    tempRoots.push(context.parentRoot)
+    const inputId = `ain_${'7'.repeat(32)}`
+    const laterInputId = `ain_${'8'.repeat(32)}`
+    const rawPath = 'raw/inbox/group-video/attachments/01__video.mp4'
+    const laterRawPath =
+      'raw/inbox/group-video-later/attachments/01__video.mp4'
+    const videoBytes = Buffer.from([
+      0x00, 0x00, 0x00, 0x18,
+      0x66, 0x74, 0x79, 0x70,
+      0x69, 0x73, 0x6f, 0x6d,
+      0x00, 0x00, 0x00, 0x00,
+      0x69, 0x73, 0x6f, 0x6d,
+      0x6d, 0x70, 0x34, 0x32,
+    ])
+    await mkdir(path.dirname(path.join(context.vaultRoot, rawPath)), {
+      recursive: true,
+    })
+    await writeFile(path.join(context.vaultRoot, rawPath), videoBytes)
+    const laterVideoBytes = Buffer.from(videoBytes)
+    laterVideoBytes[23] = 0x31
+    await mkdir(path.dirname(path.join(context.vaultRoot, laterRawPath)), {
+      recursive: true,
+    })
+    await writeFile(path.join(context.vaultRoot, laterRawPath), laterVideoBytes)
+    const attachmentAuthorities = [
+      {
+        byteSize: videoBytes.byteLength,
+        messageRef: inputId,
+        mimeType: 'video/mp4',
+        ordinal: 1,
+        rawPath,
+        sha256: createHash('sha256').update(videoBytes).digest('hex'),
+      },
+      {
+        byteSize: laterVideoBytes.byteLength,
+        messageRef: laterInputId,
+        mimeType: 'video/mp4',
+        ordinal: 1,
+        rawPath: laterRawPath,
+        sha256: createHash('sha256').update(laterVideoBytes).digest('hex'),
+      },
+    ]
+    const expectedResponse = `${expectedFirstResponse}\n\n${
+      firstSucceeded
+        ? 'I did not analyze the later video request.'
+        : 'The later video request was not analyzed.'
+    }`
+    const geminiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json(geminiPayload),
+    )
+    const analyzeVideoRuntime = createAnalyzeVideoToolRuntimeFromEnv({
+      env: { GEMINI_API_KEY: 'synthetic-gemini-key' },
+      fetchImpl: geminiFetch,
+    })
     const session = createAssistantSession({
       binding: {
         actorId: null,
@@ -4367,15 +4607,27 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     const reconsiderationAdmissionClosed = createDeferred<void>()
     const reconsiderationFinish = createDeferred<void>()
     const liveSteeredPrompts: string[] = []
-    let requestZeroAnalyzeVideoTurnState: { providerCallCount: number } | null =
-      null
+    let requestZeroAnalyzeVideoTurnState: AnalyzeVideoTurnState | null = null
+    let requestZeroVideoResult: AnalyzeVideoToolResult | null = null
 
     mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
       async (providerInput) => {
-        requestZeroAnalyzeVideoTurnState = providerInput.analyzeVideoTurnState ?? null
-        assert.ok(requestZeroAnalyzeVideoTurnState)
-        expect(requestZeroAnalyzeVideoTurnState.providerCallCount).toBe(0)
-        requestZeroAnalyzeVideoTurnState.providerCallCount += 1
+        const analyzeVideoTurnState = providerInput.analyzeVideoTurnState
+        assert.ok(analyzeVideoTurnState)
+        requestZeroAnalyzeVideoTurnState = analyzeVideoTurnState
+        expect(analyzeVideoTurnState.providerCallCount).toBe(0)
+        requestZeroVideoResult = await executeAnalyzeVideoTool({
+          acceptedInputIds: [inputId],
+          attachmentAuthorities,
+          args: {
+            messageRef: inputId,
+            question: 'Count the visible push-ups and describe the form.',
+          },
+          runtime: analyzeVideoRuntime,
+          turnState: analyzeVideoTurnState,
+          vaultRoot: context.vaultRoot,
+        })
+        expect(analyzeVideoTurnState.providerCallCount).toBe(1)
         await providerInput.onProviderRequestPlanned?.({
           providerAttemptId: 'attempt-live-0',
           codexContinuation: { kind: 'explicit-structured-history' },
@@ -4401,11 +4653,15 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
             onboardingGuidanceInjected: true,
             codexContinuation: { kind: 'explicit-structured-history' },
             codexThreadId: 'provider-thread-group-live-draft',
-            response: 'Provisional answer to only the second request.',
+            response:
+              requestZeroVideoResult.finalResponseFallback
+              ?? requestZeroVideoResult.rpcText,
             responseDeliveryContextOrdinal: 1,
             route: { routeId: 'route-group-live-draft' },
             session,
-            transcriptResponse: 'Provisional answer to only the second request.',
+            transcriptResponse:
+              requestZeroVideoResult.finalResponseFallback
+              ?? requestZeroVideoResult.rpcText,
           },
         }
       },
@@ -4416,6 +4672,30 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
           requestZeroAnalyzeVideoTurnState,
         )
         expect(providerInput.analyzeVideoTurnState?.providerCallCount).toBe(1)
+        const analyzeVideoTurnState = providerInput.analyzeVideoTurnState
+        assert.ok(analyzeVideoTurnState)
+        const repeatedVideoResult = await executeAnalyzeVideoTool({
+          acceptedInputIds: [inputId, laterInputId],
+          attachmentAuthorities,
+          args: {
+            messageRef: laterInputId,
+            question: 'Is there a rabbit in this second video?',
+          },
+          runtime: analyzeVideoRuntime,
+          turnState: analyzeVideoTurnState,
+          vaultRoot: context.vaultRoot,
+        })
+        expect(repeatedVideoResult).toMatchObject({
+          finalResponseFallback: expectedResponse,
+          rpcSuccess: false,
+          rpcText: expect.stringContaining(
+            'belongs only to the earlier request',
+          ),
+        })
+        expect(repeatedVideoResult.rpcText).toContain(
+          requestZeroVideoResult?.rpcText,
+        )
+        expect(geminiFetch).toHaveBeenCalledOnce()
         await providerInput.onProviderRequestPlanned?.({
           providerAttemptId: 'attempt-live-1',
           codexContinuation: { kind: 'explicit-structured-history' },
@@ -4443,11 +4723,15 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
             onboardingGuidanceInjected: true,
             codexContinuation: { kind: 'explicit-structured-history' },
             codexThreadId: 'provider-thread-group-live-draft',
-            response: 'One final answer covering all three requests.',
+            response:
+              repeatedVideoResult.finalResponseFallback
+              ?? repeatedVideoResult.rpcText,
             responseDeliveryContextOrdinal: 1,
             route: { routeId: 'route-group-live-draft' },
             session,
-            transcriptResponse: 'One final answer covering all three requests.',
+            transcriptResponse:
+              repeatedVideoResult.finalResponseFallback
+              ?? repeatedVideoResult.rpcText,
           },
         }
       },
@@ -4462,7 +4746,7 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
         threadId: 'thread-1',
       },
       deliverResponse: true,
-      prompt: 'First group request',
+      prompt: 'Count the push-ups in the first video',
       turnTrigger: 'automation-auto-reply',
       vault: '/vaults/test',
     })
@@ -4478,12 +4762,14 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
         threadId: 'thread-1',
       },
       expectedActiveTurnId: 'turn-1',
-      prompt: 'Second group request',
+      prompt: 'Please also check the second video for a rabbit',
       vault: '/vaults/test',
     })
     assert.equal(followUp.kind, 'queued')
     await vi.waitFor(() => {
-      expect(liveSteeredPrompts).toEqual(['Second group request'])
+      expect(liveSteeredPrompts).toEqual([
+        'Please also check the second video for a rabbit',
+      ])
     })
     providerRelease.resolve()
     await vi.waitFor(() => {
@@ -4499,14 +4785,14 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
         threadId: 'thread-1',
       },
       expectedActiveTurnId: 'turn-1',
-      prompt: 'Third group request',
+      prompt: 'Please answer both video questions',
       vault: '/vaults/test',
     })
     assert.equal(reconsiderationFollowUp.kind, 'queued')
     await vi.waitFor(() => {
       expect(liveSteeredPrompts).toEqual([
-        'Second group request',
-        'Third group request',
+        'Please also check the second video for a rabbit',
+        'Please answer both video questions',
       ])
     })
     reconsiderationRelease.resolve()
@@ -4535,8 +4821,11 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
       reconsiderationFollowUpOutcome,
     ]) {
       expect(outcome).toMatchObject({
-        prompt: 'First group request\n\nSecond group request\n\nThird group request',
-        response: 'One final answer covering all three requests.',
+        prompt:
+          'Count the push-ups in the first video\n\n'
+          + 'Please also check the second video for a rabbit\n\n'
+          + 'Please answer both video questions',
+        response: expectedResponse,
       })
     }
     expect(
@@ -4547,15 +4836,18 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input,
     ).toMatchObject({
-      prompt: 'First group request\n\nSecond group request',
+      prompt:
+        'Count the push-ups in the first video\n\n'
+        + 'Please also check the second video for a rabbit',
       turnContext: expect.stringContaining(
         'The unsent draft neither answers a request nor keeps Murph\'s floor',
       ),
     })
     expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
     expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(
-      'One final answer covering all three requests.',
+      expectedResponse,
     )
+    expect(geminiFetch).toHaveBeenCalledOnce()
     expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
       expect.objectContaining({ segments: [] }),
     )

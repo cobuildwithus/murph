@@ -1950,8 +1950,8 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
                 item: {
                   id: 'dyn-1',
                   type: 'dynamicToolCall',
-                  namespace: 'vault',
-                  tool: 'readSummary',
+                  namespace: 'murph',
+                  tool: 'send_progress_update',
                   status: 'completed',
                   success: true,
                   durationMs: 123,
@@ -2055,6 +2055,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       executeCodexAppServerTurn({
         onTraceEvent,
         prompt: 'diagnose usage',
+        providerRequestOrdinal: 4,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
@@ -2083,6 +2084,9 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       codexActionOutputBytesMax: 59,
       codexActionOutputBytesTotal: 149,
       codexActionOutputItemCount: 6,
+      codexActionProgressUpdateCallCount: 1,
+      codexActionProgressUpdateFirstCallElapsedMs: expect.any(Number),
+      codexActionProgressUpdateSentCount: 1,
       codexActionProviderActionCount: 3,
       codexActionSlowDurationMs: [123, 80, 60],
       codexActionSlowKinds: [
@@ -2097,7 +2101,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
           namespacePresent: true,
           outputBytesMax: 59,
           outputBytesTotal: 59,
-          tool: 'readSummary',
+          tool: 'send_progress_update',
         },
         {
           callCount: 1,
@@ -2115,6 +2119,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         },
       ],
       codexActionUsageSampleCount: 1,
+      codexActionTurnCorrelation: expect.any(Number),
     })
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('/tmp/raw')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('raw output')
@@ -2122,6 +2127,18 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('secretPath')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('thread-diagnostics')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('turn-diagnostics')
+    const completionTimingEvent = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .find((event) => {
+        const rawEvent = asRecord(event.rawEvent)
+        return rawEvent.type === 'assistant.codex.app_server_timing'
+          && rawEvent.codexTimingStage === 'turn-completed'
+      })
+    expect(
+      asRecord(completionTimingEvent?.rawEvent).codexTimingTurnCorrelation,
+    ).toBe(
+      asRecord(diagnosticEvent?.rawEvent).codexActionTurnCorrelation,
+    )
   })
 
   it('emits metadata-only Codex transport diagnostics for stream retry and fallback', async () => {
@@ -2660,37 +2677,45 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: normalizeCodexEvent(staleTokenEvent),
+      observedAtMs: 0,
       rawEvent: staleTokenEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: normalizeCodexEvent(currentTokenEvent),
+      observedAtMs: 0,
       rawEvent: currentTokenEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: rawStartedNormalized,
+      observedAtMs: 10,
       rawEvent: rawStartedEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: rawStartedNormalized,
+      observedAtMs: 10,
       rawEvent: rawStartedEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: rawCompletedNormalized,
+      observedAtMs: 70,
       rawEvent: rawCompletedEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: rawCompletedNormalized,
+      observedAtMs: 70,
       rawEvent: rawCompletedEvent,
     })
 
     const trace = reducer.buildTraceEvent({
       codexThreadId: 'thread-current',
       providerActionCount: 0,
+      providerStartedAtMs: 0,
+      turnCorrelation: 1234,
       turnId: activeTurnId,
     })
     expect(trace).toMatchObject({
@@ -2703,6 +2728,8 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       codexActionOutputBytesTotal: 26,
       codexActionOutputItemCount: 1,
       codexActionOutputUnitMax: 45,
+      codexActionProgressUpdateCallCount: 0,
+      codexActionProgressUpdateSentCount: 0,
       codexActionStartedCount: 1,
       codexActionToolSummaries: [
         {
@@ -2713,11 +2740,110 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         },
       ],
       codexActionTotalUnitMax: 168,
+      codexActionTurnCorrelation: 1234,
       codexActionUsageSampleCount: 1,
     })
     expect(JSON.stringify(trace)).not.toContain('999999')
     expect(JSON.stringify(trace)).not.toContain('raw-action-id')
     expect(JSON.stringify(trace)).not.toContain('raw output')
+  })
+
+  it('records progress call timing and delivery outcomes without progress text', () => {
+    const reducer = createCodexActionDiagnosticsReducer()
+    const activeTurnId = 'turn-progress-diagnostics'
+    const events = [
+      {
+        observedAtMs: 1_200,
+        rawEvent: {
+          method: 'item/started',
+          params: {
+            item: {
+              id: 'progress-sent',
+              namespace: 'murph',
+              status: 'running',
+              tool: 'send_progress_update',
+              type: 'dynamicToolCall',
+            },
+            turnId: activeTurnId,
+          },
+        },
+      },
+      {
+        observedAtMs: 1_250,
+        rawEvent: {
+          method: 'item/completed',
+          params: {
+            item: {
+              contentItems: [{
+                text: 'progress update sent',
+                type: 'inputText',
+              }],
+              durationMs: 50,
+              id: 'progress-sent',
+              namespace: 'murph',
+              status: 'completed',
+              success: true,
+              tool: 'send_progress_update',
+              type: 'dynamicToolCall',
+            },
+            turnId: activeTurnId,
+          },
+        },
+      },
+      {
+        observedAtMs: 1_500,
+        rawEvent: {
+          method: 'item/completed',
+          params: {
+            item: {
+              contentItems: [{
+                text: 'progress update failed during best-effort delivery',
+                type: 'inputText',
+              }],
+              durationMs: 20,
+              id: 'progress-failed',
+              namespace: 'murph',
+              status: 'failed',
+              success: false,
+              tool: 'send_progress_update',
+              type: 'dynamicToolCall',
+            },
+            turnId: activeTurnId,
+          },
+        },
+      },
+    ]
+
+    for (const event of events) {
+      reducer.recordEvent({
+        activeTurnId,
+        normalizedEvent: normalizeCodexEvent(event.rawEvent),
+        observedAtMs: event.observedAtMs,
+        rawEvent: event.rawEvent,
+      })
+    }
+
+    const trace = reducer.buildTraceEvent({
+      codexThreadId: 'thread-progress-diagnostics',
+      providerActionCount: 2,
+      providerStartedAtMs: 1_000,
+      turnCorrelation: 5678,
+      turnId: activeTurnId,
+    })
+
+    expect(trace).toMatchObject({
+      codexActionProgressUpdateCallCount: 2,
+      codexActionProgressUpdateFirstCallElapsedMs: 200,
+      codexActionProgressUpdateSentCount: 1,
+      codexActionTurnCorrelation: 5678,
+    })
+    expect(
+      Number(trace?.codexActionProgressUpdateCallCount)
+      - Number(trace?.codexActionProgressUpdateSentCount),
+    ).toBe(1)
+    expect(JSON.stringify(trace)).not.toContain('best-effort delivery')
+    expect(JSON.stringify(trace)).not.toContain('thread-progress-diagnostics')
+    expect(JSON.stringify(trace)).not.toContain(activeTurnId)
   })
 
   it('builds privacy-safe runtime issues for failed Codex action events', () => {
@@ -2755,7 +2881,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       summary: 'Codex command execution failed during provider turn.',
       details: {
         actionKind: 'command.execution',
-        commandFamily: 'unknown',
+        commandFamily: 'cat',
         commandOrdinal: 1,
         durationMsBucket: '5_30s',
         exitCode: 2,
@@ -2965,22 +3091,32 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       {
         command: 'cat /tmp/private-record',
         exitCode: 126,
+        expectedFamily: 'cat',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 127,
+        expectedFamily: 'cat',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 124,
+        expectedFamily: 'cat',
       },
       {
         command: 'bash -lc "rg private-query /tmp/private-record"',
         exitCode: 1,
+        expectedFamily: 'command',
       },
       {
         command: 'rg private-query /tmp/private-record | head',
         exitCode: 1,
+        expectedFamily: 'command',
+      },
+      {
+        command: 'vault-cli knowledge show page_test --format json',
+        exitCode: 2,
+        expectedFamily: 'vault-cli knowledge',
       },
     ] as const
     const operationalIssues: AssistantRuntimeIssueInput[] = []
@@ -2996,7 +3132,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       const issue = record(event)
       expect(issue).toMatchObject({
         details: {
-          commandFamily: 'unknown',
+          commandFamily: example.expectedFamily,
           commandOrdinal: index + 5,
           exitCode: example.exitCode,
         },
@@ -3095,7 +3231,22 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       },
     })
 
+    const wrappedVaultIssue = recordCommand({
+      command:
+        'bash -lc "vault-cli knowledge show private-page --format json"',
+      exitCode: 2,
+      output: 'private vault output',
+    })
+    expect(wrappedVaultIssue).toMatchObject({
+      details: {
+        commandFamily: 'vault-cli knowledge',
+        commandOrdinal: 7,
+        exitCode: 2,
+      },
+    })
+
     const commandsWithExecutableShellSyntax = [
+      'bash -lc "rg private-query /tmp/private-record"',
       'rg private-query /tmp/private-record | head',
       'rg private-query /tmp/private-record; head /tmp/private-record',
       'rg private-query /tmp/private-record && head /tmp/private-record',
@@ -3114,8 +3265,8 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         const issue = recordCommand({ command, exitCode: 1 })
         expect(issue).toMatchObject({
           details: {
-            commandFamily: 'unknown',
-            commandOrdinal: index + 7,
+            commandFamily: 'command',
+            commandOrdinal: index + 8,
             exitCode: 1,
           },
         })
@@ -3125,6 +3276,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     const encodedIssues = JSON.stringify([
       searchIssue,
+      wrappedVaultIssue,
       ...executableShellIssues,
     ])
     expect(encodedIssues).not.toContain('private(foo|bar)')
@@ -3133,6 +3285,8 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(encodedIssues).not.toContain('/tmp/private-record')
     expect(encodedIssues).not.toContain('private search output')
     expect(encodedIssues).not.toContain('private regex error')
+    expect(encodedIssues).not.toContain('private vault output')
+    expect(encodedIssues).not.toContain('private-page')
     expect(encodedIssues).not.toContain('item-sensitive')
     expect(encodedIssues).not.toContain('turn-current')
   })
@@ -3180,7 +3334,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     })
     expect(boundaryIssue).toMatchObject({
       details: {
-        commandFamily: 'unknown',
+        commandFamily: 'cat',
         commandOrdinal: 10_000,
         exitCode: 127,
       },
@@ -3973,6 +4127,60 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         }),
       }),
     )
+  })
+
+  it('keeps one resident process while thread-scoped config and working directories change', async () => {
+    const codexHome = await createTempDir('assistant-codex-stable-launch-home-')
+    const ordinaryWorkingDirectory = await createTempDir(
+      'assistant-codex-stable-launch-ordinary-',
+    )
+    const restrictedWorkingDirectory = await createTempDir(
+      'assistant-codex-stable-launch-restricted-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+    const env = {
+      CODEX_HOME: codexHome,
+      PATH: '/usr/bin',
+    }
+
+    await executeCodexAppServerTurn({
+      env,
+      prompt: 'ordinary turn before restricted work',
+      workingDirectory: ordinaryWorkingDirectory,
+    })
+    await executeCodexAppServerTurn({
+      env,
+      prompt: 'restricted background turn',
+      threadConfig: {
+        'features.shell_tool': false,
+        'memories.use_memories': false,
+      },
+      workingDirectory: restrictedWorkingDirectory,
+    })
+    await executeCodexAppServerTurn({
+      env,
+      prompt: 'ordinary turn after restricted work',
+      workingDirectory: ordinaryWorkingDirectory,
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    const threadStarts = child.stdin.writes
+      .flatMap((write) => write.split('\n'))
+      .filter(Boolean)
+      .map((line) => asRecord(JSON.parse(line)))
+      .filter((message) => message.method === 'thread/start')
+    expect(threadStarts).toHaveLength(3)
+    expect(threadStarts.map((message) => asRecord(message.params).cwd)).toEqual([
+      path.resolve(ordinaryWorkingDirectory),
+      path.resolve(restrictedWorkingDirectory),
+      path.resolve(ordinaryWorkingDirectory),
+    ])
+    expect(asRecord(threadStarts[1]?.params).config).toEqual({
+      'features.shell_tool': false,
+      'memories.use_memories': false,
+    })
   })
 
   it.each([

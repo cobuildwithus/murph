@@ -335,6 +335,10 @@ const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_NUMBER_KEYS = [
   "codexTransportRetryMax",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
+  "codexActionTurnCorrelation",
+  "codexActionProgressUpdateCallCount",
+  "codexActionProgressUpdateFirstCallElapsedMs",
+  "codexActionProgressUpdateSentCount",
   "codexActionCachedInputUnitMax",
   "codexActionCommandCount",
   "codexActionCompletedCount",
@@ -1052,6 +1056,7 @@ function readHostedAssistantCodexAppServerTimingTrace(
   if (stage === "turn-completed") {
     for (const key of [
       "codexTimingProviderRequestOrdinal",
+      "codexTimingTurnCorrelation",
       "codexTimingTurnStartAckElapsedMs",
       "codexTimingTurnStartedNotificationElapsedMs",
       "codexTimingTurnCompletedNotificationElapsedMs",

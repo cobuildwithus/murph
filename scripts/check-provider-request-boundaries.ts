@@ -442,18 +442,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     reason: "existing-provider-boundary",
     relativePath: "scripts/linq-typing-repro.ts",
   },
-  {
-    ownerName: "resolveJunctionUser",
-    providerIds: ["junction"],
-    reason: "existing-provider-boundary",
-    relativePath: "scripts/native-ios-hosted-e2e-identity.mjs",
-  },
-  {
-    ownerName: "deleteJunctionUser",
-    providerIds: ["junction"],
-    reason: "existing-provider-boundary",
-    relativePath: "scripts/native-ios-hosted-e2e-identity.mjs",
-  },
 ] satisfies readonly ApprovedRawHttpOwner[]);
 
 type ProviderRequestBoundaryViolationKind =

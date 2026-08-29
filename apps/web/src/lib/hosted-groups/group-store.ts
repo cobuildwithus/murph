@@ -236,6 +236,7 @@ export const HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX = 64;
 export async function ensureHostedGroupStructureForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
   containerMemberId: string;
+  initialDisplayName?: string | null;
   now: Date;
 }): Promise<{ created: boolean; groupId: string }> {
   const container = await readLockedHostedGroupThreadContainerTx(
@@ -244,7 +245,9 @@ export async function ensureHostedGroupStructureForThreadContainerTx(input: {
   );
   const ensured = await ensureHostedGroupStructureForLockedThreadContainerTx({
     container,
-    createDisplayName: null,
+    createDisplayName: normalizeHostedGroupDisplayName(
+      input.initialDisplayName ?? null,
+    ),
     createKind: null,
     createRequestedVaultShareProjectionScopes: [],
     now: input.now,
@@ -1125,7 +1128,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
 function parseHostedGroupSharedReadProjectionScopes(
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[],
 ): HostedVaultShareSelectableProjectionScope[] {
-  if (projectionScopes.length < 1 || projectionScopes.length > 3) {
+  if (projectionScopes.length > 3) {
     throw new TypeError("Hosted group shared read projection scope count is invalid.");
   }
   const seen = new Set<string>();

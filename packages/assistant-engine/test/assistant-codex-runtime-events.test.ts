@@ -2087,6 +2087,7 @@ describe('assistant codex event shaping', () => {
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,
         messageReactionPending: true,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       expect(onFinishWithoutReplyRecorded).toHaveBeenCalledOnce()
       expect(onFinishWithoutReplyRecorded).toHaveBeenCalledWith({
@@ -2150,6 +2151,16 @@ describe('assistant codex event shaping', () => {
                   id: 'user-cross-context-initial',
                   type: 'userMessage',
                   content: [{ type: 'text', text: 'react to my earlier message' }],
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-cross-context-initial',
+                  text: 'Earlier answer.',
+                  type: 'agentMessage',
                 },
               },
             }))
@@ -2229,12 +2240,13 @@ describe('assistant codex event shaping', () => {
           },
         ],
       })
-      // The accepted event settles the cumulative prefix through ordinal 1,
-      // so the ordinal-0 reaction must keep suppression evidence deferred.
+      // The earlier reply owns ordinal 0, while its reaction and the later
+      // no-reply suffix both require deferred suppression evidence.
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledOnce()
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
         deliveryContextOrdinal: 1,
         messageReactionPending: true,
+        precedingReplyDeliveryContextOrdinal: 0,
       })
     })
 
@@ -2332,6 +2344,7 @@ describe('assistant codex event shaping', () => {
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       expect(onFinishWithoutReplyRecorded).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,

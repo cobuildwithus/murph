@@ -260,8 +260,8 @@ export function buildFallbackSignupLinkResponse(input: {
   inviteCode: string;
   inviteId: string;
   memberId: string;
-  memberPhone: string;
   occurredAt: string;
+  participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   const joinUrl = buildHostedGroupAwareInviteUrl({
@@ -277,8 +277,8 @@ export function buildFallbackSignupLinkResponse(input: {
         groupJoinOutreachId: input.groupJoinOutreachId ?? null,
         inviteId: input.inviteId,
         memberId: input.memberId,
-        memberPhone: input.memberPhone,
         occurredAt: input.occurredAt,
+        participantContact: input.participantContact,
         sourceEventId: input.sourceEventId,
         template: "invite_signup_fallback",
       }),
@@ -408,24 +408,38 @@ export const HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON: Record<
  * mailbox writes, mirroring the home-redirect plan's shape.
  */
 export function buildInactiveMemberAccessNoticeResponse(input: {
-  chatId: string;
   memberId: string;
   message: string;
-  messageId: string;
   noticeCode: HostedRuntimeAiAccessNoticeCode;
   occurredAt: string;
   sourceEventId: string;
-}): HostedOnboardingLinqDirectPlan {
+} & (
+  | {
+      assignedPhone: string;
+      participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
+    }
+  | {
+      chatId: string;
+      messageId: string;
+    }
+)): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
-        chatId: input.chatId,
+        ...("assignedPhone" in input
+          ? {
+              assignedRecipientPhone: input.assignedPhone,
+              participantContact: input.participantContact,
+            }
+          : {
+              chatId: input.chatId,
+              replyToMessageId: input.messageId,
+            }),
         claimToken: null,
         memberId: input.memberId,
         message: input.message,
         noticeCode: input.noticeCode,
         occurredAt: input.occurredAt,
-        replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "ai_usage_quota",
       }),

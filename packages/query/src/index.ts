@@ -75,6 +75,7 @@ export type {
   VaultEntitiesByFamily,
   VaultReadModel,
 } from "./model.ts";
+export { compareCanonicalEntities } from "./canonical-entities.ts";
 export type {
   CanonicalEntity,
   CanonicalEntityFamily,

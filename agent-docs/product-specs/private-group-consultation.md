@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-08-24
+Last verified: 2026-08-28
 
 ## Decision
 
@@ -56,13 +56,24 @@ with prompt-delimiter characters Unicode-escaped, uses its own committed group
 conversation and tone, and authors one ordinary group message through the
 existing notification and outbox owners.
 
-The model supplies only `context` and an optional visible `groupLabel`. It never
-supplies member, membership, runtime, thread, route, provider, callback,
-idempotency, or mailbox identifiers. Exact replay reuses one global event/item
+After membership and route admission, Web reads only the sharing member's
+existing consented `profile-name.v0` projection. The sanitized group-safe name
+is stored with the existing handoff proof and placed in trusted prompt text
+outside the untrusted context wrapper; when no safe name is available, the
+prompt uses the neutral `a member`. The model never infers attribution from the
+private context or group history.
+
+The model supplies only `context` and the exact opaque `membershipId` from the
+current conversation's `list_memberships` result. It must never expose, invent,
+edit, derive, or accept that id from the member. The model never supplies member,
+runtime, thread, route, provider, callback, idempotency, or mailbox identifiers.
+Exact replay reuses one global event/item
 identity derived from the authenticated member and accepted input, decrypts and
 validates the stored notification, and retains its pinned membership and route
 even if the member's group count changed. Changed context, membership
-generation, target group, or route conflicts instead of redirecting. `accepted`
+generation, or route conflicts instead of redirecting. A repeated call for that
+accepted input reuses the first persisted target without rerunning inventory
+discovery. `accepted`
 proves only that the target mailbox item is durable. The runner exact-replays
 the same hidden request once after a retryable Cloudflare-to-Web failure, so a
 lost successful response re-signals the same mailbox item instead of reporting
@@ -76,15 +87,20 @@ root unwraps are disabled; a root change retries the existing preparation owner
 rather than performing provider work under locks.
 
 The target turn uses the conversation prompt with an isolated output-only
-provider thread. It has no tools, private-vault access, filesystem capability,
-follow-up effect, recursion, or second delivery protocol. Fresh foreground
-conversation input still preempts it, while the exact bounded handoff family may
-run before the normal idle-checkpoint floor so it cannot starve indefinitely.
-The provider returns only one ordinary natural-language group message. The
-runtime validates that required text, constructs the minimal internal send
-lifecycle value, and passes the text through the existing notification and
-outbox owners without requesting or parsing a model-authored notification
-decision.
+provider thread. The attempt keeps the existing native capability restriction
+without adding a legacy sandbox override and has no dynamic tools,
+private-vault access, follow-up effect,
+recursion, or second delivery protocol. It inherits the canonical group's
+ordinary session target instead of persisting a synthetic read-only target.
+After the standalone handoff transcript commits, the runtime clears the stale
+native resume pointer so the next ordinary group turn reconstructs from that
+same durable transcript. Fresh foreground conversation input still preempts the
+handoff, while the exact bounded family may run before the normal idle-checkpoint
+floor so it cannot starve indefinitely. The provider returns only one ordinary
+natural-language group message. The runtime validates that required text,
+constructs the minimal internal send lifecycle value, and passes the text
+through the existing notification and outbox owners without requesting or
+parsing a model-authored notification decision.
 
 Do not add a table, queue, workflow, callback registry, delivery ledger, target
 selector API, or generalized cross-context message type for this action.
@@ -96,14 +112,15 @@ The model-facing action is:
 ```ts
 type AskGroupArguments = {
   action: "ask";
+  membershipId: string;
   question: string;
-  groupLabel?: string;
 };
 ```
 
-The model supplies no member, membership, runtime, mailbox, session, callback,
-or return-route identifier. Web derives all authority and routing from the
-authenticated caller and stored request.
+`membershipId` is a model-visible selector, not model authority. It must be an
+exact opaque value returned by `list_memberships` in the current conversation.
+Web derives and revalidates member, runtime, mailbox, session, callback, and
+return-route authority from the authenticated caller and stored rows.
 
 The target execution surface is:
 
@@ -160,13 +177,14 @@ Happy path:
 If private messages intervene, the answer begins naturally, for example:
 `quick follow-up from 100 Club...`.
 
-- One joined group: choose it automatically.
-- Several groups plus one exact label match: choose it automatically.
-- Ambiguous: ask once using safe visible labels, such as
-  `Which group did you mean: 100 Club or Wednesday Training?`
+- One inventory entry fits the member's ordinary cue: choose its exact id.
+- Several entries plus one clear title, participant-count, or safe-label fit:
+  choose its exact id.
+- Ambiguous: ask once using only safe titles, real chat participant counts, and
+  other safe participant labels.
 - No groups: offer the existing paste-or-screenshot fallback.
-- Duplicate or unnamed labels: fail closed and ask the member to name or
-  rename one; never expose an id.
+- Duplicate or unnamed titles remain usable when count or safe labels distinguish
+  them. Otherwise ask one concise clarification; never expose an id.
 - Cannot answer: say the group context was insufficient.
 - Admission transport failure: return only an allowlisted Prisma `P####`
   diagnostic code when present, HTTP status, and opaque Assistant Ask request
@@ -182,32 +200,36 @@ Nothing is posted, reacted to, or shown as typing in the group.
 
 ## Routing, authority, and disclosure
 
-Web owns target resolution because it owns current `HostedGroupMember` truth.
+Web owns target authority because it owns current `HostedGroupMember` truth.
 
-1. Allow `ask` only from fresh user-authored input in an authenticated personal
-   direct turn, once per accepted input.
-2. With one current membership and no label, select it.
-3. With a label, normalize it and current display labels using Unicode NFC,
-   trimming, whitespace collapse, and locale-independent lowercase matching.
-   Preserve punctuation
-   and emoji; select only one exact match.
-4. Otherwise return a bounded set of visible labels for clarification.
-5. Require a valid current synthetic group-runtime identity before accepting
-   the ask. The runtime may be cold; the committed request wakes it.
+1. Before `ask` or `handoff`, call `list_memberships` and exhaust its cursor
+   chain. While `nextCursor` is nonnull, continue with that exact opaque cursor;
+   choose or ask the final clarification only from the complete inventory.
+2. Every returned entry contains its current opaque `membershipId`, existing
+   title, Murph member count, and a `participantRoster` availability result.
+3. For a complete Linq/iMessage/SMS roster, Web removes the provider line,
+   reports the real human participant count including the requester, and labels
+   other people with only the requester's enabled Contacts names, NANP area code
+   plus last four, international last four, or `email participant`.
+4. Web fetches at most four provider summaries concurrently under one absolute
+   deadline. Missing routes, unsupported providers, incomplete rosters, and
+   provider failures mark only that entry unavailable. Optional Contacts
+   failure falls back to masked hints. An unavailable roster never erases the
+   membership or poisons other entries.
+5. The model resolves the member's ordinary cue naturally against that safe
+   inventory. When several entries fit, it asks one concise clarification using
+   safe titles, counts, and labels. It never exposes ids, guesses, fuzzy-matches
+   hidden data, selects by ownership or newness, or fans out.
+6. `ask` and `handoff` send only the exact chosen `membershipId`. Web locks and
+   revalidates that it belongs to the requester, remains active, targets the
+   expected group runtime, and retains valid route authority before append.
 
-The visible-label bound admits at most 64 labels and limits only one
-clarification response. It is not a membership or availability limit: when the
-member names a group, Web compares that normalized label against every current
-membership so the total number of joined groups can never make a unique exact
-target unavailable. The heavier `list_memberships` summary keeps its separate
-25-row page bound and exposes stable continuation instead of making later
-memberships unreachable.
+The 25-row membership page remains a response and provider-work bound, not a
+product cardinality cap. A later membership stays reachable through the stable
+cursor. There is no participant matcher, title matcher, digest, selector token,
+directory, or second authority state.
 
-Never fuzzy-match, pick the newest or owned group, inspect roster identities to
-guess, or fan out. `list_memberships` is not required, and the model never
-receives a membership id for an ask.
-
-The exact membership row is a hidden generation fence. Web checks it at
+The exact membership row is the generation fence. Web checks it at
 admission, before the target reads context, and before appending the answer.
 Leave and rejoin creates a new generation, so old work cannot cross it. Target
 completion also requires the exact group runtime and its current write fence.
@@ -289,9 +311,15 @@ If private Murph is already replying, the completion waits in the normal
 mailbox and becomes a later follow-up. It never steals foreground authority.
 
 A legacy joined-group `cannot_answer` is not provider-authored private copy. The
-private runtime queues the fixed unavailable-evidence response exactly and does
-not let another model reinterpret it as an expiry, provider error, or execution
-failure.
+private runtime queues one fixed, self-contained earlier-question failure
+response exactly and does not let another model reinterpret it as an expiry,
+provider error, or execution failure. Mailbox completion returns the exact
+newly created outbox intent to the existing foreground-causal collector so a
+later user message cannot overtake that completion before dispatch.
+Foreground work may preempt until that intent is queued. After queueing, the
+outbox owns delivery: transcript/session finalization ignores a new foreground
+yield while still rechecking expiry. A retry therefore cannot reuse an
+abandoned deduplicated intent and consume the completion without dispatch.
 
 After Web durably appends either side of the joined-group request/reply pair, it
 signals the existing Temporal runtime workflow. Only after that signal is
@@ -518,6 +546,12 @@ requests drain or expire for ten minutes, then rolls back consumers.
     joined-group shapes and never overtakes older personal input.
 15. Question and answer content stays out of normalized rows, logs, and
     analytics.
+16. A private-to-group handoff attributes a consenting member by the existing
+    group-safe profile projection when available, commits into the canonical
+    group transcript, and leaves the next ordinary group turn able to use it.
+17. A composed synthetic journey covers Web handoff admission, wake
+    serialization/parsing, runtime dispatch, canonical transcript import, and
+    a cold follow-up without using a real member identity or provider.
 
 The production-faithful concurrency test pauses an active group provider turn,
 imports an ask, starts the child, delivers a new group message, and proves both

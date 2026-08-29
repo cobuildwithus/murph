@@ -217,8 +217,39 @@ test.sequential('built CLI reports invalid stored events as read failures withou
     assert.equal(rejectedError.code, 'contract_invalid')
     assert.equal(rejectedError.retryable, false)
     assert.equal(rejectedError.stage, 'read')
+    assert.match(rejectedError.hint ?? '', /vault validate/u)
     assertDoesNotEcho(rejected, [privateStoredTitle, eventId, ledgerPath, payloadPath, vaultRoot])
     assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesBeforeRejectedImport)
+
+    const corruptReadCommands = [
+      ['event', 'show', eventId, '--vault', vaultRoot],
+      ['event', 'edit', eventId, '--note', 'Attempted edit', '--vault', vaultRoot],
+      ['event', 'delete', eventId, '--vault', vaultRoot],
+    ]
+    for (const command of corruptReadCommands) {
+      const result = await runCli(command)
+      const error = requireError(result)
+      assert.equal(error.code, 'contract_invalid')
+      assert.equal(error.retryable, false)
+      assert.equal(error.stage, 'read')
+      assert.match(error.hint ?? '', /vault validate/u)
+      assertDoesNotEcho(result, [privateStoredTitle, eventId, ledgerPath, vaultRoot])
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesBeforeRejectedImport)
+    }
+
+    const privateMalformedLine = 'private-malformed-event-ledger-line'
+    await writeFile(ledgerPath, `${privateMalformedLine}\n`, 'utf8')
+    const malformedSnapshot = await snapshotVaultFiles(vaultRoot)
+    for (const command of corruptReadCommands) {
+      const result = await runCli(command)
+      const error = requireError(result)
+      assert.equal(error.code, 'contract_invalid')
+      assert.equal(error.retryable, false)
+      assert.equal(error.stage, 'read')
+      assert.match(error.hint ?? '', /vault validate/u)
+      assertDoesNotEcho(result, [privateMalformedLine, eventId, ledgerPath, vaultRoot])
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), malformedSnapshot)
+    }
 
     await writeFile(ledgerPath, healthyLedger, 'utf8')
     const recovered = await runCli<{ created: boolean, eventId: string }>(importArgs)
@@ -226,6 +257,75 @@ test.sequential('built CLI reports invalid stored events as read failures withou
     assert.equal(recovered.ok, true, JSON.stringify(recovered))
     assert.equal(requireData(recovered).created, false)
     assert.equal(requireData(recovered).eventId, eventId)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('built CLI rejects finite-filter typos and invalid date ranges', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-filter-recovery-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+    const cases = [
+      ['event', 'list', '--kind', 'not-a-kind'],
+      ['samples', 'list', '--stream', 'not-a-stream'],
+      ['samples', 'summarize', '--stream', 'not-a-stream'],
+      ['audit', 'list', '--status', 'warning'],
+      ['regimen', 'list', '--status', 'not-a-status'],
+      ['protocol', 'list', '--status', 'not-a-status'],
+      ['supplement', 'list', '--status', 'not-a-status'],
+      ['event', 'list', '--from', '2026-02-30'],
+      ['event', 'list', '--from', '2026-03-02', '--to', '2026-03-01'],
+      [
+        'samples',
+        'summarize',
+        '--stream',
+        'spo2',
+        '--from',
+        '2026-03-02T00:00:00.000Z',
+        '--to',
+        '2026-03-01T00:00:00.000Z',
+      ],
+    ]
+
+    for (const args of cases) {
+      const result = await runCli([...args, '--vault', vaultRoot])
+      const error = requireError(result)
+      assert.equal((error.fieldErrors?.length ?? 0) > 0, true)
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('built CLI gives vault update metadata repair guidance without writing', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-update-recovery-'))
+  const metadataPath = path.join(vaultRoot, 'vault.json')
+  const privateMetadataValue = 'private-invalid-vault-metadata'
+
+  try {
+    await initializeVault({ vaultRoot })
+    await writeFile(metadataPath, JSON.stringify({
+      formatVersion: privateMetadataValue,
+    }), 'utf8')
+    const before = await snapshotVaultFiles(vaultRoot)
+    const result = await runCli([
+      'vault',
+      'update',
+      '--title',
+      'Recovered title',
+      '--vault',
+      vaultRoot,
+    ])
+    const error = requireError(result)
+
+    assert.equal(error.code, 'invalid_metadata')
+    assert.equal(error.retryable, false)
+    assert.equal(error.stage, 'validation')
+    assert.match(error.message ?? '', /repair or restore/u)
+    assertDoesNotEcho(result, [privateMetadataValue, metadataPath, vaultRoot])
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

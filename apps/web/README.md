@@ -777,7 +777,12 @@ preserve representative choice and canonical diversity across the established
 5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
 within the admitted set; it is intentionally not an exhaustive whole-catalog
 ranking. Exact IDs and UPCs continue to use direct lookup
-paths.
+paths. On `foods_api_failed` failures from private food lookup, including exact
+ID/UPC dispatch and ranked search, the existing safe structured log adds only
+the closed `failureStage` value `search_rows` or `contaminant_summary`;
+PostgreSQL error codes remain in the existing safe error fields, and SQL/query
+text, search values, product data, rows, identifiers, raw error messages, and
+stacks remain excluded. No success event is added.
 
 For an existing labels database, run
 `psql -f sql/foods/private-search-indexes.sql` with the labels schema owner to
@@ -1463,9 +1468,14 @@ pnpm --dir apps/web release:production:contract-migrate
 ```
 
 Use `prisma:validate` for focused schema verification. It checks the schema
-without rewriting it. Run `prisma format` only when a repository-wide schema
-layout change is intentional, and review that mechanical diff separately from
-the migration change.
+without rewriting it. The hosted-Web Prisma config rejects `prisma format` by
+default because Prisma formats the entire schema rather than one edited model.
+For an intentional repository-wide schema layout change, opt in explicitly and
+review that mechanical diff separately from the migration change:
+
+```bash
+MURPH_ALLOW_FULL_PRISMA_FORMAT=1 pnpm --dir apps/web exec prisma format
+```
 
 The checked-in Vercel build command runs the guarded production migration
 wrapper before building. That wrapper generates the Prisma client because the

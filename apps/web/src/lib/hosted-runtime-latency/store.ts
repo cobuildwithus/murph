@@ -385,9 +385,6 @@ export async function recordHostedIngressProviderStarted(input: {
   if (assistantInputIds.length === 0) {
     return { matchedCount: 0, recorded: false, unmatchedCount: 0 };
   }
-  if (isLegacyLinqEgressGuardOnlyProviderStart(input.phaseBreakdown)) {
-    return { matchedCount: 0, recorded: false, unmatchedCount: 0 };
-  }
 
   const phasePatch = readHostedIngressLatencyProviderPhasePatch(input.phaseBreakdown);
   const requestedIds = buildHostedIngressLatencyRequestedIdsSql(assistantInputIds);
@@ -2551,21 +2548,6 @@ async function updateHostedIngressAssistantInputStagedLocked(
 
     return true;
   });
-}
-
-function isLegacyLinqEgressGuardOnlyProviderStart(
-  phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
-): boolean {
-  // Rolling deploys can still deliver the old post-generation Linq guard
-  // event. Reject that guard-only shape so it cannot masquerade as turn start.
-  const provider = phaseBreakdown?.provider;
-  if (!provider || provider.linqEgressGuardMs === undefined) {
-    return false;
-  }
-
-  return Object.entries(provider).every(
-    ([key, value]) => key === "linqEgressGuardMs" || value === undefined,
-  );
 }
 
 function normalizeDate(value: Date | string | null | undefined, label: string): Date {

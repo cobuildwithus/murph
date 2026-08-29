@@ -1,12 +1,13 @@
 # iOS address-book advisory names
 
-Last verified: 2026-07-30
+Last verified: 2026-08-28
 
 ## Product boundary
 
 The iOS companion may offer one optional Contacts step after Apple Health.
 Sharing lets Murph use a familiar address-book display name for a
-phone participant in a group owned by the sharing member, whether or not that
+phone participant in a group owned by the sharing member and lets the sharing
+member describe one of their joined groups from private Murph, whether or not that
 participant already uses Murph.
 Skipping makes no permission request and performs no backend mutation.
 
@@ -103,7 +104,7 @@ provider handle with a decrypted label. KMS IAM, provider/session retention,
 and application compromise remain security boundaries and must not be
 described otherwise.
 
-There are three route-authorized consumers. The primary consumer is the existing
+There are four route-authorized consumers. The primary consumer is the existing
 `read_chat_participants` operation:
 
 1. Read and reconcile the truthful live Linq iMessage or SMS group roster.
@@ -123,7 +124,7 @@ replacement: the route-authorized live group read is the access boundary for an
 already-enabled projection, regardless of the owner's current personal or
 sponsored billing access.
 
-Across all three model-facing consumers, Murph is explicitly told to trust a
+Across all four model-facing consumers, Murph is explicitly told to trust a
 label as the participant's familiar conversational name, use it naturally when
 helpful, and avoid unsolicited uncertainty or provenance disclaimers. If
 someone asks how Murph knows one of these address-book names, Murph truthfully
@@ -170,6 +171,21 @@ event wakes Murph or sends anything.
 For a registered participant, the label remains only the owner's private
 presentation hint: it does not replace or modify that participant's Murph
 identity, and `hasOwnMurph` remains a separate durable-activation fact.
+
+The fourth consumer is private joined-group inventory for Linq iMessage/SMS
+groups. Its authority is the authenticated requester's current membership, not
+group ownership. Web may read only that requester's enabled projection and uses
+familiar labels solely as a presentation overlay on complete current provider
+rosters. It never falls back to the group owner's or another member's Contacts.
+Each membership receives its own available or unavailable roster result;
+provider handles remain transient. When the requester has no matching shared
+label, the model sees only the real human participant count, NANP area code plus
+last four, international last four, or a generic email-participant marker.
+Incomplete rosters, missing routes, unsupported providers, or provider failure
+make only that entry unavailable. Lookup or decryption failure falls back to
+masked hints. These labels may help natural clarification but never select a
+route or authorize an effect; Ask and handoff authority comes only from Web's
+locked revalidation of an exact current membership id.
 
 The roster read is shared by route-authorized iMessage and SMS groups. Its Web
 owner also runs the existing best-effort Linq participant reconciliation. That

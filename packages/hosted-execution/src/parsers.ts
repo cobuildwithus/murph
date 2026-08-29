@@ -22,6 +22,7 @@ import {
 
 import {
   HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES,
+  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES,
   HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
@@ -1877,7 +1878,7 @@ function parseHostedExecutionGroupContextHandoffNotification(
   const record = requireObject(value, label);
   assertExactHostedExecutionKeys(
     record,
-    ["membershipId", "originAssistantInputId"],
+    ["membershipId", "originAssistantInputId", "sourceDisplayName"],
     label,
   );
   const membershipId = requireString(
@@ -1897,7 +1898,34 @@ function parseHostedExecutionGroupContextHandoffNotification(
       record.originAssistantInputId,
       `${label}.originAssistantInputId`,
     ),
+    ...(record.sourceDisplayName === undefined
+      ? {}
+      : {
+          sourceDisplayName: record.sourceDisplayName === null
+            ? null
+            : parseHostedExecutionGroupContextHandoffDisplayName(
+                record.sourceDisplayName,
+                `${label}.sourceDisplayName`,
+              ),
+        }),
   };
+}
+
+function parseHostedExecutionGroupContextHandoffDisplayName(
+  value: unknown,
+  label: string,
+): string {
+  const displayName = requireString(value, label);
+  if (
+    displayName.trim() !== displayName
+    || !displayName
+    || [...displayName].length
+      > HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS
+    || /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/u.test(displayName)
+  ) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return displayName;
 }
 
 function parseHostedExecutionPrivateAssistantAskCompletionNotification(

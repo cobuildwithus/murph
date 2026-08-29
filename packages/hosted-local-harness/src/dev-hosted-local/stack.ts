@@ -735,6 +735,16 @@ export async function startHostedLocalDevStack(input: {
       await cleanupHostedRunnerContainers({
         cwd: repoRoot,
         env: workerProcessEnv ?? workerRuntimeEnv,
+        ignoreErrors: true,
+        scope: runnerCleanupScope,
+        stoppedOnly: true,
+      });
+      await cleanupHostedRunnerImages({
+        cwd: repoRoot,
+        env: workerProcessEnv ?? workerRuntimeEnv,
+        force: false,
+        ignoreErrors: true,
+        preserveCurrentBuild: true,
         scope: runnerCleanupScope,
       });
       await cleanupHostedRunnerContainerLocalState({

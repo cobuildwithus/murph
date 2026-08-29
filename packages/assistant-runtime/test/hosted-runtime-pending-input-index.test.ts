@@ -219,6 +219,54 @@ describe("hosted pending assistant input index", () => {
     ]);
   });
 
+  it("keeps indexed self-authored Linq input non-runnable and unhandled without terminal evidence", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const selfAuthored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorIsSelf: true,
+        dedupeKey: "dedupe_self_authored_partial",
+        eventId: "evt_self_authored_partial",
+        itemId: "item_self_authored_partial",
+        laneSeq: "1",
+        messageId: "msg_self_authored_partial",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "self-authored partial input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: selfAuthored.inputId,
+      vaultRoot,
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: selfAuthored.inputId,
+      mailboxItemId: "item_self_authored_partial",
+      vault: vaultRoot,
+    });
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([]);
+    await expect(compactHostedConversationMailboxHandledItemSelection({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual({
+      frontierSelected: false,
+      itemIds: [],
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([selfAuthored.inputId]);
+  });
+
   it("keeps the legacy value shape while appending before v2 compaction", async () => {
     const vaultRoot = await createTempVault();
     const inputId = "ain_00000000000000000000000000000001";
@@ -2212,6 +2260,7 @@ async function writeTerminalEvidence(input: {
 }
 
 function createAssistantInputEvent(input: {
+  actorIsSelf?: boolean;
   dedupeKey: string;
   eventId: string;
   itemId: string;
@@ -2249,7 +2298,7 @@ function createAssistantInputEvent(input: {
     conversation: {
       accountId: "acct_1",
       actorId: "actor_1",
-      actorIsSelf: false,
+      actorIsSelf: input.actorIsSelf ?? false,
       source,
       threadId: "thread_1",
       threadIsDirect: true,

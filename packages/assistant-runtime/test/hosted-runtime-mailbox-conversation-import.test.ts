@@ -38,6 +38,9 @@ import {
   updateAssistantInputAttachmentEvidence,
 } from "@murphai/assistant-engine";
 import {
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   reconcileManagedAssistantAutoReplyChannelsLocal,
   readAssistantAutomationState,
   saveAssistantAutomationState,
@@ -60,10 +63,10 @@ import {
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
 import {
+  compactHostedConversationMailboxHandledItemSelection,
   compactHostedPendingAssistantInputIds,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
-  suppressHostedPendingLinqInputAnsweredByExternalReply,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   HostedRawEmailMessageMissingError,
@@ -947,42 +950,87 @@ describe("hosted mailbox conversation import adapter", () => {
         phoneLookupKey: "redacted-self-sentinel",
       },
     });
+    const item = createResolvedConversationMailboxItem({
+      dedupeKey: decodedWake.eventId,
+      id: "mailbox_item_self_input",
+    });
     let activityCallbackCount = 0;
+    let activeTurnNotificationCount = 0;
     let preparationCallbackCount = 0;
-
-    const outcome = await importHostedConversationMailboxItem({
-      decodePayload: createDecodedPayloadDecoder(decodedWake),
-      async importConversationWake() {
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async () => {
+        activeTurnNotificationCount += 1;
         return {
-          captureId: null,
-          metrics: {
-            nextWakeAt: null,
-            parserProcessed: 0,
-          },
+          kind: "no-new-input",
         };
       },
-      async prepareWakeContext() {},
-      item: createResolvedConversationMailboxItem({
-        dedupeKey: decodedWake.eventId,
-        id: "mailbox_item_self_input",
-      }),
-      onConversationActivityObserved() {
-        activityCallbackCount += 1;
-      },
-      onConversationInputStaged() {
-        preparationCallbackCount += 1;
-      },
-      runtime: createRuntime(),
-      vaultRoot,
+      conversationKeys: [createLinqConversationLookupKey({
+        item,
+        wake: decodedWake,
+      })],
+      sessionId: "session_self_input",
+      turnId: "turn_self_input",
+      vault: vaultRoot,
     });
+
+    const outcome = await (async () => {
+      try {
+        return await importHostedConversationMailboxItem({
+          decodePayload: createDecodedPayloadDecoder(decodedWake),
+          async importConversationWake() {
+            return {
+              captureId: null,
+              metrics: {
+                nextWakeAt: null,
+                parserProcessed: 0,
+              },
+            };
+          },
+          async prepareWakeContext() {},
+          item,
+          onConversationActivityObserved() {
+            activityCallbackCount += 1;
+          },
+          onConversationInputStaged() {
+            preparationCallbackCount += 1;
+          },
+          runtime: createRuntime(),
+          vaultRoot,
+        });
+      } finally {
+        controller.close();
+      }
+    })();
 
     assert.equal(outcome.status, "imported");
     assert.equal(activityCallbackCount, 1);
+    assert.equal(activeTurnNotificationCount, 0);
     assert.equal(preparationCallbackCount, 0);
-    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+    const events = (await listAssistantInputEvents({ vault: vaultRoot })).events;
+    assert.equal(events.length, 1);
+    const selfAuthoredEvent = events[0]!;
+    assert.equal(selfAuthoredEvent.conversation?.actorIsSelf, true);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      selfAuthoredEvent.inputId,
+    ]);
+    assert.deepEqual(await compactHostedPendingAssistantInputIds({ vaultRoot }), []);
+    assert.deepEqual(
+      (await selectHostedAssistantInputIds({
+        mode: "background",
+        vaultRoot,
+      })).inputIds,
+      [],
+    );
+    assert.equal(
+      (await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+        vaultRoot,
+        selfAuthoredEvent.inputId,
+      ))?.terminal.kind,
+      "suppressed",
+    );
   });
 
-  test("treats an imported self-authored Linq reply as terminal proof for the exact pending input", async () => {
+  test("makes an imported self-authored Linq reply terminal at the contiguous mailbox frontier", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-self-reply-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -1001,6 +1049,11 @@ describe("hosted mailbox conversation import adapter", () => {
         phoneLookupKey: "redacted-contact-sentinel",
       },
     });
+    const inboundItem = createResolvedConversationMailboxItem({
+      dedupeKey: inboundWake.eventId,
+      id: "mailbox_item_self_reply_inbound",
+      laneSeq: "1",
+    });
     const inbound = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(inboundWake),
       async importConversationWake() {
@@ -1010,11 +1063,7 @@ describe("hosted mailbox conversation import adapter", () => {
         };
       },
       async prepareWakeContext() {},
-      item: createResolvedConversationMailboxItem({
-        dedupeKey: inboundWake.eventId,
-        id: "mailbox_item_self_reply_inbound",
-        laneSeq: "1",
-      }),
+      item: inboundItem,
       runtime: createRuntime(),
       vaultRoot,
     });
@@ -1046,7 +1095,9 @@ describe("hosted mailbox conversation import adapter", () => {
       id: "mailbox_item_self_reply_outbound",
       laneSeq: "2",
     });
-    const importOutbound = async () => await importHostedConversationMailboxItem({
+    const importOutbound = async (
+      item: HostedMailboxResolvedImportItem = outboundItem,
+    ) => await importHostedConversationMailboxItem({
       assistantTarget: TEST_ASSISTANT_TARGET,
       decodePayload: createDecodedPayloadDecoder(outboundWake),
       async importConversationWake() {
@@ -1056,7 +1107,7 @@ describe("hosted mailbox conversation import adapter", () => {
         };
       },
       async prepareWakeContext() {},
-      item: outboundItem,
+      item,
       runtime: createRuntime(),
       vaultRoot,
     });
@@ -1064,11 +1115,49 @@ describe("hosted mailbox conversation import adapter", () => {
 
     assert.equal(outbound.status, "imported");
     assert.equal(outbound.status === "imported" && "assistantInputId" in outbound, false);
-    assert.deepEqual(await compactHostedPendingAssistantInputIds({ vaultRoot }), []);
+    const importedEvents = (await listAssistantInputEvents({ vault: vaultRoot })).events;
+    assert.equal(importedEvents.length, 2);
+    const assistantReplyEvent = importedEvents.find(
+      (event) => event.conversation?.actorIsSelf === true,
+    );
+    if (!assistantReplyEvent) {
+      throw new Error("Expected the imported self-authored reply event.");
+    }
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
       inbound.assistantInputId,
+      assistantReplyEvent.inputId,
     ]);
-    assert.equal((await listAssistantInputEvents({ vault: vaultRoot })).events.length, 2);
+    assert.deepEqual(await compactHostedPendingAssistantInputIds({ vaultRoot }), []);
+    assert.deepEqual(
+      (await selectHostedAssistantInputIds({
+        mode: "background",
+        vaultRoot,
+      })).inputIds,
+      [],
+    );
+    assert.equal(
+      (await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+        vaultRoot,
+        assistantReplyEvent.inputId,
+      ))?.terminal.kind,
+      "suppressed",
+    );
+
+    const handledAtFrontier =
+      await compactHostedConversationMailboxHandledItemSelection({
+        consumedThroughSeq: "0",
+        vaultRoot,
+      });
+    assert.equal(handledAtFrontier.frontierSelected, true);
+    assert.equal(handledAtFrontier.itemIds.length, 2);
+    assert.deepEqual(
+      new Set(handledAtFrontier.itemIds),
+      new Set([inboundItem.item.id, outboundItem.item.id]),
+    );
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      inbound.assistantInputId,
+      assistantReplyEvent.inputId,
+    ]);
 
     const inboundEvent = await readAssistantInputEvent({
       inputId: inbound.assistantInputId,
@@ -1084,45 +1173,63 @@ describe("hosted mailbox conversation import adapter", () => {
       createIfMissing: false,
       vault: vaultRoot,
     });
-    assert.deepEqual(
+    const expectedTranscript = [
+      {
+        kind: "user",
+        standaloneAssistantContext: false,
+        text: "Hey Murph",
+      },
+      {
+        kind: "assistant",
+        standaloneAssistantContext: true,
+        text: "Canonical Murph welcome",
+      },
+    ];
+    const readTranscript = async () =>
       (await listAssistantTranscriptEntries(vaultRoot, session.session.sessionId))
         .map((entry) => ({
           kind: entry.kind,
           standaloneAssistantContext: entry.standaloneAssistantContext ?? false,
           text: entry.text,
-        })),
-      [
-        {
-          kind: "user",
-          standaloneAssistantContext: false,
-          text: "Hey Murph",
-        },
-        {
-          kind: "assistant",
-          standaloneAssistantContext: true,
-          text: "Canonical Murph welcome",
-        },
-      ],
+        }));
+    assert.deepEqual(await readTranscript(), expectedTranscript);
+
+    const replay = await importOutbound();
+    assert.equal(replay.status, "imported");
+    const replayedEvents = (await listAssistantInputEvents({ vault: vaultRoot })).events;
+    assert.equal(replayedEvents.length, 2);
+    assert.deepEqual(
+      new Set(replayedEvents.map((event) => event.inputId)),
+      new Set([inbound.assistantInputId, assistantReplyEvent.inputId]),
+    );
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      inbound.assistantInputId,
+      assistantReplyEvent.inputId,
+    ]);
+    assert.deepEqual(await readTranscript(), expectedTranscript);
+    const replayedHandled =
+      await compactHostedConversationMailboxHandledItemSelection({
+        consumedThroughSeq: "0",
+        vaultRoot,
+      });
+    assert.equal(replayedHandled.frontierSelected, true);
+    assert.equal(replayedHandled.itemIds.length, 2);
+    assert.deepEqual(
+      new Set(replayedHandled.itemIds),
+      new Set([inboundItem.item.id, outboundItem.item.id]),
     );
 
-    const assistantReplyEvent = (await listAssistantInputEvents({ vault: vaultRoot }))
-      .events.find((event) => event.conversation?.actorIsSelf === true);
-    if (!assistantReplyEvent) {
-      throw new Error("Expected the imported self-authored reply event.");
-    }
-    await suppressHostedPendingLinqInputAnsweredByExternalReply({
-      accountId: inboundEvent.conversation.accountId,
-      assistantReplyEvent,
-      replyToMessageId: "msg_self_reply_inbound",
-      target: TEST_ASSISTANT_TARGET,
-      threadId: inboundEvent.conversation.threadId ?? "",
-      vaultRoot,
-    });
-    assert.equal(
-      (await listAssistantTranscriptEntries(vaultRoot, session.session.sessionId)).length,
-      2,
+    assert.deepEqual(
+      await compactHostedConversationMailboxHandledItemSelection({
+        consumedThroughSeq: "2",
+        vaultRoot,
+      }),
+      {
+        frontierSelected: false,
+        itemIds: [],
+      },
     );
-
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
   });
 
   test("does not notify active turn input early for durably consumed replay imports", async () => {

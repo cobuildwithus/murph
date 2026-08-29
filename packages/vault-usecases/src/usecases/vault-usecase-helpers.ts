@@ -323,9 +323,15 @@ const publicEventContractFields = new Set([
 
 function contractValidationDetails(details: Record<string, unknown>) {
   const errors = Array.isArray(details.errors) ? details.errors : []
+  const stage = details.stage === 'read' ? 'read' : 'validation'
 
   return {
-    stage: details.stage === 'read' ? 'read' : 'validation',
+    stage,
+    ...(stage === 'read'
+      ? {
+          hint: 'Run vault validate, then repair or restore the event ledger before retrying.',
+        }
+      : {}),
     issues: errors.map((issue) => ({
       publicPath: contractIssuePublicPath(issue),
       code: 'custom',
@@ -515,7 +521,7 @@ export function toVaultCliFilesystemError(
   error: unknown,
   input: {
     message: string
-    fieldPath?: 'out' | 'vault'
+    fieldPath?: 'file' | 'out' | 'vault'
   },
 ) {
   if (error instanceof VaultCliError) {

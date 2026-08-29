@@ -6081,7 +6081,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         expect(providerDomainsAfterTransactionStart).toEqual([]);
         expect(prisma.$transaction).toHaveBeenCalledTimes(1);
         expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
-        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
         expect(prisma.$executeRaw.mock.calls[0]?.[1]).toBe(
           "phone:+15551234567",
         );
@@ -13215,7 +13215,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("ignores email-only first contact when fallback delivery has no member phone", async () => {
+  it("delivers verified-email first contact from the selected fallback line", async () => {
     const fallbackLinePhone = "+15550100001";
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const prismaMocks = {
@@ -13232,10 +13232,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn(),
+        create: vi.fn().mockResolvedValue({
+          id: "invite_email",
+          inviteCode: "code_email",
+        }),
         findFirst: vi.fn().mockResolvedValue(null),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          id: "invite_email",
+          inviteCode: "code_email",
+        }),
+        update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqLine: buildHostedLinqLinePoolFixture({
@@ -13292,14 +13298,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(response).toMatchObject({
-      ignored: true,
+      inviteCode: "code_email",
       ok: true,
-      reason: "unassignable-home-line",
+      reason: "sent-signup-link",
     });
-    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledOnce();
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledWith(expect.objectContaining({
+      from: fallbackLinePhone,
+      to: ["buddy@example.test"],
+    }));
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -15526,6 +15534,9 @@ function buildHostedLinqLinePoolFixture(input: {
   const rows = input.lines.map((line) => ({
     activeMemberLimit: line.activeMemberLimit ?? null,
     assignmentWeight: 1,
+    configuredAt: new Date("2026-03-26T00:00:00.000Z"),
+    egressPolicy: "enabled",
+    healthStatus: "healthy",
     maxNewConversationsPerDay: line.maxNewConversationsPerDay ?? null,
     phoneNumber: line.phoneNumber,
     phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(line.phoneNumber),
@@ -15533,6 +15544,8 @@ function buildHostedLinqLinePoolFixture(input: {
     phoneNumberLookupKey: createHostedPhoneLookupKey(line.phoneNumber),
     proactiveConversationCount: line.proactiveConversationCount ?? null,
     proactiveConversationDayUtc: line.proactiveConversationDayUtc ?? null,
+    providerReputationStatus: "HEALTHY",
+    providerServiceStatus: "ACTIVE",
   }));
 
   return {
@@ -15549,12 +15562,17 @@ function buildHostedLinqLinePoolFixture(input: {
       return matchingRows.map((row) => ({
         activeMemberLimit: row.activeMemberLimit,
         assignmentWeight: row.assignmentWeight,
+        configuredAt: row.configuredAt,
+        egressPolicy: row.egressPolicy,
+        healthStatus: row.healthStatus,
         maxNewConversationsPerDay: row.maxNewConversationsPerDay,
         phoneNumberEncrypted: row.phoneNumberEncrypted,
         phoneNumberHint: row.phoneNumberHint,
         phoneNumberLookupKey: row.phoneNumberLookupKey,
         proactiveConversationCount: row.proactiveConversationCount,
         proactiveConversationDayUtc: row.proactiveConversationDayUtc,
+        providerReputationStatus: row.providerReputationStatus,
+        providerServiceStatus: row.providerServiceStatus,
       }));
     }),
     findUnique: vi.fn().mockResolvedValue(null),

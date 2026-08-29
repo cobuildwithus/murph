@@ -28,6 +28,8 @@ import {
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -89,7 +91,18 @@ function buildExpectedVaultShareActiveKindsPath(
 }
 
 function buildExpectedGroupToolPath(): string {
-  return buildExpectedSupportedProjectionScopePath(HOSTED_RUNTIME_GROUP_TOOL_PATH);
+  const params = new URLSearchParams();
+  params.set(
+    HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
+    HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
+  );
+  for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+    params.append(
+      "supportedProjectionScope",
+      buildHostedVaultShareProjectionScopeKey(projectionScope),
+    );
+  }
+  return `${HOSTED_RUNTIME_GROUP_TOOL_PATH}?${params.toString()}`;
 }
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -7191,6 +7204,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               targetKind: "thread",
               threadIsDirect: true,
             },
+        targetOverride: {
+          conversationThreadId: "hid_legacy_conflict",
+          target: "chat_legacy_conflict",
+          targetKind: "thread",
+        },
+        threadIsDirect: responseCount === 1,
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -7256,7 +7275,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("does not synthesize a canonical Linq route from a legacy Web response", async () => {
+  it("does not synthesize a Linq route from legacy response fields", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         ok: true,

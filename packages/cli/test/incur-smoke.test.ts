@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli, z } from 'incur'
+import { EVENT_KINDS } from '@murphai/contracts'
 import { initializeVault } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
@@ -2807,7 +2808,10 @@ test('health list help preserves command-family option shapes', async () => {
   assert.match(eventHelp, /^\s+--experiment\b/mu)
   assert.match(
     eventHelp,
-    /--kind <string>\s+Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure\./u,
+    new RegExp(
+      `--kind <${EVENT_KINDS.join('\\|')}>\\s+Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure\\.`,
+      'u',
+    ),
   )
   assert.match(
     eventHelp,
