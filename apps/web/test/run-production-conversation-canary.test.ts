@@ -85,15 +85,20 @@ describe("production conversation canary runner", () => {
     }), { status: 200 })));
   });
 
-  it("runs three reciprocal turns, ignores unrelated messages, and stops", async () => {
+  it("runs three reciprocal turns, ignores stale and unrelated messages, and stops", async () => {
+    vi.mocked(Date.now)
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(2_000)
+      .mockReturnValueOnce(3_000);
     mocks.now = [0, 100, 200, 300, 400, 500];
     mocks.sendResults = [true, true, true];
     mocks.messages = [
       inboundMessage({ text: "An older reply.", timestampMs: 999 }),
       inboundMessage({ spaceId: "other_space", text: "unrelated" }),
       inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
-      inboundMessage({ text: "A useful next question." }),
-      inboundMessage({ text: "Start with a consistent wake time." }),
+      inboundMessage({ text: "A useful next question.", timestampMs: 2_000 }),
+      inboundMessage({ text: "A retained earlier reply.", timestampMs: 2_000 }),
+      inboundMessage({ text: "Start with a consistent wake time.", timestampMs: 3_000 }),
     ];
 
     await expect(runLinqProductionCanary(TEST_ENV)).resolves.toEqual({
@@ -109,6 +114,7 @@ describe("production conversation canary runner", () => {
         { latencyMs: 100, turn: 3 },
       ],
     });
+    expect(mocks.messages).toEqual([]);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
