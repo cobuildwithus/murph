@@ -32,7 +32,6 @@ import type {
   HostedMailboxItem,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
-  HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLatencyTraceStagedMilestones,
   HostedRuntimeLogRequest,
   HostedRuntimeRedactedJson,
@@ -275,100 +274,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(selectedContextsByPass, [olderContext, newerContext]);
       assert.equal(secondPass.latestAssistantInputBatch, null);
       assert.deepEqual(checkpointRequests, []);
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  test("records finalized foreground selection without coupling trace failure to execution", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-selection-trace-"));
-    const mailboxItem = createMailboxItem({
-      id: "mailbox_selection_trace_1",
-      laneSeq: "1",
-      occurredAt: "2026-04-26T00:00:01.000Z",
-    });
-    const { mailboxPort } = createMailboxPort({ items: [mailboxItem] });
-    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
-    let selectedInputId: string | null = null;
-    let assistantPhaseRan = false;
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_selection_trace_1",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem(item) {
-          const stored = await upsertAssistantInputEvent({
-            event: createStoredAssistantInputEventForMailboxItem(
-              item.item,
-              "selection trace private input",
-            ),
-            vault: vaultRoot,
-          });
-          selectedInputId = stored.inputId;
-          return {
-            assistantInputId: stored.inputId,
-            status: "imported",
-          };
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          latencyTracePort: {
-            async record(request) {
-              latencyTraceRequests.push(request);
-              throw new Error("synthetic selection trace failure");
-            },
-          },
-          mailboxPort,
-          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
-        }),
-        requestId: "request_selection_trace_1",
-        runtimeLogContext: {
-          attemptId: "attempt_selection_trace_1",
-          leaseGeneration: "1",
-          workspaceVersion: "0",
-        },
-        async runAssistantPhase(phaseInput) {
-          assistantPhaseRan = true;
-          assert.equal(latencyTraceRequests.length, 1);
-          assert.ok(selectedInputId);
-          assert.deepEqual(
-            phaseInput.initialAssistantInputBatch?.assistantInputIds,
-            [selectedInputId],
-          );
-          return { progressed: false };
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-        now: () => TEST_NOW,
-      });
-
-      assert.equal(assistantPhaseRan, true);
-      await waitUntil(() => {
-        assert.equal(latencyTraceRequests.length, 1);
-      });
-      assert.ok(selectedInputId);
-      expect(latencyTraceRequests.map((request) => request.event)).toEqual([
-        expect.objectContaining({
-          assistantInputIds: [selectedInputId],
-          at: expect.any(String),
-          milestone: "foreground_input_selected",
-          runtimeAttemptId: "attempt_selection_trace_1",
-          source: "linq",
-          type: "assistant_milestone",
-        }),
-      ]);
-      assert.equal(
-        JSON.stringify(latencyTraceRequests).includes("selection trace private input"),
-        false,
-      );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

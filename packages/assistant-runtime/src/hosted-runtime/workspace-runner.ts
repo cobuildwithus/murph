@@ -18,7 +18,6 @@ import {
 } from "@murphai/core";
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import type {
-  HostedIngressLatencySource,
   HostedRuntimeRedactedJson,
   HostedRuntimeLatencyPhaseBreakdown,
   HostedRuntimeLatencyTraceStagedMilestones,
@@ -27,9 +26,6 @@ import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceState,
-} from "@murphai/hosted-execution/runtime-control";
-import {
-  readHostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   compareAssistantInputCursors,
@@ -120,9 +116,6 @@ import {
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
-import {
-  recordHostedAssistantMilestonesBestEffort,
-} from "./assistant-latency-trace.ts";
 
 export interface HostedWorkspaceCheckpointMetadata {
   attemptId: string;
@@ -863,13 +856,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       ? (await selectHostedAssistantInputIds({
           freshAssistantInputIds: acceptedInitialAssistantInputBatch.assistantInputIds,
           mode: "foreground",
-          onSelectionFinalized(events) {
-            recordHostedForegroundInputSelectedBestEffort({
-              events,
-              platform: input.platform,
-              runtimeAttemptId: input.runtimeLogContext?.attemptId ?? null,
-            });
-          },
           vaultRoot: input.vaultRoot,
         })).inputIds
     : [];
@@ -1870,54 +1856,6 @@ function hostedMailboxImportFetchedSystemLane(
   result: HostedMailboxImportCheckpointResult,
 ): boolean {
   return result.importResult.fetchedLanes?.includes("system") === true;
-}
-
-function recordHostedForegroundInputSelectedBestEffort(input: {
-  events: readonly AssistantInputEventRecord[];
-  platform: HostedRuntimePlatform;
-  runtimeAttemptId?: string | null;
-}): void {
-  try {
-    const runtimeAttemptId = input.runtimeAttemptId?.trim() ?? "";
-    if (
-      !runtimeAttemptId
-      || !input.platform.latencyTracePort
-      || input.events.length === 0
-    ) {
-      return;
-    }
-
-    let source: HostedIngressLatencySource | null = null;
-    const assistantInputIds: string[] = [];
-    for (const event of input.events) {
-      const eventSource = readHostedIngressLatencySource(event.conversation?.source);
-      if (!eventSource) {
-        continue;
-      }
-      if (source && source !== eventSource) {
-        return;
-      }
-      source = eventSource;
-      assistantInputIds.push(event.inputId);
-    }
-    if (!source || assistantInputIds.length === 0) {
-      return;
-    }
-    recordHostedAssistantMilestonesBestEffort({
-      context: {
-        assistantInputIds,
-        latencyTracePort: input.platform.latencyTracePort,
-        runtimeAttemptId,
-        source,
-      },
-      milestones: [{
-        at: new Date().toISOString(),
-        milestone: "foreground_input_selected",
-      }],
-    });
-  } catch {
-    // Latency traces are diagnostic-only and must not affect selection.
-  }
 }
 
 function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {

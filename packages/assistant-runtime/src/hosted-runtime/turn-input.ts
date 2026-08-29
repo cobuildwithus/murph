@@ -24,6 +24,10 @@ import {
   shouldGroupAdjacentAssistantInputCandidates,
 } from "@murphai/assistant-engine/assistant-automation";
 import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
+import {
+  readHostedIngressLatencySource,
+  type HostedIngressLatencySource,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   compactHostedPendingAssistantInputIds,
@@ -71,6 +75,10 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   conversationActivity: HostedConversationActivityObservation;
   currentInputId: string | null;
   foregroundPriorityInputAccepted: boolean;
+  latencyTraceInputGroups: Array<{
+    assistantInputIds: string[];
+    source: HostedIngressLatencySource;
+  }>;
 }> {
   const inputIds = uniqueStrings(input.assistantInputIds);
   if (inputIds.length === 0) {
@@ -78,6 +86,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
       conversationActivity: "not_observed",
       currentInputId: null,
       foregroundPriorityInputAccepted: false,
+      latencyTraceInputGroups: [],
     };
   }
   if (inputIds.length !== input.assistantInputIds.length) {
@@ -85,6 +94,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
       conversationActivity: "uncertain",
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [],
     };
   }
   let events: AssistantInputEventRecord[];
@@ -98,13 +108,18 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
       conversationActivity: "uncertain",
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [],
     };
   }
+  const latencyTraceInputGroups = groupHostedAssistantInputLatencyTraceEvents(
+    events,
+  );
   if (events.length !== inputIds.length) {
     return {
       conversationActivity: "uncertain",
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups,
     };
   }
   const conversationActivity = events.some(isHostedConversationActivityInputEvent)
@@ -131,6 +146,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
       conversationActivity,
       currentInputId: null,
       foregroundPriorityInputAccepted,
+      latencyTraceInputGroups,
     };
   }
   return {
@@ -139,7 +155,30 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
       ? batch.at(-1)?.inputId ?? null
       : null,
     foregroundPriorityInputAccepted,
+    latencyTraceInputGroups,
   };
+}
+
+function groupHostedAssistantInputLatencyTraceEvents(
+  events: readonly AssistantInputEventRecord[],
+): Array<{
+  assistantInputIds: string[];
+  source: HostedIngressLatencySource;
+}> {
+  const inputIdsBySource = new Map<HostedIngressLatencySource, string[]>();
+  for (const event of events) {
+    const source = readHostedIngressLatencySource(event.conversation?.source);
+    if (!source) {
+      continue;
+    }
+    const inputIds = inputIdsBySource.get(source) ?? [];
+    inputIds.push(event.inputId);
+    inputIdsBySource.set(source, inputIds);
+  }
+  return [...inputIdsBySource].map(([source, assistantInputIds]) => ({
+    assistantInputIds,
+    source,
+  }));
 }
 
 function isHostedConversationActivityInputEvent(
@@ -321,9 +360,6 @@ export async function selectHostedAssistantInputIds(
     | {
         freshAssistantInputIds?: readonly string[] | null;
         mode: "foreground";
-        onSelectionFinalized?: ((
-          events: readonly AssistantInputEventRecord[],
-        ) => void) | null;
         vaultRoot: string;
       }
     | {
@@ -434,11 +470,6 @@ export async function selectHostedAssistantInputIds(
     };
   }
 
-  notifyHostedAssistantInputSelectionFinalizedBestEffort(
-    input.onSelectionFinalized ?? null,
-    selected.events,
-  );
-
   return {
     freshInputIds,
     inputIds: selected.events.map((event) => event.inputId),
@@ -448,20 +479,6 @@ export async function selectHostedAssistantInputIds(
       ? { preserveInputOrder: true as const }
       : {}),
   };
-}
-
-function notifyHostedAssistantInputSelectionFinalizedBestEffort(
-  notify: ((events: readonly AssistantInputEventRecord[]) => void) | null,
-  events: readonly AssistantInputEventRecord[],
-): void {
-  if (!notify) {
-    return;
-  }
-  try {
-    notify(events);
-  } catch {
-    // Selection observation is diagnostic-only and must not affect the batch.
-  }
 }
 
 async function selectHostedAssistantInputEventBatchWithImageCompletion(input: {

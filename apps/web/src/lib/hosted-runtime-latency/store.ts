@@ -555,14 +555,21 @@ export async function recordHostedIngressAssistantMilestone(input: {
 
   const requestedIds = buildHostedIngressLatencyRequestedIdsSql(assistantInputIds);
   const terminalNonReplyProjection = input.milestone === "terminal_non_reply_committed";
+  const lifecycleProjection = isHostedIngressLifecycleAssistantMilestone(
+    input.milestone,
+  );
   const nextPhaseBreakdown = terminalNonReplyProjection
     ? buildHostedIngressTerminalNonReplyPhaseBreakdownSql({
         hasCheckpointPublicationExpectedBy: checkpointPublicationExpectedBy !== null,
       })
-    : buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql();
+    : lifecycleProjection
+      ? buildHostedIngressLifecycleAssistantMilestonePhaseBreakdownSql()
+      : buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql();
   const nextRuntimeAttemptId = terminalNonReplyProjection
     ? buildHostedIngressTerminalNonReplyRuntimeAttemptSql()
-    : Prisma.sql`trace.runtime_attempt_id`;
+    : lifecycleProjection
+      ? Prisma.sql`input.runtime_attempt_id`
+      : Prisma.sql`trace.runtime_attempt_id`;
   const ordinaryMilestoneLeaf = terminalNonReplyProjection
     ? null
     : readHostedIngressAssistantMilestoneLeaf(input.milestone);
@@ -579,6 +586,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
           AS checkpoint_publication_expected_by_epoch_ms,
         ${ordinaryMilestoneLeaf?.leafKey ?? null}::text AS milestone_leaf,
         ${ordinaryMilestoneLeaf?.keepEarliest ?? false}::boolean AS keep_earliest,
+        ${lifecycleProjection}::boolean AS lifecycle_projection,
         ${terminalNonReplyProjection}::boolean AS terminal_non_reply_projection,
         1::integer AS phase_schema_version,
         ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
@@ -605,7 +613,14 @@ export async function recordHostedIngressAssistantMilestone(input: {
        AND trace.source = input.source
        AND (
          input.terminal_non_reply_projection
-         OR trace.runtime_attempt_id = input.runtime_attempt_id
+         OR (
+           input.lifecycle_projection
+           AND ${buildHostedIngressLifecycleAssistantMilestoneEligibilitySql()}
+         )
+         OR (
+           NOT input.lifecycle_projection
+           AND trace.runtime_attempt_id = input.runtime_attempt_id
+         )
        )
       ORDER BY trace.id
       FOR UPDATE OF trace SKIP LOCKED
@@ -764,10 +779,46 @@ function buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql(): Prisma
   const assistant = buildHostedIngressLatencyJsonObjectSql(
     Prisma.sql`${object} -> 'assistant'`,
   );
+  const leafPatch = buildHostedIngressAssistantMilestoneLeafPatchSql(assistant);
+  return Prisma.sql`(
+    SELECT ${object}
+      || ${buildHostedIngressLatencySchemaPatchSql(object)}
+      || jsonb_build_object('assistant', ${assistant} || ${leafPatch})
+    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+  )`;
+}
+
+function buildHostedIngressLifecycleAssistantMilestonePhaseBreakdownSql(): Prisma.Sql {
+  const stored = Prisma.sql`trace.phase_breakdown_json`;
+  const sanitizedObject = buildHostedIngressLatencySanitizedJsonObjectSql(stored);
+  const object = Prisma.sql`sanitized.object`;
+  const assistant = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`${object} -> 'assistant'`,
+  );
+  const leafPatch = buildHostedIngressAssistantMilestoneLeafPatchSql(assistant);
+  return Prisma.sql`(
+    SELECT ${object}
+      || ${buildHostedIngressLatencySchemaPatchSql(object)}
+      || jsonb_build_object(
+        'assistant',
+        ${assistant}
+          || ${leafPatch}
+          || jsonb_build_object(
+            'runtimeLeaseGeneration',
+            input.runtime_lease_generation
+          )
+      )
+    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+  )`;
+}
+
+function buildHostedIngressAssistantMilestoneLeafPatchSql(
+  assistant: Prisma.Sql,
+): Prisma.Sql {
   const leaf = Prisma.sql`${assistant} -> input.milestone_leaf`;
   const safeLeaf = buildHostedIngressLatencySafeJsonIntegerPredicateSql(leaf);
   const leafText = Prisma.sql`(${leaf}) #>> '{}'`;
-  const leafPatch = Prisma.sql`CASE
+  return Prisma.sql`CASE
     WHEN ${safeLeaf} AND NOT input.keep_earliest THEN '{}'::jsonb
     ELSE jsonb_build_object(
       input.milestone_leaf,
@@ -778,11 +829,36 @@ function buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql(): Prisma
       END
     )
   END`;
+}
+
+function buildHostedIngressLifecycleAssistantMilestoneEligibilitySql(): Prisma.Sql {
+  const stored = Prisma.sql`trace.phase_breakdown_json`;
+  const object = buildHostedIngressLatencyJsonObjectSql(stored);
+  const assistant = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`${object} -> 'assistant'`,
+  );
+  const storedGeneration = buildHostedIngressLatencyStoredLeaseGenerationSql(assistant);
+  const incomingGeneration = Prisma.sql`input.runtime_lease_generation::numeric`;
+  const exactAttempt = Prisma.sql`trace.runtime_attempt_id = input.runtime_attempt_id`;
+  const incomingNotOlder = Prisma.sql`(
+    ${storedGeneration} IS NULL
+    OR ${storedGeneration} <= ${incomingGeneration}
+  )`;
+  const newerLease = Prisma.sql`(
+    ${storedGeneration} IS NULL
+    OR ${storedGeneration} < ${incomingGeneration}
+  )`;
+  const terminalLeaf = Prisma.sql`${assistant}
+    -> 'terminalNonReplyCommittedAtEpochMs'`;
+  const unresolved = Prisma.sql`(
+    trace.provider_start_at IS NULL
+    AND trace.reply_runtime_attempt_id IS NULL
+    AND trace.linq_delivery_id IS NULL
+    AND NOT ${buildHostedIngressLatencySafeJsonIntegerPredicateSql(terminalLeaf)}
+  )`;
   return Prisma.sql`(
-    SELECT ${object}
-      || ${buildHostedIngressLatencySchemaPatchSql(object)}
-      || jsonb_build_object('assistant', ${assistant} || ${leafPatch})
-    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+    (${exactAttempt} AND ${incomingNotOlder})
+    OR (${unresolved} AND ${newerLease})
   )`;
 }
 
@@ -1024,6 +1100,11 @@ function readHostedIngressAssistantMilestoneLeaf(
       return { keepEarliest: true, leafKey: "pendingReplyAdmittedAtEpochMs" };
     case "foreground_input_selected":
       return { keepEarliest: true, leafKey: "foregroundInputSelectedAtEpochMs" };
+    case "assistant_input_accepted_for_execution":
+      return {
+        keepEarliest: true,
+        leafKey: "assistantInputAcceptedForExecutionAtEpochMs",
+      };
     case "linq_typing_request_started":
       return { keepEarliest: false, leafKey: "linqTypingRequestStartedAtEpochMs" };
     case "linq_typing_accepted":
@@ -1037,6 +1118,13 @@ function readHostedIngressAssistantMilestoneLeaf(
     case "terminal_non_reply_committed":
       throw new TypeError("Terminal non-reply milestones do not use an ordinary assistant leaf.");
   }
+}
+
+function isHostedIngressLifecycleAssistantMilestone(
+  milestone: HostedRuntimeAssistantMilestone,
+): boolean {
+  return milestone === "pending_reply_admitted"
+    || milestone === "assistant_input_accepted_for_execution";
 }
 
 export async function recordHostedIngressRuntimeMilestone(input: {

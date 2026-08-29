@@ -2714,6 +2714,7 @@ describe("hosted runtime internal web routes", () => {
     for (const milestone of [
       "pending_reply_admitted",
       "foreground_input_selected",
+      "assistant_input_accepted_for_execution",
     ] as const) {
       const response = await runtimeLatencyRoute.POST(jsonRequest(
         "/api/internal/hosted-runtime/latency",
@@ -2828,7 +2829,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(unsafeResponse.status).toBe(400);
     expect(mocks.recordHostedIngressAssistantInputStaged).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledTimes(3);
+    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledTimes(4);
     expect(mocks.recordHostedIngressProviderStarted).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedIngressRuntimeMilestone).toHaveBeenCalledTimes(1);
   });

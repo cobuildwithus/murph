@@ -2268,7 +2268,9 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
 
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "pending_reply_admitted",
+  // Web input compatibility only; current runners do not emit this.
   "foreground_input_selected",
+  "assistant_input_accepted_for_execution",
   "linq_typing_request_started",
   "linq_typing_accepted",
   "progress_update_accepted",
@@ -2444,6 +2446,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   assistant?: {
     pendingReplyAdmittedAtEpochMs?: number;
     foregroundInputSelectedAtEpochMs?: number;
+    assistantInputAcceptedForExecutionAtEpochMs?: number;
     linqTypingRequestStartedAtEpochMs?: number;
     linqTypingAcceptedAtEpochMs?: number;
     progressUpdateAcceptedAtEpochMs?: number;
@@ -2719,6 +2722,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   assistant: [
     "pendingReplyAdmittedAtEpochMs",
     "foregroundInputSelectedAtEpochMs",
+    "assistantInputAcceptedForExecutionAtEpochMs",
     "linqTypingRequestStartedAtEpochMs",
     "linqTypingAcceptedAtEpochMs",
     "progressUpdateAcceptedAtEpochMs",
@@ -2924,12 +2928,14 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
 
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale
-// stored leaves are dropped before the next write. Admission, foreground
-// selection, and accepted progress can be observed more than once across
-// retries: retain their earliest timestamps when callbacks arrive out of order.
+// stored leaves are dropped before the next write. Admission, legacy selection,
+// execution acceptance, and accepted progress can be observed more than once
+// across retries: retain their earliest timestamps when callbacks arrive out of
+// order.
 const HOSTED_RUNTIME_ASSISTANT_EARLIEST_TIMESTAMP_LEAF_KEYS = new Set([
   "pendingReplyAdmittedAtEpochMs",
   "foregroundInputSelectedAtEpochMs",
+  "assistantInputAcceptedForExecutionAtEpochMs",
   "progressUpdateAcceptedAtEpochMs",
 ]);
 

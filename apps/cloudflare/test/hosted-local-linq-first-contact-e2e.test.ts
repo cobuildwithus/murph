@@ -559,17 +559,20 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       userId: directReplyUserId,
     });
     expect(answeredMailboxItem.consumedAt).not.toBeNull();
-    const lifecycleTrace = await waitForForegroundLifecycleLatencyTrace({
+    const lifecycleTrace = await waitForAssistantExecutionLifecycleLatencyTrace({
       mailboxItemId: answeredMailboxItem.id,
       userId: directReplyUserId,
     });
     const pendingReplyAdmittedAtEpochMs =
       lifecycleTrace.phaseBreakdown?.assistant?.pendingReplyAdmittedAtEpochMs;
-    const foregroundInputSelectedAtEpochMs =
-      lifecycleTrace.phaseBreakdown?.assistant?.foregroundInputSelectedAtEpochMs;
+    const assistantInputAcceptedForExecutionAtEpochMs =
+      lifecycleTrace.phaseBreakdown?.assistant
+        ?.assistantInputAcceptedForExecutionAtEpochMs;
     expect(pendingReplyAdmittedAtEpochMs).toEqual(expect.any(Number));
-    expect(foregroundInputSelectedAtEpochMs).toEqual(expect.any(Number));
-    expect(foregroundInputSelectedAtEpochMs!).toBeGreaterThanOrEqual(
+    expect(assistantInputAcceptedForExecutionAtEpochMs).toEqual(
+      expect.any(Number),
+    );
+    expect(assistantInputAcceptedForExecutionAtEpochMs!).toBeGreaterThanOrEqual(
       pendingReplyAdmittedAtEpochMs!,
     );
     const lateEnsure = await ensureProcessingAfterSyntheticMailboxAppendForTest({
@@ -2250,7 +2253,7 @@ function requireRealInstantFirstTurnOpenAiApiKey(): string {
   return apiKey;
 }
 
-async function waitForForegroundLifecycleLatencyTrace(input: {
+async function waitForAssistantExecutionLifecycleLatencyTrace(input: {
   mailboxItemId: string;
   userId: string;
 }) {
@@ -2267,19 +2270,19 @@ async function waitForForegroundLifecycleLatencyTrace(input: {
       const assistant = trace.phaseBreakdown?.assistant;
       const pendingReplyAdmittedAtEpochMs =
         assistant?.pendingReplyAdmittedAtEpochMs;
-      const foregroundInputSelectedAtEpochMs =
-        assistant?.foregroundInputSelectedAtEpochMs;
+      const assistantInputAcceptedForExecutionAtEpochMs =
+        assistant?.assistantInputAcceptedForExecutionAtEpochMs;
       lastObservation = [
         `pendingAdmission=${typeof pendingReplyAdmittedAtEpochMs === "number"
           ? "present"
           : "missing"}`,
-        `foregroundSelection=${typeof foregroundInputSelectedAtEpochMs === "number"
+        `assistantExecutionAcceptance=${typeof assistantInputAcceptedForExecutionAtEpochMs === "number"
           ? "present"
           : "missing"}`,
       ].join(",");
       if (
         typeof pendingReplyAdmittedAtEpochMs === "number"
-        && typeof foregroundInputSelectedAtEpochMs === "number"
+        && typeof assistantInputAcceptedForExecutionAtEpochMs === "number"
       ) {
         return trace;
       }
@@ -2293,7 +2296,7 @@ async function waitForForegroundLifecycleLatencyTrace(input: {
     ? lastError.name
     : typeof lastError;
   throw new Error(
-    "Timed out waiting for foreground lifecycle latency milestones. "
+    "Timed out waiting for assistant execution lifecycle latency milestones. "
       + `Observation: ${lastObservation}. `
       + `Last read error kind: ${lastErrorKind}.`,
   );

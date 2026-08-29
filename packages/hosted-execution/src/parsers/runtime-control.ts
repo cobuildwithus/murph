@@ -6509,6 +6509,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     breakdown.assistant = {
       ...requireOptionalNonNegativeInteger(assistant, "pendingReplyAdmittedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "foregroundInputSelectedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "assistantInputAcceptedForExecutionAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "linqTypingRequestStartedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "linqTypingAcceptedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "firstCodexOutputObservedAtEpochMs", assistantLabel),

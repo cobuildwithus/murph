@@ -1751,10 +1751,16 @@ but omit the subdivision so earlier group work and pass-shared history scans are
 not misattributed; the scan-nesting statement applies only to an emitted complete
 subdivision.
 Because Web strictly parses phase-breakdown leaves and assistant milestone
-values, deploy Web/Vercel first so its reader accepts the additive contract,
-then deploy the Cloudflare Worker/runner emitters. Warm old runners remain valid
-because the additions are optional and old milestone values are unchanged.
-Rollback Cloudflare Worker/runner first, then Web/Vercel.
+values, deploy Web/Vercel first so its reader accepts both the already-shipped
+`foreground_input_selected` diagnostic event and
+`foregroundInputSelectedAtEpochMs` leaf and the new
+`assistant_input_accepted_for_execution` event and
+`assistantInputAcceptedForExecutionAtEpochMs` leaf, then deploy the Cloudflare
+Worker/runner emitters. During rollout
+skew, a warm old runner's legacy event remains accepted and stored under its
+prior exact-attempt ownership semantics; it is not translated into or counted
+as execution acceptance. Rollback Cloudflare Worker/runner first, then
+Web/Vercel.
 
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
@@ -1774,17 +1780,30 @@ latency incident, while a late update does not hide the breached wait.
 Two additional metadata-only assistant milestones close the bounded observation
 gap between staging and provider execution. `pending_reply_admitted` means the
 runtime's existing pending-reply enqueue completed for a reply-eligible staged
-input that was not already durably consumed. `foreground_input_selected` means
-the runner finalized that input in the foreground assistant batch, before
-assistant execution. Web stores their earliest observed epoch-millisecond
-timestamps as
+input that was not already durably consumed.
+`assistant_input_accepted_for_execution` means the runtime's shared
+`beforeProviderAcceptedInputs` boundary accepted stored assistant input for
+provider execution. That boundary is common to initial execution,
+background/replacement recovery, and live steering. It reuses the accepted-event
+read already required to resolve the current input and groups opaque input IDs
+by traceable supported source; it performs no second vault read. Unsupported
+sources are omitted without suppressing supported-source IDs from the same
+accepted set.
+
+Web stores the earliest observed epoch-millisecond timestamps as
 `phaseBreakdown.assistant.pendingReplyAdmittedAtEpochMs` and
-`phaseBreakdown.assistant.foregroundInputSelectedAtEpochMs`. Duplicate or
-out-of-order emissions therefore remain idempotent, while unmatched trace rows
-and stale runtime attempts remain no-ops under the existing set-based writer and
-attempt fence. Both emissions use the existing queued best-effort milestone
-path: failure cannot delay or alter admission, selection, assistant execution,
-retry, checkpointing, delivery, mailbox consumption, or device sync.
+`phaseBreakdown.assistant.assistantInputAcceptedForExecutionAtEpochMs`.
+Duplicate or out-of-order emissions remain idempotent. For these two unresolved
+lifecycle milestones only, the exact owner may merge the same or a newer
+authenticated runtime lease generation; a strictly newer generation may
+transfer an unresolved trace to its accepting runtime attempt. The same
+generation from another attempt and every older generation are no-ops. Provider
+start, reply-attempt, accepted-delivery, and terminal evidence prevent that
+cross-attempt transfer, and later ordinary milestones remain fenced to the
+trace's current exact attempt. Both emissions use the existing queued
+best-effort milestone path: trace read or write failure cannot delay or alter
+admission, input selection, provider execution, retry, checkpointing, delivery,
+mailbox consumption, or device sync.
 
 These milestones carry only opaque assistant input IDs, the timestamp, the
 existing source enum, the runtime attempt ID, and the bounded milestone enum.
@@ -1798,11 +1817,11 @@ provider start, reply attempt, accepted delivery, terminal non-reply, and durabl
 mailbox consumption are all absent. Project only the opaque trace ID, opaque
 assistant input ID, the two timestamp leaves and their presence flags, and one
 derived lifecycle state: `staged_without_pending_admission`,
-`admitted_not_selected`, or `selected_without_downstream_outcome`. Order by
-accepted time and opaque trace ID, or aggregate only by that typed lifecycle
-state. Do not project member, mailbox, route, provider, delivery-target, content,
-or arbitrary JSON fields. For the existing Linq trace owner, the bounded query
-shape is:
+`admitted_not_accepted_for_execution`, or
+`accepted_for_execution_without_downstream_outcome`. Order by accepted time and
+opaque trace ID, or aggregate only by that typed lifecycle state. Do not project
+member, mailbox, route, provider, delivery-target, content, or arbitrary JSON
+fields. For the existing Linq trace owner, the bounded query shape is:
 
 ```sql
 WITH bounded AS MATERIALIZED (
@@ -1814,8 +1833,8 @@ WITH bounded AS MATERIALIZED (
       '{assistant,pendingReplyAdmittedAtEpochMs}'
       AS pending_reply_admitted_at_epoch_ms,
     trace.phase_breakdown_json #>>
-      '{assistant,foregroundInputSelectedAtEpochMs}'
-      AS foreground_input_selected_at_epoch_ms
+      '{assistant,assistantInputAcceptedForExecutionAtEpochMs}'
+      AS assistant_input_accepted_for_execution_at_epoch_ms
   FROM hosted_ingress_latency_trace AS trace
   JOIN hosted_mailbox_item AS mailbox_item
     ON mailbox_item.user_id = trace.user_id
@@ -1840,14 +1859,14 @@ SELECT
   pending_reply_admitted_at_epoch_ms IS NOT NULL
     AS pending_reply_admitted,
   pending_reply_admitted_at_epoch_ms,
-  foreground_input_selected_at_epoch_ms IS NOT NULL
-    AS foreground_input_selected,
-  foreground_input_selected_at_epoch_ms,
+  assistant_input_accepted_for_execution_at_epoch_ms IS NOT NULL
+    AS assistant_input_accepted_for_execution,
+  assistant_input_accepted_for_execution_at_epoch_ms,
   CASE
-    WHEN foreground_input_selected_at_epoch_ms IS NOT NULL
-      THEN 'selected_without_downstream_outcome'
+    WHEN assistant_input_accepted_for_execution_at_epoch_ms IS NOT NULL
+      THEN 'accepted_for_execution_without_downstream_outcome'
     WHEN pending_reply_admitted_at_epoch_ms IS NOT NULL
-      THEN 'admitted_not_selected'
+      THEN 'admitted_not_accepted_for_execution'
     ELSE 'staged_without_pending_admission'
   END AS lifecycle_state
 FROM bounded
@@ -1864,9 +1883,11 @@ reply trace and stay outside this monitor. It projects
 that write succeeds or when a replay reads the completed evidence. That marker
 is an observability projection of the existing terminal owner; it is not a
 second disposition record and does not advance mailbox consumption. Web keeps
-in-flight timing milestones scoped to the exact staged runtime attempt. The
-terminal marker may converge across a later attempt because authenticated user,
-source, and assistant input ID identify the durable disposition being projected.
+downstream timing milestones scoped to the trace's exact current runtime
+attempt. The unresolved admission and execution-acceptance lifecycle milestones
+are the narrow pre-downstream exception described above. The terminal marker may
+converge across a later attempt because authenticated user, source, and assistant
+input ID identify the durable disposition being projected.
 Terminal convergence and deadline refreshes carry the authenticated runtime
 lease generation in the existing phase document. A strictly newer generation
 transfers the unresolved trace's runtime-attempt ownership, the same generation

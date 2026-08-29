@@ -1438,9 +1438,19 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.540Z",
+        milestone: "foreground_input_selected",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    }).event).toMatchObject({ milestone: "foreground_input_selected" });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.550Z",
-        milestone: "foreground_input_selected",
+        milestone: "assistant_input_accepted_for_execution",
         runtimeAttemptId: "attempt_1",
         source: "telegram",
         type: "assistant_milestone",
@@ -1449,7 +1459,7 @@ describe("hosted runtime control contracts", () => {
       event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.550Z",
-        milestone: "foreground_input_selected",
+        milestone: "assistant_input_accepted_for_execution",
         runtimeAttemptId: "attempt_1",
         source: "telegram",
         type: "assistant_milestone",
@@ -1731,7 +1741,8 @@ describe("hosted runtime control contracts", () => {
       },
       assistant: {
         pendingReplyAdmittedAtEpochMs: 1_777_000_000_120,
-        foregroundInputSelectedAtEpochMs: 1_777_000_000_123,
+        foregroundInputSelectedAtEpochMs: 1_777_000_000_121,
+        assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_000_123,
         runtimeLeaseGeneration: "18446744073709551615",
         terminalNonReplyCommittedAtEpochMs: 1_777_000_000_125,
       },
@@ -2107,14 +2118,16 @@ describe("hosted runtime control contracts", () => {
       existing: {
         assistant: {
           pendingReplyAdmittedAtEpochMs: 1_777_000_020_000,
-          foregroundInputSelectedAtEpochMs: 1_777_000_021_000,
+          foregroundInputSelectedAtEpochMs: 1_777_000_020_500,
+          assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_021_000,
         },
         schemaVersion: 1,
       },
       incoming: {
         assistant: {
           pendingReplyAdmittedAtEpochMs: 1_777_000_019_000,
-          foregroundInputSelectedAtEpochMs: 1_777_000_022_000,
+          foregroundInputSelectedAtEpochMs: 1_777_000_019_500,
+          assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_022_000,
         },
         schemaVersion: 1,
       },
@@ -2125,7 +2138,8 @@ describe("hosted runtime control contracts", () => {
       value: {
         assistant: {
           pendingReplyAdmittedAtEpochMs: 1_777_000_019_000,
-          foregroundInputSelectedAtEpochMs: 1_777_000_021_000,
+          foregroundInputSelectedAtEpochMs: 1_777_000_019_500,
+          assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_021_000,
         },
         schemaVersion: 1,
       },
