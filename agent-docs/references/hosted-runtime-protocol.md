@@ -3632,6 +3632,11 @@ after persistence.
 The hosted runtime also emits metadata-only phase boundary logs to stdout/stderr
 for supervisor correlation. Those phase logs carry fixed-vocabulary phase names
 and status plus bounded metadata-only correlation, count, and timing fields. The
+Codex completion-timing and action-diagnostics records share a bounded one-way
+numeric provider-turn correlation; action diagnostics also retain only progress
+call/sent counts and the first call's provider-start-relative timing. A failed
+delivery remains derivable as a completed progress call without a sent outcome.
+They retain neither a raw provider turn id nor progress text. The
 Cloudflare child supervisor treats that output as untrusted: it may summarize
 only fixed-vocabulary phase/status pairs plus a supervisor-derived last-phase
 ordinal into container failure payloads. It must not trust child-provided

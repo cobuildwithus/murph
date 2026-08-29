@@ -3033,6 +3033,12 @@ function hashCodexRawString(value: string): string {
     .digest('hex')
 }
 
+function buildCodexTurnCorrelation(turnId: string): number {
+  // Keep the opaque provider id out of logs while preserving a safe-integer
+  // join key shared by this turn's timing and action diagnostics.
+  return Number.parseInt(hashCodexRawString(turnId).slice(0, 12), 16)
+}
+
 function readCodexEventMethod(message: CodexRpcMessage): string | null {
   return typeof message.method === 'string' ? message.method : null
 }
@@ -3632,6 +3638,9 @@ async function runCodexAppServerTurnOnProcess(
                 ...(typeof input.providerRequestOrdinal === 'number'
                   ? { codexTimingProviderRequestOrdinal: input.providerRequestOrdinal }
                   : {}),
+                ...(turnId === null
+                  ? {}
+                  : { codexTimingTurnCorrelation: buildCodexTurnCorrelation(turnId) }),
                 // This ends when the completion trace is emitted after local
                 // dynamic-tool/progress drains. The outer provider-result
                 // boundary is recorded separately by assistant.turn.timing.
@@ -5058,6 +5067,7 @@ async function runCodexAppServerTurnOnProcess(
     method: string | null,
   ): void => {
     acceptJsonEvent(message)
+    const observedAtMs = Date.now()
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
@@ -5078,7 +5088,6 @@ async function runCodexAppServerTurnOnProcess(
       (shouldCaptureTurnStartedNotification ||
         shouldCaptureTurnCompletedNotification)
     ) {
-      const observedAtMs = Date.now()
       if (shouldCaptureTurnStartedNotification) {
         codexTimingTurnStartedNotificationElapsedMs = Math.max(
           0,
@@ -5107,6 +5116,7 @@ async function runCodexAppServerTurnOnProcess(
     actionDiagnostics?.recordEvent({
       activeTurnId: turnId,
       normalizedEvent,
+      observedAtMs,
       rawEvent: message,
     })
     const transportDiagnosticsTraceEvent = input.onTraceEvent
@@ -5540,6 +5550,9 @@ async function runCodexAppServerTurnOnProcess(
     const rawEvent = actionDiagnostics.buildTraceEvent({
       codexThreadId,
       providerActionCount,
+      providerStartedAtMs: codexProviderRequestStartedAtMs,
+      turnCorrelation:
+        turnId === null ? null : buildCodexTurnCorrelation(turnId),
       turnId,
     })
     if (!rawEvent) {

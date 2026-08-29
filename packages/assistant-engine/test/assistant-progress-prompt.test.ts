@@ -23,13 +23,10 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection',
+      'Send one early update before direct reply-critical work spanning multiple sources or several substantive tool steps, including cross-owner evidence, long research, parsing/scans, or content inspection',
     )
     expect(prompt).toContain(
-      'Before the first read in that pass, orient the member even when each lookup is routine',
-    )
-    expect(prompt).toContain(
-      'Do not wait until the work is done or the member asks about the delay',
+      'Before the first read, orient the member even when each lookup is routine',
     )
     expect(prompt).toContain(
       'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
@@ -38,10 +35,10 @@ describe('assistant progress prompt contract', () => {
       'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement',
     )
     expect(prompt).toContain(
-      'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update',
+      'Reconsider this on each follow-up or resumed turn; earlier updates do not count',
     )
     expect(prompt).toContain(
-      'Routine daily-card reads alone do not trigger progress',
+      'A single routine daily-card read alone does not trigger progress',
     )
     expect(prompt).toContain(
       'Skip it within ordinary latency',
@@ -85,7 +82,8 @@ describe('assistant progress prompt contract', () => {
       'Member-visible interim progress is unavailable on this route',
     )
     expect(prompt).not.toContain('murph.send_progress_update')
-    expect(prompt).not.toContain('Send an update before reply-critical work')
+    expect(prompt).not.toContain('Send an update before reply-critical multi-source')
+    expect(prompt).not.toContain('may outlast ordinary response time')
   })
 
   it('keeps the dynamic tool to a concise call contract', () => {
