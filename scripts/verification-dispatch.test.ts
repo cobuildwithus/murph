@@ -430,7 +430,7 @@ describe("verification dispatcher", () => {
 
     const failed = spawnSync(
       process.execPath,
-      [dispatcherUnderTest, "verify:acceptance"],
+      [dispatcherUnderTest, "test:diff", "scripts/verification-dispatch.mjs"],
       { cwd: testRepoDir, encoding: "utf8", env: environment },
     );
 
@@ -446,9 +446,20 @@ describe("verification dispatcher", () => {
     expect(readFileSync(path.join(failureArtifactPath, "stderr.log"), "utf8")).toContain(
       "delegated exact stderr",
     );
-    expect(readFileSync(path.join(failureArtifactPath, "run.txt"), "utf8")).toMatch(
-      /^command=verify:acceptance\nexecutor=crabbox\ncandidate-tree=[a-f0-9]{40}\n$/u,
-    );
+    const runMetadataLines = readFileSync(
+      path.join(failureArtifactPath, "run.txt"),
+      "utf8",
+    ).trimEnd().split("\n");
+    expect(runMetadataLines).toEqual([
+      expect.stringMatching(/^command-argv-json=/u),
+      "executor=crabbox",
+      expect.stringMatching(/^candidate-tree=[a-f0-9]{40}$/u),
+    ]);
+    expect(
+      JSON.parse(
+        runMetadataLines[0]?.slice("command-argv-json=".length) ?? "null",
+      ),
+    ).toEqual(["test:diff", "scripts/verification-dispatch.mjs"]);
     expect(statSync(failureArtifactPath).mode & 0o777).toBe(0o700);
     for (const fileName of ["run.txt", "stdout.log", "stderr.log"]) {
       expect(statSync(path.join(failureArtifactPath, fileName)).mode & 0o777).toBe(
@@ -466,7 +477,7 @@ describe("verification dispatcher", () => {
     );
     const succeeded = spawnSync(
       process.execPath,
-      [dispatcherUnderTest, "verify:acceptance"],
+      [dispatcherUnderTest, "test:diff", "scripts/verification-dispatch.mjs"],
       { cwd: testRepoDir, encoding: "utf8", env: environment },
     );
 

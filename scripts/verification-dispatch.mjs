@@ -322,7 +322,7 @@ export async function runVerification(argv, env = process.env) {
           ),
           displayPath: CRABBOX_FAILURE_ARTIFACT_RELATIVE_PATH,
           runMetadata:
-            `command=${request.verificationCommand}\nexecutor=crabbox\ncandidate-tree=${candidate.tree}\n`,
+            `command-argv-json=${JSON.stringify([request.verificationCommand, ...request.commandArgs])}\nexecutor=crabbox\ncandidate-tree=${candidate.tree}\n`,
         }
       : null;
     return await runChild(
