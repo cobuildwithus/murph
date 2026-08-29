@@ -28,6 +28,11 @@ import {
   requireHostedLinqProductionCanaryResetRequest,
   resetHostedLinqProductionCanary,
 } from "@/src/lib/hosted-onboarding/linq-production-canary-reset";
+import {
+  readHostedLinqProductionCanaryMemberId,
+  readHostedLinqProductionCanaryPhoneLookupKeys,
+  readHostedLinqProductionCanaryPhoneNumber,
+} from "@/src/lib/hosted-onboarding/linq-production-canary";
 
 const CONFIGURED_ENVIRONMENT = {
   HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER: "+15551234567",
@@ -37,6 +42,51 @@ const CONFIGURED_ENVIRONMENT = {
 function asCanaryResetPrismaClient(value: object): PrismaClient {
   return value as PrismaClient;
 }
+
+describe("Hosted Linq production canary identity", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.lookupIdentity.mockResolvedValue(null);
+  });
+
+  it("normalizes the configured phone and derives privacy-safe lookup keys", () => {
+    const source = {
+      HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER: "+1 (555) 123-4567",
+    };
+
+    expect(readHostedLinqProductionCanaryPhoneNumber(source))
+      .toBe("+15551234567");
+    expect(readHostedLinqProductionCanaryPhoneLookupKeys(source))
+      .toEqual(expect.arrayContaining([
+        expect.stringMatching(/^hbidx:phone:/u),
+      ]));
+    expect(readHostedLinqProductionCanaryPhoneLookupKeys(source))
+      .not.toContain("+15551234567");
+  });
+
+  it("resolves the current canary member through the canonical identity lookup", async () => {
+    const prisma = asCanaryResetPrismaClient({});
+    mocks.lookupIdentity.mockResolvedValue({ core: { id: "member_canary" } });
+
+    await expect(readHostedLinqProductionCanaryMemberId({
+      prisma,
+      source: CONFIGURED_ENVIRONMENT,
+    })).resolves.toBe("member_canary");
+    expect(mocks.lookupIdentity).toHaveBeenCalledWith({
+      phoneNumber: "+15551234567",
+      prisma,
+      projection: "core",
+    });
+  });
+
+  it("does no identity lookup when the canary is not configured", async () => {
+    await expect(readHostedLinqProductionCanaryMemberId({
+      prisma: asCanaryResetPrismaClient({}),
+      source: {},
+    })).resolves.toBeNull();
+    expect(mocks.lookupIdentity).not.toHaveBeenCalled();
+  });
+});
 
 describe("Hosted Linq production canary reset authorization", () => {
   beforeEach(() => {

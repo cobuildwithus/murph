@@ -10,6 +10,7 @@ import {
   readHostedMemberSignupNotificationContext,
 } from "./hosted-member-store";
 import { readActiveHostedMemberAccess } from "./member-access";
+import { readHostedLinqProductionCanaryMemberId } from "./linq-production-canary";
 import {
   HostedResendPlainTextEmailError,
   sendHostedResendPlainTextEmail,
@@ -33,7 +34,8 @@ export type HostedSignupNotificationEmailResult =
         | "already_attempted"
         | "member_not_active"
         | "member_not_found"
-        | "not_configured";
+        | "not_configured"
+        | "production_canary";
       status: "skipped";
     }
   | {
@@ -119,6 +121,17 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
   }
 
   const prisma = input.prisma ?? getPrisma();
+  const productionCanaryMemberId = await readHostedLinqProductionCanaryMemberId({
+    prisma,
+    source: input.env,
+  });
+  if (productionCanaryMemberId === input.memberId) {
+    return {
+      reason: "production_canary",
+      status: "skipped",
+    };
+  }
+
   const hasActiveAccess = await readActiveHostedMemberAccess({
     memberId: input.memberId,
     prisma,

@@ -39,6 +39,10 @@ import {
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
+  readHostedLinqProductionCanaryMemberId,
+  readHostedLinqProductionCanaryPhoneLookupKeys,
+} from "@/src/lib/hosted-onboarding/linq-production-canary";
+import {
   HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX,
   parseHostedStarterUsageSourceReferenceLookupKey,
   type HostedStarterUsageSource,
@@ -114,10 +118,21 @@ const paidHostedFamilyGroupWhere = {
   suspendedAt: null,
 } satisfies Prisma.HostedAccountGroupWhereInput;
 
-const realHostedMemberWhere = {
-  hostedGroupRuntime: null,
-  threadContainer: null,
-} satisfies Prisma.HostedMemberWhereInput;
+function buildHostedGrowthMemberWhere(
+  productionCanaryMemberId: string | null,
+): Prisma.HostedMemberWhereInput {
+  return {
+    hostedGroupRuntime: null,
+    ...(productionCanaryMemberId
+      ? {
+          id: {
+            not: productionCanaryMemberId,
+          },
+        }
+      : {}),
+    threadContainer: null,
+  };
+}
 
 function activePaidFamilyMembershipWhere(): Prisma.HostedAccountGroupMembershipWhereInput {
   return {
@@ -1290,6 +1305,11 @@ export async function readHostedGrowthDashboard(
   now: Date,
   prisma: HostedGrowthPrisma = getPrisma(),
 ): Promise<HostedGrowthDashboard> {
+  const productionCanaryMemberId =
+    await readHostedLinqProductionCanaryMemberId({ prisma });
+  const realHostedMemberWhere = buildHostedGrowthMemberWhere(
+    productionCanaryMemberId,
+  );
   const todayStart = startOfUtcDay(now);
   const recentStart = addUtcDays(todayStart, -63);
   const dailyStart = addUtcDays(todayStart, -(DAILY_SERIES_DAYS - 1));
@@ -1308,7 +1328,11 @@ export async function readHostedGrowthDashboard(
   // database operations, and each concurrent group below contains at most
   // eight reads. Keep these waves sequenced; the hosted Web pool defaults to
   // 15 clients.
-  const current = await readCurrentHostedGrowthMetrics(now, prisma);
+  const current = await readCurrentHostedGrowthMetrics(
+    now,
+    prisma,
+    realHostedMemberWhere,
+  );
   const [
     memberRows,
     rawTrialStartRows,
@@ -1360,6 +1384,9 @@ export async function readHostedGrowthDashboard(
         sourceReferenceLookupKey: true,
       },
       where: {
+        beneficiary: {
+          is: realHostedMemberWhere,
+        },
         effectiveAt: {
           gte: recentStart,
           lte: now,
@@ -1403,6 +1430,9 @@ export async function readHostedGrowthDashboard(
     }),
     prisma.hostedUsageCreditEntry.count({
       where: {
+        beneficiary: {
+          is: realHostedMemberWhere,
+        },
         effectiveAt: {
           lt: getTrialMaturityCutoff(now),
         },
@@ -1416,6 +1446,7 @@ export async function readHostedGrowthDashboard(
       where: {
         beneficiary: {
           is: {
+            ...realHostedMemberWhere,
             OR: [
               {
                 billingRef: {
@@ -1849,6 +1880,13 @@ export async function captureHostedGrowthDailySnapshot(
   now: Date,
   prisma: HostedGrowthPrisma = getPrisma(),
 ): Promise<HostedGrowthSnapshotCapture> {
+  const productionCanaryMemberId =
+    await readHostedLinqProductionCanaryMemberId({ prisma });
+  const productionCanaryPhoneLookupKeys =
+    readHostedLinqProductionCanaryPhoneLookupKeys();
+  const realHostedMemberWhere = buildHostedGrowthMemberWhere(
+    productionCanaryMemberId,
+  );
   const snapshotDate = startOfUtcDay(now);
   const priorDayStart = addUtcDays(snapshotDate, -1);
   const trailing7DayStart = addUtcDays(snapshotDate, -7);
@@ -1960,10 +1998,19 @@ export async function captureHostedGrowthDailySnapshot(
     activityCounts,
   ] =
     await Promise.all([
-      readCurrentHostedGrowthMetrics(now, prisma),
+      readCurrentHostedGrowthMetrics(now, prisma, realHostedMemberWhere),
       prisma.hostedMailboxItem.count({
         where: {
           kind: INBOUND_MESSAGE_MAILBOX_KIND,
+          ...(productionCanaryMemberId
+            ? {
+                member: {
+                  id: {
+                    not: productionCanaryMemberId,
+                  },
+                },
+              }
+            : {}),
           occurredAt: {
             gte: priorDayStart,
             lt: snapshotDate,
@@ -1972,6 +2019,18 @@ export async function captureHostedGrowthDailySnapshot(
       }),
       prisma.hostedLinqDelivery.count({
         where: {
+          ...(productionCanaryPhoneLookupKeys.length > 0
+            ? {
+                OR: [
+                  { phoneNumberLookupKey: null },
+                  {
+                    phoneNumberLookupKey: {
+                      notIn: productionCanaryPhoneLookupKeys,
+                    },
+                  },
+                ],
+              }
+            : {}),
           attemptedAt: {
             gte: priorDayStart,
             lt: snapshotDate,
@@ -2001,6 +2060,7 @@ export async function captureHostedGrowthDailySnapshot(
   });
   if (activityCounts.available) {
     await recordHostedGrowthGroupPrivateConversions({
+      memberWhere: realHostedMemberWhere,
       messages: activityCounts.resolvedGroupMessages,
       trackedAt: now,
       prisma,
@@ -2072,6 +2132,7 @@ export async function captureHostedGrowthDailySnapshot(
 }
 
 async function recordHostedGrowthGroupPrivateConversions(input: {
+  memberWhere: Prisma.HostedMemberWhereInput;
   messages: readonly HostedGrowthResolvedGroupMessage[];
   prisma: HostedGrowthPrisma;
   trackedAt: Date;
@@ -2101,7 +2162,7 @@ async function recordHostedGrowthGroupPrivateConversions(input: {
       id: true,
     },
     where: {
-      ...realHostedMemberWhere,
+      ...input.memberWhere,
       groupPrivateConversionTrackedAt: null,
       id: {
         in: memberIds,
@@ -2204,6 +2265,7 @@ export async function readHostedMessageVolumeTotal(
 async function readCurrentHostedGrowthMetrics(
   now: Date,
   prisma: HostedGrowthPrisma,
+  memberWhere: Prisma.HostedMemberWhereInput,
 ): Promise<HostedGrowthCurrentMetrics> {
   const [
     totalMembers,
@@ -2213,7 +2275,7 @@ async function readCurrentHostedGrowthMetrics(
     statusCounts,
   ] = await Promise.all([
     prisma.hostedMember.count({
-      where: realHostedMemberWhere,
+      where: memberWhere,
     }),
     prisma.hostedMember.findMany({
       select: {
@@ -2226,6 +2288,7 @@ async function readCurrentHostedGrowthMetrics(
         id: true,
       },
       where: {
+        ...memberWhere,
         billingRef: {
           is: {
             currentBillingPhase: "paid",
@@ -2279,6 +2342,7 @@ async function readCurrentHostedGrowthMetrics(
         suspendedAt: true,
       },
       where: {
+        ...memberWhere,
         billingRef: {
           isNot: null,
         },
@@ -2291,7 +2355,7 @@ async function readCurrentHostedGrowthMetrics(
         suspendedAt: null,
       },
     }),
-    readStatusCounts(prisma),
+    readStatusCounts(prisma, memberWhere),
   ]);
 
   return calculateHostedGrowthCurrentMetrics({
@@ -2306,11 +2370,13 @@ async function readCurrentHostedGrowthMetrics(
 
 async function readStatusCounts(
   prisma: HostedGrowthPrisma,
+  memberWhere: Prisma.HostedMemberWhereInput,
 ): Promise<HostedGrowthStatusCounts> {
   const counts = await Promise.all(
     CHURN_STATUS_KEYS.map((status) =>
       prisma.hostedMember.count({
         where: {
+          ...memberWhere,
           billingStatus: status,
         },
       })
