@@ -2869,6 +2869,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const returnSystemMailboxModeResult = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceInvocationResult> => {
+        if (foregroundWakeObserved && importOrStartupCheckpointPending) {
+          await checkpointSystemMailboxMode(
+            "system_mailbox.checkpoint.due_assistant_handoff",
+          );
+        }
         const projectedWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
         const requestedDefaultOwnerWakeAt = defaultOwnerWakeObserved
           ? new Date(Date.now()).toISOString()
