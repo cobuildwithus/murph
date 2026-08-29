@@ -20,6 +20,7 @@ import type {
 import {
   destroyHostedExecutionContainer,
   type HostedExecutionContainerNamespaceLike,
+  type RunnerContainerColdStartTiming,
   type RunnerContainerShellPrewarmObservation,
 } from "../runner-container.js";
 import {
@@ -113,6 +114,7 @@ type FreshRuntimeStartPreparation =
       prepared: PreparedRuntimeInvocation;
       preparedAtEpochMs: number;
       runtimePreparationWaitAfterContainerReadyMs: number;
+      startupOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
       shellPrewarmOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
     }
   | {
@@ -164,6 +166,41 @@ function toShellPrewarmOrchestrationDiagnostics(
       shellPrewarmOutcome: observation.outcome,
     }),
     shellPrewarmSource: observation.source,
+  };
+}
+
+function toContainerColdStartOrchestrationDiagnostics(
+  timing: RunnerContainerColdStartTiming | undefined,
+): RuntimeProcessingOrchestrationDiagnostics | null {
+  if (!timing) {
+    return null;
+  }
+  return {
+    freshStartContainerReadinessRequestedAtEpochMs:
+      timing.readinessRequestedAtEpochMs,
+    freshStartContainerLifecycleLockAcquiredAtEpochMs:
+      timing.lifecycleLockAcquiredAtEpochMs,
+    freshStartContainerStateReadFinishedAtEpochMs:
+      timing.stateReadFinishedAtEpochMs,
+    freshStartContainerStartIssuedAtEpochMs: timing.startIssuedAtEpochMs,
+    ...(timing.onStartAtEpochMs === undefined ? {} : {
+      freshStartContainerOnStartAtEpochMs: timing.onStartAtEpochMs,
+    }),
+    freshStartContainerPortsReadyAtEpochMs: timing.portsReadyAtEpochMs,
+    freshStartContainerHealthStartedAtEpochMs:
+      timing.healthCheckStartedAtEpochMs,
+    freshStartContainerHealthFinishedAtEpochMs:
+      timing.healthCheckFinishedAtEpochMs,
+    ...(timing.processStartedAtEpochMs === undefined ? {} : {
+      freshStartContainerProcessStartedAtEpochMs:
+        timing.processStartedAtEpochMs,
+    }),
+    ...(timing.serverListeningAtEpochMs === undefined ? {} : {
+      freshStartContainerListeningAtEpochMs:
+        timing.serverListeningAtEpochMs,
+    }),
+    freshStartContainerReadyObservedAtEpochMs:
+      timing.readyObservedAtEpochMs,
   };
 }
 
@@ -1040,6 +1077,7 @@ export class RuntimeProcessingController {
         freshStartContainerReadyAtEpochMs: preparation.containerReadyAtEpochMs,
       }),
       freshStartInvocationPreparedAtEpochMs: preparation.preparedAtEpochMs,
+      ...(preparation.startupOrchestration ?? {}),
       ...(preparation.shellPrewarmOrchestration ?? {}),
     });
     const preparationOrchestration =
@@ -1226,6 +1264,9 @@ export class RuntimeProcessingController {
       prepared: preparation.prepared,
       preparedAtEpochMs: preparation.preparedAtEpochMs,
       runtimePreparationWaitAfterContainerReadyMs,
+      startupOrchestration: toContainerColdStartOrchestrationDiagnostics(
+        startupConfirmed.coldStartTiming,
+      ),
       shellPrewarmOrchestration: toShellPrewarmOrchestrationDiagnostics(
         startupConfirmed.shellPrewarmObservation,
       ),
@@ -1262,6 +1303,7 @@ export class RuntimeProcessingController {
     token: RunnerWriteFenceToken;
   }): Promise<
     | {
+        coldStartTiming?: RunnerContainerColdStartTiming;
         confirmed: true;
         shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
       }
@@ -1356,6 +1398,9 @@ export class RuntimeProcessingController {
         userId: input.input.userId,
       });
       return {
+        ...(readinessResult.coldStartTiming === undefined ? {} : {
+          coldStartTiming: readinessResult.coldStartTiming,
+        }),
         confirmed: true,
         ...(readinessResult.shellPrewarmObservation === undefined ? {} : {
           shellPrewarmObservation: readinessResult.shellPrewarmObservation,

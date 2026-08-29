@@ -1864,13 +1864,37 @@ describe("RunnerContainer", () => {
   it("ensureReadyForProcessing starts and health-checks without invoking workspace work", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
-    await expect(container.ensureReadyForProcessing({
+    const result = await container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    });
+    expect(result).toMatchObject({
       action: "started",
       kind: "ready",
     });
+    if (result.kind !== "ready" || !result.coldStartTiming) {
+      throw new Error("Expected cold readiness timing.");
+    }
+    const timing = result.coldStartTiming;
+    expect(timing.processStartedAtEpochMs).toEqual(expect.any(Number));
+    expect(timing.serverListeningAtEpochMs).toEqual(expect.any(Number));
+    expect(timing.onStartAtEpochMs).toEqual(expect.any(Number));
+    expect(timing.readinessRequestedAtEpochMs)
+      .toBeLessThanOrEqual(timing.lifecycleLockAcquiredAtEpochMs);
+    expect(timing.lifecycleLockAcquiredAtEpochMs)
+      .toBeLessThanOrEqual(timing.stateReadFinishedAtEpochMs);
+    expect(timing.stateReadFinishedAtEpochMs)
+      .toBeLessThanOrEqual(timing.startIssuedAtEpochMs);
+    expect(timing.startIssuedAtEpochMs)
+      .toBeLessThanOrEqual(timing.onStartAtEpochMs ?? Number.POSITIVE_INFINITY);
+    expect(timing.onStartAtEpochMs ?? Number.NEGATIVE_INFINITY)
+      .toBeLessThanOrEqual(timing.portsReadyAtEpochMs);
+    expect(timing.portsReadyAtEpochMs)
+      .toBeLessThanOrEqual(timing.healthCheckStartedAtEpochMs);
+    expect(timing.healthCheckStartedAtEpochMs)
+      .toBeLessThanOrEqual(timing.healthCheckFinishedAtEpochMs);
+    expect(timing.healthCheckFinishedAtEpochMs)
+      .toBeLessThanOrEqual(timing.readyObservedAtEpochMs);
 
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
     const healthCalls = containerFetch.mock.calls.filter(([url]) =>
@@ -1881,6 +1905,41 @@ describe("RunnerContainer", () => {
     );
     expect(healthCalls).toHaveLength(1);
     expect(executeCalls).toHaveLength(0);
+  });
+
+  it("keeps cold readiness compatible with health responses that omit startup timestamps", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        return new Response(JSON.stringify({
+          activeJobCount: 0,
+          hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+          ok: true,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    const result = await container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    });
+
+    expect(result).toMatchObject({
+      action: "started",
+      kind: "ready",
+    });
+    if (result.kind !== "ready" || !result.coldStartTiming) {
+      throw new Error("Expected cold readiness timing.");
+    }
+    expect(result.coldStartTiming).not.toHaveProperty("processStartedAtEpochMs");
+    expect(result.coldStartTiming).not.toHaveProperty("serverListeningAtEpochMs");
   });
 
   it("starts the readiness deadline before lifecycle-lock admission", async () => {
@@ -2125,7 +2184,7 @@ describe("RunnerContainer", () => {
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 8_000,
         userId: "member_456",
-      })).resolves.toEqual({
+      })).resolves.toMatchObject({
         action: "started",
         kind: "ready",
       });
@@ -2924,7 +2983,7 @@ describe("RunnerContainer", () => {
       await expect(queuedHealthStarted.promise).resolves.toBe(
         Date.parse("2026-04-27T00:00:05.000Z"),
       );
-      await expect(queuedReadiness).resolves.toEqual({
+      await expect(queuedReadiness).resolves.toMatchObject({
         action: "started",
         kind: "ready",
       });
@@ -3172,7 +3231,7 @@ describe("RunnerContainer", () => {
       action: "superseded",
       kind: "superseded",
     });
-    await expect(authoritativeReadiness).resolves.toEqual({
+    await expect(authoritativeReadiness).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3282,7 +3341,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3323,7 +3382,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3361,7 +3420,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3400,7 +3459,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3433,7 +3492,7 @@ describe("RunnerContainer", () => {
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 7_500,
         userId: "member_123",
-      })).resolves.toEqual({
+      })).resolves.toMatchObject({
         action: "started",
         kind: "ready",
       });
@@ -3486,7 +3545,7 @@ describe("RunnerContainer", () => {
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 7_500,
         userId: "member_123",
-      })).resolves.toEqual({
+      })).resolves.toMatchObject({
         action: "started",
         kind: "ready",
       });
@@ -3529,7 +3588,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3561,7 +3620,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3695,7 +3754,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3714,7 +3773,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -10948,10 +11007,13 @@ function createRunnerResult(): HostedWorkspaceInvocationResult {
 }
 
 function createRunnerHealthResult(): Record<string, unknown> {
+  const now = Date.now();
   return {
     activeJobCount: 0,
     conversationWarmActivityCompletedAtEpochMs: null,
     hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     ok: true,
+    processStartedAtEpochMs: Math.max(0, now - 20),
+    serverListeningAtEpochMs: Math.max(0, now - 10),
   };
 }

@@ -432,8 +432,13 @@ describe("startHostedContainerEntrypoint", () => {
       hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
       ok: true,
       poisoned: false,
+      processStartedAtEpochMs: expect.any(Number),
       service: "cloudflare-hosted-runner-node",
+      serverListeningAtEpochMs: expect.any(Number),
     });
+    const health = response.json as Record<string, unknown>;
+    expect(health.processStartedAtEpochMs as number)
+      .toBeLessThanOrEqual(health.serverListeningAtEpochMs as number);
   });
 
   it("starts workspace restore preparation while one heavy hydration remains pending", async () => {

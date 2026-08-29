@@ -1644,6 +1644,17 @@ describe("hosted runtime control contracts", () => {
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
+        freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
+        freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
+        freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
+        freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
+        freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
+        freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
+        freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
+        freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
         freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
@@ -1943,6 +1954,7 @@ describe("hosted runtime control contracts", () => {
       { activeWakeFoundNoActiveChild: "true" }, // boolean leaf must stay boolean
       { activeWakeElapsedMs: 1.5 }, // duration must be an integer
       { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
+      { freshStartContainerPortsReadyAtEpochMs: -1 }, // container timestamps stay non-negative
       { shellPrewarmHintCount: -1 }, // counts must be non-negative
       { shellPrewarmFirstHintAtEpochMs: "1777000000061" }, // timestamps stay numeric
       { shellPrewarmOutcome: "started" }, // outcomes stay in the bounded enum

@@ -292,6 +292,7 @@ export async function startHostedContainerEntrypoint(input: {
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
   let pendingColdNodeStartupMs: number | null = null;
+  let serverListeningAtEpochMs: number | null = null;
   // During gradual deploys, active grace delays eligibility for rollout
   // replacement. Cloudflare then sends SIGTERM and allows up to 15 minutes
   // before SIGKILL.
@@ -344,7 +345,11 @@ export async function startHostedContainerEntrypoint(input: {
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
           ok: true,
           poisoned: hostedContainerProcessFatalObserved,
+          processStartedAtEpochMs: HOSTED_CONTAINER_PROCESS_START_MS,
           service: "cloudflare-hosted-runner-node",
+          ...(serverListeningAtEpochMs === null ? {} : {
+            serverListeningAtEpochMs,
+          }),
           ...(runnerBundle ? { runnerBundle } : {}),
         }));
         return;
@@ -1107,7 +1112,9 @@ export async function startHostedContainerEntrypoint(input: {
       // the event loop can dispatch the first request handler, so a request that
       // races server startup still observes the cold nodeStartupMs. Heavy runtime
       // hydration starts only after this measurement and never changes readiness.
-      pendingColdNodeStartupMs = Date.now() - HOSTED_CONTAINER_PROCESS_START_MS;
+      serverListeningAtEpochMs = Date.now();
+      pendingColdNodeStartupMs =
+        serverListeningAtEpochMs - HOSTED_CONTAINER_PROCESS_START_MS;
       hydrateHeavyRuntime();
       hostedContainerFatalRuntimeDrain = fatalRuntimeDrainOwner;
       resolve();
