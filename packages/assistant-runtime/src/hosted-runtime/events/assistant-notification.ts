@@ -516,6 +516,7 @@ async function seedOnboardingFollowupAutomation(input: {
     // Linq participant routes without a Linq delivery source).
     const result = await seedMurphOnboardingFollowupFromStartedOnboarding({
       route: buildOnboardingFollowupAutomationRoute(input.route),
+      routeValidationProfile: "hosted",
       stableKey: input.stableKey,
       vault: input.vaultRoot,
     });

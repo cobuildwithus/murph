@@ -221,6 +221,9 @@ import {
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import {
+  seedMurphOnboardingFollowupAutomation,
+} from '../src/assistant/onboarding-followup-seed.ts'
+import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
 } from '../src/assistant/shared.ts'
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
@@ -802,6 +805,101 @@ describe('assistant cron runtime orchestration', () => {
       'archived',
     )
     expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(3)
+  })
+
+  it('persists hosted email onboarding follow-up and delivers a due occurrence', async () => {
+    vi.useFakeTimers()
+    const now = new Date('2026-04-08T15:00:00.000Z')
+    const dueAt = '2026-04-09T13:45:00.000Z'
+    vi.setSystemTime(now)
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-hosted-email-onboarding-followup-',
+    )
+    const route = {
+      channel: 'email' as const,
+      deliverySource: null,
+      deliveryTarget: 'member@example.test',
+      identityId: 'hid_email_member',
+      participantId: null,
+      threadId: null,
+      threadIsDirect: true,
+    }
+    const seedInput = {
+      activeUntil: '2026-04-11T15:00:00.000Z',
+      firstOccurrenceAt: dueAt,
+      now,
+      route,
+      stableKey: 'member_email_onboarding_followup',
+      vault: vaultRoot,
+    }
+
+    await expect(
+      seedMurphOnboardingFollowupAutomation(seedInput),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
+    })
+
+    const job = await seedMurphOnboardingFollowupAutomation({
+      ...seedInput,
+      routeValidationProfile: 'hosted',
+    })
+    if (!job) {
+      throw new Error('Expected hosted email onboarding follow-up to be seeded.')
+    }
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    )?.route).toEqual(route)
+
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Prepared the onboarding continuation.',
+        text: 'Want to pick this back up?',
+      },
+      deliveryOutcome: {
+        delivery: {
+          channel: 'email',
+          sentAt: '2026-04-09T13:45:05.000Z',
+          target: 'member@example.test',
+          targetKind: 'explicit',
+        },
+        intentId: 'outbox_hosted_email_onboarding_followup',
+        kind: 'sent',
+        media: [],
+        session: {
+          sessionId: 'session_hosted_email_onboarding_followup',
+        },
+      },
+      response: 'Want to pick this back up?',
+      session: {
+        sessionId: 'session_hosted_email_onboarding_followup',
+      },
+    })
+    vi.setSystemTime(new Date('2026-04-09T13:45:05.000Z'))
+
+    await expect(processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member_email_onboarding_followup',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'member@example.test',
+        channel: 'email',
+        deliveryTarget: 'member@example.test',
+        threadIsDirect: true,
+      }),
+    )
   })
 
   it('keeps an explicit recurring timezone instead of reinterpreting its wall clock in the vault timezone', async () => {

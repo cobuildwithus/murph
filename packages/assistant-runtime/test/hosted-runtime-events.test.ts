@@ -2676,6 +2676,7 @@ describe("executeHostedMailboxEvent", () => {
           threadId: null,
           threadIsDirect: true,
         },
+        routeValidationProfile: "hosted",
         stableKey: "member_123",
         vault: "/tmp/assistant-runtime-events",
       }),
@@ -2731,10 +2732,69 @@ describe("executeHostedMailboxEvent", () => {
           deliveryTarget: "thread_123",
           threadIsDirect: true,
         }),
+        routeValidationProfile: "hosted",
         stableKey: "member_123",
         vault: "/tmp/assistant-runtime-events",
       }),
     );
+    expect(result).toMatchObject({
+      mailboxLane: "member-activated",
+      nextWakeAt: seededNextWakeAt,
+      nextWakeReason: "assistant",
+    });
+  });
+
+  it("seeds hosted email onboarding follow-up with hosted route validation", async () => {
+    const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
+    mocks.seedMurphOnboardingFollowupFromStartedOnboarding.mockResolvedValueOnce(
+      createReadyOnboardingFollowupSeedResult(seededNextWakeAt),
+    );
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:email:member_123:evt_email_followup",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: false,
+      },
+      memberId: "member_123",
+      onboardingFollowupRoute: {
+        actorId: null,
+        channel: "email",
+        delivery: {
+          kind: "explicit",
+          target: "member@example.test",
+        },
+        identityId: "hid_email_identity_123",
+        threadId: null,
+        threadIsDirect: true,
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      signupWelcome: null,
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledWith({
+      route: {
+        channel: "email",
+        deliverySource: null,
+        deliveryTarget: "member@example.test",
+        identityId: "hid_email_identity_123",
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      routeValidationProfile: "hosted",
+      stableKey: "member_123",
+      vault: "/tmp/assistant-runtime-events",
+    });
     expect(result).toMatchObject({
       mailboxLane: "member-activated",
       nextWakeAt: seededNextWakeAt,
@@ -2792,6 +2852,7 @@ describe("executeHostedMailboxEvent", () => {
         threadId: "hid_telegram_thread_123",
         threadIsDirect: true,
       },
+      routeValidationProfile: "hosted",
       stableKey: "member_123",
       vault: "/tmp/assistant-runtime-events",
     });
@@ -2861,6 +2922,7 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
     expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledWith(
       expect.objectContaining({
+        routeValidationProfile: "hosted",
         stableKey: "member_123",
         vault: "/tmp/assistant-runtime-events",
       }),

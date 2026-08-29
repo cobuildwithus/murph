@@ -49,6 +49,7 @@ import {
   assistantCronTargetAudienceEquals,
   buildCanonicalAutomationRoute,
   resolveAssistantCronTargetDefaults,
+  type AssistantCronDeliveryRouteValidationProfile,
   validateAssistantCronDeliveryTarget,
 } from './targets.js'
 
@@ -80,6 +81,7 @@ export interface UpsertAssistantCronAutomationInput {
   instructions: string
   now?: Date
   route: AutomationRoute
+  routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
   schedule: AssistantCronScheduleInput
   slug: string
   summary?: string | null
@@ -225,7 +227,10 @@ export async function upsertAssistantCronAutomation(
       schedule: input.schedule,
       vault: input.vault,
     })
-    const target = validateAssistantCronDeliveryTarget(input.route)
+    const target = validateAssistantCronDeliveryTarget(
+      input.route,
+      input.routeValidationProfile ?? 'local',
+    )
     const localStore = await readAssistantCronStore(resolvedCreation.paths)
     assertAssistantCronJobNameIsAvailable(localStore, resolvedCreation.name)
 
