@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-29",
+  "order": 100,
+  "item": {
+    "id": "replies-recover-from-unavailable-chats",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Replies recover from unavailable chats",
+    "summary": "When a private conversation becomes unavailable, Murph can open a valid direct chat and continue the reply.",
+    "details": "Recovery is limited to definitive unavailable-chat failures; ambiguous delivery failures still stop without retrying.",
+    "relevanceTags": ["assistant", "messages", "reliability"],
+    "sourcePullRequests": [2524]
+  }
+}
