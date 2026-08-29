@@ -1380,7 +1380,10 @@ locally readable.
   deployment-status event. Manual recovery must name `refs/heads/main` at the
   exact current `main` SHA before protected environment work. The controllers
   own no database, Privy, Junction, custom-environment deployment, or
-  identity-reset authority. Reviewed private
+  identity-reset authority. The iOS controller attaches the existing
+  `native-ios-hosted-e2e` environment but passes only its repository-scoped App
+  private key and production-alias Vercel token to controller steps; legacy
+  database and provider secrets are not passed to controller processes. Reviewed private
   source refs and SHAs live in `.github/native-hosted-e2e-controller.json` so a
   source rotation must pass ordinary protected-main review. Each controller
   proves the policy tag is an immutable lightweight tag resolving to the exact
