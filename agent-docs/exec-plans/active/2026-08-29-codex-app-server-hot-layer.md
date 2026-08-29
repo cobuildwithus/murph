@@ -29,9 +29,10 @@ Updated: 2026-08-29
 - Evidence: Production metadata isolates the avoidable wait to native process
   first use; the candidate changes only where those exact pinned files live in
   the image.
-- Differences from plan: None.
-- Result: Ready for image CI and canary deployment; the latency claim remains
-  subject to the post-deploy timing check.
+- Differences from plan: Public changelog publication is deferred until the
+  post-deploy timing check proves a member-visible improvement.
+- Result: Candidate ready for canary; the member latency outcome is not yet
+  proven and no public performance claim ships before post-deploy timing.
 
 ## Evidence
 
@@ -73,9 +74,14 @@ Updated: 2026-08-29
 
 - Container image contract: 11 tests passed.
 - Cloudflare package typecheck: passed.
-- Changelog production-renderer contract: 9 tests passed.
 - Local Docker was unavailable, so the native Linux image build, Codex command,
   and sandbox proof remain assigned to exact-head CI.
+- Exact-head CI passed, including the native runner permission/image sandbox,
+  production runner bundle budget, release verification, and required checks.
+- Preliminary specialist review produced one accepted finding: the public
+  changelog claim preceded production latency proof. The entry was deleted and
+  remains deferred until post-deploy measurements establish the outcome.
+- Final ReviewGPT round 1 passed with no findings on the original candidate.
 
 ## Deployment concerns
 
