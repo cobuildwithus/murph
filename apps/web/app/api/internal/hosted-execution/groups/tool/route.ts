@@ -6,6 +6,7 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
@@ -55,12 +56,19 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
+  const membershipInventoryProtocol = new URL(request.url).searchParams.get(
+    HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
+  );
   const executeTool = async () => filterHostedRuntimeGroupToolResponseProjectionScopes(
     await handleHostedRuntimeGroupTool({
+      includeMembershipAvailability:
+        membershipInventoryProtocol
+          === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
       includeParticipantRosters:
-        new URL(request.url).searchParams.get(
-          HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
-        ) === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
+        membershipInventoryProtocol
+          === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE
+        || membershipInventoryProtocol
+          === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
       memberId,
       request: body,
       requestStartedAtMs,

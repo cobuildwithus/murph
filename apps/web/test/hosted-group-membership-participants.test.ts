@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 
 const dependencyMocks = vi.hoisted(() => ({
   getHostedLinqChatSummary: vi.fn(),
@@ -50,7 +53,8 @@ vi.mock("../src/lib/hosted-groups/participant-member", async (importOriginal) =>
 }));
 
 import {
-  readHostedGroupMembershipParticipantRosters,
+  isHostedGroupConsultRouteAvailable,
+  readHostedGroupMembershipInventory,
 } from "../src/lib/hosted-groups/group-membership-participants";
 import {
   createHostedLinqParticipantContact,
@@ -150,14 +154,24 @@ describe("joined-group participant inventory", () => {
       requestedHandleCount: 2,
     });
 
-    const result = await readHostedGroupMembershipParticipantRosters({
+    const result = await readHostedGroupMembershipInventory({
       memberId: REQUESTER_MEMBER_ID,
       memberships,
       now: NOW,
       prisma: {} as never,
     });
 
-    expect(result.get("membership_1")).toEqual({
+    expect(result.availabilityByMembershipId).toEqual(new Map([
+      ["membership_1", { status: "available" }],
+      ["membership_2", {
+        status: "available",
+      }],
+      ["membership_3", {
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      }],
+    ]));
+    expect(result.participantRosterByMembershipId.get("membership_1")).toEqual({
       participantCount: 3,
       participantLabels: [
         { displayName: "Taylor" },
@@ -165,11 +179,11 @@ describe("joined-group participant inventory", () => {
       ],
       status: "available",
     });
-    expect(result.get("membership_2")).toEqual({
+    expect(result.participantRosterByMembershipId.get("membership_2")).toEqual({
       status: "unavailable",
       unavailableReason: "participant_roster_unavailable",
     });
-    expect(result.get("membership_3")).toEqual({
+    expect(result.participantRosterByMembershipId.get("membership_3")).toEqual({
       status: "unavailable",
       unavailableReason: "group_route_unavailable",
     });
@@ -193,14 +207,17 @@ describe("joined-group participant inventory", () => {
       new Error("synthetic address-book failure"),
     );
 
-    const result = await readHostedGroupMembershipParticipantRosters({
+    const result = await readHostedGroupMembershipInventory({
       memberId: REQUESTER_MEMBER_ID,
       memberships,
       now: NOW,
       prisma: {} as never,
     });
 
-    expect(result.get("membership_1")).toEqual({
+    expect(result.availabilityByMembershipId.get("membership_1")).toEqual({
+      status: "available",
+    });
+    expect(result.participantRosterByMembershipId.get("membership_1")).toEqual({
       participantCount: 3,
       participantLabels: [
         { phoneHint: { lastFour: "0321" } },
@@ -239,21 +256,25 @@ describe("joined-group participant inventory", () => {
       },
     );
 
-    const result = await readHostedGroupMembershipParticipantRosters({
+    const result = await readHostedGroupMembershipInventory({
       memberId: REQUESTER_MEMBER_ID,
       memberships,
       now: NOW,
       prisma: {} as never,
     });
 
-    expect(result.get("membership_1")).toEqual({
+    expect(result.availabilityByMembershipId).toEqual(new Map([
+      ["membership_1", { status: "available" }],
+      ["membership_2", { status: "available" }],
+    ]));
+    expect(result.participantRosterByMembershipId.get("membership_1")).toEqual({
       participantCount: 2,
       participantLabels: [
         { phoneHint: { areaCode: "415", lastFour: "0101" } },
       ],
       status: "available",
     });
-    expect(result.get("membership_2")).toEqual({
+    expect(result.participantRosterByMembershipId.get("membership_2")).toEqual({
       participantCount: 2,
       participantLabels: [
         { phoneHint: { areaCode: "415", lastFour: "0202" } },
@@ -286,7 +307,7 @@ describe("joined-group participant inventory", () => {
       return summary(["+14155550101"]);
     });
 
-    await readHostedGroupMembershipParticipantRosters({
+    await readHostedGroupMembershipInventory({
       memberId: REQUESTER_MEMBER_ID,
       memberships,
       now: NOW,
@@ -294,5 +315,191 @@ describe("joined-group participant inventory", () => {
     });
 
     expect(maxInFlight).toBe(4);
+  });
+
+  it("keeps a departed provider chat identifiable but unavailable for action", async () => {
+    const memberships = [membership(1)];
+    dependencyMocks.readHostedRuntimeAiAllowedMemberIds.mockResolvedValue(
+      new Set(["runtime_1"]),
+    );
+    dependencyMocks.readHostedThreadContainerLinqRouteAuthorities
+      .mockResolvedValue({
+        authorities: new Map([["runtime_1", route("runtime_1", "chat_1")]]),
+        nonLinqContainerMemberIds: new Set(),
+        unavailableContainerMemberIds: new Set(),
+      });
+    const chatSummary = summary(["+14155550101"]);
+    chatSummary.handles[0]!.status = "removed";
+    dependencyMocks.getHostedLinqChatSummary.mockResolvedValue(chatSummary);
+
+    const result = await readHostedGroupMembershipInventory({
+      memberId: REQUESTER_MEMBER_ID,
+      memberships,
+      now: NOW,
+      prisma: {} as never,
+    });
+
+    expect(result.availabilityByMembershipId.get("membership_1")).toEqual({
+      status: "unavailable",
+      unavailableReason: "group_route_unavailable",
+    });
+    expect(result.participantRosterByMembershipId.get("membership_1")).toEqual({
+      participantCount: 2,
+      participantLabels: [
+        { phoneHint: { areaCode: "415", lastFour: "0101" } },
+      ],
+      status: "available",
+    });
+    await expect(isHostedGroupConsultRouteAvailable({
+      routeAuthority: route("runtime_1", "chat_1"),
+    })).resolves.toBe(false);
+  });
+
+  it.each([
+    {
+      handles: [
+        { handle: "+15557770000", isMe: true, status: "active" },
+        { handle: REQUESTER_PHONE, isMe: false, status: "active" },
+        { handle: "+14155550101", isMe: false, status: "active" },
+      ],
+      label: "the exact routed account is absent",
+    },
+    {
+      handles: [
+        { handle: PROVIDER_PHONE, isMe: false, status: "inactive" },
+        { handle: "+15557770000", isMe: true, status: "active" },
+        { handle: REQUESTER_PHONE, isMe: false, status: "active" },
+        { handle: "+14155550101", isMe: false, status: "active" },
+      ],
+      label: "a different self account is active",
+    },
+  ])("requires the active exact routed account when $label", async ({ handles }) => {
+    const memberships = [membership(1)];
+    dependencyMocks.readHostedRuntimeAiAllowedMemberIds.mockResolvedValue(
+      new Set(["runtime_1"]),
+    );
+    dependencyMocks.readHostedThreadContainerLinqRouteAuthorities
+      .mockResolvedValue({
+        authorities: new Map([["runtime_1", route("runtime_1", "chat_1")]]),
+        nonLinqContainerMemberIds: new Set(),
+        unavailableContainerMemberIds: new Set(),
+      });
+    dependencyMocks.getHostedLinqChatSummary.mockResolvedValue({
+      handleCount: handles.length,
+      handles,
+      handlesComplete: true,
+      isGroup: true,
+    });
+
+    const result = await readHostedGroupMembershipInventory({
+      memberId: REQUESTER_MEMBER_ID,
+      memberships,
+      now: NOW,
+      prisma: {} as never,
+    });
+
+    expect(result.availabilityByMembershipId.get("membership_1")).toEqual({
+      status: "unavailable",
+      unavailableReason: "group_route_unavailable",
+    });
+    expect(result.participantRosterByMembershipId.get("membership_1")).toEqual({
+      participantCount: 2,
+      participantLabels: [
+        { phoneHint: { areaCode: "415", lastFour: "0101" } },
+      ],
+      status: "available",
+    });
+    await expect(isHostedGroupConsultRouteAvailable({
+      routeAuthority: route("runtime_1", "chat_1"),
+    })).resolves.toBe(false);
+  });
+
+  it.each([
+    {
+      label: "an unrelated handle cannot be parsed",
+      otherHandles: ["not-a-phone"],
+    },
+    {
+      label: "the presentation roster exceeds its bound",
+      otherHandles: Array.from(
+        { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX },
+        (_, index) => `+1415555${String(index).padStart(4, "0")}`,
+      ),
+    },
+  ])(
+    "keeps sender availability authoritative when $label",
+    async ({ otherHandles }) => {
+      const memberships = [membership(1)];
+      dependencyMocks.readHostedRuntimeAiAllowedMemberIds.mockResolvedValue(
+        new Set(["runtime_1"]),
+      );
+      dependencyMocks.readHostedThreadContainerLinqRouteAuthorities
+        .mockResolvedValue({
+          authorities: new Map([[
+            "runtime_1",
+            route("runtime_1", "chat_1"),
+          ]]),
+          nonLinqContainerMemberIds: new Set(),
+          unavailableContainerMemberIds: new Set(),
+        });
+      const chatSummary = summary(otherHandles);
+      chatSummary.handles[0]!.status = "removed";
+      dependencyMocks.getHostedLinqChatSummary.mockResolvedValue(chatSummary);
+
+      const result = await readHostedGroupMembershipInventory({
+        memberId: REQUESTER_MEMBER_ID,
+        memberships,
+        now: NOW,
+        prisma: {} as never,
+      });
+
+      expect(result.availabilityByMembershipId.get("membership_1")).toEqual({
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      });
+      expect(result.participantRosterByMembershipId.get("membership_1")).toEqual({
+        status: "unavailable",
+        unavailableReason: "participant_roster_unavailable",
+      });
+      await expect(isHostedGroupConsultRouteAvailable({
+        routeAuthority: route("runtime_1", "chat_1"),
+      })).resolves.toBe(false);
+    },
+  );
+
+  it("does not turn a transient provider read failure into false route unavailability", async () => {
+    const memberships = [membership(1)];
+    dependencyMocks.readHostedRuntimeAiAllowedMemberIds.mockResolvedValue(
+      new Set(["runtime_1"]),
+    );
+    dependencyMocks.readHostedThreadContainerLinqRouteAuthorities
+      .mockResolvedValue({
+        authorities: new Map([["runtime_1", route("runtime_1", "chat_1")]]),
+        nonLinqContainerMemberIds: new Set(),
+        unavailableContainerMemberIds: new Set(),
+      });
+    dependencyMocks.getHostedLinqChatSummary.mockRejectedValue(
+      new Error("synthetic provider timeout"),
+    );
+
+    const inventory = await readHostedGroupMembershipInventory({
+      memberId: REQUESTER_MEMBER_ID,
+      memberships,
+      now: NOW,
+      prisma: {} as never,
+    });
+
+    expect(inventory.availabilityByMembershipId.get("membership_1")).toEqual({
+      status: "available",
+    });
+    expect(
+      inventory.participantRosterByMembershipId.get("membership_1"),
+    ).toEqual({
+      status: "unavailable",
+      unavailableReason: "participant_roster_unavailable",
+    });
+    await expect(isHostedGroupConsultRouteAvailable({
+      routeAuthority: route("runtime_1", "chat_1"),
+    })).resolves.toBe(true);
   });
 });

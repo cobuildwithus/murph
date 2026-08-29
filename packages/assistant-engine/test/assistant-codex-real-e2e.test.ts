@@ -7808,7 +7808,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'keeps an exact private-to-group handoff identity-neutral without listing memberships',
+    'keeps unavailable semantic matches in joined-group clarification',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -7865,25 +7865,49 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                     action: 'list_memberships',
                     result: {
                       disclosureGrants: [],
-                      memberships: [{
-                        displayName: 'Trail Crew',
-                        grantedVaultShareProjectionScopes: [],
-                        kind: 'friends',
-                        memberCount: 8,
-                        membershipId: 'membership_trail_crew',
-                        participantRoster: {
-                          participantCount: 9,
-                          participantLabels: [
-                            { displayName: 'Taylor' },
-                            { phoneHint: { areaCode: '415', lastFour: '9876' } },
-                          ],
-                          status: 'available',
+                      memberships: [
+                        {
+                          availability: {
+                            status: 'unavailable',
+                            unavailableReason: 'group_route_unavailable',
+                          },
+                          displayName: 'Former Trail Crew',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 4,
+                          membershipId: 'membership_former_trail_crew',
+                          participantRoster: {
+                            participantCount: 5,
+                            participantLabels: [{ displayName: 'Taylor' }],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
                         },
-                        permissionsUrl: null,
-                        requestedVaultShareProjectionScopes: [],
-                        role: 'member',
-                        sponsorshipUrl: null,
-                      }],
+                        {
+                          availability: { status: 'available' },
+                          displayName: 'Trail Crew',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 8,
+                          membershipId: 'membership_trail_crew',
+                          participantRoster: {
+                            participantCount: 9,
+                            participantLabels: [
+                              { displayName: 'Taylor' },
+                              { phoneHint: { areaCode: '415', lastFour: '9876' } },
+                            ],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
+                        },
+                      ],
+                      nextCursor: null,
                       status: 'ok',
                       truncated: false,
                     },
@@ -7906,7 +7930,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt:
-            'Tell Trail Crew that I completed the synthetic mobility session as planned.',
+            'Tell my group with Taylor that I completed the synthetic mobility session as planned.',
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           vaultRoot: workingDirectory,
@@ -7914,20 +7938,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         })
 
         const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const observedContext = groupRequests.find((request) =>
-          request !== null
-          && typeof request === 'object'
-          && 'context' in request
-          && typeof request.context === 'string'
-        )
         process.stdout.write(
           `[group-handoff-context-e2e] ${JSON.stringify({
-            context:
-              observedContext
-                && typeof observedContext === 'object'
-                && 'context' in observedContext
-                ? observedContext.context
-                : null,
             reply: result.finalMessage.trim(),
             toolActions: groupRequests.flatMap((request) =>
               request
@@ -7941,30 +7953,186 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           })}\n`,
         )
 
-        expect(groupRequests).toHaveLength(2)
-        expect(groupRequests[0]).toEqual({ action: 'list_memberships' })
-        const handoffRequest = groupRequests[1]
-        expect(handoffRequest).toMatchObject({
-          action: 'handoff',
-          membershipId: 'membership_trail_crew',
-        })
-        if (
-          !handoffRequest
-          || typeof handoffRequest !== 'object'
-          || !('context' in handoffRequest)
-          || typeof handoffRequest.context !== 'string'
-        ) {
-          throw new Error('Expected one identity-neutral group handoff context.')
-        }
-        expect(handoffRequest.context).not.toMatch(/Member Delta/iu)
-        expect(handoffRequest.context).not.toMatch(/\b(?:I|me|my)\b/iu)
+        expect(groupRequests).toEqual([{ action: 'list_memberships' }])
         expect(
           actions.some((action) =>
             action.kind === 'command'
             && action.command.includes('memory show')
           ),
         ).toBe(false)
-        expect(result.finalMessage).toMatch(/queu/iu)
+        expect(result.finalMessage).toMatch(/Former Trail Crew/iu)
+        expect(result.finalMessage).toMatch(/\bTrail Crew\b/iu)
+        expect(result.finalMessage).toMatch(/\?/u)
+        expect(result.finalMessage).not.toMatch(/membership_(?:former_)?trail_crew/iu)
+        expect(result.finalMessage).not.toMatch(/group_route_unavailable/iu)
+        expect(result.finalMessage).not.toMatch(/queu/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it.each([
+    {
+      label: 'an exact inventory match is unavailable',
+      targetAvailability: 'unavailable' as const,
+    },
+    {
+      label: 'the selected route becomes unavailable before handoff',
+      targetAvailability: 'available' as const,
+    },
+  ])(
+    'gives truthful no-queue recovery when $label',
+    async ({ targetAvailability }) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-unavailable-recovery-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [
+            MURPH_GROUP_CONSULT_TOOL,
+            MURPH_GROUP_MEMBERSHIP_TOOL,
+          ],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_group_unavailable_recovery',
+              recipientKey: 'recipient_group_unavailable_recovery',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_group_unavailable_recovery'],
+              conversationId: 'conversation_group_unavailable_recovery',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_group_unavailable_recovery'],
+              originSessionId: 'session_group_unavailable_recovery',
+              recipientKey: 'recipient_group_unavailable_recovery',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                if (request.action === 'list_memberships') {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [],
+                      memberships: [
+                        {
+                          availability: targetAvailability === 'available'
+                            ? { status: 'available' as const }
+                            : {
+                                status: 'unavailable' as const,
+                                unavailableReason: 'group_route_unavailable',
+                              },
+                          displayName: 'Former Trail Crew',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 4,
+                          membershipId: 'membership_former_trail_crew',
+                          participantRoster: {
+                            participantCount: 5,
+                            participantLabels: [{ displayName: 'Taylor' }],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
+                        },
+                        {
+                          availability: { status: 'available' },
+                          displayName: 'Weekend Walkers',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 3,
+                          membershipId: 'membership_weekend_walkers',
+                          participantRoster: {
+                            participantCount: 4,
+                            participantLabels: [{ displayName: 'Jordan' }],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
+                        },
+                      ],
+                      nextCursor: null,
+                      status: 'ok',
+                      truncated: false,
+                    },
+                  }
+                }
+                return {
+                  action: 'handoff',
+                  result: {
+                    status: 'unavailable',
+                    unavailableReason: 'group_route_unavailable',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Tell Former Trail Crew that the synthetic mobility session is complete.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+
+        const expectedRequestCount = targetAvailability === 'available' ? 2 : 1
+        expect(groupRequests).toHaveLength(expectedRequestCount)
+        expect(groupRequests[0]).toEqual({ action: 'list_memberships' })
+        if (targetAvailability === 'available') {
+          expect(groupRequests[1]).toMatchObject({
+            action: 'handoff',
+            membershipId: 'membership_former_trail_crew',
+          })
+        }
+        expect(result.finalMessage).toMatch(/Former Trail Crew/iu)
+        expect(result.finalMessage).toMatch(/cannot|can't|unable|not available/iu)
+        expect(result.finalMessage).toMatch(
+          /nothing was (?:queued|sent)|did not (?:queue|send)|didn't (?:queue|send)/iu,
+        )
+        expect(result.finalMessage).toMatch(/paste|screenshot/iu)
+        expect(result.finalMessage).not.toMatch(/Weekend Walkers/iu)
+        expect(result.finalMessage).not.toMatch(/group_route_unavailable/iu)
+        expect(result.finalMessage).not.toMatch(/membership_/iu)
+        expect(result.finalMessage).not.toMatch(/provider/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

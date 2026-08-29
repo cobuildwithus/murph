@@ -91,6 +91,9 @@ import {
 import {
   sanitizeHostedGroupTargetDisplayLabel,
 } from "./group-target-description";
+import {
+  isHostedGroupConsultRouteAvailable,
+} from "./group-membership-participants";
 
 const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-assistant-ask.request.v1";
@@ -316,6 +319,11 @@ async function requestHostedGroupAssistantAskWithCryptoCache(input: {
   if (!destination) {
     return unavailableAdmission("group_route_unavailable");
   }
+  if (!await isHostedGroupConsultRouteAvailable({
+    routeAuthority: destination.routeAuthority,
+  })) {
+    return unavailableAdmission("group_route_unavailable");
+  }
 
   const occurredAt = now.toISOString();
   const expiresAt = new Date(
@@ -496,6 +504,9 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     return unavailableAdmission("group_route_unavailable");
   }
   const { boundDestination, routeAuthority } = destination;
+  if (!await isHostedGroupConsultRouteAvailable({ routeAuthority })) {
+    return unavailableAdmission("group_route_unavailable");
+  }
   const sourceDisplayName = await readHostedGroupContextHandoffSourceDisplayName({
     memberId: input.memberId,
     prisma,

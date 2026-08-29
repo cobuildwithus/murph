@@ -4429,6 +4429,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
     assertAllowedObjectKeys(
       record,
       new Set([
+        "availability",
         "displayName",
         "grantedVaultShareProjectionScopes",
         "kind",
@@ -4479,6 +4480,14 @@ function parseHostedRuntimeGroupMembershipSummaries(
       throw new TypeError(`${label} entry membershipId must not be blank.`);
     }
     return {
+      ...(record.availability === undefined
+        ? {}
+        : {
+            availability: parseHostedRuntimeGroupMembershipAvailability(
+              record.availability,
+              `${label} entry availability`,
+            ),
+          }),
       displayName: readNullableString(record.displayName, `${label} entry displayName`),
       grantedVaultShareProjectionScopes,
       kind: requireString(record.kind, `${label} entry kind`),
@@ -4505,6 +4514,34 @@ function parseHostedRuntimeGroupMembershipSummaries(
       ),
     };
   });
+}
+
+function parseHostedRuntimeGroupMembershipAvailability(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupMembershipSummary["availability"] {
+  const record = requireObject(value, label);
+  const status = requireString(record.status, `${label} status`);
+  if (status === "available") {
+    assertAllowedObjectKeys(record, new Set(["status"]), label);
+    return { status };
+  }
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    const unavailableReason = requireString(
+      record.unavailableReason,
+      `${label} unavailableReason`,
+    ).trim();
+    if (!unavailableReason) {
+      throw new TypeError(`${label} unavailableReason must not be blank.`);
+    }
+    return { status, unavailableReason };
+  }
+  throw new TypeError(`${label} status is invalid.`);
 }
 
 function parseHostedRuntimeGroupProjectionKindArray<

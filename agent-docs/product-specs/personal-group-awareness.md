@@ -154,17 +154,16 @@ to accept initial requests without either cursor. After Web emits these fields,
 rolling the runner behind that parser floor would reject otherwise successful
 reads.
 
-Participant roster inventory uses a query capability marker rather than an
-unconditional response expansion. New Cloudflare/runner code sends
-`membershipInventoryProtocol=v2` and accepts older Web responses that omit the
-roster by normalizing each entry to `participant_roster_not_reported`. New Web
-returns roster fields only for that exact query value, so older callers retain
-their strict legacy response shape. Deploy and recycle Cloudflare/runner first,
-then deploy Web. During that interval membership listing and leaving remain
-compatible, while the new membership-id Ask/handoff request correctly remains
-unavailable until Web is current. Roll back Web first, then the runner. Do not
-deploy Web while legacy runtime containers can still send title- or
-participant-based Ask/handoff requests.
+Participant roster and action availability use versioned query capability
+markers rather than unconditional response expansion. Existing
+Cloudflare/runner code sends `membershipInventoryProtocol=v2` and receives the
+roster-only shape. New code sends `membershipInventoryProtocol=v3` and receives
+both the roster and per-membership action availability. New Web accepts both
+versions; callers without either exact marker retain their strict legacy
+response shape. Deploy Web first, then recycle Cloudflare/runner onto v3. Roll
+back Cloudflare/runner to v2 before rolling back Web. During either skew window,
+membership listing and leaving remain compatible, and only v3 callers depend on
+the new availability field.
 
 ## Direct proof
 
