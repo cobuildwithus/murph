@@ -1,6 +1,6 @@
 # Stateless calendar links
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-29
 
@@ -135,5 +135,11 @@ Updated: 2026-08-29
   real-Codex compound reminder-and-link journey passes on `gpt-5.6-terra` at
   medium reasoning with one accepted reminder save, a Ready UX verdict, and the
   exact runtime-owned URL suffix. Local 320/390/1280 browser proof passes for
-  the review page, including the rounded primary action; exact-head deployed
-  proof remains required.
+  the review page, including the rounded primary action. Required exact-head
+  GitHub checks pass. The official final full-snapshot ReviewGPT gate selected
+  GPT-5.6 Sol, completed in roughly 40 minutes, and returned
+  `ROUND_OUTCOME: PASS` with no qualifying findings; its canonical attestation
+  path accepted the UI selection plus the backend model slug under the
+  repository's bounded `MODEL_CONFIRMATION: UNKNOWN` fallback. Exact-head
+  deployed proof remains required after merge.
+Completed: 2026-08-29
