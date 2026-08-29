@@ -1298,7 +1298,7 @@ export function registerAutomationCommands(
       limit: z.number().int().positive().max(200).default(10),
     }),
     output: automationListResultSchema,
-    async run(context) {
+    async run(context): Promise<z.infer<typeof automationListResultSchema>> {
       if (context.options.cursor !== undefined && context.options.supportSeriesId === undefined) {
         return invalidAutomationOption(
           "--cursor requires --support-series-id so pagination uses immutable automation ids.",
