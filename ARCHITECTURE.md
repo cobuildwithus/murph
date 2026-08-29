@@ -1843,9 +1843,11 @@ Private food-name search bounds indexed matches before similarity scoring,
 canonical-key deduplication, and window sorting. A literal-equality btree lane
 admits up to 250 exact names without SQL-pattern semantics, an unordered GIN
 lane admits up to 10,000 full-text matches without sorting the whole match set,
-and one GiST trigram branch is realized per query. Full-text searches supplement
-GIN recall with up to 10,000 strict-word-nearest names. When FTS finds nothing,
-typo recovery instead admits up to 10,000 names by whole-name distance and then
+and at most one GiST trigram branch is realized per query. A full-text search
+supplements GIN recall with up to 10,000 strict-word-nearest names only when
+the GIN set reaches its cap and may be truncated; an unsaturated set is
+exhaustive and skips that whole-catalog scan. When FTS finds nothing, typo
+recovery instead admits up to 10,000 names by whole-name distance and then
 applies the matching whole-name threshold; eligible names necessarily precede
 ineligible names because ordering and eligibility use the same similarity.
 Canonical-key deduplication happens only after those bounded admissions.
