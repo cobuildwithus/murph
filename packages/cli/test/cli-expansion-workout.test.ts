@@ -1675,6 +1675,39 @@ test('workout capture preserves explicit hours and the manual source boundary', 
     assert.equal(definiteBeforeTemporalHour.ok, true)
     assert.equal(requireData(definiteBeforeTemporalHour).durationMinutes, 30)
 
+    const numericDurationBeforeSchedule = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Yoga for 30 minutes after lunch.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(numericDurationBeforeSchedule.ok, true)
+    assert.equal(requireData(numericDurationBeforeSchedule).durationMinutes, 30)
+
+    const wordDurationBeforeSchedule = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Yoga for one hour before breakfast.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(wordDurationBeforeSchedule.ok, true)
+    assert.equal(requireData(wordDurationBeforeSchedule).durationMinutes, 60)
+
+    const unframedBeforeSchedule = await runCli([
+      'workout',
+      'add',
+      'Yoga an hour before breakfast.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(unframedBeforeSchedule.ok, false)
+    assert.match(
+      unframedBeforeSchedule.error.message ?? '',
+      /duration is ambiguous/iu,
+    )
+
     const explicitManual = await runCli<WorkoutAddEnvelope>([
       'workout',
       'add',

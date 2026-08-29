@@ -1491,7 +1491,7 @@ describe("record service seams", () => {
   });
 
   test("intervention and experiment journal services keep their event and journal wiring stable", async () => {
-    const eventUpsert = vi.fn(async () => ({
+    const eventUpsert = vi.fn(async (_input: unknown) => ({
       eventId: "evt_1",
       lookupId: "evt_1",
       ledgerFile: "events/evt_1.md",
@@ -1556,6 +1556,14 @@ describe("record service seams", () => {
       note: "20 minute red light sauna session",
     });
     expect("protocolId" in addedIntervention).toBe(false);
+    const scheduledIntervention = await intervention.addInterventionRecord({
+      vault: "./vault",
+      text: "Sauna for 30 minutes after lunch.",
+    });
+    expect(scheduledIntervention.durationMinutes).toBe(30);
+    expect(eventUpsert.mock.calls[1]?.[0]).toMatchObject({
+      payload: { durationMinutes: 30 },
+    });
     const editedIntervention = await intervention.editInterventionRecord({
       vault: "./vault",
       lookup: "evt_1",
@@ -2141,7 +2149,7 @@ describe("record service seams", () => {
       vi.useRealTimers();
     }
 
-    assert.equal(eventUpsert.mock.calls.length, 1);
+    assert.equal(eventUpsert.mock.calls.length, 2);
     assert.equal(eventDelete.mock.calls.length, 1);
     assert.equal(eventEdit.mock.calls.length, 1);
     assert.equal(journalCore.createExperiment.mock.calls.length, 1);

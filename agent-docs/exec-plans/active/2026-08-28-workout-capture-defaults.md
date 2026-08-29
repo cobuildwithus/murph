@@ -159,3 +159,17 @@ candidate now:
 - Correction proof: shared parser/format seam 2 passed; existing duration and
   intervention callers 2 passed; rebuilt CLI workout-capture slice 6 passed;
   vault-usecases and CLI typechecks passed.
+- ReviewGPT round 3 accepted one review-induced High: blanket removal of
+  duration phrases followed by `before`, `after`, or `later` could erase an
+  explicitly framed activity duration and unlock the saved default. The built
+  CLI reproduced `Yoga for 30 minutes after lunch` as 25 with a 25-minute
+  default and reproduced the same intervention phrase with a null duration.
+- Complexity-collapse correction: occurrence-offset removal now owns only
+  duration phrases followed by `ago`; explicit `for one hour` remains duration
+  evidence even when later scheduling context follows, while an unframed word
+  hour before/after a reference fails ambiguous. This deletes three blanket
+  temporal categories and adds no downstream guard or replacement owner.
+- Round-3 correction proof: parser/format/intervention focused cases 4 passed;
+  rebuilt CLI workout-capture slice 6 passed; vault-usecases and CLI typechecks
+  and builds passed. Direct built CLI proof now records 30 minutes for both
+  workout and intervention `for 30 minutes after lunch` examples.

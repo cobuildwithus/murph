@@ -20,7 +20,7 @@ const wordHourOnlyPattern = /\b(?:an|one)\s+hour\b/iu
 const definiteWordHourOnlyPatterns = [
   /^\s*(?:an|one)\s+hour\s*[.!?]?\s*$/iu,
   /^\s*(?:an|one)\s+hour\s+of\b/iu,
-  /\bfor\s+(?:an|one)\s+hour(?=\s*[.!?]?\s*$)/iu,
+  /\bfor\s+(?:an|one)\s+hour\b/iu,
 ] as const
 const hourOnlyPattern =
   /\b(\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h)\b/iu
@@ -28,16 +28,16 @@ const minuteOnlyPatterns = [
   /\b(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|min)\b/iu,
   /\b(\d+(?:\.\d+)?)m\b/iu,
 ] as const
-const temporalDurationReferencePatterns = [
-  /\b(?:(?:an|one)\s+hour\s+(?:or|to|\/)\s*(?:two|\d+(?:\.\d+)?)(?:\s*(?:hours?|hrs?|hr|h))?|one\s+(?:or|to|\/)\s*(?:two|\d+(?:\.\d+)?)\s*(?:hours?|hrs?|hr|h))\s+(?:ago|before|after|later)\b/giu,
-  /\b(?:an|one)\s+hour\s+and\s+(?:a\s+half|\d+(?:\.\d+)?\s*-?\s*(?:minutes?|mins?|min|m))\s+(?:ago|before|after|later)\b/giu,
-  /\b\d+(?:\.\d+)?\s*-?\s*(?:hours?|hrs?|hr|h)\s+(?:and\s+)?\d+(?:\.\d+)?\s*-?\s*(?:minutes?|mins?|min|m)\s+(?:ago|before|after|later)\b/giu,
-  /\b(?:half(?:\s+an)?\s+hour|half-hour)\s+(?:ago|before|after|later)\b/giu,
-  /\b(?:an|one|\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h|minutes?|mins?|min)\s+(?:ago|before|after|later)\b/giu,
+const occurrenceOffsetDurationPatterns = [
+  /\b(?:(?:an|one)\s+hour\s+(?:or|to|\/)\s*(?:two|\d+(?:\.\d+)?)(?:\s*(?:hours?|hrs?|hr|h))?|one\s+(?:or|to|\/)\s*(?:two|\d+(?:\.\d+)?)\s*(?:hours?|hrs?|hr|h))\s+ago\b/giu,
+  /\b(?:an|one)\s+hour\s+and\s+(?:a\s+half|\d+(?:\.\d+)?\s*-?\s*(?:minutes?|mins?|min|m))\s+ago\b/giu,
+  /\b\d+(?:\.\d+)?\s*-?\s*(?:hours?|hrs?|hr|h)\s+(?:and\s+)?\d+(?:\.\d+)?\s*-?\s*(?:minutes?|mins?|min|m)\s+ago\b/giu,
+  /\b(?:half(?:\s+an)?\s+hour|half-hour)\s+ago\b/giu,
+  /\b(?:an|one|\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h|minutes?|mins?|min)\s+ago\b/giu,
 ] as const
 
 export function inferDurationMinutes(text: string): number | 'ambiguous' | null {
-  const durationText = temporalDurationReferencePatterns.reduce(
+  const durationText = occurrenceOffsetDurationPatterns.reduce(
     (value, pattern) => value.replace(pattern, ' '),
     text,
   )
