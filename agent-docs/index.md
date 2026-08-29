@@ -47,6 +47,14 @@ reuse, and focused proof are specified by
 `agent-docs/operations/verification-and-runtime.md` and
 `agent-docs/references/testing-ci-map.md`.
 
+Package-local TypeScript typechecks intentionally source-check sibling
+workspace owners and report when the emitted package boundary remains
+unchecked. Static or type-only public-entrypoint imports, workspace dependency
+and project-reference changes, public exports, and build-root changes require
+the edited package's build. This verification split is specified by
+`agent-docs/operations/verification-and-runtime.md` and
+`agent-docs/references/testing-ci-map.md`.
+
 Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
 expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
