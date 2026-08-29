@@ -16252,6 +16252,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
       const automationId = 'automation-central-evening'
       const lookupId = 'evening-reminder'
+      const title = 'Evening reminder'
       const inspectedUpdatedAt = '2026-08-10T00:00:00.000Z'
       const automationFixture = createVersionedAutomationPatchFixture({
         current: {
@@ -16310,7 +16311,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           binDirectory,
           commandLogPath,
           lookupId,
-          title: 'Evening reminder',
+          title,
           updatedAt: inspectedUpdatedAt,
         })
         const result = await executeRealCodexAppServerTurn({
@@ -16410,12 +16411,12 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         })
         expect(automationCalls).toMatchObject([
           {
-            argumentsValue: { action: 'inspect' },
+            argumentsValue: { action: 'inspect', lookup: automationId },
             kind: 'dynamic',
             success: true,
           },
           {
-            argumentsValue: { action: 'patch' },
+            argumentsValue: { action: 'patch', lookup: automationId },
             kind: 'dynamic',
             success: true,
           },
@@ -16432,9 +16433,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         )
         for (const attempt of automationAttempts) {
           expect(typeof attempt.argumentsValue.lookup).toBe('string')
-          expect([automationId, lookupId]).toContain(
-            attempt.argumentsValue.lookup,
-          )
+          expect(attempt.argumentsValue.lookup).toBe(automationId)
         }
 
         expect(automationRequests).toHaveLength(2)
@@ -16451,6 +16450,10 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         ) {
           throw new Error('Expected one inspect and one scheduled patch.')
         }
+        expect(inspectRequest.lookup).toBe(automationId)
+        expect(request.lookup).toBe(automationId)
+        expect(request.lookup).not.toBe(title)
+        expect(request.lookup).not.toBe(lookupId)
         expect(request.expectedUpdatedAt).toBe(inspectedUpdatedAt)
         if (request.schedule.kind === 'dailyLocal') {
           expect(request.schedule.localTime).toBe('22:00')

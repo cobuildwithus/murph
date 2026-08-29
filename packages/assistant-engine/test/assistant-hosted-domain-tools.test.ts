@@ -96,10 +96,16 @@ describe('hosted domain dynamic tools', () => {
       'never derive a slug from a title or invent one',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For inspect and patch, lookup is one exact scalar automationId or loaded-skill recipe key, never a title, natural-language phrase, object, or record',
+      'For inspect, lookup is one scalar string containing either an exact automationId or an exact stable recipe key supplied by the currently loaded skill',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'when the turn lacks an exact identifier, resolve exactly one automationId from current read-only automation inventory first and ask if that is unavailable or ambiguous',
+      'for patch, lookup is only the concrete automationId returned by the immediately preceding inspect',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'lookup is never a title, natural-language phrase, object, or record',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'when the turn has only a title or natural-language phrase, resolve exactly one automationId from current read-only automation inventory before inspect and ask if zero or multiple matches remain',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'patch never changes the recipe key',
