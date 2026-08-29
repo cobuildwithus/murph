@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Browser Vault refreshes recover automatically",
-    "summary": "If a background Browser Vault refresh takes too long, Murph now keeps the work and retries it instead of waiting for another change.",
-    "details": "The delayed recovery stays behind active conversations and stops after the Browser Vault is current.",
+    "summary": "If a background Browser Vault refresh takes too long, Murph now keeps the work for one automatic retry instead of waiting for another change.",
+    "details": "The delayed retry stays behind active conversations. If it also times out, Murph moves on so later background work can continue.",
     "relevanceTags": ["browser-vault", "reliability", "recovery"],
     "sourcePullRequests": [2515]
   }

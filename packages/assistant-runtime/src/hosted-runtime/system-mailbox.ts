@@ -1004,6 +1004,9 @@ export async function deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeou
   ) {
     return null;
   }
+  if (input.item.nextAttemptAt !== null) {
+    return null;
+  }
   const nextWakeAt = new Date(
     Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
   ).toISOString();

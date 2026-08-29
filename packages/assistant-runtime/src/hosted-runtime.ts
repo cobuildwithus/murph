@@ -3286,6 +3286,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           if (shouldYieldSystemMailboxWork()) {
             return { preempted: true, prepared: true };
           }
+          const browserVaultRefreshAttempt =
+            recordItem.routeAction === "apply-runtime-control-request"
+            && recordItem.wake.kind === "runtime.browser-vault-refresh-requested"
+            && recordItem.nextAttemptAt !== null
+              ? "retry"
+              : "initial";
           emitPhaseLog({
             details: {
               workspacePresent: activeWorkspace !== null,
@@ -3299,6 +3305,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           let refresh: HostedBrowserVaultReplicaRefreshResult;
           try {
             refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+              attempt: browserVaultRefreshAttempt,
               deadlineMs: assistantCronDeadlineMs,
               force: true,
               generatedAt: new Date().toISOString(),
@@ -3941,6 +3948,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       });
       try {
         const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+          attempt: "initial",
           force: browserVaultReplicaRefreshRequested,
           generatedAt: new Date().toISOString(),
           platform: guardedRuntime.platform,
@@ -6938,7 +6946,15 @@ function buildHostedBrowserVaultRefreshLogDetails(
       ? { browserVaultReplicaMaxBytes: refresh.maxBytes }
       : {}),
     ...(refresh.status === "deferred_timeout"
-      ? { browserVaultRefreshStage: refresh.refreshStage }
+      ? {
+          browserVaultRefreshAttempt: refresh.attempt,
+          browserVaultRefreshConfiguredTimeoutMs: refresh.configuredTimeoutMs,
+          browserVaultRefreshCurrentStepElapsedMs:
+            refresh.currentStepElapsedMs,
+          browserVaultRefreshElapsedMs: refresh.refreshElapsedMs,
+          browserVaultRefreshStage: refresh.refreshStage,
+          browserVaultRefreshStep: refresh.refreshStep,
+        }
       : {}),
     ...("source" in refresh
       ? {

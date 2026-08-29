@@ -2589,7 +2589,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
 
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockResolvedValueOnce({
+        attempt: "initial",
+        configuredTimeoutMs: 30_000,
+        currentStepElapsedMs: 12_000,
+        refreshElapsedMs: 30_000,
         refreshStage: "replica_write",
+        refreshStep: "replica_write",
         source: { fileCount: 7, totalBytes: 4_096 },
         status: "deferred_timeout",
       });
@@ -2671,8 +2676,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
         expect(Object.fromEntries(
           Object.entries(refreshLog.details).filter(([key]) => key.startsWith("browserVault")),
         )).toEqual({
+          browserVaultRefreshAttempt: "initial",
+          browserVaultRefreshConfiguredTimeoutMs: 30_000,
+          browserVaultRefreshCurrentStepElapsedMs: 12_000,
+          browserVaultRefreshElapsedMs: 30_000,
           browserVaultRefreshStage: "replica_write",
           browserVaultRefreshStatus: "deferred_timeout",
+          browserVaultRefreshStep: "replica_write",
           browserVaultReplicaSourceFileCount: 7,
           browserVaultReplicaSourceTotalBytes: 4_096,
         });

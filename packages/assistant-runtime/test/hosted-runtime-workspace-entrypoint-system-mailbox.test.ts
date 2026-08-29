@@ -26,6 +26,7 @@ import {
   enqueueEnvironmentInterviewSystemMailboxItemForTest,
   enqueuePendingEffectsSystemMailboxItemForTest,
   mocks,
+  readCapturedRuntimePhaseLogs,
   readCheckpointConversationWatermark,
   removeTempRoot,
   requireEventIndex,
@@ -172,6 +173,7 @@ import {
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   findNextHostedSystemMailboxQueueItem,
+  isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -2826,13 +2828,20 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       forcedRefreshCalls += 1;
       events.push(`browser-vault.refresh:${forcedRefreshCalls}`);
       if (forcedRefreshCalls === 1) {
+        assert.equal(input.attempt, "initial");
         return {
+          attempt: "initial",
+          configuredTimeoutMs: 30_000,
+          currentStepElapsedMs: 8_000,
+          refreshElapsedMs: 30_000,
           refreshStage: "replica_serialization",
+          refreshStep: "replica_serialization",
           source: { fileCount: 2, totalBytes: 1_024 },
           status: "deferred_timeout",
         };
       }
       if (forcedRefreshCalls === 2) {
+        assert.equal(input.attempt, "retry");
         const publishedReplicaRef = createBrowserVaultReplicaRef({
           generatedAt: new Date().toISOString(),
           generation: 1,
@@ -3133,11 +3142,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode retains a timed-out browser refresh until one delayed retry publishes", async () => {
+  test("system mailbox mode terminalizes a second browser timeout and exposes its model-free successor", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const events: string[] = [];
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const refreshItem = createMailboxItem({
       dedupeKey: "runtime.browser-vault-refresh-requested:timeout-retry",
       id: "mailbox_item_system_mailbox_browser_vault_timeout_retry",
@@ -3145,17 +3156,51 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       lane: "system",
       laneSeq: "1",
     });
+    const successorText = "Synthetic Browser Vault successor completed.";
+    const successorDeliveryKey = "group-join:browser-vault-timeout-successor";
+    const successorDedupeKey =
+      `assistant.notification.requested:${successorDeliveryKey}`;
+    const successorItem = createMailboxItem({
+      dedupeKey: successorDedupeKey,
+      id: "mailbox_item_system_mailbox_browser_vault_timeout_successor",
+      kind: "assistant.notification.requested",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const successorTarget = "synthetic_browser_vault_timeout_successor";
+    const successorIdentityId = "hbidx:phone:v1:browser-vault-timeout-successor";
+    const successorThreadId = "hbidx:thread:v1:browser-vault-timeout-successor";
+    const successorWake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: successorDedupeKey,
+      memberId: TEST_USER_ID,
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: successorDeliveryKey,
+        deliveryIdempotencyKey: successorDeliveryKey,
+        instructions: "Send the exact synthetic completion text.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: successorText,
+        },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: successorTarget,
+          },
+          identityId: successorIdentityId,
+          threadId: successorThreadId,
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: TEST_NOW,
+    });
     const refreshImplementation =
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
     const retryAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
-    const publishedReplicaRef = createBrowserVaultReplicaRef({
-      generatedAt: retryAt,
-      generation: 1,
-      source: {
-        dataVersion: "browser-vault-timeout-retry",
-        sourceBundleHash: "d".repeat(64),
-      },
-    });
+    const successorAt = new Date(Date.parse(retryAt) + 30_000).toISOString();
+    const secondRetryAt = new Date(Date.parse(retryAt) + 60_000).toISOString();
     let refreshCalls = 0;
     let snapshotIndex = 0;
 
@@ -3163,43 +3208,38 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(input.force, true);
       refreshCalls += 1;
       if (refreshCalls === 1) {
+        assert.equal(input.attempt, "initial");
         return {
-          refreshStage: "replica_serialization",
+          attempt: "initial",
+          configuredTimeoutMs: 30_000,
+          currentStepElapsedMs: 9_000,
+          refreshElapsedMs: 30_000,
+          refreshStage: "replica_construction",
+          refreshStep: "replica_construction_experiment_outcome_read",
           source: { fileCount: 2, totalBytes: 1_024 },
           status: "deferred_timeout",
         };
       }
       if (refreshCalls === 2) {
+        assert.equal(input.attempt, "retry");
         return {
-          byteLength: publishedReplicaRef.byteLength,
-          content: {
-            entities: 0,
-            hasPrivateContent: false,
-            labResultRows: 0,
-            metricGoalProgressRows: 0,
-            metricRows: 0,
-            metricSelectionRows: 0,
-            searchRows: 0,
-            sourceHealthRows: 0,
-            timelineRows: 0,
-            weeklySampleSummaries: 0,
-          },
-          freshness: {
-            freshness: "stale",
-            reason: "missing",
-            shouldRefresh: true,
-          },
-          replicaRef: publishedReplicaRef,
+          attempt: "retry",
+          configuredTimeoutMs: 30_000,
+          currentStepElapsedMs: 18_000,
+          refreshElapsedMs: 30_000,
+          refreshStage: "replica_construction",
+          refreshStep: "replica_construction_projection",
           source: { fileCount: 2, totalBytes: 1_024 },
-          status: "published",
+          status: "deferred_timeout",
         };
       }
-      throw new Error("A terminal Browser Vault refresh must not schedule another retry.");
+      throw new Error("A second Browser Vault timeout must terminalize without a third refresh.");
     });
 
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       await enqueueHostedSystemMailboxItem({
         item: createResolvedRuntimeControlSystemMailboxItem(refreshItem),
@@ -3211,6 +3251,31 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           userId: TEST_USER_ID,
         }),
       });
+      await enqueueHostedSystemMailboxItem({
+        item: {
+          item: successorItem,
+          payload: {
+            payloadCiphertext: "ciphertext",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            requestId: `request_${successorItem.id}`,
+            source: "inline",
+            status: "resolved",
+          },
+          route: {
+            action: "dispatch-assistant-notification",
+            advanceProgress: true,
+            itemRef: {
+              id: successorItem.id,
+              kind: successorItem.kind,
+              lane: successorItem.lane,
+              laneSeq: successorItem.laneSeq,
+            },
+            state: "route",
+          },
+        },
+        vaultRoot,
+        wake: successorWake,
+      });
       await updateHostedSystemMailboxState(vaultRoot, (state) => ({
         pending: state.pending.map((item) =>
           item.itemId === refreshItem.id
@@ -3221,11 +3286,49 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 postCheckpointRecord: null,
                 status: "recording" as const,
               }
-            : item
+            : item.itemId === successorItem.id
+              ? {
+                  ...item,
+                  attemptCount: 1,
+                  lastAttemptAt: TEST_NOW,
+                  nextAttemptAt: successorAt,
+                  status: "recording" as const,
+                }
+              : item
         ),
       }));
+      const successorIntent = await createAssistantOutboxIntent({
+        channel: "linq",
+        createdAt: TEST_NOW,
+        dedupeToken: successorDeliveryKey,
+        deliveryIdempotencyKey: successorDeliveryKey,
+        deliveryTransportIdempotent: true,
+        explicitTarget: successorTarget,
+        identityId: successorIdentityId,
+        message: successorText,
+        sessionId: "session_browser_vault_timeout_successor",
+        threadId: successorThreadId,
+        threadIsDirect: true,
+        turnId: "turn_browser_vault_timeout_successor",
+        vault: vaultRoot,
+      });
+      const sentSuccessorIntent = await markAssistantOutboxIntentSentById({
+        delivery: {
+          channel: "linq",
+          idempotencyKey: successorDeliveryKey,
+          messageLength: successorText.length,
+          providerMessageId: "provider_browser_vault_timeout_successor",
+          providerThreadId: successorTarget,
+          sentAt: TEST_NOW,
+          target: successorTarget,
+          targetKind: "explicit",
+        },
+        intentId: successorIntent.intentId,
+        vault: vaultRoot,
+      });
+      assert.equal(sentSuccessorIntent?.status, "sent");
       const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "1";
+      importState.watermarks.system = "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
         key: "users/bundles/member-synthetic/system-mailbox-browser-vault-timeout-retry-before.bundle.json",
@@ -3242,7 +3345,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           hostedMailboxImportedCount: 0,
           hostedMailboxRetryableBlockedCount: 0,
           hostedMailboxSystemHandledThroughSeq: "0",
-          hostedMailboxSystemImportedSeq: "1",
+          hostedMailboxSystemImportedSeq: "2",
         },
         snapshotRef: restoredWorkspace.snapshotRef,
         version: "0",
@@ -3319,22 +3422,49 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(timedOut.nextWakeReason, "assistant");
       assert.equal(timedOut.immediateRecheckRequested, undefined);
       const checkpointCountAfterTimeout = checkpointRequests.length;
-      assert.ok(checkpointCountAfterTimeout > 0);
+      assert.equal(checkpointCountAfterTimeout, 1);
       const timeoutCheckpoint = checkpointRequests.at(-1);
       assert.equal(timeoutCheckpoint?.nextWakeAt, retryAt);
       assert.equal(timeoutCheckpoint?.nextWakeReason, "assistant");
       assert.equal(
+        checkpointRequests.filter((request) =>
+          request.nextWakeAt === retryAt
+          && request.nextWakeReason === "assistant"
+        ).length,
+        1,
+      );
+      assert.equal(
         timeoutCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "0",
       );
-      const retained = (await readHostedSystemMailboxState(vaultRoot)).pending.find(
+      const stateAfterFirstTimeout = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(stateAfterFirstTimeout.pending.length, 2);
+      const retained = stateAfterFirstTimeout.pending.find(
         (item) => item.itemId === refreshItem.id,
+      );
+      const retainedSuccessor = stateAfterFirstTimeout.pending.find(
+        (item) => item.itemId === successorItem.id,
       );
       assert.equal(retained?.status, "recording");
       assert.equal(retained?.postCheckpointRecord, null);
       assert.equal(retained?.nextAttemptAt, retryAt);
+      assert.ok(retainedSuccessor);
+      assert.equal(
+        isHostedSystemMailboxModelFreeExactNotificationItem(retainedSuccessor),
+        true,
+      );
+      assert.equal(retainedSuccessor.nextAttemptAt, successorAt);
+      const prematureAt = new Date(Date.parse(TEST_NOW) + 30_000).toISOString();
+      assert.equal(
+        findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: prematureAt,
+          state: stateAfterFirstTimeout,
+        }),
+        null,
+      );
 
-      vi.setSystemTime(new Date(Date.parse(TEST_NOW) + 30_000));
+      vi.setSystemTime(new Date(prematureAt));
       const beforeRetry = await runSystemPass(
         "attempt_synthetic_system_mailbox_browser_vault_timeout_before_retry",
       );
@@ -3348,39 +3478,158 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(currentWorkspace.nextWakeAt, retryAt);
       assert.equal(currentWorkspace.nextWakeReason, "assistant");
       const beforeRetryState = await readHostedSystemMailboxState(vaultRoot);
-      assert.equal(beforeRetryState.pending.length, 1);
-      assert.deepEqual(beforeRetryState.pending[0], retained);
+      assert.deepEqual(beforeRetryState, stateAfterFirstTimeout);
+      assert.equal(
+        findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: retryAt,
+          state: beforeRetryState,
+        })?.itemId,
+        refreshItem.id,
+      );
 
       vi.setSystemTime(new Date(retryAt));
-      const published = await runSystemPass(
-        "attempt_synthetic_system_mailbox_browser_vault_timeout_published",
+      const timedOutAgain = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_retry",
       );
 
       assert.equal(refreshCalls, 2);
-      assert.equal(published.status, "idle");
-      assert.equal(published.nextWakeAt, null);
-      assert.equal(published.nextWakeReason ?? null, null);
-      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(timedOutAgain.status, "scheduled");
+      assert.equal(timedOutAgain.nextWakeAt, successorAt);
+      assert.equal(timedOutAgain.nextWakeReason, "mailbox");
+      assert.equal(timedOutAgain.immediateRecheckRequested, undefined);
       assert.equal(checkpointRequests.length, checkpointCountAfterTimeout + 1);
-      const publicationCheckpoint = checkpointRequests.at(-1);
-      assert.equal(publicationCheckpoint?.nextWakeAt, null);
-      assert.equal(publicationCheckpoint?.nextWakeReason, null);
+      const checkpointCountAfterSecondTimeout = checkpointRequests.length;
+      const secondTimeoutCheckpoint = checkpointRequests.at(-1);
+      assert.equal(secondTimeoutCheckpoint?.nextWakeAt, successorAt);
+      assert.notEqual(secondTimeoutCheckpoint?.nextWakeAt, secondRetryAt);
+      assert.equal(secondTimeoutCheckpoint?.nextWakeReason, "mailbox");
       assert.equal(
-        publicationCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        checkpointRequests.some((request) => request.nextWakeAt === secondRetryAt),
+        false,
+      );
+      assert.equal(
+        secondTimeoutCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "1",
       );
+      const stateAfterSecondTimeout = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(stateAfterSecondTimeout.pending.length, 1);
+      assert.equal(stateAfterSecondTimeout.pending[0]?.itemId, successorItem.id);
+      assert.equal(stateAfterSecondTimeout.pending[0]?.nextAttemptAt, successorAt);
+      assert.equal(
+        stateAfterSecondTimeout.pending.some((item) => item.itemId === refreshItem.id),
+        false,
+      );
+      assert.equal(
+        findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: retryAt,
+          state: stateAfterSecondTimeout,
+        }),
+        null,
+      );
+      assert.equal(
+        findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: successorAt,
+          state: stateAfterSecondTimeout,
+        })?.itemId,
+        successorItem.id,
+      );
 
-      vi.setSystemTime(new Date(Date.parse(retryAt) + 60_000));
-      const afterPublication = await runSystemPass(
-        "attempt_synthetic_system_mailbox_browser_vault_timeout_after_publication",
+      const initialTimeoutLog = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_system_mailbox_browser_vault_timeout",
+        spy: consoleInfo,
+      }).find((entry) =>
+        entry.details.runtimePhase === "browser_vault.refresh"
+        && entry.details.runtimePhaseStatus === "done"
+        && entry.details.browserVaultRefreshStatus === "deferred_timeout"
+      );
+      assert.ok(initialTimeoutLog);
+      expect(Object.fromEntries(
+        Object.entries(initialTimeoutLog.details).filter(([key]) =>
+          key.startsWith("browserVault")
+        ),
+      )).toEqual({
+        browserVaultRefreshAttempt: "initial",
+        browserVaultRefreshConfiguredTimeoutMs: 30_000,
+        browserVaultRefreshCurrentStepElapsedMs: 9_000,
+        browserVaultRefreshElapsedMs: 30_000,
+        browserVaultRefreshStage: "replica_construction",
+        browserVaultRefreshStatus: "deferred_timeout",
+        browserVaultRefreshStep:
+          "replica_construction_experiment_outcome_read",
+        browserVaultReplicaSourceFileCount: 2,
+        browserVaultReplicaSourceTotalBytes: 1_024,
+      });
+      const retryTimeoutLog = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_system_mailbox_browser_vault_timeout_retry",
+        spy: consoleInfo,
+      }).find((entry) =>
+        entry.details.runtimePhase === "browser_vault.refresh"
+        && entry.details.runtimePhaseStatus === "done"
+        && entry.details.browserVaultRefreshStatus === "deferred_timeout"
+      );
+      assert.ok(retryTimeoutLog);
+      expect(Object.fromEntries(
+        Object.entries(retryTimeoutLog.details).filter(([key]) =>
+          key.startsWith("browserVault")
+        ),
+      )).toEqual({
+        browserVaultRefreshAttempt: "retry",
+        browserVaultRefreshConfiguredTimeoutMs: 30_000,
+        browserVaultRefreshCurrentStepElapsedMs: 18_000,
+        browserVaultRefreshElapsedMs: 30_000,
+        browserVaultRefreshStage: "replica_construction",
+        browserVaultRefreshStatus: "deferred_timeout",
+        browserVaultRefreshStep: "replica_construction_projection",
+        browserVaultReplicaSourceFileCount: 2,
+        browserVaultReplicaSourceTotalBytes: 1_024,
+      });
+
+      vi.setSystemTime(new Date(successorAt));
+      const successorProcessed = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_successor",
       );
 
       assert.equal(refreshCalls, 2);
-      assert.equal(afterPublication.status, "idle");
-      assert.equal(afterPublication.nextWakeAt, null);
-      assert.equal(afterPublication.nextWakeReason ?? null, null);
-      assert.equal(checkpointRequests.length, checkpointCountAfterTimeout + 1);
+      assert.equal(successorProcessed.status, "idle");
+      assert.equal(successorProcessed.nextWakeAt, null);
+      assert.equal(successorProcessed.nextWakeReason ?? null, null);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(checkpointRequests.length, checkpointCountAfterSecondTimeout + 2);
+      const checkpointCountAfterSuccessor = checkpointRequests.length;
+      const successorCheckpoint = checkpointRequests.at(-1);
+      assert.equal(successorCheckpoint?.nextWakeAt, null);
+      assert.equal(successorCheckpoint?.nextWakeReason, null);
+      assert.equal(
+        successorCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "2",
+      );
+      const outboxAfterSuccessor = await listAssistantOutboxIntents(vaultRoot);
+      assert.equal(
+        outboxAfterSuccessor.find((intent) => intent.intentId === successorIntent.intentId)
+          ?.status,
+        "sent",
+      );
+
+      vi.setSystemTime(new Date(secondRetryAt));
+      const afterTerminalization = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_after_terminalization",
+      );
+
+      assert.equal(refreshCalls, 2);
+      assert.equal(afterTerminalization.status, "idle");
+      assert.equal(afterTerminalization.nextWakeAt, null);
+      assert.equal(afterTerminalization.nextWakeReason ?? null, null);
+      assert.equal(checkpointRequests.length, checkpointCountAfterSuccessor);
     } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleInfo.mockRestore();
       const restoreRefreshImplementation =
         refreshImplementation
         ?? mocks.actualRefreshHostedBrowserVaultReplicaFromRuntime;

@@ -34,9 +34,10 @@ reuse, and focused proof are specified by
 `agent-docs/operations/verification-and-runtime.md` and
 `agent-docs/references/testing-ci-map.md`.
 
-Hosted Browser Vault terminal-failure convergence, bounded retained-item timeout
-retry, joined-cancellation ownership, and direct proof expectations are specified
-by `agent-docs/references/hosted-runtime-protocol.md`.
+Hosted Browser Vault terminal-failure convergence, exactly-one retained-item
+timeout retry, the 30-second deadline, fixed-schema timeout diagnostics,
+joined-cancellation ownership, and direct proof expectations are specified by
+`agent-docs/references/hosted-runtime-protocol.md`.
 
 Current Linq group message receipt, active-group edits, and participant changes
 share chat-before-member/route database lock order. The invariant and focused
