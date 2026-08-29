@@ -37,7 +37,7 @@ export function CalendarEventPage({
           <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[#315a40]">
             Calendar invite
           </p>
-          <h1 className="mt-5 max-w-3xl font-serif text-5xl font-medium leading-[0.95] tracking-[-0.045em] text-balance sm:text-7xl lg:text-8xl">
+          <h1 className="mt-5 max-w-3xl font-serif text-5xl font-medium leading-[0.95] tracking-[-0.045em] text-balance [overflow-wrap:anywhere] sm:text-7xl lg:text-8xl">
             {event.title}
           </h1>
 
@@ -50,7 +50,7 @@ export function CalendarEventPage({
                 {presentation.day}
               </strong>
             </div>
-            <dl className="grid gap-3 py-5 sm:pl-7">
+            <dl className="grid min-w-0 gap-3 py-5 sm:pl-7">
               <EventFact label="Date" value={presentation.dateLabel} />
               <EventFact
                 label="Time"
@@ -68,7 +68,7 @@ export function CalendarEventPage({
               <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#667168]">
                 Notes
               </p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#4e5b52]">
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#4e5b52] [overflow-wrap:anywhere]">
                 {event.notes}
               </p>
             </div>
@@ -127,11 +127,13 @@ function CalendarHeader() {
 
 function EventFact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[62px_1fr] items-baseline gap-3">
+    <div className="grid min-w-0 grid-cols-[62px_minmax(0,1fr)] items-baseline gap-3">
       <dt className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#667168]">
         {label}
       </dt>
-      <dd className="text-sm font-semibold text-[#19231d]">{value}</dd>
+      <dd className="min-w-0 text-sm font-semibold text-[#19231d] [overflow-wrap:anywhere]">
+        {value}
+      </dd>
     </div>
   );
 }

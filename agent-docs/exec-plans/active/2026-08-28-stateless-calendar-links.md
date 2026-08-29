@@ -1,18 +1,18 @@
 # Stateless calendar links
 
-Status: completed
+Status: active
 Created: 2026-08-28
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 ## Goal
 
 - Let Murph prepare an explicit appointment as a first-party calendar link that
   opens a clear Web review surface and hands one standards-compliant `.ics`
-  event to Apple Calendar for the member's final confirmation.
+  event to the member's calendar app for final confirmation.
 
 ## Success criteria
 
-- In a private direct Linq/iMessage conversation, Murph can create one terminal
+- In a private direct Linq text conversation, Murph can create one terminal
   `https://www.withmurph.ai/calendar/<payload>` link from an explicit title,
   start, end, and UTC offset without claiming the event was already added.
 - The bounded payload is self-contained and stateless. It creates no database,
@@ -21,7 +21,7 @@ Updated: 2026-08-28
   action, attempts the handoff once, and retains a button fallback.
 - The calendar resource emits valid UTF-8 iCalendar with UTC timestamps, CRLF,
   text escaping, and 75-octet line folding.
-- The Messages preview is generic and does not expose event details.
+- Message previews are generic and do not expose event details.
 - Invalid or oversized links fail clearly, and desktop browsers can download the
   same calendar resource.
 - Focused tests, responsive browser proof, a real-Codex assistant journey,
@@ -44,23 +44,27 @@ Updated: 2026-08-28
   within the existing 2,048-character provider bound; accept event URLs only
   when HTTPS; keep validation at the URL and calendar-format boundaries.
 - Product/process constraints: this is a Product UX Feature. Plan the direct
-  iPhone happy path, missing-detail clarification, invalid-link recovery, and
-  desktop fallback; preserve Apple's confirmation as the only add boundary;
+  phone happy path, missing-detail clarification, invalid-link recovery, and
+  desktop fallback; preserve calendar-app confirmation as the only add boundary;
   keep the implementation smaller and more composable than the supplied
   attachment patch; use the isolated worktree/PR workflow and complete both
   required ReviewGPT stages because the user explicitly requested the loop.
 
 ## Risks and mitigations
 
-1. Risk: a long notes field produces a URL Messages cannot preview reliably.
-   Mitigation: one envelope-size check against the existing provider URL limit;
-   return a clear tool error instead of adding storage or compression machinery.
-2. Risk: Messages or Safari does not launch the calendar resource automatically.
+1. Risk: a long notes field produces a URL a messaging app cannot preview
+   reliably. Mitigation: one envelope-size check against the existing provider
+   URL limit; return a clear tool error instead of adding storage or compression
+   machinery.
+2. Risk: a mobile browser does not launch the calendar resource automatically.
    Mitigation: attempt the handoff once per payload and keep the same resource
    behind a visible button; do not add runtime state or browser-specific forks.
 3. Risk: generated calendar bytes encode a different instant or malformed text.
    Mitigation: require offset-bearing timestamps, reject reversed intervals, and
    cover the pure serializer with focused tests.
+4. Risk: contract-valid unbroken text overflows a narrow phone viewport.
+   Mitigation: allow wrapping at the title, event-fact, and notes boundaries and
+   inspect a maximum-length synthetic event at the narrow viewport.
 
 ## Tasks
 
@@ -71,26 +75,52 @@ Updated: 2026-08-28
    proof without changing the ordinary reply or outbox architecture.
 4. Add the member-visible changelog entry and finish the Product UX walkthrough.
 5. Run focused checks and browser proof, commit, push, and open the draft PR.
-6. Run the preliminary specialist and final ReviewGPT loops with CI, remediate
-   accepted findings, complete the parent review, and close the plan.
+6. Remediate the accepted narrow-phone and production-planner evidence findings
+   without narrowing direct Linq service support or redesigning the URL format.
+7. Run the final ReviewGPT loop with CI, complete the parent review, and close
+   the plan.
 
 ## Decisions
 
 - The URL payload is intentionally unsigned because it carries no authority and
-  the member confirms the only external effect in Apple Calendar.
+  the member confirms the only external effect in their calendar app.
 - The calendar bytes are served from a resource route under the calendar URL,
   not an `/api` namespace.
 - Event details stay out of Open Graph metadata so lock-screen and rich-link
   previews reveal only the action.
+- Calendar-link admission intentionally follows direct Linq text routing rather
+  than a provider service-name check; SMS and RCS recipients can use the same
+  standards-based `.ics` handoff when their phone supports it.
+- The existing bounded stateless URL design remains unchanged.
+- The runtime, rather than the model, owns the exact final confirmation and
+  opaque URL because a real-Codex journey proved that model copying can alter a
+  payload character. This remains turn-local and adds no state or service.
+
+## Product UX walkthrough
+
+- Direct text happy path: the production planner admits the tool after an
+  accepted direct Linq input; the real-Codex reply is one honest confirmation
+  followed by the exact calendar URL, with no claim that the event was added.
+- Missing details: the existing tool instructions still ask for all missing
+  title/time/offset details together before constructing a link.
+- Narrow phone: the title, fact values, and notes can wrap maximum-length
+  unbroken contract-valid text; deployed 320/390/1280 browser proof remains.
+- Invalid and desktop paths: the unchanged recovery surface and downloadable
+  `.ics` fallback remain available, with calendar-app-neutral confirmation copy.
 
 ## Verification
 
 - Commands to run: focused contract, Web route/component, assistant tool, and
-  dynamic-catalog tests; owner typechecks; `git diff --check`; privacy scan;
-  responsive design proof through the repository Playwright lane; one focused
-  real-Codex journey; required exact-head GitHub checks; preliminary specialist
-  ReviewGPT; final ReviewGPT rounds; current-base merge-tree proof.
+  production turn-planning tests; owner typechecks; `git diff --check`; privacy
+  scan; responsive design proof through the repository Playwright lane; one
+  focused real-Codex journey; required exact-head GitHub checks; preliminary
+  specialist ReviewGPT; final ReviewGPT rounds; current-base merge-tree proof.
 - Expected outcomes: all focused checks pass, rendered happy/invalid states are
   usable on phone and desktop, the real reply is accurate and ends in the link,
   CI is green, and both ReviewGPT stages have no unresolved accepted finding.
-Completed: 2026-08-28
+- Current results: assistant calendar/planner/scripted tests pass (6); Web
+  calendar tests pass (6); assistant and Web typechecks pass; scoped Web lint
+  passes; `git diff --check` and the identifier scan pass; the focused
+  real-Codex journey passes with a Ready UX verdict and the exact runtime-owned
+  link. The local Playwright server did not reach its health probe before the
+  repository timeout, so exact-head deployed viewport proof is still required.

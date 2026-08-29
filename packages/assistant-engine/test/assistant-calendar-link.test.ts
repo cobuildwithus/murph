@@ -31,7 +31,7 @@ describe('assistant calendar link tool', () => {
       MURPH_CREATE_CALENDAR_LINK_TOOL,
     )
     expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'current private iMessage conversation',
+      'current private text conversation',
     )
     expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
       'This does not add the event',
@@ -51,16 +51,17 @@ describe('assistant calendar link tool', () => {
   it('returns a terminal first-party URL and an honest fallback reply', () => {
     const result = executeCreateCalendarLinkDynamicTool(EVENT)
     expect(result.rpcResult.success).toBe(true)
-    const toolResult = result.rpcResult.contentItems[0]?.text ?? ''
-    const url = toolResult.match(
+    const finalResponse = result.requiredFinalResponseOverride ?? ''
+    const url = finalResponse.match(
       /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u,
     )?.[0]
     expect(url?.startsWith(CALENDAR_LINK_URL_PREFIX)).toBe(true)
-    expect(JSON.parse(toolResult)).toEqual({
-      url,
+    expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toEqual({
       instruction:
-        'Say the details are ready, do not say the event was added, and put this exact URL on the final line.',
+        'The runtime owns the exact final confirmation and calendar link. End the turn without copying or repeating a URL.',
+      status: 'ready',
     })
+    expect(finalResponse).toBe(`The details are ready.\n${url}`)
     const payload = url?.slice(CALENDAR_LINK_URL_PREFIX.length) ?? ''
     expect(parseCalendarEventPayload(payload)).toEqual(EVENT)
     expect(result.requiredFinalResponseFallback).toBeUndefined()

@@ -3399,6 +3399,70 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
+  it('plans calendar links for accepted direct Linq text turns only', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const acceptedInputItems = [{
+      id: 'ain_calendar_link_planning',
+      source: 'assistant-input' as const,
+    }]
+    const planToolNamesFor = async (options: {
+      accepted?: boolean
+      channel?: 'linq' | 'telegram'
+      threadIsDirect?: boolean
+    } = {}) => {
+      const channel = options.channel ?? 'linq'
+      const threadIsDirect = options.threadIsDirect ?? true
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: options.accepted === false ? [] : acceptedInputItems,
+        executionContext: threadIsDirect
+          ? null
+          : {
+              hosted: {
+                memberId: 'member-calendar-link-group',
+                userEnvKeys: [],
+              },
+            },
+        input: {
+          ...createMessageInput(),
+          channel,
+          threadIsDirect,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-29',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          channel,
+          effectiveThreadIsDirect: threadIsDirect,
+          threadId: 'thread-calendar-link',
+          threadIsDirect,
+        }),
+      })
+      return plan.dynamicTools.map((tool) => tool.name)
+    }
+
+    expect(await planToolNamesFor()).toContain('create_calendar_link')
+    expect(await planToolNamesFor({ accepted: false }))
+      .not.toContain('create_calendar_link')
+    expect(await planToolNamesFor({ channel: 'telegram' }))
+      .not.toContain('create_calendar_link')
+    expect(await planToolNamesFor({ threadIsDirect: false }))
+      .not.toContain('create_calendar_link')
+  })
+
   it('plans murph.analyze_video for accepted direct and authenticated group turns with the Gemini key', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',

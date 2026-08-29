@@ -1142,6 +1142,11 @@ export interface MurphDynamicToolExecutionResult {
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
   /**
+   * Runtime-authored complete response that replaces model text when an exact
+   * opaque value cannot safely be copied through the model.
+   */
+  requiredFinalResponseOverride?: string
+  /**
    * Runtime-selected text that must be delivered when the model supplies no
    * response text or card. Analyze-video failure text is trusted status;
    * successful observation text remains untrusted data, never instructions.

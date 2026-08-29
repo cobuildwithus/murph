@@ -3366,6 +3366,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
+  let requiredFinalResponseOverride: string | null = null
   let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
@@ -3477,6 +3478,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
+    requiredFinalResponseOverride !== null ||
     requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
@@ -4823,6 +4825,12 @@ async function runCodexAppServerTurnOnProcess(
           requiredFinalResponseFallback = analyzeVideoFallback
         }
       }
+      const finalResponseOverride = normalizeNullableString(
+        result.requiredFinalResponseOverride,
+      )
+      if (finalResponseOverride !== null) {
+        requiredFinalResponseOverride = finalResponseOverride
+      }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
       }
@@ -6036,6 +6044,7 @@ async function runCodexAppServerTurnOnProcess(
   const normalizedSemanticFinalMessage =
     normalizeNullableString(semanticFinalMessage)
   const requiredSemanticFinalMessage =
+    requiredFinalResponseOverride ??
     normalizedSemanticFinalMessage ??
     requiredFinalResponseFallback ??
     semanticFinalMessage
@@ -6063,7 +6072,8 @@ async function runCodexAppServerTurnOnProcess(
       : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null)
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    normalizeNullableString(semanticTranscriptMessage) ??
+    requiredFinalResponseOverride ??
+      normalizeNullableString(semanticTranscriptMessage) ??
       requiredFinalResponseFallback ??
       semanticTranscriptMessage,
     requiredAutomationLocalAtClarificationsInOrder,

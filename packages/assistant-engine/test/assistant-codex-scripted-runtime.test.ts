@@ -14,7 +14,7 @@ import {
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
 } from '@murphai/hosted-execution/assistant-model'
-import { goalMetricTargetSchema } from '@murphai/contracts'
+import { buildCalendarEventUrl, goalMetricTargetSchema } from '@murphai/contracts'
 import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
@@ -8380,6 +8380,48 @@ text(JSON.stringify(result));
     expect(progressUpdates).toEqual(['Scripted progress update.'])
     expect(result.finalMessage).toBe('DYNAMIC_TOOL_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('delivers the exact runtime-owned calendar link instead of model-copied text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const event = {
+      title: 'Care appointment',
+      startsAt: '2026-10-14T14:30:00-04:00',
+      endsAt: '2026-10-14T15:15:00-04:00',
+      location: 'Downtown Clinic',
+    } as const
+    const exactUrl = buildCalendarEventUrl(event)
+    const modelCopiedUrl = `${exactUrl.slice(0, -1)}A`
+    const modelFinalMessage = `The details are ready.\n${modelCopiedUrl}`
+    const exactFinalMessage = `The details are ready.\n${exactUrl}`
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: event,
+          name: 'create_calendar_link',
+          namespace: 'murph',
+        },
+      },
+      {
+        text: modelFinalMessage,
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        calendarLinkAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      prompt: 'Prepare my exact appointment as a calendar link.',
+    })
+
+    expect(result.providerAuthoredFinalMessage).toBe(modelFinalMessage)
+    expect(result.finalMessage).toBe(exactFinalMessage)
+    expect(result.transcriptMessage).toBe(exactFinalMessage)
+    expect(result.finalMessage).not.toContain(modelCopiedUrl)
   })
 
   it.each([

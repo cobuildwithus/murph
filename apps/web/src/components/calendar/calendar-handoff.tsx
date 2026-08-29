@@ -37,7 +37,7 @@ export function CalendarHandoff({
         />
       </a>
       <p className="max-w-xs text-xs leading-5 text-[#667168]">
-        Apple Calendar will ask you to confirm before anything is added.
+        Your calendar app will ask you to confirm before anything is added.
       </p>
     </div>
   );

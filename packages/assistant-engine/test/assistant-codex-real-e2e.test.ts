@@ -13581,6 +13581,9 @@ describeRealCodex('real Codex stateless calendar link e2e', () => {
         && action.tool === MURPH_CREATE_CALENDAR_LINK_TOOL.name
       )
 
+      console.info(
+        `[real-codex calendar-link explicit] ${result.finalMessage.replace(/https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u, '<calendar-link>').replaceAll(/\s+/gu, ' ').trim()}`,
+      )
       expect(calendarActions.length).toBeGreaterThan(0)
       expect(actions).toEqual(calendarActions)
       for (const action of calendarActions) {
@@ -13594,20 +13597,20 @@ describeRealCodex('real Codex stateless calendar link e2e', () => {
           success: true,
         })
       }
-
-      console.info(
-        `[real-codex calendar-link explicit] ${result.finalMessage.replace(/https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u, '<calendar-link>').replaceAll(/\s+/gu, ' ').trim()}`,
-      )
       const url = result.finalMessage.match(
         /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u,
       )?.[0]
       expect(url?.startsWith(CALENDAR_LINK_URL_PREFIX)).toBe(true)
-      expect(new Set(calendarActions.map((action) => {
+      for (const action of calendarActions) {
         if (action.kind !== 'dynamic') {
-          return null
+          continue
         }
-        return (JSON.parse(action.output) as { url?: string }).url ?? null
-      }))).toEqual(new Set([url]))
+        expect(JSON.parse(action.output)).toEqual({
+          instruction:
+            'The runtime owns the exact final confirmation and calendar link. End the turn without copying or repeating a URL.',
+          status: 'ready',
+        })
+      }
       expect(result.finalMessage.trim().endsWith(url ?? '<missing>')).toBe(true)
       expect(result.finalMessage).not.toMatch(/(?:has been|was|is now) added/iu)
       expect(parseCalendarEventPayload(
