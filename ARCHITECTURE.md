@@ -3576,10 +3576,11 @@ protects live snapshots without imposing a fixed publication deadline; absent,
 mismatched, completed, or stale handoffs proceed immediately.
 A dead runtime can defer replacement for the 10-second liveness window plus at
 most one additional retry interval (one second) after its final heartbeat.
-Encrypted hosted snapshots also carry
-the exact query SQLite cache triplet so a fresh one-vCPU runner can reuse the
-last projection; canonical vault files remain authoritative, source-manifest
-validation rebuilds stale caches, and every other projection remains excluded.
+Encrypted hosted snapshots omit the query SQLite cache triplet with every other
+rebuildable projection. Canonical vault files remain authoritative, and the
+first query-dependent read after a cold restore waits for the existing
+source-manifest rebuild before returning. Older snapshots that carried the
+triplet remain readable.
 The detailed contract lives in
 `agent-docs/references/hosted-runtime-protocol.md`.
 

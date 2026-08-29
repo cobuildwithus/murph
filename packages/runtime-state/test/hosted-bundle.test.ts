@@ -2557,9 +2557,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/operations/device-sync/state.sqlite", root: "vault" },
       { expected: null, path: ".runtime/cache/assistant-cache.json", root: "vault" },
       { expected: null, path: ".runtime/projections/gateway.sqlite", root: "vault" },
-      { expected: "query-projection\n", path: ".runtime/projections/query.sqlite", root: "vault" },
-      { expected: "query-projection-shm\n", path: ".runtime/projections/query.sqlite-shm", root: "vault" },
-      { expected: "query-projection-wal\n", path: ".runtime/projections/query.sqlite-wal", root: "vault" },
+      { expected: null, path: ".runtime/projections/query.sqlite", root: "vault" },
+      { expected: null, path: ".runtime/projections/query.sqlite-shm", root: "vault" },
+      { expected: null, path: ".runtime/projections/query.sqlite-wal", root: "vault" },
       { expected: null, path: ".runtime/search.sqlite", root: "vault" },
       { expected: null, path: ".runtime/tmp/scratch.txt", root: "vault" },
       { expected: null, path: ".runtime/operations/parsers/toolchain.json", root: "vault" },
@@ -2920,17 +2920,14 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "projections", "gateway.sqlite"), "utf8"),
     );
-    assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"),
-      "query-projection\n",
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"),
     );
-    assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite-shm"), "utf8"),
-      "query-projection-shm\n",
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite-shm"), "utf8"),
     );
-    assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite-wal"), "utf8"),
-      "query-projection-wal\n",
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite-wal"), "utf8"),
     );
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "search.sqlite"), "utf8"),

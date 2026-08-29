@@ -377,11 +377,15 @@ describe("workspace snapshot local restore", () => {
           kind: "file",
         }),
       ]));
+      const archivePaths = archivePlan.entries.map((entry) => entry.archivePath);
       expect(archivePlan.entries).not.toEqual(expect.arrayContaining([
         expect.objectContaining({
           archivePath: "vault/.runtime/operations/device-sync/state.sqlite",
         }),
       ]));
+      expect(archivePaths).not.toContain("vault/.runtime/projections/query.sqlite");
+      expect(archivePaths).not.toContain("vault/.runtime/projections/query.sqlite-shm");
+      expect(archivePaths).not.toContain("vault/.runtime/projections/query.sqlite-wal");
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
         archiveEntries: archivePlan.entries,
@@ -446,12 +450,12 @@ describe("workspace snapshot local restore", () => {
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, "vault-share")))
         .rejects.toThrow();
-      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"))
-        .resolves.toBe("projection\n");
-      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-shm"), "utf8"))
-        .resolves.toBe("projection-shm\n");
-      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-wal"), "utf8"))
-        .resolves.toBe("projection-wal\n");
+      await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite")))
+        .rejects.toThrow();
+      await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-shm")))
+        .rejects.toThrow();
+      await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-wal")))
+        .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "inboxd.sqlite")))
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, ".runtime", "cache", "cache.txt")))
@@ -465,7 +469,7 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
-  it("keeps a real fractional-mtime query projection fresh across encrypted restore", async () => {
+  it("rebuilds an omitted query projection before the first cold query returns", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-query-projection-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
@@ -532,6 +536,10 @@ describe("workspace snapshot local restore", () => {
         operatorHomeRoot: sourceOperatorHomeRoot,
         vaultRoot: sourceVaultRoot,
       });
+      const archivePaths = archivePlan.entries.map((entry) => entry.archivePath);
+      expect(archivePaths).not.toContain("vault/.runtime/projections/query.sqlite");
+      expect(archivePaths).not.toContain("vault/.runtime/projections/query.sqlite-shm");
+      expect(archivePaths).not.toContain("vault/.runtime/projections/query.sqlite-wal");
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
         archiveEntries: archivePlan.entries,
@@ -558,12 +566,12 @@ describe("workspace snapshot local restore", () => {
       });
 
       const restoredVaultRoot = path.join(restoredDurableRoot, "vault");
-      const restoredStatus = await getQueryProjectionStatus(restoredVaultRoot);
-      expect(restoredStatus?.fresh).toBe(true);
-      expect(restoredStatus?.builtAt).toBe(sourceStatus?.builtAt);
-
       const projectionPath = path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite");
-      const projectionMtimeBefore = (await stat(projectionPath)).mtimeMs;
+      const restoredStatusBeforeQuery = await getQueryProjectionStatus(restoredVaultRoot);
+      expect(restoredStatusBeforeQuery.exists).toBe(false);
+      expect(restoredStatusBeforeQuery.fresh).toBe(false);
+      await expect(access(projectionPath)).rejects.toThrow();
+
       const records = await listBloodTests(restoredVaultRoot, {
         limit: 1,
         text: "Apolipoprotein B",
@@ -572,7 +580,10 @@ describe("workspace snapshot local restore", () => {
       expect(records[0]?.data.results).toEqual(expect.arrayContaining([
         expect.objectContaining({ analyte: "Apolipoprotein B", value: 87 }),
       ]));
-      expect((await stat(projectionPath)).mtimeMs).toBe(projectionMtimeBefore);
+      const restoredStatusAfterQuery = await getQueryProjectionStatus(restoredVaultRoot);
+      expect(restoredStatusAfterQuery.exists).toBe(true);
+      expect(restoredStatusAfterQuery.fresh).toBe(true);
+      await expect(access(projectionPath)).resolves.toBeUndefined();
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
@@ -584,6 +595,13 @@ describe("workspace snapshot local restore", () => {
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
     const notePath = path.join(sourceDurableRoot, "vault", "note.md");
+    const queryProjectionPath = path.join(
+      sourceDurableRoot,
+      "vault",
+      ".runtime",
+      "projections",
+      "query.sqlite",
+    );
     const snapshotId = "snapshot_legacy_ustar";
     const objectKey = "users/hsn_test/workspace-snapshots/snapshot_legacy_ustar.snapshot.enc";
     const userId = "member_123";
@@ -591,7 +609,9 @@ describe("workspace snapshot local restore", () => {
 
     try {
       await mkdir(path.dirname(notePath), { recursive: true });
+      await mkdir(path.dirname(queryProjectionPath), { recursive: true });
       await writeFile(notePath, "legacy workspace archive\n", "utf8");
+      await writeFile(queryProjectionPath, "legacy query projection\n", "utf8");
       const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
       const encrypted = await createLegacyUstarEncryptedSnapshot({
         aad,
@@ -601,6 +621,7 @@ describe("workspace snapshot local restore", () => {
           .toString("base64url"),
         notePath,
         outputDir: path.join(tempRoot, "scratch"),
+        queryProjectionPath,
       });
       const ref = createHostedWorkspaceSnapshotTestRef({
         aad,
@@ -619,6 +640,10 @@ describe("workspace snapshot local restore", () => {
 
       await expect(readFile(path.join(restoredDurableRoot, "vault", "note.md"), "utf8"))
         .resolves.toBe("legacy workspace archive\n");
+      await expect(readFile(
+        path.join(restoredDurableRoot, "vault", ".runtime", "projections", "query.sqlite"),
+        "utf8",
+      )).resolves.toBe("legacy query projection\n");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
@@ -1513,6 +1538,7 @@ async function createLegacyUstarEncryptedSnapshot(input: {
   ivBase64: string;
   notePath: string;
   outputDir: string;
+  queryProjectionPath: string;
 }): Promise<EncryptedWorkspaceSnapshotFile> {
   await mkdir(input.outputDir, { mode: 0o700, recursive: true });
   const temporaryDirectoryPath = await mkdtemp(path.join(input.outputDir, "legacy-ustar-"));
@@ -1529,6 +1555,7 @@ async function createLegacyUstarEncryptedSnapshot(input: {
       "-cf",
       tarPath,
       "./vault/note.md",
+      "./vault/.runtime/projections/query.sqlite",
     ]);
     await execFileAsync("zstd", [
       "-1",
@@ -1558,11 +1585,12 @@ async function createLegacyUstarEncryptedSnapshot(input: {
       encryptedByteSize: encryptedBytes.byteLength,
       encryptedFilePath,
       encryptedObjectSha256: createHash("sha256").update(encryptedBytes).digest("hex"),
-      fileCount: 1,
+      fileCount: 2,
       ivBase64: input.ivBase64,
       plaintextArchiveSha256: createHash("sha256").update(compressedArchive).digest("hex"),
       temporaryDirectoryPath,
-      totalPlainBytes: (await stat(input.notePath)).size,
+      totalPlainBytes:
+        (await stat(input.notePath)).size + (await stat(input.queryProjectionPath)).size,
     };
   } finally {
     key.fill(0);

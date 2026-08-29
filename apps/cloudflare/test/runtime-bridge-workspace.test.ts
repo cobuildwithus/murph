@@ -505,9 +505,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(entries).toContain("vault/note.md");
     expect(entries).toContain("vault/.runtime/operations/assistant/sessions/session.json");
     expect(entries).toContain(`home/.codex-hosted/${rolloutRelativePath}`);
-    expect(entries).toContain("vault/.runtime/projections/query.sqlite");
-    expect(entries).toContain("vault/.runtime/projections/query.sqlite-shm");
-    expect(entries).toContain("vault/.runtime/projections/query.sqlite-wal");
+    expect(entries).not.toContain("vault/.runtime/projections/query.sqlite");
+    expect(entries).not.toContain("vault/.runtime/projections/query.sqlite-shm");
+    expect(entries).not.toContain("vault/.runtime/projections/query.sqlite-wal");
     expect(entries).not.toContain("vault/.runtime/projections/inboxd.sqlite");
     expect(entries).not.toContain("vault/.runtime/cache/cache.txt");
     expect(entries).not.toContain("vault/.runtime/tmp/temp.txt");

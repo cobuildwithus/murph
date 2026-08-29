@@ -3174,13 +3174,13 @@ but never makes it portable; invalid capture metadata fails snapshot planning
 closed. Idle maintenance separately gives unprotected video a zero-length
 retention window, preserving descriptors and parser derivatives while the
 canonical retention transaction appends the tombstone and deletes the bytes.
-The one derived-cache exception is the exact query SQLite triplet
-`.runtime/projections/query.sqlite{,-wal,-shm}`: carrying it avoids a foreground
-canonical rescan after a cold restore, while normal source-manifest validation
-still discards and rebuilds stale copies. New archives use the POSIX PAX format
-so canonical source-file subsecond mtimes survive restore and keep an otherwise
-fresh carried manifest fresh; extraction remains format-agnostic for older
-archives. No other projection is portable. Assistant
+The query SQLite triplet `.runtime/projections/query.sqlite{,-wal,-shm}` is a
+machine-local rebuildable projection and is excluded while the snapshot plan is
+assembled, before archive reads, hashing, compression, encryption, and upload.
+After a cold restore, the first query-dependent read waits for the existing
+single-flight source-manifest rebuild and therefore never substitutes an empty
+result for a missing projection. Extraction remains format-agnostic, so older
+archives that carried the triplet remain readable. Assistant
 diagnostics snapshots, status snapshots, runtime budgets, pending issue records,
 and the diagnostics snapshot's recent warning/error text remain portable; event
 logs are bounded local observability only and are rewritten by runtime
