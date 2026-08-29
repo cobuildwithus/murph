@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -372,6 +373,106 @@ describe("verification dispatcher", () => {
     expect(leaseResult.stderr).toContain(
       "an arbitrary existing lease cannot prove the organization",
     );
+  });
+
+  it("retains the last failed Testbox transcript and clears it after success", () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const fakeCrabboxPath = path.join(binDir, "crabbox");
+    const testRepoDir = path.join(tempRoot, "repo");
+    const testScriptsDir = path.join(testRepoDir, "scripts");
+    const failureArtifactPath = path.join(
+      testRepoDir,
+      ".artifacts",
+      "verification",
+      "crabbox-last-failure",
+    );
+    mkdirSync(testScriptsDir, { recursive: true });
+    writeFileSync(
+      path.join(testScriptsDir, "verification-dispatch.mjs"),
+      readFileSync(dispatcherPath, "utf8"),
+      "utf8",
+    );
+    writeFileSync(path.join(testRepoDir, ".gitignore"), "/.artifacts/\n", "utf8");
+    runGit(testRepoDir, ["init", "--quiet"]);
+    runGit(testRepoDir, ["add", ".gitignore", "scripts"]);
+    runGit(testRepoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+    writeExecutable(
+      fakeCrabboxPath,
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        'printf "%s\\n" "delegated exact failing test"',
+        'printf "%s\\n" "delegated exact stderr" >&2',
+        "exit 37",
+      ].join("\n"),
+    );
+    writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
+    const dispatcherUnderTest = realpathSync(
+      path.join(testScriptsDir, "verification-dispatch.mjs"),
+    );
+    const environment = {
+      ...withoutVerificationRoutingEnvironment(process.env),
+      MURPH_ALLOW_TESTBOX_SPEND: "1",
+      MURPH_VERIFY_EXECUTOR: "crabbox",
+      MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
+      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    };
+
+    const failed = spawnSync(
+      process.execPath,
+      [dispatcherUnderTest, "verify:acceptance"],
+      { cwd: testRepoDir, encoding: "utf8", env: environment },
+    );
+
+    expect(failed.status).toBe(37);
+    expect(failed.stdout).toContain("delegated exact failing test");
+    expect(failed.stderr).toContain("delegated exact stderr");
+    expect(failed.stderr).toContain(
+      "[verification-dispatch] failure-artifact=.artifacts/verification/crabbox-last-failure",
+    );
+    expect(readFileSync(path.join(failureArtifactPath, "stdout.log"), "utf8")).toContain(
+      "delegated exact failing test",
+    );
+    expect(readFileSync(path.join(failureArtifactPath, "stderr.log"), "utf8")).toContain(
+      "delegated exact stderr",
+    );
+    expect(readFileSync(path.join(failureArtifactPath, "run.txt"), "utf8")).toMatch(
+      /^command=verify:acceptance\nexecutor=crabbox\ncandidate-tree=[a-f0-9]{40}\n$/u,
+    );
+    expect(statSync(failureArtifactPath).mode & 0o777).toBe(0o700);
+    for (const fileName of ["run.txt", "stdout.log", "stderr.log"]) {
+      expect(statSync(path.join(failureArtifactPath, fileName)).mode & 0o777).toBe(
+        0o600,
+      );
+    }
+
+    writeExecutable(
+      fakeCrabboxPath,
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        'printf "%s\\n" "delegated success"',
+      ].join("\n"),
+    );
+    const succeeded = spawnSync(
+      process.execPath,
+      [dispatcherUnderTest, "verify:acceptance"],
+      { cwd: testRepoDir, encoding: "utf8", env: environment },
+    );
+
+    expect(succeeded.status, succeeded.stderr).toBe(0);
+    expect(succeeded.stdout).toContain("delegated success");
+    expect(existsSync(failureArtifactPath)).toBe(false);
   });
 
   it("uses one isolated, secret-free static macOS workspace per local worktree", () => {

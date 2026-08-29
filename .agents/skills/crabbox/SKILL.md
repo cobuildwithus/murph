@@ -138,6 +138,11 @@ claim, command invocation, timing, and one-shot cleanup. Preserve the printed
 Testbox ID, Crabbox timing summary, and linked Actions run in Blacksmith
 verification evidence. For static SSH, preserve the command, result, and timing
 without recording host, account, or local-path identifiers.
+On a failed Blacksmith run, inspect the dispatcher-reported
+`.artifacts/verification/crabbox-last-failure/` bundle before retrying. It
+retains separate delegated stdout and stderr plus the frozen candidate-tree
+identity before the one-shot Testbox is removed; the next paid run replaces it,
+and success clears it.
 Do not add provider-specific worker overrides. The root verifier is the sole
 authority for scheduling and worker budgets. For `verify:acceptance`, Blacksmith
 evidence must show the expected default profile in the printed `resources` line.
