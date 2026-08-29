@@ -558,6 +558,9 @@ const TYPO_CASES: readonly SearchCase[] = [
 ] as const;
 
 const FOOD_EXACT_ADMISSION_LIMIT = 250;
+const FOOD_CANDIDATE_ADMISSION_LIMIT = 1_000;
+const FOOD_MAX_FTS_REPRESENTATIVE_LOOKUPS =
+  FOOD_EXACT_ADMISSION_LIMIT + FOOD_CANDIDATE_ADMISSION_LIMIT * 2;
 
 function readPrivateFoodSearchCandidateBudgets(text: string): number[] {
   const ranges = [
@@ -571,7 +574,7 @@ function readPrivateFoodSearchCandidateBudgets(text: string): number[] {
     ],
     [
       "trigram_matches AS MATERIALIZED",
-      "trigram_candidates AS MATERIALIZED",
+      "bounded_matches AS MATERIALIZED",
     ],
   ] as const;
 
@@ -592,6 +595,26 @@ function readPrivateFoodSearchCandidateBudgets(text: string): number[] {
 
     return Number(limits[0]![1]);
   });
+}
+
+function readPrivateFoodCanonicalAdmissionBudget(text: string): number {
+  const startMarker = "canonical_candidates AS MATERIALIZED";
+  const endMarker = "selected AS (";
+  const start = text.indexOf(startMarker);
+  const end = text.indexOf(endMarker, start + startMarker.length);
+
+  if (start < 0 || end <= start) {
+    throw new Error("missing private food canonical admission range");
+  }
+
+  const limits = [
+    ...text.slice(start, end).matchAll(/\bLIMIT (\d+)\b/gu),
+  ];
+  if (limits.length !== 1) {
+    throw new Error("unexpected private food canonical admission limits");
+  }
+
+  return Number(limits[0]![1]);
 }
 
 const UNICODE_CASES: readonly SearchCase[] = [
@@ -1134,6 +1157,106 @@ describe.runIf(Boolean(testDatabaseUrl))(
       );
     }, 20_000);
 
+    it.each(["Boundaryfts", "Boundryfts"])(
+      "keeps five canonical food results at the 1,000-row candidate floor for %s",
+      async (q) => {
+        const { rows: timeoutRows } = await client.query<{
+          statement_timeout: string;
+        }>("SHOW statement_timeout");
+        expect(
+          timeoutRows[0]?.statement_timeout,
+          `${q}: private food search must keep the existing database timeout`,
+        ).toBe("8s");
+
+        const { rows: fixtureRows } = await client.query<{
+          aliasRows: string;
+          canonicalGroups: string;
+          preferredAliasRows: string;
+          winnerRows: string;
+        }>(`
+          SELECT
+            count(*) FILTER (
+              WHERE canonical_key = 'food-boundary-fts-alias'
+            )::text AS "aliasRows",
+            count(DISTINCT canonical_key) FILTER (
+              WHERE id = 'zz-food-boundary-fts-winner'
+                OR canonical_key = 'food-boundary-fts-alias'
+                OR id LIKE 'food-boundary-fts-distinct-%'
+            )::text AS "canonicalGroups",
+            count(*) FILTER (
+              WHERE id = 'zz-food-boundary-fts-alias-priority'
+            )::text AS "preferredAliasRows",
+            count(*) FILTER (
+              WHERE id = 'zz-food-boundary-fts-winner'
+            )::text AS "winnerRows"
+          FROM foods
+        `);
+        expect(
+          fixtureRows[0],
+          `${q}: the existing synthetic large-alias fixture must be intact`,
+        ).toEqual({
+          aliasRows: "6000",
+          canonicalGroups: "62",
+          preferredAliasRows: "1",
+          winnerRows: "1",
+        });
+
+        const firstStartedAt = performance.now();
+        const first = await foodQueries.searchFoods({
+          includeOffMarket: false,
+          limit: 5,
+          q,
+        });
+        const firstElapsedMs = performance.now() - firstStartedAt;
+        const repeatedStartedAt = performance.now();
+        const repeated = await foodQueries.searchFoods({
+          includeOffMarket: false,
+          limit: 5,
+          q,
+        });
+        const repeatedElapsedMs = performance.now() - repeatedStartedAt;
+        console.info("private-food canonical-diversity diagnostic timing", {
+          firstElapsedMs: Math.round(firstElapsedMs),
+          q,
+          repeatedElapsedMs: Math.round(repeatedElapsedMs),
+        });
+        const ids = first.map((row) => row.id);
+        const preferredAliasId = "zz-food-boundary-fts-alias-priority";
+        const aliasRepresentatives = ids.filter(
+          (id) =>
+            id === preferredAliasId ||
+            id.startsWith("food-boundary-fts-alias-"),
+        );
+        const canonicalKeys = ids.map((id) =>
+          id === preferredAliasId || id.startsWith("food-boundary-fts-alias-")
+            ? "food-boundary-fts-alias"
+            : id,
+        );
+
+        expect.soft(
+          first,
+          `${q}: pre-dedupe candidate admission collapsed below five available canonical groups`,
+        ).toHaveLength(5);
+        expect.soft(
+          new Set(canonicalKeys).size,
+          `${q}: five rows did not represent five distinct canonical keys`,
+        ).toBe(5);
+        expect.soft(
+          ids[0],
+          `${q}: the established top-ranked winner changed`,
+        ).toBe("zz-food-boundary-fts-winner");
+        expect.soft(
+          aliasRepresentatives,
+          `${q}: the large alias group did not keep its preferred representative`,
+        ).toEqual([preferredAliasId]);
+        expect.soft(
+          repeated.map((row) => row.id),
+          `${q}: repeated identical search changed the ordered IDs`,
+        ).toEqual(ids);
+      },
+      20_000,
+    );
+
     it.each(["% boundaryfts", "_ boundaryfts"])(
       "treats SQL wildcard characters as ordinary food-search input for %s",
       async (q) => {
@@ -1205,10 +1328,30 @@ function expectBoundedFoodSortInputs(
   }
 }
 
+function expectBoundedFoodRepresentativeLookups(
+  nodes: readonly ExplainPlanNode[],
+  maximumLookups: number,
+): void {
+  const representativeScans = nodes.filter((node) =>
+    node["Index Name"] === "foods_perf_name_exact_rank_idx" &&
+    (node["Actual Loops"] ?? 0) > 1
+  );
+  expect(representativeScans.length).toBeGreaterThan(0);
+  expect(
+    representativeScans.reduce(
+      (total, node) => total + (node["Actual Loops"] ?? 0),
+      0,
+    ),
+  ).toBeLessThanOrEqual(maximumLookups);
+  for (const scan of representativeScans) {
+    expect(scan["Actual Rows"] ?? 0).toBeLessThanOrEqual(1);
+  }
+}
+
 describe.runIf(Boolean(testDatabaseUrl))(
   "large-catalog food PostgreSQL search bound",
   () => {
-    it("uses derived candidate bounds and indexed plans inside the production statement timeout", async () => {
+    it("keeps maximum-cardinality candidate and representative work bounded inside the production statement timeout", async () => {
       const client = new pg.Client({
         connectionString: testDatabaseUrl ?? undefined,
       });
@@ -1314,22 +1457,27 @@ describe.runIf(Boolean(testDatabaseUrl))(
         }>("SHOW statement_timeout");
         expect(timeoutRows[0]?.statement_timeout).toBe("8s");
 
+        const broadStartedAt = performance.now();
         const broad = await queries.searchFoods({
           includeOffMarket: false,
-          limit: 20,
+          limit: 50,
           q: "commonfood",
         });
-        expect(broad).toHaveLength(20);
+        const broadElapsedMs = performance.now() - broadStartedAt;
+        expect(broad).toHaveLength(50);
         expect(capturedSearch.current).not.toBeNull();
         const broadSearch = capturedSearch.current;
         if (!broadSearch) {
           throw new Error("broad food search SQL was not captured");
         }
         expect(readPrivateFoodSearchCandidateBudgets(broadSearch.text)).toEqual([
-          4_000,
-          4_000,
-          4_000,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
         ]);
+        expect(readPrivateFoodCanonicalAdmissionBudget(broadSearch.text)).toBe(
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+        );
         const broadExplain = await client.query<{ "QUERY PLAN": Array<{
           Plan: ExplainPlanNode;
         }> }>(
@@ -1343,7 +1491,17 @@ describe.runIf(Boolean(testDatabaseUrl))(
           node["Index Name"] === "foods_perf_name_rank_idx" &&
           (node["Actual Loops"] ?? 0) > 0
         )).toBe(true);
-        expectBoundedFoodSortInputs(broadNodes, 4_000);
+        expectBoundedFoodSortInputs(
+          broadNodes,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+        );
+        expectBoundedFoodRepresentativeLookups(
+          broadNodes,
+          FOOD_MAX_FTS_REPRESENTATIVE_LOOKUPS,
+        );
+        console.info("private-food maximum-cardinality timing", {
+          broadElapsedMs: Math.round(broadElapsedMs),
+        });
 
         const brandOnly = await queries.searchFoods({
           includeOffMarket: false,
@@ -1356,10 +1514,13 @@ describe.runIf(Boolean(testDatabaseUrl))(
           throw new Error("brand-only food search SQL was not captured");
         }
         expect(readPrivateFoodSearchCandidateBudgets(brandSearch.text)).toEqual([
-          1_000,
-          1_000,
-          1_000,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
         ]);
+        expect(readPrivateFoodCanonicalAdmissionBudget(brandSearch.text)).toBe(
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+        );
         const brandExplain = await client.query<{ "QUERY PLAN": Array<{
           Plan: ExplainPlanNode;
         }> }>(
@@ -1410,21 +1571,55 @@ describe.runIf(Boolean(testDatabaseUrl))(
           valid_trigram_match: true,
         });
 
-        const ceilingTypo = await queries.searchFoods({
+        const maximumTypoStartedAt = performance.now();
+        const maximumTypo = await queries.searchFoods({
           includeOffMarket: false,
           limit: 50,
           q: typoQ,
         });
-        const ceilingTypoSearch = capturedSearch.current;
-        if (!ceilingTypoSearch) {
+        const maximumTypoElapsedMs = performance.now() - maximumTypoStartedAt;
+        const maximumTypoSearch = capturedSearch.current;
+        if (!maximumTypoSearch) {
           throw new Error(
-            "large-catalog ceiling typo search SQL was not captured",
+            "large-catalog maximum typo search SQL was not captured",
           );
         }
-        expect(ceilingTypo).toHaveLength(50);
+        expect(maximumTypo).toHaveLength(50);
         expect(
-          readPrivateFoodSearchCandidateBudgets(ceilingTypoSearch.text),
-        ).toEqual([10_000, 10_000, 10_000]);
+          readPrivateFoodSearchCandidateBudgets(maximumTypoSearch.text),
+        ).toEqual([
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+        ]);
+        expect(
+          readPrivateFoodCanonicalAdmissionBudget(maximumTypoSearch.text),
+        ).toBe(FOOD_CANDIDATE_ADMISSION_LIMIT);
+        const maximumTypoExplain = await client.query<{ "QUERY PLAN": Array<{
+          Plan: ExplainPlanNode;
+        }> }>(
+          `EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${maximumTypoSearch.text}`,
+          maximumTypoSearch.values,
+        );
+        const maximumTypoPlan =
+          maximumTypoExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
+        expect(maximumTypoPlan).toBeDefined();
+        const maximumTypoNodes = flattenExplainPlan(maximumTypoPlan ?? {});
+        expect(maximumTypoNodes.filter((node) =>
+          node["Index Name"] === "foods_perf_name_rank_idx" &&
+          (node["Actual Loops"] ?? 0) > 0
+        )).toHaveLength(1);
+        expectBoundedFoodSortInputs(
+          maximumTypoNodes,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+        );
+        expectBoundedFoodRepresentativeLookups(
+          maximumTypoNodes,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+        );
+        console.info("private-food maximum-cardinality timing", {
+          maximumTypoElapsedMs: Math.round(maximumTypoElapsedMs),
+        });
 
         const floorTypo = await queries.searchFoods({
           includeOffMarket: false,
@@ -1439,25 +1634,13 @@ describe.runIf(Boolean(testDatabaseUrl))(
         }
         expect(floorTypo).toHaveLength(5);
         expect(readPrivateFoodSearchCandidateBudgets(typoSearch.text)).toEqual([
-          1_000,
-          1_000,
-          1_000,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
         ]);
-
-        const typoExplain = await client.query<{ "QUERY PLAN": Array<{
-          Plan: ExplainPlanNode;
-        }> }>(
-          `EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${typoSearch.text}`,
-          typoSearch.values,
+        expect(readPrivateFoodCanonicalAdmissionBudget(typoSearch.text)).toBe(
+          FOOD_CANDIDATE_ADMISSION_LIMIT,
         );
-        const typoPlan = typoExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
-        expect(typoPlan).toBeDefined();
-        const typoNodes = flattenExplainPlan(typoPlan ?? {});
-        expect(typoNodes.filter((node) =>
-          node["Index Name"] === "foods_perf_name_rank_idx" &&
-          (node["Actual Loops"] ?? 0) > 0
-        )).toHaveLength(1);
-        expectBoundedFoodSortInputs(typoNodes, 1_000);
 
         const { rows: obsoleteIndexes } = await client.query<{ name: string | null }>(
           "SELECT to_regclass('foods_perf_canonical_rank_idx')::text AS name",

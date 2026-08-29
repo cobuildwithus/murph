@@ -765,23 +765,35 @@ Attribution lives under `sql/product-tests/`.
 The current search path uses built-in Postgres full-text search plus the
 `pg_trgm` extension for indexed name similarity. Public food searches retain
 their existing 250-candidate SQL bound, and supplement searches retain their
-existing ranking path. Private food-name search uses a separate bounded
+existing ranking path. Private food-name search uses a separate two-stage
 retrieval contract for the roughly two-million-row foods corpus. Literal
-exact-name admission remains capped at 250 rows. Every other indexed admission
-branch derives the same candidate budget from the requested final result count:
-`min(10,000, max(1,000, 200 × limit))`. A five-result request therefore admits
-1,000 candidates per branch, while the supported 50-result maximum reaches the
-existing 10,000 ceiling. The validated integer is rendered as a concrete SQL
-literal for the GIN full-text, full-text nearest-name GiST, and no-FTS typo GiST
-admissions so each indexed branch retains a bounded concrete plan. Exactly one
-GiST branch is realized: full-text searches use strict-word-nearest names,
-while no-FTS typo searches use whole-name distance and its matching whole-name
-threshold. That shared metric keeps eligible typo matches ahead of ineligible
-names before the cap. The bounded admissions preserve representative choice
-and canonical diversity across the established 5,000-row boundary and
-ineligible-neighbor fixtures. Ranking is deterministic within the admitted
-set; it is intentionally not an exhaustive whole-catalog ranking. Exact IDs
-and UPCs continue to use direct lookup paths. On `foods_api_failed` failures
+exact-name admission remains capped at 250 rows. Every supported private-food
+result count, including the 50-result maximum, uses the same concrete 1,000-row
+candidate limit for the GIN full-text, full-text nearest-name GiST, and no-FTS
+typo GiST branches. The fixed SQL literal preserves a bounded concrete plan
+instead of multiplying maximum-cardinality requests into a 10,000-row probe.
+
+The same statement counts distinct `canonical_key` values in that probe. When
+it already has enough groups, the existing exact-name ranking index admits the
+best eligible representative for every bounded canonical-key/name pair before
+canonical dedupe and final ranking. A full-text
+path can expose at most 2,250 such pairs (250 exact-name rows plus two 1,000-row
+branches), while the no-FTS typo path can expose at most 1,000; each pair
+performs one `LIMIT 1` representative lookup and final canonical admission
+remains capped at 1,000. A raw branch therefore cannot hide a higher-priority
+peer behind same-name duplicates or scale representative work with the
+requested result count. When one or more duplicated groups leave the probe
+underfilled, a gated fallback evaluates the eligible indexed full-text or
+trigram matches, chooses the established ranked representative for each
+canonical key, and only then applies the same concrete candidate budget. One
+canonical group therefore cannot consume result admission, and the fallback
+adds no second database round trip. Exactly one
+GiST probe branch is realized: full-text searches use strict-word-nearest
+names, while no-FTS typo searches use whole-name distance and its matching
+whole-name threshold. That shared metric keeps eligible typo matches ahead of
+ineligible names before the cap. Ranking and tie-breaks remain deterministic,
+and the existing eight-second statement timeout still owns both stages. Exact
+IDs and UPCs continue to use direct lookup paths. On `foods_api_failed` failures
 from private food lookup, including exact
 ID/UPC dispatch and ranked search, the existing safe structured log adds only
 the closed `failureStage` value `search_rows` or `contaminant_summary`;

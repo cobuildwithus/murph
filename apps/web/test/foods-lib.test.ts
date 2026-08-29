@@ -43,7 +43,7 @@ function readPrivateFoodSearchCandidateBudgets(text: string): number[] {
     ],
     [
       "trigram_matches AS MATERIALIZED",
-      "trigram_candidates AS MATERIALIZED",
+      "bounded_matches AS MATERIALIZED",
     ],
   ] as const;
 
@@ -64,6 +64,26 @@ function readPrivateFoodSearchCandidateBudgets(text: string): number[] {
 
     return Number(limits[0]![1]);
   });
+}
+
+function readPrivateFoodCanonicalAdmissionBudget(text: string): number {
+  const startMarker = "canonical_candidates AS MATERIALIZED";
+  const endMarker = "selected AS (";
+  const start = text.indexOf(startMarker);
+  const end = text.indexOf(endMarker, start + startMarker.length);
+
+  if (start < 0 || end <= start) {
+    throw new Error("missing private food canonical admission range");
+  }
+
+  const limits = [
+    ...text.slice(start, end).matchAll(/\bLIMIT (\d+)\b/gu),
+  ];
+  if (limits.length !== 1) {
+    throw new Error("unexpected private food canonical admission limits");
+  }
+
+  return Number(limits[0]![1]);
 }
 
 function createFoodsTestRouteHandlers(
@@ -329,14 +349,14 @@ describe("foods query helpers", () => {
     {
       lookup: "ranked search",
       routeQuery: "private-search-value",
-      primarySql: "fts_candidates AS MATERIALIZED",
+      primarySql: "bounded_matches AS MATERIALIZED",
       failureStage: "search_rows" as const,
       failingQuery: 1,
     },
     {
       lookup: "ranked search",
       routeQuery: "private-search-value",
-      primarySql: "fts_candidates AS MATERIALIZED",
+      primarySql: "bounded_matches AS MATERIALIZED",
       failureStage: "contaminant_summary" as const,
       failingQuery: 2,
     },
@@ -637,9 +657,23 @@ describe("foods query helpers", () => {
       "strict_word_similarity(query.raw_q, name)",
     );
     expect(searchCall?.text).toContain("fts_matches AS MATERIALIZED");
-    expect(searchCall?.text).toContain("fts_candidates AS MATERIALIZED");
     expect(searchCall?.text).toContain("trigram_matches AS MATERIALIZED");
-    expect(searchCall?.text).toContain("trigram_candidates AS MATERIALIZED");
+    expect(searchCall?.text).toContain("bounded_matches AS MATERIALIZED");
+    expect(searchCall?.text).toContain(
+      "bounded_candidate_summary AS MATERIALIZED",
+    );
+    expect(searchCall?.text).toContain(
+      "bounded_fast_matches AS MATERIALIZED",
+    );
+    expect(searchCall?.text).toContain(
+      "fts_canonical_fallback_matches AS MATERIALIZED",
+    );
+    expect(searchCall?.text).toContain(
+      "trigram_canonical_fallback_matches AS MATERIALIZED",
+    );
+    expect(searchCall?.text).toContain(
+      "canonical_candidates AS MATERIALIZED",
+    );
     expect(searchCall?.text).toContain(
       "NOT EXISTS (SELECT 1 FROM fts_index_matches)",
     );
@@ -656,6 +690,26 @@ describe("foods query helpers", () => {
       searchSql.indexOf("fts_nearest_matches AS MATERIALIZED"),
       searchSql.indexOf("fts_matches AS MATERIALIZED"),
     );
+    const boundedFastSql = searchSql.slice(
+      searchSql.indexOf("bounded_fast_matches AS MATERIALIZED"),
+      searchSql.indexOf("fts_canonical_fallback_matches AS MATERIALIZED"),
+    );
+    const ftsFallbackSql = searchSql.slice(
+      searchSql.indexOf("fts_canonical_fallback_matches AS MATERIALIZED"),
+      searchSql.indexOf("trigram_canonical_fallback_matches AS MATERIALIZED"),
+    );
+    const trigramFallbackSql = searchSql.slice(
+      searchSql.indexOf("trigram_canonical_fallback_matches AS MATERIALIZED"),
+      searchSql.indexOf("matches AS ("),
+    );
+    const matchesSql = searchSql.slice(
+      searchSql.indexOf("matches AS ("),
+      searchSql.indexOf("scored AS ("),
+    );
+    const canonicalCandidatesSql = searchSql.slice(
+      searchSql.indexOf("canonical_candidates AS MATERIALIZED"),
+      searchSql.indexOf("selected AS ("),
+    );
     expect(ftsIndexSql).toContain("to_tsvector");
     expect(ftsIndexSql).not.toContain("ORDER BY");
     expect(nameNearestSql).not.toContain("to_tsvector");
@@ -665,11 +719,50 @@ describe("foods query helpers", () => {
       "EXISTS (SELECT 1 FROM fts_index_matches)",
     );
     expect(ftsNearestSql).not.toContain("FROM foods");
+    expect(boundedFastSql).toContain("SELECT * FROM bounded_matches");
+    expect(boundedFastSql).toContain("SELECT DISTINCT");
+    expect(boundedFastSql).toContain("SELECT canonical_count >= $3");
+    expect(boundedFastSql).toContain("lower(name) AS normalized_name");
+    expect(boundedFastSql.match(/CROSS JOIN LATERAL/gu)).toHaveLength(1);
+    expect(boundedFastSql).toContain(
+      "labels.canonical_key = bounded_names.canonical_key",
+    );
+    expect(boundedFastSql).toContain(
+      "lower(labels.name) = bounded_names.normalized_name",
+    );
+    expect(boundedFastSql).toContain(
+      "to_tsvector('simple', labels.search_text) @@ query.tsq",
+    );
+    expect(boundedFastSql).toContain("NOT bounded_names.full_text_match");
+    expect(boundedFastSql).toContain(
+      "NOT EXISTS (SELECT 1 FROM fts_index_matches)",
+    );
+    expect(boundedFastSql).toContain("labels.name % $1::text");
+    expect(boundedFastSql).toContain("labels.data_origin_priority ASC");
+    expect(boundedFastSql.match(/\bLIMIT 1\b/gu)).toHaveLength(1);
+    expect(ftsFallbackSql).toContain(
+      "(SELECT canonical_count < $3 FROM bounded_candidate_summary)",
+    );
+    expect(ftsFallbackSql).toContain(
+      "EXISTS (SELECT 1 FROM fts_index_matches)",
+    );
+    expect(ftsFallbackSql).toContain("to_tsvector");
+    expect(ftsFallbackSql).not.toContain("ORDER BY name");
+    expect(trigramFallbackSql).toContain(
+      "(SELECT canonical_count < $3 FROM bounded_candidate_summary)",
+    );
+    expect(trigramFallbackSql).toContain(
+      "NOT EXISTS (SELECT 1 FROM fts_index_matches)",
+    );
+    expect(trigramFallbackSql).toContain("name % $1::text");
+    expect(trigramFallbackSql).not.toContain("<->");
     expect(readPrivateFoodSearchCandidateBudgets(searchSql)).toEqual([
       1_000,
       1_000,
       1_000,
     ]);
+    expect(readPrivateFoodCanonicalAdmissionBudget(searchSql)).toBe(1_000);
+    expect(searchSql).not.toContain("LIMIT 10000");
     expect(searchCall?.text).toMatch(
       /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 1000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
     );
@@ -689,8 +782,17 @@ describe("foods query helpers", () => {
       /trigram_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches/u,
     );
     expect(searchCall?.text).not.toContain("trigram_nearest_matches");
-    expect(searchCall?.text).not.toContain("fts_canonical_matches");
-    expect(searchCall?.text).not.toContain("trigram_canonical_matches");
+    expect(matchesSql).toContain("FROM bounded_fast_matches");
+    expect(matchesSql).toContain(
+      "(SELECT canonical_count >= $3 FROM bounded_candidate_summary)",
+    );
+    expect(canonicalCandidatesSql).toContain("dedupe_rank = 1");
+    expect(canonicalCandidatesSql).toMatch(
+      /dedupe_rank = 1[\s\S]*?LIMIT 1000/u,
+    );
+    expect(searchCall?.text).toContain(
+      "count(DISTINCT canonical_key)::integer AS canonical_count",
+    );
     expect(searchCall?.text).toMatch(
       /fts_exact_name_matches AS MATERIALIZED \([\s\S]*?lower\(name\) = lower\(\$1::text\)[\s\S]*?LIMIT 250/u,
     );
@@ -784,11 +886,11 @@ describe("foods query helpers", () => {
   it.each([
     [1, 1_000],
     [5, 1_000],
-    [20, 4_000],
-    [50, 10_000],
-    [500, 10_000],
+    [20, 1_000],
+    [50, 1_000],
+    [500, 1_000],
   ] as const)(
-    "derives bounded private food candidates for a %i-result request",
+    "keeps private food candidate work fixed for a %i-result request",
     async (limit, expectedCandidateBudget) => {
       const calls: Array<{ text: string; values: unknown[] }> = [];
       const queries = createFoodsQueries({
@@ -814,7 +916,11 @@ describe("foods query helpers", () => {
         expectedCandidateBudget,
         expectedCandidateBudget,
       ]);
-      expect(Math.max(...candidateBudgets)).toBeLessThanOrEqual(10_000);
+      expect(Math.max(...candidateBudgets)).toBeLessThanOrEqual(1_000);
+      expect(readPrivateFoodCanonicalAdmissionBudget(
+        searchCall?.text ?? "",
+      )).toBe(expectedCandidateBudget);
+      expect(searchCall?.text).not.toContain("LIMIT 10000");
       expect(searchCall?.values).toEqual([
         "candidate budget fixture",
         false,
@@ -823,6 +929,43 @@ describe("foods query helpers", () => {
       ]);
     },
   );
+
+  it("keeps supplement search on the original candidate SQL path", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createProductLabelsQueries(
+      {
+        async query<T>(text: string, values: unknown[]) {
+          calls.push({ text, values });
+          return { rows: [] as T[] };
+        },
+      },
+      "supplements",
+      { stemmedSearch: true },
+    );
+
+    await expect(queries.search({
+      q: "synthetic supplement search",
+      limit: 5,
+      includeOffMarket: false,
+    })).resolves.toEqual([]);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.values).toEqual([
+      "synthetic supplement search",
+      false,
+      5,
+      null,
+    ]);
+    expect(calls[0]?.text).toContain("fts_candidates AS MATERIALIZED");
+    expect(calls[0]?.text).toContain("trigram_candidates AS MATERIALIZED");
+    expect(calls[0]?.text).toContain("FROM supplements, query");
+    expect(calls[0]?.text).not.toContain("fts_index_matches AS MATERIALIZED");
+    expect(calls[0]?.text).not.toContain("bounded_matches AS MATERIALIZED");
+    expect(calls[0]?.text).not.toContain(
+      "bounded_fast_matches AS MATERIALIZED",
+    );
+    expect(calls[0]?.text).not.toContain("canonical_fallback");
+  });
 
   it("filters generic food searches to USDA non-branded origins", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
@@ -868,7 +1011,7 @@ describe("foods query helpers", () => {
     );
     expect(searchCall?.text.match(
       /\(\$4::text\[\] IS NULL OR data_origin = ANY\(\$4::text\[\]\)\)/gu,
-    )).toHaveLength(4);
+    )).toHaveLength(6);
     expect(searchCall?.values).toEqual([
       "chicken breast cooked skinless",
       false,
@@ -1905,6 +2048,14 @@ describe("foods query helpers", () => {
     expect(calls[0]?.text).toContain("'usda_sr_legacy'");
     expect(calls[0]?.text).toContain("'usda_fndds'");
     expect(calls[0]?.text).toContain("COUNT(DISTINCT product_tests.id)");
+    expect(calls[0]?.text).toContain("fts_candidates AS MATERIALIZED");
+    expect(calls[0]?.text).toContain("trigram_candidates AS MATERIALIZED");
+    expect(calls[0]?.text).not.toContain("fts_index_matches AS MATERIALIZED");
+    expect(calls[0]?.text).not.toContain("bounded_matches AS MATERIALIZED");
+    expect(calls[0]?.text).not.toContain(
+      "bounded_fast_matches AS MATERIALIZED",
+    );
+    expect(calls[0]?.text).not.toContain("canonical_fallback");
     expect(calls[0]?.text).not.toContain("labels.label");
   });
 

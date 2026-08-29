@@ -21,9 +21,7 @@ const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES = 256 * 1_024;
 const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
-const PRIVATE_FOOD_SEARCH_CANDIDATE_FLOOR = 1_000;
-const PRIVATE_FOOD_SEARCH_CANDIDATE_CEILING = 10_000;
-const PRIVATE_FOOD_SEARCH_CANDIDATES_PER_RESULT = 200;
+const PRIVATE_FOOD_SEARCH_CANDIDATE_LIMIT = 1_000;
 const PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
@@ -2086,24 +2084,6 @@ type GenericProductLabelSearchInput = {
   stemmedSearch: boolean;
 };
 
-function privateFoodSearchCandidateLimit(resultLimit: number): number {
-  const normalizedResultLimit = Number.isFinite(resultLimit)
-    ? Math.max(1, Math.floor(resultLimit))
-    : 1;
-
-  // Five requested results use the proven 1,000-row floor, while the
-  // supported 50-result maximum reaches the existing 10,000-row ceiling. Keep
-  // the clamped integer as a SQL literal so each indexed branch retains its
-  // concrete bounded plan instead of a generic parameterized LIMIT.
-  return Math.min(
-    PRIVATE_FOOD_SEARCH_CANDIDATE_CEILING,
-    Math.max(
-      PRIVATE_FOOD_SEARCH_CANDIDATE_FLOOR,
-      normalizedResultLimit * PRIVATE_FOOD_SEARCH_CANDIDATES_PER_RESULT,
-    ),
-  );
-}
-
 async function searchGenericProductLabels(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
@@ -2126,12 +2106,14 @@ async function searchGenericProductLabels(
     return await searchOriginalGenericProductLabels(client, tableSql, input);
   }
 
-  // Food-name results are ranked deterministically within separately bounded
-  // GIN full-text and GiST nearest-name sets. This retrieval contract trades
-  // exhaustive whole-catalog ranking for completion inside the labels database
-  // statement timeout; exact IDs and UPCs use separate direct paths.
+  // Food-name search keeps one fixed 1,000-row GIN/GiST probe as its ordinary
+  // path at every supported result limit. A count-qualified probe completes
+  // each admitted exact-name group's representative through the existing
+  // ranking index; an underfilled probe derives a canonical-first fallback
+  // from the matching indexed rows. Exact IDs and UPCs continue to use
+  // separate direct paths.
   const stemmed = input.stemmedSearch;
-  const candidateLimit = privateFoodSearchCandidateLimit(input.limit);
+  const candidateLimit = PRIVATE_FOOD_SEARCH_CANDIDATE_LIMIT;
   const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
     "data_origin",
     input.excludedDataOrigins,
@@ -2251,36 +2233,6 @@ async function searchGenericProductLabels(
           UNION
           SELECT * FROM fts_nearest_matches
         ),
-        fts_candidates AS MATERIALIZED (
-          SELECT
-            id,
-            canonical_key,
-            data_origin AS "dataOrigin",
-            data_origin_id AS "dataOriginId",
-            name,
-            brand,
-            upc,
-            off_market AS "offMarket",
-            ${stemmed ? `greatest(
-              ts_rank_cd(to_tsvector('simple', search_text), query.tsq),
-              ts_rank_cd(to_tsvector('english', search_text), query.stemmed_tsq)
-            )` : `ts_rank_cd(to_tsvector('simple', search_text), query.tsq)`} AS search_rank,
-            strict_word_similarity(query.raw_q, name) AS name_similarity,
-            CASE
-              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
-              ELSE 0
-            END AS name_phrase_match,
-            CASE
-              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN char_length(name)
-              ELSE 0
-            END AS name_phrase_length,
-            ${stemmed ? `CASE
-              WHEN to_tsvector('english', name) = to_tsvector('english', query.raw_q) THEN 1
-              ELSE 0
-            END` : "0"} AS stemmed_name_match,
-            data_origin_priority
-          FROM fts_matches, query
-        ),
         trigram_matches AS MATERIALIZED (
           SELECT
             id,
@@ -2291,6 +2243,7 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
+            NULL::text AS search_text,
             data_origin_priority
           FROM (
             SELECT
@@ -2318,7 +2271,159 @@ async function searchGenericProductLabels(
           ) nearest_names
           WHERE name % $1::text
         ),
-        trigram_candidates AS MATERIALIZED (
+        bounded_matches AS MATERIALIZED (
+          SELECT
+            *,
+            true AS full_text_match
+          FROM fts_matches
+          UNION ALL
+          SELECT
+            *,
+            false AS full_text_match
+          FROM trigram_matches
+        ),
+        bounded_candidate_summary AS MATERIALIZED (
+          SELECT
+            count(DISTINCT canonical_key)::integer AS canonical_count
+          FROM bounded_matches
+        ),
+        bounded_fast_matches AS MATERIALIZED (
+          SELECT * FROM bounded_matches
+          UNION
+          SELECT preferred.*
+          FROM (
+            SELECT DISTINCT
+              canonical_key,
+              lower(name) AS normalized_name,
+              full_text_match
+            FROM bounded_matches
+            WHERE (
+              SELECT canonical_count >= $3
+              FROM bounded_candidate_summary
+            )
+          ) bounded_names
+          CROSS JOIN LATERAL (
+            SELECT
+              labels.id,
+              labels.canonical_key,
+              labels.data_origin,
+              labels.data_origin_id,
+              labels.name,
+              labels.brand,
+              labels.upc,
+              labels.off_market,
+              CASE
+                WHEN bounded_names.full_text_match THEN labels.search_text
+                ELSE NULL::text
+              END AS search_text,
+              labels.data_origin_priority,
+              bounded_names.full_text_match
+            FROM ${tableSql} labels, query
+            WHERE
+              -- A count-qualified raw probe can still truncate a better
+              -- source-priority peer. Complete only its admitted exact-name
+              -- groups through the existing lower(name) ranking index before
+              -- the bounded fast path performs canonical dedupe.
+              labels.canonical_key = bounded_names.canonical_key
+              AND lower(labels.name) = bounded_names.normalized_name
+              AND ($2::boolean OR labels.off_market = false)
+              AND ${productLabelSourceFilterSql("labels.data_origin")}
+              AND ($4::text[] IS NULL OR labels.data_origin = ANY($4::text[]))
+              AND ${productLabelExcludedDataOriginsFilterSql(
+                "labels.data_origin",
+                input.excludedDataOrigins,
+              )}
+              AND (
+                (
+                  bounded_names.full_text_match
+                  AND ${stemmed ? `(
+                    to_tsvector('simple', labels.search_text) @@ query.tsq
+                    OR to_tsvector('english', labels.search_text) @@ query.stemmed_tsq
+                  )` : `to_tsvector('simple', labels.search_text) @@ query.tsq`}
+                )
+                OR (
+                  NOT bounded_names.full_text_match
+                  AND NOT EXISTS (SELECT 1 FROM fts_index_matches)
+                  AND labels.name % $1::text
+                )
+              )
+            ORDER BY
+              CASE
+                WHEN bounded_names.full_text_match THEN ${stemmed ? `greatest(
+                  ts_rank_cd(to_tsvector('simple', labels.search_text), query.tsq),
+                  ts_rank_cd(to_tsvector('english', labels.search_text), query.stemmed_tsq)
+                )` : `ts_rank_cd(to_tsvector('simple', labels.search_text), query.tsq)`}
+                ELSE 0::real
+              END DESC,
+              labels.off_market ASC,
+              labels.data_origin_priority ASC,
+              labels.name ASC,
+              labels.id ASC
+            LIMIT 1
+          ) preferred
+        ),
+        fts_canonical_fallback_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            data_origin_priority,
+            true AS full_text_match
+          FROM ${tableSql}
+          WHERE
+            -- The indexed bounded probe remains the ordinary path. Only an
+            -- underfilled canonical result set evaluates all indexed matches,
+            -- and its later LIMIT is applied after canonical-key dedupe.
+            (SELECT canonical_count < $3 FROM bounded_candidate_summary)
+            AND EXISTS (SELECT 1 FROM fts_index_matches)
+            AND ${stemmed ? `(
+              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
+            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+        ),
+        trigram_canonical_fallback_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            NULL::text AS search_text,
+            data_origin_priority,
+            false AS full_text_match
+          FROM ${tableSql}
+          WHERE
+            (SELECT canonical_count < $3 FROM bounded_candidate_summary)
+            AND NOT EXISTS (SELECT 1 FROM fts_index_matches)
+            AND name % $1::text
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+        ),
+        matches AS (
+          SELECT *
+          FROM bounded_fast_matches
+          WHERE (SELECT canonical_count >= $3 FROM bounded_candidate_summary)
+          UNION ALL
+          SELECT * FROM fts_canonical_fallback_matches
+          UNION ALL
+          SELECT * FROM trigram_canonical_fallback_matches
+        ),
+        scored AS (
           SELECT
             id,
             canonical_key,
@@ -2328,7 +2433,13 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market AS "offMarket",
-            0::real AS search_rank,
+            CASE
+              WHEN full_text_match THEN ${stemmed ? `greatest(
+                ts_rank_cd(to_tsvector('simple', search_text), query.tsq),
+                ts_rank_cd(to_tsvector('english', search_text), query.stemmed_tsq)
+              )` : `ts_rank_cd(to_tsvector('simple', search_text), query.tsq)`}
+              ELSE 0::real
+            END AS search_rank,
             strict_word_similarity(query.raw_q, name) AS name_similarity,
             CASE
               WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
@@ -2343,12 +2454,7 @@ async function searchGenericProductLabels(
               ELSE 0
             END` : "0"} AS stemmed_name_match,
             data_origin_priority
-          FROM trigram_matches, query
-        ),
-        candidates AS (
-          SELECT * FROM fts_candidates
-          UNION ALL
-          SELECT * FROM trigram_candidates
+          FROM matches, query
         ),
         ranked AS (
           SELECT
@@ -2366,7 +2472,22 @@ async function searchGenericProductLabels(
                 name ASC,
                 id ASC
             ) AS dedupe_rank
-          FROM candidates
+          FROM scored
+        ),
+        canonical_candidates AS MATERIALIZED (
+          SELECT ranked.*
+          FROM ranked
+          WHERE dedupe_rank = 1
+          ORDER BY
+            name_phrase_match DESC,
+            name_phrase_length DESC,
+            stemmed_name_match DESC,
+            name_similarity DESC,
+            search_rank DESC,
+            data_origin_priority ASC,
+            name ASC,
+            id ASC
+          LIMIT ${candidateLimit}
         ),
         selected AS (
           SELECT
@@ -2382,8 +2503,7 @@ async function searchGenericProductLabels(
                 name ASC,
                 id ASC
             ) AS result_rank
-          FROM ranked
-          WHERE dedupe_rank = 1
+          FROM canonical_candidates
           ORDER BY
             name_phrase_match DESC,
             name_phrase_length DESC,
