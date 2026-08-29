@@ -1,6 +1,6 @@
 # Codex app-server hot layer
 
-Status: active
+Status: completed
 Created: 2026-08-29
 Updated: 2026-08-29
 
@@ -76,12 +76,16 @@ Updated: 2026-08-29
 - Cloudflare package typecheck: passed.
 - Local Docker was unavailable, so the native Linux image build, Codex command,
   and sandbox proof remain assigned to exact-head CI.
-- Exact-head CI passed, including the native runner permission/image sandbox,
-  production runner bundle budget, release verification, and required checks.
+- Candidate-head CI passed, including the native runner permission/image
+  sandbox, production runner bundle budget, release verification, and required
+  checks. The final plan-closure head will rerun the same PR checks before
+  handoff.
 - Preliminary specialist review produced one accepted finding: the public
   changelog claim preceded production latency proof. The entry was deleted and
   remains deferred until post-deploy measurements establish the outcome.
 - Final ReviewGPT round 1 passed with no findings on the original candidate.
+- Final ReviewGPT round 2 passed with no findings after the changelog
+  correction, and the parent final diff review found no additional issue.
 
 ## Deployment concerns
 
@@ -89,3 +93,4 @@ Updated: 2026-08-29
   Cloudflare container rollout; Web and Temporal contracts remain compatible.
 - Post-deploy proof must compare cold `node-process-first-use` p50/p95 and
   accepted-to-provider latency without exposing member or attempt identifiers.
+Completed: 2026-08-29
