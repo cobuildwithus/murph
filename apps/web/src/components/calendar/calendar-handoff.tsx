@@ -27,7 +27,7 @@ export function CalendarHandoff({
   return (
     <div className="grid gap-4 sm:grid-cols-[minmax(220px,280px)_1fr] sm:items-center">
       <a
-        className="group flex min-h-13 items-center justify-between bg-[#19231d] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#315a40] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[#b8e26f]"
+        className="group flex min-h-13 items-center justify-between rounded-xl bg-[#19231d] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#315a40] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[#b8e26f]"
         href={downloadHref}
       >
         Add to Calendar
