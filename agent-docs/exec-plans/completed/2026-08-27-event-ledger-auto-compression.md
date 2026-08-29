@@ -1,8 +1,8 @@
 # Automatically compress closed event ledger shards
 
-Status: active
+Status: completed
 Created: 2026-08-27
-Updated: 2026-08-27
+Updated: 2026-08-29
 
 ## Goal
 
@@ -76,8 +76,9 @@ Updated: 2026-08-27
    maintenance; emit bounded aggregate diagnostics.
 3. [completed] Add focused core and hosted-runtime proof, update live owner docs,
    and update the existing smaller-checkpoints changelog item.
-4. [in progress] Run local proof, push a draft PR, complete preliminary and final
-   ReviewGPT gates plus exact-head CI, merge, and retire the task worktree.
+4. [completed] Run local proof, push a draft PR, and complete preliminary and
+   final ReviewGPT gates. Exact-head CI, merge, and worktree retirement remain
+   release-workflow gates after this implementation plan closes.
 
 ## Decisions
 
@@ -106,3 +107,4 @@ Updated: 2026-08-27
   aborts archiving and preserves the pending notification, a long malformed
   month cannot starve later event or integration history, checkpointing stays
   fail open on archive errors, and all exact-head required checks pass.
+Completed: 2026-08-29
