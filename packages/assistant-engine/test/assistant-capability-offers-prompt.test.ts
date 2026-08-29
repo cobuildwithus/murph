@@ -269,7 +269,9 @@ describe('assistant capability-offers prompt contract', () => {
     expect(directSection).toContain(
       'while `nextCursor` is nonnull, call `list_memberships` again with that exact cursor',
     )
-    expect(directSection).toContain("complete inventory's titles")
+    expect(directSection).toContain(
+      "Resolve the member's ordinary cue against every inventory entry's title",
+    )
     expect(directSection).not.toContain('If the candidate is not settled')
     expect(directSection).toContain(
       'send only identity-neutral factual context; the host supplies any group-safe attribution',
@@ -279,10 +281,13 @@ describe('assistant capability-offers prompt contract', () => {
       '`participantRoster.participantCount`, which is the real chat participant count',
     )
     expect(directSection).toContain(
-      'select only entries with `availability.status="available"`',
+      'availability controls whether the resolved destination can be used, never whether it is a semantic match',
     )
     expect(directSection).toContain(
-      'an omitted field is a legacy inventory entry and remains selectable',
+      'An omitted availability field is a legacy entry and remains usable',
+    )
+    expect(directSection).toContain(
+      'Never remove an unavailable match and thereby select another group',
     )
     expect(directSection).toContain(
       'Never use `memberCount` for this clarification',
@@ -291,7 +296,7 @@ describe('assistant capability-offers prompt contract', () => {
       'Never treat `truncated`, one unavailable entry, or one entry\'s unavailable participant roster as global unavailability',
     )
     expect(directSection).toContain(
-      'every available inventory entry containing that safe label remains a candidate',
+      'every inventory entry containing that safe label remains a candidate',
     )
     expect(directSection).toContain(
       'Do not treat people the member omitted as exclusions unless they explicitly say only',
@@ -302,7 +307,7 @@ describe('assistant capability-offers prompt contract', () => {
     )
     expect(directSection).toContain('paste-or-screenshot fallback')
     expect(directSection).toContain(
-      "If the member's cue matches only unavailable entries, or a selected Ask or handoff returns unavailable",
+      'If the selected entry is unavailable, or a selected Ask or handoff returns unavailable',
     )
     expect(directSection).toContain(
       'always name the safe title, say explicitly that the chat cannot be used right now and nothing was queued',

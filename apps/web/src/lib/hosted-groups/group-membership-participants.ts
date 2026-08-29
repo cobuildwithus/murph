@@ -252,11 +252,11 @@ export async function isHostedGroupConsultRouteAvailable(input: {
         HOSTED_GROUP_PARTICIPANT_PROVIDER_DEADLINE_MS,
       ),
     });
-    const inventory = readCompleteParticipantContacts({
+    const availability = readCompleteHostedLinqRouteAvailability({
       ...summary,
       accountLookupKey: input.routeAuthority.accountLookupKey,
     });
-    return inventory?.availability.status !== "unavailable";
+    return availability?.status !== "unavailable";
   } catch {
     return true;
   }
@@ -320,23 +320,29 @@ async function readParticipantContacts(input: {
             chatId: route.threadId,
             signal: input.signal,
           });
-          const inventory = readCompleteParticipantContacts({
+          const routeAvailability = readCompleteHostedLinqRouteAvailability({
             ...summary,
             accountLookupKey: route.accountLookupKey,
           });
-          if (!inventory) {
+          if (routeAvailability) {
+            input.availabilityByMembershipId.set(
+              membership.membershipId,
+              routeAvailability,
+            );
+          }
+          const contacts = readCompleteParticipantContacts({
+            ...summary,
+            accountLookupKey: route.accountLookupKey,
+          });
+          if (!contacts) {
             input.participantRosterByMembershipId.set(
               membership.membershipId,
               unavailableRoster("participant_roster_unavailable"),
             );
             continue;
           }
-          input.availabilityByMembershipId.set(
-            membership.membershipId,
-            inventory.availability,
-          );
           contactsByMembership.set(membership.membershipId, {
-            contacts: inventory.contacts,
+            contacts,
             membershipId: membership.membershipId,
           });
         } catch {
@@ -355,16 +361,13 @@ async function readParticipantContacts(input: {
   });
 }
 
-function readCompleteParticipantContacts(input: {
+function readCompleteHostedLinqRouteAvailability(input: {
   accountLookupKey?: string | null;
   handleCount?: number;
   handles: readonly HostedLinqChatHandleSummary[];
   handlesComplete?: boolean;
   isGroup: boolean | null;
-}): {
-  availability: HostedRuntimeGroupMembershipAvailability;
-  contacts: HostedLinqParticipantContact[];
-} | null {
+}): HostedRuntimeGroupMembershipAvailability | null {
   if (
     input.isGroup !== true
     || input.handlesComplete !== true
@@ -374,23 +377,46 @@ function readCompleteParticipantContacts(input: {
   }
   let routeAccountObserved = false;
   let routeAccountIsActive = false;
+  for (const handle of input.handles) {
+    if (!isHostedLinqRouteAccountHandle({
+      accountLookupKey: input.accountLookupKey,
+      handle,
+    })) {
+      continue;
+    }
+    routeAccountObserved = true;
+    routeAccountIsActive ||= isActiveHandle(handle);
+  }
+  return routeAccountObserved && !routeAccountIsActive
+    ? unavailableAvailability("group_route_unavailable")
+    : availableAvailability();
+}
+
+function readCompleteParticipantContacts(input: {
+  accountLookupKey?: string | null;
+  handleCount?: number;
+  handles: readonly HostedLinqChatHandleSummary[];
+  handlesComplete?: boolean;
+  isGroup: boolean | null;
+}): HostedLinqParticipantContact[] | null {
+  if (
+    input.isGroup !== true
+    || input.handlesComplete !== true
+    || input.handleCount !== input.handles.length
+  ) {
+    return null;
+  }
   const contacts = input.handles.flatMap((handle) => {
+    if (isHostedLinqRouteAccountHandle({
+      accountLookupKey: input.accountLookupKey,
+      handle,
+    })) {
+      return [];
+    }
     const contact = createHostedLinqParticipantContact({
       kind: handle.handle.includes("@") ? "email" : "phone",
       value: handle.handle,
     });
-    const matchesRouteAccount = contact !== null && input.accountLookupKey
-      ? createHostedLinqParticipantContactLookupKeyReadCandidates(contact)
-        .includes(input.accountLookupKey)
-      : false;
-    if (matchesRouteAccount || (!input.accountLookupKey && handle.isMe)) {
-      routeAccountObserved = true;
-      routeAccountIsActive ||= isActiveHandle(handle);
-    }
-    const isSender = matchesRouteAccount || handle.isMe;
-    if (isSender) {
-      return [];
-    }
     if (!isActiveHandle(handle)) {
       return [];
     }
@@ -403,14 +429,28 @@ function readCompleteParticipantContacts(input: {
   ) {
     return null;
   }
-  return {
-    availability: routeAccountObserved && !routeAccountIsActive
-      ? unavailableAvailability("group_route_unavailable")
-      : availableAvailability(),
-    contacts: contacts.filter(
-      (contact): contact is HostedLinqParticipantContact => contact !== null,
-    ),
-  };
+  return contacts.filter(
+    (contact): contact is HostedLinqParticipantContact => contact !== null,
+  );
+}
+
+function isHostedLinqRouteAccountHandle(input: {
+  accountLookupKey?: string | null;
+  handle: HostedLinqChatHandleSummary;
+}): boolean {
+  if (input.handle.isMe) {
+    return true;
+  }
+  if (!input.accountLookupKey) {
+    return false;
+  }
+  const contact = createHostedLinqParticipantContact({
+    kind: input.handle.handle.includes("@") ? "email" : "phone",
+    value: input.handle.handle,
+  });
+  return contact !== null
+    && createHostedLinqParticipantContactLookupKeyReadCandidates(contact)
+      .includes(input.accountLookupKey);
 }
 
 function isActiveHandle(handle: HostedLinqChatHandleSummary): boolean {

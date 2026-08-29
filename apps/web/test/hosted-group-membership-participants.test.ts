@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 
 const dependencyMocks = vi.hoisted(() => ({
   getHostedLinqChatSummary: vi.fn(),
@@ -351,6 +354,59 @@ describe("joined-group participant inventory", () => {
       routeAuthority: route("runtime_1", "chat_1"),
     })).resolves.toBe(false);
   });
+
+  it.each([
+    {
+      label: "an unrelated handle cannot be parsed",
+      otherHandles: ["not-a-phone"],
+    },
+    {
+      label: "the presentation roster exceeds its bound",
+      otherHandles: Array.from(
+        { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX },
+        (_, index) => `+1415555${String(index).padStart(4, "0")}`,
+      ),
+    },
+  ])(
+    "keeps sender availability authoritative when $label",
+    async ({ otherHandles }) => {
+      const memberships = [membership(1)];
+      dependencyMocks.readHostedRuntimeAiAllowedMemberIds.mockResolvedValue(
+        new Set(["runtime_1"]),
+      );
+      dependencyMocks.readHostedThreadContainerLinqRouteAuthorities
+        .mockResolvedValue({
+          authorities: new Map([[
+            "runtime_1",
+            route("runtime_1", "chat_1"),
+          ]]),
+          nonLinqContainerMemberIds: new Set(),
+          unavailableContainerMemberIds: new Set(),
+        });
+      const chatSummary = summary(otherHandles);
+      chatSummary.handles[0]!.status = "removed";
+      dependencyMocks.getHostedLinqChatSummary.mockResolvedValue(chatSummary);
+
+      const result = await readHostedGroupMembershipInventory({
+        memberId: REQUESTER_MEMBER_ID,
+        memberships,
+        now: NOW,
+        prisma: {} as never,
+      });
+
+      expect(result.availabilityByMembershipId.get("membership_1")).toEqual({
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      });
+      expect(result.participantRosterByMembershipId.get("membership_1")).toEqual({
+        status: "unavailable",
+        unavailableReason: "participant_roster_unavailable",
+      });
+      await expect(isHostedGroupConsultRouteAvailable({
+        routeAuthority: route("runtime_1", "chat_1"),
+      })).resolves.toBe(false);
+    },
+  );
 
   it("does not turn a transient provider read failure into false route unavailability", async () => {
     const memberships = [membership(1)];

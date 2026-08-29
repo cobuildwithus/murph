@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 3,
     "title": "More reliable joined-group handoffs",
-    "summary": "Murph now checks whether each joined chat is still usable before offering it or queueing a handoff.",
-    "details": "Chats Murph has left stay separate from healthy groups, while safe participant counts and labels continue to help distinguish the right destination.",
+    "summary": "Murph now keeps similarly named joined chats distinct, then checks the selected chat before queueing a handoff.",
+    "details": "Safe participant counts and labels help clarify the intended destination, including when one matching chat is not currently usable.",
     "relevanceTags": ["assistant", "groups", "imessage", "reliability"],
     "sourcePullRequests": [2507]
   }

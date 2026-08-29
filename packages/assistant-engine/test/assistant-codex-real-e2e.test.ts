@@ -7570,7 +7570,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'skips an unavailable joined group and keeps the handoff identity-neutral',
+    'keeps unavailable semantic matches in joined-group clarification',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -7700,20 +7700,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         })
 
         const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const observedContext = groupRequests.find((request) =>
-          request !== null
-          && typeof request === 'object'
-          && 'context' in request
-          && typeof request.context === 'string'
-        )
         process.stdout.write(
           `[group-handoff-context-e2e] ${JSON.stringify({
-            context:
-              observedContext
-                && typeof observedContext === 'object'
-                && 'context' in observedContext
-                ? observedContext.context
-                : null,
             reply: result.finalMessage.trim(),
             toolActions: groupRequests.flatMap((request) =>
               request
@@ -7727,30 +7715,19 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           })}\n`,
         )
 
-        expect(groupRequests).toHaveLength(2)
-        expect(groupRequests[0]).toEqual({ action: 'list_memberships' })
-        const handoffRequest = groupRequests[1]
-        expect(handoffRequest).toMatchObject({
-          action: 'handoff',
-          membershipId: 'membership_trail_crew',
-        })
-        if (
-          !handoffRequest
-          || typeof handoffRequest !== 'object'
-          || !('context' in handoffRequest)
-          || typeof handoffRequest.context !== 'string'
-        ) {
-          throw new Error('Expected one identity-neutral group handoff context.')
-        }
-        expect(handoffRequest.context).not.toMatch(/Member Delta/iu)
-        expect(handoffRequest.context).not.toMatch(/\b(?:I|me|my)\b/iu)
+        expect(groupRequests).toEqual([{ action: 'list_memberships' }])
         expect(
           actions.some((action) =>
             action.kind === 'command'
             && action.command.includes('memory show')
           ),
         ).toBe(false)
-        expect(result.finalMessage).toMatch(/queu/iu)
+        expect(result.finalMessage).toMatch(/Former Trail Crew/iu)
+        expect(result.finalMessage).toMatch(/\bTrail Crew\b/iu)
+        expect(result.finalMessage).toMatch(/\?/u)
+        expect(result.finalMessage).not.toMatch(/membership_(?:former_)?trail_crew/iu)
+        expect(result.finalMessage).not.toMatch(/group_route_unavailable/iu)
+        expect(result.finalMessage).not.toMatch(/queu/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

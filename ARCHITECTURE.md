@@ -389,22 +389,22 @@ plus requester-authorized Contacts names, masked phone hints, or a generic
 email marker. Provider handles remain transient. For Linq groups, the durable
 exact route remains available unless a complete current provider roster
 affirmatively shows that the route's sending account has departed; transient
-roster reads, roster identity, and optional Contacts failures do not turn it
-into a false negative. A missing route, unsupported roster, incomplete roster,
-provider failure, or optional Contacts failure is scoped to
-that entry; it does not hide otherwise usable memberships. The model reasons
-only over available destinations and their safe summaries, asks a natural
-clarification when several entries fit, and passes only the exact returned
-`membershipId` with the bounded question or handoff context. It never exposes,
+roster reads do not turn it into a false negative. Sender presence is derived
+independently from participant parsing, roster bounds, identity resolution, and
+the optional Contacts overlay, so presentation failure cannot make a departed
+sender actionable. A missing route, unsupported roster, incomplete roster,
+provider failure, or optional Contacts failure is scoped to that entry; it does
+not hide otherwise usable memberships. The model resolves identity across all
+matching destinations before applying action availability, asks a natural
+clarification when several entries fit, and never silently selects a usable
+group by discarding an unavailable match. It passes only the exact returned
+`membershipId` with the bounded question or handoff context and never exposes,
 invents, edits, or derives the identifier. Before a new Ask or handoff is
 queued, Web repeats the same bounded live provider check outside the database
 transaction, then locks and revalidates that the exact membership belongs to
 the requester, is still active, points to the expected group runtime, and
-retains route authority. A confirmed sending-account removal deletes only the
-matching route whose last update does not postdate the provider event; this
-keeps delayed removal events from retiring a later rejoin. Leaving and
-rejoining creates a new membership id, so an older clarification is a stale
-generation.
+retains route authority. Leaving and rejoining creates a new membership id, so
+an older clarification is a stale generation.
 Ask and handoff replay remain pinned to the stored membership id; no title or
 participant matcher, target digest, directory, or selector state exists.
 After Temporal accepts each pointer-only mailbox signal, Web starts the
