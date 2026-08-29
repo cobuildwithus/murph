@@ -493,6 +493,37 @@ describe("native companion hosted member admission", () => {
     expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
   });
 
+  it("returns retryable admission until a newly linked channel is canonical", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({ identity });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: null,
+    });
+    mocks.completeHostedPrivyVerification
+      .mockResolvedValueOnce({
+        ...completion(HostedBillingStatus.active),
+        messagingSetupRequired: true,
+      })
+      .mockResolvedValueOnce(completion(HostedBillingStatus.active));
+
+    const firstResponse = await admissionRoute.POST(admissionRequest());
+    const retryResponse = await admissionRoute.POST(admissionRequest());
+
+    expect(firstResponse.status).toBe(503);
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "COMPANION_ADMISSION_RETRYABLE",
+        retryable: true,
+      },
+    });
+    expect(retryResponse.status).toBe(200);
+    await expect(retryResponse.json()).resolves.toEqual({ ok: true });
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps an active email-only member on the read path until Privy has a linked channel", async () => {
     const activeMember = member(HostedBillingStatus.active);
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);

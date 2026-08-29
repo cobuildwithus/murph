@@ -116,7 +116,7 @@ export async function ensureHostedCompanionMemberId(input: {
         // A member whose live Privy identity now includes phone or Telegram is
         // the narrow exception: repeating canonical completion synchronizes
         // the newly linked account before readiness is projected again.
-        await completeHostedPrivyVerification({
+        const completion = await completeHostedPrivyVerification({
           identity: input.identity,
           now,
           prisma,
@@ -124,6 +124,15 @@ export async function ensureHostedCompanionMemberId(input: {
         }).catch((error: unknown) => {
           throw remapHostedPrivyCompletionLagError(error);
         });
+        if (completion.messagingSetupRequired) {
+          throw hostedOnboardingError({
+            code: "PRIVY_ACCOUNT_NOT_READY",
+            httpStatus: 409,
+            message:
+              "Your verified messaging account has not reached Murph yet. Wait a moment and try again.",
+            retryable: true,
+          });
+        }
       }
       await requireHostedCompanionActivationRuntimeWake({
         memberId: existingMember.id,
