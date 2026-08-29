@@ -1,21 +1,21 @@
-# Trace foreground input admission
+# Trace accepted input execution
 
-Status: active
+Status: completed
 Created: 2026-08-27
-Updated: 2026-08-27
+Updated: 2026-08-29
 
 ## Goal
 
 - Add the smallest behavior-preserving telemetry needed to identify where an
   accepted, staged private Linq input can disappear between pending admission,
-  foreground selection, and a durable reply/non-reply outcome.
+  acceptance for provider execution, and a durable reply/non-reply outcome.
 
 ## Success criteria
 
-- The telemetry answers one bounded question: for a staged foreground input
-  without a provider start, reply attempt, delivery, or terminal non-reply,
-  was pending admission completed, was the input selected, or was it lost
-  between those owner transitions?
+- The telemetry answers one bounded question: for a staged input without a
+  provider start, reply attempt, delivery, or terminal non-reply, was pending
+  admission completed, was the input accepted at the common provider boundary,
+  or was it lost between those owner transitions?
 - The accepted ReviewGPT implementation reuses the existing ingress-latency
   trace, its authenticated write fence, and the current assistant-input
   correlation ID; it adds no functional branch, new store, scheduler, queue,
@@ -27,9 +27,9 @@ Updated: 2026-08-27
 
 ## Scope
 
-- In scope: typed lifecycle milestones at pending-admission and foreground-
-  selection boundaries, existing ingress-latency trace persistence, focused
-  tests, and the durable observability contract.
+- In scope: typed lifecycle milestones at pending-admission and the common
+  accepted-for-execution boundary, existing ingress-latency trace persistence,
+  focused tests, and the durable observability contract.
 - Out of scope: device sync, provider retry policy, production repair/replay,
   mailbox or database schema/migrations, functional terminalization changes,
   new schedulers/queues/state owners, and messaging behavior.
@@ -81,8 +81,8 @@ Updated: 2026-08-27
   current user-critical accepted-input gap with exact durable exposure and no
   active owner.
 - Existing evidence proves staging and the missing durable outcome, but it does
-  not distinguish pending-admission loss, foreground carry/selection loss, and
-  an automation terminalization gap. A direct index-backfill hypothesis was
+  not distinguish pending-admission loss, accepted-execution loss, and an
+  automation terminalization gap. A direct index-backfill hypothesis was
   rejected by a focused passing reproduction, so functional code is not safe
   to change yet.
 - Do not repair production state or send a message; the run remains read-only.
@@ -103,11 +103,26 @@ Updated: 2026-08-27
   accepted for provider execution. Remediation must move the observation to the
   existing common accepted-input boundary, use the existing lease-generation
   transfer rule, and delete the incomplete selector callback plumbing.
+- Accepted ReviewGPT remediation v2 exactly. It deletes the selector-only
+  callback/emitter, records `assistant_input_accepted_for_execution` from the
+  existing `beforeProviderAcceptedInputs` owner, reuses the event already read
+  to resolve the current input, and adds no second vault read, new service,
+  queue, schema, or state owner. Supported source/input pairs are grouped;
+  unsupported inputs do not suppress supported ones.
+- Warm old-runner compatibility remains explicit: the legacy
+  `foreground_input_selected` event, parser value, and trace leaf remain valid
+  with their original exact-attempt semantics. The new acceptance event uses
+  the existing monotonic lease-generation transfer only for unresolved
+  lifecycle milestones; the legacy event is not translated into acceptance.
+- Accepted three ReviewGPT test-only corrections exactly. They update one route
+  call count and remove two fixture assumptions that were not architectural
+  proof. The existing background-selection boundary test plus the entrypoint
+  acceptance/failure-isolation test now provide the smaller composable proof.
 
 ## Verification
 
 - Commands to run: focused hosted-execution parser/contract, Web latency-store
-  and route, runtime import/selection and Cloudflare bridge tests; affected
+  and route, runtime import/acceptance and Cloudflare bridge tests; affected
   package typechecks; `git diff --check`; privacy and provider-boundary guards;
   preliminary `completion-specialists`; final ReviewGPT; exact-head required
   GitHub checks.
@@ -115,9 +130,23 @@ Updated: 2026-08-27
   milestones update only already-matched trace rows; unmatched inputs are a
   bounded no-op; trace failures do not alter runtime flow; no migration,
   functional behavior, provider call, or device-sync surface changes.
-- Completed local proof: 33 hosted-execution tests, 187 assistant-runtime tests,
-  105 Web tests, affected package typechecks (including Cloudflare after the
-  specialist test), `pnpm logs:guard`, and `git diff --check` passed. Final
-  ReviewGPT round 1 ran for 188 minutes on the immutable first-reviewed head and
-  returned `FINDINGS`; ReviewGPT-authored remediation, a resolved later round,
-  exact-head CI, and deployment proof remain pending.
+- Completed proof on the first-reviewed head: 33 hosted-execution tests, 187
+  assistant-runtime tests, 105 Web tests, affected package typechecks,
+  `pnpm logs:guard`, and `git diff --check` passed. On the remediation tree, the
+  full hosted-execution suite passed (561 tests); the full assistant-runtime
+  suite reached one ReviewGPT test-fixture assertion with 2,535 passing and five
+  skipped, and the corrected compositional acceptance/background proof passed
+  both named tests. The Web store suite passes; the route suite is currently
+  blocked in its shared dynamic-import hook under unrelated host CPU contention,
+  after an earlier run reached only the corrected call-count assertion. Exact-
+  head typechecks, privacy checks, final ReviewGPT, CI, merge, and deployment
+  proof remain pending.
+
+## Later production query
+
+- Query a bounded accepted-time window with the existing fixed row cap and only
+  opaque trace/input identifiers. Classify unresolved rows as
+  `staged_without_pending_admission`,
+  `admitted_not_accepted_for_execution`, or
+  `accepted_for_execution_without_downstream_outcome`.
+Completed: 2026-08-29
