@@ -1,6 +1,6 @@
 # Prevent branded food label search timeouts
 
-Status: active
+Status: completed
 Created: 2026-08-29
 Updated: 2026-08-29
 
@@ -85,9 +85,21 @@ Updated: 2026-08-29
 
 ## Verification
 
-- Commands to run: focused product-label unit and PostgreSQL tests, Web
-  typecheck, a safe labels-database reproduction using representative synthetic
-  searches, and exact-head CI plus routed ReviewGPT gates.
-- Expected outcomes: focused checks pass; affected searches return inside the
-  statement budget; unsaturated plans show zero loops for the nearest-name GiST
-  scan; saturated fixtures preserve current ranked recall.
+- `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
+  apps/web/test/foods-lib.test.ts` passed 32 tests.
+- The focused large-catalog PostgreSQL test passed its one selected case with
+  133 unrelated cases skipped. It proved one active GiST scan for saturated FTS
+  and zero for unsaturated FTS under the production eight-second timeout.
+- Five representative synthetic food searches passed against the configured
+  labels database. The two pre-fix timeout cases completed in 54 ms and 59 ms;
+  direct `EXPLAIN ANALYZE` completed in 7 ms with zero active name-rank scans.
+- `pnpm --dir apps/web typecheck`, focused ESLint, and `git diff --check`
+  passed.
+- `pnpm --dir apps/web test -- changelog-page.test.tsx` passed 9 tests.
+- Preliminary ReviewGPT specialists returned `SPECIALIST_OUTCOME: PASS` with
+  no findings on `9210aabf24bab783c3383ad54b628bda65121fef`.
+- Final ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` with no qualifying
+  findings on the same exact pushed head.
+- PR 2549 remains the exact-head CI owner after plan closure and Ready
+  admission.
+Completed: 2026-08-29
