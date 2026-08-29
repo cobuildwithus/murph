@@ -1679,12 +1679,16 @@ describe('real Codex live fixture contracts', () => {
     ]) {
       expect(hasJoinedGroupCapabilityMeaning(message), message).toBe(true)
     }
-    expect(hasJoinedGroupCapabilityMeaning(
+    for (const message of [
       "Yes. I can't consult group conversations that I'm not joined to, and joined groups are unavailable too.",
-    )).toBe(false)
-    expect(hasJoinedGroupCapabilityMeaning(
       'Murph can message groups it has already joined, but it cannot interact with those groups.',
-    )).toBe(false)
+      'Murph can message every group. Only groups already joined are summarized.',
+      "I can consult all group chats. I only summarize chats I've joined.",
+      'Murph can post in any group. When already joined, it can read summaries.',
+      "I can message groups, including ones I haven't joined. Joined groups are easier.",
+    ]) {
+      expect(hasJoinedGroupCapabilityMeaning(message), message).toBe(false)
+    }
 
     expect(hasSavedSupportIssueForTriageMeaning(
       'Your issue was saved for triage, and an account-linked support escalation was recorded.',
@@ -19133,18 +19137,59 @@ function hasFinnishDrySaunaMeaning(value: string): boolean {
 }
 
 function hasJoinedGroupCapabilityMeaning(message: string): boolean {
-  const affirmsJoinedAccess = /\b(?:i|murph)\s+can(?!['’]?t\b)\b[^.?!\n]{0,160}\b(?:answer|ask|check|consult|interact|message|pass along|post|share|tell)\b/iu
-    .test(message)
+  const affirmsAccess = /\b(?:i|murph)\s+can(?!['’]?t\b)\b[^.?!\n;]{0,160}\b(?:answer|ask|check|consult|interact|message|pass along|post|share|tell)\b/iu
   const namesJoinedBoundary = [
     /\b(?:only|if|when)\b[^.?!\n]{0,160}\b(?:joined|added|already in)\b/iu,
     /\b(?:group conversations?|groups?)\b[^.?!\n]{0,160}\b(?:joined|added|already in)\b/iu,
+    /\b(?:joined|added)\b[^.?!\n]{0,80}\b(?:group conversations?|groups?)\b/iu,
+  ]
+  const sentences = message
+    .split(/[.?!\n;]+/u)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+  const semanticClauses = sentences.flatMap((sentence) => sentence
+    .split(
+      /,\s*(?:and|but|while|whereas)\b|\b(?:although|however|though|whereas)\b/iu,
+    )
+    .map((clause) => clause.trim())
+    .filter(Boolean))
+  const couplesCapabilityToBoundary = semanticClauses.some((clause) =>
+    affirmsAccess.test(clause)
+    && namesJoinedBoundary.some((pattern) => pattern.test(clause)))
+  const referencesAdjacentBoundary = sentences.some((sentence, index) => {
+    const nextSentence = sentences[index + 1]
+    return nextSentence !== undefined
+      && namesJoinedBoundary.some((pattern) => pattern.test(sentence))
+      && affirmsAccess.test(nextSentence)
+      && /\b(?:there|that group|those groups?)\b/iu.test(nextSentence)
+  })
+  const deniesUnjoinedAccess = [
+    /\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!\n]{0,120}\b(?:unjoined|not\s+joined)\b/iu,
+    /\b(?:unjoined|not[- ]joined)\b[^.?!\n]{0,120}\b(?:unavailable|inaccessible|off[- ]limits)\b/iu,
   ].some((pattern) => pattern.test(message))
   const deniesJoinedAccess = [
     /\b(?:joined|already[- ]joined)\s+groups?\b[^.?!\n]{0,80}\b(?:unavailable|inaccessible)\b/iu,
     /\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!\n]{0,120}\b(?:joined|already[- ]joined)\s+groups?\b/iu,
     /\b(?:i|it|murph)\s+(?:cannot|can['’]?t)\b[^.?!\n]{0,120}\b(?:those|the|joined|already[- ]joined)\s+groups?\b/iu,
   ].some((pattern) => pattern.test(message))
-  return affirmsJoinedAccess && namesJoinedBoundary && !deniesJoinedAccess
+  const claimsUnjoinedAccess = sentences.some((sentence) =>
+    affirmsAccess.test(sentence)
+    && [
+      /\b(?:answer|ask|check|consult|interact|message|pass along|post|share|tell)\b[^.?!\n]{0,80}\b(?:all|any|every)\s+(?:group conversations?|group chats?|groups?)\b/iu,
+      /\b(?:including|even)\b[^.?!\n]{0,80}\b(?:unjoined|not\s+joined|haven['’]?t\s+joined|have\s+not\s+joined)\b/iu,
+      /\b(?:answer|ask|check|consult|interact|message|pass along|post|share|tell)\b[^.?!\n]{0,80}\bunjoined\s+(?:group conversations?|group chats?|groups?)\b/iu,
+    ].some((pattern) => pattern.test(sentence)))
+  const affirmsAnyAccess = sentences.some((sentence) =>
+    affirmsAccess.test(sentence))
+
+  return affirmsAnyAccess
+    && !claimsUnjoinedAccess
+    && !deniesJoinedAccess
+    && (
+      couplesCapabilityToBoundary
+      || referencesAdjacentBoundary
+      || deniesUnjoinedAccess
+    )
 }
 
 function hasWearableConnectionDeferralMeaning(message: string): boolean {
