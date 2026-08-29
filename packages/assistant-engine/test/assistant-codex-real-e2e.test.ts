@@ -16248,11 +16248,16 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-move-central-reminder-e2e-'),
       )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
+      const automationId = 'automation-central-evening'
+      const lookupId = 'evening-reminder'
+      const inspectedUpdatedAt = '2026-08-10T00:00:00.000Z'
       const automationFixture = createVersionedAutomationPatchFixture({
         current: {
-          automationId: 'automation-central-evening',
+          automationId,
           effectiveTimeZone: 'America/Chicago',
-          lookupId: 'evening-reminder',
+          lookupId,
           occurrenceProjection: {
             nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
             status: 'resolved',
@@ -16263,7 +16268,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             timeZone: 'America/Chicago',
           },
           status: 'active',
-          updatedAt: '2026-08-10T00:00:00.000Z',
+          updatedAt: inspectedUpdatedAt,
         },
         patch: (request, current) => {
           if (
@@ -16300,6 +16305,14 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       const automationRequests = automationFixture.requests
 
       try {
+        await materializeAutomationLookupJourneyVaultCli({
+          automationId,
+          binDirectory,
+          commandLogPath,
+          lookupId,
+          title: 'Evening reminder',
+          updatedAt: inspectedUpdatedAt,
+        })
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -16308,9 +16321,16 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           developerInstructions:
-            buildMidnightLinqReminderDeveloperInstructions(),
+            buildMidnightLinqReminderDeveloperInstructions(
+              'vault-cli automation list --format json',
+            ),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
-          env: config.env,
+          env: {
+            ...config.env,
+            PATH: [binDirectory, config.env.PATH]
+              .filter((value): value is string => Boolean(value))
+              .join(path.delimiter),
+          },
           excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
@@ -16332,39 +16352,125 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           workingDirectory,
         })
 
-        expect(automationRequests).toHaveLength(2)
-        expect(automationRequests[0]).toMatchObject({ action: 'inspect' })
-        const request = automationRequests[1]
-        expect(request).toMatchObject({ action: 'patch' })
-        if (request?.action !== 'patch' || !request.schedule) {
-          throw new Error('Expected a patched automation schedule.')
+        const reply = result.finalMessage.trim()
+        const rawCommandLog = (await readFile(commandLogPath, 'utf8')).trim()
+        const commands = rawCommandLog === '' ? [] : rawCommandLog.split('\n')
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const automationListCalls = actions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes(
+            'vault-cli automation list --format json',
+          )
+        )
+        const automationCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+        const automationAttempts = readDynamicToolAttempts(
+          result.jsonEvents,
+        ).filter((attempt) => attempt.tool === MURPH_AUTOMATION_TOOL.name)
+        const attemptSummary = automationAttempts.map((attempt, index) => {
+          const automationAction = automationCalls[index]
+          const lookup = attempt.argumentsValue.lookup
+          return {
+            action: typeof attempt.argumentsValue.action === 'string'
+              ? attempt.argumentsValue.action
+              : null,
+            lookupJsonType: lookup === undefined
+              ? 'missing'
+              : lookup === null
+                ? 'null'
+                : Array.isArray(lookup)
+                  ? 'array'
+                  : typeof lookup,
+            order: index + 1,
+            success: automationAction?.kind === 'dynamic'
+              ? automationAction.success
+              : null,
+          }
+        })
+        process.stdout.write(
+          `[automation-lookup-e2e] ${JSON.stringify({
+            attemptSummary,
+            reply,
+            scenario: 'move-synthetic-central-reminder',
+          })}\n`,
+        )
+
+        expect(commands).toEqual(['automation list --format json'])
+        expect(automationListCalls).toHaveLength(1)
+        expect(automationCalls).toHaveLength(2)
+        expect(automationListCalls[0]).toMatchObject({
+          kind: 'command',
+          ok: true,
+        })
+        expect(automationCalls).toMatchObject([
+          {
+            argumentsValue: { action: 'inspect' },
+            kind: 'dynamic',
+            success: true,
+          },
+          {
+            argumentsValue: { action: 'patch' },
+            kind: 'dynamic',
+            success: true,
+          },
+        ])
+        expect(automationAttempts).toHaveLength(2)
+        expect(automationAttempts.map((attempt) =>
+          attempt.argumentsValue.action
+        )).toEqual(['inspect', 'patch'])
+        expect(automationListCalls[0]?.eventIndex).toBeLessThan(
+          automationAttempts[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
+        )
+        expect(automationAttempts[0]?.eventIndex).toBeLessThan(
+          automationAttempts[1]?.eventIndex ?? Number.NEGATIVE_INFINITY,
+        )
+        for (const attempt of automationAttempts) {
+          expect(typeof attempt.argumentsValue.lookup).toBe('string')
+          expect([automationId, lookupId]).toContain(
+            attempt.argumentsValue.lookup,
+          )
         }
-        expect(request.expectedUpdatedAt).toBe('2026-08-10T00:00:00.000Z')
-        expect(request.schedule.kind === 'dailyLocal'
-          ? request.schedule.localTime
-          : request.schedule.kind === 'cron'
-            ? request.schedule.expression
-            : null).toMatch(/22(?::00)?/u)
+
+        expect(automationRequests).toHaveLength(2)
+        expect(automationRequests.map((request) => request.action)).toEqual([
+          'inspect',
+          'patch',
+        ])
+        const inspectRequest = automationRequests[0]
+        const request = automationRequests[1]
         if (
-          request.schedule.kind !== 'dailyLocal'
-          && request.schedule.kind !== 'cron'
+          inspectRequest?.action !== 'inspect'
+          || request?.action !== 'patch'
+          || !request.schedule
         ) {
+          throw new Error('Expected one inspect and one scheduled patch.')
+        }
+        expect(request.expectedUpdatedAt).toBe(inspectedUpdatedAt)
+        if (request.schedule.kind === 'dailyLocal') {
+          expect(request.schedule.localTime).toBe('22:00')
+        } else if (request.schedule.kind === 'cron') {
+          expect(request.schedule.expression).toMatch(
+            /^0\s+22\s+\*\s+\*\s+\*$/u,
+          )
+        } else {
           throw new Error('Expected a recurring wall-clock schedule.')
         }
         expect([undefined, 'America/Chicago']).toContain(
           request.schedule.timeZone,
         )
-        expect(result.finalMessage).toMatch(
+        expect(reply).toMatch(
           /active|done|moved|saved|set|updated/iu,
         )
-        expect(result.finalMessage).toMatch(
+        expect(reply).toMatch(
           /10\s*(?::00)?\s*p\.?m\.?|22:00/iu,
         )
-        expect(result.finalMessage).toMatch(/central|america\/chicago/iu)
-        expect(result.finalMessage).not.toMatch(
+        expect(reply).toMatch(/central|america\/chicago/iu)
+        expect(reply).not.toMatch(
           /which time\s*zone|what time\s*zone|repeat.*time\s*zone/iu,
         )
-        expect(result.finalMessage).not.toMatch(
+        expect(reply).not.toMatch(
           /could not verify|couldn't verify|unable to verify/iu,
         )
       } finally {
@@ -24010,9 +24116,11 @@ function buildNativeReplyContextCandidateProbe(): string {
   ].join('\n')
 }
 
-function buildMidnightLinqReminderDeveloperInstructions(): string {
+function buildMidnightLinqReminderDeveloperInstructions(
+  assistantCliContract: string | null = null,
+): string {
   return buildAssistantSystemPrompt({
-    assistantCliContract: null,
+    assistantCliContract,
     assistantContextSnapshotPrompt: null,
     assistantHostedAutomationAvailable: true,
     assistantHostedDeviceConnectAvailable: false,
@@ -24031,6 +24139,88 @@ function buildMidnightLinqReminderDeveloperInstructions(): string {
     onboardingGuidance: false,
     turnTrigger: null,
   })
+}
+
+async function materializeAutomationLookupJourneyVaultCli(input: {
+  automationId: string
+  binDirectory: string
+  commandLogPath: string
+  lookupId: string
+  title: string
+  updatedAt: string
+}): Promise<void> {
+  const listEnvelope = {
+    ok: true,
+    data: {
+      vault: '.',
+      filters: {
+        status: null,
+        text: null,
+        supportSeriesId: null,
+        cursor: null,
+        limit: 10,
+      },
+      count: 1,
+      totalCount: 1,
+      nextCursor: null,
+      items: [{
+        automationId: input.automationId,
+        slug: input.lookupId,
+        title: input.title,
+        status: 'active',
+        summary: null,
+        activeUntil: null,
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '21:00',
+          timeZone: 'America/Chicago',
+        },
+        route: {
+          channel: 'linq',
+          deliveryTarget: null,
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        assistantTargetOverride: null,
+        supportKind: 'reminder',
+        plannedOccurrenceOffsetMs: null,
+        contextReferences: [],
+        continuityPolicy: 'preserve',
+        tags: [],
+        createdAt: '2026-08-09T00:00:00.000Z',
+        updatedAt: input.updatedAt,
+        relativePath: `bank/automations/${input.lookupId}.md`,
+      }],
+    },
+    meta: {
+      command: 'automation list',
+      duration: '0ms',
+    },
+  }
+  await mkdir(input.binDirectory, { recursive: true })
+  await writeFile(input.commandLogPath, '', 'utf8')
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      '  "automation list --format json")',
+      `    printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(listEnvelope))}`,
+      '    ;;',
+      '  *)',
+      '    printf \'unexpected automation lookup fixture command: %s\\n\' "$*" >&2',
+      '    exit 64',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
 }
 
 function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
