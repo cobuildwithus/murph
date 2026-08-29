@@ -100,6 +100,93 @@ beforeEach(() => {
 });
 
 describe("hosted system mailbox notification execution context", () => {
+  it("carries a closed validation reason without persisting private response text", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-validation-reason-",
+    );
+    const privateResponseMarker = "PRIVATE_NOTIFICATION_RESPONSE_b469d7_DO_NOT_EMIT";
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:validation-reason",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send the prepared account update.",
+        route: {
+          actorId: "+15550001111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+    mocks.executeHostedMailboxEvent.mockRejectedValueOnce(new VaultCliError(
+      "ASSISTANT_NOTIFICATION_INVALID_RESPONSE",
+      "Assistant notification turn must return a single valid JSON decision object.",
+      {
+        assistantNotificationValidationFailureReason: "decision_json_unparseable",
+        providerResponse: privateResponseMarker,
+      },
+    ));
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_notification_validation_reason",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(preparation).toMatchObject({
+        assistantNotificationValidationFailureReason: "decision_json_unparseable",
+        attemptCount: 1,
+        errorCode: "ASSISTANT_NOTIFICATION_INVALID_RESPONSE",
+        errorMessage:
+          "Assistant notification turn must return a single valid JSON decision object.",
+        itemId: "mailbox_notification_validation_reason",
+        nextWakeAt: "2026-04-27T00:01:00.000Z",
+        nextWakeReason: null,
+        routeAction: "dispatch-assistant-notification",
+        status: "retryable_failed",
+        wakeKind: "assistant.notification.requested",
+      });
+      expect(JSON.stringify(preparation)).not.toContain(privateResponseMarker);
+
+      const state = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(state.pending).toEqual([
+        expect.objectContaining({
+          attemptCount: 1,
+          itemId: "mailbox_notification_validation_reason",
+          lastErrorCode: "ASSISTANT_NOTIFICATION_INVALID_RESPONSE",
+          lastErrorMessage:
+            "Assistant notification turn must return a single valid JSON decision object.",
+          nextAttemptAt: "2026-04-27T00:01:00.000Z",
+          status: "pending",
+        }),
+      ]);
+      expect(state.pending[0]).not.toHaveProperty(
+        "assistantNotificationValidationFailureReason",
+      );
+      expect(JSON.stringify(state)).not.toContain(privateResponseMarker);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("deletes staged environment audio only after the checkpoint boundary", async () => {
     const workspace = await createHostedRuntimeWorkspace(
       "murph-hosted-system-mailbox-",

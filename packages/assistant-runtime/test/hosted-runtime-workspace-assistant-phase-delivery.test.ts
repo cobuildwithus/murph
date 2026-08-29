@@ -4154,22 +4154,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
   });
 
-  it("does not record a retryable mailbox item during an unrelated checkpoint", async () => {
+  it("emits a closed validation reason without recording a retryable mailbox item", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
-      nextWakeAt: null,
-    });
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+    const privateResponseMarker = "PRIVATE_WARNING_RESPONSE_a4158c_DO_NOT_EMIT";
+    const retryablePreparation = {
+      assistantNotificationValidationFailureReason: "decision_json_unparseable",
       attemptCount: 2,
-      errorCode: "system_mailbox.retryable",
-      errorMessage: "redacted",
+      errorCode: "ASSISTANT_NOTIFICATION_INVALID_RESPONSE",
+      errorMessage:
+        "Assistant notification turn must return a single valid JSON decision object.",
       itemId: "system_mailbox_item_retryable",
       legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:10:00.000Z",
+      providerResponse: privateResponseMarker,
       routeAction: "dispatch-assistant-notification",
       status: "retryable_failed",
       wakeKind: "assistant.notification.requested",
+    } as const;
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: null,
     });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(
+      retryablePreparation,
+    );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       logRequests,
@@ -4184,11 +4191,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       ),
     ).toEqual([
       expect.objectContaining({
+        level: "warn",
         redactedJson: expect.objectContaining({
+          assistantNotificationValidationFailureReason: "decision_json_unparseable",
+          errorCode: "ASSISTANT_NOTIFICATION_INVALID_RESPONSE",
+          routeAction: "dispatch-assistant-notification",
           status: "retryable_failed",
+          wakeKind: "assistant.notification.requested",
         }),
       }),
     ]);
+    expect(JSON.stringify(logRequests)).not.toContain(privateResponseMarker);
   });
 
   it("preserves a device-sync mailbox follow-up wake after recording the mailbox item", async () => {
