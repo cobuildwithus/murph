@@ -1,6 +1,6 @@
 # Hosted container readiness telemetry
 
-Status: active
+Status: completed
 Updated: 2026-08-29
 
 ## Goal
@@ -82,3 +82,4 @@ Web release never receives unknown fields. Use the currently required immediate
 container rollout and require managed-container smoke to prove the new bundle
 fingerprint. Roll back the Worker writer first; the additive Web reader may
 remain deployed.
+Completed: 2026-08-29
