@@ -1708,6 +1708,24 @@ test('workout capture preserves explicit hours and the manual source boundary', 
       /duration is ambiguous/iu,
     )
 
+    for (const report of [
+      'I worked out for one hour or maybe two.',
+      'I worked out for one hour, maybe two.',
+    ]) {
+      const hedgedWordHours = await runCli([
+        'workout',
+        'add',
+        report,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(hedgedWordHours.ok, false)
+      assert.match(
+        hedgedWordHours.error.message ?? '',
+        /duration is ambiguous/iu,
+      )
+    }
+
     const explicitManual = await runCli<WorkoutAddEnvelope>([
       'workout',
       'add',

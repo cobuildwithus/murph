@@ -173,3 +173,15 @@ candidate now:
   rebuilt CLI workout-capture slice 6 passed; vault-usecases and CLI typechecks
   and builds passed. Direct built CLI proof now records 30 minutes for both
   workout and intervention `for 30 minutes after lunch` examples.
+- ReviewGPT round 4 accepted one review-induced High: the broadened positive
+  `for one hour` matcher treated hedged or negated arbitrary tails as definite.
+  Direct built CLI proof reproduced both workout and intervention
+  `for one hour or maybe two` as successful 60-minute writes.
+- Round-4 complexity collapse: the terminal positive form is restored, and the
+  only nonterminal form is a structurally bounded `before|after` plus one-word
+  scheduling reference. Every other continuation reuses the existing
+  `ambiguous` result; no new resolver guard or parser owner was added.
+- Round-4 correction proof: parser/format/intervention focused cases 4 passed;
+  rebuilt CLI workout-capture slice 6 passed; vault-usecases and CLI typechecks
+  and builds passed. Direct built CLI proof now rejects both hedged workout and
+  intervention examples with `invalid_option` and writes neither event.

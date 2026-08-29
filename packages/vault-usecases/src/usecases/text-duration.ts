@@ -20,7 +20,8 @@ const wordHourOnlyPattern = /\b(?:an|one)\s+hour\b/iu
 const definiteWordHourOnlyPatterns = [
   /^\s*(?:an|one)\s+hour\s*[.!?]?\s*$/iu,
   /^\s*(?:an|one)\s+hour\s+of\b/iu,
-  /\bfor\s+(?:an|one)\s+hour\b/iu,
+  /\bfor\s+(?:an|one)\s+hour(?=\s*[.!?]?\s*$)/iu,
+  /\bfor\s+(?:an|one)\s+hour\s+(?:before|after)\s+\p{L}[\p{L}'-]*\s*[.!?]?\s*$/iu,
 ] as const
 const hourOnlyPattern =
   /\b(\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h)\b/iu
