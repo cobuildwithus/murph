@@ -12,6 +12,12 @@ while its system sequence remains ahead of the durable consumed watermark and
 never beyond the mailbox privacy deadline; `agent-docs/SECURITY.md` owns that
 boundary.
 
+Codex-managed worktree creation may derive the current repository's sanctioned
+destination without relying on an exported `CODEX_HOME`. Its current-user
+ownership, containment, Spotlight, and focused proof contracts are specified by
+`agent-docs/operations/local-storage-lifecycle.md` and
+`agent-docs/references/testing-ci-map.md`.
+
 Receipt-owned positive Stripe payment notifications cover subscription starts
 and renewals, paid plan-change and recurring-usage invoices, and fulfilled
 usage-credit payments without exposing member or customer identity. Their

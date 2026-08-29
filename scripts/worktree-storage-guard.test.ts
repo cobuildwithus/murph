@@ -419,6 +419,93 @@ describe('worktree storage guard', () => {
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
+  it('derives a Codex-managed worktree from the normal home when CODEX_HOME is unset', () => {
+    const harness = createHarness()
+    const normalHome = path.join(harness.root, 'normal-home')
+    const codexHome = path.join(normalHome, '.codex')
+    const target = path.join(codexHome, 'worktrees', 'primary', 'managed-task')
+    mkdirSync(codexHome, { recursive: true })
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'managed-task', '-b', 'managed-task'],
+      { CODEX_HOME: undefined, HOME: normalHome },
+    )
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(existsSync(path.join(codexHome, 'worktrees', '.metadata_never_index')))
+      .toBe(true)
+  })
+
+  it('keeps a Codex-managed worktree inside an explicit valid Codex home', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const target = path.join(codexHome, 'worktrees', 'primary', 'selected-task')
+    mkdirSync(codexHome)
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'selected-task', '-b', 'selected-task'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('rejects unsafe Codex-managed destination inputs before branch creation', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    mkdirSync(codexHome)
+
+    const unsafeLeaf = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', '../escaped-task', '-b', 'escaped-task'],
+      { CODEX_HOME: codexHome },
+    )
+    const relativeHome = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'relative-home-task', '-b', 'relative-home-task'],
+      { CODEX_HOME: 'relative-codex-home' },
+    )
+
+    expect(unsafeLeaf.status).toBe(1)
+    expect(unsafeLeaf.stderr).toContain('managed name must be one safe path segment')
+    expect(relativeHome.status).toBe(1)
+    expect(relativeHome.stderr).toContain('Codex home must be an absolute directory')
+    expect(runGit(harness.primary, ['branch', '--list', 'escaped-task'])).toBe('')
+    expect(runGit(harness.primary, ['branch', '--list', 'relative-home-task'])).toBe('')
+    expect(existsSync(path.join(harness.root, 'escaped-task'))).toBe(false)
+  })
+
+  it('rejects a redirected Codex worktrees root before branch creation', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const redirectedRoot = path.join(harness.root, 'redirected-worktrees')
+    mkdirSync(codexHome)
+    mkdirSync(redirectedRoot)
+    symlinkSync(redirectedRoot, path.join(codexHome, 'worktrees'), 'dir')
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'redirected-task', '-b', 'redirected-task'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status).toBe(1)
+    expect(creation.stderr).toContain(
+      'Codex worktrees root must not redirect outside its home',
+    )
+    expect(runGit(harness.primary, ['branch', '--list', 'redirected-task'])).toBe('')
+    expect(existsSync(path.join(redirectedRoot, 'primary'))).toBe(false)
+  })
+
   it('keeps both platform lock command bounds explicit', () => {
     const installer = readFileSync(
       path.join(sourceRoot, 'scripts', 'install-git-hooks'),
