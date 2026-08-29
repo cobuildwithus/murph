@@ -1908,6 +1908,19 @@ describe("HostedUserRunner execution coordination", () => {
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
     >(async () => ({
+      coldStartTiming: {
+        healthCheckFinishedAtEpochMs: 1_777_000_000_092,
+        healthCheckStartedAtEpochMs: 1_777_000_000_091,
+        lifecycleLockAcquiredAtEpochMs: 1_777_000_000_041,
+        onStartAtEpochMs: 1_777_000_000_080,
+        portsReadyAtEpochMs: 1_777_000_000_090,
+        processStartedAtEpochMs: 1_777_000_000_044,
+        readinessRequestedAtEpochMs: 1_777_000_000_040,
+        readyObservedAtEpochMs: 1_777_000_000_093,
+        serverListeningAtEpochMs: 1_777_000_000_070,
+        startIssuedAtEpochMs: 1_777_000_000_043,
+        stateReadFinishedAtEpochMs: 1_777_000_000_042,
+      },
       kind: "ready",
       shellPrewarmObservation: {
         firstHintAtEpochMs: 1_777_000_000_010,
@@ -1989,7 +2002,18 @@ describe("HostedUserRunner execution coordination", () => {
     )).toHaveLength(1);
     const invocationOrchestration = invoke.mock.calls[0]?.[0].orchestration;
     expect(invocationOrchestration).toMatchObject({
+      freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_092,
+      freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_091,
+      freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_041,
+      freshStartContainerListeningAtEpochMs: 1_777_000_000_070,
+      freshStartContainerOnStartAtEpochMs: 1_777_000_000_080,
+      freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_090,
+      freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_044,
+      freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_040,
       freshStartContainerReadyAtEpochMs: expect.any(Number),
+      freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_093,
+      freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_043,
+      freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_042,
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
       runtimeStoreEnsureElapsedMs: 250,

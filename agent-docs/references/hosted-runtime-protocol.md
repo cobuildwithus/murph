@@ -3729,6 +3729,29 @@ and explicit no-child results. These fields are stamped onto the existing trace
 payload with no additional I/O. Prefer the same-call elapsed scalars when direct
 and Temporal retries may have contributed independently merged epoch
 timestamps.
+An actual cold readiness RPC also carries optional numeric-only subdivisions.
+`freshStartContainerReadinessRequestedAtEpochMs` and
+`freshStartContainerLifecycleLockAcquiredAtEpochMs` bound lifecycle-lock wait;
+`freshStartContainerStateReadFinishedAtEpochMs` and
+`freshStartContainerStartIssuedAtEpochMs` expose the state/read-to-start gap;
+`freshStartContainerOnStartAtEpochMs` records Cloudflare's lifecycle hook; and
+`freshStartContainerPortsReadyAtEpochMs` records resolution of
+`startAndWaitForPorts`, after both the configured port and `onStart` are ready.
+The explicit private health fetch is bounded by
+`freshStartContainerHealthStartedAtEpochMs` and
+`freshStartContainerHealthFinishedAtEpochMs`, followed by
+`freshStartContainerReadyObservedAtEpochMs` and the existing caller-side ready
+stamp. The health payload additionally supplies
+`freshStartContainerProcessStartedAtEpochMs` and
+`freshStartContainerListeningAtEpochMs`; subtract only that same-process pair
+for the exact Node-to-listen duration. The operational report also presents
+start-issue-to-process and listen-to-platform-port-ready cross-owner epoch
+deltas as directional diagnostics, dropping a sample when clock ordering is
+invalid and retaining the start-issue-to-ports total as the authoritative
+platform wait. Old warm containers may omit the health
+timestamps, and a lifecycle generation whose hook was not observed may omit the
+`onStart` stamp. Missing diagnostic fields never fail readiness. These stamps
+add no request, polling loop, persisted state owner, or reply-path work.
 Fence-attempt diagnostics remain one coherent bundle across replacement races.
 When a replacement compare-and-swap loses, UserRunner drops the superseded
 fence's observation, active-wake, and replacement-clear leaves before probing

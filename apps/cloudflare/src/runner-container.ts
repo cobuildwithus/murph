@@ -218,6 +218,7 @@ export interface RunnerContainerEnsureReadyForProcessingInput {
 export type RunnerContainerEnsureReadyForProcessingResult =
   | {
       action?: "already_warm" | "started";
+      coldStartTiming?: RunnerContainerColdStartTiming;
       kind: "ready";
       shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
     }
@@ -226,6 +227,28 @@ export type RunnerContainerEnsureReadyForProcessingResult =
       kind: "cleanup_unsettled";
       shellPrewarmObservation?: never;
     };
+
+export interface RunnerContainerColdStartTiming {
+  healthCheckFinishedAtEpochMs: number;
+  healthCheckStartedAtEpochMs: number;
+  lifecycleLockAcquiredAtEpochMs: number;
+  onStartAtEpochMs?: number;
+  portsReadyAtEpochMs: number;
+  processStartedAtEpochMs?: number;
+  readinessRequestedAtEpochMs: number;
+  readyObservedAtEpochMs: number;
+  serverListeningAtEpochMs?: number;
+  startIssuedAtEpochMs: number;
+  stateReadFinishedAtEpochMs: number;
+}
+
+type RunnerContainerEnsureReadyResult = {
+  action: "already_warm" | "started";
+  coldStartTiming?: Omit<
+    RunnerContainerColdStartTiming,
+    "lifecycleLockAcquiredAtEpochMs" | "readinessRequestedAtEpochMs"
+  >;
+};
 
 export interface RunnerContainerShellPrewarmObservation {
   firstHintAtEpochMs: number;
@@ -333,6 +356,8 @@ type RunnerContainerCleanupOwnership =
   | "superseded";
 
 interface RunnerContainerCurrentStart {
+  issuedAtMs: number | null;
+  onStartAtMs: number | null;
   pendingOnStartObservation: boolean;
   pendingUntilMs: number | null;
   readyObservedBy: RunnerContainerReadinessObservation | null;
@@ -818,6 +843,7 @@ export class RunnerContainer extends Container {
     const shellPrewarmObservation = this.shellPrewarmObservation;
     this.shellPrewarmObservation = null;
     const supersededShellPrewarm = this.supersedeShellPrewarm();
+    const readinessRequestedAtEpochMs = Date.now();
     // Start the wall-clock deadline before lifecycle-lock admission. A queued
     // readiness request must not receive a fresh timeout after its caller-side
     // guard has already elapsed.
@@ -826,15 +852,16 @@ export class RunnerContainer extends Container {
     let cleanupSettlementTimedOut = false;
     const readiness = this.withLifecycleLock(async () => {
       lifecycleLockAcquired = true;
+      const lifecycleLockAcquiredAtEpochMs = Date.now();
       throwIfRunnerContainerOperationAborted(readinessSignal);
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
       };
       this.currentLogContext = logContext;
       try {
-        let action: "already_warm" | "started";
+        let readinessResult: RunnerContainerEnsureReadyResult;
         try {
-          action = await this.ensureContainerReady(
+          readinessResult = await this.ensureContainerReady(
             input,
             readinessSignal,
             {
@@ -849,7 +876,14 @@ export class RunnerContainer extends Container {
           throw error;
         }
         return {
-          action,
+          action: readinessResult.action,
+          ...(readinessResult.coldStartTiming === undefined ? {} : {
+            coldStartTiming: {
+              ...readinessResult.coldStartTiming,
+              lifecycleLockAcquiredAtEpochMs,
+              readinessRequestedAtEpochMs,
+            },
+          }),
           kind: "ready" as const,
           ...(shellPrewarmObservation === null
             ? {}
@@ -2244,9 +2278,10 @@ export class RunnerContainer extends Container {
       completeSupersededShellPrewarm?: boolean;
       surfaceCleanupUnsettled?: boolean;
     } = {},
-  ): Promise<"already_warm" | "started"> {
+  ): Promise<RunnerContainerEnsureReadyResult> {
     const readinessStartedAt = Date.now();
     const initialState = await this.getState();
+    const stateReadFinishedAtEpochMs = Date.now();
     const status = readContainerStatus(initialState);
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
     const readinessBudgetMs = input.timeoutMs ?? readyTimeoutMs;
@@ -2313,7 +2348,7 @@ export class RunnerContainer extends Container {
             phase: "container.ready",
             userId: input.userId,
           });
-          return "already_warm";
+          return { action: "already_warm" };
         }
       } else {
         this.clearRecentReadinessProof();
@@ -2349,7 +2384,7 @@ export class RunnerContainer extends Container {
           phase: "container.ready",
           userId: input.userId,
         });
-        return "already_warm";
+        return { action: "already_warm" };
       } catch (error) {
         if (this.currentContainerStart !== observedStart) {
           throw error;
@@ -2429,6 +2464,7 @@ export class RunnerContainer extends Container {
       coldStartWaitStartedAtMs,
       readyTimeoutMs,
     );
+    let coldStartTiming: RunnerContainerEnsureReadyResult["coldStartTiming"];
     try {
       await this.startAndWaitForPorts({
         cancellationOptions: {
@@ -2441,12 +2477,15 @@ export class RunnerContainer extends Container {
           waitInterval: RUNNER_WAIT_INTERVAL_MS,
         },
       });
-      await assertRunnerHealthy(
+      const portsReadyAtEpochMs = Date.now();
+      const healthCheckStartedAtEpochMs = Date.now();
+      const healthStartupTiming = await assertRunnerHealthy(
         this,
         readinessTimeoutMs,
         this.environment,
         operationAbortSignal,
       );
+      const healthCheckFinishedAtEpochMs = Date.now();
       const readyStart = this.recordContainerReady(
         "cold-start-ready",
         undefined,
@@ -2458,6 +2497,26 @@ export class RunnerContainer extends Container {
         );
       }
       this.recordRecentReadinessProof(input.userId, readyStart);
+      const readyObservedAtEpochMs = Date.now();
+
+      coldStartTiming = {
+        healthCheckFinishedAtEpochMs,
+        healthCheckStartedAtEpochMs,
+        ...(currentStart.onStartAtMs === null ? {} : {
+          onStartAtEpochMs: currentStart.onStartAtMs,
+        }),
+        portsReadyAtEpochMs,
+        ...(healthStartupTiming.processStartedAtEpochMs === undefined ? {} : {
+          processStartedAtEpochMs: healthStartupTiming.processStartedAtEpochMs,
+        }),
+        readyObservedAtEpochMs,
+        ...(healthStartupTiming.serverListeningAtEpochMs === undefined ? {} : {
+          serverListeningAtEpochMs: healthStartupTiming.serverListeningAtEpochMs,
+        }),
+        startIssuedAtEpochMs:
+          currentStart.issuedAtMs ?? coldStartWaitStartedAtMs,
+        stateReadFinishedAtEpochMs,
+      };
     } catch (error) {
       if (this.currentContainerStart !== currentStart) {
         throw error;
@@ -2532,7 +2591,10 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     });
 
-    return "started";
+    return {
+      action: "started",
+      ...(coldStartTiming === undefined ? {} : { coldStartTiming }),
+    };
   }
 
   private readPendingColdStart(input: {
@@ -3179,7 +3241,9 @@ export class RunnerContainer extends Container {
     if (existing?.readyObservedBy === null) {
       return existing;
     }
-    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, true);
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, true, {
+      issuedAtMs: startedAtMs,
+    });
   }
 
   private recordContainerStartObserved(
@@ -3189,6 +3253,7 @@ export class RunnerContainer extends Container {
     const existing = this.currentContainerStart;
     if (existing?.pendingOnStartObservation) {
       existing.pendingOnStartObservation = false;
+      existing.onStartAtMs = startedAtMs;
       existing.startedAtMs = startedAtMs;
       if (existing.pendingUntilMs !== null) {
         existing.pendingUntilMs = startedAtMs + maxAgeMs;
@@ -3198,15 +3263,23 @@ export class RunnerContainer extends Container {
       this.lastDestroyRequest = null;
       return existing;
     }
-    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false);
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false, {
+      onStartAtMs: startedAtMs,
+    });
   }
 
   private replaceCurrentContainerStart(
     startedAtMs: number,
     maxAgeMs: number,
     pendingOnStartObservation: boolean,
+    timing: {
+      issuedAtMs?: number;
+      onStartAtMs?: number;
+    } = {},
   ): RunnerContainerCurrentStart {
     const currentStart: RunnerContainerCurrentStart = {
+      issuedAtMs: timing.issuedAtMs ?? null,
+      onStartAtMs: timing.onStartAtMs ?? null,
       pendingOnStartObservation,
       pendingUntilMs: startedAtMs + maxAgeMs,
       readyObservedBy: null,
@@ -3230,6 +3303,8 @@ export class RunnerContainer extends Container {
       return null;
     }
     const currentStart: RunnerContainerCurrentStart = expectedStart ?? {
+      issuedAtMs: null,
+      onStartAtMs: null,
       pendingOnStartObservation: false,
       pendingUntilMs: null,
       readyObservedBy: null,
@@ -4429,7 +4504,7 @@ async function assertRunnerHealthy(
   timeoutMs: number,
   environment: RunnerContainerEnvironmentSource,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<RunnerContainerHealthStartupTiming> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const abortSignal = signal
     ? combineRunnerContainerAbortSignals(signal, timeoutSignal)
@@ -4477,6 +4552,41 @@ async function assertRunnerHealthy(
         : null,
     });
   }
+
+  return readRunnerContainerHealthStartupTiming(payload);
+}
+
+interface RunnerContainerHealthStartupTiming {
+  processStartedAtEpochMs?: number;
+  serverListeningAtEpochMs?: number;
+}
+
+function readRunnerContainerHealthStartupTiming(
+  payload: Record<string, unknown>,
+): RunnerContainerHealthStartupTiming {
+  const processStartedAtEpochMs = readOptionalRunnerContainerEpochMs(
+    payload.processStartedAtEpochMs,
+  );
+  const serverListeningAtEpochMs = readOptionalRunnerContainerEpochMs(
+    payload.serverListeningAtEpochMs,
+  );
+  return {
+    ...(processStartedAtEpochMs === undefined ? {} : {
+      processStartedAtEpochMs,
+    }),
+    ...(serverListeningAtEpochMs === undefined ? {} : {
+      serverListeningAtEpochMs,
+    }),
+  };
+}
+
+function readOptionalRunnerContainerEpochMs(value: unknown): number | undefined {
+  return typeof value === "number"
+    && Number.isFinite(value)
+    && Number.isInteger(value)
+    && value >= 0
+    ? value
+    : undefined;
 }
 
 function readHostedRunnerExpectedBundleIdentity(
