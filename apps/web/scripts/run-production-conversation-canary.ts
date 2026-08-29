@@ -66,8 +66,10 @@ export async function runLinqProductionCanary(
     for (const [index, prompt] of CANARY_TURNS.entries()) {
       const turn = index + 1;
       const sentAt = performance.now();
+      const sentAtEpochMs = Date.now();
       const replyPromise = waitForLinqProductionCanaryReply({
         inbound,
+        notBeforeEpochMs: sentAtEpochMs,
         spaceId: space.id,
         timeoutMs: CANARY_REPLY_WAIT_MS,
         userId: target.id,
@@ -102,6 +104,7 @@ export async function runLinqProductionCanary(
 
 export async function waitForLinqProductionCanaryReply(input: {
   inbound: AsyncIterator<[Space, Message]>;
+  notBeforeEpochMs: number;
   spaceId: string;
   timeoutMs: number;
   userId: string;
@@ -124,6 +127,8 @@ export async function waitForLinqProductionCanaryReply(input: {
         || message.platform !== "imessage"
         || message.sender?.id !== input.userId
         || message.content.type !== "text"
+        || !Number.isFinite(message.timestamp.getTime())
+        || message.timestamp.getTime() < input.notBeforeEpochMs
       ) {
         continue;
       }

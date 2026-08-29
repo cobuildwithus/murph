@@ -66,6 +66,7 @@ const TEST_ENV = {
 describe("production conversation canary runner", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(Date, "now").mockReturnValue(1_000);
     mocks.messages = [];
     mocks.now = [];
     mocks.sendResults = [];
@@ -88,6 +89,7 @@ describe("production conversation canary runner", () => {
     mocks.now = [0, 100, 200, 300, 400, 500];
     mocks.sendResults = [true, true, true];
     mocks.messages = [
+      inboundMessage({ text: "An older reply.", timestampMs: 999 }),
       inboundMessage({ spaceId: "other_space", text: "unrelated" }),
       inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
       inboundMessage({ text: "A useful next question." }),
@@ -141,6 +143,7 @@ describe("production conversation canary runner", () => {
 function inboundMessage(input: {
   spaceId?: string;
   text: string;
+  timestampMs?: number;
 }): [Record<string, unknown>, Record<string, unknown>] {
   return [
     { id: input.spaceId ?? "space_canary" },
@@ -149,6 +152,7 @@ function inboundMessage(input: {
       direction: "inbound",
       platform: "imessage",
       sender: { id: "target_canary" },
+      timestamp: new Date(input.timestampMs ?? 1_000),
     },
   ];
 }
