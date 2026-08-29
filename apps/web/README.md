@@ -767,10 +767,12 @@ The current search path uses built-in Postgres full-text search plus the
 their existing 250-candidate SQL bound, and supplement searches retain their
 existing ranking path. Private food-name search uses a separate bounded
 retrieval contract for the roughly two-million-row foods corpus: it admits at
-most 250 literal exact-name rows, 10,000 GIN full-text matches, and 10,000 GiST
-nearest-name candidates before similarity scoring, canonical-key deduplication,
-and window sorting. Exactly one GiST branch is realized: full-text searches use
-strict-word-nearest names, while no-FTS typo searches use whole-name distance
+most 250 literal exact-name rows and 10,000 GIN full-text matches before
+similarity scoring, canonical-key deduplication, and window sorting. When the
+GIN set reaches that cap and may be truncated, one GiST branch admits up to
+10,000 strict-word-nearest names to recover stronger full-text candidates. An
+unsaturated GIN set is already exhaustive and skips that whole-catalog scan.
+When FTS finds nothing, the one GiST branch instead uses whole-name distance
 and its matching whole-name threshold. That shared metric keeps eligible typo
 matches ahead of ineligible names before the cap. The bounded admissions
 preserve representative choice and canonical diversity across the established
