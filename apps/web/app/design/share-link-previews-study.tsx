@@ -15,7 +15,7 @@ const PREVIEWS = [
     frameId: "calendar",
     route: "/calendar/[payload]",
     note:
-      "The calendar link Murph sends in a private iMessage. The preview names "
+      "The calendar link Murph sends in a private text. The preview names "
       + "the action without exposing the event title, time, location, or notes.",
     alt: CALENDAR_OG_ALT,
     card: <CalendarShareCard logoDataUri="/logo.svg" />,

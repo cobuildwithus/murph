@@ -10,7 +10,7 @@ export function CalendarShareCard({ logoDataUri }: { logoDataUri: string }) {
       headline={"Add to\nCalendar."}
       headlineFontSize={92}
       logoDataUri={logoDataUri}
-      subtext="Review the details. Apple Calendar confirms the rest."
+      subtext="Review the details. Your calendar app confirms the rest."
       subtextFontSize={28}
     />
   );

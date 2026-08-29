@@ -95,6 +95,9 @@ Updated: 2026-08-29
 - The runtime, rather than the model, owns the exact final confirmation and
   opaque URL because a real-Codex journey proved that model copying can alter a
   payload character. This remains turn-local and adds no state or service.
+- A confirmed same-turn live-follow-up race remains unchanged by explicit
+  product choice; this task does not add context invalidation for an
+  undelivered calendar link after a newer correction or cancellation.
 
 ## Product UX walkthrough
 
