@@ -1528,6 +1528,7 @@ function buildAssistantSkillRouteHintText(
   ];
   if (conversationScope === "direct") {
     routeLines.push(
+      "- In a private direct conversation, when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal even when they do not say \"automatic.\"",
       "- When the private longitudinal default in turn priority applies, read self-management-experiments. For any multi-day or repeated comparison, also read experiment-onboarding; add behavior-followthrough only when recurring support matters.",
     );
   }

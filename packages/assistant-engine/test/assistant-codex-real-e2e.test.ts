@@ -16519,6 +16519,300 @@ describe('real Codex app-server cache usage e2e harness', () => {
   })
 })
 
+function readRecurringMealTrackingSetupOrder(reply: string): {
+  automaticIndex: number
+  automaticLeads: boolean
+  manualIndex: number
+} {
+  const automaticIndex = reply.search(
+    /\bautomatic (?:meal )?capture\b|\bmeal capture (?:can|in|on|picks|uses|will)\b/iu,
+  )
+  const manualIndex = reply.search(
+    /\bmanual(?:ly)?\b|\byou can also (?:log|track)\b|\bas an alternative\b|\bquick text\b|\bvoice note\b/iu,
+  )
+
+  return {
+    automaticIndex,
+    automaticLeads:
+      automaticIndex >= 0
+      && manualIndex >= 0
+      && automaticIndex < manualIndex,
+    manualIndex,
+  }
+}
+
+describe('recurring meal-tracking setup ordering matcher', () => {
+  it('rejects a manual-first answer even when it later mentions automatic capture', () => {
+    const order = readRecurringMealTrackingSetupOrder(
+      'You can log manually with a quick text or photo. Automatic meal capture is also available in the iPhone app.',
+    )
+
+    expect(order.automaticIndex).toBeGreaterThan(order.manualIndex)
+    expect(order.automaticLeads).toBe(false)
+  })
+})
+
+describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
+  it('offers automatic meal capture on the first recurring tracking request', {
+    timeout: 360_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-recurring-meal-tracking-setup-e2e-'),
+    )
+
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await Promise.all([
+        materializeAssistantSkill({
+          skillsRoot,
+          slug: 'automatic-meal-capture',
+        }),
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+      ])
+
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null,
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-28',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt:
+          'I want an easy way to keep a daily food log. What can Murph do?',
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const commandActions = actions.filter(
+        (action) => action.kind === 'command',
+      )
+      const commandText = commandActions
+        .map((action) => action.command)
+        .join('\n')
+      const reply = result.finalMessage.trim()
+      const order = readRecurringMealTrackingSetupOrder(reply)
+
+      process.stdout.write(
+        `[recurring-meal-tracking-setup-e2e] ${JSON.stringify({
+          commandCount: commandActions.length,
+          reply,
+        })}\n`,
+      )
+      expect(commandText).toContain('automatic-meal-capture')
+      expect(commandText).toContain('food-journal')
+      expect(commandText).not.toMatch(
+        /\bvault-cli\s+meal\s+(?:add|edit|import-json|remove-photo)\b/iu,
+      )
+      expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+      expect(reply).toMatch(/automatic|meal capture/iu)
+      expect(reply).toMatch(/iPhone|iOS 26\.1/iu)
+      expect(reply).toContain(
+        'https://apps.apple.com/us/app/murph-ai/id6786145859',
+      )
+      expect(reply).toMatch(/Full Photos|full photo access/iu)
+      expect(reply).toMatch(
+        /best[- ]effort|may (?:be )?delay|not guaranteed|does not guarantee|opening (?:Murph|the app)/iu,
+      )
+      expect(reply).toMatch(
+        /quick text|text (?:me|Murph)|rough (?:message|description)|log meals manually/iu,
+      )
+      expect(reply).toMatch(
+        /food photo|meal photo|sending (?:me|Murph) a photo/iu,
+      )
+      expect(reply).toMatch(/voice note/iu)
+      expect(order.automaticLeads).toBe(true)
+      expect(reply).not.toMatch(
+        /(?:will|always) (?:capture|pick up|log) every (?:meal|food photo)/iu,
+      )
+      expect(reply.match(/\?/gu) ?? []).toHaveLength(0)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+
+  it('respects manual-device, completed-setup, and group boundaries', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-meal-tracking-context-boundaries-e2e-'),
+    )
+
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await Promise.all([
+        materializeAssistantSkill({
+          skillsRoot,
+          slug: 'automatic-meal-capture',
+        }),
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeAssistantSkill({ skillsRoot, slug: 'group-chat' }),
+      ])
+
+      const runScenario = async (input: {
+        conversationScope: 'direct' | 'group'
+        context: string
+        prompt: string
+      }) => {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: null,
+            assistantContextSnapshotPrompt: input.context,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: input.conversationScope,
+            currentLocalDate: '2026-08-28',
+            currentTimeZone: 'America/New_York',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            ordinaryInboundTurn: true,
+            turnTrigger: 'automation-auto-reply',
+          }),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: input.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+
+        return {
+          actions,
+          commandText: actions
+            .filter((action) => action.kind === 'command')
+            .map((action) => action.command)
+            .join('\n'),
+          reply: result.finalMessage.trim(),
+        }
+      }
+
+      const androidManual = await runScenario({
+        context: [
+          'Known member context:',
+          '- Uses an Android phone.',
+          '- Prefers to log meals manually.',
+        ].join('\n'),
+        conversationScope: 'direct',
+        prompt: 'What is the easiest way for me to track my meals every day?',
+      })
+
+      const alreadyEnabled = await runScenario({
+        context: [
+          'Known member context:',
+          '- Uses a compatible iPhone.',
+          '- Automatic meal capture is already enabled.',
+        ].join('\n'),
+        conversationScope: 'direct',
+        prompt: 'How can Murph help me keep tracking my meals each day?',
+      })
+
+      const group = await runScenario({
+        context: 'This is a multi-person group conversation.',
+        conversationScope: 'group',
+        prompt: 'What is an easy way for us to track our meals each day?',
+      })
+      process.stdout.write(
+        `[meal-tracking-context-boundaries-e2e] ${JSON.stringify({
+          alreadyEnabled: alreadyEnabled.reply,
+          androidManual: androidManual.reply,
+          group: group.reply,
+        })}\n`,
+      )
+      expect(androidManual.commandText).toContain('automatic-meal-capture')
+      expect(androidManual.commandText).toContain('food-journal')
+      expect(androidManual.reply).toMatch(
+        /manual logging|text|photo|voice note|message|rough (?:description|line)/iu,
+      )
+      expect(androidManual.reply).not.toContain(
+        'https://apps.apple.com/us/app/murph-ai/id6786145859',
+      )
+      expect(androidManual.reply).not.toMatch(
+        /Full Photos|Settings\s*(?:>|→).*Meal capture/iu,
+      )
+      expect(alreadyEnabled.commandText).toContain('automatic-meal-capture')
+      expect(alreadyEnabled.commandText).toContain('food-journal')
+      expect(alreadyEnabled.reply).toMatch(/automatic|meal capture|Meals/iu)
+      expect(alreadyEnabled.reply).not.toContain(
+        'https://apps.apple.com/us/app/murph-ai/id6786145859',
+      )
+      expect(alreadyEnabled.reply).not.toMatch(/Full Photos|choose Set up/iu)
+      expect(group.commandText).not.toContain('automatic-meal-capture')
+      expect(group.reply).toMatch(
+        /text|photo|voice note|message|rough description/iu,
+      )
+      expect(group.reply).not.toContain(
+        'https://apps.apple.com/us/app/murph-ai/id6786145859',
+      )
+      expect(group.reply).not.toMatch(
+        /Full Photos|Settings\s*(?:>|→).*Meal capture/iu,
+      )
+      for (const scenario of [androidManual, alreadyEnabled, group]) {
+        expect(
+          scenario.actions.filter((action) => action.kind === 'dynamic'),
+        ).toHaveLength(0)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
 describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
   it('resolves an exact menu label before saving a restaurant meal', {
     timeout: 900_000,
