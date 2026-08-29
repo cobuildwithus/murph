@@ -357,6 +357,65 @@ describe("joined-group participant inventory", () => {
 
   it.each([
     {
+      handles: [
+        { handle: "+15557770000", isMe: true, status: "active" },
+        { handle: REQUESTER_PHONE, isMe: false, status: "active" },
+        { handle: "+14155550101", isMe: false, status: "active" },
+      ],
+      label: "the exact routed account is absent",
+    },
+    {
+      handles: [
+        { handle: PROVIDER_PHONE, isMe: false, status: "inactive" },
+        { handle: "+15557770000", isMe: true, status: "active" },
+        { handle: REQUESTER_PHONE, isMe: false, status: "active" },
+        { handle: "+14155550101", isMe: false, status: "active" },
+      ],
+      label: "a different self account is active",
+    },
+  ])("requires the active exact routed account when $label", async ({ handles }) => {
+    const memberships = [membership(1)];
+    dependencyMocks.readHostedRuntimeAiAllowedMemberIds.mockResolvedValue(
+      new Set(["runtime_1"]),
+    );
+    dependencyMocks.readHostedThreadContainerLinqRouteAuthorities
+      .mockResolvedValue({
+        authorities: new Map([["runtime_1", route("runtime_1", "chat_1")]]),
+        nonLinqContainerMemberIds: new Set(),
+        unavailableContainerMemberIds: new Set(),
+      });
+    dependencyMocks.getHostedLinqChatSummary.mockResolvedValue({
+      handleCount: handles.length,
+      handles,
+      handlesComplete: true,
+      isGroup: true,
+    });
+
+    const result = await readHostedGroupMembershipInventory({
+      memberId: REQUESTER_MEMBER_ID,
+      memberships,
+      now: NOW,
+      prisma: {} as never,
+    });
+
+    expect(result.availabilityByMembershipId.get("membership_1")).toEqual({
+      status: "unavailable",
+      unavailableReason: "group_route_unavailable",
+    });
+    expect(result.participantRosterByMembershipId.get("membership_1")).toEqual({
+      participantCount: 2,
+      participantLabels: [
+        { phoneHint: { areaCode: "415", lastFour: "0101" } },
+      ],
+      status: "available",
+    });
+    await expect(isHostedGroupConsultRouteAvailable({
+      routeAuthority: route("runtime_1", "chat_1"),
+    })).resolves.toBe(false);
+  });
+
+  it.each([
+    {
       label: "an unrelated handle cannot be parsed",
       otherHandles: ["not-a-phone"],
     },

@@ -524,6 +524,35 @@ describe("Hosted group Assistant Ask admission", () => {
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
+  it("rejects before append when the exact provider route is unavailable", async () => {
+    mocks.isHostedGroupConsultRouteAvailable.mockResolvedValue(false);
+    const { prisma, tx } = createPrisma();
+
+    await expect(requestHostedGroupAssistantAsk({
+      memberId: ORIGIN_MEMBER_ID,
+      membershipId: "membership-one",
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      prisma: prisma as never,
+      question: QUESTION,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      },
+    });
+    expect(mocks.isHostedGroupConsultRouteAvailable).toHaveBeenCalledWith({
+      routeAuthority: expect.objectContaining({
+        containerMemberId: TARGET_RUNTIME_MEMBER_ID,
+        threadId: "linq-group-chat",
+      }),
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  });
+
   it("rejects when route authority changes before the locked append", async () => {
     mocks.assertHostedThreadRouteEgressAuthority.mockRejectedValue(
       hostedOnboardingError({
@@ -921,6 +950,8 @@ describe("Hosted private-to-group context handoff admission", () => {
       },
     });
     expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto)
+      .not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
       .not.toHaveBeenCalled();
   });
 

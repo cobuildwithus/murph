@@ -1066,15 +1066,16 @@ older Web responses without the field normalize to an empty array. Revocation
 may select only an exact id from that private read.
 
 Inventory-v2 membership responses additionally expose a `participantRoster`
-result on each entry. Available rosters report the real human chat count,
+result on each entry. Inventory-v3 retains that roster and adds per-membership
+action availability. Available rosters report the real human chat count,
 including the requester, and safe labels for the other people. Missing routes,
-unsupported providers, incomplete rosters, and provider failures are scoped to
-one unavailable entry; optional Contacts failure falls back to masked hints.
-The query capability is an expand/contract boundary: new runners send
-`membershipInventoryProtocol=v2` and accept old Web omissions as
-`participant_roster_not_reported`; new Web omits the field for callers without
-that exact query value so old strict response parsers keep working. Deploy and
-recycle Cloudflare/runner before Web, and roll back Web before the runner.
+unsupported providers, incomplete rosters, and provider failures stay scoped
+to one entry; optional Contacts failure falls back to masked hints. The query
+capability is an expand/contract boundary: existing runners send
+`membershipInventoryProtocol=v2`, while new runners send v3. New Web accepts
+both versions and omits both expansions for callers without an exact supported
+marker so old strict response parsers keep working. Deploy Web before recycling
+Cloudflare/runner onto v3, and roll back the runner to v2 before Web.
 
 For `murph.group_consult(action="ask_member")`, trusted runtime code injects one origin:
 either the current accepted non-direct group input and signed route or one

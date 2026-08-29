@@ -375,21 +375,18 @@ function readCompleteHostedLinqRouteAvailability(input: {
   ) {
     return null;
   }
-  let routeAccountObserved = false;
-  let routeAccountIsActive = false;
-  for (const handle of input.handles) {
-    if (!isHostedLinqRouteAccountHandle({
+  if (!input.accountLookupKey) {
+    return null;
+  }
+  const routeAccountIsActive = input.handles.some((handle) =>
+    isHostedLinqExactRouteAccountHandle({
       accountLookupKey: input.accountLookupKey,
       handle,
-    })) {
-      continue;
-    }
-    routeAccountObserved = true;
-    routeAccountIsActive ||= isActiveHandle(handle);
-  }
-  return routeAccountObserved && !routeAccountIsActive
-    ? unavailableAvailability("group_route_unavailable")
-    : availableAvailability();
+    }) && isActiveHandle(handle)
+  );
+  return routeAccountIsActive
+    ? availableAvailability()
+    : unavailableAvailability("group_route_unavailable");
 }
 
 function readCompleteParticipantContacts(input: {
@@ -407,7 +404,7 @@ function readCompleteParticipantContacts(input: {
     return null;
   }
   const contacts = input.handles.flatMap((handle) => {
-    if (isHostedLinqRouteAccountHandle({
+    if (isHostedLinqProviderOwnedHandle({
       accountLookupKey: input.accountLookupKey,
       handle,
     })) {
@@ -434,13 +431,17 @@ function readCompleteParticipantContacts(input: {
   );
 }
 
-function isHostedLinqRouteAccountHandle(input: {
+function isHostedLinqProviderOwnedHandle(input: {
   accountLookupKey?: string | null;
   handle: HostedLinqChatHandleSummary;
 }): boolean {
-  if (input.handle.isMe) {
-    return true;
-  }
+  return input.handle.isMe || isHostedLinqExactRouteAccountHandle(input);
+}
+
+function isHostedLinqExactRouteAccountHandle(input: {
+  accountLookupKey?: string | null;
+  handle: HostedLinqChatHandleSummary;
+}): boolean {
   if (!input.accountLookupKey) {
     return false;
   }
