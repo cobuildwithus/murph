@@ -1,0 +1,27 @@
+diff --git a/src/committer.sh b/src/committer.sh
+index 1f1a8fa458dcd1d1c267610c3737f014c474af9b..6e1a2a74d482d453f0c43101c787c5c13567a805 100755
+--- a/src/committer.sh
++++ b/src/committer.sh
+@@ -409,7 +409,21 @@ else
+   GIT_INDEX_FILE="$tmp_index" git read-tree --empty
+   comparison_tree="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
+ fi
+-GIT_INDEX_FILE="$tmp_index" git -C "$repo_root" --literal-pathspecs add -A -- "${canonical_files[@]}"
++tracked_files=()
++untracked_files=()
++for canonical_file in "${canonical_files[@]}"; do
++  if GIT_INDEX_FILE="$tmp_index" git -C "$repo_root" --literal-pathspecs ls-files --error-unmatch -- "$canonical_file" >/dev/null 2>&1; then
++    tracked_files+=("$canonical_file")
++  else
++    untracked_files+=("$canonical_file")
++  fi
++done
++if [ "${#tracked_files[@]}" -gt 0 ]; then
++  GIT_INDEX_FILE="$tmp_index" git -C "$repo_root" --literal-pathspecs add -u -- "${tracked_files[@]}"
++fi
++if [ "${#untracked_files[@]}" -gt 0 ]; then
++  GIT_INDEX_FILE="$tmp_index" git -C "$repo_root" --literal-pathspecs add -A -- "${untracked_files[@]}"
++fi
+ 
+ initial_changed_files=()
+ while IFS= read -r -d '' changed_path; do
