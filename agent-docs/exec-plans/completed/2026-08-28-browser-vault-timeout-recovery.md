@@ -1,8 +1,8 @@
 # Retry Browser Vault refreshes after bounded timeouts
 
-Status: active
+Status: completed
 Created: 2026-08-28
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 ## Goal
 
@@ -98,6 +98,18 @@ Updated: 2026-08-28
   `assistantExecutionBlocked` input on that model-free system-mailbox scenario
   isolates the intended 60-second retained-item retry, and the complete
   timeout-to-publication scenario passes without changing production code.
+- Current `main` subsequently absorbed PR #2448 and made `system_mailbox` the
+  sole model-free owner of Browser Vault control work. ReviewGPT removed the
+  now-unreachable default-owner carry machinery while preserving the direct
+  timeout disposition and exact durable item retention.
+- A focused cross-owner reproduction then proved that a premature
+  `system_mailbox` invocation could leave the item untouched but replace its
+  committed 60-second wake with a later generic wake. ReviewGPT corrected the
+  owner boundary so the non-due invocation returns without running lifecycle
+  or rewriting the committed future wake.
+- Candidate-local dedup remained clear after inspecting current open work and
+  the merged #2448 diff: no other branch owns the Browser Vault timeout
+  disposition or the premature-wake preservation question.
 
 ## Verification
 
@@ -107,3 +119,9 @@ Updated: 2026-08-28
 - Expected outcomes: timeout retains work and schedules one bounded follow-up;
   wake/abort preemption and terminal outcomes remain unchanged; no private
   values or new production state surfaces appear.
+- Completed local proof on the current-main candidate: the cross-owner timeout
+  and premature-invocation scenarios passed; the expanded hosted-runtime set
+  passed 233 tests; assistant-runtime and Web typechecks passed; the focused
+  changelog page passed 9 tests; docs drift, privacy/log guards, and diff checks
+  passed.
+Completed: 2026-08-29
