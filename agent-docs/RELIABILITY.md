@@ -21,6 +21,18 @@ Last verified: 2026-08-29
   missing verifier before database authority or SQL, and recovery must roll
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
+- The Linq production canary runs only after the same exact Vercel production
+  proof succeeds for a protected-main deployment. One fixed Photon identity
+  starts a three-turn private iMessage conversation, and every Murph reply must
+  arrive in under ten seconds. The workflow is non-canceling and serialized;
+  an older deployment skips when the production alias has advanced. Before the
+  first send, a dedicated fixed-target Web route clears only that identity's
+  admission rows and fully pre-provider instant-reply claim, then invokes the
+  canonical account-deletion owner. Completed delivery evidence is preserved,
+  and any provider-entered or ambiguous claim blocks the reset. The route has
+  no target input and accepts only its dedicated constant-time bearer secret.
+  Provider, reset, target, and Vercel credentials are exposed only to their
+  owning workflow steps, and the journey emits counts and latency only.
 - Protected native iOS and Android hosted E2E controllers run staggered every
   six hours and admit paid work only when the current `main` SHA differs from
   the latest completed successful scheduled outcome. A latest failure retries

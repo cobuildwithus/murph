@@ -192,9 +192,12 @@ eligible dated release notes; otherwise the controller fails before paid
 dispatch and retries. It dispatches that deployed SHA with the reviewed
 immutable iOS or Android source in `production_canary` mode. The private journey uses
 `non_destructive_existing_identity`; local mocked or hosted-local tests do not
-replace it. The iOS and Android production environments remain separate and
-contain only their repository dispatch credentials plus production-alias proof
-authority. Source refs and SHAs are committed policy, not environment values.
+replace it. The Android production environment remains narrowly populated. The
+iOS controller reuses the protected `native-ios-hosted-e2e` environment, but
+its steps reference only the repository-scoped App private key and the
+production-alias Vercel token; unreferenced legacy environment secrets do not
+enter controller process environments. Source refs and SHAs are committed
+policy, not environment values.
 
 Controller child commands are time-bounded. Android additionally binds the
 private commit to an immutable lightweight tag and a short dispatch lease,

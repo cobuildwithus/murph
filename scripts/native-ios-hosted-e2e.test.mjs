@@ -105,7 +105,14 @@ test("trusted iOS controller is six-hour, latest-outcome gated, and production-o
   assert.match(workflow, /EVENT_REF: \$\{\{ github\.ref \}\}/u);
   assert.match(workflow, /git\/ref\/heads\/main/u);
   assert.match(workflow, /if: \$\{\{ needs\.select-main\.outputs\.should_run == 'true' \}\}/u);
-  assert.match(workflow, /environment: native-ios-production-canary/u);
+  assert.match(workflow, /environment: native-ios-hosted-e2e/u);
+  assert.match(workflow, /owner: \$\{\{ github\.repository_owner \}\}/u);
+  assert.match(
+    workflow,
+    /HOSTED_WEB_VERCEL_TOKEN: \$\{\{ secrets\.NATIVE_IOS_E2E_VERCEL_TOKEN \}\}/u,
+  );
+  assert.match(workflow, /NATIVE_IOS_E2E_IOS_WORKFLOW: native-ios-hosted-e2e\.yml/u);
+  assert.doesNotMatch(workflow, /NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER/u);
   assert.match(workflow, /node scripts\/native-ios-hosted-e2e\.mjs canary/u);
   assert.match(workflow, /--policy \.github\/native-hosted-e2e-controller\.json/u);
   assert.match(workflow, /NATIVE_IOS_E2E_IOS_WORKFLOW/u);
