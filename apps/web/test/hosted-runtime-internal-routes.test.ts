@@ -2711,6 +2711,43 @@ describe("hosted runtime internal web routes", () => {
       source: "linq",
     });
 
+    for (const milestone of [
+      "pending_reply_admitted",
+      "foreground_input_selected",
+      "assistant_input_accepted_for_execution",
+    ] as const) {
+      const response = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            assistantInputIds: ["input_1", "input_2"],
+            at: FIXED_NOW,
+            milestone,
+            runtimeAttemptId: "attempt_routes_1",
+            source: "linq",
+            type: "assistant_milestone",
+          },
+        },
+        runtimeWriteFenceHeaders(),
+      ));
+
+      expect(response.status).toBe(200);
+      expect(parseHostedRuntimeLatencyTraceResponse(await response.json())).toEqual({
+        matchedCount: 2,
+        recorded: true,
+        unmatchedCount: 0,
+      });
+      expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledWith({
+        assistantInputIds: ["input_1", "input_2"],
+        at: FIXED_NOW,
+        authenticatedUserId: "member_routes_1",
+        milestone,
+        runtimeAttemptId: "attempt_routes_1",
+        runtimeLeaseGeneration: "9",
+        source: "linq",
+      });
+    }
+
     const milestoneResponse = await runtimeLatencyRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/latency",
       {
@@ -2792,7 +2829,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(unsafeResponse.status).toBe(400);
     expect(mocks.recordHostedIngressAssistantInputStaged).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledTimes(4);
     expect(mocks.recordHostedIngressProviderStarted).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedIngressRuntimeMilestone).toHaveBeenCalledTimes(1);
   });

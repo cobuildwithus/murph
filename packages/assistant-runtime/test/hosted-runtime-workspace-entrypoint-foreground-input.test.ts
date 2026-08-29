@@ -1914,10 +1914,12 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     }
   });
 
-  test("retains queued image state until its committed delivery intent is terminal", async () => {
+  test("records live and background acceptance without coupling trace failure", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-evidence-retry-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+    const missingAcceptedInputId = "ain_00000000000000000000000000000000";
     const mailboxItems = [createMailboxItem({
       id: "mailbox_item_image_evidence_retry_origin",
       laneSeq: "1",
@@ -2034,17 +2036,25 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 status: "imported",
               };
             },
-            platform: createPlatform({
-              mailboxPort: createMailboxPort({
-                events,
-                items: mailboxItems,
+            platform: {
+              ...createPlatform({
+                mailboxPort: createMailboxPort({
+                  events,
+                  items: mailboxItems,
+                }),
+                workspacePort: createWorkspacePort({
+                  checkpointRequests,
+                  events,
+                  workspace: createWorkspaceState({ version: "0" }),
+                }),
               }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests,
-                events,
-                workspace: createWorkspaceState({ version: "0" }),
-              }),
-            }),
+              latencyTracePort: {
+                async record(request) {
+                  latencyTraceRequests.push(request);
+                  throw new Error("Synthetic latency trace write failure.");
+                },
+              },
+            },
             runtimeWakeSignal,
             async runAssistantPhase(phaseInput) {
               const initialBatchInputIds =
@@ -2076,6 +2086,15 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 });
 
               if (assistantPhaseCalls === 1) {
+                const releaseMissingInput =
+                  await phaseInput.beforeProviderAcceptedInputs?.({
+                    turnId: "turn_hosted_runtime_test",
+                    acceptedInputs: [{
+                      id: missingAcceptedInputId,
+                      source: "assistant-input",
+                    }],
+                  });
+                await releaseMissingInput?.();
                 originInputId = assistantInputId;
                 imageGenerationLauncherRef.current =
                   phaseInput.imageGenerationLauncher ?? null;
@@ -2281,6 +2300,31 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       assert.equal(imageProviderInvocationCount, 2);
       assert.ok(firstCompletionInputId);
       assert.ok(secondCompletionInputId);
+      await waitUntil(() => {
+        assert.equal(
+          latencyTraceRequests.filter(({ event }) =>
+            event.type === "assistant_milestone"
+            && event.milestone === "assistant_input_accepted_for_execution"
+          ).length,
+          assistantPhaseCalls + 1,
+        );
+      });
+      const acceptedForExecutionInputIds = latencyTraceRequests.flatMap(
+        ({ event }) =>
+          event.type === "assistant_milestone"
+            && event.milestone === "assistant_input_accepted_for_execution"
+            ? event.assistantInputIds
+            : [],
+      );
+      assert.ok(originInputId);
+      assert.equal(
+        acceptedForExecutionInputIds.filter((inputId) => inputId === originInputId)
+          .length,
+        2,
+      );
+      assert.ok(acceptedForExecutionInputIds.includes(firstCompletionInputId));
+      assert.ok(acceptedForExecutionInputIds.includes(secondCompletionInputId));
+      assert.equal(acceptedForExecutionInputIds.includes(missingAcceptedInputId), false);
       const completion = await readAssistantInputEvent({
         inputId: firstCompletionInputId,
         vault: vaultRoot,

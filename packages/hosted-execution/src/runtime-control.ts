@@ -2294,6 +2294,10 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
 ] as const;
 
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
+  "pending_reply_admitted",
+  // Web input compatibility only; current runners do not emit this.
+  "foreground_input_selected",
+  "assistant_input_accepted_for_execution",
   "linq_typing_request_started",
   "linq_typing_accepted",
   "progress_update_accepted",
@@ -2478,6 +2482,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // visible channel activity and local Codex output from an upstream provider
   // request or token boundary that the runtime cannot observe.
   assistant?: {
+    pendingReplyAdmittedAtEpochMs?: number;
+    foregroundInputSelectedAtEpochMs?: number;
+    assistantInputAcceptedForExecutionAtEpochMs?: number;
     linqTypingRequestStartedAtEpochMs?: number;
     linqTypingAcceptedAtEpochMs?: number;
     progressUpdateAcceptedAtEpochMs?: number;
@@ -2827,6 +2834,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "receiptScanPerformed",
   ],
   assistant: [
+    "pendingReplyAdmittedAtEpochMs",
+    "foregroundInputSelectedAtEpochMs",
+    "assistantInputAcceptedForExecutionAtEpochMs",
     "linqTypingRequestStartedAtEpochMs",
     "linqTypingAcceptedAtEpochMs",
     "progressUpdateAcceptedAtEpochMs",
@@ -3031,9 +3041,17 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
 
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale
-// stored leaves are dropped before the next write. Accepted progress is the one
-// repeated milestone: retain its earliest timestamp when callbacks arrive out
-// of order.
+// stored leaves are dropped before the next write. Admission, legacy selection,
+// execution acceptance, and accepted progress can be observed more than once
+// across retries: retain their earliest timestamps when callbacks arrive out of
+// order.
+const HOSTED_RUNTIME_ASSISTANT_EARLIEST_TIMESTAMP_LEAF_KEYS = new Set([
+  "pendingReplyAdmittedAtEpochMs",
+  "foregroundInputSelectedAtEpochMs",
+  "assistantInputAcceptedForExecutionAtEpochMs",
+  "progressUpdateAcceptedAtEpochMs",
+]);
+
 export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
   existing: unknown;
   incoming: HostedRuntimeLatencyPhaseBreakdown;
@@ -3074,7 +3092,7 @@ export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
     for (const [leafKey, leaf] of Object.entries(incomingPhase)) {
       if (
         phase === "assistant"
-        && leafKey === "progressUpdateAcceptedAtEpochMs"
+        && HOSTED_RUNTIME_ASSISTANT_EARLIEST_TIMESTAMP_LEAF_KEYS.has(leafKey)
         && typeof leaf === "number"
         && typeof mergedPhase[leafKey] === "number"
       ) {

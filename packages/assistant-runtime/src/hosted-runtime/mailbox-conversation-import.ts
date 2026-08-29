@@ -91,6 +91,9 @@ import {
 import {
   HostedRawEmailMessageMissingError,
 } from "./events/email.ts";
+import {
+  recordHostedAssistantMilestonesBestEffort,
+} from "./assistant-latency-trace.ts";
 
 const CONVERSATION_PROJECTION_FAILED_REASON =
   "conversation-import.projection-failed";
@@ -448,6 +451,12 @@ export async function importHostedConversationMailboxItem(input: {
       return;
     }
     await stagedInput.enqueuePendingReply();
+    recordHostedConversationPendingReplyAdmittedBestEffort({
+      inputId: foregroundAssistantInputId,
+      runtime: input.runtime,
+      runtimeAttemptId: input.runtimeAttemptId ?? null,
+      wake: decoded.wake,
+    });
   };
   if (input.item.durablyConsumed !== true) {
     const latencyMilestones = withHostedConversationImportLatencyMilestones({
@@ -660,6 +669,35 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
     });
   } catch {
     // Latency traces are diagnostic-only and must not affect runtime progress.
+  }
+}
+
+function recordHostedConversationPendingReplyAdmittedBestEffort(input: {
+  inputId: string;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
+  runtimeAttemptId?: string | null;
+  wake: HostedExecutionConversationMessageWake;
+}): void {
+  try {
+    const source = readHostedIngressLatencySource(input.wake.message.channel);
+    const runtimeAttemptId = input.runtimeAttemptId?.trim() ?? "";
+    if (!source || !runtimeAttemptId) {
+      return;
+    }
+    recordHostedAssistantMilestonesBestEffort({
+      context: {
+        assistantInputIds: [input.inputId],
+        latencyTracePort: input.runtime.platform.latencyTracePort,
+        runtimeAttemptId,
+        source,
+      },
+      milestones: [{
+        at: new Date().toISOString(),
+        milestone: "pending_reply_admitted",
+      }],
+    });
+  } catch {
+    // Latency traces are diagnostic-only and must not affect pending admission.
   }
 }
 

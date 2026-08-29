@@ -57,7 +57,7 @@ import {
   applyCanonicalWriteBatch,
   initializeVault,
 } from "@murphai/core";
-import { describe, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   HostedMailboxImportCheckpointConflictError,
@@ -71,6 +71,7 @@ import {
   type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "../src/hosted-runtime.ts";
 import type {
+  HostedRuntimeLatencyTracePort,
   HostedRuntimeLinqRecentInboundEngagementRequest,
 } from "../src/hosted-runtime/platform.ts";
 import {
@@ -9683,6 +9684,7 @@ function createPlatform(input: {
   artifactPut?: (artifact: { bytes: Uint8Array; sha256: string }) => Promise<void>;
   artifactPutCalls?: string[];
   effectsPort?: Partial<HostedRuntimeEffectsPort>;
+  latencyTracePort?: HostedRuntimeLatencyTracePort;
   logRequests?: HostedRuntimeLogRequest[];
   mailboxPort: HostedRuntimeMailboxPort;
   providerFetch?: typeof fetch;
@@ -9741,6 +9743,9 @@ function createPlatform(input: {
             },
           },
         }
+      : {}),
+    ...(input.latencyTracePort
+      ? { latencyTracePort: input.latencyTracePort }
       : {}),
     mailboxPort: input.mailboxPort,
     ...(input.providerFetch ? { providerFetch: input.providerFetch } : {}),

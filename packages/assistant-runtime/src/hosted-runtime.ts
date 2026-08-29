@@ -115,6 +115,9 @@ import {
   type HostedConversationActivityObservation,
 } from "./hosted-runtime/turn-input.ts";
 import {
+  recordHostedAssistantMilestonesBestEffort,
+} from "./hosted-runtime/assistant-latency-trace.ts";
+import {
   readHostedAssistantExecutionDefaultTarget,
 } from "./hosted-runtime/context.ts";
 import type {
@@ -3762,6 +3765,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   const assistantInputIds = acceptedInputs
                     .filter((acceptedInput) => acceptedInput.source === "assistant-input")
                     .map((acceptedInput) => acceptedInput.id);
+                  const acceptedForExecutionAt = new Date().toISOString();
                   for (const assistantInputId of assistantInputIds) {
                     acceptedAssistantInputIds.add(assistantInputId);
                   }
@@ -3770,6 +3774,22 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                       assistantInputIds,
                       vaultRoot: restored.vaultRoot,
                     });
+                  for (const latencyTraceInputGroup of
+                    acceptedInputContext.latencyTraceInputGroups) {
+                    recordHostedAssistantMilestonesBestEffort({
+                      context: {
+                        assistantInputIds:
+                          latencyTraceInputGroup.assistantInputIds,
+                        latencyTracePort: runnerPlatform.latencyTracePort ?? null,
+                        runtimeAttemptId: input.request.attemptId,
+                        source: latencyTraceInputGroup.source,
+                      },
+                      milestones: [{
+                        at: acceptedForExecutionAt,
+                        milestone: "assistant_input_accepted_for_execution",
+                      }],
+                    });
+                  }
                   currentAssistantInputId = acceptedInputsOnlyAssistant
                     ? acceptedInputContext.currentInputId
                     : null;
