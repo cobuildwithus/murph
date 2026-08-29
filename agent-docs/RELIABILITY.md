@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-28
+Last verified: 2026-08-29
 
 ## Current Guardrails
 
@@ -24,15 +24,17 @@ Last verified: 2026-08-28
 - Protected native iOS and Android hosted E2E controllers run staggered every
   six hours and admit paid work only when the current `main` SHA differs from
   the latest completed successful scheduled outcome. A latest failure retries
-  at the next slot even when an older run passed the same SHA, and an explicit
-  rerun of the same trusted schedule bypasses the skip. Native source pins are
-  committed with protected `main`, so source rotation advances that checkpoint.
+  at the next slot even when an older run passed the same SHA. Manual recovery
+  requires `refs/heads/main` and the exact current `main` SHA before protected
+  environment work; an explicit rerun of the same trusted controller attempt
+  bypasses the skip. Native source pins are committed with protected `main`, so
+  source rotation advances that checkpoint.
   Fixed,
   non-canceling per-platform concurrency prevents overlap without admitting a
   waiter for every pull request or deployment event. The workflows are
-  production-only, non-destructive, and have no pull-request,
-  deployment-status, or manual trigger. They dispatch the current production
-  alias SHA; alias lag is accepted only when the existing Vercel classifier
+  production-only and non-destructive, with no pull-request or
+  deployment-status trigger and no arbitrary-branch manual admission. They
+  dispatch the current production alias SHA; alias lag is accepted only when the existing Vercel classifier
   proves the intervening `main` diff contains eligible dated release notes.
 - Protected native Android hosted E2E treats private workflow dispatch as an
   uncertain external effect. A timeout, network failure, ambiguous HTTP
