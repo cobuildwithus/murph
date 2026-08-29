@@ -59,11 +59,11 @@ export {
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
 } from "./idle-maintenance-limits.ts";
 
-// Personal threads keep the measured post-compaction floor (~40k tokens).
-// Group threads can accumulate many messages between turns and amortize a
-// lower threshold. Keep both below the hosted Codex auto-compact ceiling so
-// idle shutdown can compact large-but-below-ceiling threads before the next
-// wake pays the full resend cost.
+// Keep group idle compaction at the original measured 100k boundary so busy
+// rooms do not repeatedly compact near the retained-context floor. Personal
+// threads retain their 90k boundary. Both stay below the hosted Codex
+// auto-compact ceiling so idle shutdown can still compact large threads before
+// the next wake pays the full resend cost.
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
 const HOSTED_INBOX_VIDEO_RETENTION_WINDOW_MS = 0;
 

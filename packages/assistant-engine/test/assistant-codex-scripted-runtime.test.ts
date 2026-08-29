@@ -7963,7 +7963,7 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('compacts a 95k personal warm thread off-turn and keeps its task resumable', {
+  it('compacts a 100k group warm thread off-turn and keeps its task resumable', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -7985,6 +7985,7 @@ text(JSON.stringify(result));
     scenario.stub.queue({ text: 'COMPACT_SEED_OK' })
     const seeded = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Reply exactly COMPACT_SEED_OK.',
       serviceTier: 'flex',
     })
@@ -7992,10 +7993,11 @@ text(JSON.stringify(result));
 
     scenario.stub.queue({
       text: 'COMPACT_STANDARD_OK',
-      usageInputTokens: 95_000,
+      usageInputTokens: 100_000,
     })
     const standard = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: [
         'Preserve this task across the next idle checkpoint.',
         `Goal: ${goalSentinel}`,
@@ -8013,7 +8015,8 @@ text(JSON.stringify(result));
     // turn's tokenUsage events, not a placeholder.
     scenario.stub.markRequestBaseline()
     const skipped = await compactWarmCodexThread({
-      minThreadTokens: 100_000,
+      groupMinThreadTokens: 100_001,
+      minThreadTokens: 90_000,
       timeoutMs: 30_000,
     })
     expect(skipped).toMatchObject({
@@ -8022,7 +8025,7 @@ text(JSON.stringify(result));
     })
     expect(
       skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
-        && skipped.threadContextTokensBefore === 95_000,
+        && skipped.threadContextTokensBefore === 100_000,
     ).toBe(true)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
 
@@ -8030,6 +8033,7 @@ text(JSON.stringify(result));
     // served by the stub and the thread reports compacted.
     scenario.stub.queue({ text: compactedSummary })
     const compacted = await compactWarmCodexThread({
+      groupMinThreadTokens: 100_000,
       minThreadTokens: 90_000,
       timeoutMs: 60_000,
     })
@@ -8062,6 +8066,7 @@ text(JSON.stringify(result));
     scenario.stub.markRequestBaseline()
     expect(
       await compactWarmCodexThread({
+        groupMinThreadTokens: 1,
         minThreadTokens: 1,
         timeoutMs: 30_000,
       }),
@@ -8083,6 +8088,7 @@ text(JSON.stringify(result));
     })
     const resumed = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Finish the preserved task after the idle checkpoint.',
       resumeSessionId: seeded.sessionId,
     })
