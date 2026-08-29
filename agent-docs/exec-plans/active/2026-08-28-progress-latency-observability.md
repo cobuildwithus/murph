@@ -63,3 +63,7 @@ Updated: 2026-08-29
   typecheck produced no diagnostic or result after 10 minutes; only the exact
   owned processes were stopped. Exact-head PR CI remains the required
   test/typecheck gate before merge.
+- The first remediation head reached PR CI and exposed two test-only TypeScript
+  narrowing errors in the new composed cap proof; production sources compiled.
+  The follow-up narrows the redacted detail shape without changing runtime
+  behavior, and the replacement exact head must rerun review and CI.

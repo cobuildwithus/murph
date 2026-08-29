@@ -11,6 +11,7 @@ import {
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionStructuredLogRecord,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -1152,7 +1153,10 @@ describe("executeHostedMailboxEvent", () => {
     });
     const structuredRecord = buildHostedExecutionStructuredLogRecord({
       component: "runtime.provider",
-      details: entry?.redacted,
+      details: entry?.redacted as
+        | HostedExecutionStructuredLogDetails
+        | null
+        | undefined,
       eventId: wake.eventId,
       message: "Hosted assistant Codex action diagnostics captured.",
       phase: "wake.running",

@@ -529,7 +529,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
       },
       wake,
     });
-    if (!providerEntry) {
+    if (!providerEntry?.redacted) {
       throw new Error("Expected a synthetic Codex action diagnostics entry.");
     }
     expect(Object.keys(providerEntry.redacted)).toHaveLength(40);
