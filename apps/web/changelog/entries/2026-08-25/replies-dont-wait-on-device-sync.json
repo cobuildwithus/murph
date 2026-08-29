@@ -9,6 +9,6 @@
     "summary": "In an existing iMessage conversation, Murph now prioritizes your new message over background connected-data work.",
     "details": "If background work is already saving, that save finishes safely first; anything left resumes after your reply.",
     "relevanceTags": ["assistant", "devices", "messaging", "reliability"],
-    "sourcePullRequests": [2314]
+    "sourcePullRequests": [2314, 2526]
   }
 }
