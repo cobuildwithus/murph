@@ -1015,6 +1015,8 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   assistantCronDueNow: boolean;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  systemMailboxWakeAt: string | null;
+  systemMailboxWakeReason: string | null;
 }> {
   const now = new Date(input.nowMs);
   const pendingAssistantInputWakeAt =
@@ -1111,6 +1113,8 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   return {
     assistantCronWakeAt: assistantCronWake.at,
     assistantCronDueNow: assistantCronWake.dueNow,
+    systemMailboxWakeAt: systemMailboxWake.at,
+    systemMailboxWakeReason: systemMailboxWake.reason,
     ...selectedWake,
   };
 }
@@ -3402,6 +3406,26 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             "system_mailbox.checkpoint.due_assistant_handoff",
           );
         }
+        return await returnSystemMailboxModeResult();
+      }
+
+      const committedFutureModelFreeWakeAt =
+        initialProjectedWake.systemMailboxWakeReason === "mailbox"
+        && initialProjectedWake.systemMailboxWakeAt === activeWorkspace?.nextWakeAt
+        && activeWorkspace?.nextWakeReason === HOSTED_ASSISTANT_WAKE_REASON
+          ? initialProjectedWake.systemMailboxWakeAt
+          : null;
+      if (
+        !importOrStartupCheckpointPending
+        && committedFutureModelFreeWakeAt !== null
+        && !hostedRuntimeWakeIsDue(committedFutureModelFreeWakeAt)
+        && (
+          initialProjectedWake.nextWakeAt === null
+          || Date.parse(committedFutureModelFreeWakeAt)
+            <= Date.parse(initialProjectedWake.nextWakeAt)
+        )
+      ) {
+        consumeForegroundWake();
         return await returnSystemMailboxModeResult();
       }
 

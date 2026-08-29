@@ -2752,6 +2752,387 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
+  test("default foreground hands a timed-out browser refresh to the model-free system owner", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_default_browser_vault_foreground",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+    });
+    const refreshItem = createMailboxItem({
+      dedupeKey: "runtime.browser-vault-refresh-requested:default-timeout-retry",
+      id: "mailbox_item_default_browser_vault_timeout_retry",
+      kind: "runtime.browser-vault-refresh-requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const refreshWake = buildHostedExecutionRuntimeControlWake({
+      eventId: refreshItem.dedupeKey,
+      kind: "runtime.browser-vault-refresh-requested",
+      occurredAt: refreshItem.occurredAt,
+      userId: TEST_USER_ID,
+    });
+    const refreshImplementation =
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
+    const automationImplementation =
+      mocks.runAssistantAutomationPass.getMockImplementation();
+    const foregroundAssistantInputIds: string[] = [];
+    const importedRefreshRecords: Array<
+      Awaited<ReturnType<typeof readHostedSystemMailboxState>>["pending"][number]
+    > = [];
+    let importedForegroundAssistantInputId: string | null = null;
+    let forcedRefreshCalls = 0;
+    let snapshotIndex = 0;
+
+    mocks.runAssistantAutomationPass.mockImplementation(
+      async (automationInput: RunAssistantAutomationPassInput) => {
+        const candidates = await automationInput.inputSource?.listInputCandidates({
+          afterCursor: null,
+          limit: 10,
+          sourceId: "linq",
+        });
+        const inputIds = candidates?.inputs.map((candidate) => candidate.event.inputId) ?? [];
+        if (inputIds.length === 0) {
+          return {
+            currentTurnDeliveryIntentIds: [],
+            nextWakeAt: null,
+            progressed: false,
+          };
+        }
+
+        events.push("foreground.default-work");
+        foregroundAssistantInputIds.push(...inputIds);
+        for (const inputId of inputIds) {
+          await writeSyntheticAssistantAutoReplyTerminalEvidence({
+            inputId,
+            vaultRoot,
+          });
+        }
+        return {
+          currentTurnDeliveryIntentIds: [],
+          nextWakeAt: null,
+          progressed: true,
+        };
+      },
+    );
+    mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(async (input) => {
+      if (input.force !== true) {
+        return { status: "skipped_no_port" };
+      }
+      forcedRefreshCalls += 1;
+      events.push(`browser-vault.refresh:${forcedRefreshCalls}`);
+      if (forcedRefreshCalls === 1) {
+        return {
+          refreshStage: "replica_serialization",
+          source: { fileCount: 2, totalBytes: 1_024 },
+          status: "deferred_timeout",
+        };
+      }
+      if (forcedRefreshCalls === 2) {
+        const publishedReplicaRef = createBrowserVaultReplicaRef({
+          generatedAt: new Date().toISOString(),
+          generation: 1,
+          source: {
+            dataVersion: "browser-vault-default-timeout-retry",
+            sourceBundleHash: "e".repeat(64),
+          },
+        });
+        return {
+          byteLength: publishedReplicaRef.byteLength,
+          content: {
+            entities: 0,
+            hasPrivateContent: false,
+            labResultRows: 0,
+            metricGoalProgressRows: 0,
+            metricRows: 0,
+            metricSelectionRows: 0,
+            searchRows: 0,
+            sourceHealthRows: 0,
+            timelineRows: 0,
+            weeklySampleSummaries: 0,
+          },
+          freshness: {
+            freshness: "stale",
+            reason: "missing",
+            shouldRefresh: true,
+          },
+          replicaRef: publishedReplicaRef,
+          source: { fileCount: 2, totalBytes: 1_024 },
+          status: "published",
+        };
+      }
+      throw new Error("A terminal Browser Vault refresh must not retry again.");
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/default-browser-vault-timeout-retry-before.bundle.json",
+        vaultRoot,
+      });
+      artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
+      let currentWorkspace = createWorkspaceState({
+        nextWakeAt: TEST_NOW,
+        nextWakeReason: "assistant",
+        redactedStatus: {
+          hostedMailboxBlockedCount: 0,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 0,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        snapshotRef: restoredWorkspace.snapshotRef,
+        version: "0",
+      });
+      const workspacePort: HostedRuntimeWorkspacePort = {
+        async checkpoint(request) {
+          events.push("workspace.checkpoint");
+          checkpointRequests.push(request);
+          currentWorkspace = createWorkspaceState({
+            browserVaultReplicaRef: currentWorkspace.browserVaultReplicaRef ?? null,
+            inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+            nextWakeAt: request.nextWakeAt ?? null,
+            nextWakeReason: request.nextWakeReason ?? null,
+            redactedStatus: request.redactedStatus ?? null,
+            snapshotRef: request.snapshotRef,
+            version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+          });
+          return {
+            checkpointed: true,
+            workspace: currentWorkspace,
+          };
+        },
+        async read() {
+          events.push("workspace.read");
+          return {
+            fetchedAt: new Date().toISOString(),
+            workspace: currentWorkspace,
+          };
+        },
+      };
+      const platform = createPlatform({
+        artifactBytesByHash,
+        mailboxPort: createMailboxPort({
+          events,
+          items: [conversationItem, refreshItem],
+        }),
+        workspacePort,
+      });
+      const runWorkspacePass = async (
+        attemptId: string,
+        processingMode: "default" | "system_mailbox" = "default",
+      ) =>
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              ...(processingMode === "system_mailbox"
+                ? {
+                    assistantExecutionBlocked: true as const,
+                    processingMode,
+                  }
+                : {}),
+              attemptId,
+              workspaceVersion: currentWorkspace.version,
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              snapshotIndex += 1;
+              const snapshot = await createVaultSnapshotBundle({
+                key: `users/bundles/member-synthetic/default-browser-vault-timeout-retry-${snapshotIndex}.bundle.json`,
+                vaultRoot,
+              });
+              artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+              return { snapshotRef: snapshot.snapshotRef };
+            },
+            async importItem(item, context) {
+              if (item.item.id === refreshItem.id) {
+                const outcome = await enqueueHostedSystemMailboxItem({
+                  item,
+                  vaultRoot,
+                  wake: refreshWake,
+                });
+                const importedRefreshRecord =
+                  (await readHostedSystemMailboxState(vaultRoot)).pending.find(
+                    (pendingItem) => pendingItem.itemId === refreshItem.id,
+                  );
+                assert.equal(importedRefreshRecord?.status, "pending");
+                assert.ok(importedRefreshRecord);
+                importedRefreshRecords.push(structuredClone(importedRefreshRecord));
+                return outcome;
+              }
+              assert.equal(item.item.id, conversationItem.id);
+              context?.onConversationInputStaged?.("linq");
+              importedForegroundAssistantInputId =
+                await stageAssistantInputEventForMailboxItem({
+                  item: item.item,
+                  vaultRoot,
+                });
+              return {
+                assistantInputId: importedForegroundAssistantInputId,
+                status: "imported",
+              };
+            },
+            platform,
+            async runAssistantPhase(input) {
+              assert.equal(processingMode, "default");
+              events.push("assistant.phase");
+              return await runHostedWorkspaceAssistantPhase(input);
+            },
+            vaultRoot,
+          },
+        );
+
+      const foreground = await runWorkspacePass(
+        "attempt_synthetic_default_browser_vault_foreground",
+      );
+
+      assert.equal(forcedRefreshCalls, 0);
+      assert.equal(foreground.status, "scheduled");
+      assert.equal(foreground.immediateRecheckRequested, true);
+      assert.equal(foreground.nextWakeReason, "assistant");
+      const foregroundRecheckAt = foreground.nextWakeAt;
+      assert.ok(foregroundRecheckAt);
+      assert.ok(importedForegroundAssistantInputId);
+      assert.deepEqual(foregroundAssistantInputIds, [importedForegroundAssistantInputId]);
+      const importedRefreshRecord = importedRefreshRecords[0];
+      assert.ok(importedRefreshRecord);
+      const foregroundState = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(foregroundState.pending.length, 1);
+      const pending = foregroundState.pending[0];
+      assert.equal(pending?.itemId, importedRefreshRecord.itemId);
+      assert.equal(
+        pending?.mailboxDedupeKey,
+        importedRefreshRecord.mailboxDedupeKey,
+      );
+      assert.equal(pending?.mailboxLaneSeq, importedRefreshRecord.mailboxLaneSeq);
+      assert.equal(pending?.occurredAt, importedRefreshRecord.occurredAt);
+      assert.equal(pending?.requestId, importedRefreshRecord.requestId);
+      assert.deepEqual(pending?.wake, importedRefreshRecord.wake);
+      assert.equal(pending?.status, "pending");
+      assert.equal(pending?.postCheckpointRecord, null);
+      assert.equal(pending?.nextAttemptAt, null);
+      const checkpointCountAfterForeground = checkpointRequests.length;
+      vi.setSystemTime(new Date(foregroundRecheckAt));
+      const timeoutInvocationAt = new Date().toISOString();
+      const retryAt = new Date(Date.now() + 60_000).toISOString();
+
+      const timedOut = await runWorkspacePass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout",
+        "system_mailbox",
+      );
+
+      assert.equal(forcedRefreshCalls, 1);
+      assert.equal(timedOut.status, "scheduled");
+      assert.equal(timedOut.nextWakeAt, retryAt);
+      assert.equal(timedOut.nextWakeReason, "assistant");
+      assert.equal(timedOut.immediateRecheckRequested, undefined);
+      assert.ok(
+        requireEventIndex(events, "foreground.default-work")
+          < requireEventIndex(events, "browser-vault.refresh:1"),
+      );
+      const checkpointCountAfterTimeout = checkpointRequests.length;
+      assert.ok(checkpointCountAfterTimeout > checkpointCountAfterForeground);
+      const timeoutCheckpoint = checkpointRequests.at(-1);
+      assert.equal(timeoutCheckpoint?.nextWakeAt, retryAt);
+      assert.equal(timeoutCheckpoint?.nextWakeReason, "assistant");
+      assert.equal(
+        timeoutCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "0",
+      );
+      const timeoutState = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(timeoutState.pending.length, 1);
+      const retained = timeoutState.pending[0];
+      assert.equal(retained?.itemId, importedRefreshRecord.itemId);
+      assert.equal(
+        retained?.mailboxDedupeKey,
+        importedRefreshRecord.mailboxDedupeKey,
+      );
+      assert.equal(retained?.mailboxLaneSeq, importedRefreshRecord.mailboxLaneSeq);
+      assert.equal(retained?.occurredAt, importedRefreshRecord.occurredAt);
+      assert.equal(retained?.requestId, importedRefreshRecord.requestId);
+      assert.deepEqual(retained?.wake, importedRefreshRecord.wake);
+      assert.equal(retained?.status, "recording");
+      assert.equal(retained?.postCheckpointRecord, null);
+      assert.equal(retained?.nextAttemptAt, retryAt);
+
+      vi.setSystemTime(new Date(Date.parse(timeoutInvocationAt) + 30_000));
+      const beforeRetry = await runWorkspacePass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_before_retry",
+        "system_mailbox",
+      );
+
+      assert.equal(forcedRefreshCalls, 1);
+      assert.equal(beforeRetry.status, "scheduled");
+      const deferredDefaultOwnerWakeAt = beforeRetry.nextWakeAt;
+      assert.ok(deferredDefaultOwnerWakeAt);
+      assert.notEqual(deferredDefaultOwnerWakeAt, retryAt);
+      assert.ok(Date.parse(deferredDefaultOwnerWakeAt) > Date.parse(retryAt));
+      assert.equal(beforeRetry.nextWakeReason, "assistant");
+      assert.equal(beforeRetry.immediateRecheckRequested, undefined);
+      assert.equal(checkpointRequests.length, checkpointCountAfterTimeout);
+      assert.equal(currentWorkspace.nextWakeAt, retryAt);
+      assert.equal(currentWorkspace.nextWakeReason, "assistant");
+      const beforeRetryRecord = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+      assert.deepEqual(beforeRetryRecord, retained);
+
+      vi.setSystemTime(new Date(retryAt));
+      const published = await runWorkspacePass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_published",
+        "system_mailbox",
+      );
+
+      const publicationCheckpoint = checkpointRequests.at(-1);
+      const expectedRetentionWakeAt = new Date(
+        Date.parse(conversationItem.createdAt) + 14 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      assert.equal(forcedRefreshCalls, 2);
+      assert.equal(published.status, "scheduled");
+      assert.equal(published.immediateRecheckRequested, undefined);
+      assert.equal(published.nextWakeAt, deferredDefaultOwnerWakeAt);
+      assert.equal(published.nextWakeReason, "assistant");
+      assert.ok(
+        Date.parse(deferredDefaultOwnerWakeAt)
+          < Date.parse(expectedRetentionWakeAt),
+      );
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(publicationCheckpoint?.nextWakeAt, deferredDefaultOwnerWakeAt);
+      assert.equal(publicationCheckpoint?.nextWakeReason, "assistant");
+      assert.equal(
+        publicationCheckpoint?.inboxMediaRetentionWakeAt,
+        expectedRetentionWakeAt,
+      );
+      assert.equal(
+        publicationCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+    } finally {
+      if (automationImplementation) {
+        mocks.runAssistantAutomationPass.mockImplementation(automationImplementation);
+      }
+      const restoreRefreshImplementation =
+        refreshImplementation
+        ?? mocks.actualRefreshHostedBrowserVaultReplicaFromRuntime;
+      if (restoreRefreshImplementation) {
+        mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
+          restoreRefreshImplementation,
+        );
+      }
+      mocks.runAssistantAutomationPass.mockClear();
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("system mailbox mode retains a timed-out browser refresh until one delayed retry publishes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
@@ -2959,10 +3340,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
 
       assert.equal(refreshCalls, 1);
-      assert.equal(beforeRetry.status, "scheduled");
-      assert.equal(beforeRetry.nextWakeAt, retryAt);
-      assert.equal(beforeRetry.nextWakeReason, "assistant");
+      assert.equal(beforeRetry.status, "idle");
+      assert.equal(beforeRetry.nextWakeAt, null);
+      assert.equal(beforeRetry.nextWakeReason ?? null, null);
+      assert.equal(beforeRetry.immediateRecheckRequested, undefined);
       assert.equal(checkpointRequests.length, checkpointCountAfterTimeout);
+      assert.equal(currentWorkspace.nextWakeAt, retryAt);
+      assert.equal(currentWorkspace.nextWakeReason, "assistant");
+      const beforeRetryState = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(beforeRetryState.pending.length, 1);
+      assert.deepEqual(beforeRetryState.pending[0], retained);
 
       vi.setSystemTime(new Date(retryAt));
       const published = await runSystemPass(
