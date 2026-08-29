@@ -89,12 +89,16 @@ async function replaceGeneratedRoot(
     const publishCollision = isGeneratedRootPublishCollision(error);
     const sameTreePublished = publishCollision
       && await generatedTreesMatchExactly(temporaryRoot, targetRoot).catch(() => false);
+    if (sameTreePublished) {
+      await rm(temporaryRoot, { force: true, recursive: true });
+      if (targetMoved) {
+        await rm(backupRoot, { force: true, recursive: true });
+      }
+      return;
+    }
     await rm(temporaryRoot, { force: true, recursive: true }).catch(() => {});
     if (publishCollision && targetMoved) {
-      await rm(backupRoot, { force: true, recursive: true });
-    }
-    if (sameTreePublished) {
-      return;
+      await rm(backupRoot, { force: true, recursive: true }).catch(() => {});
     }
     if (targetMoved && !publishCollision) {
       await rename(backupRoot, targetRoot).catch(() => {});
