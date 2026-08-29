@@ -80,3 +80,39 @@ Updated: 2026-08-29
   exact owned session without a test result; the completed journey remains the
   behavioral evidence because neither production code nor generated output
   changed.
+- Exact-head CI at `aea294326c960f5ebbde4193fa9b1cb6c5ec6636` passed 26
+  checks with two intentional skips and no pending or failed check. Final
+  ReviewGPT round 3 found no tactical defect and returned the mandatory
+  round-number `RETROSPECTIVE_REQUIRED` outcome. The requirement-level decision
+  below was recorded before another review round.
+
+## Round-3 retrospective
+
+- Original requirement: provide one early useful update for direct
+  reply-critical multi-source or substantive multi-step work, keep routine
+  single reads and group conversations quiet, and make the same path diagnosable
+  with metadata only.
+- The immutable first-reviewed head changed 14 files and 509 lines, including
+  80 authored production-source lines. The current head still changes 14 files
+  and 600 lines, while production-source churn decreased to 70 lines. Review
+  remediation changed 191 lines in the same files; the immediate round-3 delta
+  is 18 additions and four deletions in proof and documentation only.
+- Review removed duplicated prompt wording, a derivable failure counter, and a
+  duplicated action-row ordinal. The remaining growth is semantic live-journey,
+  parser/cap, type-narrowing, and durable evidence coverage, not runtime
+  machinery.
+- Decision: explicitly continue as one indivisible delivery. The prompt owns
+  the member outcome, diagnostics explain the same decision and delivery path,
+  tests prove their shared boundary, and the changelog communicates the result.
+  Splitting them would discard one of those guarantees and add rollout/review
+  overhead for only 70 production-source lines.
+- Retain only the shared direct-progress rule, existing progress tool and Codex
+  turn wiring, action reducer, numeric timing correlation, and existing hosted
+  trace projection/caps. The final boundary adds no sender, timer, scheduler,
+  queue, state machine, lifecycle, reconciliation path, schema, persisted state,
+  or policy owner; no further production expansion is justified.
+- Sufficient continuation proof is the focused deterministic suite and package
+  typechecks, parser-produced cap and privacy/log guards, one completed synthetic
+  production-derived live journey with a Ready verdict, changelog source and
+  production-presentation evidence, exact-head CI, and one full-snapshot
+  ReviewGPT pass after this retrospective.
