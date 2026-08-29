@@ -10,6 +10,7 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
 } from "@murphai/query/browser";
+import type { PersonalPatternReport } from "@murphai/query/browser-overview";
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 
 const mocks = vi.hoisted(() => ({
@@ -44,6 +45,7 @@ import { metadata as patternsMetadata } from "../app/(dashboard)/patterns/layout
 import { EnvironmentPrintStudy } from "../app/design/environment-print-study";
 import { PersonalPatternsComponentStudy } from "../app/design/personal-patterns-study";
 import { JournalViewContent } from "../src/components/journal/journal-view";
+import { getOutcomeDescription } from "../src/components/overview/personal-patterns-section";
 import { renderClientComponent } from "./render-client-component";
 
 type BrowserVaultEntity = Parameters<
@@ -475,6 +477,15 @@ test("Personal Patterns comparison controls use plain result language", () => {
   assert.match(markup, /data-pattern-outcome-column="total-sleep"/u);
   assert.match(markup, />Sleep duration</u);
   assert.match(markup, />Sleep quality</u);
+  assert.match(markup, />SpO₂</u);
+  assert.equal(
+    getOutcomeDescription("spo2"),
+    "Blood oxygen saturation. It estimates how much oxygen your red blood cells carry, usually while you sleep.",
+  );
+  assert.match(markup, /\/design-assets\/patterns\/housework\.svg/u);
+  assert.match(markup, /\/design-assets\/patterns\/mobility\.svg/u);
+  assert.match(markup, /\/design-assets\/habitat\/night-temp\.svg/u);
+  assert.match(markup, /\/design-assets\/patterns\/activity\.svg/u);
   assert.doesNotMatch(markup, />Score<\/span>/u);
   assert.doesNotMatch(markup, />Efficiency<\/span>/u);
   assert.match(markup, /sleep efficiency/u);
@@ -508,6 +519,160 @@ test("Personal Patterns comparison controls use plain result language", () => {
   assert.doesNotMatch(markup, />~</u);
   assert.doesNotMatch(markup, /font-mono font-semibold tabular-nums/u);
   assert.doesNotMatch(markup, /Scroll sideways/u);
+});
+
+test("a saved synthetic Journal factor reaches Patterns and disappears after correction", async () => {
+  const start = "2026-01-05";
+  const yardWorkDates = Array.from({ length: 8 }, (_, index) =>
+    addIsoDays(start, index * 14),
+  );
+  const entities = yardWorkDates.map((date, index) =>
+    createEntity("event", `yard_work_${index}`, {
+      attributes: { activityType: "yard_work" },
+      date,
+      kind: "activity_session",
+      occurredAt: `${date}T12:00:00.000Z`,
+      title: "Yard work",
+    }),
+  );
+  const metricPoints = Array.from({ length: 112 }, (_, index) => {
+    const date = addIsoDays(start, index);
+    const value = yardWorkDates.includes(addIsoDays(date, -1)) ? 70 : 50;
+    return {
+      biomarkerKey: null,
+      canonicalUnit: "ms",
+      canonicalValue: value,
+      comparator: null,
+      confidence: "high" as const,
+      context: {},
+      effectiveDate: date,
+      grain: "day" as const,
+      id: `yard_work_hrv_${index}`,
+      metricKey: "hrv-rmssd",
+      observedAt: `${date}T07:00:00.000Z`,
+      provenance: {
+        dataOrigin: null,
+        externalRef: null,
+        labName: null,
+        provider: "whoop",
+        rawRefs: [],
+        sourceLabel: "Synthetic wearable summary",
+      },
+      recordedAt: null,
+      reportedAt: null,
+      schemaVersion: "murph.metric-point.v1" as const,
+      source: {
+        family: "derived" as const,
+        kind: "wearable-summary",
+        path: "",
+        recordId: `record:yard_work_hrv_${index}`,
+        resultIndex: null,
+      },
+      statistic: "value" as const,
+      textValue: null,
+      unit: "ms",
+      value,
+    };
+  });
+  const buildReplica = async (
+    sourceBundleHash: string,
+    sourceEntities: BrowserVaultEntity[],
+  ) =>
+    await createBrowserVaultReplica({
+      generatedAt: "2026-04-27T13:00:00.000Z",
+      metricPoints,
+      sourceBundleHash,
+      vault: createVaultReadModel({
+        entities: sourceEntities,
+        vaultRoot: "browser://synthetic-pattern-cycle",
+      }),
+    });
+
+  const savedReplica = await buildReplica("s".repeat(64), entities);
+  assert.equal(savedReplica.source.sourceBundleHash, "s".repeat(64));
+  assert.equal(savedReplica.personalPatterns?.factors[0]?.id, "yard-work");
+  const savedClient = createBrowserVaultQueryClient(savedReplica);
+  mocks.useBrowserVault.mockReturnValue({
+    client: savedClient,
+    dataVersion: savedClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+
+  const savedMarkup = renderToStaticMarkup(createElement(PatternsPageClient));
+  assert.match(savedMarkup, /Yard work/u);
+  assert.match(savedMarkup, /HRV/u);
+
+  const correctedReplica = await buildReplica("c".repeat(64), []);
+  assert.equal(correctedReplica.personalPatterns?.factors.length, 0);
+  const correctedClient = createBrowserVaultQueryClient(correctedReplica);
+  mocks.useBrowserVault.mockReturnValue({
+    client: correctedClient,
+    dataVersion: correctedClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+
+  const correctedMarkup = renderToStaticMarkup(
+    createElement(PatternsPageClient),
+  );
+  assert.doesNotMatch(correctedMarkup, /Yard work/u);
+  assert.match(correctedMarkup, /Give your health data some context/u);
+});
+
+test("Personal Patterns reveals factors after the first 15 on request", async () => {
+  const rendered = await renderClientComponent(
+    createElement(PersonalPatternsComponentStudy),
+    {
+      location: {
+        hash: "",
+        href: "https://local.withmurph.ai/patterns",
+        origin: "https://local.withmurph.ai",
+        pathname: "/patterns",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Showing 15 of 17 factors/u,
+    );
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Yoga/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Reading/u);
+
+    const showMore = Array.from(
+      rendered.window.document.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Show more");
+    assert.ok(showMore instanceof rendered.window.HTMLButtonElement);
+    await act(async () => {
+      showMore.click();
+    });
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Showing 17 of 17 factors/u,
+    );
+    assert.match(rendered.container.textContent ?? "", /Yoga/u);
+    assert.match(rendered.container.textContent ?? "", /Reading/u);
+    assert.equal(showMore.getAttribute("aria-expanded"), "true");
+
+    await act(async () => {
+      showMore.click();
+    });
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Yoga/u);
+    assert.equal(showMore.getAttribute("aria-expanded"), "false");
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("PatternsPage explains the bounded wait when a legacy replica has no patterns projection", async () => {
@@ -593,6 +758,123 @@ test("PatternsPage keeps its heading and recovery action when loading fails", as
   } finally {
     await rendered.cleanup();
   }
+});
+
+test("PatternsPage local diagnostics explain why a selected factor is hidden", () => {
+  const personalPatterns = createPersonalPatternDiagnosticFixture();
+  const diagnosticsClient = createBrowserVaultQueryClient({
+    ...clientFixture.replica,
+    personalPatterns,
+  });
+  mocks.useBrowserVault.mockReturnValue({
+    client: diagnosticsClient,
+    dataVersion: diagnosticsClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(PatternsPageClient, { debugFactor: "trail-running" }),
+  );
+
+  assert.match(markup, /Local pattern diagnostics/u);
+  assert.match(markup, /4 recorded days, 5 sessions/u);
+  assert.match(markup, /Not enough matched days/u);
+  assert.match(markup, /Shown in matrix/u);
+  assert.match(markup, />No</u);
+});
+
+test("PatternsPage local diagnostics distinguishes a factor missing before selection", () => {
+  const personalPatterns = createPersonalPatternDiagnosticFixture();
+  const diagnosticsClient = createBrowserVaultQueryClient({
+    ...clientFixture.replica,
+    entities: [
+      ...clientFixture.replica.entities,
+      {
+        attributes: {
+          activityType: "workout",
+        },
+        bodyPreview: null,
+        date: "2026-08-28",
+        experimentSlug: null,
+        family: "event",
+        id: "trail-running-activity",
+        kind: "activity_session",
+        links: [],
+        lookupIds: ["trail-running-activity"],
+        occurredAt: "2026-08-28T19:27:00.000Z",
+        recordClass: "ledger",
+        status: null,
+        stream: null,
+        tags: [],
+        title: "Trail running",
+      },
+    ],
+    journal: {
+      ...clientFixture.replica.journal,
+      days: [
+        ...(clientFixture.replica.journal?.days ?? []),
+        {
+          date: "2026-08-28",
+          events: [
+            {
+              date: "2026-08-28",
+              details: ["2 h 45 across 2 sessions"],
+              id: "trail-running-activity",
+              kind: "activity_session",
+              occurredAt: "2026-08-28T19:27:00.000Z",
+              records: [
+                {
+                  id: "trail-running-activity",
+                  kind: "activity_session",
+                  label: "Oura workout",
+                  occurredAt: "2026-08-28T19:27:00.000Z",
+                  source: "device",
+                  summary: null,
+                  tags: [],
+                  timeZone: null,
+                },
+              ],
+              summary: "2 h 45 across 2 sessions",
+              timing: "timed",
+              timeZone: null,
+              title: "Trail running",
+            },
+          ],
+        },
+      ],
+      eventCount: (clientFixture.replica.journal?.eventCount ?? 0) + 1,
+      recordCount: (clientFixture.replica.journal?.recordCount ?? 0) + 1,
+      weeks: clientFixture.replica.journal?.weeks ?? [],
+      windowDays: clientFixture.replica.journal?.windowDays ?? 14,
+    },
+    personalPatterns: {
+      ...personalPatterns,
+      cells: [],
+      factors: [],
+    },
+  });
+  mocks.useBrowserVault.mockReturnValue({
+    client: diagnosticsClient,
+    dataVersion: diagnosticsClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(PatternsPageClient, { debugFactor: "trail-running" }),
+  );
+
+  assert.match(markup, /Factor is not in the selected report/u);
+  assert.match(markup, /Matching Journal events exist/u);
+  assert.match(markup, /activityType=workout/u);
+  assert.match(markup, />None</u);
 });
 
 test("OverviewPage counts all tracked experiments while listing the most recent ones", async () => {
@@ -992,6 +1274,56 @@ function createEntity(
   };
 }
 
+function createPersonalPatternDiagnosticFixture(): PersonalPatternReport {
+  return {
+    asOfDate: "2026-08-29",
+    cells: [
+      {
+        classification: null,
+        comparisonBasis: "unobserved_baseline",
+        comparisonDates: [],
+        comparisonDays: 0,
+        comparisonMean: null,
+        delta: null,
+        deltaPercent: null,
+        direction: "flat",
+        exposedDates: [],
+        exposedDays: 0,
+        exposedMean: null,
+        factorId: "trail-running",
+        firstExposedDate: null,
+        grade: null,
+        lastExposedDate: null,
+        outcomeId: "sleep-duration",
+        repeatedDirection: false,
+        stage: "insufficient",
+      },
+    ],
+    factors: [
+      {
+        episodeCount: 5,
+        id: "trail-running",
+        kind: "activity",
+        label: "Trail running",
+        observedDays: 4,
+      },
+    ],
+    lagDays: 1,
+    notes: [],
+    outcomes: [
+      {
+        id: "sleep-duration",
+        label: "Sleep duration",
+        lagDays: 1,
+        unit: "min",
+      },
+    ],
+    repeatableCellCount: 0,
+    testedCellCount: 0,
+    windowDays: 120,
+  };
+}
+
 async function createFixtureClient(
   input: {
     experimentSlug?: string;
@@ -1099,6 +1431,7 @@ function resolveRecordClass(
     case "habitat":
     case "regimen":
       return "bank";
+    case "event":
     case "journal":
       return "ledger";
     case "sample":
@@ -1144,4 +1477,10 @@ function createHabitatEntities(): BrowserVaultEntity[] {
       title: "Bedroom & sleep",
     }),
   ];
+}
+
+function addIsoDays(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }

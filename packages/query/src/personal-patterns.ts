@@ -24,7 +24,7 @@ import {
 } from "./wearables/sleep-pattern.ts";
 
 const DEFAULT_WINDOW_DAYS = 120;
-const MAX_FACTORS = 15;
+const MAX_REPORT_FACTORS = 100;
 const MIN_OUTCOME_DAYS = 2;
 const COMPARISON_SEARCH_DAYS = 35;
 // Product-owned and intentionally fail-closed. A new provider tag requires
@@ -245,7 +245,7 @@ function buildPersonalPatternReportFromOutcomeSeries(
         right.observedDays - left.observedDays ||
         left.label.localeCompare(right.label),
     )
-    .slice(0, MAX_FACTORS);
+    .slice(0, MAX_REPORT_FACTORS);
   const visibleFactorIds = new Set(factors.map((factor) => factor.id));
   const selectedCells = candidateCells.filter((cell) =>
     visibleFactorIds.has(cell.factorId),

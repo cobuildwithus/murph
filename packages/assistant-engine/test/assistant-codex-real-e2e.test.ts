@@ -10721,10 +10721,113 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex weekly health insight evidence fallback e2e', () => {
-  it(
-    'falls back from an unavailable personal-pattern report and accepts a usable no-clear report',
-    async () => {
+describeRealCodex('real Codex Personal Patterns initial baseline e2e', () => {
+  it('records the first Personal Patterns baseline without messaging the member', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.slug === 'personal-patterns-update',
+    )
+    if (!automation) {
+      throw new Error('Expected the managed Personal Patterns automation.')
+    }
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-personal-pattern-baseline-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
+      await materializePersonalPatternsBaselineVaultCli({
+        binDirectory,
+        ledgerCapturePath,
+      })
+      await writeFile(
+        path.join(workingDirectory, '.zprofile'),
+        `export PATH=${JSON.stringify(binDirectory)}:$PATH\n`,
+        'utf8',
+      )
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: {
+          ...config.env,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          ZDOTDIR: workingDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Scheduled occurrence context:',
+          '- Current local date: 2026-08-29.',
+          '- This is a controlled synthetic fixture.',
+          '- Complete the normal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const patternReads = actions.filter(
+        (action) =>
+          action.kind === 'command' &&
+          action.command.includes('vault-cli wearables patterns'),
+      )
+      const ledgerReads = actions.filter(
+        (action) =>
+          action.kind === 'command' &&
+          action.command.includes(
+            'vault-cli knowledge show personal-pattern-notifications',
+          ),
+      )
+      const ledgerWrites = actions.filter(
+        (action) =>
+          action.kind === 'command' &&
+          action.command.includes(
+            'vault-cli knowledge upsert --slug personal-pattern-notifications',
+          ),
+      )
+      const finishCalls = actions.filter(
+        (action) =>
+          action.kind === 'dynamic' &&
+          action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name,
+      )
+
+      expect(patternReads).toHaveLength(1)
+      expect(ledgerReads).toHaveLength(1)
+      expect(ledgerWrites).toHaveLength(1)
+      expect(await readFile(ledgerCapturePath, 'utf8')).toContain('yard-work')
+      expect(finishCalls.length).toBeLessThanOrEqual(1)
+      if (result.finalMessage !== '') {
+        expect(JSON.parse(result.finalMessage.trim())).toEqual({
+          kind: 'skip',
+          privateSummary: 'No new Personal Pattern result appeared.',
+        })
+      }
+      process.stdout.write(
+        `[personal-pattern-baseline-e2e] ${JSON.stringify({
+          finalMessage: result.finalMessage,
+          ledgerWrites: ledgerWrites.length,
+        })}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+describeRealCodex(
+  'real Codex weekly health insight evidence fallback e2e',
+  () => {
+    it('falls back from an unavailable personal-pattern report and accepts a usable no-clear report', async () => {
       const config = await resolveRealCodexE2eConfig()
       const weeklyHealthInsight = MURPH_MANAGED_AUTOMATIONS.find(
         (automation) =>
@@ -10836,6 +10939,83 @@ describeRealCodex('real Codex weekly health insight evidence fallback e2e', () =
     },
     720_000,
   )
+})
+
+describeRealCodex('real Codex Journal and Patterns help e2e', () => {
+  it('recalculates Patterns and explains Journal corrections in plain language', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-journal-patterns-help-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeWeeklyHealthInsightVaultCli({
+        binDirectory,
+        patternResult: 'no-clear',
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        env: {
+          ...config.env,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Please recalculate my Patterns now.',
+          'Then explain when Patterns refreshes and how I can correct or delete a Journal entry.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const patternReads = actions.flatMap((action) =>
+        action.kind === 'command' &&
+        action.command.includes('vault-cli wearables patterns')
+          ? [action.command]
+          : [],
+      )
+      const journalWrites = actions.flatMap((action) =>
+        action.kind === 'command' &&
+        /vault-cli event (?:note add|edit|delete)/u.test(action.command)
+          ? [action.command]
+          : [],
+      )
+
+      expect(patternReads).toHaveLength(1)
+      expect(patternReads[0]).toMatch(
+        /vault-cli wearables patterns --date \d{4}-\d{2}-\d{2} --format json/u,
+      )
+      expect(journalWrites).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/Patterns/iu)
+      expect(result.finalMessage).toMatch(/Journal/iu)
+      expect(result.finalMessage).toMatch(/correct|edit|delete|remove/iu)
+      expect(result.finalMessage).toMatch(/ask|message|tell|through Murph/iu)
+      expect(result.finalMessage).toMatch(/13:00|daily|stale|refresh/iu)
+      expect(result.finalMessage).not.toMatch(
+        /open (?:that|the) (?:Journal )?entry|edit button|delete button/iu,
+      )
+      expect(result.finalMessage).not.toMatch(
+        /(?:refreshed|updated) (?:the )?(?:web|page)/iu,
+      )
+      process.stdout.write(
+        `[real-codex] Journal and Patterns help reply: ${JSON.stringify(
+          result.finalMessage,
+        )}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
 })
 
 describeRealCodex('real Codex product notes eligibility e2e', () => {
@@ -26158,6 +26338,73 @@ async function materializeHealthCommonsKnowledgeVaultCli(input: {
       '  exit 70',
       'fi',
       `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} "$HEALTH_COMMONS_E2E_CLI_ENTRYPOINT" "$@"`,
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function materializePersonalPatternsBaselineVaultCli(input: {
+  binDirectory: string
+  ledgerCapturePath: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const report = JSON.stringify({
+    report: {
+      asOfDate: '2026-08-29',
+      cells: [
+        {
+          classification: 'early_signal',
+          comparisonBasis: 'matched_weekday',
+          comparisonDays: 8,
+          comparisonMean: 50,
+          delta: 20,
+          deltaPercent: 40,
+          direction: 'higher',
+          exposedDays: 8,
+          exposedMean: 70,
+          factorId: 'yard-work',
+          grade: 'D',
+          lagDays: 1,
+          outcomeId: 'hrv',
+          stage: 'seen_again',
+        },
+      ],
+      factors: [
+        {
+          id: 'yard-work',
+          kind: 'activity',
+          label: 'Yard work',
+          observedDays: 8,
+        },
+      ],
+      lagDays: 1,
+      outcomes: [{ id: 'hrv', label: 'HRV', unit: 'ms' }],
+    },
+  })
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"wearables patterns"*)',
+      `    printf '%s\\n' '${report}'`,
+      '    ;;',
+      '  *"knowledge show personal-pattern-notifications"*)',
+      "    printf '%s\\n' 'knowledge page not found' >&2",
+      '    exit 1',
+      '    ;;',
+      '  *"knowledge upsert --slug personal-pattern-notifications"*)',
+      `    printf '%s\\n' "$*" > ${JSON.stringify(input.ledgerCapturePath)}`,
+      "    printf '%s\\n' '{\"ok\":true}'",
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    ;;',
+      'esac',
       '',
     ].join('\n'),
     { encoding: 'utf8', mode: 0o700 },

@@ -350,6 +350,16 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
       sourceHash: sourceBefore.hash,
     });
 
+    const sourceBeforePublish = await cancellation.runOwned((signal) =>
+      hashHostedBrowserVaultReplicaSources(input.vaultRoot, signal),
+    );
+    if (sourceBeforePublish.hash !== sourceBefore.hash) {
+      return {
+        source,
+        status: "deferred_source_changed",
+      };
+    }
+
     cancellation.throwIfCancelled();
     const publish = await cancellation.race(
       "ref_publication",

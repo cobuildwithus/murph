@@ -76,6 +76,10 @@ The helper:
   default, overwrites inherited remote public web origins locally, and allows
   both `localhost:<web-port>` and `127.0.0.1:<web-port>` for hosted-onboarding
   browser mutations
+- when `MURPH_DEV_WEB_PUBLIC_BASE_URL=https://local.withmurph.ai:3443` is set,
+  publishes that browser origin while the Web server stays on its isolated
+  worktree port; the managed Caddy child proxies to that same port and the
+  mutation allowlist keeps both public and internal origins
 - preserves live Stripe support
 - uses normal Linq webhook `auto` mode with a worktree-local registration cache
   and tunnel config path, so an active worktree can reuse the shared local
@@ -95,6 +99,29 @@ Companion commands:
 pnpm hosted-local worktree doctor <slug> [--json]
 pnpm hosted-local worktree env <slug>
 ```
+
+The helper uses the canonical local HTTPS origin for authenticated previews by
+default:
+
+```bash
+MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR=../murph-cloud/packages/hosted-orchestrator-temporal \
+pnpm dev:worktree <slug>
+```
+
+The helper still binds Web, Worker, Temporal, and MinIO to their isolated
+worktree ports. It starts Caddy for `https://local.withmurph.ai:3443` and prints
+that browser URL after startup. The app session, Oura callback, and other
+browser-facing URLs use the same hostname. It rejects other public Web origins
+so an inherited hosted URL cannot redirect local mutations or callbacks to a
+remote environment.
+
+The helper also selects the Cobuild Cloudflare account for local Wrangler by
+default. Set `CLOUDFLARE_ACCOUNT_ID` before startup only when a different account
+is required. The generated Wrangler config receives the selected account, so a
+cold local Worker start does not pause for an interactive account choice.
+
+Set `MURPH_DEV_SKIP_TLS_PROXY=1` only for direct HTTP work that does not use
+host-only browser authentication or provider OAuth.
 
 `doctor` applies the worktree env internally and checks the resolved non-secret
 config. `env` is inspection-only: it prints the resolved exports with the

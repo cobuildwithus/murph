@@ -82,18 +82,16 @@ and a current Personal Pattern when one is ready. A Pattern is an insight about
 the week, not a health event, so it does not appear on the daily timeline. The
 page supports loading, unavailable, empty, error, and ready states.
 
-The web does not provide edit controls or a placeholder add button. A member
-asks Murph to add, correct, or remove an entry. Voice capture can later reuse
-the planned web voice composer. Calendar follow-ups and email travel capture
-are later features.
+The web does not provide edit or add controls. A member asks Murph to add,
+correct, or remove an entry. Calendar follow-ups and email travel capture are
+later features.
 
 Those later capture paths must write the same canonical records that Journal
 already reads. Calendar and email need one approved owner for normalized event
-writes and consent. Generic voice capture needs a private Journal note command;
-the Environment recorder continues to own Environment state. Environment
-history also needs a canonical change event instead of a second Journal-only
-copy. Do not infer these records from page state or store them in the Journal
-projection.
+writes and consent. The Environment recorder continues to own Environment
+state. Environment history also needs a canonical change event instead of a
+second Journal-only copy. Do not infer these records from page state or store
+them in the Journal projection.
 
 ## Ownership
 

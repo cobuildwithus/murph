@@ -1,6 +1,6 @@
 # Personal Patterns
 
-Last verified: 2026-08-27
+Last verified: 2026-08-29
 
 ## Product boundary
 
@@ -101,10 +101,18 @@ If corrected or removed evidence changes a result, the next calculation
 replaces the old state. A result can therefore weaken, change direction, or
 disappear.
 
+The Browser Vault replica ref records the stable hash of its canonical query
+inputs. A refresh skips the calculation when that hash is current. It checks
+the hash again before publication. If evidence changes during calculation, it
+does not publish the stale report. A later refresh keeps the newer evidence
+pending and publishes a report for the newer hash.
+
 ## Presentation
 
-The current `/patterns` matrix remains the main view. It shows up to 15 factors
-and every supported outcome present in the member's data. A recognized factor
+The current `/patterns` matrix remains the main view. It shows the first 15
+factors and every supported outcome present in the member's data. `Show more`
+reveals the remaining report factors. The report keeps at most 100 sorted
+factors to bound Browser Vault size and calculation work. A recognized factor
 stays visible when it has no suitable comparison day. Its cells explain that
 Murph needs more comparable data. Observations can appear with grade E. The
 page shows the evidence count, comparison basis, date range, and the factor and
@@ -115,15 +123,16 @@ start a calculation. It reads the latest Browser Vault report.
 
 ## Proactive messages
 
-The managed Personal Patterns automation checks twice each day, at 13:00 and
-21:00 local time. It sends at most one private message per run. Several new
-results become one summary, and a large first import becomes one digest.
+The managed Personal Patterns automation checks each day at 13:00 local time.
+It sends at most one private message per run. The first report becomes a quiet
+baseline. Later new results become one summary with at most three highlights.
 
-Every grade can be useful as a new result, but Murph describes E as an
-Observation, D as an Early signal, and A-C as a Pattern. A saved private ledger
-deduplicates result identities. It also stores factor or result mutes requested
-in conversation. Grade changes do not create separate messages. The weekly
-health insight can mention a useful strengthening or weakening result.
+Only a new grade A-D identity can trigger that daily message. Murph describes D
+as an Early signal and A-C as a Pattern. Grade E Observations remain visible on
+the page but stay quiet. A saved private ledger deduplicates result identities.
+It also stores factor or result mutes requested in conversation. Grade changes
+do not create separate messages. The weekly health insight can mention a useful
+strengthening, weakening, or removed result.
 
 ## Weekly audit
 

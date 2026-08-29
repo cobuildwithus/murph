@@ -448,19 +448,15 @@ test("Personal Patterns does not duplicate the canonical readiness metric as rec
   assert.equal(report?.cells[0]?.stage, "seen_again");
 });
 
-test("Personal Patterns keeps qualified factors within the bounded display cap", () => {
+test("Personal Patterns keeps qualified factors for the expandable report", () => {
   const start = "2026-01-05";
   const runningDates = Array.from({ length: 8 }, (_, index) =>
     addDays(start, index * 14),
   );
-  const dailyFactors = [
-    "breathwork",
-    "journaling",
-    "meditation",
-    "mobility",
-    "stretching",
-    "walking",
-  ];
+  const dailyFactors = Array.from(
+    { length: 17 },
+    (_, index) => `daily-factor-${String(index + 1).padStart(2, "0")}`,
+  );
   const entities: CanonicalEntity[] = [
     ...Array.from({ length: 112 }, (_, dayIndex) =>
       dailyFactors.map((activityType, factorIndex) =>
@@ -498,17 +494,11 @@ test("Personal Patterns keeps qualified factors within the bounded display cap",
     },
   );
 
+  assert.equal(report.factors.length, 18);
+  assert.equal(report.factors[0]?.id, "running");
   assert.deepEqual(
-    report.factors.map((factor) => factor.id),
-    [
-      "running",
-      "breathwork",
-      "journaling",
-      "meditation",
-      "mobility",
-      "stretching",
-      "walking",
-    ],
+    report.factors.slice(1).map((factor) => factor.id),
+    dailyFactors,
   );
   assert.equal(
     report.cells.find(

@@ -633,14 +633,25 @@ describe('assistant execution prompt contract', () => {
       conversationScope: 'group',
     }))
 
-    expect(directPrompt).toContain('Automatic Journal capture in a private conversation:')
-    expect(directPrompt).toContain('--note-type journal-factor')
-    expect(directPrompt).toContain('--note-type journal-outcome')
+    expect(directPrompt).toContain('Private Journal capture:')
+    expect(directPrompt).toContain('journal-factor')
+    expect(directPrompt).toContain('journal-outcome')
     expect(directPrompt).toContain('per independent fact')
     expect(directPrompt).toContain('--related-id')
-    expect(directPrompt).toContain('Missing data remains unknown')
-    expect(directPrompt).toContain('without announcing routine saves')
-    expect(groupPrompt).not.toContain('Automatic Journal capture in a private conversation:')
+    expect(directPrompt).toContain('missing data remains unknown')
+    expect(directPrompt).toContain('Save clear facts silently')
+    expect(directPrompt).toContain('start one workout')
+    expect(directPrompt).toContain('Check at 13:00 local')
+    expect(directPrompt).toContain(
+      'vault-cli wearables patterns --date <local-date> --format json',
+    )
+    expect(directPrompt).toContain('exactly once')
+    expect(directPrompt).toContain('stop proactive questions when asked')
+    expect(directPrompt).toContain('Explain capture, fixes, and refresh')
+    expect(directPrompt).toContain(
+      'tell users to ask Murph; never claim web controls',
+    )
+    expect(groupPrompt).not.toContain('Private Journal capture:')
   })
 
   it('uses formal by default and applies a saved tone as a strict writing contract', () => {

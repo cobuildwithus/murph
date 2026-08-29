@@ -52,6 +52,8 @@ import { usePointerPopoverAnchor } from "@/src/components/ui/use-pointer-popover
 import { cn } from "@/src/lib/utils";
 import { resolvePatternFactorIcon } from "./pattern-factor-icon";
 
+const INITIAL_VISIBLE_FACTOR_COUNT = 15;
+
 const STAGE_LABELS: Record<PersonalPatternStage, string> = {
   insufficient: "Not enough matches",
   no_clear_pattern: "No clear pattern",
@@ -83,7 +85,19 @@ export function PersonalPatternsSection({
   state?: "error" | "loading" | "ready" | "unavailable";
 }) {
   const headingId = useId();
+  const matrixId = useId();
+  const [showAllFactors, setShowAllFactors] = useState(false);
   const visibleReport = report ? selectVisiblePatternReport(report) : null;
+  const hasMoreFactors =
+    (visibleReport?.factors.length ?? 0) > INITIAL_VISIBLE_FACTOR_COUNT;
+  const displayedReport = visibleReport
+    ? {
+        ...visibleReport,
+        factors: showAllFactors
+          ? visibleReport.factors
+          : visibleReport.factors.slice(0, INITIAL_VISIBLE_FACTOR_COUNT),
+      }
+    : null;
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-8">
@@ -117,10 +131,32 @@ export function PersonalPatternsSection({
 
       {state === "ready" ? (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
-          {visibleReport &&
-          visibleReport.factors.length > 0 &&
-          visibleReport.outcomes.length > 0 ? (
-            <PatternMatrix report={visibleReport} />
+          {displayedReport &&
+          displayedReport.factors.length > 0 &&
+          displayedReport.outcomes.length > 0 ? (
+            <>
+              <div id={matrixId}>
+                <PatternMatrix report={displayedReport} />
+              </div>
+              {hasMoreFactors ? (
+                <div className="flex items-center justify-between gap-4 border-t border-border px-6 py-4 sm:px-8">
+                  <p className="text-xs text-muted-foreground">
+                    Showing {displayedReport.factors.length} of{" "}
+                    {visibleReport?.factors.length} factors
+                  </p>
+                  <Button
+                    aria-controls={matrixId}
+                    aria-expanded={showAllFactors}
+                    className="rounded-full"
+                    onClick={() => setShowAllFactors((current) => !current)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {showAllFactors ? "Show less" : "Show more"}
+                  </Button>
+                </div>
+              ) : null}
+            </>
           ) : (
             <PatternsEmptyState
               hasFactors={Boolean(report?.factors.length)}
@@ -1098,7 +1134,7 @@ function buildOutcomeColumns(
   });
 }
 
-function getOutcomeDescription(outcomeId: string): string {
+export function getOutcomeDescription(outcomeId: string): string {
   switch (outcomeId) {
     case "total-sleep":
       return "How long you slept. More time can support recovery when it matches your needs.";
@@ -1114,6 +1150,8 @@ function getOutcomeDescription(outcomeId: string): string {
       return "Your heart rate at rest. Changes can reflect recovery, stress, or illness.";
     case "respiratory-rate":
       return "How many breaths you took each minute while resting or sleeping.";
+    case "spo2":
+      return "Blood oxygen saturation. It estimates how much oxygen your red blood cells carry, usually while you sleep.";
     default:
       return "A personal health result compared across recorded days.";
   }
@@ -1245,7 +1283,7 @@ function getObservedDaysLevel(days: number): number {
   return 5;
 }
 
-function selectVisiblePatternReport(
+export function selectVisiblePatternReport(
   report: PersonalPatternReport,
 ): PersonalPatternReport {
   const outcomes = report.outcomes.filter((outcome) =>

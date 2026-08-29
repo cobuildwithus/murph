@@ -1121,6 +1121,28 @@ describe("buildHostedLocalDevOverrides", () => {
     expect(overrides.DEVICE_SYNC_PUBLIC_BASE_URL).toBe("http://127.0.0.1:3205/api/device-sync");
   });
 
+  it("publishes the canonical HTTPS browser origin without changing local ports", () => {
+    const overrides = buildHostedLocalDevOverrides(localConfig, {}, {
+      webPublicBaseUrl: "https://local.withmurph.ai:3443",
+    });
+
+    expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe(
+      "https://local.withmurph.ai:3443",
+    );
+    expect(overrides.HOSTED_WEB_BASE_URL).toBe(
+      "https://local.withmurph.ai:3443",
+    );
+    expect(overrides.DEVICE_SYNC_PUBLIC_BASE_URL).toBe(
+      "https://local.withmurph.ai:3443/api/device-sync",
+    );
+    expect(overrides.HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS).toBe(
+      "https://local.withmurph.ai:3443,http://localhost:3000,http://127.0.0.1:3000",
+    );
+    expect(overrides.HOSTED_EXECUTION_CONTROL_URL).toBe(
+      "http://127.0.0.1:8787",
+    );
+  });
+
   it("preserves an explicit wake fetch proof key override", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
     });
@@ -1586,6 +1608,15 @@ describe("buildWranglerEnvFileText", () => {
 });
 
 describe("buildWranglerLocalDevConfig", () => {
+  it("passes an explicit account to Wrangler local dev", () => {
+    expect(
+      buildWranglerLocalDevConfig({
+        CLOUDFLARE_ACCOUNT_ID: "stub-account-id",
+      }),
+    ).toMatchObject({ account_id: "stub-account-id" });
+    expect(buildWranglerLocalDevConfig({})).not.toHaveProperty("account_id");
+  });
+
   it("keeps repo-relative defaults for the checked-in local dev location", () => {
     const config = buildWranglerLocalDevConfig({});
     const containers = config.containers as {

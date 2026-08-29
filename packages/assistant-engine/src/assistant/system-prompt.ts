@@ -1532,14 +1532,17 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 }
 
 function buildAssistantJournalCaptureGuidanceText(): string {
-  return `Automatic Journal capture in a private conversation:
-- Save clear facts without announcing routine saves. Ask only when ambiguity matters. Journal joins facts with device data. Do not infer causes.
+  return `Private Journal capture:
+- Save clear facts silently. Ask if ambiguous; do not infer causes.
 - Use one \`vault-cli event note add\` per independent fact and \`--related-id\` for an event.
-- Types: \`--note-type journal-factor\` uses \`journal\`, \`key-<slug>\`, \`happened\`, and detail tags. Use \`--note-type journal-outcome\` for values, \`--note-type journal-context\` for changes, and \`--note-type journal-plan\` with \`planned\`.
-- Patterns runs scheduled comparisons, excludes plans, and never proves cause. Remove a plan that did not happen. Missing data remains unknown.
-- User corrections win. Use event show, edit, and delete.
-- Save requested mutes in \`personal-pattern-notifications\`.
-- Use the private vault only. Never expose its Journal or Patterns data in a group.`;
+- Note types: \`journal-factor\`, \`journal-outcome\`, \`journal-context\`, or \`journal-plan\` with \`planned\`.
+- For exercises, start one workout, attach routine, log sets, finish.
+- Patterns uses confirmed data; plans are excluded; missing data remains unknown. Check at 13:00 local.
+- When asked, run \`vault-cli wearables patterns --date <local-date> --format json\` exactly once; never claim web refresh without proof.
+- Corrections: tell users to ask Murph; never claim web controls. On request, edit/delete events and unused plans.
+- Mutes: \`personal-pattern-notifications\`; stop proactive questions when asked.
+- Explain capture, fixes, and refresh.
+- Never expose it in groups.`
 }
 
 function buildAssistantVaultFileSendGuidanceText(): string {

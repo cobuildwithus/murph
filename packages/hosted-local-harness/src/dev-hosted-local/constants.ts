@@ -80,6 +80,8 @@ export const HOSTED_WORKER_OPTIONAL_SECRET_NAMES = [
 ] as const;
 
 export const repoRoot = hostedLocalHarnessRepoRoot;
+export const HOSTED_LOCAL_CLOUDFLARE_ACCOUNT_ID =
+  "790196a825975e8b2f885acb904ae3cc";
 export const webDir = path.join(repoRoot, "apps", "web");
 export const cloudflareDir = path.join(repoRoot, "apps", "cloudflare");
 export const cloudflareDevVarsPath = path.join(cloudflareDir, ".dev.vars");
@@ -120,6 +122,10 @@ export const HOSTED_WEB_SMOKE_DIST_DIR = ".next-smoke";
 export const HOSTED_LOCAL_WORKTREE_ROOT = path.join(".tmp", "hosted-local-worktrees");
 export const HOSTED_RUNNER_LOCAL_BUILD_ID_ENV = "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID";
 export const HOSTED_LOCAL_WORKTREE_SCOPE_ENV = "MURPH_DEV_WORKTREE_SCOPE";
+export const HOSTED_LOCAL_PUBLIC_WEB_BASE_URL_ENV =
+  "MURPH_DEV_WEB_PUBLIC_BASE_URL";
+export const HOSTED_LOCAL_HTTPS_ORIGIN =
+  "https://local.withmurph.ai:3443";
 export const HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV =
   "MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID";
 export const STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV =

@@ -16,6 +16,7 @@ export {
   selectBrowserVaultTrackedExperiments,
 } from "./browser-replica/tracked-experiments.ts";
 export { buildOverviewWeeklyStatsFromDailySampleSummaries } from "./overview-weekly-stats.ts";
+export { resolveAdherenceObservationActivityKind } from "./experiment-adherence.ts";
 export {
   isActiveOverviewExperimentStatus,
   isCompletedOverviewExperimentStatus,

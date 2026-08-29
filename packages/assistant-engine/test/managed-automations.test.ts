@@ -1380,13 +1380,27 @@ describe('applyMurphManagedAutomations', () => {
         model: 'gpt-5.6-luna',
         reasoningEffort: 'medium',
       },
-      schedule: { kind: 'cron', expression: '0 13,21 * * *' },
+      schedule: { kind: 'cron', expression: '0 13 * * *' },
       slug: 'personal-patterns-update',
       status: 'active',
     })
     expect(patternsUpdateRecord?.instructions).toContain('Send at most one compact message')
     expect(patternsUpdateRecord?.instructions).toContain('factorId + outcomeId')
-    expect(patternsUpdateRecord?.instructions).toContain('Grade changes belong in the weekly health insight')
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Grade changes belong in the weekly health insight',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'keep the first import quiet',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Grade E observations stay quiet',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'combine at most three highlights',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'do not rely on a shell environment variable',
+    )
     const digestRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     )
