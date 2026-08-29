@@ -1,5 +1,5 @@
 ---
-title: 'Viewport-overflow Playwright server deadline expires during cold startup'
+title: 'Viewport-overflow Playwright deadlines expire during cold startup'
 severity: 'minor'
 ---
 
@@ -11,26 +11,27 @@ readiness window.
 
 ## Current Behavior
 
-A cold focused run can spend nearly the full window in the documented generated
-prerequisites and Next configuration discovery. Twice in succession, Next
-printed that it was ready immediately after Playwright reported the 240-second
-Web-server timeout, so no browser assertion ran.
+A cold focused run can spend nearly the full server window in the documented
+generated prerequisites and Next configuration discovery. Twice in succession,
+Next printed that it was ready immediately after Playwright reported the
+240-second Web-server timeout. Once the prerequisites were warm enough to reach
+the browser, the first calendar-route compilation then exhausted the focused
+test's original 120-second limit. No layout assertion ran in either case.
 
 ## Possible Solution
 
-Prepare generated prerequisites before starting the readiness timer, or give
-this repository-owned Web startup lane a timeout that covers the measured
-cold-start path.
+Prepare generated prerequisites before starting the readiness timer, and give
+focused public-route assertions enough time for the first development compile.
 
 ## Minimal Reproducible Example
 
 Run the focused calendar viewport test through the existing Playwright
 configuration in a secondary task worktree with an isolated port and dist
-suffix. Observe Playwright time out waiting for the health URL as Next reports
-ready just after the deadline.
+suffix. On a cold run, observe Playwright time out waiting for the health URL as
+Next reports ready just after the deadline. On a partially warm run, observe
+the first route compile consume the original focused-test deadline.
 
 ## Context
 
-This delayed required responsive proof and forced a separately owned server
-startup with a longer readiness window. The application route and viewport
-assertion were not implicated.
+This delayed required responsive proof and required a longer focused-test
+deadline. The application route and viewport assertion were not implicated.

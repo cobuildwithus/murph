@@ -187,7 +187,7 @@ function measureHorizontalOverflow(tolerancePx: number) {
 }
 
 test("calendar links wrap maximum unbroken event text", async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
   const event = {
     title: "T".repeat(calendarEventV1Bounds.title),
     startsAt: "2026-10-14T14:30:00-04:00",
