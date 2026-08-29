@@ -1,6 +1,6 @@
 # Stateless calendar links
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-28
 
@@ -93,3 +93,4 @@ Updated: 2026-08-28
 - Expected outcomes: all focused checks pass, rendered happy/invalid states are
   usable on phone and desktop, the real reply is accurate and ends in the link,
   CI is green, and both ReviewGPT stages have no unresolved accepted finding.
+Completed: 2026-08-28
