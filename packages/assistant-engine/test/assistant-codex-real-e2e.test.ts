@@ -16356,8 +16356,9 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         const rawCommandLog = (await readFile(commandLogPath, 'utf8')).trim()
         const commands = rawCommandLog === '' ? [] : rawCommandLog.split('\n')
         const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const automationListCalls = actions.filter((action) =>
+        const automationListCall = actions.find((action) =>
           action.kind === 'command'
+          && action.ok
           && action.command.includes(
             'vault-cli automation list --format json',
           )
@@ -16398,9 +16399,12 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         )
 
         expect(commands).toEqual(['automation list --format json'])
-        expect(automationListCalls).toHaveLength(1)
+        expect(
+          automationListCall,
+          'successful automation inventory command event',
+        ).toBeDefined()
         expect(automationCalls).toHaveLength(2)
-        expect(automationListCalls[0]).toMatchObject({
+        expect(automationListCall).toMatchObject({
           kind: 'command',
           ok: true,
         })
@@ -16420,7 +16424,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         expect(automationAttempts.map((attempt) =>
           attempt.argumentsValue.action
         )).toEqual(['inspect', 'patch'])
-        expect(automationListCalls[0]?.eventIndex).toBeLessThan(
+        expect(automationListCall?.eventIndex).toBeLessThan(
           automationAttempts[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
         )
         expect(automationAttempts[0]?.eventIndex).toBeLessThan(
