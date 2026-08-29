@@ -86,8 +86,17 @@ async function replaceGeneratedRoot(
     );
     await rename(temporaryRoot, targetRoot);
   } catch (error) {
+    const publishCollision = isGeneratedRootPublishCollision(error);
+    const sameTreePublished = publishCollision
+      && await generatedTreesMatchExactly(temporaryRoot, targetRoot).catch(() => false);
     await rm(temporaryRoot, { force: true, recursive: true }).catch(() => {});
-    if (targetMoved) {
+    if (publishCollision && targetMoved) {
+      await rm(backupRoot, { force: true, recursive: true });
+    }
+    if (sameTreePublished) {
+      return;
+    }
+    if (targetMoved && !publishCollision) {
       await rename(backupRoot, targetRoot).catch(() => {});
     }
     throw error;
@@ -245,6 +254,39 @@ async function readGeneratedTree(root: string): Promise<Map<string, string | nul
   return files;
 }
 
+async function generatedTreesMatchExactly(leftRoot: string, rightRoot: string): Promise<boolean> {
+  const [leftFiles, rightFiles] = await Promise.all([
+    readGeneratedTree(leftRoot),
+    readGeneratedTree(rightRoot),
+  ]);
+  if (leftFiles.size !== rightFiles.size) {
+    return false;
+  }
+
+  for (const [fileName, leftContent] of leftFiles.entries()) {
+    if (!rightFiles.has(fileName)) {
+      return false;
+    }
+    const rightContent = rightFiles.get(fileName);
+    if (leftContent !== null || rightContent !== null) {
+      if (leftContent !== rightContent) {
+        return false;
+      }
+      continue;
+    }
+
+    const [leftBytes, rightBytes] = await Promise.all([
+      readFile(path.join(leftRoot, fileName)),
+      readFile(path.join(rightRoot, fileName)),
+    ]);
+    if (!leftBytes.equals(rightBytes)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function collectGeneratedTreeFiles(
   absoluteRoot: string,
   relativeDir: string,
@@ -288,6 +330,10 @@ function formatGeneratedDiff(label: string, files: readonly string[]): string | 
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
+}
+
+function isGeneratedRootPublishCollision(error: unknown): boolean {
+  return isNodeErrorWithCode(error, "EEXIST") || isNodeErrorWithCode(error, "ENOTEMPTY");
 }
 
 export function parseCliOptions(argv: readonly string[]): CliOptions {
