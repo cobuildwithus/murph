@@ -10,7 +10,9 @@ function compact(value: string): string {
   return value.replace(/\s+/gu, ' ').trim()
 }
 
-function buildPrompt(): string {
+function buildPrompt(
+  conversationScope: 'direct' | 'group' = 'direct',
+): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantHostedDeviceConnectAvailable: false,
@@ -23,6 +25,7 @@ function buildPrompt(): string {
     },
     currentLocalDate: '2026-06-24',
     currentTimeZone: 'America/New_York',
+    conversationScope,
     onboardingGuidance: false,
     modelBehaviorProfile: 'gpt5-agentic',
     turnTrigger: null,
@@ -44,7 +47,10 @@ describe('assistant food journal skill', () => {
       'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation',
     )
     expect(prompt).toContain(
-      'For any request to start or maintain recurring meal tracking, or asking how Murph can track meals, load both automatic-meal-capture and food-journal even when the person does not say "automatic."',
+      'In a private direct conversation, when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal even when they do not say "automatic."',
+    )
+    expect(buildPrompt('group')).not.toContain(
+      'when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal',
     )
     expect(prompt).toContain(
       'When exact food or supplement identity, ingredients, allergens, dose, or movement instruction matters, follow the owning skill',
@@ -73,10 +79,13 @@ describe('assistant food journal skill', () => {
       'Do not create a new food-journal store, observation entity, scoring model, streak, or CLI family.',
     )
     expect(compact(skill)).toContain(
-      'When the member asks how to start or maintain recurring meal tracking, first read `$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md` even when they do not say "automatic."',
+      'In a private direct conversation, when the member asks how to start recurring meal tracking or how Murph can track meals, read `$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md` even when they do not say "automatic."',
     )
     expect(compact(skill)).toContain(
-      'Present its compatible-iPhone automatic path first as the lowest-friction supported option, then keep this skill\'s manual text, voice-note, and user-sent-photo capture available.',
+      'That skill owns whether the compatible-iPhone path or this skill\'s manual text, voice-note, and user-sent-photo path should lead based on known device, preference, and setup context.',
+    )
+    expect(compact(skill)).toContain(
+      'For a generic group request, keep the response on group-safe manual capture',
     )
     expect(skill).toContain(
       'A photo, voice note, or rough phrase can be a complete meal log.',

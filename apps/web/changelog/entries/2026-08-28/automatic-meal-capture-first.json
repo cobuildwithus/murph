@@ -6,7 +6,7 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Meal tracking starts with the easiest option",
-    "summary": "When you ask Murph how to track meals regularly, it now surfaces compatible-iPhone automatic meal capture and the app setup right away while keeping manual logging available.",
+    "summary": "When you ask Murph how to start tracking meals regularly, it now surfaces compatible-iPhone automatic meal capture right away when that fits your device and preferences, while keeping manual logging available.",
     "details": "Automatic capture remains opt-in and best effort, considers only new photos after setup, and requires Full Photos access on a compatible iPhone.",
     "relevanceTags": ["assistant", "nutrition", "ios"],
     "sourcePullRequests": [2505]
