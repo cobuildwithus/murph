@@ -1,8 +1,8 @@
 # Recover queues blocked by expired Assistant Ask content
 
-Status: active
+Status: completed
 Created: 2026-08-28
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 ## Goal
 
@@ -73,3 +73,4 @@ Updated: 2026-08-28
 - Expected outcomes: tests and checks pass; content remains available for
   ordinary expiry recovery but retires at the privacy deadline; the legacy
   head leaves the local queue and the production lane resumes advancing.
+Completed: 2026-08-29
