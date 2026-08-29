@@ -55,3 +55,14 @@ long reply-critical work can still send one useful update.
   exactly one early update, while the simple onboarding next-step sent none and
   answered directly with one useful question.
 - Changelog rendering tests (9 assertions) and the hosted Web typecheck passed.
+- Preliminary ReviewGPT returned two accepted medium findings. The browser-open
+  tool's obsolete second progress trigger is deleted so the shared prompt stays
+  authoritative. Existing real-journey helpers now prove the silent onboarding
+  turn actually read its resume context and changed policy, and the short
+  browser open/finish journey proves the duplicate trigger stays gone.
+- Remediation proof passed with `gpt-5.6-terra`: the context-dependent
+  onboarding continuation read one resume context plus the changed return
+  policy and sent zero updates; the two-action browser journey sent zero; the
+  three-check recovery journey still sent exactly one. Four focused
+  deterministic files passed (139 assertions, 7 skipped), and Assistant Engine
+  typecheck passed.
