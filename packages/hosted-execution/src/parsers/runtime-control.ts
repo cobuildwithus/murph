@@ -1087,7 +1087,11 @@ export function parseHostedRuntimeAssistantAskControlResponse(
       record.terminalReason,
       "Hosted runtime assistant ask terminalReason",
     );
-    if (terminalReason !== "expired" && terminalReason !== "unavailable") {
+    if (
+      terminalReason !== "content_expired"
+      && terminalReason !== "expired"
+      && terminalReason !== "unavailable"
+    ) {
       throw new TypeError("Hosted runtime assistant ask terminalReason is invalid.");
     }
     return { action, status, terminalReason };

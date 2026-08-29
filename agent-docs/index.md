@@ -7,6 +7,11 @@ Last verified: 2026-08-28
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists only live architecture, product, verification, and package-boundary docs.
 
+Current-sender Assistant Ask recovery retains encrypted request content only
+while its system sequence remains ahead of the durable consumed watermark and
+never beyond the mailbox privacy deadline; `agent-docs/SECURITY.md` owns that
+boundary.
+
 Receipt-owned positive Stripe payment notifications cover subscription starts
 and renewals, paid plan-change and recurring-usage invoices, and fulfilled
 usage-credit payments without exposing member or customer identity. Their

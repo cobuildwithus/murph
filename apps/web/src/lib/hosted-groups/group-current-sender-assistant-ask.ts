@@ -34,6 +34,7 @@ import type {
 
 import {
   appendHostedMailboxEnvelopeWithIdentityTx,
+  HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxItemById,
@@ -386,6 +387,13 @@ async function requestHostedGroupCurrentSenderAssistantAskTx(input: {
   if (append.dedupeConflict || append.item.id !== requestId) {
     return unavailableHostedCurrentSenderAdmission("request_conflict");
   }
+  await input.tx.hostedMailboxItem.update({
+    data: {
+      retentionDisposition:
+        HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
+    },
+    where: { id: requestId },
+  });
   return {
     mailboxWake: { expectedUserId: authority.targetMemberId, mailboxItemId: requestId },
     result: { status: "accepted" },

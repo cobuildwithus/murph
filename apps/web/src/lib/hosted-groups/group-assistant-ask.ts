@@ -34,6 +34,7 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
   type HostedRuntimeAssistantAskControlRequest,
   type HostedRuntimeAssistantAskControlResponse,
+  type HostedRuntimeAssistantAskTerminalReason,
   type HostedRuntimeGroupAskResult,
   type HostedRuntimeGroupMemberAskResult,
 } from "@murphai/hosted-execution/runtime-control";
@@ -163,7 +164,7 @@ type HostedAssistantAskAuthority =
 
 interface HostedAssistantAskRequestReadResult {
   authority: HostedAssistantAskAuthority | null;
-  terminalReason: "expired" | "unavailable" | null;
+  terminalReason: HostedRuntimeAssistantAskTerminalReason | null;
 }
 
 export function createHostedAssistantAskRequestId(input: {
@@ -1576,7 +1577,7 @@ function readHostedAssistantAskItemExpiresAt(
 
 function terminalHostedAssistantAskControlResult(
   action: HostedRuntimeAssistantAskControlRequest["action"],
-  terminalReason: "expired" | "unavailable",
+  terminalReason: HostedRuntimeAssistantAskTerminalReason,
 ): HostedAssistantAskControlResult {
   return {
     mailboxWake: null,
@@ -2313,7 +2314,12 @@ async function readHostedAssistantAskAuthorityTx(input: {
     return { authority: null, terminalReason: "unavailable" };
   }
   if (isHostedAssistantAskExpired(item.expiresAt ?? null, input.now)) {
-    return { authority: null, terminalReason: "expired" };
+    return {
+      authority: null,
+      terminalReason: item.contentRetiredAt === null
+        ? "expired"
+        : "content_expired",
+    };
   }
   if (
     item.dedupeKey !== input.requestId

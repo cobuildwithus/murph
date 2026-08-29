@@ -1049,6 +1049,7 @@ export type HostedRuntimeAssistantAskControlRequest =
     };
 
 export type HostedRuntimeAssistantAskTerminalReason =
+  | "content_expired"
   | "expired"
   | "unavailable";
 

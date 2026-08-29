@@ -186,6 +186,7 @@ function requestWake(input: {
 
 function mailboxItemForWake(wake: ReturnType<typeof requestWake>) {
   return {
+    contentRetiredAt: null,
     dedupeKey: wake.eventId,
     expiresAt: wake.ask.expiresAt,
     id: wake.eventId,
@@ -1364,6 +1365,32 @@ describe("Hosted Assistant Ask runtime control", () => {
     expect(mocks.readHostedMailboxWakeByDedupeKey).toHaveBeenCalledOnce();
     expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
     expect(tx.hostedGroupMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("reports retired expired request content without trying to reconstruct a fallback", async () => {
+    const wake = requestWake();
+    mocks.readHostedMailboxItemById.mockResolvedValue({
+      ...mailboxItemForWake(wake),
+      contentRetiredAt: NOW.toISOString(),
+      expiresAt: NOW.toISOString(),
+    });
+    const { prisma } = createPrisma();
+
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: TARGET_RUNTIME_MEMBER_ID,
+      now: NOW,
+      prisma: prisma as never,
+      request: { action: "prepare", requestId: wake.eventId },
+    })).resolves.toEqual({
+      mailboxWake: null,
+      response: {
+        action: "prepare",
+        status: "terminal",
+        terminalReason: "content_expired",
+      },
+    });
+    expect(mocks.readHostedMailboxWakeByDedupeKey).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
   });
 
   it("does not disclose a request to a different bound runtime", async () => {
