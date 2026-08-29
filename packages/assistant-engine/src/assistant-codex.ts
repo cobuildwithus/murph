@@ -1548,6 +1548,25 @@ class CodexAppServerProcess {
             )
           }
         }
+      } else if (activity.kind === 'completed') {
+        if (
+          senderThreadId
+          && this.detachedRootThreadIds.has(senderThreadId)
+          && this.detachedChildThreadIds.has(activity.agentThreadId)
+        ) {
+          this.detachedCompletedChildThreadIds.add(activity.agentThreadId)
+        } else if (
+          this.detachedRootThreadIds.size > 0
+          || this.detachedChildThreadIds.size > 0
+        ) {
+          this.recordDetachedChildViolation(
+            'Codex emitted an untracked detached-child completion.',
+          )
+        }
+        // A child thread's own turn/completed can let the prior boundary clear
+        // before this root-thread acknowledgement is delivered. Completion is
+        // idempotent and grants no new authority, so an empty boundary may
+        // safely ignore that late acknowledgement.
       } else {
         this.recordDetachedChildViolation(
           'Detached Codex children may not be messaged, reused, or interrupted.',
@@ -2026,7 +2045,7 @@ function readCodexBackgroundTerminalPresence(value: unknown): boolean {
 
 function readCodexSubagentActivity(message: CodexRpcMessage): {
   agentThreadId: string | null
-  kind: 'interacted' | 'interrupted' | 'malformed' | 'started'
+  kind: 'completed' | 'interacted' | 'interrupted' | 'malformed' | 'started'
 } | null {
   const method = typeof message.method === 'string' ? message.method : null
   if (method !== 'item/completed') {
@@ -2038,7 +2057,15 @@ function readCodexSubagentActivity(message: CodexRpcMessage): {
   }
   const agentThreadId = asCodexString(item?.agentThreadId)
   const kind = asCodexString(item?.kind)
-  if (!agentThreadId || (kind !== 'started' && kind !== 'interacted' && kind !== 'interrupted')) {
+  if (
+    !agentThreadId
+    || (
+      kind !== 'completed'
+      && kind !== 'started'
+      && kind !== 'interacted'
+      && kind !== 'interrupted'
+    )
+  ) {
     return { agentThreadId: agentThreadId ?? null, kind: 'malformed' }
   }
   return { agentThreadId, kind }

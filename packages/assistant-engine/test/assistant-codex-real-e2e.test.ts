@@ -779,6 +779,11 @@ describeRealCodex('real Codex child model selection e2e', () => {
         })
         expect(parentUsage.servedModel).not.toBeNull()
         expect(parentUsage.servedModel).not.toBe('gpt-5.6-luna')
+        expect(parentUsage.usageExtractionSourcePath).toBe(
+          'thread.tokenUsage.total.delta',
+        )
+        expect(parentUsage.totalTokens).not.toBeNull()
+        expect(parentUsage.totalTokens ?? 0).toBeGreaterThan(0)
         await waitForWarmCodexBackgroundWork()
         expect(childUsages).toHaveLength(1)
         expect(childUsages[0]).toMatchObject({
@@ -787,8 +792,12 @@ describeRealCodex('real Codex child model selection e2e', () => {
           usage: {
             requestedModel: 'gpt-5.6-luna',
             servedModel: 'gpt-5.6-luna',
+            usageExtractionSourcePath:
+              'subagent.turn.tokenUsage.total.delta',
           },
         })
+        expect(childUsages[0]?.usage.totalTokens).not.toBeNull()
+        expect(childUsages[0]?.usage.totalTokens ?? 0).toBeGreaterThan(0)
       } finally {
         await stopWarmCodexAppServer('real-codex-luna-child-e2e-complete')
         await removeRealCodexTemporaryPaths([

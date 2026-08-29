@@ -3219,6 +3219,167 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
+    it('accepts the canonical root-thread child completion activity', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-completed-child-work-')
+      const codexHome = await createTempDir('assistant-codex-completed-child-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const scannedThreadIds: string[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_872, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-completed-child-parent',
+          'turn-completed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-completed-child-parent',
+          'thread-completed-child-child',
+        )
+        writeStartedTurn(
+          child,
+          'thread-completed-child-child',
+          'turn-completed-child-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-completed-child-parent',
+          'turn-completed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-completed-child-parent',
+          'thread-completed-child-child',
+          'completed',
+          {
+            id: 'subagent-completed-turn-completed-child-child',
+            turnId: 'turn-completed-child-parent',
+          },
+        )
+
+        for (let requestCount = 1; requestCount <= 2; requestCount += 1) {
+          const request = await respondToBackgroundTerminals(child, requestCount)
+          scannedThreadIds.push(String(asRecord(request.params).threadId))
+        }
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'run one bounded child with canonical completion activity',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      expect(scannedThreadIds).toEqual([
+        'thread-completed-child-parent',
+        'thread-completed-child-child',
+      ])
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('ignores a child completion acknowledgement after its boundary clears', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-late-completed-child-work-')
+      const codexHome = await createTempDir('assistant-codex-late-completed-child-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const releaseLateCompletion = createDeferred<void>()
+      const lateCompletionWritten = createDeferred<void>()
+      mockWarmCodexProcess(spawnedChildren, 31_873, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-late-completed-child-parent',
+          'turn-late-completed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-late-completed-child-parent',
+          'thread-late-completed-child-child',
+        )
+        writeStartedTurn(
+          child,
+          'thread-late-completed-child-child',
+          'turn-late-completed-child-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-late-completed-child-child',
+          'turn-late-completed-child-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-late-completed-child-parent',
+          'turn-late-completed-child-parent',
+        )
+        await respondToBackgroundTerminals(child, 1)
+        await respondToBackgroundTerminals(child, 2)
+
+        await releaseLateCompletion.promise
+        writeSubAgentActivity(
+          child,
+          'thread-late-completed-child-parent',
+          'thread-late-completed-child-child',
+          'completed',
+          {
+            id: 'subagent-completed-turn-late-completed-child-child',
+            turnId: 'turn-late-completed-child-parent',
+          },
+        )
+        lateCompletionWritten.resolve(undefined)
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'run one child whose acknowledgement arrives late',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      releaseLateCompletion.resolve(undefined)
+      await lateCompletionWritten.promise
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('fails closed on an untracked child completion acknowledgement', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-untracked-completed-child-work-')
+      const codexHome = await createTempDir('assistant-codex-untracked-completed-child-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_874, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-untracked-completed-child-parent',
+          'turn-untracked-completed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-untracked-completed-child-parent',
+          'thread-untracked-completed-child-child',
+          'completed',
+          {
+            id: 'subagent-completed-turn-untracked-completed-child-child',
+            turnId: 'turn-untracked-completed-child-parent',
+          },
+        )
+        writeCompletedTurn(
+          child,
+          'thread-untracked-completed-child-parent',
+          'turn-untracked-completed-child-parent',
+        )
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'attempt to complete an untracked child',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
+      })
+      expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
+    })
+
     it('tracks every sequential child admitted before the boundary', async () => {
       const workingDirectory = await createTempDir('assistant-codex-sequential-child-work-')
       const codexHome = await createTempDir('assistant-codex-sequential-child-home-')

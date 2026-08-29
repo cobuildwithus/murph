@@ -1,8 +1,10 @@
+import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { executeCodexAppServerTurn } from "@murphai/assistant-engine/assistant-codex";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +40,7 @@ const SCRIPTED_MODEL = "gpt-5.6-terra";
 const SCRIPTED_PROVIDER_ENV = "MURPH_CODEX_ROUTE_CONFORMANCE_KEY";
 const TEST_TIMEOUT_MS = 90_000;
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+const execFileAsync = promisify(execFile);
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -94,6 +97,65 @@ describe("pinned Codex OpenAI egress conformance", () => {
       .toContain("verify-codex-upstream-source.ts");
     expect(hostSupportWorkflow)
       .toContain("pnpm --dir apps/cloudflare verify:codex-upstream-source");
+  });
+
+  it("keeps the pinned App Server token-usage notification compatible", async () => {
+    const temporaryRoot = await mkdtemp(
+      path.join(resolveVitestTempRoot(), "codex-app-server-schema-"),
+    );
+    const schemaRoot = path.join(temporaryRoot, "schema");
+
+    try {
+      await execFileAsync(resolveInstalledCodexBinary(), [
+        "app-server",
+        "generate-json-schema",
+        "--out",
+        schemaRoot,
+      ], { timeout: 30_000 });
+      const schema = JSON.parse(await readFile(
+        path.join(schemaRoot, "v2/ThreadTokenUsageUpdatedNotification.json"),
+        "utf8",
+      )) as {
+        definitions?: Record<string, {
+          properties?: Record<string, unknown>;
+          required?: string[];
+        }>;
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+      const protocolSchema = JSON.parse(await readFile(
+        path.join(schemaRoot, "codex_app_server_protocol.v2.schemas.json"),
+        "utf8",
+      )) as {
+        definitions?: Record<string, { enum?: string[] }>;
+      };
+
+      expect(schema.required).toEqual(["threadId", "tokenUsage", "turnId"]);
+      expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
+        "threadId",
+        "tokenUsage",
+        "turnId",
+      ]);
+      expect(schema.definitions?.ThreadTokenUsage?.required)
+        .toEqual(["last", "total"]);
+      expect(schema.definitions?.TokenUsageBreakdown?.required).toEqual([
+        "cachedInputTokens",
+        "inputTokens",
+        "outputTokens",
+        "reasoningOutputTokens",
+        "totalTokens",
+      ]);
+      expect(schema.definitions?.TokenUsageBreakdown?.properties)
+        .toHaveProperty("cacheWriteInputTokens");
+      expect(protocolSchema.definitions?.SubAgentActivityKind?.enum).toEqual([
+        "started",
+        "interacted",
+        "interrupted",
+        "completed",
+      ]);
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
   });
 
   it("keeps every route disposition unique and tied to reviewed source provenance", () => {

@@ -1472,7 +1472,7 @@ function writeSubAgentActivity(
   child: MockChildProcess,
   threadId: string,
   agentThreadId: string,
-  kind: 'interacted' | 'started' = 'started',
+  kind: 'completed' | 'interacted' | 'interrupted' | 'started' = 'started',
   metadata: {
     agentPath?: string
     id?: string

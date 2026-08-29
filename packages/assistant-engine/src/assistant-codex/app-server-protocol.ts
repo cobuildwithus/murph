@@ -2,7 +2,7 @@
  * Exact JSON-RPC envelope boundary for the pinned Codex app-server protocol.
  *
  * Payload-specific readers own the fields they consume. This module admits
- * only the canonical server-to-client envelopes emitted by Codex 0.149.1, so
+ * only the canonical server-to-client envelopes emitted by Codex 0.151.0, so
  * legacy `type`/`event`, dotted-method, snake-case-method, and alternate
  * top-level payload shapes cannot enter the runtime.
  */
