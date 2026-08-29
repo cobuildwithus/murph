@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-29",
+  "order": 100,
+  "item": {
+    "id": "wearable-history-catches-up-faster",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Wearable history catches up faster",
+    "summary": "When a connected wearable has a long history to import, Murph now moves through it in bounded batches that leave room for newer work.",
+    "details": "Each batch saves its completed days and resumes from the exact next day, so a long import does not need to restart or block fresh conversation work.",
+    "relevanceTags": ["wearables", "devices", "reliability"],
+    "sourcePullRequests": [2532]
+  }
+}
