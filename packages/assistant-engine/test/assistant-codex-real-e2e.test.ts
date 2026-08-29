@@ -29,7 +29,8 @@ import {
   buildHostedExecutionGroupContextHandoffInstructions,
 } from '@murphai/hosted-execution'
 import {
-  buildMurphGroupReadPermissionProfileTomlLines,
+  buildMurphHostedPermissionProfileTomlLines,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   createAssistantModelTarget,
@@ -6871,7 +6872,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )
 
         const consultationConfig =
-          await materializeRealCodexGroupReadPermissionHome(config)
+          await materializeRealCodexHostedPermissionHome(config)
         consultationTemporaryPaths = consultationConfig.temporaryPaths
         const executeConsultation = (question: string) =>
           executeReadOnlyAssistantAsk({
@@ -8295,6 +8296,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     'keeps a named private handoff in a synthetic group follow-up',
     async () => {
       const config = await resolveRealCodexE2eConfig()
+      const hostedPermissionConfig =
+        await materializeRealCodexHostedPermissionHome(config)
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-group-private-handoff-flow-e2e-'),
       )
@@ -8302,7 +8305,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         approvalPolicy: 'never',
         codexCommand:
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
-        codexHome: config.codexHome,
+        codexHome: hostedPermissionConfig.codexHome,
         model: config.model,
         modelProvider: config.modelProvider,
         provider: 'codex-cli',
@@ -8374,6 +8377,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const followUp = await sendAssistantMessageLocal({
           ...route,
           deliverResponse: false,
+          executionContext,
           includeEarlySessionOnboarding: false,
           persistUserPromptOnFailure: false,
           prompt: 'What do you think about 8,000 over four months?',
@@ -8398,6 +8402,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         await stopWarmCodexAppServer('group-private-handoff-flow-e2e-complete')
         await removeRealCodexTemporaryPaths([
           workingDirectory,
+          ...hostedPermissionConfig.temporaryPaths,
           ...config.temporaryPaths,
         ])
       }
@@ -16908,7 +16913,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       model: 'gpt-5.6-terra',
       modelProvider: OPENAI_ENV_MODEL_PROVIDER,
     })
-    const groupReadConfigToml = buildRealCodexGroupReadPermissionConfigToml({
+    const hostedPermissionConfigToml = buildRealCodexHostedPermissionConfigToml({
       codexHome: null,
       env: {},
       model: 'gpt-5.6-terra',
@@ -16916,14 +16921,38 @@ describe('real Codex app-server cache usage e2e harness', () => {
       providerApiKeyEnv: 'PROVIDER_AUTH',
       temporaryPaths: [],
     })
+    const subscriptionPermissionConfigToml =
+      buildRealCodexHostedPermissionConfigToml({
+        codexHome: null,
+        env: {},
+        model: 'gpt-5.6-terra',
+        modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+        providerApiKeyEnv: null,
+        temporaryPaths: [],
+      })
 
     expect(configToml).toContain('[shell_environment_policy]')
+    expect(configToml).toContain('sandbox_mode = "workspace-write"')
     expect(configToml).toContain('include_only = [')
     expect(configToml).toContain('[model_providers.openai-env]')
     expect(configToml).toContain('env_key = "PROVIDER_AUTH"')
     expect(configToml).not.toContain('provider-value')
-    expect(groupReadConfigToml).toContain('env_key = "PROVIDER_AUTH"')
-    expect(groupReadConfigToml).not.toContain('provider-value')
+    expect(hostedPermissionConfigToml).toContain('env_key = "PROVIDER_AUTH"')
+    expect(hostedPermissionConfigToml).toContain(
+      '[permissions.murph-member-workspace.filesystem]',
+    )
+    expect(hostedPermissionConfigToml).toContain(
+      'default_permissions = "murph-member-workspace"',
+    )
+    expect(hostedPermissionConfigToml).not.toContain('sandbox_mode =')
+    expect(hostedPermissionConfigToml).not.toContain('provider-value')
+    expect(subscriptionPermissionConfigToml).toContain(
+      'default_permissions = "murph-member-workspace"',
+    )
+    expect(subscriptionPermissionConfigToml).toContain(
+      '[permissions.murph-member-workspace.filesystem]',
+    )
+    expect(subscriptionPermissionConfigToml).not.toContain('sandbox_mode =')
     expect(configToml).not.toContain('[features.multi_agent_v2]')
     expect(CHILD_MODEL_SELECTION_CONFIG_OVERRIDES).toEqual([
       'features.multi_agent_v2.enabled=true',
@@ -25039,8 +25068,10 @@ function resolveRealCodexProviderApiKeyEnv(modelProvider: string): string | null
 
 function buildRealCodexConfigToml(input: {
   apiKeyEnv: string
+  defaultPermissions?: string | null
   model: string
   modelProvider: string
+  sandboxMode?: 'workspace-write' | null
 }): string {
   const baseUrl =
     input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
@@ -25056,7 +25087,12 @@ function buildRealCodexConfigToml(input: {
     `model_provider = ${tomlString(input.modelProvider)}`,
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
-    'sandbox_mode = "workspace-write"',
+    ...(input.defaultPermissions
+      ? [`default_permissions = ${tomlString(input.defaultPermissions)}`]
+      : []),
+    ...(input.sandboxMode === null
+      ? []
+      : [`sandbox_mode = ${tomlString(input.sandboxMode ?? 'workspace-write')}`]),
     'allow_login_shell = false',
     '',
     '[shell_environment_policy]',
@@ -25078,17 +25114,17 @@ function buildRealCodexConfigToml(input: {
   ].join('\n')
 }
 
-async function materializeRealCodexGroupReadPermissionHome(
+async function materializeRealCodexHostedPermissionHome(
   config: RealCodexE2eConfig,
 ): Promise<{ codexHome: string; temporaryPaths: string[] }> {
   const codexHome = await mkdtemp(
-    path.join(tmpdir(), 'murph-codex-group-read-home-'),
+    path.join(tmpdir(), 'murph-codex-hosted-permissions-home-'),
   )
 
   try {
     await writeFile(
       path.join(codexHome, 'config.toml'),
-      buildRealCodexGroupReadPermissionConfigToml(config),
+      buildRealCodexHostedPermissionConfigToml(config),
       {
         encoding: 'utf8',
         mode: 0o600,
@@ -25113,7 +25149,7 @@ async function materializeRealCodexGroupReadPermissionHome(
   }
 }
 
-function buildRealCodexGroupReadPermissionConfigToml(
+function buildRealCodexHostedPermissionConfigToml(
   config: RealCodexE2eConfig,
 ): string {
   const providerApiKeyEnv = config.providerApiKeyEnv
@@ -25124,25 +25160,28 @@ function buildRealCodexGroupReadPermissionConfigToml(
       `model_provider = ${tomlString(config.modelProvider)}`,
       'model_reasoning_effort = "low"',
       'approval_policy = "never"',
+      `default_permissions = ${tomlString(MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE)}`,
       '',
     ].join('\n')
   } else {
     if (!providerApiKeyEnv) {
       throw new Error(
-        'Provider-auth group-read config requires the resolved credential key name.',
+        'Provider-auth hosted permission config requires the resolved credential key name.',
       )
     }
     baseConfig = buildRealCodexConfigToml({
-        apiKeyEnv: providerApiKeyEnv,
-        model: config.model,
-        modelProvider: config.modelProvider,
-      })
+      apiKeyEnv: providerApiKeyEnv,
+      defaultPermissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      sandboxMode: null,
+    })
   }
 
   return [
     baseConfig.trimEnd(),
     '',
-    ...buildMurphGroupReadPermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(),
   ].join('\n')
 }
 
