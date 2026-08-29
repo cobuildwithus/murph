@@ -378,9 +378,17 @@ export function isLinqChatNotFoundSendMessageError(
     && error.context?.operation === 'send_message'
     && error.context?.method === 'POST'
     && error.context?.path === '/chats/[chat]/messages'
-    && error.context?.status === 404
     && error.context?.failureStage === 'http'
-    && error.context?.linqFailureKind === 'chat_not_found'
+    && (
+      (
+        error.context?.status === 404
+        && error.context?.linqFailureKind === 'chat_not_found'
+      )
+      || (
+        error.context?.status === 409
+        && error.context?.providerErrorCode === '2013'
+      )
+    )
 }
 
 export function isDefinitiveLinqIMessageAppCardRejection(

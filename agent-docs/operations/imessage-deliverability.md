@@ -144,8 +144,9 @@ V4 cards already in transcripts remain readable but do not expose the editor.
 V6 does not change provider fallback text, pacing, or delivery ownership.
 
 For this contract, the definitive pre-acceptance set also includes an exact
-classified HTTP 404 `chat_not_found`; generic or unclassified 404 responses
-remain outside the fallback path.
+classified HTTP 404 `chat_not_found` or an exact HTTP 409 response with provider
+error code `2013` classified as an unavailable chat; generic 404, generic 409,
+and all unclassified responses remain outside the fallback path.
 
 Same-route inputs accepted during a live inbound turn may update the reply
 message, reaction capability, and idempotency inputs, but they must retain the

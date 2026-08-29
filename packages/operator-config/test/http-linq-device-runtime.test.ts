@@ -27,6 +27,7 @@ import {
   createLinqWebhookSubscription,
   deleteLinqMessage,
   isDefinitiveLinqIMessageAppCardRejection,
+  isLinqChatNotFoundSendMessageError,
   markLinqChatRead,
   probeLinqApi,
   sendLinqChatMessage,
@@ -691,6 +692,49 @@ test('linq app-card failure diagnostics do not expose nutrition values', async (
         !serialized.includes('private-chat-route')
     },
   )
+})
+
+test('linq missing-chat classification permits only definitive provider tuples', () => {
+  const createError = (details: Record<string, unknown>): VaultCliError =>
+    new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq rejected the message.',
+      {
+        failureStage: 'http',
+        method: 'POST',
+        operation: 'send_message',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        ...details,
+      },
+    )
+
+  expect(isLinqChatNotFoundSendMessageError(createError({
+    linqFailureKind: 'chat_not_found',
+    status: 404,
+  }))).toBe(true)
+  expect(isLinqChatNotFoundSendMessageError(createError({
+    providerErrorCode: '2013',
+    status: 409,
+  }))).toBe(true)
+
+  for (const details of [
+    { status: 404 },
+    { status: 409 },
+    { providerErrorCode: '2014', status: 409 },
+    { providerErrorCode: '2013', status: 400 },
+    { providerErrorCode: '2013', status: 408 },
+    { providerErrorCode: '2013', status: 429 },
+    { providerErrorCode: '2013', status: 500 },
+    { failureStage: 'transport', providerErrorCode: '2013', status: 409 },
+    { method: 'GET', providerErrorCode: '2013', status: 409 },
+    { operation: 'create_chat', providerErrorCode: '2013', status: 409 },
+    { path: '/chats', providerErrorCode: '2013', status: 409 },
+    { provider: 'telegram', providerErrorCode: '2013', status: 409 },
+  ]) {
+    expect(isLinqChatNotFoundSendMessageError(createError(details))).toBe(false)
+  }
 })
 
 test('linq app-card rejection classification permits only definitive pre-acceptance statuses', () => {

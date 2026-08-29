@@ -914,6 +914,75 @@ describe("hosted provider effects", () => {
     );
   });
 
+  it("recovers a definitively unavailable Linq direct chat", async () => {
+    const fetchImplementation = vi.fn(async (
+      input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/chats/unavailable-chat/messages")) {
+        return new Response(JSON.stringify({
+          error: {
+            code: 2013,
+            message: "This chat is unavailable",
+            status: 409,
+          },
+          success: false,
+          trace_id: "trace-unavailable-chat",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 409,
+        });
+      }
+      if (url.endsWith("/chats")) {
+        return new Response(JSON.stringify({
+          chat: {
+            id: "recovered-chat",
+            message: {
+              id: "recovered-message",
+            },
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(null, { status: 500 });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: "hosted-unavailable-chat",
+      message: "hello",
+      target: "unavailable-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation,
+    })).resolves.toEqual({
+      idempotencyKey: "hosted-unavailable-chat",
+      providerMessageEffects: [{
+        message: "hello",
+        providerMessageId: "recovered-message",
+      }],
+      providerMessageId: "recovered-message",
+      providerThreadId: "recovered-chat",
+      target: "recovered-chat",
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
   it("does not retry Linq recovery after an ambiguous create-chat response", async () => {
     const fetchImplementation = vi.fn(async (
       input: RequestInfo | URL,
