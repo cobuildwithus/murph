@@ -195,7 +195,7 @@ For operator UX, prefer `murph`. It resolves one active vault and no longer expe
 Quick help:
 
 ```bash
-pnpm exec tsx packages/cli/src/bin.ts --help
+pnpm vault-cli --help
 ```
 
 ## Common workflows
