@@ -48,12 +48,12 @@ const legacyWorkoutDefaultDurationText =
   '(\\d+(?:\\.\\d+)?\\s*-?\\s*(?:minutes?|mins?|min|hours?|hrs?|hr)|half(?:\\s+an)?\\s+hour|half-hour|(?:an|one)\\s+hour)'
 const legacyWorkoutDefaultPatterns = [
   new RegExp(
-    `\\bworkouts?(?:\\s+(?:I\\s+)?report(?:ed)?\\s+here)?\\s+defaults?\\s+to\\s+${legacyWorkoutDefaultDurationText}\\s+unless\\s+(?:(?:(?:another|a\\s+different)\\s+duration\\s+is\\s+(?:stated|specified|provided))|(?:(?:stated|specified|provided)\\s+otherwise))\\b`,
-    'giu',
+    `^\\s*workouts?(?:\\s+(?:I\\s+)?report(?:ed)?\\s+here)?\\s+defaults?\\s+to\\s+${legacyWorkoutDefaultDurationText}\\s+unless\\s+(?:(?:(?:another|a\\s+different)\\s+duration\\s+is\\s+(?:stated|specified|provided))|(?:(?:stated|specified|provided)\\s+otherwise))\\b\\s*[.!]?\\s*$`,
+    'iu',
   ),
   new RegExp(
-    `\\bwhen\\s+(?:the\\s+)?workout\\s+duration\\s+is\\s+(?:omitted|missing|not\\s+(?:stated|specified|provided))\\s*,?\\s*(?:the\\s+)?default\\s+is\\s+${legacyWorkoutDefaultDurationText}\\b`,
-    'giu',
+    `^\\s*when\\s+(?:the\\s+)?workout\\s+duration\\s+is\\s+(?:omitted|missing|not\\s+(?:stated|specified|provided))\\s*,?\\s*(?:the\\s+)?default\\s+is\\s+${legacyWorkoutDefaultDurationText}\\b\\s*[.!]?\\s*$`,
+    'iu',
   ),
 ] as const
 
@@ -79,11 +79,10 @@ function normalizeCapturePreferences(
 }
 
 function parseLegacyWorkoutDurationDefaults(text: string): number[] {
-  const matches = legacyWorkoutDefaultPatterns.flatMap((pattern) =>
-    [...text.matchAll(pattern)].flatMap((match) =>
-      match[1] === undefined ? [] : [match[1]],
-    ),
-  )
+  const matches = legacyWorkoutDefaultPatterns.flatMap((pattern) => {
+    const match = pattern.exec(text)
+    return match?.[1] === undefined ? [] : [match[1]]
+  })
 
   return matches.flatMap((match) => {
     try {

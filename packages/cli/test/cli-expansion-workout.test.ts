@@ -1614,7 +1614,7 @@ test('workout capture preserves explicit hours and the manual source boundary', 
       'defaults',
       'set',
       '--duration',
-      '30',
+      '25',
       '--vault',
       vaultRoot,
     ])
@@ -1632,6 +1632,49 @@ test('workout capture preserves explicit hours and the manual source boundary', 
       assert.equal(requireData(explicitHour).durationMinutes, 60)
     }
 
+    const compoundHour = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'I did yoga for an hour and a half.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(compoundHour.ok, true)
+    assert.equal(requireData(compoundHour).durationMinutes, 90)
+
+    const ambiguousWordHours = await runCli([
+      'workout',
+      'add',
+      'I worked out for an hour or two.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(ambiguousWordHours.ok, false)
+    assert.match(
+      ambiguousWordHours.error.message ?? '',
+      /duration is ambiguous/iu,
+    )
+
+    const temporalHour = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'I did yoga an hour ago.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(temporalHour.ok, true)
+    assert.equal(requireData(temporalHour).durationMinutes, 25)
+
+    const definiteBeforeTemporalHour = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'I ran 30 minutes one hour ago.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(definiteBeforeTemporalHour.ok, true)
+    assert.equal(requireData(definiteBeforeTemporalHour).durationMinutes, 30)
+
     const explicitManual = await runCli<WorkoutAddEnvelope>([
       'workout',
       'add',
@@ -1642,7 +1685,7 @@ test('workout capture preserves explicit hours and the manual source boundary', 
       vaultRoot,
     ])
     assert.equal(explicitManual.ok, true)
-    assert.equal(requireData(explicitManual).durationMinutes, 30)
+    assert.equal(requireData(explicitManual).durationMinutes, 25)
 
     for (const source of ['import', 'device', 'derived']) {
       const nonManual = await runCli([
@@ -1753,6 +1796,9 @@ test('workout capture ignores unsupported legacy prose and non-manual migration'
     'Default breakfast is oatmeal when I have a 30-minute workout.',
     'I prefer 60-minute workouts when possible, and default reminders to off unless I ask.',
     'My workouts are usually 45 minutes when I do them; default to kilograms unless specified.',
+    'Workouts default to 60 minutes unless specified otherwise, but not anymore.',
+    'I no longer use the rule "workouts default to 60 minutes unless specified otherwise."',
+    'When workout duration is omitted, the default is 45 minutes, but that preference was removed.',
   ]
 
   const unsupportedVaultRoot = await mkdtemp(

@@ -117,3 +117,45 @@ candidate now:
     not reach the route step. This is recorded as a live-lane environment
     limitation, not a passing check; the exact built CLI and deterministic
     prompt/route boundaries above are green.
+
+## Round 2 anomaly retrospective
+
+- Trigger: final ReviewGPT round 2 returned `RETROSPECTIVE_REQUIRED` because
+  the round-1 corrections for explicit word-hour phrases and legacy-memory
+  inference retained the same underlying mechanism: an unscoped matching
+  substring could still become duration authority.
+- Original requirement: one saved duration should fill only a genuinely
+  omitted duration on an ordinary member-reported workout. Definite current
+  duration wins, ambiguous current duration clarifies, temporal references do
+  not become duration, and only an affirmative legacy preference may migrate.
+- Shape comparison: the first-reviewed head contained 494 authored-source
+  additions and 7 deletions; the integrated round-2 head contains 499 additions
+  and 13 deletions. The review correction stayed small, but its global
+  `an|one hour` normalization and clause-level legacy scans repeated the prior
+  authority defect rather than resolving it.
+- Current-report decision: keep the existing shared duration parser as the one
+  owner because workouts and interventions already compose through it. Remove
+  global word substitution. Its bounded grammar will distinguish definite
+  word-hour compounds, word-hour ranges, and temporal references before
+  returning one duration; unsupported prose fails closed. Do not add a second
+  workout-only parser or a growing context blacklist.
+- Legacy decision: retain the bridge because an established member may already
+  have the reported preference only in `bank/memory.md`, but make each of the
+  two accepted forms a whole-record contract. Remove substring scanning; quoted,
+  historical, revoked, trailing, or multi-assertion records do not migrate.
+  Agreement across separate qualifying records remains required.
+- Correction direction: shrink both problematic branches, add no owner or
+  persisted state, and prove the ordinary built-CLI path for definite,
+  compound, temporal, ambiguous, quoted, and revoked examples before the next
+  substantive review.
+- Production-path reproduction: the pre-correction built CLI wrote 60 minutes
+  for `an hour and a half`, `an hour or two`, and `an hour ago`; rejected a
+  definite 30-minute run followed by `one hour ago`; and migrated a revoked
+  60-minute legacy sentence. All five findings reproduced without a mock.
+- Landed correction: temporal duration references are removed by the shared
+  grammar before duration resolution, definite word-hour compounds resolve as
+  one value, word-hour ranges and unsupported word-hour prose fail closed, and
+  whole-record anchors replace legacy substring scans.
+- Correction proof: shared parser/format seam 2 passed; existing duration and
+  intervention callers 2 passed; rebuilt CLI workout-capture slice 6 passed;
+  vault-usecases and CLI typechecks passed.

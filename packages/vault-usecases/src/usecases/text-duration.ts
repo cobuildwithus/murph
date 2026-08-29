@@ -4,9 +4,23 @@ export const MAX_DURATION_MINUTES = 24 * 60
 
 const ambiguousDurationPattern =
   /\b\d+(?:\.\d+)?\s*(?:or|to|\/|-)\s*\d+(?:\.\d+)?\s*(?:minutes?|mins?|min|hours?|hrs?|hr|h)\b/iu
+const ambiguousWordHourPatterns = [
+  /\b(?:an|one)\s+hour\s*(?:or|to|\/)\s*(?:two|\d+(?:\.\d+)?)(?:\s*(?:hours?|hrs?|hr|h))?\b/iu,
+  /\bone\s*(?:or|to|\/)\s*(?:two|\d+(?:\.\d+)?)\s*(?:hours?|hrs?|hr|h)\b/iu,
+] as const
 const combinedDurationPatterns = [
   /\b(\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h)\s*(?:and\s+)?(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|min|m)\b/iu,
   /\b(\d+(?:\.\d+)?)h\s*(\d+(?:\.\d+)?)m\b/iu,
+] as const
+const wordHourAndHalfPattern =
+  /\b(?:an|one)\s+hour\s+and\s+(?:a\s+)?half\b/iu
+const wordHourAndMinutesPattern =
+  /\b(?:an|one)\s+hour\s+(?:and\s+)?(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|min|m)\b/iu
+const wordHourOnlyPattern = /\b(?:an|one)\s+hour\b/iu
+const definiteWordHourOnlyPatterns = [
+  /^\s*(?:an|one)\s+hour\s*[.!?]?\s*$/iu,
+  /^\s*(?:an|one)\s+hour\s+of\b/iu,
+  /\bfor\s+(?:an|one)\s+hour(?=\s*[.!?]?\s*$)/iu,
 ] as const
 const hourOnlyPattern =
   /\b(\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h)\b/iu
@@ -14,23 +28,50 @@ const minuteOnlyPatterns = [
   /\b(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|min)\b/iu,
   /\b(\d+(?:\.\d+)?)m\b/iu,
 ] as const
+const temporalDurationReferencePatterns = [
+  /\b(?:(?:an|one)\s+hour\s+(?:or|to|\/)\s*(?:two|\d+(?:\.\d+)?)(?:\s*(?:hours?|hrs?|hr|h))?|one\s+(?:or|to|\/)\s*(?:two|\d+(?:\.\d+)?)\s*(?:hours?|hrs?|hr|h))\s+(?:ago|before|after|later)\b/giu,
+  /\b(?:an|one)\s+hour\s+and\s+(?:a\s+half|\d+(?:\.\d+)?\s*-?\s*(?:minutes?|mins?|min|m))\s+(?:ago|before|after|later)\b/giu,
+  /\b\d+(?:\.\d+)?\s*-?\s*(?:hours?|hrs?|hr|h)\s+(?:and\s+)?\d+(?:\.\d+)?\s*-?\s*(?:minutes?|mins?|min|m)\s+(?:ago|before|after|later)\b/giu,
+  /\b(?:half(?:\s+an)?\s+hour|half-hour)\s+(?:ago|before|after|later)\b/giu,
+  /\b(?:an|one|\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h|minutes?|mins?|min)\s+(?:ago|before|after|later)\b/giu,
+] as const
 
 export function inferDurationMinutes(text: string): number | 'ambiguous' | null {
-  if (/\bhalf(?: an)? hour\b/iu.test(text) || /\bhalf-hour\b/iu.test(text)) {
-    return 30
-  }
-
-  const normalizedText = text.replace(
-    /\b(?:an|one)\s+hour\b/giu,
-    '1 hour',
+  const durationText = temporalDurationReferencePatterns.reduce(
+    (value, pattern) => value.replace(pattern, ' '),
+    text,
   )
 
-  if (ambiguousDurationPattern.test(normalizedText)) {
+  if (
+    ambiguousDurationPattern.test(durationText)
+    || ambiguousWordHourPatterns.some((pattern) => pattern.test(durationText))
+  ) {
     return 'ambiguous'
   }
 
+  if (wordHourAndHalfPattern.test(durationText)) {
+    return 90
+  }
+
+  const wordHourAndMinutesMatch = durationText.match(
+    wordHourAndMinutesPattern,
+  )
+  if (wordHourAndMinutesMatch) {
+    const minutes = Number.parseFloat(wordHourAndMinutesMatch[1] ?? '')
+    if (Number.isFinite(minutes)) {
+      return validateDurationMinutes(60 + minutes)
+    }
+  }
+
+  if (
+    /\bhalf(?: an)? hour\b/iu.test(durationText)
+    || /\bhalf-hour\b/iu.test(durationText)
+  ) {
+    return 30
+  }
+
   for (const pattern of combinedDurationPatterns) {
-    const match = normalizedText.match(pattern)
+    const match = durationText.match(pattern)
     if (!match) {
       continue
     }
@@ -42,11 +83,20 @@ export function inferDurationMinutes(text: string): number | 'ambiguous' | null 
     }
   }
 
-  const hourMatch = normalizedText.match(hourOnlyPattern)
-  const minuteMatch = findMinuteDurationMatch(normalizedText)
+  const wordHourMatch = durationText.match(wordHourOnlyPattern)
+  const hourMatch = durationText.match(hourOnlyPattern)
+  const minuteMatch = findMinuteDurationMatch(durationText)
 
-  if (hourMatch && minuteMatch) {
+  if ((wordHourMatch || hourMatch) && minuteMatch) {
     return 'ambiguous'
+  }
+
+  if (wordHourMatch) {
+    return definiteWordHourOnlyPatterns.some((pattern) =>
+      pattern.test(durationText)
+    )
+      ? 60
+      : 'ambiguous'
   }
 
   if (hourMatch) {
