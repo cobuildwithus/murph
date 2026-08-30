@@ -24,7 +24,7 @@ Last verified: 2026-08-29
 - The Linq production canary runs only after the same exact Vercel production
   proof succeeds for a protected-main deployment. One fixed Photon identity
   starts a three-turn private iMessage conversation, and every Murph reply must
-  arrive in under ten seconds. The workflow is non-canceling and serialized;
+  arrive in under twenty seconds. The workflow is non-canceling and serialized;
   an older deployment skips when the production alias has advanced. Before the
   first send, a dedicated fixed-target Web route clears only that identity's
   admission rows and fully pre-provider instant-reply claim, then invokes the
@@ -1152,7 +1152,10 @@ Last verified: 2026-08-29
   an earlier queued-job wake reaches Temporal through the existing workspace
   `nextWakeAt`. Hosted provider scheduling runs only for the account named by a
   connection mailbox wake; only that wake may fetch its exact Web-owned dirty
-  row or claim its account's local jobs. A generic runtime timer admits neither
+  row or claim its account's local jobs. A runtime-authored dirty-remainder
+  retry bypasses provider scheduling so cadence cannot refill the bounded local
+  queue before the authoritative dirty payload is admitted. A generic runtime
+  timer admits neither
   dirty work, provider cadence, nor unrelated-account jobs. The connection-specific encrypted
   mailbox item stays pending while that account has queued or running work and
   is narrowed before checkpoint publication from the actual job rows to each

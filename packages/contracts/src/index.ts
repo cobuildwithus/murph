@@ -20,6 +20,7 @@ export * from "./scheduled-log.ts";
 export * from "./assistant.ts";
 export * from "./assistant-personas.ts";
 export * from "./activity-kind.ts";
+export * from "./calendar-link.ts";
 export * from "./challenge-standings-card.ts";
 export * from "./compact-table-card.ts";
 export * from "./exercise-routine-card.ts";

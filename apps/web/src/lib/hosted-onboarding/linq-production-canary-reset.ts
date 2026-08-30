@@ -8,16 +8,13 @@ import { hostedOnboardingError } from "./errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { resetHostedLinqFirstContactAdmissionForCanaryTx } from "./linq-first-contact-admission";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
-import { normalizePhoneNumber } from "./phone";
+import {
+  readHostedLinqProductionCanaryPhoneNumber,
+  type HostedLinqProductionCanaryEnvironment,
+} from "./linq-production-canary";
 
-const HOSTED_LINQ_PRODUCTION_CANARY_PHONE_NUMBER_ENV =
-  "HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER";
 const HOSTED_LINQ_PRODUCTION_CANARY_RESET_SECRET_ENV =
   "HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_RESET_SECRET";
-
-type HostedLinqProductionCanaryEnvironment = Readonly<
-  Record<string, string | undefined>
->;
 
 export type HostedLinqProductionCanaryResetResult = {
   accountDeleted: boolean;
@@ -72,9 +69,7 @@ export function requireHostedLinqProductionCanaryResetRequest(
   const configuredSecret = normalizeNullableString(
     source[HOSTED_LINQ_PRODUCTION_CANARY_RESET_SECRET_ENV],
   );
-  const phoneNumber = normalizePhoneNumber(
-    source[HOSTED_LINQ_PRODUCTION_CANARY_PHONE_NUMBER_ENV],
-  );
+  const phoneNumber = readHostedLinqProductionCanaryPhoneNumber(source);
   if (!configuredSecret || !phoneNumber) {
     throwHostedLinqProductionCanaryConfigurationError();
   }

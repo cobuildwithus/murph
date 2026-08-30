@@ -50,10 +50,37 @@ const memoryDisplayNameArgSchema = z
   .max(MEMORY_DISPLAY_NAME_MAX_LENGTH)
   .describe("Preferred display name to store in canonical memory.");
 
-const memoryShowResultSchema = z.object({
+const compactMemoryRecordSchema = memoryRecordSchema.pick({
+  id: true,
+  section: true,
+  text: true,
+});
+
+const compactMemoryDocumentSchema = z.object({
+  exists: z.boolean(),
+  records: z.array(compactMemoryRecordSchema),
+});
+
+const fullMemoryShowResultSchema = z.object({
   vault: z.string().min(1),
   document: memoryDocumentSnapshotSchema,
   memory: memoryRecordSchema.nullable(),
+});
+
+const compactMemoryShowResultSchema = z.object({
+  document: compactMemoryDocumentSchema,
+  memory: compactMemoryRecordSchema.nullable(),
+});
+
+const memoryShowResultSchema = z.union([
+  fullMemoryShowResultSchema,
+  compactMemoryShowResultSchema,
+]);
+
+const memoryShowOptionsSchema = vaultOptionSchema.extend({
+  compact: z.boolean().optional().describe(
+    "Return only document existence plus each record's id, section, and text.",
+  ),
 });
 
 const memoryUpsertResultSchema = z.object({
@@ -82,7 +109,7 @@ export function registerMemoryCommands(cli: Cli.Cli) {
         .optional()
         .describe("Optional canonical memory record id to show; omit to return the whole memory document."),
     }),
-    options: vaultOptionSchema,
+    options: memoryShowOptionsSchema,
     output: memoryShowResultSchema,
     async run({ args, options }) {
       return runMemoryCommand(async () => {
@@ -90,6 +117,26 @@ export function registerMemoryCommands(cli: Cli.Cli) {
         const memory = args.memoryId ? await getMemoryRecord(options.vault, args.memoryId) : null;
         if (args.memoryId && !memory) {
           throw new MemoryRecordNotFoundError();
+        }
+
+        if (options.compact) {
+          return {
+            document: {
+              exists: document.exists,
+              records: document.records.map(({ id, section, text }) => ({
+                id,
+                section,
+                text,
+              })),
+            },
+            memory: memory
+              ? {
+                  id: memory.id,
+                  section: memory.section,
+                  text: memory.text,
+                }
+              : null,
+          };
         }
 
         return {

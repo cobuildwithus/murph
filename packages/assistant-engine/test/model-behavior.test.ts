@@ -1291,19 +1291,22 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Send one early update before direct reply-critical work spanning multiple sources or several substantive tool steps, including cross-owner evidence, long research, parsing/scans, or content inspection.',
+      'Default to no progress update',
     )
     expect(prompt).toContain(
-      'Before the first read, orient the member even when each lookup is routine',
+      'Send one only when the member is likely to wait noticeably',
     )
     expect(prompt).toContain(
-      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
+      'Routine onboarding/setup never qualifies by itself, even when it uses tools or the runtime is slow',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
+      'one or two quick calls, and the next setup question go straight to the final reply',
     )
     expect(prompt).toContain(
-      'Reconsider this on each follow-up or resumed turn; earlier updates do not count.',
+      'send a required child-start acknowledgement after spawning.',
+    )
+    expect(prompt).toContain(
+      'Background work does not trigger progress by itself.',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update.',
@@ -1344,6 +1347,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
+    expect(prompt).not.toContain(
+      'orient the member even when each lookup is routine',
+    )
   })
 
   it('allows only sparing native text styles on Linq and Telegram messaging routes', () => {
@@ -1596,7 +1602,13 @@ describe('assistant local PDF evidence guidance', () => {
       'When several bounded `vault-cli` commands are needed for the same vault, prefer one `vault-cli batch --compact --format json` call',
     )
     expect(prompt).toContain(
-      'vault-cli batch --compact --format json --command \'["memory","show"]\' --command \'["goal","list"]\'',
+      'vault-cli batch --compact --format json --command \'["memory","show","--compact"]\' --command \'["goal","list"]\'',
+    )
+    expect(prompt).toContain(
+      'For the user\'s saved current-state context, prefer `vault-cli memory show --compact --format json`',
+    )
+    expect(prompt).not.toContain(
+      '--command \'["memory","show"]\'',
     )
     expect(prompt).toContain(
       'do not use batch for interactive, server, or long-running assistant commands',

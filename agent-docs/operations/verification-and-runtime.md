@@ -646,6 +646,17 @@ because its CLIs, authentication, or capacity are unavailable, fail closed and
 report that concrete blocker with the completed local evidence. Preserve the
 Testbox ID, timing summary, and linked Actions run when delegation starts.
 
+The dispatcher captures paid Testbox stdout and stderr into separate private
+files while the delegated command is still running. A failed run retains the
+single ignored bundle at
+`.artifacts/verification/crabbox-last-failure/`, records the command and frozen
+candidate tree in `run.txt` with the complete command argument vector encoded as
+one JSON value, and prints that stable repository-relative bundle location
+before returning the provider status. The next paid run replaces that same
+checkout-local bundle, and a successful run removes it so stale failure evidence
+cannot be mistaken for the current result. Do not add `--keep` merely to inspect
+a failure that this bundle already preserves.
+
 Do not run both remote `test:diff` and remote acceptance on the same exact head.
 When acceptance is required, keep the preceding diff checks local and reserve
 the one remote check for acceptance; otherwise use the remote diff lane. Retry

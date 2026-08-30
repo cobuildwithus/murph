@@ -1137,7 +1137,10 @@ function runFinishTaskHarnessGit(harnessRoot: string, ...command: string[]) {
   return result.stdout.trim()
 }
 
-function createFinishTaskHarness(baselineFiles: Record<string, string>) {
+function createFinishTaskHarness(
+  baselineFiles: Record<string, string>,
+  options: { useRealCommitter?: boolean } = {},
+) {
   const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-finish-task-harness-'))
 
   try {
@@ -1203,13 +1206,19 @@ printf '%s\\n' "$plan_path" "$completed_path" > .fake-tools/close-exec-plan.args
 `,
       true,
     )
+    const committerContents = options.useRealCommitter
+      ? readFileSync(
+          path.join(repoRoot, 'node_modules', '@cobuild', 'repo-tools', 'src', 'committer.sh'),
+          'utf8',
+        )
+      : `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$@" > .fake-tools/committer.args
+`
     writeHarnessFile(
       harnessRoot,
       '.fake-tools/cobuild-committer',
-      `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "$@" > .fake-tools/committer.args
-`,
+      committerContents,
       true,
     )
 
@@ -1356,6 +1365,7 @@ describe('monorepo release flow coverage audit', () => {
     ).toEqual(
       [
         "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
+        "'@cobuild/review-gpt@0.5.139': patches/@cobuild__review-gpt@0.5.139.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
       ],
@@ -1364,6 +1374,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(repoToolsPatch).toContain('untracked_files=()')
     expect(repoToolsPatch).toContain('add -u -- "${tracked_files[@]}"')
     expect(repoToolsPatch).toContain('add -A -- "${untracked_files[@]}"')
+    expect(
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.139.patch')),
+    ).toBe(true)
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.103.patch')),
     ).toBe(false)
@@ -4327,6 +4340,68 @@ Updated: 2026-04-24
     }
   })
 
+  it('commits a newly staged active plan through its archived path', () => {
+    const planPath = 'agent-docs/exec-plans/active/2026-04-24-staged.md'
+    const completedPlanPath = 'agent-docs/exec-plans/completed/2026-04-24-staged.md'
+    const taskPath = 'docs/touched.md'
+    const harnessRoot = createFinishTaskHarness(
+      {
+        'agent-docs/exec-plans/completed/README.md': '# Completed\n',
+        [taskPath]: '# Before\n',
+      },
+      { useRealCommitter: true },
+    )
+
+    try {
+      writeHarnessFile(harnessRoot, planPath, '# Harness Plan\n')
+      runFinishTaskHarnessGit(harnessRoot, 'add', planPath)
+      writeHarnessFile(harnessRoot, taskPath, '# Before\n\nAfter\n')
+
+      const result = spawnSync(
+        'bash',
+        [
+          'scripts/finish-task',
+          planPath,
+          'fix(repo): close staged harness plan',
+          taskPath,
+        ],
+        {
+          cwd: harnessRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+
+      if (result.status !== 0) {
+        throw new Error(
+          `finish-task staged-plan harness failed:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+        )
+      }
+
+      rmSync(path.join(harnessRoot, '.fake-tools', 'install-git-hooks.called'), { force: true })
+      rmSync(path.join(harnessRoot, '.fake-tools', 'close-exec-plan.args'), { force: true })
+      expect(runFinishTaskHarnessGit(harnessRoot, 'status', '--porcelain')).toBe('')
+      expect(
+        runFinishTaskHarnessGit(
+          harnessRoot,
+          'diff-tree',
+          '--no-commit-id',
+          '--name-only',
+          '-r',
+          'HEAD',
+        )
+          .split(/\r?\n/u)
+          .sort(),
+      ).toEqual([completedPlanPath, taskPath].sort())
+      expect(runFinishTaskHarnessGit(harnessRoot, 'show', `HEAD:${completedPlanPath}`)).toBe(
+        '# Harness Plan',
+      )
+      expect(existsSync(path.join(harnessRoot, planPath))).toBe(false)
+    } finally {
+      rmSync(harnessRoot, { recursive: true, force: true })
+    }
+  })
+
   it('omits an untracked active plan found while expanding a task directory', () => {
     const planPath = 'agent-docs/exec-plans/active/2026-04-24-untracked.md'
     const completedPlanPath = 'agent-docs/exec-plans/completed/2026-04-24-untracked.md'
@@ -6161,6 +6236,13 @@ exit 1
     expect(packPublishables).toContain("path.basename(sourcePath) === 'node_modules'")
     expect(packPublishables).toContain('isNonRuntimeIncurPayloadPath')
     expect(packPublishables).toContain('/(?:^|\\/)[^/]+\\.test\\.[cm]?[jt]sx?$/u')
+    expect(packPublishables).toContain(
+      'const assistantCliSurfacePackagingTimeoutMs = 5 * 60_000;',
+    )
+    expect(packPublishables).toContain("'--manifest-timeout-ms'")
+    expect(packPublishables).toContain(
+      'String(assistantCliSurfacePackagingTimeoutMs)',
+    )
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)

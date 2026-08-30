@@ -1224,10 +1224,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   retention-bounded rows. It selects no billing relation, message content, or
   decrypted identifier, excludes group and thread-container identities, and
   leaves per-participant group activity in the anonymous Growth projection.
-  Composed with sponsorship reads, the page can queue at most 26 database
-  operations at its read peak (previously 25); the shared pool still caps live
-  connections at 15. This projection adds no transaction, decrypt, external
-  call, retry, or fallback.
+  One sequential blind-index lookup also excludes the configured fixed-identity
+  production canary from personal-member, trial, status, retention, and direct
+  activity results. Daily snapshots apply the same member exclusion and omit
+  Linq deliveries attributed to the canary member's canonical current or
+  pending Linq chat lookup key; previously aggregated snapshots remain
+  immutable. Snapshot capture performs one bounded routing-row read after the
+  canary identity lookup. Composed with sponsorship reads, the page can queue at
+  most 27 database operations at its read peak (previously 26); the shared pool
+  still caps live connections at 15. This projection adds no transaction,
+  decrypt, external call, retry, or fallback.
 
   Hosted device-sync scheduling keeps one canonical connection timestamp:
   Web's `nextReconcileAt` is the provider cadence and the only timestamp the
@@ -1458,7 +1464,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   reconciliation, and Family invite acceptance from the browser, Linq, or
   Telegram; its one post-response task is registered at the first post-commit
   boundary, and both its read and attempt claim use canonical hosted access,
-  including Family sponsorship. The first authenticated website or companion
+  including Family sponsorship. Before that access read or attempt claim, the
+  configured fixed-identity production canary is resolved through its canonical
+  phone blind index and skipped. The first authenticated website or companion
   request may write one schema-closed signup context while the notification is
   pending: server occurrence time, validated IANA time zone, closed signup
   surface, and Vercel's advisory network city/region/country headers. Web
@@ -2190,7 +2198,7 @@ URLs are delivery capabilities, not valid private-media storage
 representations.
 
 Provider-native thread continuity is not a delivery ledger. Preserve a resumable Codex thread even when `finish_without_reply` or delivery-context filtering means its internal history differs slightly from the durable semantic transcript, and preserve it after authenticated private reads. Runtime-owned capability URLs belong only to the ephemeral delivery response: do not put them in the durable assistant transcript, fresh-thread replay, stale-resume fallback, or provider-native turn. Do not clear or abandon provider continuity as a privacy or delivery-reconciliation mechanism; enforce privacy at authority, output, logging, and snapshot boundaries instead.
-Hosted group-email assistant replies use the assistant outbox as their single durability owner. The parent effect resolves authorized group members and creates privacy-blind, member-scoped child intents before it is considered sent; the no-send parent planner remains replay-safe through bounded response-body and partial child-intent persistence failures until that durable expansion completes, and stable per-member dedupe fills only missing children after a restart. Each child resolves only that member's current authorized address at delivery time. A deleted group or child whose recipient authority has changed before the provider call is durably abandoned with a typed authority-superseded reason, and transient failures proven to occur before provider entry remain retryable across the runner response boundary, while a lost internal response or liveness failure after the recipient-scoped provider request starts is terminal ambiguity. Successful siblings remain durable when another recipient fails, and an ambiguous child send is recorded terminally instead of replaying the whole group. Production Worker config embeds the prepared runner bundle and source fingerprints, while the bundle manifest embeds the checked-out public Murph base commit used for release correlation even when the protected private workflow composes private runtime assets into that checkout. The source and bundle fingerprints identify the resulting composed artifact, and production deploy validation rejects missing or malformed public release provenance. Every warm or cold runner must report the exact fingerprints before a user workspace invocation is admitted, and deploy smoke also compares the public release SHA, so a stale warm shell is replaced and a stale cold shell fails closed even before post-deploy smoke completes.
+Hosted group-email assistant replies use the assistant outbox as their single durability owner. The parent effect resolves authorized group members and creates privacy-blind, member-scoped child intents before it is considered sent; the no-send parent planner remains replay-safe through bounded response-body and partial child-intent persistence failures until that durable expansion completes, and stable per-member dedupe fills only missing children after a restart. Each child resolves only that member's current authorized address at delivery time. A deleted group or child whose recipient authority has changed before the provider call is durably abandoned with a typed authority-superseded reason, and transient failures proven to occur before provider entry remain retryable across the runner response boundary, while a lost internal response or liveness failure after the recipient-scoped provider request starts is terminal ambiguity. Successful siblings remain durable when another recipient fails, and an ambiguous child send is recorded terminally instead of replaying the whole group. Production Worker config embeds the prepared runner bundle and source fingerprints, while the bundle manifest embeds the checked-out public Murph base commit used for release correlation even when the protected private workflow composes private runtime assets into that checkout. The source and bundle fingerprints identify the resulting composed artifact, and production deploy validation rejects missing or malformed public release provenance. Every warm or cold runner must report the exact fingerprints before a user workspace invocation is admitted, and deploy smoke also compares the public release SHA. A stale warm shell is replaced; direct cold readiness may replace one stale bundle/source image inside the same lifecycle operation and original caller budget, but neither attempt receives user work until the exact architecture and fingerprints pass, and any second mismatch still fails closed before post-deploy smoke completes.
 
 The hosted pending-input v2 index persists a capped exact-ack batch cursor in
 the same workspace snapshot. It rotates later idle checkpoints without
