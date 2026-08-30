@@ -7963,7 +7963,85 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('compacts a 95k personal warm thread off-turn and keeps its task resumable', {
+  it('cold-resumes a skipped 99,999-token group thread with its task context', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const goalSentinel = 'IDLE_COMPACTION_GOAL'
+    const constraintSentinel = 'IDLE_COMPACTION_CONSTRAINT'
+    const toolResultSentinel = 'IDLE_COMPACTION_TOOL_RESULT'
+    const skippedResumeReply = [
+      'POST_SKIP_OK',
+      goalSentinel,
+      constraintSentinel,
+      toolResultSentinel,
+    ].join(' ')
+    scenario.stub.queue({ text: 'SKIP_SEED_OK' })
+    const seeded = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: 'Reply exactly SKIP_SEED_OK.',
+      serviceTier: 'flex',
+    })
+    expect(seeded.finalMessage).toBe('SKIP_SEED_OK')
+
+    scenario.stub.queue({
+      text: 'SKIP_STANDARD_OK',
+      usageInputTokens: 99_999,
+    })
+    const standard = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: [
+        'Preserve this task across the next idle checkpoint.',
+        `Goal: ${goalSentinel}`,
+        `Constraint: ${constraintSentinel}`,
+        `Completed tool result: ${toolResultSentinel}`,
+        'Reply exactly SKIP_STANDARD_OK.',
+      ].join('\n'),
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(standard.finalMessage).toBe('SKIP_STANDARD_OK')
+    expect(standard.threadId).toBe(seeded.threadId)
+
+    // Below threshold: no provider traffic, warm process untouched. The
+    // reported size must be the real observed thread context from the latest
+    // turn's tokenUsage events, not a placeholder.
+    scenario.stub.markRequestBaseline()
+    const skipped = await compactWarmCodexThread({
+      groupMinThreadTokens: 100_000,
+      minThreadTokens: 90_000,
+      timeoutMs: 30_000,
+    })
+    expect(skipped).toMatchObject({
+      kind: 'skipped',
+      reason: 'below_threshold',
+    })
+    expect(
+      skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
+        && skipped.threadContextTokensBefore === 99_999,
+    ).toBe(true)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+
+    // Changed-path proof: kill the warm process after the below-threshold skip
+    // so the next turn must reconstruct the uncompacted thread from disk and
+    // continue from the provider response that received the task sentinels.
+    await stopWarmCodexAppServer('post-skip-cold-resume')
+    scenario.stub.queue({
+      requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
+      text: skippedResumeReply,
+    })
+    const resumedAfterSkip = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: 'Continue the preserved task after the skipped idle checkpoint.',
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(resumedAfterSkip.finalMessage).toBe(skippedResumeReply)
+    expect(resumedAfterSkip.threadId).toBe(seeded.threadId)
+  })
+
+  it('compacts a 100k group warm thread off-turn and keeps its task resumable', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -7976,7 +8054,7 @@ text(JSON.stringify(result));
       constraintSentinel,
       toolResultSentinel,
     ].join(' ')
-    const resumedReply = [
+    const compactedResumeReply = [
       'POST_COMPACT_OK',
       goalSentinel,
       constraintSentinel,
@@ -7985,6 +8063,7 @@ text(JSON.stringify(result));
     scenario.stub.queue({ text: 'COMPACT_SEED_OK' })
     const seeded = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Reply exactly COMPACT_SEED_OK.',
       serviceTier: 'flex',
     })
@@ -7992,10 +8071,11 @@ text(JSON.stringify(result));
 
     scenario.stub.queue({
       text: 'COMPACT_STANDARD_OK',
-      usageInputTokens: 95_000,
+      usageInputTokens: 100_000,
     })
     const standard = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: [
         'Preserve this task across the next idle checkpoint.',
         `Goal: ${goalSentinel}`,
@@ -8008,28 +8088,11 @@ text(JSON.stringify(result));
     expect(standard.finalMessage).toBe('COMPACT_STANDARD_OK')
     expect(standard.threadId).toBe(seeded.threadId)
 
-    // Below threshold: no provider traffic, warm process untouched. The
-    // reported size must be the real observed thread context from the latest
-    // turn's tokenUsage events, not a placeholder.
-    scenario.stub.markRequestBaseline()
-    const skipped = await compactWarmCodexThread({
-      minThreadTokens: 100_000,
-      timeoutMs: 30_000,
-    })
-    expect(skipped).toMatchObject({
-      kind: 'skipped',
-      reason: 'below_threshold',
-    })
-    expect(
-      skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
-        && skipped.threadContextTokensBefore === 95_000,
-    ).toBe(true)
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
-
-    // Above threshold: the local-provider compaction summarization request is
+    // Exact boundary: the local-provider compaction summarization request is
     // served by the stub and the thread reports compacted.
     scenario.stub.queue({ text: compactedSummary })
     const compacted = await compactWarmCodexThread({
+      groupMinThreadTokens: 100_000,
       minThreadTokens: 90_000,
       timeoutMs: 60_000,
     })
@@ -8062,6 +8125,7 @@ text(JSON.stringify(result));
     scenario.stub.markRequestBaseline()
     expect(
       await compactWarmCodexThread({
+        groupMinThreadTokens: 1,
         minThreadTokens: 1,
         timeoutMs: 30_000,
       }),
@@ -8079,15 +8143,16 @@ text(JSON.stringify(result));
     await stopWarmCodexAppServer('post-compact-cold-resume')
     scenario.stub.queue({
       requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
-      text: resumedReply,
+      text: compactedResumeReply,
     })
-    const resumed = await executeCodexAppServerTurn({
+    const resumedAfterCompact = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Finish the preserved task after the idle checkpoint.',
       resumeSessionId: seeded.sessionId,
     })
-    expect(resumed.finalMessage).toBe(resumedReply)
-    expect(resumed.threadId).toBe(seeded.threadId)
+    expect(resumedAfterCompact.finalMessage).toBe(compactedResumeReply)
+    expect(resumedAfterCompact.threadId).toBe(seeded.threadId)
   })
 
   it('keeps a warm thread reusable when its model cannot be accounted', {
