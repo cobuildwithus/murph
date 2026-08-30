@@ -5,10 +5,10 @@
     "id": "faster-connected-health-catch-up",
     "kind": "improvement",
     "priority": 3,
-    "title": "Connected health histories catch up faster",
-    "summary": "New connected-health updates now catch up faster for members with large histories.",
-    "details": "Timed-out background requests no longer hold up newer health updates, while corrections made between syncs still receive a full safety recheck.",
+    "title": "Newer connected-health updates keep moving",
+    "summary": "Long connected-health histories no longer hold up newer sync work.",
+    "details": "Murph saves each completed batch and resumes at the exact next day; timed-out background requests also yield to newer updates, while between-sync corrections still receive a full safety recheck.",
     "relevanceTags": ["connected-health", "wearables", "sync", "reliability"],
-    "sourcePullRequests": [2322, 2334]
+    "sourcePullRequests": [2322, 2334, 2532]
   }
 }

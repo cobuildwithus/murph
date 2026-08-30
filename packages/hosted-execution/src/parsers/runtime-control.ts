@@ -1087,7 +1087,11 @@ export function parseHostedRuntimeAssistantAskControlResponse(
       record.terminalReason,
       "Hosted runtime assistant ask terminalReason",
     );
-    if (terminalReason !== "expired" && terminalReason !== "unavailable") {
+    if (
+      terminalReason !== "content_expired"
+      && terminalReason !== "expired"
+      && terminalReason !== "unavailable"
+    ) {
       throw new TypeError("Hosted runtime assistant ask terminalReason is invalid.");
     }
     return { action, status, terminalReason };
@@ -4425,6 +4429,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
     assertAllowedObjectKeys(
       record,
       new Set([
+        "availability",
         "displayName",
         "grantedVaultShareProjectionScopes",
         "kind",
@@ -4475,6 +4480,14 @@ function parseHostedRuntimeGroupMembershipSummaries(
       throw new TypeError(`${label} entry membershipId must not be blank.`);
     }
     return {
+      ...(record.availability === undefined
+        ? {}
+        : {
+            availability: parseHostedRuntimeGroupMembershipAvailability(
+              record.availability,
+              `${label} entry availability`,
+            ),
+          }),
       displayName: readNullableString(record.displayName, `${label} entry displayName`),
       grantedVaultShareProjectionScopes,
       kind: requireString(record.kind, `${label} entry kind`),
@@ -4501,6 +4514,34 @@ function parseHostedRuntimeGroupMembershipSummaries(
       ),
     };
   });
+}
+
+function parseHostedRuntimeGroupMembershipAvailability(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupMembershipSummary["availability"] {
+  const record = requireObject(value, label);
+  const status = requireString(record.status, `${label} status`);
+  if (status === "available") {
+    assertAllowedObjectKeys(record, new Set(["status"]), label);
+    return { status };
+  }
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    const unavailableReason = requireString(
+      record.unavailableReason,
+      `${label} unavailableReason`,
+    ).trim();
+    if (!unavailableReason) {
+      throw new TypeError(`${label} unavailableReason must not be blank.`);
+    }
+    return { status, unavailableReason };
+  }
+  throw new TypeError(`${label} status is invalid.`);
 }
 
 function parseHostedRuntimeGroupProjectionKindArray<
@@ -6484,6 +6525,17 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalBoolean(orchestration, "replacedStaleFence", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartRequestedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartFenceBoundAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerReadinessRequestedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerLifecycleLockAcquiredAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerStateReadFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerStartIssuedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerOnStartAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerPortsReadyAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerHealthStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerHealthFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerProcessStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerListeningAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerReadyObservedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerReadyAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationPreparedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationAcceptedAtEpochMs", orchestrationLabel),
@@ -6662,6 +6714,9 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       assistantLabel,
     );
     breakdown.assistant = {
+      ...requireOptionalNonNegativeInteger(assistant, "pendingReplyAdmittedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "foregroundInputSelectedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "assistantInputAcceptedForExecutionAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "linqTypingRequestStartedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "linqTypingAcceptedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "firstCodexOutputObservedAtEpochMs", assistantLabel),

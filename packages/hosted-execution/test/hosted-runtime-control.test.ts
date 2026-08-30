@@ -1420,6 +1420,54 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
         assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.525Z",
+        milestone: "pending_reply_admitted",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.525Z",
+        milestone: "pending_reply_admitted",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.540Z",
+        milestone: "foreground_input_selected",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    }).event).toMatchObject({ milestone: "foreground_input_selected" });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.550Z",
+        milestone: "assistant_input_accepted_for_execution",
+        runtimeAttemptId: "attempt_1",
+        source: "telegram",
+        type: "assistant_milestone",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.550Z",
+        milestone: "assistant_input_accepted_for_execution",
+        runtimeAttemptId: "attempt_1",
+        source: "telegram",
+        type: "assistant_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.600Z",
         milestone: "first_codex_text_observed",
         runtimeAttemptId: "attempt_1",
@@ -1596,6 +1644,17 @@ describe("hosted runtime control contracts", () => {
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
+        freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
+        freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
+        freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
+        freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
+        freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
+        freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
+        freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
+        freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
         freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
@@ -1699,6 +1758,9 @@ describe("hosted runtime control contracts", () => {
         receiptScanPerformed: false,
       },
       assistant: {
+        pendingReplyAdmittedAtEpochMs: 1_777_000_000_120,
+        foregroundInputSelectedAtEpochMs: 1_777_000_000_121,
+        assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_000_123,
         runtimeLeaseGeneration: "18446744073709551615",
         terminalNonReplyCommittedAtEpochMs: 1_777_000_000_125,
       },
@@ -1892,6 +1954,7 @@ describe("hosted runtime control contracts", () => {
       { activeWakeFoundNoActiveChild: "true" }, // boolean leaf must stay boolean
       { activeWakeElapsedMs: 1.5 }, // duration must be an integer
       { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
+      { freshStartContainerPortsReadyAtEpochMs: -1 }, // container timestamps stay non-negative
       { shellPrewarmHintCount: -1 }, // counts must be non-negative
       { shellPrewarmFirstHintAtEpochMs: "1777000000061" }, // timestamps stay numeric
       { shellPrewarmOutcome: "started" }, // outcomes stay in the bounded enum
@@ -2107,6 +2170,37 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       changed: false,
       value: earlierProgressMerged.value,
+    });
+
+    const earlierLifecycleMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {
+        assistant: {
+          pendingReplyAdmittedAtEpochMs: 1_777_000_020_000,
+          foregroundInputSelectedAtEpochMs: 1_777_000_020_500,
+          assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_021_000,
+        },
+        schemaVersion: 1,
+      },
+      incoming: {
+        assistant: {
+          pendingReplyAdmittedAtEpochMs: 1_777_000_019_000,
+          foregroundInputSelectedAtEpochMs: 1_777_000_019_500,
+          assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_022_000,
+        },
+        schemaVersion: 1,
+      },
+      phases: ["assistant"],
+    });
+    expect(earlierLifecycleMerged).toEqual({
+      changed: true,
+      value: {
+        assistant: {
+          pendingReplyAdmittedAtEpochMs: 1_777_000_019_000,
+          foregroundInputSelectedAtEpochMs: 1_777_000_019_500,
+          assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_021_000,
+        },
+        schemaVersion: 1,
+      },
     });
 
     const providerMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({

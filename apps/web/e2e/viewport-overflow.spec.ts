@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+import {
+  buildCalendarEventUrl,
+  CALENDAR_LINK_URL_PREFIX,
+  calendarEventV1Bounds,
+} from "@murphai/contracts";
+
 // Public marketing pages that must never scroll horizontally. They render
 // anonymously (no auth, no database), which is what lets this gate run against
 // the placeholder smoke environment. Dynamic and dashboard routes are
@@ -179,6 +185,60 @@ function measureHorizontalOverflow(tolerancePx: number) {
 
   return { viewportWidth, scrollWidth, overflowPx, culprits };
 }
+
+test("calendar links wrap maximum unbroken event text", async ({ page }) => {
+  test.setTimeout(240_000);
+  const event = {
+    title: "T".repeat(calendarEventV1Bounds.title),
+    startsAt: "2026-10-14T14:30:00-04:00",
+    endsAt: "2026-10-14T15:15:00-04:00",
+    location: "L".repeat(calendarEventV1Bounds.location),
+    notes: "N".repeat(calendarEventV1Bounds.notes),
+  };
+  const url = buildCalendarEventUrl(event);
+  const payload = url.slice(CALENDAR_LINK_URL_PREFIX.length);
+  const path = new URL(url).pathname;
+
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+  const healthResponse = await page.goto("/api/internal/health", {
+    waitUntil: "domcontentloaded",
+  });
+  expect(healthResponse?.status()).toBe(200);
+  await page.evaluate((calendarPayload) => {
+    window.sessionStorage.setItem(
+      `murph-calendar-opened:${calendarPayload}`,
+      "1",
+    );
+  }, payload);
+
+  for (const width of [320, 390, 1280] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    const response = await page.goto(path, { waitUntil: "load" });
+    expect(response?.status(), `${path} should respond 200`).toBe(200);
+    await expect(page.locator('[data-calendar-link-state="ready"]')).toHaveCount(1);
+    await page.evaluate(async () => {
+      await document.fonts?.ready;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+    });
+
+    const result = await page.evaluate(
+      measureHorizontalOverflow,
+      OVERFLOW_TOLERANCE_PX,
+    );
+    expect(
+      result.overflowPx,
+      `${path} overflows by ${result.overflowPx}px at ${width}px.\n${result.culprits.join("\n")}`,
+    ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+  }
+});
 
 for (const route of ROUTES) {
   for (const width of WIDTHS) {

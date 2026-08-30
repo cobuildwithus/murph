@@ -2510,6 +2510,247 @@ test("device sync service supplies the vault timezone to Junction jobs", async (
   }
 });
 
+test("Junction historical suffix persistence lets a same-priority update run first", async () => {
+  const now = new Date("2026-04-22T12:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-historical-fanout-order");
+  vi.useFakeTimers();
+  vi.setSystemTime(now);
+  const stateDatabasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const historicalWindowStart = "2026-04-01T00:00:00.000Z";
+  const historicalWindowEnd = "2026-04-18T00:00:00.000Z";
+  const updateWindowStart = "2026-04-20T00:00:00.000Z";
+  const updateWindowEnd = "2026-04-21T00:00:00.000Z";
+  const expectedHistoricalDays = Array.from({ length: 17 }, (_value, index) =>
+    new Date(Date.parse(historicalWindowStart) + index * 24 * 60 * 60_000)
+      .toISOString()
+      .slice(0, 10)
+  );
+  const requestedDays: string[] = [];
+  const importedDays: string[] = [];
+  let queueCompetingUpdate: (() => DeviceSyncJobRecord) | null = null;
+  let competingUpdateId = "";
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const snapshot = input.snapshot as {
+          timeseries?: { floors_climbed?: unknown[] };
+          windowStart?: string;
+        };
+        assert.equal(snapshot.timeseries?.floors_climbed?.length, 1);
+        const importedWindowStart = snapshot.windowStart;
+        assert.ok(importedWindowStart);
+        importedDays.push(importedWindowStart.slice(0, 10));
+        if (!competingUpdateId) {
+          const enqueue = queueCompetingUpdate;
+          assert.ok(enqueue);
+          competingUpdateId = enqueue().id;
+        }
+        return { events: [{ kind: "measurement" }] };
+      },
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["floors_climbed"],
+      fetchImpl: async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/junction-historical-fanout-service") {
+          return createJsonResponse({
+            providers: [{
+              id: "provider-garmin-historical-fanout",
+              name: "Garmin",
+              resource_availability: { floors_climbed: true },
+              slug: "garmin",
+              status: "connected",
+            }],
+          });
+        }
+        if (
+          url.pathname
+            === "/v2/timeseries/junction-historical-fanout-service/floors_climbed/grouped"
+        ) {
+          const dayKey = url.searchParams.get("start_date");
+          assert.ok(dayKey);
+          assert.equal(dayKey, url.searchParams.get("end_date"));
+          requestedDays.push(dayKey);
+          return createJsonResponse({
+            groups: {
+              garmin: [{
+                data: [{
+                  end: `${dayKey}T10:00:00.000Z`,
+                  start: `${dayKey}T09:00:00.000Z`,
+                  unit: "count",
+                  value: 1,
+                }],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          });
+        }
+        throw new Error(`Unexpected Junction historical fanout request: ${url.toString()}`);
+      },
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-historical-fanout-service",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: historicalWindowEnd,
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      firstSeenAt: historicalWindowStart,
+      lastSeenAt: now.toISOString(),
+      resourceAvailabilitySummary: { floors_climbed: true },
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    const historicalJob = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        eventType: "historical.data.floors_climbed.created",
+        objectId: "floors-history-17-day",
+        occurredAt: "2026-04-17T10:00:00.000Z",
+        resource: "floors_climbed",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowEnd: historicalWindowEnd,
+        windowStart: historicalWindowStart,
+      },
+      availableAt: now.toISOString(),
+      priority: 65,
+      dedupeKey: "junction-historical-fanout-service-history",
+    });
+    queueCompetingUpdate = () => {
+      assert.equal(store.getJobById(historicalJob.id)?.status, "running");
+      return store.enqueueJob({
+        accountId: account.id,
+        provider: "junction",
+        kind: "resource",
+        payload: {
+          eventType: "daily.data.floors_climbed.updated",
+          objectId: "floors-update-after-history-started",
+          occurredAt: "2026-04-20T10:00:00.000Z",
+          resource: "floors_climbed",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          windowEnd: updateWindowEnd,
+          windowStart: updateWindowStart,
+        },
+        availableAt: new Date(now.getTime() - 1_000).toISOString(),
+        priority: historicalJob.priority,
+        dedupeKey: "junction-historical-fanout-service-update",
+      });
+    };
+
+    const firstClaim = await service.runWorkerOnce(account.id);
+    assert.equal(firstClaim?.id, historicalJob.id);
+    assert.equal(store.getJobById(historicalJob.id)?.status, "succeeded");
+    assert.deepEqual(requestedDays, expectedHistoricalDays.slice(0, 16));
+    assert.deepEqual(importedDays, expectedHistoricalDays.slice(0, 16));
+    assert.ok(competingUpdateId);
+    const queuedUpdate = store.getJobById(competingUpdateId);
+    assert.ok(queuedUpdate);
+    assert.equal(queuedUpdate.priority, historicalJob.priority);
+
+    let persistedSuffixId = "";
+    const durableStore = new SqliteDeviceSyncStore(stateDatabasePath);
+    try {
+      const queuedJobs = readJobsForAccountForTesting(durableStore, account.id)
+        .filter((job) => job.status === "queued")
+        .flatMap((job) => {
+          const storedJob = durableStore.getJobById(job.id);
+          return storedJob ? [storedJob] : [];
+        });
+      assert.equal(queuedJobs.length, 2);
+      assert.equal(durableStore.getJobById(queuedUpdate.id)?.status, "queued");
+      const suffixes = queuedJobs.filter((job) =>
+        job.payload.eventType === "historical.data.floors_climbed.created"
+      );
+      assert.equal(suffixes.length, 1);
+      const suffix = suffixes[0];
+      assert.ok(suffix);
+      persistedSuffixId = suffix.id;
+      assert.equal(suffix.priority, historicalJob.priority);
+      assert.equal(suffix.dedupeKey, historicalJob.dedupeKey);
+      assert.deepEqual(suffix.payload, {
+        eventType: "historical.data.floors_climbed.created",
+        objectId: "floors-history-17-day",
+        occurredAt: "2026-04-17T10:00:00.000Z",
+        resource: "floors_climbed",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowEnd: historicalWindowEnd,
+        windowStart: "2026-04-17T00:00:00.000Z",
+      });
+    } finally {
+      durableStore.close();
+    }
+
+    const updateClaim = await service.runWorkerOnce(account.id);
+    assert.equal(updateClaim?.id, queuedUpdate.id);
+    assert.equal(store.getJobById(queuedUpdate.id)?.status, "succeeded");
+    assert.equal(store.getJobById(persistedSuffixId)?.status, "queued");
+    assert.deepEqual(requestedDays, [
+      ...expectedHistoricalDays.slice(0, 16),
+      updateWindowStart.slice(0, 10),
+    ]);
+
+    const suffixClaim = await service.runWorkerOnce(account.id);
+    assert.equal(suffixClaim?.id, persistedSuffixId);
+    assert.equal(store.getJobById(persistedSuffixId)?.status, "succeeded");
+    assert.equal(await service.runWorkerOnce(account.id), null);
+
+    const expectedExecutionOrder = [
+      ...expectedHistoricalDays.slice(0, 16),
+      updateWindowStart.slice(0, 10),
+      expectedHistoricalDays[16]!,
+    ];
+    assert.deepEqual(requestedDays, expectedExecutionOrder);
+    assert.deepEqual(importedDays, expectedExecutionOrder);
+    const historicalRequestedDays = requestedDays.filter((dayKey) =>
+      dayKey !== updateWindowStart.slice(0, 10)
+    );
+    const historicalImportedDays = importedDays.filter((dayKey) =>
+      dayKey !== updateWindowStart.slice(0, 10)
+    );
+    assert.deepEqual(historicalRequestedDays, expectedHistoricalDays);
+    assert.deepEqual(historicalImportedDays, expectedHistoricalDays);
+    assert.equal(new Set(historicalRequestedDays).size, expectedHistoricalDays.length);
+    assert.equal(new Set(historicalImportedDays).size, expectedHistoricalDays.length);
+    const finalJobs = readJobsForAccountForTesting(store, account.id);
+    assert.equal(finalJobs.length, 3);
+    assert.equal(finalJobs.filter((job) => job.status === "queued").length, 0);
+    assert.ok(finalJobs.every((job) => job.status === "succeeded"));
+    assert.ok(finalJobs.every((job) => job.attempts === 1));
+  } finally {
+    close();
+    vi.useRealTimers();
+  }
+});
+
 test("Junction lifecycle supersession retries one webhook resource job with normal backoff", async () => {
   let now = new Date("2030-04-03T12:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-lifecycle-retry");

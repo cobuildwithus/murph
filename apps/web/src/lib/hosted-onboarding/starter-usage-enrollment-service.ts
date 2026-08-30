@@ -164,8 +164,7 @@ export async function ensureHostedStarterUsageEnrollment(
     requireLaunchConsent: true,
     source: input.source,
     suppressSignupWelcome,
-    suppressSignupWelcomeEmail:
-      suppressSignupWelcome || companionOnboarding,
+    suppressSignupWelcomeEmail: suppressSignupWelcome,
   });
   return enrollment.result;
 }
@@ -315,7 +314,10 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
       prisma,
     });
   }
-  if (!policy.instantStartAdmission) {
+  if (
+    !policy.instantStartAdmission
+    && policy.source !== "companion_onboarding"
+  ) {
     await assertHostedMemberBillingStartMessagingReady({
       identity: invite.member.identity,
       prisma,

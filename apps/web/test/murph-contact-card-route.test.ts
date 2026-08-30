@@ -25,8 +25,8 @@ interface TestMurphContactCardHandoffPayload {
 const mocks = vi.hoisted(() => ({
   assertActiveHostedMemberAccessAllowed: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
-  fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getPrisma: vi.fn(),
+  readMurphContactCardAvatarPhoto: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   resolveMurphHostedLinqContactCardBackupPhoneNumber: vi.fn(),
@@ -52,12 +52,14 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", async (importOriginal) 
   >();
   return {
     ...actual,
-    fetchMurphHostedLinqContactCardVcfPhoto:
-      mocks.fetchMurphHostedLinqContactCardVcfPhoto,
     resolveMurphHostedLinqContactCardBackupPhoneNumber:
       mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber,
   };
 });
+
+vi.mock("../app/api/murph-contact-card/avatar-photo", () => ({
+  readMurphContactCardAvatarPhoto: mocks.readMurphContactCardAvatarPhoto,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed:
@@ -166,7 +168,7 @@ describe("murph contact card route", () => {
     mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber.mockResolvedValue(
       "+14045550111",
     );
-    mocks.fetchMurphHostedLinqContactCardVcfPhoto.mockResolvedValue({
+    mocks.readMurphContactCardAvatarPhoto.mockResolvedValue({
       base64: "cGhvdG8=",
       type: "PNG",
     });
@@ -188,14 +190,42 @@ describe("murph contact card route", () => {
     expect(body).toContain("item1.X-ABLabel:backup");
     expect(body).toContain("PHOTO;ENCODING=b;TYPE=PNG:cGhvdG8=");
 
-    expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
-      imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-02-sm.png",
-    });
+    expect(mocks.readMurphContactCardAvatarPhoto).toHaveBeenCalledWith("classic");
     expect(
       mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber,
     ).toHaveBeenCalledWith({
       excludePhoneNumber: INITIATING_PHONE_NUMBER,
       prisma: {},
+    });
+  });
+
+  it("does not return a selected-avatar card when its photo is unavailable", async () => {
+    mocks.readMurphContactCardAvatarPhoto.mockResolvedValue(null);
+
+    const response = await route.GET(buildRequest("?avatar=rancher"));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "MURPH_CONTACT_CARD_PHOTO_UNAVAILABLE",
+        message: "Murph's contact photo is temporarily unavailable. Try saving the card again.",
+        retryable: true,
+      },
+    });
+  });
+
+  it("does not issue a browser handoff when its selected photo is unavailable", async () => {
+    mocks.readMurphContactCardAvatarPhoto.mockResolvedValue(null);
+
+    const response = await route.POST(buildIssuanceRequest("rancher"));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "MURPH_CONTACT_CARD_PHOTO_UNAVAILABLE",
+        message: "Murph's contact photo is temporarily unavailable. Try saving the card again.",
+        retryable: true,
+      },
     });
   });
 
@@ -242,9 +272,7 @@ describe("murph contact card route", () => {
     expect(await safariResponse.text()).toContain(
       `TEL;TYPE=CELL:${INITIATING_PHONE_NUMBER}`,
     );
-    expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
-      imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-03-sm.png",
-    });
+    expect(mocks.readMurphContactCardAvatarPhoto).toHaveBeenCalledWith("gremlin");
   });
 
   it("keeps the handoff member and avatar when Safari has another member's cookie", async () => {
@@ -272,9 +300,7 @@ describe("murph contact card route", () => {
     const body = await response.text();
     expect(body).toContain(`TEL;TYPE=CELL:${INITIATING_PHONE_NUMBER}`);
     expect(body).not.toContain(OTHER_PHONE_NUMBER);
-    expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
-      imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-03-sm.png",
-    });
+    expect(mocks.readMurphContactCardAvatarPhoto).toHaveBeenCalledWith("gremlin");
   });
 
   it("rejects a missing handoff claim without falling back to a Safari session", async () => {
@@ -348,9 +374,7 @@ describe("murph contact card route", () => {
   it("embeds the chosen logo avatar", async () => {
     await route.GET(buildRequest("?avatar=logo-light"));
 
-    expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
-      imageUrl: "https://www.withmurph.ai/brand-logos/murph-logo-avatar-light.png",
-    });
+    expect(mocks.readMurphContactCardAvatarPhoto).toHaveBeenCalledWith("logo-light");
   });
 
   it("ignores the request origin when resolving the photo asset", async () => {
@@ -358,9 +382,7 @@ describe("murph contact card route", () => {
       new Request("https://evil.example.net/api/murph-contact-card?avatar=hooded"),
     );
 
-    expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
-      imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-01-sm.png",
-    });
+    expect(mocks.readMurphContactCardAvatarPhoto).toHaveBeenCalledWith("hooded");
   });
 
   it("omits the photo for the no-photo option", async () => {
@@ -368,15 +390,13 @@ describe("murph contact card route", () => {
 
     const body = await response.text();
     expect(body).not.toContain("PHOTO");
-    expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).not.toHaveBeenCalled();
+    expect(mocks.readMurphContactCardAvatarPhoto).not.toHaveBeenCalled();
   });
 
   it("falls back to the default avatar for unknown ids", async () => {
     await route.GET(buildRequest("?avatar=does-not-exist"));
 
-    expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
-      imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-02-sm.png",
-    });
+    expect(mocks.readMurphContactCardAvatarPhoto).toHaveBeenCalledWith("classic");
   });
 
   it("logs an authorized iOS webview contact-card request", async () => {

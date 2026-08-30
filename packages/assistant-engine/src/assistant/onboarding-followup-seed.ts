@@ -12,6 +12,9 @@ import {
   computeAssistantCronFirstRunAfterCurrentLocalDay,
   computeAssistantCronNextRunAt,
 } from './cron/schedule.js'
+import type {
+  AssistantCronDeliveryRouteValidationProfile,
+} from './cron/targets.js'
 
 export type MurphOnboardingFollowupSeedResult =
   | { kind: 'not-applicable' }
@@ -23,6 +26,7 @@ export async function seedMurphOnboardingFollowupAutomation(input: {
   firstOccurrenceAt?: string
   now?: Date
   route: AutomationRoute
+  routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
   stableKey: string
   vault: string
 }): Promise<AssistantCronJob | null> {
@@ -41,6 +45,9 @@ export async function seedMurphOnboardingFollowupAutomation(input: {
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
     ...(input.now === undefined ? {} : { now: input.now }),
     route: input.route,
+    ...(input.routeValidationProfile === undefined
+      ? {}
+      : { routeValidationProfile: input.routeValidationProfile }),
     schedule: resolveMurphOnboardingFollowupSchedule(input.stableKey),
     slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
     summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
@@ -54,6 +61,7 @@ export async function seedMurphOnboardingFollowupFromStartedOnboarding(
   input: {
     now?: Date
     route: AutomationRoute
+    routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
     stableKey: string
     vault: string
   },
@@ -103,6 +111,9 @@ export async function seedMurphOnboardingFollowupFromStartedOnboarding(
     firstOccurrenceAt,
     now,
     route: input.route,
+    ...(input.routeValidationProfile === undefined
+      ? {}
+      : { routeValidationProfile: input.routeValidationProfile }),
     stableKey: input.stableKey,
     vault: input.vault,
   })

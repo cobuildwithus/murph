@@ -3,11 +3,13 @@ name: Native iOS Hosted E2E
 on:
   schedule:
     - cron: "17 */6 * * *"
+  workflow_dispatch:
 
 # This trusted default-branch controller spends native-runner capacity only
 # when the latest completed schedule is not a success for current protected main.
-# A failed canary remains eligible at the next slot; an explicit workflow rerun
-# also retries the same revision immediately. Source pins live in protected main.
+# A failed canary remains eligible at the next slot. Manual recovery is limited
+# to the exact current main SHA; reruns retry that revision. Source pins live in
+# protected main.
 permissions:
   actions: read
   contents: read
@@ -29,12 +31,23 @@ jobs:
         id: select
         env:
           CURRENT_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
           GH_TOKEN: ${{ github.token }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "${CURRENT_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Schedule must identify an exact protected-main SHA."; exit 1; }
+          [[ "${CURRENT_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Controller must identify an exact protected-main SHA."; exit 1; }
+          if [[ "${EVENT_NAME}" == workflow_dispatch ]]; then
+            [[ "${EVENT_REF}" == refs/heads/main ]] || { echo "::error::Manual recovery is limited to the main branch."; exit 1; }
+            main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha // ""')"
+            [[ "${main_sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Current main did not expose an exact SHA."; exit 1; }
+            [[ "${CURRENT_SHA}" == "${main_sha}" ]] || { echo "::error::Manual recovery must target the current main SHA."; exit 1; }
+          elif [[ "${EVENT_NAME}" != schedule ]]; then
+            echo "::error::Unsupported native iOS controller event."
+            exit 1
+          fi
           previous_sha=""
           previous_conclusion=""
           if [[ "${RUN_ATTEMPT}" == 1 ]]; then
@@ -59,13 +72,13 @@ jobs:
             echo "should_run=${should_run}"
             echo "web_sha=${CURRENT_SHA}"
           } >> "${GITHUB_OUTPUT}"
-          echo "::notice::native-ios-e2e stage=schedule_admission result=${should_run}"
+          echo "::notice::native-ios-e2e stage=controller_admission result=${should_run}"
 
   production-canary:
     name: Non-destructive production native iOS canary
     needs: select-main
     if: ${{ needs.select-main.outputs.should_run == 'true' }}
-    environment: native-ios-production-canary
+    environment: native-ios-hosted-e2e
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -103,7 +116,7 @@ jobs:
         with:
           app-id: ${{ vars.NATIVE_IOS_E2E_GITHUB_APP_ID }}
           private-key: ${{ secrets.NATIVE_IOS_E2E_GITHUB_APP_PRIVATE_KEY }}
-          owner: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER }}
+          owner: ${{ github.repository_owner }}
           repositories: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
           permission-actions: write
           permission-contents: read
@@ -114,10 +127,10 @@ jobs:
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
-          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.NATIVE_IOS_E2E_VERCEL_TOKEN }}
           NATIVE_IOS_E2E_GITHUB_TOKEN: ${{ steps.ios-app-token.outputs.token }}
-          NATIVE_IOS_E2E_IOS_REPOSITORY: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER }}/${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
-          NATIVE_IOS_E2E_IOS_WORKFLOW: ${{ vars.NATIVE_IOS_E2E_IOS_WORKFLOW }}
+          NATIVE_IOS_E2E_IOS_REPOSITORY: ${{ github.repository_owner }}/${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
+          NATIVE_IOS_E2E_IOS_WORKFLOW: native-ios-hosted-e2e.yml
           PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
         shell: bash
         run: |

@@ -34,6 +34,7 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
   type HostedRuntimeAssistantAskControlRequest,
   type HostedRuntimeAssistantAskControlResponse,
+  type HostedRuntimeAssistantAskTerminalReason,
   type HostedRuntimeGroupAskResult,
   type HostedRuntimeGroupMemberAskResult,
 } from "@murphai/hosted-execution/runtime-control";
@@ -90,6 +91,9 @@ import {
 import {
   sanitizeHostedGroupTargetDisplayLabel,
 } from "./group-target-description";
+import {
+  isHostedGroupConsultRouteAvailable,
+} from "./group-membership-participants";
 
 const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-assistant-ask.request.v1";
@@ -163,7 +167,7 @@ type HostedAssistantAskAuthority =
 
 interface HostedAssistantAskRequestReadResult {
   authority: HostedAssistantAskAuthority | null;
-  terminalReason: "expired" | "unavailable" | null;
+  terminalReason: HostedRuntimeAssistantAskTerminalReason | null;
 }
 
 export function createHostedAssistantAskRequestId(input: {
@@ -313,6 +317,11 @@ async function requestHostedGroupAssistantAskWithCryptoCache(input: {
     targetRuntimeMemberId: preparedSelection.targetRuntimeMemberId,
   });
   if (!destination) {
+    return unavailableAdmission("group_route_unavailable");
+  }
+  if (!await isHostedGroupConsultRouteAvailable({
+    routeAuthority: destination.routeAuthority,
+  })) {
     return unavailableAdmission("group_route_unavailable");
   }
 
@@ -495,6 +504,9 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     return unavailableAdmission("group_route_unavailable");
   }
   const { boundDestination, routeAuthority } = destination;
+  if (!await isHostedGroupConsultRouteAvailable({ routeAuthority })) {
+    return unavailableAdmission("group_route_unavailable");
+  }
   const sourceDisplayName = await readHostedGroupContextHandoffSourceDisplayName({
     memberId: input.memberId,
     prisma,
@@ -1576,7 +1588,7 @@ function readHostedAssistantAskItemExpiresAt(
 
 function terminalHostedAssistantAskControlResult(
   action: HostedRuntimeAssistantAskControlRequest["action"],
-  terminalReason: "expired" | "unavailable",
+  terminalReason: HostedRuntimeAssistantAskTerminalReason,
 ): HostedAssistantAskControlResult {
   return {
     mailboxWake: null,
@@ -2313,7 +2325,12 @@ async function readHostedAssistantAskAuthorityTx(input: {
     return { authority: null, terminalReason: "unavailable" };
   }
   if (isHostedAssistantAskExpired(item.expiresAt ?? null, input.now)) {
-    return { authority: null, terminalReason: "expired" };
+    return {
+      authority: null,
+      terminalReason: item.contentRetiredAt === null
+        ? "expired"
+        : "content_expired",
+    };
   }
   if (
     item.dedupeKey !== input.requestId

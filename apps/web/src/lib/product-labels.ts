@@ -2194,12 +2194,17 @@ async function searchGenericProductLabels(
             data_origin_priority
           FROM ${tableSql}
           WHERE
+            -- Below the FTS cap, fts_index_matches already contains every
+            -- indexed full-text match, so this whole-catalog KNN scan can add
+            -- no candidate. Only pay for it when the bounded GIN result is
+            -- saturated and may have omitted a better nearest-name match.
+            (SELECT count(*) FROM fts_index_matches) = ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+            AND
             ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
-          -- This GiST KNN branch runs only when indexed FTS found rows. The
-          -- mutually exclusive typo branch below owns no-FTS searches.
+          -- The mutually exclusive typo branch below owns no-FTS searches.
           ORDER BY name <->>> $1::text
           LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
         ),
@@ -2217,8 +2222,7 @@ async function searchGenericProductLabels(
             data_origin_priority
           FROM name_nearest_matches
           WHERE
-            EXISTS (SELECT 1 FROM fts_index_matches)
-            AND ${stemmed ? `(
+            ${stemmed ? `(
               to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
               OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
             )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}

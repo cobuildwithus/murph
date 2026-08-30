@@ -1950,8 +1950,8 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
                 item: {
                   id: 'dyn-1',
                   type: 'dynamicToolCall',
-                  namespace: 'vault',
-                  tool: 'readSummary',
+                  namespace: 'murph',
+                  tool: 'send_progress_update',
                   status: 'completed',
                   success: true,
                   durationMs: 123,
@@ -2055,6 +2055,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       executeCodexAppServerTurn({
         onTraceEvent,
         prompt: 'diagnose usage',
+        providerRequestOrdinal: 4,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
@@ -2083,6 +2084,9 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       codexActionOutputBytesMax: 59,
       codexActionOutputBytesTotal: 149,
       codexActionOutputItemCount: 6,
+      codexActionProgressUpdateCallCount: 1,
+      codexActionProgressUpdateFirstCallElapsedMs: expect.any(Number),
+      codexActionProgressUpdateSentCount: 1,
       codexActionProviderActionCount: 3,
       codexActionSlowDurationMs: [123, 80, 60],
       codexActionSlowKinds: [
@@ -2097,7 +2101,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
           namespacePresent: true,
           outputBytesMax: 59,
           outputBytesTotal: 59,
-          tool: 'readSummary',
+          tool: 'send_progress_update',
         },
         {
           callCount: 1,
@@ -2115,6 +2119,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         },
       ],
       codexActionUsageSampleCount: 1,
+      codexActionTurnCorrelation: expect.any(Number),
     })
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('/tmp/raw')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('raw output')
@@ -2122,6 +2127,18 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('secretPath')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('thread-diagnostics')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('turn-diagnostics')
+    const completionTimingEvent = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .find((event) => {
+        const rawEvent = asRecord(event.rawEvent)
+        return rawEvent.type === 'assistant.codex.app_server_timing'
+          && rawEvent.codexTimingStage === 'turn-completed'
+      })
+    expect(
+      asRecord(completionTimingEvent?.rawEvent).codexTimingTurnCorrelation,
+    ).toBe(
+      asRecord(diagnosticEvent?.rawEvent).codexActionTurnCorrelation,
+    )
   })
 
   it('emits metadata-only Codex transport diagnostics for stream retry and fallback', async () => {
@@ -2660,37 +2677,45 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: normalizeCodexEvent(staleTokenEvent),
+      observedAtMs: 0,
       rawEvent: staleTokenEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: normalizeCodexEvent(currentTokenEvent),
+      observedAtMs: 0,
       rawEvent: currentTokenEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: rawStartedNormalized,
+      observedAtMs: 10,
       rawEvent: rawStartedEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: rawStartedNormalized,
+      observedAtMs: 10,
       rawEvent: rawStartedEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: rawCompletedNormalized,
+      observedAtMs: 70,
       rawEvent: rawCompletedEvent,
     })
     reducer.recordEvent({
       activeTurnId,
       normalizedEvent: rawCompletedNormalized,
+      observedAtMs: 70,
       rawEvent: rawCompletedEvent,
     })
 
     const trace = reducer.buildTraceEvent({
       codexThreadId: 'thread-current',
       providerActionCount: 0,
+      providerStartedAtMs: 0,
+      turnCorrelation: 1234,
       turnId: activeTurnId,
     })
     expect(trace).toMatchObject({
@@ -2703,6 +2728,8 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       codexActionOutputBytesTotal: 26,
       codexActionOutputItemCount: 1,
       codexActionOutputUnitMax: 45,
+      codexActionProgressUpdateCallCount: 0,
+      codexActionProgressUpdateSentCount: 0,
       codexActionStartedCount: 1,
       codexActionToolSummaries: [
         {
@@ -2713,11 +2740,110 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         },
       ],
       codexActionTotalUnitMax: 168,
+      codexActionTurnCorrelation: 1234,
       codexActionUsageSampleCount: 1,
     })
     expect(JSON.stringify(trace)).not.toContain('999999')
     expect(JSON.stringify(trace)).not.toContain('raw-action-id')
     expect(JSON.stringify(trace)).not.toContain('raw output')
+  })
+
+  it('records progress call timing and delivery outcomes without progress text', () => {
+    const reducer = createCodexActionDiagnosticsReducer()
+    const activeTurnId = 'turn-progress-diagnostics'
+    const events = [
+      {
+        observedAtMs: 1_200,
+        rawEvent: {
+          method: 'item/started',
+          params: {
+            item: {
+              id: 'progress-sent',
+              namespace: 'murph',
+              status: 'running',
+              tool: 'send_progress_update',
+              type: 'dynamicToolCall',
+            },
+            turnId: activeTurnId,
+          },
+        },
+      },
+      {
+        observedAtMs: 1_250,
+        rawEvent: {
+          method: 'item/completed',
+          params: {
+            item: {
+              contentItems: [{
+                text: 'progress update sent',
+                type: 'inputText',
+              }],
+              durationMs: 50,
+              id: 'progress-sent',
+              namespace: 'murph',
+              status: 'completed',
+              success: true,
+              tool: 'send_progress_update',
+              type: 'dynamicToolCall',
+            },
+            turnId: activeTurnId,
+          },
+        },
+      },
+      {
+        observedAtMs: 1_500,
+        rawEvent: {
+          method: 'item/completed',
+          params: {
+            item: {
+              contentItems: [{
+                text: 'progress update failed during best-effort delivery',
+                type: 'inputText',
+              }],
+              durationMs: 20,
+              id: 'progress-failed',
+              namespace: 'murph',
+              status: 'failed',
+              success: false,
+              tool: 'send_progress_update',
+              type: 'dynamicToolCall',
+            },
+            turnId: activeTurnId,
+          },
+        },
+      },
+    ]
+
+    for (const event of events) {
+      reducer.recordEvent({
+        activeTurnId,
+        normalizedEvent: normalizeCodexEvent(event.rawEvent),
+        observedAtMs: event.observedAtMs,
+        rawEvent: event.rawEvent,
+      })
+    }
+
+    const trace = reducer.buildTraceEvent({
+      codexThreadId: 'thread-progress-diagnostics',
+      providerActionCount: 2,
+      providerStartedAtMs: 1_000,
+      turnCorrelation: 5678,
+      turnId: activeTurnId,
+    })
+
+    expect(trace).toMatchObject({
+      codexActionProgressUpdateCallCount: 2,
+      codexActionProgressUpdateFirstCallElapsedMs: 200,
+      codexActionProgressUpdateSentCount: 1,
+      codexActionTurnCorrelation: 5678,
+    })
+    expect(
+      Number(trace?.codexActionProgressUpdateCallCount)
+      - Number(trace?.codexActionProgressUpdateSentCount),
+    ).toBe(1)
+    expect(JSON.stringify(trace)).not.toContain('best-effort delivery')
+    expect(JSON.stringify(trace)).not.toContain('thread-progress-diagnostics')
+    expect(JSON.stringify(trace)).not.toContain(activeTurnId)
   })
 
   it('builds privacy-safe runtime issues for failed Codex action events', () => {

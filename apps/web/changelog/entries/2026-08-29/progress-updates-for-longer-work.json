@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-29",
+  "order": 100,
+  "item": {
+    "id": "progress-updates-for-longer-work",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Progress updates for longer work",
+    "summary": "Murph now answers ordinary onboarding and setup questions directly, reserving early progress notes for work with several substantive checks or a longer wait.",
+    "details": "Routine context reads and one or two quick calls stay in the main reply, while longer research, document inspection, and other substantial work can still receive one useful update.",
+    "relevanceTags": ["assistant", "messaging", "onboarding"],
+    "sourcePullRequests": [2553, 2571]
+  }
+}

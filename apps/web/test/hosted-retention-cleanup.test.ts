@@ -244,6 +244,7 @@ describe("hosted retention cleanup", () => {
     expect(mailboxDeleteSql.match(/FOR UPDATE SKIP LOCKED/g)).toHaveLength(2);
     expect(queryRaw.mock.calls[0]?.slice(1)).toEqual([
       now,
+      "assistant_ask.current_sender_pending",
       new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS),
       HOSTED_RETENTION_BATCH_SIZE,
       now,

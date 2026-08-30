@@ -57,6 +57,7 @@ test("closed event months archive losslessly while the current month stays plain
   });
   assert.equal(result.archivedShardCount, 1);
   assert.equal(result.repairedShardCount, 0);
+  assert.ok(result.archivedByteCount < result.sourceByteCount);
   await assert.rejects(fs.access(path.join(vaultRoot, historical.ledgerFile)));
   await fs.access(path.join(vaultRoot, `${historical.ledgerFile}.gz`));
   await fs.access(path.join(vaultRoot, current.ledgerFile));
@@ -69,6 +70,129 @@ test("closed event months archive losslessly while the current month stays plain
     (await readJsonlRecords({ vaultRoot, relativePath: historical.ledgerFile })).length,
     1,
   );
+});
+
+test("event archiving is abortable before publication and leaves the raw shard intact", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-ledger-archive-abort");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+  const event = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-01-12T09:00:00.000Z",
+      note: "Preserve this raw event when maintenance is interrupted.",
+      title: "Interrupted archive",
+    },
+  });
+  const abortController = new AbortController();
+  const abortReason = new Error("synthetic foreground wake");
+  queueMicrotask(() => abortController.abort(abortReason));
+
+  await assert.rejects(
+    archiveClosedEventLedgerShards({
+      now: new Date("2026-02-15T12:00:00.000Z"),
+      signal: abortController.signal,
+      vaultRoot,
+    }),
+    (error: unknown) => error === abortReason,
+  );
+  await fs.access(path.join(vaultRoot, event.ledgerFile));
+  await assert.rejects(fs.access(path.join(vaultRoot, `${event.ledgerFile}.gz`)));
+});
+
+test("a long malformed closed event shard does not starve later valid months", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-ledger-archive-blocked");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+  const malformed = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-01-12T09:00:00.000Z",
+      note: "This shard will be made invalid.",
+      title: "Malformed month",
+    },
+  });
+  const valid = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-02-12T09:00:00.000Z",
+      note: "This later month should still archive.",
+      title: "Valid month",
+    },
+  });
+  const malformedLine = "x".repeat(16 * 1024 * 1024);
+  await fs.appendFile(path.join(vaultRoot, malformed.ledgerFile), `${malformedLine}\n`);
+
+  const result = await archiveClosedEventLedgerShards({
+    now: new Date("2026-03-15T12:00:00.000Z"),
+    signal: AbortSignal.timeout(5_000),
+    vaultRoot,
+  });
+
+  assert.equal(result.archivedShardCount, 1);
+  assert.equal(result.blockedShardCount, 1);
+  await fs.access(path.join(vaultRoot, malformed.ledgerFile));
+  await assert.rejects(fs.access(path.join(vaultRoot, `${malformed.ledgerFile}.gz`)));
+  await assert.rejects(fs.access(path.join(vaultRoot, valid.ledgerFile)));
+  await fs.access(path.join(vaultRoot, `${valid.ledgerFile}.gz`));
+}, 30_000);
+
+test("event archiving leaves differing representations intact and continues later months", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-ledger-archive-conflict");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+  const conflicting = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-01-12T09:00:00.000Z",
+      note: "This month will retain two different representations.",
+      title: "Conflicting month",
+    },
+  });
+  await archiveClosedEventLedgerShards({
+    now: new Date("2026-02-01T00:00:00.000Z"),
+    vaultRoot,
+  });
+  const conflictRawPath = path.join(vaultRoot, conflicting.ledgerFile);
+  const conflictArchivePath = `${conflictRawPath}.gz`;
+  const conflictArchiveBefore = await fs.readFile(conflictArchivePath);
+  const conflictingRows = gunzipSync(conflictArchiveBefore)
+    .toString("utf8")
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  assert.ok(conflictingRows[0]);
+  conflictingRows[0].title = "Different plain representation";
+  await fs.writeFile(
+    conflictRawPath,
+    `${conflictingRows.map((row) => JSON.stringify(row)).join("\n")}\n`,
+  );
+  const conflictRawBefore = await fs.readFile(conflictRawPath);
+
+  const valid = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-02-12T09:00:00.000Z",
+      note: "This later valid month should still archive.",
+      title: "Valid later month",
+    },
+  });
+
+  const result = await archiveClosedEventLedgerShards({
+    now: new Date("2026-03-01T00:00:00.000Z"),
+    vaultRoot,
+  });
+
+  assert.equal(result.archivedShardCount, 1);
+  assert.equal(result.blockedShardCount, 1);
+  assert.equal(result.repairedShardCount, 0);
+  assert.deepEqual(await fs.readFile(conflictRawPath), conflictRawBefore);
+  assert.deepEqual(await fs.readFile(conflictArchivePath), conflictArchiveBefore);
+  const validRawPath = path.join(vaultRoot, valid.ledgerFile);
+  await assert.rejects(fs.access(validRawPath));
+  await fs.access(`${validRawPath}.gz`);
 });
 
 test("backdated writes and hosted replay amend archived event shards exactly once", async () => {

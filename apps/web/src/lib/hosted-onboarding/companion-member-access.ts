@@ -26,6 +26,12 @@ import {
   type HostedSignupNotificationContextV1,
 } from "./signup-notification-context";
 import {
+  readHostedMemberMessagingSetupState,
+} from "./hosted-member-store";
+import {
+  isHostedMemberMessagingSetupRequired,
+} from "./messaging-state";
+import {
   isHostedSignupNotificationEmailConfigured,
 } from "./signup-notification-email-config";
 import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
@@ -95,6 +101,39 @@ export async function ensureHostedCompanionMemberId(input: {
         memberId: existingMember.id,
         prisma,
       });
+      const messagingState = await readHostedMemberMessagingSetupState({
+        memberId: existingMember.id,
+        prisma,
+      });
+      if (
+        isHostedMemberMessagingSetupRequired({
+          identity: messagingState?.identity ?? null,
+          routing: messagingState?.routing ?? null,
+        })
+        && (input.identity.phone || input.identity.telegram)
+      ) {
+        // Existing active members normally stay on the read-only fast path.
+        // A member whose live Privy identity now includes phone or Telegram is
+        // the narrow exception: repeating canonical completion synchronizes
+        // the newly linked account before readiness is projected again.
+        const completion = await completeHostedPrivyVerification({
+          identity: input.identity,
+          now,
+          prisma,
+          ...(input.timeZone ? { timeZone: input.timeZone } : {}),
+        }).catch((error: unknown) => {
+          throw remapHostedPrivyCompletionLagError(error);
+        });
+        if (completion.messagingSetupRequired) {
+          throw hostedOnboardingError({
+            code: "PRIVY_ACCOUNT_NOT_READY",
+            httpStatus: 409,
+            message:
+              "Your verified messaging account has not reached Murph yet. Wait a moment and try again.",
+            retryable: true,
+          });
+        }
+      }
       await requireHostedCompanionActivationRuntimeWake({
         memberId: existingMember.id,
         prisma,

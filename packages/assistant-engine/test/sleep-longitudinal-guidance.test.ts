@@ -303,7 +303,10 @@ describe('plan ownership and closeout guidance', () => {
       '`murph.automation` action `reconcile`',
     )
     expect(automation).toContain(
-      'vault-cli automation list --support-series-id habit:<regimenId>',
+      'vault-cli automation list --support-series-id habit:<regimenId> --compact',
+    )
+    expect(automation).toContain(
+      'vault-cli automation show <automationId>` only when a fact needed for the reconciliation decision is absent from that compact inventory',
     )
     expect(closeout).toContain(
       'reconcile it with an empty desired-id list to archive the whole series',

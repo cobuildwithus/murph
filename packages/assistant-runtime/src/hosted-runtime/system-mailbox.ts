@@ -4,8 +4,11 @@ import path from "node:path";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
+  extractHostedAssistantNotificationRedactedDetails,
+  isHostedAssistantNotificationValidationFailureReason,
   readHostedRuntimeSafeErrorText,
   sanitizeHostedExecutionStructuredLogText,
+  type HostedAssistantNotificationValidationFailureReason,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -96,6 +99,8 @@ export type {
 
 export type HostedSystemMailboxCheckpointPreparation =
   | {
+      assistantNotificationValidationFailureReason?:
+        HostedAssistantNotificationValidationFailureReason;
       attemptCount: number;
       errorCode: string | null;
       errorMessage: string | null;
@@ -569,7 +574,15 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
             wake: prepared.wake,
           })
         : null;
+    const assistantNotificationValidationFailureReason =
+      prepared.wake.kind === "assistant.notification.requested"
+      && normalized.code === "ASSISTANT_NOTIFICATION_INVALID_RESPONSE"
+        ? readHostedAssistantNotificationValidationFailureReason(error)
+        : null;
     return {
+      ...(assistantNotificationValidationFailureReason
+        ? { assistantNotificationValidationFailureReason }
+        : {}),
       attemptCount: prepared.attemptCount,
       errorCode: normalized.code,
       errorMessage: normalized.message,
@@ -601,6 +614,16 @@ export function resolveHostedBrowserVaultRefreshAttempt(
       && item.lastErrorCode !== HOSTED_VAULT_SHARE_PROJECTION_FAILED_ERROR_CODE
     ? "retry"
     : "initial";
+}
+
+function readHostedAssistantNotificationValidationFailureReason(
+  error: unknown,
+): HostedAssistantNotificationValidationFailureReason | null {
+  const reason = extractHostedAssistantNotificationRedactedDetails(error)
+    ?.assistantNotificationValidationFailureReason;
+  return isHostedAssistantNotificationValidationFailureReason(reason)
+    ? reason
+    : null;
 }
 
 function shouldResumeHostedBrowserVaultRecordingItemReadOnly(

@@ -24,6 +24,7 @@ interface Invocation {
     mode: "checkers" | "single-threaded";
     checkers: number | null;
     builders: number | null;
+    packageBoundary: "unchecked" | null;
   };
 }
 
@@ -31,6 +32,7 @@ interface RunnerModule {
   buildTypeScriptInvocation(lane: Lane, args: string[], env?: Env): Invocation;
   containsBuildFlag(args: string[]): boolean;
   formatTypeScriptBudget(budget: Invocation["budget"]): string;
+  isSourceResolvedPackageTypecheck(args: string[]): boolean;
   parseTypeScriptRunnerArgs(argv: string[]): { lane: Lane; args: string[] };
   resolveRootTypeScriptCompiler(repoRoot?: string): {
     compilerPath: string;
@@ -255,6 +257,32 @@ describe("TypeScript runner arguments", () => {
     );
     expect(runner.formatTypeScriptBudget(sharedBuild.budget)).toBe(
       "[typescript] lane=workspace-build profile=shared mode=checkers checkers=1 builders=2",
+    );
+  });
+
+  it("reports when a source-resolved package typecheck leaves the build boundary unchecked", () => {
+    const sourceTypecheck = runner.buildTypeScriptInvocation(
+      "package",
+      ["-p", "tsconfig.typecheck.json"],
+    );
+    const nestedSourceTypecheck = runner.buildTypeScriptInvocation(
+      "package",
+      ["-b", "packages/query/tsconfig.typecheck.json"],
+    );
+    const packageBuild = runner.buildTypeScriptInvocation(
+      "package",
+      ["-b", "tsconfig.json"],
+    );
+
+    expect(sourceTypecheck.budget.packageBoundary).toBe("unchecked");
+    expect(nestedSourceTypecheck.budget.packageBoundary).toBe("unchecked");
+    expect(packageBuild.budget.packageBoundary).toBeNull();
+    expect(runner.isSourceResolvedPackageTypecheck([
+      "--project",
+      "packages/query/tsconfig.typecheck.json",
+    ])).toBe(true);
+    expect(runner.formatTypeScriptBudget(sourceTypecheck.budget)).toContain(
+      "package-boundary=unchecked",
     );
   });
 });

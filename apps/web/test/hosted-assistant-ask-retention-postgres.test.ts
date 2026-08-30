@@ -52,6 +52,7 @@ describe.skipIf(!runPostgresProof)(
       memberIds.push(memberId);
       const requestId = `aask_req_retention_${suffix}`;
       const completionId = `aask_done_retention_${suffix}`;
+      const createdAt = new Date("2026-07-16T12:00:00.000Z");
       const expiresAt = new Date("2026-07-16T12:10:00.000Z");
       const cleanupAt = new Date("2026-07-16T13:00:00.000Z");
 
@@ -61,6 +62,7 @@ describe.skipIf(!runPostgresProof)(
       await client.hostedMailboxItem.createMany({
         data: [
           {
+            createdAt,
             dedupeKey: requestId,
             expiresAt,
             id: requestId,
@@ -73,6 +75,7 @@ describe.skipIf(!runPostgresProof)(
             userId: memberId,
           },
           {
+            createdAt,
             dedupeKey: completionId,
             expiresAt,
             id: completionId,
@@ -108,6 +111,7 @@ describe.skipIf(!runPostgresProof)(
       const retiredItems = await client.hostedMailboxItem.findMany({
         select: {
           contentRetiredAt: true,
+          id: true,
           payloadInlineCiphertext: true,
           payloadRef: true,
         },
@@ -117,6 +121,13 @@ describe.skipIf(!runPostgresProof)(
       expect(retiredItems).toEqual(expect.arrayContaining([
         expect.objectContaining({
           contentRetiredAt: cleanupAt,
+          id: requestId,
+          payloadInlineCiphertext: null,
+          payloadRef: null,
+        }),
+        expect.objectContaining({
+          contentRetiredAt: cleanupAt,
+          id: completionId,
           payloadInlineCiphertext: null,
           payloadRef: null,
         }),
@@ -149,6 +160,7 @@ describe.skipIf(!runPostgresProof)(
           tx,
         })
       )).resolves.toBeUndefined();
+
     });
 
     it("records policy non-replies without advancing across a younger conversation gap", async () => {

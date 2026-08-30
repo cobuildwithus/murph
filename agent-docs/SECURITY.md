@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-27
+Last verified: 2026-08-29
 
 ## Non-Negotiable Rules
 
@@ -663,6 +663,20 @@ Last verified: 2026-08-27
   verifier is its postdeploy rollback floor: a pre-floor retry must fail before
   database authority is exposed, and recovery must roll forward rather than use
   an older workflow that lacks the complete-domain proof.
+- The Linq production-canary reset is an internal fixed-target mutation, not a
+  general test-account API. Vercel alone configures the one normalized Photon
+  sender and a dedicated reset bearer; the request accepts no path, query, or
+  body selector. Authentication uses constant-time comparison before input
+  inspection. The admission owner takes its existing version-independent
+  contact lock, derives event ids only from that contact's key-rotation-aware
+  budget rows, and asks the delivery-ledger owner to remove only compare-and-
+  delete-proven `attempted` instant-first-turn claims with no provider,
+  receipt, child-message, or encrypted-payload evidence. Completed rows remain
+  evidence; provider-dispatch or ambiguous rows fail the transaction closed.
+  The canonical account-deletion owner then removes the canary member. The
+  response contains booleans and counts only, and no production log or CI
+  artifact may contain either phone number, credentials, message text, chat or
+  message ids, or provider responses.
 - Privy completion with an ambient Murph app session is same-member reauthentication, not account switching. The fresh Privy user id and resolved member id must both match that app session before web issues a replacement session; a member who intends to switch accounts must end the current app session first.
 - Every interactive authentication completion that may mutate Privy-derived identity, sender, routing, or messaging state must perform a bounded live-provider read for the exact principal, including new-member creation, changed-principal recovery, exact-principal consent retry, and lost-response retry. A changed principal may replace an existing member binding only when that live principal still owns a verified email resolving uniquely to the same member's durable verified-email authorization. The same live identity snapshot must supply every later identity, verified-email, sender-authority, routing, and messaging-state mutation in that completion; a bearer-token snapshot is candidate-lookup input, not replacement or downstream write authority. Every non-best-effort live binding, including secondary Telegram ownership, must be checked and written in the same transaction as the principal replacement so a split credential rolls the entire completion back. An exact already-bound principal remains the member candidate during an interactive retry; a different bearer or live phone cannot redirect or reject that retry. Interactive completion preserves a non-null stored phone whenever the live phone differs, and only the settings phone-link/transfer owner may replace it. Same-phone verification may refresh, and an absent phone may be filled only when the verified bearer and live projection agree and no other member owns that phone; optional enrichment never vetoes an exact-principal retry. Missing, stale, or mismatched provider state, phone-only changed-principal matches, credentials split across members on unbound or changed-principal attempts, and non-interactive callers such as App Review operations must continue to fail closed. A non-interactive split-phase caller that prepares this live identity before database checkout must bind it to the exact nullable preflight member owner: the existing transactional resolver rejects any member-existence drift, and a preflight new-member path consults the existing pending-deletion owner before provider or KMS preparation.
 - Settings account linking must use Privy's link or update operation for the exact app-session Privy principal; login operations must not stand in for linking. Settings mounts one page-level Privy provider and opens the provider flow directly from the user action. Normal provider success syncs only the exact returned phone. Privy's `account_transfer_required` callback is a non-terminal handoff into its transfer UI, so a later provider-flow exit is only a wake-up: web management-reads the same Privy user and persists only a proven change from the phone observed immediately before the provider flow. An unchanged phone is a quiet cancellation, an absent intermediate replacement remains retryable, and an ambiguous Murph save retries the same expectation without reopening Privy. On remount, a phone present on the exact Privy principal but absent or different in the Murph projection is reconciled as that exact-phone expectation instead of reopening Privy. When Privy transfers a phone from another Privy principal, automatic reconciliation additionally requires a typed provider not-found for that exact source principal and two exact, transactionally locked proofs that the source Murph member is either the pristine `not_started` signup scaffold or the untouched legacy automatic Pulse-trial scaffold. A member with a starter grant is active product state and is never disposable through this transfer path. The allowlist includes only the known system-created billing, routing, workspace, mailbox, counter, crypto, consent, unused web-invite, and same-Privy web-session shapes; any member activity, product state, device state, connected-app or clinical state, credits, referrals, shares, feedback, phone-bound invitation/outreach, or ambiguous state fails closed to support. Murph first commits a source suspension fence, then the existing account-deletion owner performs provider and billing cleanup. Its final transaction management-reads the target Privy principal immediately beforehand, takes the phone lock before sorted source/target member locks, revalidates the exact disposable scaffold, persists the cleanup receipt, deletes that fully proven scaffold, and attaches the phone plus channel projection to the target atomically. General or active member data is never auto-deleted because any such state fails the disposable-source gate.
@@ -1087,6 +1101,15 @@ Last verified: 2026-08-27
   authorize a send. Conversely, expired detached-control replay re-hands a
   still-valid private effect instead of appending another group terminal; only
   its provider-entry authority may convert that effect to the fixed fallback.
+  A current-sender `assistant.ask.requested` keeps its encrypted wake after the
+  ten-minute request expiry only while its system sequence remains ahead of the
+  durable consumed watermark, so Web can still persist that terminal result.
+  The mailbox's 14-day privacy deadline remains absolute. If that deadline
+  retires the wake first, Web returns the explicit `content_expired` terminal
+  reason and the runtime may retire only that unrecoverable request; ordinary
+  `expired` or `unavailable` responses still cannot substitute for the required
+  current-sender completion. Other Assistant Ask targets retain their ordinary
+  expiry behavior.
 - Rolling compatibility is legacy-facing only. New callers use one strict body
   marker. New Web rejects deployed unmarked old `ask_current_sender` requests:
   the old runtime cannot prove the required exact-room notice happened before
@@ -1154,18 +1177,23 @@ Last verified: 2026-08-27
 - Tool authority for the reserved support-escalation shape exists only for an explicit Murph human-support request in a verified private direct conversation. That request authorizes one account-linked call whose summary begins with the exact reserved prefix and continues with Murph's concise, bounded, de-identified product-only explanation in its own words. The model-facing contract forbids copied or quoted conversation text and every private category forbidden for ordinary feedback; shared parsing and Web persistence apply the same deterministic sanitizer before recording. The linked marker remains fixed server-authored metadata while the explanation is stored in a separate anonymous detail row. The explicit human-support request also authorizes the paired Web owner to disclose that sanitized explanation beside the internal member id to the dedicated support recipient. This intentionally accepts the same residual semantic-redaction risk described above for the explanation while never treating raw conversation text as disclosure authority. The anonymous explanation also enters the configured general product-feedback digest without the linked marker or member id and follows ordinary anonymous-feedback retention after account deletion; the linked marker is deleted with the account. Those existing audience and retention owners preserve de-identified product triage without adding another state or lifecycle path. Every value under the exact reserved prefix must enter the support owner; empty, wrong-kind, changelog-linked, group, and unverified shapes fail closed before persistence. A generic bug handoff does not authorize the reserved shape. The support address remains opt-in and appears only when explicitly requested.
 - The reserved verified-private support-escalation shape is the narrow internal-email exception to ordinary feedback disclosure. Web persists one fixed server-authored member-linked marker and one anonymous row containing only the prefix-stripped sanitized explanation, then may pair that read-back explanation with the callback-bound member id and internal feedback id in the immediate support alert. Both rows must validate before provider entry. Replay treats the first stored anonymous explanation as authority and reproduces the same body and provider idempotency key even if a later callback rewords the issue; missing, member-linked, empty, unsanitized, overlong, or still-prefixed stored detail fails before Resend. The alert remains plain text, fixed-recipient, daily-capped, and forbidden from including raw or quoted member text or any private category prohibited by the model-facing contract. The explicit request authorizes only Murph's sanitized de-identified product explanation beside identity, with the same documented residual semantic-redaction risk; it never authorizes transcript disclosure.
 - The internal product-feedback digest may disclose only the fixed
-  server-owned kind labels, truthful grouped per-kind counts, and the
+  server-owned kind and neutral ordinal member-section labels, truthful grouped
+  per-kind counts, and the
   capture-scrubbed de-identified product-feedback summaries of the three
-  allowlisted product-feedback kinds to the dedicated configured operator
-  recipient list through the existing Resend transport. The disclosure
-  boundary for summary text is the capture side: the recording path stores
-  only a bounded de-identified product-only summary written under the
-  model-facing contract and passed through the shared deterministic redaction
-  pass, so the digest renders stored summaries verbatim and adds nothing else.
-  Its bounded, deterministically ordered row query must select only the kind
-  and summary columns, its count aggregate groups only by kind, and neither
-  may read any member identifier, internal feedback id, changelog metadata, or
-  any other private row content. The cron route must retain the shared
+  allowlisted kinds to the dedicated configured operator recipient list
+  through the existing Resend transport. The row read may use Web's existing
+  server-controlled member id only as an in-memory grouping key; that id must
+  not enter the email body, and the digest must not read the member relation,
+  contact data, or infer a human from a synthetic group runtime. Unlinked
+  groupchat and truly anonymous rows share one final section so the email does
+  not misattribute either to a person. The disclosure boundary for summary
+  text is the capture side: the recording path stores only a bounded de-identified product-only
+  summary written under the model-facing contract and passed through the
+  shared deterministic redaction pass, so the digest renders stored summaries
+  verbatim. Its bounded, deterministically ordered row query must select only
+  kind, member id, and summary; its count aggregate groups only by kind; and
+  neither may read an internal feedback id, changelog metadata, or any other
+  private row content. The cron route must retain the shared
   timing-safe Vercel bearer check before any database read, missing
   configuration must fail before that read, and recipient addresses must
   remain environment-held and absent from logs.
@@ -1371,9 +1399,14 @@ locally readable.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
 - Native iOS and Android public controllers are protected-main production
-  canaries only. They run on staggered six-hour schedules, admit no PR,
-  deployment-status, or manual event, and own no database, Privy, Junction,
-  custom-environment deployment, or identity-reset authority. Reviewed private
+  canaries only. They run on staggered six-hour schedules and admit no PR or
+  deployment-status event. Manual recovery must name `refs/heads/main` at the
+  exact current `main` SHA before protected environment work. The controllers
+  own no database, Privy, Junction, custom-environment deployment, or
+  identity-reset authority. The iOS controller attaches the existing
+  `native-ios-hosted-e2e` environment but passes only its repository-scoped App
+  private key and production-alias Vercel token to controller steps; legacy
+  database and provider secrets are not passed to controller processes. Reviewed private
   source refs and SHAs live in `.github/native-hosted-e2e-controller.json` so a
   source rotation must pass ordinary protected-main review. Each controller
   proves the policy tag is an immutable lightweight tag resolving to the exact
@@ -1412,18 +1445,6 @@ locally readable.
   must attach that environment and may call the hook only for the exact current
   protected `main` commit after required push CI passes.
 - Resend-backed hosted signup welcome email must keep `RESEND_API_KEY` and sender identity in environment variables only, send a plain-text-only body, claim the durable per-member welcome-attempt marker before the provider call, keep the stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata such as status/code. The optional internal signup notification must also keep recipients in environment variables only, use a plain-text-only body, claim its own durable per-member attempt marker before the provider call, keep a separate stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata. Its optional request context may contain only a schema-closed server timestamp, validated IANA time zone, closed signup surface, and bounded advisory network city/region/country values; Web must encrypt it with the member control root, must not retain IP address, coordinates, or postal data, and must label the emailed location as approximate. Reads must stop disclosing the context at its 24-hour expiry, and the existing hourly hosted-retention owner must clear expired or missing-expiry ciphertext through the indexed bounded sweep. The database must clear both ciphertext and expiry for every durable attempt claim, including rollback-runner claims, and prevent later writes from restoring context after an attempt. Unreadable live optional context must degrade to the context-free formatter rather than suppress the durable attempt claim or provider path. A batch activation without exact per-member provenance must omit source rather than infer it. The notification must not read or include member email addresses or phone numbers, the member ID, or provider event identifiers. Resend-backed subscription cancellation feedback email must use the same env-only API key/sender configuration, send plain text only, rely on the existing Stripe event receipt for retry ownership until completion, store a receipt-local sent marker only after provider success so later receipt retries do not resend, use a subscription-scoped Resend idempotency key as provider replay defense, and log only sanitized provider metadata. A Stripe-collected checkout email may be stored only as an encrypted unverified email hint plus transactional welcome and cancellation-feedback recipient; do not use it for hosted account lookup, direct-public sender authorization, direct-public start instructions, or email-linked channel state until Privy verifies it. Later successful Stripe payments must not re-run activation welcome side effects.
-- The public Vercel anomaly webhook must keep
-  `HOSTED_WEB_VERCEL_ALERT_WEBHOOK_SECRET` environment-only and verify the
-  exact bounded raw body against the bare hexadecimal `x-vercel-signature`
-  HMAC-SHA1 value with a constant-time comparison before JSON parsing or
-  Resend entry. Missing configuration or invalid authentication fails closed.
-  Its plain-text operational email may contain only bounded project slug,
-  timestamps, alert title/type/metric/unit, aggregate count, baseline average,
-  standard deviation, z-score, threshold, and an allowlisted Vercel
-  observability URL. It must not email or log the raw webhook body, provider
-  account/project/group/event/alert ids, arbitrary formatted values, request
-  data, member data, credentials, or provider prose outside those bounded
-  display fields.
 - Resend-backed Stripe failure alerts must use only the environment-owned shared
   operational sender, recipient allowlist, and API key. Their plain-text body
   may include only bounded operation/event types, sanitized error tokens and

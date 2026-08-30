@@ -44,6 +44,8 @@ export type HostedMemberAssistantNotificationRoute =
 
 type HostedMemberAssistantNotificationRouteInput = {
   channel?: "linq" | "telegram";
+  emailAddress?: string | null;
+  emailLookupKey?: string | null;
   linqChatId: string | null;
   linqContactLookupKey?: string | null;
   linqRecipientPhone?: string | null;
@@ -77,8 +79,8 @@ export function resolveHostedMemberMessagingState(input: {
 
   return {
     // Preserve the historical chat-specific meaning used by the dashboard.
-    // Verified email satisfies onboarding readiness below, but it does not
-    // imply that a Linq or Telegram conversation thread already exists.
+    // Verified email remains a delivery route, but it does not imply that a
+    // Linq or Telegram conversation thread already exists.
     hasDirectMessagingChannel: hasLinq || hasTelegram,
     hasEmail,
     hasLinq,
@@ -98,12 +100,10 @@ export function isHostedMemberMessagingSetupRequired(input: {
 }): boolean {
   const messaging = resolveHostedMemberMessagingState(input);
 
-  // Verified email is already a real Murph route. A linked Telegram account
-  // also completes setup even before its first inbound thread exists: the
-  // member has told us how to reach them, while delivery remains an independent
-  // concern surfaced as telegramAwaitingInbound.
-  return !messaging.hasEmail
-    && !messaging.hasDirectMessagingChannel
+  // Messaging setup deliberately requires a conversational phone or Telegram
+  // identity. Verified email remains available for authentication and fallback
+  // delivery, but it no longer skips this onboarding step.
+  return !messaging.hasDirectMessagingChannel
     && !messaging.telegramAwaitingInbound;
 }
 
@@ -221,6 +221,34 @@ export function resolveHostedMemberAssistantNotificationRoute(
         identifierBlind,
         input.messaging.telegramTarget,
       ),
+      threadIsDirect: true,
+    };
+  }
+
+  const emailAddress = normalizeMessagingIdentity(input.emailAddress);
+  const emailLookupKey = normalizeMessagingIdentity(input.emailLookupKey);
+  if (
+    input.channel !== "linq"
+    && input.channel !== "telegram"
+    && emailAddress
+    && emailLookupKey
+  ) {
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: emailLookupKey,
+      userId: input.memberId,
+    });
+    return {
+      actorId: null,
+      channel: "email",
+      delivery: {
+        kind: "explicit",
+        target: emailAddress,
+      },
+      identityId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        emailLookupKey,
+      ),
+      threadId: null,
       threadIsDirect: true,
     };
   }

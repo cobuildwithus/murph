@@ -1423,6 +1423,47 @@ describe("hosted detached assistant ask controller", () => {
       await removeVaultRoot(vaultRoot);
     }
   });
+
+  test("dequeues a content-expired current-sender request without starting Codex", async () => {
+    const vaultRoot = await createVaultRoot();
+    const executeAsk = vi.fn();
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          currentSender: true,
+          eventId: "ask_event_content_expired",
+          itemId: "item_content_expired",
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request() {
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "content_expired",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      });
+      await controller.closeAndRequeue();
+      assert.equal(executeAsk.mock.calls.length, 0);
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
 });
 
 function createPendingAsk(input: {

@@ -400,6 +400,10 @@ interface JunctionDailyTimeseriesWindow {
   windowStart: string;
 }
 
+interface JunctionHistoricalResourceJobWorkBudget {
+  startedOwnerUnits: number;
+}
+
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
 const JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY = "junctionProfileSummaryCheckedAt";
 const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION = 2;
@@ -621,6 +625,12 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SETUP_TTL_MS = 30 * 60_000;
 const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
+// The elapsed/foreground predicate remains the earlier stop. This independent
+// request-local bound catches cheap historical work that would otherwise keep
+// starting canonical day owners until the outer deadline. One claimed job may
+// start at most 16 such owners; resource record/cardinality limits and the
+// client's collection attempt, page, and timeout limits remain the inner bound.
+const JUNCTION_HISTORICAL_RESOURCE_JOB_MAX_OWNER_UNITS = 16;
 // A date-only provider query can contain source-local records from UTC-12.
 // Delay calendar-day ownership until that date has closed in every admitted
 // civil offset instead of treating UTC midnight as globally complete.
@@ -3054,6 +3064,8 @@ export function createJunctionDeviceSyncProvider(
           }
         }
         const timeseriesPolicy = resolveJunctionTimeseriesResourcePolicy(effectiveResource);
+        const historicalResourceJobWorkBudget =
+          createJunctionHistoricalResourceJobWorkBudget(job);
         if (JUNCTION_DENSE_FIDELITY_RESOURCE_SET.has(effectiveResource)) {
           const dailyImport = await importTimeseriesDailyAggregateSnapshots(
             context,
@@ -3063,6 +3075,8 @@ export function createJunctionDeviceSyncProvider(
             skippedOptionalResources,
             [effectiveResource],
             sourceProviderSlug,
+            undefined,
+            historicalResourceJobWorkBudget,
           );
           if (dailyImport.yieldedAt) {
             return withJunctionSkippedResourceMetadata(
@@ -3105,6 +3119,7 @@ export function createJunctionDeviceSyncProvider(
             sourceProviderSlug,
             completedWorkoutStreamIdentities,
             job.payload.workoutStreamEmptySeen === true,
+            historicalResourceJobWorkBudget,
           );
           const result = withJunctionSkippedResourceMetadata(
             context,
@@ -3191,6 +3206,7 @@ export function createJunctionDeviceSyncProvider(
               ? "connected"
               : undefined,
           },
+          historicalResourceJobWorkBudget,
         );
         const calendarRefreshJobs =
           JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(effectiveResource)
@@ -4225,6 +4241,7 @@ export function createJunctionDeviceSyncProvider(
     resources: readonly string[],
     sourceProviderSlug?: string | null,
     options: JunctionPreciseTimeseriesImportOptions = {},
+    historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget,
   ): Promise<JunctionPreciseTimeseriesImportResult> {
     const accumulatedTimeseries: Record<string, unknown[]> = {};
     let acceptedProviderRecordCount = 0;
@@ -4250,6 +4267,15 @@ export function createJunctionDeviceSyncProvider(
     );
     for (const [index, window] of preciseWindows.entries()) {
       if (context.shouldYield?.()) {
+        fetchComplete = false;
+        yieldedAt = window.windowStart;
+        break;
+      }
+      if (
+        !tryStartJunctionHistoricalResourceJobOwnerUnit(
+          historicalResourceJobWorkBudget,
+        )
+      ) {
         fetchComplete = false;
         yieldedAt = window.windowStart;
         break;
@@ -4537,6 +4563,7 @@ export function createJunctionDeviceSyncProvider(
     resources?: readonly string[],
     sourceProviderSlug?: string | null,
     emptySparseCalendarSource?: Omit<ProviderSparseCalendarTarget, "dayKey">,
+    historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget,
   ): Promise<JunctionTimeseriesImportResult> {
     const requestedResources = resources ?? timeseriesResources;
     const globallyClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, context.now);
@@ -4555,6 +4582,16 @@ export function createJunctionDeviceSyncProvider(
           );
       if (windowResources.length === 0) {
         continue;
+      }
+      if (
+        !tryStartJunctionHistoricalResourceJobOwnerUnit(
+          historicalResourceJobWorkBudget,
+        )
+      ) {
+        return {
+          appliedDailyAggregateResourceIds: [...appliedDailyAggregateResourceIds],
+          yieldedAt: window.windowStart,
+        };
       }
       const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
       const timeseries = await fetchTimeseriesSnapshots(
@@ -4677,6 +4714,7 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
     completedWorkoutStreamIdentities: ReadonlySet<string> = new Set(),
     workoutStreamEmptySeen = false,
+    historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget,
   ): Promise<JunctionDailyTimeseriesImportResult> {
     let resumeWorkoutStreamIdentities = new Set(completedWorkoutStreamIdentities);
     let madeProgress = false;
@@ -4695,6 +4733,17 @@ export function createJunctionDeviceSyncProvider(
           };
         }
         context.throwIfAborted?.();
+      }
+      if (
+        !tryStartJunctionHistoricalResourceJobOwnerUnit(
+          historicalResourceJobWorkBudget,
+        )
+      ) {
+        return {
+          workoutStreamCursor,
+          workoutStreamEmptySeen,
+          yieldedAt: window.windowStart,
+        };
       }
 
       if (resource === "workout_stream") {
@@ -11435,6 +11484,37 @@ function isJunctionDataEvent(eventType: string): boolean {
 
 function isJunctionHistoricalDataEvent(eventType: string): boolean {
   return eventType.startsWith("historical.data.");
+}
+
+function createJunctionHistoricalResourceJobWorkBudget(
+  job: DeviceSyncJobRecord,
+): JunctionHistoricalResourceJobWorkBudget | undefined {
+  const eventType = normalizeString(job.payload.eventType);
+  if (
+    job.payload.historicalBackfill !== true
+    && (!eventType || !isJunctionHistoricalDataEvent(eventType))
+  ) {
+    return undefined;
+  }
+
+  return { startedOwnerUnits: 0 };
+}
+
+function tryStartJunctionHistoricalResourceJobOwnerUnit(
+  budget: JunctionHistoricalResourceJobWorkBudget | undefined,
+): boolean {
+  if (!budget) {
+    return true;
+  }
+  if (
+    budget.startedOwnerUnits
+      >= JUNCTION_HISTORICAL_RESOURCE_JOB_MAX_OWNER_UNITS
+  ) {
+    return false;
+  }
+
+  budget.startedOwnerUnits += 1;
+  return true;
 }
 
 function isJunctionHistoricalPullCompletedWebhookData(

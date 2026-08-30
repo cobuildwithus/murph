@@ -178,6 +178,89 @@ test("contact card picker fills the mobile viewport and keeps safe-area actions"
   expect(markup).toContain("safe-area-inset-bottom");
 });
 
+test("contact card picker keeps a failed direct download open and retryable", async () => {
+  const fetchMock = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        error: {
+          code: "MURPH_CONTACT_CARD_PHOTO_UNAVAILABLE",
+          message: "Murph's contact photo is temporarily unavailable. Try saving the card again.",
+          retryable: true,
+        },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 503,
+      }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ claim: "direct.retry.claim" }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("navigator", {
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 26_5 like Mac OS X) AppleWebKit/605.1.15 Version/26.5 Mobile/15E148 Safari/604.1",
+  });
+  const onAddToContacts = vi.fn();
+  const onOpenChange = vi.fn();
+  const props = {
+    initialAvatarId: "rancher",
+    onAddToContacts,
+    onOpenChange,
+    open: true,
+  };
+  const rendered = await renderClientComponent(
+    <MurphContactCardPicker {...props} />,
+    {
+      location: {
+        host: "app.example.com",
+        href: "https://app.example.com/settings",
+        origin: "https://app.example.com",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    const firstAttempt = findButton(rendered.container, "Add Murph to Contacts");
+    assert.ok(firstAttempt);
+
+    await act(async () => {
+      firstAttempt.click();
+      await flushPromises();
+    });
+
+    expect(rendered.container.querySelector("[role='alert']")?.textContent)
+      .toContain("contact card is temporarily unavailable");
+    expect(rendered.container.querySelector("[data-drawer-open='true']"))
+      .not.toBeNull();
+    expect(onAddToContacts).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(rendered.assign).not.toHaveBeenCalled();
+
+    const retry = findButton(rendered.container, "Add Murph to Contacts");
+    assert.ok(retry);
+    expect(retry.disabled).toBe(false);
+
+    await act(async () => {
+      retry.click();
+      await flushPromises();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(rendered.assign).toHaveBeenCalledWith(
+      "/api/murph-contact-card?avatar=rancher",
+    );
+    expect(onAddToContacts).toHaveBeenCalledWith(
+      findMurphContactAvatarOption("rancher"),
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("contact card picker issues a bound handoff and keeps launch failures retryable", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
     new Response(JSON.stringify({ claim: "claim.for.gremlin" }), {
@@ -312,7 +395,7 @@ test("contact card picker keeps an issuance denial open and retryable", async ()
     });
 
     expect(rendered.container.querySelector("[role='alert']")?.textContent)
-      .toContain("Couldn't open Safari");
+      .toContain("contact card is temporarily unavailable");
     expect(rendered.container.querySelector("[data-drawer-open='true']"))
       .not.toBeNull();
     expect(onAddToContacts).not.toHaveBeenCalled();
@@ -480,7 +563,7 @@ test("contact card picker times out issuance and stays open for retry", async ()
     });
 
     expect(rendered.container.querySelector("[role='alert']")?.textContent)
-      .toContain("Couldn't open Safari");
+      .toContain("contact card is temporarily unavailable");
     expect(rendered.container.querySelector("[data-drawer-open='true']"))
       .not.toBeNull();
     expect(findButton(rendered.container, "Open in Safari to add Murph")?.disabled)
@@ -722,6 +805,13 @@ test("contact card picker freezes the selected avatar during issuance", async ()
 });
 
 test("contact card picker keeps the normal download action in Android webviews", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify({ claim: "android.claim" }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
   const onAddToContacts = vi.fn();
   const props = {
     initialAvatarId: "gremlin",
@@ -748,25 +838,27 @@ test("contact card picker keeps the normal download action in Android webviews",
   await rendered.rerender(<MurphContactCardPicker {...props} />);
 
   try {
-    const link = rendered.container.querySelector("a");
-    assert.ok(link);
-    expect(link.getAttribute("href")).toBe(
-      "/api/murph-contact-card?avatar=gremlin",
-    );
-    expect(link.textContent).toContain("Add Murph to Contacts");
+    const add = findButton(rendered.container, "Add Murph to Contacts");
+    assert.ok(add);
     expect(rendered.container.textContent).not.toContain(
       "You're in an in-app browser",
     );
     expect(rendered.container.textContent).toContain("Skip for now");
 
     await act(async () => {
-      const clickEvent = new rendered.window.Event("click", {
-        bubbles: true,
-        cancelable: true,
-      });
-      clickEvent.preventDefault();
-      link.dispatchEvent(clickEvent);
+      add.click();
+      await flushPromises();
     });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/murph-contact-card",
+      expect.objectContaining({
+        body: JSON.stringify({ avatar: "gremlin" }),
+        method: "POST",
+      }),
+    );
+    expect(rendered.assign).toHaveBeenCalledWith(
+      "/api/murph-contact-card?avatar=gremlin",
+    );
     expect(onAddToContacts).toHaveBeenCalledWith(
       findMurphContactAvatarOption("gremlin"),
     );

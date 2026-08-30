@@ -88,6 +88,7 @@ test("trusted iOS controller is six-hour, latest-outcome gated, and production-o
   );
 
   assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/6 \* \* \*"/u);
+  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/6 \* \* \*"\n\s+workflow_dispatch:/u);
   assert.match(workflow, /actions: read\n\s+contents: read/u);
   assert.match(workflowConcurrency, /group: native-ios-production-canary/u);
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);
@@ -100,15 +101,25 @@ test("trusted iOS controller is six-hour, latest-outcome gated, and production-o
   assert.match(workflow, /previous_conclusion.*success/su);
   assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
   assert.match(workflow, /CURRENT_SHA: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /EVENT_NAME: \$\{\{ github\.event_name \}\}/u);
+  assert.match(workflow, /EVENT_REF: \$\{\{ github\.ref \}\}/u);
+  assert.match(workflow, /git\/ref\/heads\/main/u);
   assert.match(workflow, /if: \$\{\{ needs\.select-main\.outputs\.should_run == 'true' \}\}/u);
-  assert.match(workflow, /environment: native-ios-production-canary/u);
+  assert.match(workflow, /environment: native-ios-hosted-e2e/u);
+  assert.match(workflow, /owner: \$\{\{ github\.repository_owner \}\}/u);
+  assert.match(
+    workflow,
+    /HOSTED_WEB_VERCEL_TOKEN: \$\{\{ secrets\.NATIVE_IOS_E2E_VERCEL_TOKEN \}\}/u,
+  );
+  assert.match(workflow, /NATIVE_IOS_E2E_IOS_WORKFLOW: native-ios-hosted-e2e\.yml/u);
+  assert.doesNotMatch(workflow, /NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER/u);
   assert.match(workflow, /node scripts\/native-ios-hosted-e2e\.mjs canary/u);
   assert.match(workflow, /--policy \.github\/native-hosted-e2e-controller\.json/u);
   assert.match(workflow, /NATIVE_IOS_E2E_IOS_WORKFLOW/u);
   assert.doesNotMatch(workflow, /NATIVE_IOS_E2E_IOS_(?:EXPECTED_SHA|REF)/u);
   assert.doesNotMatch(
     workflow,
-    /workflow_run:|deployment_status:|workflow_dispatch:|pull_request:|push:|pull-requests:|statuses: write|node scripts\/native-ios-hosted-e2e\.mjs pr/u,
+    /workflow_run:|deployment_status:|pull_request:|push:|pull-requests:|statuses: write|node scripts\/native-ios-hosted-e2e\.mjs pr/u,
   );
   assert.doesNotMatch(
     workflow,
@@ -125,7 +136,7 @@ test("trusted iOS controller is six-hour, latest-outcome gated, and production-o
   }
 });
 
-test("iOS schedule skips only a same-SHA successful latest outcome", async () => {
+test("iOS controller admits only current-main manual recovery and skips same-SHA success", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
@@ -140,6 +151,12 @@ test("iOS schedule skips only a same-SHA successful latest outcome", async () =>
 set -euo pipefail
 [[ "$#" == 4 ]] || exit 64
 [[ "$1" == api ]] || exit 64
+if [[ "$2" == "repos/\${GITHUB_REPOSITORY}/git/ref/heads/main" ]]; then
+  [[ "$3" == --jq ]] || exit 64
+  [[ "$4" == '.object.sha // ""' ]] || exit 64
+  printf '%s\n' "\${MAIN_SHA:-}"
+  exit 0
+fi
 [[ "$2" == "repos/\${GITHUB_REPOSITORY}/actions/workflows/native-ios-hosted-e2e.yml/runs?event=schedule&status=completed&per_page=1" ]] || exit 64
 [[ "$3" == --jq ]] || exit 64
 [[ "$4" == '.workflow_runs[0] // {}' ]] || exit 64
@@ -151,11 +168,12 @@ else
 fi
 `, { mode: 0o755 });
     const scenarios = [
-      { attempt: "1", conclusion: "", expected: "true", previousSha: "" },
-      { attempt: "1", conclusion: "success", expected: "false", previousSha: SHA },
-      { attempt: "1", conclusion: "failure", expected: "true", previousSha: SHA },
-      { attempt: "1", conclusion: "success", expected: "true", previousSha: "c".repeat(40) },
-      { attempt: "2", conclusion: "success", expected: "true", previousSha: SHA },
+      { attempt: "1", conclusion: "", eventName: "schedule", expected: "true", previousSha: "" },
+      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "false", previousSha: SHA },
+      { attempt: "1", conclusion: "failure", eventName: "schedule", expected: "true", previousSha: SHA },
+      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "true", previousSha: "c".repeat(40) },
+      { attempt: "2", conclusion: "success", eventName: "schedule", expected: "true", previousSha: SHA },
+      { attempt: "1", conclusion: "", eventName: "workflow_dispatch", expected: "true", previousSha: "" },
     ];
     for (const [index, scenario] of scenarios.entries()) {
       const outputPath = path.join(tempDir, `output-${index}`);
@@ -165,9 +183,12 @@ fi
         env: {
           ...process.env,
           CURRENT_SHA: SHA,
+          EVENT_NAME: scenario.eventName,
+          EVENT_REF: "refs/heads/main",
           FAIL_HISTORY_LOOKUP: scenario.attempt === "2" ? "1" : "0",
           GITHUB_OUTPUT: outputPath,
           GITHUB_REPOSITORY: "example/murph",
+          MAIN_SHA: SHA,
           PATH: `${tempDir}:${process.env.PATH ?? ""}`,
           PREVIOUS_CONCLUSION: scenario.conclusion,
           PREVIOUS_SHA: scenario.previousSha,
@@ -185,6 +206,26 @@ fi
     }
 
     for (const [invalidIndex, invalid] of [
+      { CURRENT_SHA: SHA, EVENT_NAME: "workflow_dispatch", EVENT_REF: "refs/heads/topic", MAIN_SHA: SHA },
+      { CURRENT_SHA: SHA, EVENT_NAME: "workflow_dispatch", EVENT_REF: "refs/heads/main", MAIN_SHA: "c".repeat(40) },
+      { CURRENT_SHA: SHA, EVENT_NAME: "push", EVENT_REF: "refs/heads/main", MAIN_SHA: SHA },
+    ].entries()) {
+      const result = spawnSync("bash", ["-c", script], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: path.join(tempDir, `invalid-manual-${invalidIndex}`),
+          GITHUB_REPOSITORY: "example/murph",
+          PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+          RUN_ATTEMPT: "1",
+          ...invalid,
+        },
+      });
+      assert.equal(result.status, 1);
+    }
+
+    for (const [invalidIndex, invalid] of [
       { PREVIOUS_SHA: "not-a-sha" },
       { PREVIOUS_CONCLUSION: "unknown", PREVIOUS_SHA: SHA },
       { PREVIOUS_SHA: SHA, PREVIOUS_STATUS: "in_progress" },
@@ -195,6 +236,8 @@ fi
         env: {
           ...process.env,
           CURRENT_SHA: SHA,
+          EVENT_NAME: "schedule",
+          EVENT_REF: "refs/heads/main",
           GITHUB_OUTPUT: path.join(tempDir, `invalid-${invalidIndex}`),
           GITHUB_REPOSITORY: "example/murph",
           PATH: `${tempDir}:${process.env.PATH ?? ""}`,
@@ -213,6 +256,8 @@ fi
       env: {
         ...process.env,
         CURRENT_SHA: SHA,
+        EVENT_NAME: "schedule",
+        EVENT_REF: "refs/heads/main",
         FAIL_HISTORY_LOOKUP: "1",
         GITHUB_OUTPUT: path.join(tempDir, "history-failure-output"),
         GITHUB_REPOSITORY: "example/murph",

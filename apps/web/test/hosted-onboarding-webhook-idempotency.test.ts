@@ -2276,6 +2276,7 @@ function createPrismaStub() {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedThreadRoute: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       groupBy: vi.fn().mockResolvedValue([]),
@@ -2295,6 +2296,7 @@ function buildHostedThreadRouteRow(containerMemberId: string) {
     updatedAt: new Date("2026-03-26T00:00:00.000Z"),
   };
   return {
+    accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
     channel: "linq",
     container: {
       member: memberCore,

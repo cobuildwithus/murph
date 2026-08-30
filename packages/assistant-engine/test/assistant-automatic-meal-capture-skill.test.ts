@@ -18,6 +18,7 @@ function compact(value: string): string {
 }
 
 function buildPrompt(input: {
+  conversationScope?: 'direct' | 'group'
   currentLocalDate?: string
   scheduledOccurrenceAt?: string
 } = {}): string {
@@ -33,6 +34,7 @@ function buildPrompt(input: {
     },
     currentLocalDate: input.currentLocalDate ?? '2026-07-18',
     currentTimeZone: 'America/New_York',
+    conversationScope: input.conversationScope ?? 'direct',
     onboardingGuidance: false,
     modelBehaviorProfile: 'gpt5-agentic',
     scheduledOccurrenceAt: input.scheduledOccurrenceAt,
@@ -52,7 +54,12 @@ describe('assistant automatic meal capture skill', () => {
     expect(matches[0]?.triggerHint).toContain('automatic 9pm closeout')
     expect(matches[0]?.triggerHint).toContain('retained-photo privacy cleanup')
     expect(matches[0]?.triggerHint).toContain('without duplicate logging')
-    expect(matches[0]?.triggerHint).toContain('Always co-load with food-journal')
+    expect(matches[0]?.triggerHint).toContain('private direct conversation')
+    expect(matches[0]?.triggerHint).toContain('start recurring meal tracking')
+    expect(matches[0]?.triggerHint).toContain(
+      'even when they do not say automatic',
+    )
+    expect(matches[0]?.triggerHint).toContain('Co-load food-journal')
 
     const prompt = buildPrompt()
     expect(prompt).toContain(
@@ -63,6 +70,15 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(prompt).toContain(
       'Load automatic-meal-capture for device meals; imports are canonical, never duplicate them, and do not start model turns.',
+    )
+    expect(prompt).toContain(
+      'In a private direct conversation, when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal even when they do not say "automatic."',
+    )
+    expect(prompt).not.toContain(
+      'Lead with compatible-iPhone automatic capture',
+    )
+    expect(buildPrompt({ conversationScope: 'group' })).not.toContain(
+      'when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal',
     )
     expect(prompt).not.toContain(
       'For a requested daily nutrition card, never answer unavailable from inference:',
@@ -83,6 +99,24 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill).toContain('grant **Full Photos** access')
     expect(skill).toContain('existing photos are never scanned')
+    expect(compact(skill)).toContain(
+      'In a private direct conversation, load this skill when a member asks how to start recurring meal tracking or how Murph can track meals, even when they do not say "automatic."',
+    )
+    expect(compact(skill)).toContain(
+      'lead with automatic capture as the lowest-friction supported option',
+    )
+    expect(compact(skill)).toContain(
+      'When known context establishes Android or another incompatible device, or the member prefers manual capture, lead with the food-journal skill\'s manual text, voice-note, and user-sent-photo options.',
+    )
+    expect(compact(skill)).toContain(
+      'When automatic meal capture is already enabled, explain the current capture, review, or recovery path that answers the question.',
+    )
+    expect(compact(skill)).toContain(
+      'In a group, do not introduce the app or personalized automatic-capture setup for a generic meal-tracking request.',
+    )
+    expect(compact(skill)).toContain(
+      'When automatic capture leads, keep manual text, voice-note, and user-sent-photo logging available as an alternative',
+    )
     expect(skill).toContain("Uncertain candidates stay in the iPhone's")
     expect(skill).toContain('age out after 14 days')
     expect(skill).toContain('24-item limit')

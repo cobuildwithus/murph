@@ -166,20 +166,22 @@ supplement that proof, but it cannot establish runtime cleanup behavior.
 
 Native iOS and Android hosted E2E are production canaries, not pull-request
 statuses. The trusted default-branch controllers run on staggered six-hour
-schedules: iOS at minute 17 and Android at minute 47. Each cheap selection job
-reads the latest completed scheduled outcome for its own workflow and skips the
-native job only when that outcome succeeded at the current protected-`main`
-SHA. Missing history, a newer SHA, or a latest failure admits the canary. An
-explicit rerun of the same trusted schedule attempt bypasses the no-change
-skip. Reviewed native source pins live in
+schedules: iOS at minute 17 and Android at minute 47. An authenticated manual
+dispatch is the scheduler-drop recovery path, but its event ref must be
+`refs/heads/main` and its exact event SHA must still equal current `main` when
+the selection job runs. Each cheap selection job reads the latest completed
+scheduled outcome for its own workflow and skips the native job only when that
+outcome succeeded at the selected protected-`main` SHA. Missing history, a
+newer SHA, or a latest failure admits the canary. An explicit rerun of the same
+trusted controller attempt bypasses the no-change skip. Reviewed native source pins live in
 `.github/native-hosted-e2e-controller.json`, so a source rotation advances the
 protected-main checkpoint.
 
-Neither controller admits `workflow_run`, `deployment_status`, or
-branch-selectable `workflow_dispatch` events, and neither publishes a commit
-status. Fixed non-canceling workflow concurrency bounds each platform to one
-running and one pending controller. The workflows do not receive the destructive
-PR database, Privy, Junction-namespace, or candidate-deployment authority.
+Neither controller admits `workflow_run`, `deployment_status`, or an arbitrary
+branch dispatch, and neither publishes a commit status. Fixed non-canceling
+workflow concurrency bounds each platform to one running and one pending
+controller. The workflows do not receive the destructive PR database, Privy,
+Junction-namespace, or candidate-deployment authority.
 
 A scheduled native pass is production-shaped evidence for the current
 protected-`main` checkpoint and the exact deployed Web SHA it dispatches.
@@ -190,9 +192,12 @@ eligible dated release notes; otherwise the controller fails before paid
 dispatch and retries. It dispatches that deployed SHA with the reviewed
 immutable iOS or Android source in `production_canary` mode. The private journey uses
 `non_destructive_existing_identity`; local mocked or hosted-local tests do not
-replace it. The iOS and Android production environments remain separate and
-contain only their repository dispatch credentials plus production-alias proof
-authority. Source refs and SHAs are committed policy, not environment values.
+replace it. The Android production environment remains narrowly populated. The
+iOS controller reuses the protected `native-ios-hosted-e2e` environment, but
+its steps reference only the repository-scoped App private key and the
+production-alias Vercel token; unreferenced legacy environment secrets do not
+enter controller process environments. Source refs and SHAs are committed
+policy, not environment values.
 
 Controller child commands are time-bounded. Android additionally binds the
 private commit to an immutable lightweight tag and a short dispatch lease,
@@ -772,9 +777,11 @@ cron allowlist, Prisma schema/migration inventory, and Web typecheck. The
 service proof must exercise the Eastern daily window across both DST
 transitions, the dedicated recipient list, fixed empty digest, day-keyed
 idempotency key, the bounded three-kind summary read that selects only the
-kind and summary columns with deterministic ordering, truthful grouped
-per-kind totals with explicit omitted-remainder lines past the row cap,
-observable missing configuration, and a
+kind, member-id, and summary columns with deterministic ordering, neutral
+member grouping without identifier disclosure and with unlinked
+groupchat/anonymous feedback last, and truthful grouped
+per-kind totals with explicit unattributed omitted-remainder lines past the row
+cap, observable missing configuration, and a
 bounded same-hour retry. The
 direct scenario must compose the production sender against an isolated
 loopback Resend fake and prove identical request/key reuse plus one fake
@@ -1037,7 +1044,7 @@ the advisory budget.
 - `pnpm deps:audit`: runs `pnpm audit --audit-level=high` so dependency changes can be screened for known high-severity advisories before handoff.
 - `pnpm deps:ignored-builds`: shows dependency install scripts that pnpm blocked so dependency updates can be reviewed instead of silently executing new lifecycle code.
 - `pnpm deps:approve-builds`: records reviewed install-script approvals into `pnpm-workspace.yaml` after a trusted-machine dependency refresh.
-- `pnpm typecheck`: validates shell syntax, syntax-checks the root `.mjs` release helpers, runs `pnpm deps:guard`, the workspace-boundary and package-cycle audits, hosted architecture/privacy guards, repo-owned TS tools typecheck, the contracts build, and every package/app no-emit typecheck. The canonical root and workspace `tsc` binary is stable TypeScript 7; the hosted web keeps a local TypeScript 5 dependency only for Next, ESLint, Workflow, and Solana tools that still require the legacy JavaScript compiler API or peer range. Repo-owned source-analysis checks use Babel's parser and do not depend on a TypeScript compiler API, so the web-local TypeScript 5 boundary can be deleted independently once its framework/tooling consumers support TypeScript 7. Tsconfig path-map discovery now reads root tsconfigs non-recursively and scans only `packages/**` plus `apps/**`; it no longer walks unrelated local residue. The repo-tools pass keeps an ignored `tsconfig.tools.tsbuildinfo` cache for warm runs. Independent preflight checks overlap the contracts prerequisite, then the package/app fanout runs with `MURPH_TYPECHECK_WORKSPACE_CONCURRENCY=min(logical CPUs, 8)` on an ordinary local host, `2` on CI or a local shared host, and no unnecessary topological ordering. The capable-host acceptance composition may use the wider local fanout inside its exclusive verification slot. The command retains the per-worktree artifact lock and clean contracts proof used by full acceptance.
+- `pnpm typecheck`: validates shell syntax, syntax-checks the root `.mjs` release helpers, runs `pnpm deps:guard`, the workspace-boundary and package-cycle audits, hosted architecture/privacy guards, repo-owned TS tools typecheck, the contracts build, and every package/app no-emit typecheck. Package-local `tsconfig.typecheck.json` deliberately widens `rootDir` to the repository root so it can source-check sibling workspace owners without requiring prebuilt artifacts; the TypeScript runner labels that lane `package-boundary=unchecked`. Therefore typecheck does not replace the edited package's `build` when a change adds or changes a static or type-only sibling public-entrypoint import, workspace dependency, project reference, public export, or build `rootDir`: the emitted build remains the canonical TS6059/TS6307 boundary. The canonical root and workspace `tsc` binary is stable TypeScript 7; the hosted web keeps a local TypeScript 5 dependency only for Next, ESLint, Workflow, and Solana tools that still require the legacy JavaScript compiler API or peer range. Repo-owned source-analysis checks use Babel's parser and do not depend on a TypeScript compiler API, so the web-local TypeScript 5 boundary can be deleted independently once its framework/tooling consumers support TypeScript 7. Tsconfig path-map discovery now reads root tsconfigs non-recursively and scans only `packages/**` plus `apps/**`; it no longer walks unrelated local residue. The repo-tools pass keeps an ignored `tsconfig.tools.tsbuildinfo` cache for warm runs. Independent preflight checks overlap the contracts prerequisite, then the package/app fanout runs with `MURPH_TYPECHECK_WORKSPACE_CONCURRENCY=min(logical CPUs, 8)` on an ordinary local host, `2` on CI or a local shared host, and no unnecessary topological ordering. The capable-host acceptance composition may use the wider local fanout inside its exclusive verification slot. The command retains the per-worktree artifact lock and clean contracts proof used by full acceptance.
 - `pnpm test:diff`: the self-contained optional local lane for a diff-aware
   scoped check or CI diagnosis. It maps the requested worktree paths to
   workspace owners and reverse dependents, runs the relevant global guards,
@@ -1054,7 +1061,11 @@ the advisory budget.
   unchanged. Tooling-only diffs retain the narrow guard fast path, while root
   workspace manifests still broaden to the whole workspace. Because this lane
   already typechecks touched owners and reverse dependents, do not pair it with
-  a separate root `pnpm typecheck` for narrow changes.
+  a separate root `pnpm typecheck` for narrow changes. Its source-resolved
+  typecheck fanout still reports `package-boundary=unchecked`; run the edited
+  package's build separately for public-entrypoint, workspace
+  import/dependency, project-reference, or build-`rootDir` changes unless an
+  existing package-boundary follow-up already executes that build.
 - `pnpm test`: runs the fast deterministic behavior loop under the artifact lock: warm-safe incremental contracts artifact verification, the root multi-project Vitest lane, and fixture/scenario-manifest verification without coverage. Full acceptance and release lanes retain clean contracts builds. Package projects share one bounded pool; the four independent CLI buckets share the next phase, while the five explicit `fileParallelism: false` smoke buckets remain isolated. Shared Vitest global setup places every ordinary package/app/repo-tool process beneath one marked private temp root inside a dedicated Murph owner directory, removes it on teardown even after test failures, and sweeps only old dead-owner marked roots before a later run without enumerating unrelated host temp entries. `MURPH_VITEST_MAX_WORKERS` now actually controls the root and ordinary package configs, defaulting to `75%` locally or `50%` in CI. Local runs overlap repo Vitest with scenario-manifest verification when `MURPH_TEST_LANES_PARALLEL` allows it; CI stays sequential by default.
 - `pnpm docs:drift`: runs the manual durable-doc drift check. Use it when a task intentionally changes `agent-docs/**`, `ARCHITECTURE.md`, or other durable repo docs and you want the old index/truthfulness guard explicitly, without making every default `pnpm test` run sensitive to unrelated dirty-tree doc work. In pull-request CI mode, the wrapper resolves immutable base and checked-out candidate SHAs from the GitHub event (with `MURPH_DOCS_DRIFT_BASE_SHA` / `MURPH_DOCS_DRIFT_CANDIDATE_SHA` overrides), compares those exact trees, and delegates the unchanged upstream policy through an alternate index; it never rewrites `origin/<base>` or shortens existing shallow history. Doc gardening intersects unindexed findings with Git's tracked-file inventory, so ignored or otherwise untracked local documents cannot block acceptance. It also excludes immutable `agent-docs/exec-plans/completed/**` snapshots from live index enforcement; active plans and durable current docs remain governed.
 - `pnpm test:packages`: uses the same incremental contracts prerequisite and bounded root multi-project Vitest suite as `pnpm test`, without fixture smoke. It covers every root-wired package project plus all nine CLI buckets, with the four independent CLI buckets sharing one phase and the five explicit serial buckets retaining separate phases. It leaves app verification and prepared CLI package-shape acceptance to their dedicated commands.
@@ -1178,7 +1189,7 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
   origin used only as an inequality guard. An isolated Vercel preview
   database/crypto/control-plane boundary is a prerequisite; production Web or
   production stateful secrets are never a preview bootstrap fallback.
-- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, patches the native bundled Codex model catalog so `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` support the OpenAI flex service tier, validates those entries, and copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app`; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
+- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, patches the native bundled Codex model catalog so `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` support the OpenAI flex service tier, validates those entries, copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app`, and promotes the pinned native Codex binary plus adjacent sandbox resources into a compact final layer for lazy image loading; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
 - The local assistant daemon entrypoint lives under `packages/assistantd`; `murph-assistantd` binds to one vault, rejects non-loopback hosts, requires a bearer token on every route, sets `MURPH_ASSISTANTD_DISABLE_CLIENT=1` in its own process so daemon-local calls do not recurse back through HTTP, and now fronts the steady-state assistant session/message/options flows plus session/status/outbox/cron inspection and serializable automation control whenever the CLI invocation does not need local-only hooks such as live provider events, foreground inbox events, abort propagation, or local session/transcript snapshots.
 - The current runner scaffold now ships as a preassembled deploy bundle copied into the native image rather than rebuilding the workspace from repo source inside Docker. `apps/cloudflare/DEPLOY.md` is the durable guide for the current staged manual deploy path.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.

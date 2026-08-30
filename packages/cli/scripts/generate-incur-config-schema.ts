@@ -8,7 +8,10 @@ import {
   vaultCliSkillHashPath,
 } from './incur-config-schema.js'
 
-const generatedArtifacts = await generateIncurArtifacts()
+const generatedArtifacts = await generateIncurArtifacts({
+  onStage: (message) => console.log(message),
+})
+console.log('Writing generated CLI artifacts.')
 await writeFile(configSchemaPath, generatedArtifacts.configSchema)
 await writeFile(incurGeneratedTypesPath, generatedArtifacts.types)
 await writeFile(vaultCliSkillHashPath, generatedArtifacts.skillHashModule)

@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-08-15
+Last verified: 2026-08-28
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -118,14 +118,17 @@ installed build rather than the static fallback.
 
 ### Login methods: verified constraint
 
-Privy's Swift SDK natively supports **email OTP and SMS OTP**. Its native
-OAuth support is currently **Google-only — Telegram login is web-only and
-not available in the iOS SDK**. MVP ships **phone + email**; Telegram joins
-when Privy lands it on iOS.
+Privy's Swift SDK natively supports **email OTP and SMS OTP** for primary
+authentication. Pinned Privy 2.12 also supports post-authentication Telegram
+OAuth linking. Telegram is a messaging setup choice, not a login method.
+Email-only authentication therefore remains at the canonical setup gate until
+the member links a phone number or Telegram account.
 
 Guideline note: Apple's 4.8 (must offer Sign in with Apple) is triggered by
-third-party *social* login. Email/SMS OTP does not trigger it. The day we
-add Telegram or Google, we must add Sign in with Apple in the same release.
+third-party *social* login. Email/SMS OTP does not trigger it, and the bounded
+post-authentication Telegram link does not authenticate app access. If
+Telegram or Google becomes a login method, add Sign in with Apple in the same
+release.
 
 ## Stack (verified 2026-06-10)
 
@@ -163,6 +166,10 @@ Launch
 Login screen
   └─ phone → privy.sms.sendCode(to:) → privy.sms.loginWithCode(_:sentTo:)
   └─ email → equivalent email OTP flow
+Messaging setup after canonical admission
+  ├─ verified phone or linked Telegram → continue
+  └─ email only → link phone by OTP or Telegram by OAuth → repeat admission
+       → continue only after the canonical projection clears the gate
 Token exchange (on demand, immediately before SDK exchange; retry = new token)
   └─ app sends Privy auth token to Murph web API
   └─ backend verifies Privy identity (@privy-io/node, already a dependency)

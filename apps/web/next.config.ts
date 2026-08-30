@@ -71,6 +71,10 @@ const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "public/icons/murph-mark.svg",
   "public/logo.svg",
 ];
+const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
+  "public/brand-logos/murph-logo-avatar-*.png",
+  "public/murph-headshots/*-sm.png",
+];
 // The footer availability indicator reads the incident.io status-page summary
 // from the browser, so the status-page origin must be reachable client-side.
 const STATUS_PAGE_CONNECT_SOURCES = ["https://status.withmurph.ai"] as const;
@@ -358,6 +362,7 @@ export function buildHostedWebNextConfig(
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/environment/share-card": OG_SHARE_ASSET_TRACE_INCLUDES,
+      "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),

@@ -1291,22 +1291,19 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection.',
+      'Send one early update only for reply-critical work needing 3+ substantive checks/actions beyond routine setup',
     )
     expect(prompt).toContain(
-      'Before the first read in that pass, orient the member even when each lookup is routine',
+      'Routine onboarding/setup does not count by itself',
     )
     expect(prompt).toContain(
-      'Do not wait until the work is done or the member asks about the delay.',
+      'Also skip ordinary conversation, a straightforward next step, and quick resume checks.',
     )
     expect(prompt).toContain(
-      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
+      'Send a child-wait update after spawning.',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
-    )
-    expect(prompt).toContain(
-      'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.',
+      'Background work does not trigger progress by itself unless an active skill requires a receipt or start acknowledgement.',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update.',
@@ -1330,11 +1327,6 @@ describe('assistant execution prompt contract', () => {
     ).toHaveLength(1)
     expect(
       prompt.match(
-        /Linq\/iMessage quota is not a reason to withhold a useful update\./g,
-      ) ?? [],
-    ).toHaveLength(1)
-    expect(
-      prompt.match(
         /Do not narrate individual tool loops, searches, reads, clicks, or status churn/g,
       ) ?? [],
     ).toHaveLength(1)
@@ -1352,6 +1344,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
+    expect(prompt).not.toContain(
+      'orient the member even when each lookup is routine',
+    )
   })
 
   it('allows only sparing native text styles on Linq and Telegram messaging routes', () => {

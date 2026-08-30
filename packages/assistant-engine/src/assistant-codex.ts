@@ -718,6 +718,39 @@ function appendRequiredVaultFileApprovalUrls(
   ].filter((part): part is string => part !== null).join('\n\n')
 }
 
+const MODEL_AUTHORED_CALENDAR_LINK_PATTERN =
+  /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/gu
+
+function appendRequiredFinalResponseSuffix(
+  message: string,
+  suffix: string | null,
+  fallback: string | null,
+): string
+function appendRequiredFinalResponseSuffix(
+  message: string | null,
+  suffix: string | null,
+  fallback: string | null,
+): string | null
+function appendRequiredFinalResponseSuffix(
+  message: string | null,
+  suffix: string | null,
+  fallback: string | null,
+): string | null {
+  const normalizedSuffix = normalizeNullableString(suffix)
+  if (normalizedSuffix === null) {
+    return message
+  }
+  const messageWithoutModelAuthoredCalendarLink = normalizeNullableString(
+    message?.replace(MODEL_AUTHORED_CALENDAR_LINK_PATTERN, '') ?? null,
+  )
+  return [
+    messageWithoutModelAuthoredCalendarLink ?? normalizeNullableString(fallback),
+    normalizedSuffix,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n')
+}
+
 interface RequiredAutomationLocalAtClarification {
   code: 'local_at_fold' | 'local_at_gap'
   resolvedLocalDate: string
@@ -3033,6 +3066,12 @@ function hashCodexRawString(value: string): string {
     .digest('hex')
 }
 
+function buildCodexTurnCorrelation(turnId: string): number {
+  // Keep the opaque provider id out of logs while preserving a safe-integer
+  // join key shared by this turn's timing and action diagnostics.
+  return Number.parseInt(hashCodexRawString(turnId).slice(0, 12), 16)
+}
+
 function readCodexEventMethod(message: CodexRpcMessage): string | null {
   return typeof message.method === 'string' ? message.method : null
 }
@@ -3366,6 +3405,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
+  let requiredFinalResponseSuffix: string | null = null
   let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
@@ -3477,6 +3517,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
+    requiredFinalResponseSuffix !== null ||
     requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
@@ -3632,6 +3673,9 @@ async function runCodexAppServerTurnOnProcess(
                 ...(typeof input.providerRequestOrdinal === 'number'
                   ? { codexTimingProviderRequestOrdinal: input.providerRequestOrdinal }
                   : {}),
+                ...(turnId === null
+                  ? {}
+                  : { codexTimingTurnCorrelation: buildCodexTurnCorrelation(turnId) }),
                 // This ends when the completion trace is emitted after local
                 // dynamic-tool/progress drains. The outer provider-result
                 // boundary is recorded separately by assistant.turn.timing.
@@ -4815,13 +4859,17 @@ async function runCodexAppServerTurnOnProcess(
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
-      if (dynamicToolRequest.kind === 'analyze-video') {
-        const analyzeVideoFallback = normalizeNullableString(
-          result.requiredFinalResponseFallback,
-        )
-        if (analyzeVideoFallback !== null) {
-          requiredFinalResponseFallback = analyzeVideoFallback
-        }
+      const finalResponseFallback = normalizeNullableString(
+        result.requiredFinalResponseFallback,
+      )
+      if (finalResponseFallback !== null) {
+        requiredFinalResponseFallback = finalResponseFallback
+      }
+      const finalResponseSuffix = normalizeNullableString(
+        result.requiredFinalResponseSuffix,
+      )
+      if (finalResponseSuffix !== null) {
+        requiredFinalResponseSuffix = finalResponseSuffix
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -5058,6 +5106,7 @@ async function runCodexAppServerTurnOnProcess(
     method: string | null,
   ): void => {
     acceptJsonEvent(message)
+    const observedAtMs = Date.now()
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
@@ -5078,7 +5127,6 @@ async function runCodexAppServerTurnOnProcess(
       (shouldCaptureTurnStartedNotification ||
         shouldCaptureTurnCompletedNotification)
     ) {
-      const observedAtMs = Date.now()
       if (shouldCaptureTurnStartedNotification) {
         codexTimingTurnStartedNotificationElapsedMs = Math.max(
           0,
@@ -5107,6 +5155,7 @@ async function runCodexAppServerTurnOnProcess(
     actionDiagnostics?.recordEvent({
       activeTurnId: turnId,
       normalizedEvent,
+      observedAtMs,
       rawEvent: message,
     })
     const transportDiagnosticsTraceEvent = input.onTraceEvent
@@ -5540,6 +5589,9 @@ async function runCodexAppServerTurnOnProcess(
     const rawEvent = actionDiagnostics.buildTraceEvent({
       codexThreadId,
       providerActionCount,
+      providerStartedAtMs: codexProviderRequestStartedAtMs,
+      turnCorrelation:
+        turnId === null ? null : buildCodexTurnCorrelation(turnId),
       turnId,
     })
     if (!rawEvent) {
@@ -6045,12 +6097,16 @@ async function runCodexAppServerTurnOnProcess(
     requiredAutomationLocalAtClarificationsInOrder.length === 0
       ? finalResponseCard
       : null
-  const finalMessage = appendRequiredVaultFileApprovalUrls(
-    appendRequiredAutomationLocalAtClarification(
-      requiredSemanticFinalMessage,
-      requiredAutomationLocalAtClarificationsInOrder,
+  const finalMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredVaultFileApprovalUrls(
+      appendRequiredAutomationLocalAtClarification(
+        requiredSemanticFinalMessage,
+        requiredAutomationLocalAtClarificationsInOrder,
+      ),
+      requiredVaultFileApprovalUrls,
     ),
-    requiredVaultFileApprovalUrls,
+    requiredFinalResponseSuffix,
+    requiredFinalResponseFallback,
   )
   const semanticTranscriptMessage = finalResponseCard
     ? requiredAutomationLocalAtClarificationsInOrder.length === 0
@@ -6062,11 +6118,15 @@ async function runCodexAppServerTurnOnProcess(
         )
       : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null)
-  const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    normalizeNullableString(semanticTranscriptMessage) ??
+  const transcriptMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredAutomationLocalAtClarification(
+      normalizeNullableString(semanticTranscriptMessage) ??
       requiredFinalResponseFallback ??
       semanticTranscriptMessage,
-    requiredAutomationLocalAtClarificationsInOrder,
+      requiredAutomationLocalAtClarificationsInOrder,
+    ),
+    requiredFinalResponseSuffix,
+    requiredFinalResponseFallback,
   )
   if (
     noReplySelected &&
