@@ -1433,6 +1433,20 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).not.toContain('book another dentist appointment')
   })
 
+  it('keeps workout capture route duration out of typed duration', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'recover route distance/elevation, never route duration',
+    )
+    expect(prompt).toContain(
+      'call `vault-cli workout add` before asking for an omitted duration',
+    )
+    expect(prompt).not.toContain(
+      'estimated distance, duration, or elevation are often useful fields to recover',
+    )
+  })
+
   it('guides automation continuity policy by task size', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
