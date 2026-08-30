@@ -419,6 +419,307 @@ describe('worktree storage guard', () => {
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
+  it('derives a Codex-managed worktree from the normal home when CODEX_HOME is unset', () => {
+    const harness = createHarness()
+    const normalHome = path.join(harness.root, 'normal-home')
+    const codexHome = path.join(normalHome, '.codex')
+    const target = path.join(codexHome, 'worktrees', 'primary', 'managed-task')
+    mkdirSync(codexHome, { recursive: true })
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'managed-task', '-b', 'managed-task'],
+      { CODEX_HOME: undefined, HOME: normalHome },
+    )
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+  })
+
+  it('keeps a Codex-managed worktree inside an explicit valid Codex home', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const target = path.join(codexHome, 'worktrees', 'primary', 'selected-task')
+    mkdirSync(codexHome)
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'selected-task', '-b', 'selected-task'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  })
+
+  it.each([
+    [
+      'managed destination before data/research lock',
+      ['--codex-worktree', 'combined-task', '--data-research', 'research proof'],
+    ],
+    [
+      'data/research lock before managed destination',
+      ['--data-research', 'research proof', '--codex-worktree', 'combined-task'],
+    ],
+  ])('composes %s', (_name, optionArgs) => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const target = path.join(
+      codexHome,
+      'worktrees',
+      'primary',
+      'combined-task',
+    )
+    mkdirSync(codexHome)
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      [...optionArgs, '-b', 'combined-task'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain']))
+      .toContain('locked data/research: research proof')
+  })
+
+  it('rejects unsafe Codex-managed destination inputs before branch creation', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    mkdirSync(codexHome)
+
+    const unsafeLeaf = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', '../escaped-task', '-b', 'escaped-task'],
+      { CODEX_HOME: codexHome },
+    )
+    const relativeHome = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'relative-home-task', '-b', 'relative-home-task'],
+      { CODEX_HOME: 'relative-codex-home' },
+    )
+
+    expect(unsafeLeaf.status).toBe(1)
+    expect(unsafeLeaf.stderr).toContain('managed name must be one safe path segment')
+    expect(relativeHome.status).toBe(1)
+    expect(relativeHome.stderr).toContain('Codex home must be an absolute directory')
+    expect(runGit(harness.primary, ['branch', '--list', 'escaped-task'])).toBe('')
+    expect(runGit(harness.primary, ['branch', '--list', 'relative-home-task'])).toBe('')
+    expect(existsSync(path.join(harness.root, 'escaped-task'))).toBe(false)
+  })
+
+  it('rejects a redirected Codex worktrees root before branch creation', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const redirectedRoot = path.join(harness.root, 'redirected-worktrees')
+    mkdirSync(codexHome)
+    mkdirSync(redirectedRoot)
+    symlinkSync(redirectedRoot, path.join(codexHome, 'worktrees'), 'dir')
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'redirected-task', '-b', 'redirected-task'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status).toBe(1)
+    expect(creation.stderr).toContain(
+      'Codex worktrees root must not redirect outside its home',
+    )
+    expect(runGit(harness.primary, ['branch', '--list', 'redirected-task'])).toBe('')
+    expect(existsSync(path.join(redirectedRoot, 'primary'))).toBe(false)
+  })
+
+  it('rejects an empty Codex-managed name before explicit-target branch movement', () => {
+    const harness = createHarness()
+    runGit(harness.primary, ['branch', 'victim'])
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'advanced\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+    runGit(harness.primary, ['commit', '-m', 'advance main'])
+    const victimHead = runGit(harness.primary, ['rev-parse', 'victim'])
+    const target = path.join(harness.primary, 'main')
+    const intent = worktreeCreationIntentPath(harness.state, target)
+
+    const creation = runScript(harness, 'create-worktree', [
+      '--codex-worktree',
+      '',
+      '-B',
+      'victim',
+      'main',
+    ])
+
+    expect(creation.status).toBe(2)
+    expect(runGit(harness.primary, ['rev-parse', 'victim'])).toBe(victimHead)
+    expect(existsSync(target)).toBe(false)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain']))
+      .not.toContain(target)
+    expect(existsSync(intent)).toBe(false)
+  })
+
+  it.each([
+    [
+      'a missing data reason before managed intent',
+      ['-B', 'victim', '--data-research', '--codex-worktree', 'managed-task'],
+    ],
+    [
+      'a missing data reason after managed intent',
+      ['--codex-worktree', 'managed-task', '--data-research', '-B', 'victim'],
+    ],
+    [
+      'a missing managed leaf after a data reason',
+      ['--data-research', 'research proof', '--codex-worktree', '-B', 'victim'],
+    ],
+    [
+      'a missing branch before managed intent',
+      ['-B', '--codex-worktree', 'managed-task'],
+    ],
+  ])('rejects %s before any managed-to-explicit crossover', (_name, args) => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const explicitTarget = path.join(harness.primary, 'managed-task')
+    const managedTarget = path.join(
+      codexHome,
+      'worktrees',
+      'primary',
+      'managed-task',
+    )
+    mkdirSync(codexHome)
+    runGit(harness.primary, ['branch', 'victim'])
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'advanced\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+    runGit(harness.primary, ['commit', '-m', 'advance main'])
+    const beforeBranches = runGit(harness.primary, [
+      'for-each-ref',
+      '--format=%(refname):%(objectname)',
+      'refs/heads',
+    ])
+    const beforeWorktrees = runGit(harness.primary, [
+      'worktree',
+      'list',
+      '--porcelain',
+    ])
+    const beforeStatus = runGit(harness.primary, ['status', '--porcelain=v1'])
+
+    const creation = runScript(harness, 'create-worktree', args, {
+      CODEX_HOME: codexHome,
+    })
+
+    expect(creation.status).toBe(2)
+    expect(runGit(harness.primary, [
+      'for-each-ref',
+      '--format=%(refname):%(objectname)',
+      'refs/heads',
+    ])).toBe(beforeBranches)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain']))
+      .toBe(beforeWorktrees)
+    expect(runGit(harness.primary, ['status', '--porcelain=v1']))
+      .toBe(beforeStatus)
+    expect(existsSync(explicitTarget)).toBe(false)
+    expect(existsSync(managedTarget)).toBe(false)
+    expect(existsSync(path.join(harness.state, 'worktree-create-intents')))
+      .toBe(false)
+  })
+
+  it('uses the stable primary repository owner from a sanctioned linked worktree', () => {
+    const harness = createHarness()
+    const linked = path.join(harness.root, 'linked-invoker')
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const target = path.join(codexHome, 'worktrees', 'primary', 'managed-from-linked')
+    mkdirSync(codexHome)
+    const linkedCreation = runScript(
+      harness,
+      'create-worktree',
+      ['-b', 'linked-invoker', linked],
+      { MURPH_WORKTREE_MAX_LIVE: '3' },
+    )
+    expect(linkedCreation.status, linkedCreation.stderr).toBe(0)
+
+    const creation = spawnSync(
+      'bash',
+      [
+        path.join('scripts', 'create-worktree'),
+        '--codex-worktree',
+        'managed-from-linked',
+        '-b',
+        'managed-from-linked',
+      ],
+      {
+        cwd: linked,
+        encoding: 'utf8',
+        env: guardEnvironment(harness, {
+          CODEX_HOME: codexHome,
+          MURPH_WORKTREE_MAX_LIVE: '3',
+        }),
+      },
+    )
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(existsSync(path.join(codexHome, 'worktrees', 'linked-invoker')))
+      .toBe(false)
+  })
+
+  it('rejects a managed final-leaf symlink without touching its external target', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const ownerRoot = path.join(codexHome, 'worktrees', 'primary')
+    const externalTarget = path.join(harness.root, 'external-target')
+    const target = path.join(ownerRoot, 'redirected-task')
+    const intent = worktreeCreationIntentPath(harness.state, target)
+    mkdirSync(ownerRoot, { recursive: true })
+    mkdirSync(externalTarget)
+    symlinkSync(externalTarget, target, 'dir')
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'redirected-task', '-b', 'redirected-task'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status).toBe(1)
+    expect(creation.stderr).toContain('managed target must not already exist')
+    expect(existsSync(path.join(externalTarget, 'tracked.txt'))).toBe(false)
+    expect(runGit(harness.primary, ['branch', '--list', 'redirected-task'])).toBe('')
+    expect(existsSync(intent)).toBe(false)
+  })
+
+  it('rejects a pre-existing managed leaf before resetting a branch or publishing intent', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const target = path.join(codexHome, 'worktrees', 'primary', 'occupied-task')
+    const sentinel = path.join(target, 'sentinel.txt')
+    const intent = worktreeCreationIntentPath(harness.state, target)
+    mkdirSync(target, { recursive: true })
+    writeFileSync(sentinel, 'preserve\n')
+    runGit(harness.primary, ['branch', 'victim'])
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'advanced\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+    runGit(harness.primary, ['commit', '-m', 'advance main'])
+    const victimHead = runGit(harness.primary, ['rev-parse', 'victim'])
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'occupied-task', '-B', 'victim'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status).toBe(1)
+    expect(creation.stderr).toContain('managed target must not already exist')
+    expect(runGit(harness.primary, ['rev-parse', 'victim'])).toBe(victimHead)
+    expect(readFileSync(sentinel, 'utf8')).toBe('preserve\n')
+    expect(existsSync(intent)).toBe(false)
+  })
+
   it('keeps both platform lock command bounds explicit', () => {
     const installer = readFileSync(
       path.join(sourceRoot, 'scripts', 'install-git-hooks'),
@@ -1981,6 +2282,79 @@ printf '%s\\n' 'testfs 200000000 1 30000000 85% /'
     })
     expect(result.status, result.stderr).toBe(0)
     expect(result.stdout).toContain('free=28GiB')
+  })
+
+  it('selects Capacity only after a complete POSIX numeric column triplet', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '%s\n' 'network mirror quota 40% snapshot 200000000 1 30000000 85% /Volumes/Capacity Fixture'
+`,
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MIN_FREE_GIB: '20',
+    })
+
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout).toContain('free=28GiB')
+  })
+
+  it('fails closed when filesystem text mimics a POSIX capacity sequence', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '%s\n' 'network 100000000 100000000 90000000 40% snapshot 50000000 1 10000000 80% /Volumes/Capacity Fixture'
+`,
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      '`df -Pk` returned an unsupported capacity row while probing 1 filesystem path(s)',
+    )
+    expect(result.stderr).not.toContain(harness.primary)
+    expect(result.stdout).not.toContain('free=85GiB')
+  })
+
+  it('reports a bounded actionable capacity-command failure', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      '#!/usr/bin/env bash\nexit 23\n',
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      '`df -Pk` exited with status 23 while probing 1 filesystem path(s)',
+    )
+    expect(result.stderr).not.toContain(harness.primary)
+  })
+
+  it('reports a bounded malformed capacity row without exposing probe paths', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '%s\n' 'testfs capacity unavailable /fixture'
+`,
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      '`df -Pk` returned an unsupported capacity row while probing 1 filesystem path(s)',
+    )
+    expect(result.stderr).not.toContain(harness.primary)
   })
 
   it('fails closed when the fixed free-space floor is missed', () => {

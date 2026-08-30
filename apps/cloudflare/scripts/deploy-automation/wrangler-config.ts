@@ -115,6 +115,10 @@ export function buildHostedWranglerDeployConfig(
           class_name: "DeviceWebhookQueueHealthDurableObject",
         },
         {
+          name: "OPENAI_AUTHORIZATION_ALERT_MONITOR",
+          class_name: "OpenAiAuthorizationAlertDurableObject",
+        },
+        {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
         },
@@ -147,6 +151,10 @@ export function buildHostedWranglerDeployConfig(
       {
         tag: "v5",
         new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
+      },
+      {
+        tag: "v6",
+        new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
       },
     ],
     triggers: {

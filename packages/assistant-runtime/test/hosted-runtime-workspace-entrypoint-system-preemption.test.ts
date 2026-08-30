@@ -2651,10 +2651,16 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
 
     mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(async (input) => {
+      assert.equal(input.attempt, "initial");
       assert.equal(input.deadlineMs, Date.parse(reminderAt));
       vi.setSystemTime(new Date(reminderAt));
       return {
+        attempt: "initial" as const,
+        configuredTimeoutMs: 30_000,
+        currentStepElapsedMs: 25,
+        refreshElapsedMs: 25,
         refreshStage: "replica_write" as const,
+        refreshStep: "replica_write" as const,
         source: { fileCount: 0, totalBytes: 0 },
         status: "deferred_timeout" as const,
       };

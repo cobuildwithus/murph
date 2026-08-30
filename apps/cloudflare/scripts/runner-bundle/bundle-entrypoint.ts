@@ -311,7 +311,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // thin boot kernel measured 11,552,732B total in exact macOS production
 // assembly on 2026-08-28. Ratchet that integrated baseline and retain the fixed
 // 32KB total cross-platform allowance; the startup-specific gates stay fixed.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_552_732 + 32_768;
+// Recorded device-sync wake revalidation extends the existing lazy runtime
+// graph without adding a forbidden boot input. Exact macOS production assembly
+// measured 11,592,493B total on 2026-08-30; ratchet only the total baseline and
+// retain the fixed cross-platform allowance and all startup-specific gates.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_592_493 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 64_257;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 1_950_662;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;

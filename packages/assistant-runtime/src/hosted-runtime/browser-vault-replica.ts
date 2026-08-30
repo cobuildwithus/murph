@@ -89,6 +89,26 @@ export type HostedBrowserVaultReplicaRefreshStage =
   | "replica_write"
   | "ref_publication";
 
+export type HostedBrowserVaultReplicaRefreshAttempt = "initial" | "retry";
+
+export type HostedBrowserVaultReplicaRefreshStep =
+  | "initial_source_hash"
+  | "replica_construction_initialization"
+  | "replica_construction_source_read"
+  | "replica_construction_experiment_outcome_read"
+  | "replica_construction_projection"
+  | "replica_serialization"
+  | "second_source_hash"
+  | "replica_write"
+  | "ref_publication";
+
+type HostedBrowserVaultReplicaConstructionStep = Extract<
+  HostedBrowserVaultReplicaRefreshStep,
+  | "replica_construction_source_read"
+  | "replica_construction_experiment_outcome_read"
+  | "replica_construction_projection"
+>;
+
 export interface HostedBrowserVaultReplicaRefreshPreparation {
   content: HostedBrowserVaultReplicaContentSummary;
   replica: BrowserVaultReplica;
@@ -118,7 +138,12 @@ export type HostedBrowserVaultReplicaRefreshResult =
       status: "refresh_failed_too_large";
     }
   | {
+      attempt: HostedBrowserVaultReplicaRefreshAttempt;
+      configuredTimeoutMs: number;
+      currentStepElapsedMs: number;
+      refreshElapsedMs: number;
       refreshStage: HostedBrowserVaultReplicaRefreshStage;
+      refreshStep: HostedBrowserVaultReplicaRefreshStep;
       source: HostedBrowserVaultReplicaSourceSummary;
       status: "deferred_timeout";
     }
@@ -134,11 +159,12 @@ export type HostedBrowserVaultReplicaRefreshResult =
       status: "publish_conflict" | "skipped_no_port" | "workspace_missing" | "refresh_failed";
     };
 
-const DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS = 20_000;
+const DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS = 30_000;
 const utf8Encoder = new TextEncoder();
 
 export async function createHostedBrowserVaultReplicaForSourceState(input: {
   generatedAt?: string;
+  onRefreshStep?: (step: HostedBrowserVaultReplicaConstructionStep) => void;
   signal?: AbortSignal;
   sourceStateHash: string;
   vaultRoot: string;
@@ -147,11 +173,13 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
     createBrowserVaultReplica,
     readBrowserVaultReplicaSource,
   } = await import("@murphai/query/browser-replica-server");
+  input.onRefreshStep?.("replica_construction_source_read");
   input.signal?.throwIfAborted();
   const { metricPoints, vault } = await readBrowserVaultReplicaSource(
     input.vaultRoot,
     { signal: input.signal },
   );
+  input.onRefreshStep?.("replica_construction_experiment_outcome_read");
   input.signal?.throwIfAborted();
   const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
     input.vaultRoot,
@@ -160,6 +188,7 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
   );
   input.signal?.throwIfAborted();
 
+  input.onRefreshStep?.("replica_construction_projection");
   return await createBrowserVaultReplica({
     experimentOutcomes: outcomeProjection.outcomes,
     generatedAt: input.generatedAt,
@@ -206,6 +235,7 @@ export async function createHostedBrowserVaultReplicaRefreshFromWorkspace(input:
 }
 
 export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
+  attempt?: HostedBrowserVaultReplicaRefreshAttempt;
   deadlineMs?: number | null;
   generatedAt?: string | null;
   force?: boolean | null;
@@ -227,6 +257,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
   }
 
   const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const attempt = input.attempt ?? "initial";
   const configuredTimeoutMs =
     input.timeoutMs ?? DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS;
   const timeoutMs = input.deadlineMs === null || input.deadlineMs === undefined
@@ -236,6 +267,8 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
         Math.max(0, input.deadlineMs - Date.now()),
       );
   const cancellation = createBrowserVaultRefreshCancellation({
+    attempt,
+    configuredTimeoutMs,
     runtimeWakeSignal: input.runtimeWakeSignal ?? null,
     signal: input.signal ?? null,
     timeoutMs,
@@ -267,6 +300,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
       "replica_construction",
       (signal) => createHostedBrowserVaultReplicaForSourceState({
         generatedAt,
+        onRefreshStep: cancellation.recordConstructionStep,
         signal,
         sourceStateHash: sourceBefore.hash,
         vaultRoot: input.vaultRoot,
@@ -346,7 +380,12 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
           totalBytes: 0,
         };
         return {
+          attempt: error.attempt,
+          configuredTimeoutMs: error.configuredTimeoutMs,
+          currentStepElapsedMs: error.currentStepElapsedMs,
+          refreshElapsedMs: error.refreshElapsedMs,
           refreshStage: error.refreshStage,
+          refreshStep: error.refreshStep,
           source,
           status: error.status,
         };
@@ -683,7 +722,12 @@ function assertHostedBrowserVaultReplicaWriteMatchesRefresh(input: {
 }
 
 class HostedBrowserVaultRefreshDeferredError extends Error {
+  readonly attempt: HostedBrowserVaultReplicaRefreshAttempt;
+  readonly configuredTimeoutMs: number;
+  readonly currentStepElapsedMs: number;
+  readonly refreshElapsedMs: number;
   readonly refreshStage: HostedBrowserVaultReplicaRefreshStage;
+  readonly refreshStep: HostedBrowserVaultReplicaRefreshStep;
   readonly source: HostedBrowserVaultReplicaSourceSummary | null;
   readonly status: Extract<
     HostedBrowserVaultReplicaRefreshResult["status"],
@@ -691,19 +735,31 @@ class HostedBrowserVaultRefreshDeferredError extends Error {
   >;
 
   constructor(input: {
+    attempt: HostedBrowserVaultReplicaRefreshAttempt;
+    configuredTimeoutMs: number;
+    currentStepElapsedMs: number;
+    refreshElapsedMs: number;
     refreshStage: HostedBrowserVaultReplicaRefreshStage;
+    refreshStep: HostedBrowserVaultReplicaRefreshStep;
     source?: HostedBrowserVaultReplicaSourceSummary | null;
     status: HostedBrowserVaultRefreshDeferredError["status"];
   }) {
     super(`Hosted browser-vault refresh ${input.status}.`);
     this.name = "HostedBrowserVaultRefreshDeferredError";
+    this.attempt = input.attempt;
+    this.configuredTimeoutMs = input.configuredTimeoutMs;
+    this.currentStepElapsedMs = input.currentStepElapsedMs;
+    this.refreshElapsedMs = input.refreshElapsedMs;
     this.refreshStage = input.refreshStage;
+    this.refreshStep = input.refreshStep;
     this.source = input.source ?? null;
     this.status = input.status;
   }
 }
 
 function createBrowserVaultRefreshCancellation(input: {
+  attempt: HostedBrowserVaultReplicaRefreshAttempt;
+  configuredTimeoutMs: number;
   runtimeWakeSignal: RuntimeWakeSignal | null;
   signal: AbortSignal | null;
   timeoutMs: number;
@@ -713,6 +769,9 @@ function createBrowserVaultRefreshCancellation(input: {
     refreshStage: HostedBrowserVaultReplicaRefreshStage,
     operation: () => Promise<T>,
   ): Promise<T>;
+  recordConstructionStep(
+    refreshStep: HostedBrowserVaultReplicaConstructionStep,
+  ): void;
   recordSource(source: HostedBrowserVaultReplicaSourceSummary): void;
   runOwned<T>(
     refreshStage: HostedBrowserVaultReplicaRefreshStage,
@@ -723,8 +782,11 @@ function createBrowserVaultRefreshCancellation(input: {
 } {
   let deferred: HostedBrowserVaultRefreshDeferredError | null = null;
   let refreshStage: HostedBrowserVaultReplicaRefreshStage = "initial_source_hash";
+  let refreshStep: HostedBrowserVaultReplicaRefreshStep = "initial_source_hash";
   let source: HostedBrowserVaultReplicaSourceSummary | null = null;
   let rejectDeferred: (error: HostedBrowserVaultRefreshDeferredError) => void = () => {};
+  const refreshStartedAtMs = Date.now();
+  let currentStepStartedAtMs = refreshStartedAtMs;
   const waiterAbortController = new AbortController();
   const deferredPromise = new Promise<never>((_resolve, reject) => {
     rejectDeferred = reject;
@@ -734,8 +796,24 @@ function createBrowserVaultRefreshCancellation(input: {
     if (deferred) {
       return;
     }
+    const deferredAtMs = Date.now();
+    const refreshElapsedMs = toBoundedHostedBrowserVaultTimingMs(
+      deferredAtMs - refreshStartedAtMs,
+    );
     deferred = new HostedBrowserVaultRefreshDeferredError({
+      attempt: input.attempt,
+      configuredTimeoutMs: toBoundedHostedBrowserVaultTimingMs(
+        input.configuredTimeoutMs,
+      ),
+      currentStepElapsedMs: Math.min(
+        refreshElapsedMs,
+        toBoundedHostedBrowserVaultTimingMs(
+          deferredAtMs - currentStepStartedAtMs,
+        ),
+      ),
+      refreshElapsedMs,
       refreshStage,
+      refreshStep,
       source,
       status,
     });
@@ -771,11 +849,17 @@ function createBrowserVaultRefreshCancellation(input: {
       operation: () => Promise<T>,
     ): Promise<T> {
       refreshStage = nextRefreshStage;
+      refreshStep = resolveHostedBrowserVaultRefreshStep(nextRefreshStage);
+      currentStepStartedAtMs = Date.now();
       const promise = operation();
       if (deferred) {
         throw deferred;
       }
       return await Promise.race([promise, deferredPromise]);
+    },
+    recordConstructionStep(nextRefreshStep) {
+      refreshStep = nextRefreshStep;
+      currentStepStartedAtMs = Date.now();
     },
     recordSource(nextSource: HostedBrowserVaultReplicaSourceSummary) {
       source = nextSource;
@@ -785,6 +869,8 @@ function createBrowserVaultRefreshCancellation(input: {
       operation: (signal: AbortSignal) => Promise<T>,
     ): Promise<T> {
       refreshStage = nextRefreshStage;
+      refreshStep = resolveHostedBrowserVaultRefreshStep(nextRefreshStage);
+      currentStepStartedAtMs = Date.now();
       if (deferred) {
         throw deferred;
       }
@@ -808,4 +894,19 @@ function createBrowserVaultRefreshCancellation(input: {
       }
     },
   };
+}
+
+function resolveHostedBrowserVaultRefreshStep(
+  refreshStage: HostedBrowserVaultReplicaRefreshStage,
+): HostedBrowserVaultReplicaRefreshStep {
+  return refreshStage === "replica_construction"
+    ? "replica_construction_initialization"
+    : refreshStage;
+}
+
+function toBoundedHostedBrowserVaultTimingMs(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.floor(value));
 }

@@ -2022,12 +2022,12 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     writeSubAgentActivity(
       residentChild,
       'thread-warm-identity-1-1',
+      'turn-warm-identity-1-1',
       'thread-provider-background-child',
       'started',
       {
         agentPath: '/root/provider-background-child',
         id: 'spawn-provider-background-child',
-        turnId: 'turn-warm-identity-1-1',
       },
     )
     writeStartedTurn(
@@ -2234,12 +2234,12 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
             writeSubAgentActivity(
               child,
               parentThreadId,
+              parentTurnId,
               childThreadId,
               'started',
               {
                 agentPath: '/root/group-owned-background-work',
                 id: 'spawn-group-compact-detached-child',
-                turnId: parentTurnId,
               },
             )
             writeStartedTurn(child, childThreadId, childTurnId)
@@ -2360,7 +2360,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     },
   )
 
-  it('compacts current-shape group usage and preserves pre-compaction attribution', async () => {
+  it('compacts current-shape group usage at the 50k boundary and preserves attribution', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
@@ -2514,7 +2514,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     await expect(
       compactWarmCodexThread({
         groupMinThreadTokens: 50_000,
-        minThreadTokens: 100_000,
+        minThreadTokens: 90_000,
         timeoutMs: 5_000,
       }),
     ).resolves.toMatchObject({

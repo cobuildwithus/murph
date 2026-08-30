@@ -2527,7 +2527,7 @@ test('memory update schema requires a memory id and text, with an optional repla
   assert.deepEqual(schema.options.required ?? [], [])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('memory show schema accepts an optional memory id', async () => {
+test('memory show schema accepts an optional memory id and compact projection', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw(['memory', 'show', '--schema', '--format', 'json']),
   ) as {
@@ -2538,7 +2538,10 @@ test('memory show schema accepts an optional memory id', async () => {
       required?: string[]
     }
     options: {
-      properties: Record<string, unknown>
+      properties: Record<string, {
+        description?: string
+        type?: string
+      }>
       required?: string[]
     }
   }
@@ -2549,6 +2552,11 @@ test('memory show schema accepts an optional memory id', async () => {
     /omit to return the whole memory document/u,
   )
   assert.deepEqual(schema.args.required ?? [], [])
+  assert.equal(schema.options.properties.compact?.type, 'boolean')
+  assert.match(
+    String(schema.options.properties.compact?.description ?? ''),
+    /document existence plus each record's id, section, and text/u,
+  )
   assert.deepEqual(schema.options.required ?? [], [])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 

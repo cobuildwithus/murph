@@ -1487,9 +1487,9 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
           writeSubAgentActivity(
             child,
             'thread-root-tool-scope',
+            'turn-root-tool-scope',
             'thread-root-tool-scope-descendant',
             'started',
-            { turnId: 'turn-root-tool-scope' },
           )
           const messageTargetToolVariants = [
             {

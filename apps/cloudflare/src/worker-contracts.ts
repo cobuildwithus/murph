@@ -264,6 +264,20 @@ export interface WorkerDeviceWebhookQueueHealthNamespaceLike<
   getByName(name: string): TStub;
 }
 
+export interface WorkerOpenAiAuthorizationAlertStubLike {
+  reportFailure(input: {
+    observedAtMs: number;
+    status: 401 | 403;
+  }): Promise<{ accepted: true }>;
+}
+
+export interface WorkerOpenAiAuthorizationAlertNamespaceLike<
+  TStub extends WorkerOpenAiAuthorizationAlertStubLike =
+    WorkerOpenAiAuthorizationAlertStubLike,
+> {
+  getByName(name: string): TStub;
+}
+
 export interface WorkerEnvironmentContract<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > extends Readonly<Record<string, unknown>> {
@@ -301,6 +315,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_ASSISTANT_SANDBOX?: string;
   ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  OPENAI_AUTHORIZATION_ALERT_MONITOR?: WorkerOpenAiAuthorizationAlertNamespaceLike;
   VENICE_API_KEY?: string;
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON?: string;

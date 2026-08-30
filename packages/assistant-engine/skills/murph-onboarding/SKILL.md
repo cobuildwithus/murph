@@ -135,7 +135,7 @@ historical ordering or replay the park.
 Do not fan the snapshot out into separate memory, goal, regimen, supplement,
 condition, allergy, experiment, or device commands. Make one targeted owning
 read only when the checkpoint needed now is omitted, truncated, or errored in
-the snapshot. In particular, use `vault-cli memory show --format json` when
+the snapshot. In particular, use `vault-cli memory show --compact --format json` when
 relevant memory evidence is truncated and `vault-cli blood-test list --format
 json` before asking the lab checkpoint when recent lab evidence is otherwise
 unknown. If visible and saved evidence satisfies every completion rule in
