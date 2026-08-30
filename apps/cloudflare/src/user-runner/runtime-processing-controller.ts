@@ -536,13 +536,7 @@ export class RuntimeProcessingController {
       }
     }
 
-    const canCoalesceWithoutWake =
-      activeFence.processingMode === "inbox_media_retention"
-      || (
-        activeFence.processingMode === "system_mailbox"
-        && requestedProcessingMode === "system_mailbox"
-      );
-    if (canCoalesceWithoutWake) {
+    if (activeFence.processingMode === "inbox_media_retention") {
       const activeRuntimeState =
         await this.readActiveRuntimeFenceLiveness({
           activeFence,
@@ -595,7 +589,7 @@ export class RuntimeProcessingController {
           ? { orchestration: inputAtActiveWakeStart.orchestration }
           : {}),
         processingMode: activeFence.processingMode,
-        ...(cooperativeMailboxOwnerHandoff
+        ...(activeFence.processingMode === "system_mailbox"
           ? { requestedProcessingMode }
           : {}),
         userId: record.userId,

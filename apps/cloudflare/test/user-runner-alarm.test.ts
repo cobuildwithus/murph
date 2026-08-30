@@ -3643,13 +3643,13 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("accepts active system-mailbox rechecks without waking the running pass", async () => {
+  it("routes active system-mailbox rechecks through the wake with the explicit same-owner mode", async () => {
     const processingMode = "system_mailbox" as const;
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
-        action: "woken" as const,
+        action: "already_running" as const,
         kind: "accepted" as const,
       }),
     );
@@ -3684,8 +3684,18 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: token.attemptId,
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(ensureProcessing).toHaveBeenCalledWith({
+      activeRuntime: expect.objectContaining({
+        attemptId: token.attemptId,
+        leaseGeneration: String(token.generation),
+        processingMode,
+        requestedProcessingMode: processingMode,
+        userId: TEST_USER_ID,
+      }),
+      userId: TEST_USER_ID,
+    });
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
