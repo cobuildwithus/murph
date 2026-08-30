@@ -9,6 +9,6 @@
     "summary": "Larger private dashboards now spend less time preparing saved health data in the background, helping updates finish more reliably.",
     "details": "The data shown and privacy boundaries are unchanged. Foreground messages still take priority, and existing pages continue to read the same saved data.",
     "relevanceTags": ["health-data", "performance", "reliability", "privacy"],
-    "sourcePullRequests": [2593]
+    "sourcePullRequests": [2593, 2598]
   }
 }
