@@ -1,6 +1,6 @@
 # Bound and diagnose Browser Vault refresh timeouts
 
-Status: active
+Status: completed
 Created: 2026-08-29
 Updated: 2026-08-30
 
@@ -56,9 +56,25 @@ Updated: 2026-08-30
 - Remediation proof is green: the two focused owner/composed tests pass; the
   five-file hosted-runtime regression set passes 184 tests; assistant-runtime
   typecheck and staged diff checks pass.
-- Pending: docs/log guards, commit and push, exact-head final ReviewGPT review,
-  required CI, Ready state, merge, merge proof, and worktree retirement.
-  Production deployment remains explicitly out of scope.
+- Full sensitive ReviewGPT round 4 returned `ROUND_OUTCOME: PASS` with no
+  findings on exact reviewed head
+  `c64afccf794847d66f8c1e11212788da74764719`; response metadata verified the
+  requested GPT-5.6 Pro model.
+- Current-main reconciliation used the one permitted base update and produced
+  head `ca0b2eb22b96c7a7d7fd2a67979e58568c64ce0c`. The only conflicts were the
+  docs index and `system-mailbox.ts`; both were mechanical unions preserving
+  the reviewed Browser Vault owner and current-main's independent notification
+  telemetry. The merged state passes the five-file regression set 190/190,
+  assistant-runtime typecheck, docs drift, and the raw-log privacy guard.
+- PR #2515 is Ready and every exact-head GitHub check is green, including
+  release build/typecheck, app verification, assistant/CLI/platform coverage,
+  runner-bundle budget, Temporal compatibility, PR evidence, and privacy/build
+  artifact checks. The completed-plan commit is documentation-only and creates
+  no new ReviewGPT round; it is the final repository bookkeeping head before
+  the already-authorized merge.
+- Production deployment remains explicitly out of scope. The later protected
+  Cloudflare rollout and bounded natural-evidence query remain recorded in the
+  PR deployment section.
 
 ## Goal
 
@@ -147,6 +163,8 @@ Updated: 2026-08-30
 5. [completed] Have ReviewGPT implement the accepted projection-backoff ownership finding
    using existing metadata and one shared predicate, then run the composed
    before/between-projection-failure proof and focused regression set.
-6. [in progress] Push the corrected candidate, run the required later full ReviewGPT round and
-   exact-head CI, mark Ready, and merge only after all gates pass. Do not deploy
-   production automatically.
+6. [completed] Push the corrected candidate, obtain a full ReviewGPT PASS, reconcile
+   current main with behavior-preserving conflict proof, pass exact-head CI,
+   and mark the PR Ready for the authorized merge. Do not deploy production
+   automatically.
+Completed: 2026-08-30
