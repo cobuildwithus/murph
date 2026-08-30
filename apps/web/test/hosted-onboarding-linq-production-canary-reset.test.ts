@@ -30,7 +30,6 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-production-canary-reset";
 import {
   readHostedLinqProductionCanaryMemberId,
-  readHostedLinqProductionCanaryPhoneLookupKeys,
   readHostedLinqProductionCanaryPhoneNumber,
 } from "@/src/lib/hosted-onboarding/linq-production-canary";
 
@@ -49,19 +48,13 @@ describe("Hosted Linq production canary identity", () => {
     mocks.lookupIdentity.mockResolvedValue(null);
   });
 
-  it("normalizes the configured phone and derives privacy-safe lookup keys", () => {
+  it("normalizes the configured phone", () => {
     const source = {
       HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER: "+1 (555) 123-4567",
     };
 
     expect(readHostedLinqProductionCanaryPhoneNumber(source))
       .toBe("+15551234567");
-    expect(readHostedLinqProductionCanaryPhoneLookupKeys(source))
-      .toEqual(expect.arrayContaining([
-        expect.stringMatching(/^hbidx:phone:/u),
-      ]));
-    expect(readHostedLinqProductionCanaryPhoneLookupKeys(source))
-      .not.toContain("+15551234567");
   });
 
   it("resolves the current canary member through the canonical identity lookup", async () => {

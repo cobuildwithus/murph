@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-29
-Updated: 2026-08-29
+Updated: 2026-08-30
 
 ## Goal
 
@@ -37,7 +37,8 @@ Updated: 2026-08-29
 
 1. Trace signup-notification and growth-report ownership plus the existing canary identity boundary.
 2. Implement the smallest optional exclusion in both reporting paths.
-3. Add focused ordinary-member, canary-member, and unconfigured regressions.
+3. Add focused ordinary-member, canary-member, unconfigured, and
+   production-shaped delivery-attribution regressions.
 4. Run scoped verification, review the diff and Product UX journey, then complete the PR review gates.
 
 ## Decisions
@@ -45,8 +46,14 @@ Updated: 2026-08-29
 - Keep canary execution and account reset unchanged; filter only downstream reporting.
 - Do not hardcode a phone number or member id.
 - Preserve existing aggregate snapshots because their historical message totals no longer retain enough member attribution for a safe rewrite.
+- Exclude outbound deliveries by the canary member's canonical current and
+  pending Linq chat lookup keys, not by the external participant phone: delivery
+  phone lookup keys identify Murph's sender line.
 
 ## Verification
 
-- Commands to run: focused hosted-onboarding signup-notification and growth-metrics tests, then the hosted Web typecheck.
-- Expected outcomes: canary fixtures produce no internal new-user email/count contribution while ordinary members retain existing results.
+- `pnpm --dir apps/web test:prepared -- test/hosted-signup-notification-email.test.ts test/hosted-onboarding-linq-production-canary-reset.test.ts test/hosted-ops-growth.test.ts` — passed, 81 tests.
+- `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-ops-growth-canary-postgres.test.ts` — passed against a freshly migrated disposable local database. Both canary cycles were excluded while ordinary traffic on the same Murph line remained counted.
+- Scoped ESLint across the changed TypeScript files — passed.
+- `pnpm --dir apps/web typecheck` — passed.
+- Product UX replay: the configured canary still completes the unchanged messaging journey, operators no longer see its member or message activity in new snapshots and emails, ordinary members on the shared sender line remain visible, and unconfigured environments retain the prior behavior.

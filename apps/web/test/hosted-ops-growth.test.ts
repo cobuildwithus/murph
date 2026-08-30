@@ -99,7 +99,7 @@ const mocks = vi.hoisted(() => ({
   },
   queryRaw: vi.fn(),
   readHostedLinqProductionCanaryMemberId: vi.fn(),
-  readHostedLinqProductionCanaryPhoneLookupKeys: vi.fn(),
+  readHostedMemberRoutingRecord: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   requireVercelCronRequest: vi.fn(),
@@ -118,8 +118,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
   readHostedLinqProductionCanaryMemberId:
     mocks.readHostedLinqProductionCanaryMemberId,
-  readHostedLinqProductionCanaryPhoneLookupKeys:
-    mocks.readHostedLinqProductionCanaryPhoneLookupKeys,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -204,7 +206,7 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedMemberRouting.findMany.mockResolvedValue([]);
     mocks.hostedMember.findMany.mockResolvedValue([]);
     mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(null);
-    mocks.readHostedLinqProductionCanaryPhoneLookupKeys.mockReturnValue([]);
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue(null);
     mocks.decodeHostedMailboxStoredPayloads.mockImplementation(async (input: {
       entries: Array<{ payloadInlineCiphertext: unknown }>;
     }) => {
@@ -2876,9 +2878,10 @@ describe("hosted ops growth metrics", () => {
     mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(
       "member_canary",
     );
-    mocks.readHostedLinqProductionCanaryPhoneLookupKeys.mockReturnValue([
-      "v1:canary-phone",
-    ]);
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue({
+      linqChatLookupKey: "v1:canary-chat",
+      pendingLinqChatLookupKey: "v1:canary-chat-pending",
+    });
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
     mocks.hostedLinqDelivery.count.mockResolvedValueOnce(57);
@@ -2906,10 +2909,10 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.hostedLinqDelivery.count.mock.calls[0]?.[0]).toEqual({
       where: {
         OR: [
-          { phoneNumberLookupKey: null },
+          { linqChatLookupKey: null },
           {
-            phoneNumberLookupKey: {
-              notIn: ["v1:canary-phone"],
+            linqChatLookupKey: {
+              notIn: ["v1:canary-chat", "v1:canary-chat-pending"],
             },
           },
         ],
@@ -2921,6 +2924,10 @@ describe("hosted ops growth metrics", () => {
           in: ["accepted", "delivered", "sent_no_receipt_expected"],
         },
       },
+    });
+    expect(mocks.readHostedMemberRoutingRecord).toHaveBeenCalledWith({
+      memberId: "member_canary",
+      prisma,
     });
     expect(
       mocks.hostedOutboundMessageVolumeReceipt.count.mock.calls[0]?.[0],

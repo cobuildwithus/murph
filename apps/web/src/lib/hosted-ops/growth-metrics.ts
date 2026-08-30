@@ -40,8 +40,8 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
   readHostedLinqProductionCanaryMemberId,
-  readHostedLinqProductionCanaryPhoneLookupKeys,
 } from "@/src/lib/hosted-onboarding/linq-production-canary";
+import { readHostedMemberRoutingRecord } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
   HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX,
   parseHostedStarterUsageSourceReferenceLookupKey,
@@ -1882,8 +1882,16 @@ export async function captureHostedGrowthDailySnapshot(
 ): Promise<HostedGrowthSnapshotCapture> {
   const productionCanaryMemberId =
     await readHostedLinqProductionCanaryMemberId({ prisma });
-  const productionCanaryPhoneLookupKeys =
-    readHostedLinqProductionCanaryPhoneLookupKeys();
+  const productionCanaryRouting = productionCanaryMemberId
+    ? await readHostedMemberRoutingRecord({
+        memberId: productionCanaryMemberId,
+        prisma,
+      })
+    : null;
+  const productionCanaryLinqChatLookupKeys = [...new Set([
+    productionCanaryRouting?.linqChatLookupKey,
+    productionCanaryRouting?.pendingLinqChatLookupKey,
+  ].filter((lookupKey): lookupKey is string => Boolean(lookupKey)))];
   const realHostedMemberWhere = buildHostedGrowthMemberWhere(
     productionCanaryMemberId,
   );
@@ -2019,13 +2027,13 @@ export async function captureHostedGrowthDailySnapshot(
       }),
       prisma.hostedLinqDelivery.count({
         where: {
-          ...(productionCanaryPhoneLookupKeys.length > 0
+          ...(productionCanaryLinqChatLookupKeys.length > 0
             ? {
                 OR: [
-                  { phoneNumberLookupKey: null },
+                  { linqChatLookupKey: null },
                   {
-                    phoneNumberLookupKey: {
-                      notIn: productionCanaryPhoneLookupKeys,
+                    linqChatLookupKey: {
+                      notIn: productionCanaryLinqChatLookupKeys,
                     },
                   },
                 ],

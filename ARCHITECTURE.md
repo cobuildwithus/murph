@@ -1217,11 +1217,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   One sequential blind-index lookup also excludes the configured fixed-identity
   production canary from personal-member, trial, status, retention, and direct
   activity results. Daily snapshots apply the same member exclusion and omit
-  Linq deliveries addressed to the configured canary lookup keys; previously
-  aggregated snapshots remain immutable. Composed with sponsorship reads, the
-  page can queue at most 27 database operations at its read peak (previously
-  26); the shared pool still caps live connections at 15. This projection adds
-  no transaction, decrypt, external call, retry, or fallback.
+  Linq deliveries attributed to the canary member's canonical current or
+  pending Linq chat lookup key; previously aggregated snapshots remain
+  immutable. Snapshot capture performs one bounded routing-row read after the
+  canary identity lookup. Composed with sponsorship reads, the page can queue at
+  most 27 database operations at its read peak (previously 26); the shared pool
+  still caps live connections at 15. This projection adds no transaction,
+  decrypt, external call, retry, or fallback.
 
   Hosted device-sync scheduling keeps one canonical connection timestamp:
   Web's `nextReconcileAt` is the provider cadence and the only timestamp the
