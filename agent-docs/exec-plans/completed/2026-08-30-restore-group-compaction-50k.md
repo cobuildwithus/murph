@@ -1,6 +1,6 @@
 # Restore group idle compaction to 50k
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -107,3 +107,8 @@ Updated: 2026-08-30
     tests are sufficient for this restoration, while historical provider
     compact usage cannot be recovered exactly.
   - Final cross-cutting ReviewGPT round: passed with no findings.
+  - Parent final review: passed. The full patch remains the smallest direct
+    restoration, and the Product UX purpose remains `Ready`: exact 49,999 skip,
+    exact 50,000 compact, preserved cold-resume task context, unchanged 90,000
+    personal threshold, and no foreground or visible-reply change.
+Completed: 2026-08-30
