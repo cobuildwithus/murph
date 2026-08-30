@@ -84,7 +84,7 @@ const mealInputPayloadSchema = z
     ingredients: mealIngredientsSchema,
     nutrition: mealNutritionSchema.optional(),
   })
-  .passthrough()
+  .strict()
 
 type StructuredMealPayload = {
   photo?: string
@@ -106,12 +106,15 @@ const mealInputPayloadShapeDescription = [
 ].join(' ')
 
 function formatSchemaIssues(
-  issues: readonly { path: PropertyKey[]; message: string }[],
+  issues: readonly { code: string; path: PropertyKey[]; message: string }[],
 ): string {
   return issues
     .map((issue) => {
       const path = issue.path.length > 0 ? issue.path.join('.') : 'value'
-      return `${path}: ${issue.message}`
+      const message = issue.code === 'unrecognized_keys'
+        ? 'contains an unsupported field'
+        : issue.message
+      return `${path}: ${message}`
     })
     .join('; ')
 }
@@ -242,9 +245,14 @@ async function loadStructuredMealPayload(inputFile: string): Promise<StructuredM
   const parsed = mealInputPayloadSchema.safeParse(payload)
 
   if (!parsed.success) {
+    const unsupportedFieldHint = parsed.error.issues.some(
+      (issue) => issue.code === 'unrecognized_keys',
+    )
+      ? ` ${mealInputPayloadShapeDescription}`
+      : ''
     throw new VaultCliError(
       'invalid_payload',
-      `Meal payload is not valid. ${formatSchemaIssues(parsed.error.issues)}`,
+      `Meal payload is not valid. ${formatSchemaIssues(parsed.error.issues)}${unsupportedFieldHint}`,
     )
   }
 

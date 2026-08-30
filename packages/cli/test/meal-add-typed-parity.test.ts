@@ -73,6 +73,11 @@ interface MealCloseoutWorkResult {
   }>
 }
 
+interface MealListResult {
+  count: number
+  items: Array<{ id: string }>
+}
+
 function createMealCli() {
   const cli = Cli.create('vault-cli', {
     description: 'meal add typed parity test cli',
@@ -616,6 +621,67 @@ test.sequential(
           /Meal capture requires/u,
         )
       }
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true })
+    }
+  },
+)
+
+test.sequential(
+  'meal import-json rejects unknown fields without echoing or writing a meal',
+  async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-cli-meal-unknown-field-',
+    )
+
+    try {
+      await initializeVault({ vaultRoot })
+      const cli = createMealCli()
+      const unknownField = 'ingredientz'
+      const unknownValue = 'synthetic private value'
+      const payloadPath = path.join(parentRoot, 'meal.json')
+      await writeFile(
+        payloadPath,
+        `${JSON.stringify({
+          note: 'A valid meal note',
+          [unknownField]: unknownValue,
+        })}\n`,
+        'utf8',
+      )
+
+      const result = await runInProcessJsonCli<MealAddResult>(cli, [
+        'meal',
+        'import-json',
+        '--input',
+        `@${payloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (!result.envelope.ok) {
+        assert.equal(result.envelope.error.code, 'invalid_payload')
+        assert.match(result.envelope.error.message ?? '', /unsupported field/u)
+        assert.match(result.envelope.error.message ?? '', /ingredients/u)
+      }
+
+      const serializedError = JSON.stringify(result.envelope)
+      assert.equal(serializedError.includes(unknownField), false)
+      assert.equal(serializedError.includes(unknownValue), false)
+      assert.equal(serializedError.includes(payloadPath), false)
+
+      const listed = await runInProcessJsonCli<MealListResult>(cli, [
+        'meal',
+        'list',
+        '--limit',
+        '10',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(listed.exitCode, null)
+      assert.equal(requireData(listed.envelope).count, 0)
+      assert.deepEqual(requireData(listed.envelope).items, [])
     } finally {
       await rm(parentRoot, { force: true, recursive: true })
     }
