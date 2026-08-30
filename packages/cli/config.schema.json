@@ -1825,6 +1825,11 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "compact": {
+                          "default": false,
+                          "description": "Return identifiers and basic lifecycle and schedule state only; use automation show for complete details.",
+                          "type": "boolean"
+                        },
                         "limit": {
                           "default": 10,
                           "type": "integer",
@@ -4362,7 +4367,19 @@
               "properties": {
                 "show": {
                   "type": "object",
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "compact": {
+                          "description": "Return only document existence plus each record's id, section, and text.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 },
                 "set-name": {
                   "type": "object",

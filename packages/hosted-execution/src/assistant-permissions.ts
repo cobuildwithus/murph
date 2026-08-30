@@ -83,3 +83,12 @@ export function buildMurphMemberWorkspacePermissionProfileTomlLines(): readonly 
     "",
   ];
 }
+
+export function buildMurphHostedPermissionProfileTomlLines(): readonly string[] {
+  return [
+    ...buildMurphGroupReadPermissionProfileTomlLines(),
+    ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
+    ...buildMurphMemberReadPermissionProfileTomlLines(),
+    ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
+  ];
+}

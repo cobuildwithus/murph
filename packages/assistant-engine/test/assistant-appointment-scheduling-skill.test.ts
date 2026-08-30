@@ -81,7 +81,7 @@ describe('appointment scheduling skill', () => {
 
     expect(raw).toContain('## Evidence pass before questions')
     expect(raw).toContain(
-      'vault-cli memory show --vault "$VAULT" --format json',
+      'vault-cli memory show --compact --vault "$VAULT" --format json',
     )
     expect(raw).toMatch(
       /saved name,\s+date of birth, provider relationship/iu,

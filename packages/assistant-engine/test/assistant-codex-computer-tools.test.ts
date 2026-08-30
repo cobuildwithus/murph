@@ -113,11 +113,9 @@ describe("murph computer dynamic tools", () => {
     expect(openDescription.length).toBeLessThanOrEqual(250);
     expect(openDescription).toContain("authorized browser");
     expect(openDescription).toContain("Returns runId, URL, title, text");
-    expect(openDescription).toContain("Before multi-step browsing each turn");
-    expect(openDescription).toContain("call send_progress_update if available");
-    expect(openDescription).toContain("prior-turn progress does not count");
     expect(openDescription).toContain("reopen after handoff/uncertainty");
     expect(openDescription).toContain("prior outcome stays unknown");
+    expect(openDescription).not.toContain("send_progress_update");
 
     expect(osControlDescription.length).toBeLessThanOrEqual(310);
     expect(osControlDescription).toContain("only when Playwright cannot operate");

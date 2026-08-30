@@ -1,5 +1,7 @@
 const CONCATENATED_ROUTE_LITERALS: Readonly<Record<string, string>> = {
   "/v1/agent/register/backend-api": "/v1/agent/register",
+  "/v1/analytics/codex/turn-costsbundle_idsstruct":
+    "/v1/analytics/codex/turn-costs",
   "/v1/liveazurefd.": "/v1/live",
   "/v1/livebusinessend_turnthread": "/v1/live",
   "/v1/livecityargscoregoalusedcoveechosagevaleargv": "/v1/live",

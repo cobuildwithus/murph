@@ -14,7 +14,7 @@ import {
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
 } from '@murphai/hosted-execution/assistant-model'
-import { goalMetricTargetSchema } from '@murphai/contracts'
+import { buildCalendarEventUrl, goalMetricTargetSchema } from '@murphai/contracts'
 import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
@@ -7963,7 +7963,85 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('compacts a 95k personal warm thread off-turn and keeps its task resumable', {
+  it('cold-resumes a skipped 49,999-token group thread with its task context', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const goalSentinel = 'IDLE_COMPACTION_GOAL'
+    const constraintSentinel = 'IDLE_COMPACTION_CONSTRAINT'
+    const toolResultSentinel = 'IDLE_COMPACTION_TOOL_RESULT'
+    const skippedResumeReply = [
+      'POST_SKIP_OK',
+      goalSentinel,
+      constraintSentinel,
+      toolResultSentinel,
+    ].join(' ')
+    scenario.stub.queue({ text: 'SKIP_SEED_OK' })
+    const seeded = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: 'Reply exactly SKIP_SEED_OK.',
+      serviceTier: 'flex',
+    })
+    expect(seeded.finalMessage).toBe('SKIP_SEED_OK')
+
+    scenario.stub.queue({
+      text: 'SKIP_STANDARD_OK',
+      usageInputTokens: 49_999,
+    })
+    const standard = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: [
+        'Preserve this task across the next idle checkpoint.',
+        `Goal: ${goalSentinel}`,
+        `Constraint: ${constraintSentinel}`,
+        `Completed tool result: ${toolResultSentinel}`,
+        'Reply exactly SKIP_STANDARD_OK.',
+      ].join('\n'),
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(standard.finalMessage).toBe('SKIP_STANDARD_OK')
+    expect(standard.threadId).toBe(seeded.threadId)
+
+    // Below threshold: no provider traffic, warm process untouched. The
+    // reported size must be the real observed thread context from the latest
+    // turn's tokenUsage events, not a placeholder.
+    scenario.stub.markRequestBaseline()
+    const skipped = await compactWarmCodexThread({
+      groupMinThreadTokens: 50_000,
+      minThreadTokens: 90_000,
+      timeoutMs: 30_000,
+    })
+    expect(skipped).toMatchObject({
+      kind: 'skipped',
+      reason: 'below_threshold',
+    })
+    expect(
+      skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
+        && skipped.threadContextTokensBefore === 49_999,
+    ).toBe(true)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+
+    // Changed-path proof: kill the warm process after the below-threshold skip
+    // so the next turn must reconstruct the uncompacted thread from disk and
+    // continue from the provider response that received the task sentinels.
+    await stopWarmCodexAppServer('post-skip-cold-resume')
+    scenario.stub.queue({
+      requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
+      text: skippedResumeReply,
+    })
+    const resumedAfterSkip = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: 'Continue the preserved task after the skipped idle checkpoint.',
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(resumedAfterSkip.finalMessage).toBe(skippedResumeReply)
+    expect(resumedAfterSkip.threadId).toBe(seeded.threadId)
+  })
+
+  it('compacts a 50k group warm thread off-turn and keeps its task resumable', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -7976,7 +8054,7 @@ text(JSON.stringify(result));
       constraintSentinel,
       toolResultSentinel,
     ].join(' ')
-    const resumedReply = [
+    const compactedResumeReply = [
       'POST_COMPACT_OK',
       goalSentinel,
       constraintSentinel,
@@ -7985,6 +8063,7 @@ text(JSON.stringify(result));
     scenario.stub.queue({ text: 'COMPACT_SEED_OK' })
     const seeded = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Reply exactly COMPACT_SEED_OK.',
       serviceTier: 'flex',
     })
@@ -7992,10 +8071,11 @@ text(JSON.stringify(result));
 
     scenario.stub.queue({
       text: 'COMPACT_STANDARD_OK',
-      usageInputTokens: 95_000,
+      usageInputTokens: 50_000,
     })
     const standard = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: [
         'Preserve this task across the next idle checkpoint.',
         `Goal: ${goalSentinel}`,
@@ -8008,28 +8088,11 @@ text(JSON.stringify(result));
     expect(standard.finalMessage).toBe('COMPACT_STANDARD_OK')
     expect(standard.threadId).toBe(seeded.threadId)
 
-    // Below threshold: no provider traffic, warm process untouched. The
-    // reported size must be the real observed thread context from the latest
-    // turn's tokenUsage events, not a placeholder.
-    scenario.stub.markRequestBaseline()
-    const skipped = await compactWarmCodexThread({
-      minThreadTokens: 100_000,
-      timeoutMs: 30_000,
-    })
-    expect(skipped).toMatchObject({
-      kind: 'skipped',
-      reason: 'below_threshold',
-    })
-    expect(
-      skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
-        && skipped.threadContextTokensBefore === 95_000,
-    ).toBe(true)
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
-
-    // Above threshold: the local-provider compaction summarization request is
+    // Exact boundary: the local-provider compaction summarization request is
     // served by the stub and the thread reports compacted.
     scenario.stub.queue({ text: compactedSummary })
     const compacted = await compactWarmCodexThread({
+      groupMinThreadTokens: 50_000,
       minThreadTokens: 90_000,
       timeoutMs: 60_000,
     })
@@ -8062,6 +8125,7 @@ text(JSON.stringify(result));
     scenario.stub.markRequestBaseline()
     expect(
       await compactWarmCodexThread({
+        groupMinThreadTokens: 1,
         minThreadTokens: 1,
         timeoutMs: 30_000,
       }),
@@ -8079,15 +8143,16 @@ text(JSON.stringify(result));
     await stopWarmCodexAppServer('post-compact-cold-resume')
     scenario.stub.queue({
       requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
-      text: resumedReply,
+      text: compactedResumeReply,
     })
-    const resumed = await executeCodexAppServerTurn({
+    const resumedAfterCompact = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Finish the preserved task after the idle checkpoint.',
       resumeSessionId: seeded.sessionId,
     })
-    expect(resumed.finalMessage).toBe(resumedReply)
-    expect(resumed.threadId).toBe(seeded.threadId)
+    expect(resumedAfterCompact.finalMessage).toBe(compactedResumeReply)
+    expect(resumedAfterCompact.threadId).toBe(seeded.threadId)
   })
 
   it('keeps a warm thread reusable when its model cannot be accounted', {
@@ -8380,6 +8445,171 @@ text(JSON.stringify(result));
     expect(progressUpdates).toEqual(['Scripted progress update.'])
     expect(result.finalMessage).toBe('DYNAMIC_TOOL_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('delivers the exact runtime-owned calendar link instead of model-copied text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const event = {
+      title: 'Care appointment',
+      startsAt: '2026-10-14T14:30:00-04:00',
+      endsAt: '2026-10-14T15:15:00-04:00',
+      location: 'Downtown Clinic',
+    } as const
+    const exactUrl = buildCalendarEventUrl(event)
+    const modelCopiedUrl = `${exactUrl.slice(0, -1)}A`
+    const modelFinalMessage = `The details are ready.\n${modelCopiedUrl}`
+    const exactFinalMessage = `The details are ready.\n${exactUrl}`
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: event,
+          name: 'create_calendar_link',
+          namespace: 'murph',
+        },
+      },
+      {
+        text: modelFinalMessage,
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        calendarLinkAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      prompt: 'Prepare my exact appointment as a calendar link.',
+    })
+
+    expect(result.providerAuthoredFinalMessage).toBe(modelFinalMessage)
+    expect(result.finalMessage).toBe(exactFinalMessage)
+    expect(result.transcriptMessage).toBe(exactFinalMessage)
+    expect(result.finalMessage).not.toContain(modelCopiedUrl)
+  })
+
+  it.each([
+    {
+      calendarFirst: true,
+      name: 'calendar link first with resolved reminder timing',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-10-14T12:00:00.000Z',
+        status: 'resolved' as const,
+      },
+      reminderMessage: 'I set your appointment reminder for 8:00 AM Eastern.',
+    },
+    {
+      calendarFirst: false,
+      name: 'pending reminder first',
+      occurrenceProjection: { status: 'pending' as const },
+      reminderMessage:
+        'I saved your appointment reminder for 8:00 AM Eastern. Its timing is still being confirmed.',
+    },
+  ])('preserves the semantic reminder result and exact calendar suffix with $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ calendarFirst, occurrenceProjection, reminderMessage }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const event = {
+      title: 'Care appointment',
+      startsAt: '2026-10-14T14:30:00-04:00',
+      endsAt: '2026-10-14T15:15:00-04:00',
+      location: 'Downtown Clinic',
+    } as const
+    const exactUrl = buildCalendarEventUrl(event)
+    const modelCopiedUrl = `${exactUrl.slice(0, -1)}A`
+    const modelFinalMessage = `${reminderMessage}\n${modelCopiedUrl}`
+    const exactFinalMessage = `${reminderMessage}\n${exactUrl}`
+    const providerReminderRequest = {
+      action: 'save' as const,
+      instructions: 'Remind me about my care appointment.',
+      schedule: {
+        kind: 'at' as const,
+        localAt: {
+          date: '2026-10-14',
+          time: '08:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Care appointment reminder',
+    }
+    const calendarCall = {
+      functionCall: {
+        arguments: event,
+        name: 'create_calendar_link',
+        namespace: 'murph',
+      },
+    }
+    const reminderCall = {
+      customToolCall: {
+        input: `
+const result = await tools.murph__automation(${JSON.stringify(providerReminderRequest)});
+text(JSON.stringify(result));
+`,
+        name: 'exec',
+      },
+    }
+    if (calendarFirst) {
+      scenario.stub.queue(calendarCall, reminderCall, { text: modelFinalMessage })
+    } else {
+      scenario.stub.queue(reminderCall, calendarCall, { text: modelFinalMessage })
+    }
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        automationAvailable: true,
+        calendarLinkAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            return {
+              action: 'save',
+              automationId: 'automation-care-appointment',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'care-appointment-reminder',
+              occurrenceProjection,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              updatedAt: '2026-10-01T16:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Prepare my appointment reminder and calendar link.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: providerReminderRequest.instructions,
+      schedule: { at: '2026-10-14T12:00:00.000Z', kind: 'at' },
+      title: providerReminderRequest.title,
+    }])
+    expect(result.providerAuthoredFinalMessage).toBe(modelFinalMessage)
+    expect(result.finalMessage).toBe(exactFinalMessage)
+    expect(result.transcriptMessage).toBe(exactFinalMessage)
+    expect(result.finalMessage).not.toContain(modelCopiedUrl)
+    expect(result.finalMessage.match(
+      /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/gu,
+    )).toEqual([exactUrl])
+    expect(result.finalMessage.endsWith(exactUrl)).toBe(true)
   })
 
   it.each([

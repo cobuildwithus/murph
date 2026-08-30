@@ -161,6 +161,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
 
       const vault = await readVault(vaultRoot);
       const points = await listMetricPoints(vaultRoot, { limit: null });
+      const refreshSteps: string[] = [];
       await writeVaultFile(
         vaultRoot,
         "journal/2026/2026-05-03.md",
@@ -169,6 +170,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       expect((await getQueryProjectionStatus(vaultRoot)).fresh).toBe(false);
       const replica = await createHostedBrowserVaultReplicaForSourceState({
         generatedAt: "2026-05-10T00:00:00.000Z",
+        onRefreshStep: (step) => refreshSteps.push(step),
         sourceStateHash: "browser-vault-source-state-test",
         vaultRoot,
       });
@@ -201,6 +203,11 @@ describe("hosted browser-vault replica refresh preparation", () => {
         }),
       ]));
       expect(replica.labResultRows.some((row) => row.value === 5.1 || row.value === 9.9)).toBe(false);
+      expect(refreshSteps).toEqual([
+        "replica_construction_source_read",
+        "replica_construction_experiment_outcome_read",
+        "replica_construction_projection",
+      ]);
 
       const labOnlyContent = summarizeHostedBrowserVaultReplicaContent({
         ...replica,
@@ -267,11 +274,25 @@ describe("hosted browser-vault replica refresh preparation", () => {
         workspace,
       });
 
-      expect(timedOut).toEqual({
+      expect(timedOut).toMatchObject({
+        attempt: "initial",
+        configuredTimeoutMs: 0,
         refreshStage: "initial_source_hash",
+        refreshStep: "initial_source_hash",
         source: { fileCount: 0, totalBytes: 0 },
         status: "deferred_timeout",
       });
+      if (timedOut.status !== "deferred_timeout") {
+        throw new Error("Expected an immediate Browser Vault timeout.");
+      }
+      expect([
+        timedOut.configuredTimeoutMs,
+        timedOut.currentStepElapsedMs,
+        timedOut.refreshElapsedMs,
+      ].every((value) => Number.isSafeInteger(value) && value >= 0)).toBe(true);
+      expect(timedOut.currentStepElapsedMs).toBeLessThanOrEqual(
+        timedOut.refreshElapsedMs,
+      );
       expect(write).not.toHaveBeenCalled();
       expect(publishRef).not.toHaveBeenCalled();
 
@@ -800,7 +821,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
-  it("uses a 20-second default refresh deadline", async () => {
+  it("uses a 30-second default refresh deadline", async () => {
     mockImmediateBrowserVaultReplicaBuild();
     const {
       refreshHostedBrowserVaultReplicaFromRuntime,
@@ -847,12 +868,17 @@ describe("hosted browser-vault replica refresh preparation", () => {
       });
       await writeStarted;
 
-      await vi.advanceTimersByTimeAsync(19_999);
+      await vi.advanceTimersByTimeAsync(29_999);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
 
       await expect(resultPromise).resolves.toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 30_000,
+        currentStepElapsedMs: 30_000,
+        refreshElapsedMs: 30_000,
         refreshStage: "replica_write",
+        refreshStep: "replica_write",
         source: expectedSource,
         status: "deferred_timeout",
       });
@@ -899,7 +925,12 @@ describe("hosted browser-vault replica refresh preparation", () => {
       });
 
       expect(result).toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
         refreshStage: "replica_write",
+        refreshStep: "replica_write",
         source: expectedSource,
         status: "deferred_timeout",
       });
@@ -915,6 +946,14 @@ describe("hosted browser-vault replica refresh preparation", () => {
   });
 
   it("joins an aborted local replica build before returning its timeout", async () => {
+    let resolveSourceReadStarted: (() => void) | null = null;
+    const sourceReadStarted = new Promise<void>((resolve) => {
+      resolveSourceReadStarted = resolve;
+    });
+    let releaseSourceRead = () => {};
+    const sourceReadRelease = new Promise<void>((resolve) => {
+      releaseSourceRead = resolve;
+    });
     let resolveBuildStarted: (() => void) | null = null;
     const buildStarted = new Promise<void>((resolve) => {
       resolveBuildStarted = resolve;
@@ -928,6 +967,14 @@ describe("hosted browser-vault replica refresh preparation", () => {
         >();
         return {
           ...actual,
+          async readBrowserVaultReplicaSource(
+            vaultRoot: Parameters<typeof actual.readBrowserVaultReplicaSource>[0],
+            options?: Parameters<typeof actual.readBrowserVaultReplicaSource>[1],
+          ) {
+            resolveSourceReadStarted?.();
+            await sourceReadRelease;
+            return await actual.readBrowserVaultReplicaSource(vaultRoot, options);
+          },
           async createBrowserVaultReplica(input: {
             signal?: AbortSignal;
           }) {
@@ -959,6 +1006,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
     try {
       const expectedSource = await writeBrowserVaultStageSource(vaultRoot);
       const resultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        attempt: "retry",
         force: true,
         generatedAt: "2026-05-10T00:01:00.000Z",
         platform: createPlatform({
@@ -971,11 +1019,19 @@ describe("hosted browser-vault replica refresh preparation", () => {
         vaultRoot,
         workspace: createWorkspaceState(),
       });
+      await sourceReadStarted;
+      await vi.advanceTimersByTimeAsync(400);
+      releaseSourceRead();
       await buildStarted;
-      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(600);
 
       await expect(resultPromise).resolves.toEqual({
+        attempt: "retry",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 600,
+        refreshElapsedMs: 1_000,
         refreshStage: "replica_construction",
+        refreshStep: "replica_construction_projection",
         source: expectedSource,
         status: "deferred_timeout",
       });
@@ -983,6 +1039,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       expect(write).not.toHaveBeenCalled();
       expect(publishRef).not.toHaveBeenCalled();
     } finally {
+      releaseSourceRead();
       vi.doUnmock("@murphai/query/browser-replica-server");
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });
@@ -1053,7 +1110,12 @@ describe("hosted browser-vault replica refresh preparation", () => {
       await vi.advanceTimersByTimeAsync(1_000);
 
       await expect(resultPromise).resolves.toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
         refreshStage: "replica_serialization",
+        refreshStep: "replica_serialization",
         source: expectedSource,
         status: "deferred_timeout",
       });
@@ -1136,7 +1198,12 @@ describe("hosted browser-vault replica refresh preparation", () => {
       await vi.advanceTimersByTimeAsync(1_000);
 
       await expect(resultPromise).resolves.toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
         refreshStage: "second_source_hash",
+        refreshStep: "second_source_hash",
         source: expectedSource,
         status: "deferred_timeout",
       });
@@ -1186,7 +1253,12 @@ describe("hosted browser-vault replica refresh preparation", () => {
       });
 
       expect(result).toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
         refreshStage: "ref_publication",
+        refreshStep: "ref_publication",
         source: expectedSource,
         status: "deferred_timeout",
       });
@@ -1286,7 +1358,15 @@ describe("hosted browser-vault replica refresh preparation", () => {
       await vi.advanceTimersByTimeAsync(1_000);
       const result = await resultPromise;
 
-      expect(result).toMatchObject({ status: "deferred_timeout" });
+      expect(result).toMatchObject({
+        attempt: "initial",
+        configuredTimeoutMs: 60_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
+        refreshStage: "replica_write",
+        refreshStep: "replica_write",
+        status: "deferred_timeout",
+      });
       expect(write).toHaveBeenCalledOnce();
       expect(publishRef).not.toHaveBeenCalled();
     } finally {
