@@ -6,7 +6,7 @@ Updated: 2026-08-30
 
 ## Goal
 
-- Start the existing payloadless Cloudflare shell prewarm as soon as an
+- Start the existing payloadless Cloudflare shell prewarm as soon as a
   direct Linq message resolves an active hosted member,
   before the mailbox planning transaction and Temporal signal complete.
 - Preserve the ordinary post-Temporal direct ensure as the only foreground
