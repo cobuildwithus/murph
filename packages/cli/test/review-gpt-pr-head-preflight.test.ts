@@ -57,7 +57,11 @@ set -euo pipefail
 if [[ "$*" == "pr view --json number --jq .number" ]]; then
   printf '%s\\n' '42'
 elif [[ "$*" == "pr view 42 --json baseRefName,baseRefOid,headRefOid --jq [.baseRefName, .baseRefOid, .headRefOid] | @tsv" ]]; then
-  printf 'main\\t%s\\t%s\\n' "\${STUB_PR_BASE}" "\${STUB_PR_HEAD}"
+  pr_head="\${STUB_PR_HEAD}"
+  if [[ -n "\${STUB_PR_HEAD_FILE:-}" ]]; then
+    pr_head="$(cat "\${STUB_PR_HEAD_FILE}")"
+  fi
+  printf 'main\\t%s\\t%s\\n' "\${STUB_PR_BASE}" "$pr_head"
 else
   printf 'unexpected gh invocation: %s\\n' "$*" >&2
   exit 2
@@ -68,12 +72,52 @@ fi
     path.join(binDir, 'pnpm'),
     `#!/usr/bin/env bash
 set -euo pipefail
+if [[ "$1" == "install" ]]; then
+  [[ "$*" == "install --frozen-lockfile --filter . --ignore-scripts" ]]
+  if [[ -n "\${MURPH_TEST_MOVE_PR_HEAD_TO:-}" ]]; then
+    printf '%s\\n' "\${MURPH_TEST_MOVE_PR_HEAD_TO}" > "\${STUB_PR_HEAD_FILE}"
+  fi
+  mkdir -p "\${MURPH_TEST_ROOT}/node_modules/.bin"
+  mkdir -p "\${MURPH_TEST_ROOT}/node_modules/@cobuild/repo-tools/src"
+  printf '#!/usr/bin/env bash\\nexit 0\\n' > "\${MURPH_TEST_ROOT}/node_modules/.bin/cobuild-review-gpt"
+  printf '#!/usr/bin/env bash\\nexit 0\\n' > "\${MURPH_TEST_ROOT}/node_modules/.bin/tsx"
+  chmod +x "\${MURPH_TEST_ROOT}/node_modules/.bin/cobuild-review-gpt"
+  chmod +x "\${MURPH_TEST_ROOT}/node_modules/.bin/tsx"
+  printf '#!/usr/bin/env bash\\n' > "\${MURPH_TEST_ROOT}/node_modules/@cobuild/repo-tools/src/consumer-shell.sh"
+  exit 0
+fi
 {
   printf 'pr=%s\\n' "\${REVIEW_GPT_PR_URL:-}"
   printf 'phase=%s\\n' "\${REVIEW_GPT_REVIEW_PHASE:-}"
   printf 'args=%s\\n' "$*"
 } > "\${REVIEW_GPT_TEST_CAPTURE}"
 `,
+  )
+  writeFileSync(path.join(harnessRoot, '.gitignore'), 'node_modules/\n', 'utf8')
+  mkdirSync(path.join(harnessRoot, 'node_modules', '.bin'), { recursive: true })
+  mkdirSync(
+    path.join(harnessRoot, 'node_modules', '@cobuild', 'repo-tools', 'src'),
+    { recursive: true },
+  )
+  writeExecutable(
+    path.join(harnessRoot, 'node_modules', '.bin', 'cobuild-review-gpt'),
+    '#!/usr/bin/env bash\nexit 0\n',
+  )
+  writeExecutable(
+    path.join(harnessRoot, 'node_modules', '.bin', 'tsx'),
+    '#!/usr/bin/env bash\nexit 0\n',
+  )
+  writeFileSync(
+    path.join(
+      harnessRoot,
+      'node_modules',
+      '@cobuild',
+      'repo-tools',
+      'src',
+      'consumer-shell.sh',
+    ),
+    '#!/usr/bin/env bash\n',
+    'utf8',
   )
 
   execFileSync('git', ['init', '-q'], { cwd: harnessRoot })
@@ -87,6 +131,8 @@ set -euo pipefail
     cwd: harnessRoot,
     encoding: 'utf8',
   }).trim()
+  const stubPrHeadFile = path.join(harnessRoot, '.git', 'stub-pr-head')
+  writeFileSync(stubPrHeadFile, `${head}\n`, 'utf8')
 
   const env = {
     ...process.env,
@@ -95,10 +141,13 @@ set -euo pipefail
     REVIEW_GPT_PR_URL: '',
     REVIEW_GPT_REVIEW_PHASE: '',
     REVIEW_GPT_TEST_CAPTURE: capturePath,
+    MURPH_TEST_MOVE_PR_HEAD_TO: '',
+    MURPH_TEST_ROOT: harnessRoot,
     STUB_PR_BASE: head,
     STUB_PR_HEAD: head,
+    STUB_PR_HEAD_FILE: '',
   }
-  return { capturePath, env, harnessRoot, head }
+  return { capturePath, env, harnessRoot, head, stubPrHeadFile }
 }
 
 function runHarness(
@@ -120,6 +169,25 @@ afterEach(() => {
 })
 
 describe('ReviewGPT PR context guard', () => {
+  it('rechecks the PR head after cold toolchain setup', () => {
+    const harness = createHarness()
+    const movedPrHead = 'f'.repeat(40)
+    rmSync(path.join(harness.harnessRoot, 'node_modules'), {
+      force: true,
+      recursive: true,
+    })
+
+    const result = runHarness(harness, ['pr-review', '--dry-run'], {
+      MURPH_TEST_MOVE_PR_HEAD_TO: movedPrHead,
+      STUB_PR_HEAD_FILE: harness.stubPrHeadFile,
+    })
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('local HEAD does not match the pushed PR head')
+    expect(result.stderr).toContain(`PR head:    ${movedPrHead}`)
+    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
+  })
+
   it.each([
     ['completion-specialists', 'preliminary'],
     ['pr-review', 'final'],

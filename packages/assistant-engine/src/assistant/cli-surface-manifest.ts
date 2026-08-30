@@ -110,6 +110,8 @@ export async function readAssistantCliLlmsManifest(input: {
 export async function readAssistantCliLlmsFullManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
+  preferBuiltWorkspaceCli?: boolean
+  timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
   const result = await executeAssistantCliManifestCommand({
@@ -117,6 +119,8 @@ export async function readAssistantCliLlmsFullManifest(input: {
     cliEnv: input.cliEnv,
     executionContext: input.executionContext,
     maxOutputChars: assistantCliFullManifestMaxOutputChars,
+    preferBuiltWorkspaceCli: input.preferBuiltWorkspaceCli,
+    timeoutMs: input.timeoutMs,
     workingDirectory: input.workingDirectory,
   })
 
@@ -155,6 +159,8 @@ async function executeAssistantCliManifestCommand(input: {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
   maxOutputChars?: number
+  preferBuiltWorkspaceCli?: boolean
+  timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<{
   argv: string[]
@@ -164,13 +170,22 @@ async function executeAssistantCliManifestCommand(input: {
   stdout: string
 }> {
   const disableConfigAutodiscovery = Boolean(input.executionContext?.hosted?.memberId)
+  const timeoutMs = input.timeoutMs ?? assistantCliManifestTimeoutMs
+
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError('Assistant CLI manifest timeout must be a positive safe integer.')
+  }
+
   const argv = disableConfigAutodiscovery
     ? ['--no-config', ...input.args]
     : [...input.args]
   const env = buildAssistantCliProcessEnv({
     cliEnv: input.cliEnv,
   })
-  const launcher = await resolveAssistantCliLauncher(env)
+  const launcher = await resolveAssistantCliLauncher(
+    env,
+    input.preferBuiltWorkspaceCli ?? false,
+  )
 
   return await new Promise((resolve, reject) => {
     const child = spawn(launcher.command, [...launcher.argvPrefix, ...argv], {
@@ -195,12 +210,12 @@ async function executeAssistantCliManifestCommand(input: {
             `vault-cli ${argv.join(' ')} timed out while loading the CLI manifest.`,
             {
               argv,
-              timeoutMs: assistantCliManifestTimeoutMs,
+              timeoutMs,
             },
           ),
         )
       })
-    }, assistantCliManifestTimeoutMs)
+    }, timeoutMs)
 
     const settle = (handler: () => void) => {
       if (settled) {
@@ -321,7 +336,20 @@ function copyAllowedAssistantCliManifestEnvEntries(
 
 async function resolveAssistantCliLauncher(
   cliProcessEnv: NodeJS.ProcessEnv,
+  preferBuiltWorkspaceCli: boolean,
 ): Promise<AssistantCliLauncher> {
+  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
+  if (
+    preferBuiltWorkspaceCli &&
+    localBuiltCliBinPath &&
+    await pathExists(localBuiltCliBinPath)
+  ) {
+    return {
+      argvPrefix: [localBuiltCliBinPath],
+      command: process.execPath,
+    }
+  }
+
   const localWorkspaceCliSourceLauncher =
     await resolveLocalWorkspaceCliSourceLauncher(cliProcessEnv)
   if (localWorkspaceCliSourceLauncher) {
@@ -340,7 +368,6 @@ async function resolveAssistantCliLauncher(
     }
   }
 
-  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
   if (localBuiltCliBinPath && await pathExists(localBuiltCliBinPath)) {
     return {
       argvPrefix: [localBuiltCliBinPath],

@@ -24,7 +24,7 @@ Last verified: 2026-08-30
 - The Linq production canary runs only after the same exact Vercel production
   proof succeeds for a protected-main deployment. One fixed Photon identity
   starts a three-turn private iMessage conversation, and every Murph reply must
-  arrive in under ten seconds. The workflow is non-canceling and serialized;
+  arrive in under twenty seconds. The workflow is non-canceling and serialized;
   an older deployment skips when the production alias has advanced. Before the
   first send, a dedicated fixed-target Web route clears only that identity's
   admission rows and fully pre-provider instant-reply claim, then invokes the
@@ -647,6 +647,11 @@ Last verified: 2026-08-30
   back settlement without creating a synthetic skipped row. The
   active-member replan still owns route promotion, inbound accounting, and the
   canonical inbound mailbox append before any generated reply can be sent.
+  Ordinary established direct Linq messages use the same authority-free shell
+  hint as soon as pre-transaction routing preparation resolves the eligible
+  active member, before mailbox-root KMS work and transaction entry. This hint may
+  overlap or fail without changing the plan: it creates no fence or mailbox
+  owner, and only the accepted Temporal signal permits the direct ensure.
   A definite route-read or route-projection failure after generation confirms
   that same attempted row was skipped before allowing ordinary-runtime
   fallback; if the skip cannot be confirmed, Web retains ownership and the

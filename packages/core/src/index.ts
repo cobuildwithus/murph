@@ -33,6 +33,7 @@ export type {
   AssistantPersonalityPreferencesUpdate,
   AssistantPreferencesUpdate,
   PreferencesDocumentSnapshot,
+  WorkoutCapturePreferencesUpdate,
 } from "./preferences.ts";
 export {
   assertPathWithinVault,
@@ -161,6 +162,7 @@ export {
   unlinkJournalEventIds,
   unlinkJournalStreams,
   updateAssistantPreferences,
+  updateWorkoutCapturePreferences,
   updateWorkoutUnitPreferences,
   updateWearablePreferences,
   updateExperiment,

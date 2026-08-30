@@ -23,19 +23,31 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Send one early update before direct reply-critical work that requires three or more distinct substantive checks or tool actions',
+      'Default to no progress update',
     )
     expect(prompt).toContain(
-      'Source count alone does not trigger it: routine context reads, especially during onboarding or setup, and one or two quick calls stay silent and answer directly',
+      'Send one only when the member is likely to wait noticeably',
     )
     expect(prompt).toContain(
-      'Also skip progress for ordinary conversation, choosing a straightforward next step, and quick resume checks',
+      '3+ substantive evidence checks/actions beyond setup',
     )
     expect(prompt).toContain(
-      'Send a child-wait update after spawning',
+      "an active skill's required receipt or start acknowledgement",
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement',
+      'Routine onboarding/setup never qualifies by itself, even when it uses tools or the runtime is slow',
+    )
+    expect(prompt).toContain(
+      'goal capture, policy/resume/status/context reads, device checks, saves, connection choices, one or two quick calls, and the next setup question go straight to the final reply',
+    )
+    expect(prompt).toContain(
+      'send before its first qualifying action',
+    )
+    expect(prompt).toContain(
+      'send a required child-start acknowledgement after spawning',
+    )
+    expect(prompt).toContain(
+      'Background work does not trigger progress by itself',
     )
     expect(prompt).toContain(
       'A single routine daily-card read alone does not trigger progress',
@@ -70,6 +82,9 @@ describe('assistant progress prompt contract', () => {
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
     expect(prompt).not.toContain('orient the member even when each lookup is routine')
+    expect(prompt).not.toContain('Source count alone does not trigger it')
+    expect(prompt).not.toContain('only separate user-requested long research or external action')
+    expect(prompt).not.toContain('Routine onboarding/setup does not count by itself')
   })
 
   it('does not instruct routes without progress delivery to call the tool', () => {

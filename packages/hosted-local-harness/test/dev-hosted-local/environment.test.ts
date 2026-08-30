@@ -1625,6 +1625,10 @@ describe("buildWranglerLocalDevConfig", () => {
           class_name: "DeviceWebhookQueueHealthDurableObject",
           name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
         },
+        {
+          class_name: "OpenAiAuthorizationAlertDurableObject",
+          name: "OPENAI_AUTHORIZATION_ALERT_MONITOR",
+        },
       ]),
     });
     expect(config.migrations).toEqual(expect.arrayContaining([
@@ -1635,6 +1639,10 @@ describe("buildWranglerLocalDevConfig", () => {
       {
         new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
         tag: "v5",
+      },
+      {
+        new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
+        tag: "v6",
       },
     ]));
     expect(config.triggers).toEqual({

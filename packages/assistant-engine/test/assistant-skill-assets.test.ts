@@ -192,6 +192,20 @@ describe('assistant skill assets', () => {
     )
   })
 
+  it('keeps every registered whole-memory read on the compact projection', async () => {
+    const registeredSkillText = (
+      await Promise.all(ASSISTANT_SKILLS.map(readSkillFile))
+    ).join('\n')
+    const memoryReadCommands = [
+      ...registeredSkillText.matchAll(/vault-cli memory show[^\n`]*/gu),
+    ].map((match) => match[0])
+
+    expect(memoryReadCommands.length).toBeGreaterThan(0)
+    for (const command of memoryReadCommands) {
+      expect(command).toContain('--compact')
+    }
+  })
+
   it('uses unique safe skill slugs and names', () => {
     const slugs = new Set<string>()
     const names = new Set<string>()
@@ -1055,7 +1069,7 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/refresh the\s+current page as a last resort/)
     expect(raw).toContain('references/health-browser-playbook.md')
     expect(raw).toContain('reordering supplements or products')
-    expect(raw).toContain('vault-cli memory show --vault "$VAULT" --format json')
+    expect(raw).toContain('vault-cli memory show --compact --vault "$VAULT" --format json')
     expect(raw).toContain('vault-cli memory upsert')
     expect(raw).toContain('Do not create a memory record for routine success')
     expect(raw).toContain('Finite-supply replenishment check-ins')
@@ -2033,7 +2047,7 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'Make one targeted owning read only when the checkpoint needed now is omitted, truncated, or errored in the snapshot.',
     )
-    expect(raw).toContain('vault-cli memory show --format json')
+    expect(raw).toContain('vault-cli memory show --compact --format json')
     expect(compact).toContain(
       'Save optional demographic context to the existing best-fit Identity or Context memory.',
     )

@@ -89,7 +89,7 @@ Otherwise inspect first and make safe progress.
 
 For repeat action tasks such as reordering supplements or products, booking or
 rescheduling with a known provider, or using a known portal, run
-`vault-cli memory show --vault "$VAULT" --format json` when saved preferences
+`vault-cli memory show --compact --vault "$VAULT" --format json` when saved preferences
 could materially change the site, product, provider, delivery, or scheduling
 choice.
 
@@ -545,7 +545,7 @@ run revealed a new, durable fact that will materially improve future tasks for
 this same user.
 
 1. Read existing memory first:
-   `vault-cli memory show --vault "$VAULT" --format json`
+   `vault-cli memory show --compact --vault "$VAULT" --format json`
 2. If a matching record exists, update that record rather than creating a
    duplicate.
 3. Otherwise add one concise record with `vault-cli memory upsert`:

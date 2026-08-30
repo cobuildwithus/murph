@@ -37,6 +37,8 @@ const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const hostedLinqAppCardAssistantReplyText = "Handled the app card.";
 const hostedLinqTypingPrewarmAssistantReplyText =
   "The typing prewarm kept the normal reply path intact.";
+const hostedLinqMessageRoutingPrewarmAssistantReplyText =
+  "The message-routing prewarm stayed attached to this reply.";
 const hostedLinqParticipantAdditionGroupContext =
   "One or more participants were recently added to this group chat.";
 const hostedLinqParticipantAddedDetailedContext =
@@ -150,6 +152,97 @@ describe("hosted local Linq webhook e2e", () => {
       assistantProviderBody.includes("U can call me Rocket Man"),
       summarizeProviderTextRequestShape(assistantProviderBody),
     ).toBe(true);
+  }, 300_000);
+
+  it("attributes an idle direct message prewarm to its delivered reply", async () => {
+    const { chatId, replyChatPath, userId } =
+      await createActiveLinqWebhookMember("message-routing-prewarm");
+    await requireScenario().waitForHostedIdle(userId);
+    const outboundCountBeforeReply = requireLinqStub()
+      .countObservedSends(replyChatPath);
+    const providerCountBeforeReply = requireScenario().assistantProviderRequests.length;
+    const messageText = "Can the direct message wake the runtime early?";
+    const messageEventId = `evt_message_routing_prewarm_${userId}`;
+
+    requireScenario().queueAssistantResponses([
+      hostedLinqMessageRoutingPrewarmAssistantReplyText,
+    ], {
+      matchInputContains: messageText,
+    });
+    const messageResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(userId, chatId, {
+        eventId: messageEventId,
+        messageId: `msg_message_routing_prewarm_${userId}`,
+        text: messageText,
+      }),
+    );
+    expect(messageResponse.status).toBe(202);
+    await expect(messageResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(userId);
+    await requireScenario().waitForHostedCompletion(userId);
+    const reply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: replyChatPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(reply)).toBe(
+      hostedLinqMessageRoutingPrewarmAssistantReplyText,
+    );
+    expect(requireScenario().assistantProviderRequests).toHaveLength(
+      providerCountBeforeReply + 1,
+    );
+
+    const latencyTrace = await waitForShellPrewarmLatencyTrace({
+      mailboxDedupeKey: messageEventId,
+      userId,
+    });
+    const orchestration = latencyTrace.phaseBreakdown?.orchestration;
+    expect(orchestration).toMatchObject({
+      shellPrewarmAdmissionReadFinishedAtEpochMs: expect.any(Number),
+      shellPrewarmAdmissionReadStartedAtEpochMs: expect.any(Number),
+      shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
+      shellPrewarmConsentLockAcquiredAtEpochMs: expect.any(Number),
+      shellPrewarmExpectedOrchestrationAttemptId:
+        expect.stringMatching(/^web-prewarm-[0-9a-f-]{36}$/u),
+      shellPrewarmFirstHintAtEpochMs: expect.any(Number),
+      shellPrewarmHintCount: expect.any(Number),
+      shellPrewarmOrchestrationAttemptId:
+        expect.stringMatching(/^web-prewarm-[0-9a-f-]{36}$/u),
+      shellPrewarmOutcome: expect.stringMatching(
+        /^(?:cold_start_observed|start_issued_warm)$/u,
+      ),
+      shellPrewarmRequestStartedAtEpochMs: expect.any(Number),
+      shellPrewarmRuntimeControlAuthFinishedAtEpochMs: expect.any(Number),
+      shellPrewarmRuntimeControlAuthStartedAtEpochMs: expect.any(Number),
+      shellPrewarmSource: "linq-message-routing",
+      shellPrewarmUserRunnerConstructorFinishedAtEpochMs: expect.any(Number),
+      shellPrewarmUserRunnerConstructorStartedAtEpochMs: expect.any(Number),
+      shellPrewarmUserRunnerRpcStartedAtEpochMs: expect.any(Number),
+    });
+    expect(orchestration?.shellPrewarmExpectedOrchestrationAttemptId).toBe(
+      orchestration?.shellPrewarmOrchestrationAttemptId,
+    );
+    expectNondecreasingEpochs(
+      orchestration?.shellPrewarmRequestStartedAtEpochMs,
+      orchestration?.shellPrewarmRuntimeControlAuthStartedAtEpochMs,
+      orchestration?.shellPrewarmRuntimeControlAuthFinishedAtEpochMs,
+      orchestration?.shellPrewarmCloudflareRouteReceivedAtEpochMs,
+      orchestration?.shellPrewarmUserRunnerRpcStartedAtEpochMs,
+    );
+    expectNondecreasingEpochs(
+      orchestration?.shellPrewarmUserRunnerConstructorStartedAtEpochMs,
+      orchestration?.shellPrewarmUserRunnerConstructorFinishedAtEpochMs,
+      orchestration?.shellPrewarmUserRunnerRpcStartedAtEpochMs,
+      orchestration?.shellPrewarmConsentLockAcquiredAtEpochMs,
+      orchestration?.shellPrewarmAdmissionReadStartedAtEpochMs,
+      orchestration?.shellPrewarmAdmissionReadFinishedAtEpochMs,
+      orchestration?.shellPrewarmFirstHintAtEpochMs,
+    );
   }, 300_000);
 
   it("reduces an inbound iMessage app card to fallback text and replies in the same chat", async () => {
@@ -292,7 +385,7 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireScenario().assistantProviderRequests).toHaveLength(
       providerCountBeforeTyping + 1,
     );
-    const latencyTrace = await waitForTypingPrewarmLatencyTrace({
+    const latencyTrace = await waitForShellPrewarmLatencyTrace({
       mailboxDedupeKey: messageEventId,
       userId,
     });
@@ -928,7 +1021,7 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
   return `sha256=${signature}`;
 }
 
-async function waitForTypingPrewarmLatencyTrace(input: {
+async function waitForShellPrewarmLatencyTrace(input: {
   mailboxDedupeKey: string;
   userId: string;
 }) {
@@ -959,8 +1052,18 @@ async function waitForTypingPrewarmLatencyTrace(input: {
   }
 
   throw new Error(
-    `Timed out waiting for the typing-prewarm latency trace: ${String(lastError)}`,
+    `Timed out waiting for the shell-prewarm latency trace: ${String(lastError)}`,
   );
+}
+
+function expectNondecreasingEpochs(...values: unknown[]): void {
+  for (const value of values) {
+    expect(value).toEqual(expect.any(Number));
+  }
+  const epochValues = values as number[];
+  for (let index = 1; index < epochValues.length; index += 1) {
+    expect(epochValues[index]).toBeGreaterThanOrEqual(epochValues[index - 1] ?? 0);
+  }
 }
 
 function parseAssistantProviderRequestBody(body: string | undefined): Record<string, unknown> {

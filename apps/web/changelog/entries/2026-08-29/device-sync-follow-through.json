@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Connected data keeps moving",
     "summary": "Murph now finishes retained wearable imports before starting another scheduled sync pass, helping connected activity and health data reach follow-up work without repeated delay.",
-    "details": "Scheduled provider work remains Web-owned and resumes after retained imports drain, so one or more bounded continuation passes can run first. Data is not marked processed until its existing import work reaches a terminal result.",
+    "details": "Scheduled sync checks resume only after retained imports finish. Murph may need more than one pass to work through the backlog, and it does not mark data processed until the import succeeds or reaches a confirmed failure.",
     "relevanceTags": ["wearables", "assistant", "reliability"],
     "sourcePullRequests": [2568]
   }

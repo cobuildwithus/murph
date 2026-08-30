@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedRunnerWorkspaceArtifacts,
+  buildHostedRunnerWorkspaceArtifactPlan,
   buildHostedRunnerWorkspaceBuildArgs,
   buildWorkspacePackagePackPreflightArgs,
   mapWithConcurrency,
@@ -78,6 +79,50 @@ describe("runner bundle runtime artifact staging", () => {
         MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "0",
       }),
     ).toThrow("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY must be a positive integer.");
+  });
+
+  it("defers assistant CLI surface generation until the built workspace CLI exists", () => {
+    const plan = buildHostedRunnerWorkspaceArtifactPlan(
+      ["@murphai/assistant-engine", "@murphai/murph"],
+      {
+        env: { MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4" },
+        repoRoot,
+      },
+    );
+
+    expect(plan.buildArgs).toEqual([
+      "--workspace-concurrency=4",
+      "--filter",
+      "@murphai/assistant-engine",
+      "--filter",
+      "@murphai/murph",
+      "run",
+      "build",
+    ]);
+    expect(plan.buildEnv).toEqual({
+      MURPH_ASSISTANT_CLI_SURFACE_GENERATION: "defer",
+    });
+    expect(plan.assistantCliSurfaceGenerationArgs).toEqual([
+      path.join(
+        repoRoot,
+        "packages",
+        "assistant-engine",
+        "dist",
+        "assistant",
+        "generate-cli-surface-contract.js",
+      ),
+      "--prefer-built-workspace-cli",
+    ]);
+  });
+
+  it("keeps unrelated workspace builds single-phase", () => {
+    const plan = buildHostedRunnerWorkspaceArtifactPlan(
+      ["@murphai/health-commons"],
+      { env: {}, repoRoot },
+    );
+
+    expect(plan.buildEnv).toBeUndefined();
+    expect(plan.assistantCliSurfaceGenerationArgs).toBeNull();
   });
 
   it("prepares runtime artifacts before scriptless runner package packing", () => {

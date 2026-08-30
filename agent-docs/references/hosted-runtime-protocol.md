@@ -1658,8 +1658,19 @@ therefore relinquishes the existing lifecycle boundary without leaving a stale
 hint or partially initialized start ahead of foreground work. If a Worker
 version changes before authoritative start, the `UserRunner` destroys and
 clears a different pending versioned target before binding the current fence.
-The existing Web helper carries its bounded `linq-instant-start` or
-`linq-typing-started` source through the same request and RPC. During additive
+For an ordinary established direct Linq message, pre-transaction routing
+preparation may fire that same request immediately after it resolves an active
+member, before root KMS work and transaction entry. It threads
+one UUID-shaped attempt id through Web, the authenticated route, UserRunner
+activation and admission, and the container's first coalesced observation. The
+final wake carries the same id as expected evidence; the latency report treats
+the hint as causal only when the consumed observation matches it exactly. No
+attempt id is authority, and a retry that resolves another member starts a new
+hint while the planner remains authoritative.
+
+The existing Web helper carries its bounded `linq-instant-start`,
+`linq-message-routing`, or `linq-typing-started` source through the same request
+and RPC. During additive
 rollout an empty legacy request remains accepted and is recorded as `unknown`;
 unknown is never assumed to mean typing. Cloudflare logs one bounded admission outcome (`scheduled`,
 `skipped_consent_busy`, `skipped_admission_unavailable`,
@@ -1673,8 +1684,9 @@ do not imply port or health readiness.
 
 The container also consumes its in-memory hint observation on the next
 authoritative `ensureReadyForProcessing` call. One observation belongs to one
-shell-prewarm operation and carries its triggering source, first causal hint
-timestamp, completion time and duration, coalesced hint count, and one terminal
+shell-prewarm operation and carries its triggering source, bounded
+orchestration attempt and phase timestamps, first causal hint timestamp,
+completion time and duration, coalesced hint count, and one terminal
 outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
 After that operation settles, later hints may only increment its bounded hint
 count until readiness consumes it; they cannot launch a second operation or
@@ -1683,12 +1695,12 @@ leaves into the existing orchestration latency phase breakdown; it adds no
 request, persisted state owner, awaited reporting step, or work on the
 message-ingress path. A stop, explicit destroy, or Durable Object eviction may
 erase the optional observation, so an absent observation means `no observed
-prewarm`, not proof that no typing hint occurred. The aggregate cold-start
-report includes only typing-sourced, chronology-safe, uniquely matched
-Web-direct traces whose reply belongs to the same runtime attempt. It omits
-instant-start, unknown-source, ambiguous, backlog, and attempt-handoff rows
-rather than guessing, and returns no member, mailbox, trace, delivery, or
-runtime-attempt identifiers.
+prewarm`, not proof that no hint occurred. The aggregate cold-start report
+includes chronology-safe typing hints and exact-id-matched message-routing
+hints on uniquely matched Web-direct traces whose reply belongs to the same
+runtime attempt. It omits instant-start, unknown-source, ambiguous, backlog,
+and attempt-handoff rows rather than guessing, and returns no member, mailbox,
+trace, delivery, or runtime-attempt identifiers.
 The signal
 reconciles both the foreground conversation lane and the already-durable
 activation item. Web then
@@ -3268,39 +3280,76 @@ refresh runs only after foreground work and checkpoint correctness are settled,
 is capped by the browser-vault replica byte limit, and races the existing runtime
 wake signal; if a wake arrives before publish, refresh retains the current work
 instead of publishing partial state.
-The default refresh deadline is 20 seconds and remains bounded by any earlier
+The default refresh deadline is 30 seconds and remains bounded by any earlier
 invocation deadline. Cancellation reaches the direct canonical reads, replica
 build checkpoints, content hashing, and size serialization; parallel source
 reads share that signal and every started child settles before the lane returns,
 so timed-out or preempted work cannot continue beside a successor attempt. A
 Browser Vault control or no-record device-sync item that already reached
 `recording` is selected read-only. A runtime wake or host abort leaves its durable
-state untouched for the next foreground-safe opportunity. Timeout, source
-change, publication conflict, generic failure, and an oversized replica
-terminally record the current item without a future retry; a later browser
-freshness request may enqueue new work after the underlying state changes.
-A timeout result also carries the closed refresh-stage vocabulary
+state untouched for the next foreground-safe opportunity. The exact Browser Vault
+control frontier is model-free: the default owner leaves it durable after higher-
+priority foreground work, and a `system_mailbox` invocation claims the recording
+item for refresh disposition. Its first timeout retains that same item, writes
+the existing 60-second `nextAttemptAt`, and checkpoints one future assistant
+wake. An invocation before `nextAttemptAt` neither refreshes nor rewrites that
+committed item or wake. The non-null `nextAttemptAt` is also the exact retained
+item owner's one-retry marker: if that delayed attempt times out again, it creates
+no further retry wake and follows the existing terminal no-record path, which
+removes the exact item, advances handled-through, and exposes the next model-free
+item. The default post-checkpoint and no-progress paths project a delayed wake
+only for refresh intent that has no durable Browser Vault item. There is no
+inline timeout retry and at most one delayed retry. Conversation work, other
+foreground wakes, host abort, shutdown, mailbox budget, checkpoint fences,
+source-change detection, publication-conflict handling, and terminal outcomes
+retain their existing priority and ownership. A successful delayed publication
+or any other existing terminal refresh outcome records and removes the item
+normally. Other system-mailbox items keep their existing timeout recording
+behavior. Source change, publication conflict, generic failure, and an oversized
+replica remain terminal without a future retry; a later browser freshness request
+may enqueue new work after the underlying state changes.
+
+A `deferred_timeout` result and the existing `browser_vault.refresh` done event
+carry one fixed diagnostic schema. `details.browserVaultRefreshAttempt` is the
+closed `initial` or `retry` value supplied by the exact retained-item owner.
+`details.browserVaultRefreshStage` keeps the closed broad-stage vocabulary
 `initial_source_hash`, `replica_construction`, `replica_serialization`,
-`second_source_hash`, `replica_write`, or `ref_publication`; the
-`replica_serialization` value covers cooperative serialization and byte
-measurement. The existing hosted phase log emits that value only as
-`details.browserVaultRefreshStage`. Once the initial source hash finishes, the
-same deferred result and log retain the existing numeric source file-count and
-byte-total summary; before then both remain zero. The closed stage is the only
-new production log value. These details never include paths, filenames, source
+`second_source_hash`, `replica_write`, or `ref_publication`.
+`details.browserVaultRefreshStep` uses the closed values
+`initial_source_hash`, `replica_construction_initialization`,
+`replica_construction_source_read`,
+`replica_construction_experiment_outcome_read`,
+`replica_construction_projection`, `replica_serialization`,
+`second_source_hash`, `replica_write`, or `ref_publication`; this separates the
+canonical source read, experiment-outcome read, and in-memory projection inside
+the broad construction stage. The same event reports bounded, finite,
+non-negative integer milliseconds as
+`details.browserVaultRefreshConfiguredTimeoutMs`,
+`details.browserVaultRefreshElapsedMs`, and
+`details.browserVaultRefreshCurrentStepElapsedMs`. Current-step elapsed time is
+capped at total refresh elapsed time. The configured value remains the requested
+refresh timeout even when an earlier invocation deadline ends the attempt sooner.
+Once the initial source hash finishes, the deferred result and
+log retain the existing numeric source file-count and byte-total summary; before
+then both remain zero.
+
+These additions reuse `Date.now()` and the existing single phase log. They add
+no database or provider call, telemetry backend, metric owner, sampling system,
+or retention change, and only update an in-memory closed step marker at the
+existing stage boundaries. The event never includes paths, filenames, source
 hashes, content, messages, prompts, transcripts, health values, member or
 workspace identifiers, credentials, provider payloads, raw errors, or
 distinctive private scenarios.
 
-A later bounded production query filters
-`details.browserVaultRefreshStatus = deferred_timeout`, aggregates only
-`details.browserVaultRefreshStage` by count and, when already available, the
-existing bounded duration bucket, then compares those counts with privacy-safe
-Web aggregates for refresh-requested state, replica-age bucket, and next-wake
-presence. Use natural traffic only; do not issue synthetic production refresh
-requests for this diagnosis. This additive field ships through the normal
-protected Cloudflare runner-bundle deployment, has no Web deployment ordering
-or persisted compatibility floor, and rolls back with the prior runner bundle.
+A later bounded post-deploy natural-traffic query filters
+`details.browserVaultRefreshStatus = deferred_timeout`, aggregates counts and
+timing distributions by `details.browserVaultRefreshStage`,
+`details.browserVaultRefreshStep`, and `details.browserVaultRefreshAttempt`, and
+then correlates only privacy-safe durable terminal/removal/publication facts.
+Do not issue synthetic production refresh requests for this diagnosis. The
+additive fixed-schema fields ship through the normal protected Cloudflare
+runner-bundle deployment, have no Web deployment ordering or persisted
+compatibility floor, and roll back with the prior runner bundle.
 
 Fresh work and recording items that own post-checkpoint effects retain their
 existing pre-effect preparation checkpoint. Missing optional publication
@@ -3765,6 +3814,20 @@ four container-local stages are `lifecycle_lock_or_state_read`,
 `warm_health_or_cleanup`, `cold_start_or_ports`, and
 `cold_health_or_finalization`. The cleanup boolean overlays the stage that
 triggered cleanup instead of replacing it.
+
+A non-OK Web workspace read also retains one failure-only Worker diagnostic
+without changing its caller-visible exception or retry behavior. The Durable
+Object throws the same plain HTTP-status error immediately and schedules a
+bounded inspection of a cloned response under its existing `waitUntil` owner.
+`Hosted workspace read failure classified.` carries only HTTP status, whether
+the response had the existing forwarded-Web header, a typed retryable boolean
+when present, a closed workspace-route error-code allowlist or `unknown`, and a
+fixed envelope outcome. Inspection is capped at 4 KiB and one second. Unknown,
+missing, malformed, oversized, timed-out, or unreadable bodies collapse to
+fixed buckets; response messages, details, arbitrary codes, request or member
+identifiers, payloads, credentials, and headers other than the forwarded-Web
+boolean never enter the log. The diagnostic adds no retry, request, persisted
+state, provider interaction, or user-visible behavior.
 
 The existing UserRunner startup-confirmation warnings add the same bounded
 elapsed field and one of two caller-owned stages. `rpc_unattributed` means the

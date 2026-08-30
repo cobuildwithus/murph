@@ -144,11 +144,27 @@ describe("hosted runtime operational report contracts", () => {
     );
     expect(coldStartReportSql).toContain("Container health check");
     expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-typing-started'");
+    expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-message-routing'");
+    expect(coldStartReportSql).toContain(
+      "shellPrewarmOrchestrationAttemptId}' =",
+    );
+    expect(coldStartReportSql).toContain(
+      "shellPrewarmExpectedOrchestrationAttemptId}'",
+    );
+    expect(coldStartReportSql).toContain(
+      "Prewarm route -> UserRunner constructor start",
+    );
+    expect(coldStartReportSql).toContain(
+      "Prewarm admission -> container hint",
+    );
+    expect(coldStartReportSql).toContain(
+      "Prewarm container hint -> direct ensure route",
+    );
     expect(coldStartReportSql).toContain(
       "trace.reply_runtime_attempt_id = trace.runtime_attempt_id",
     );
     expect(coldStartReportSql).toContain("causal_candidate_count = 1");
-    expect(coldStartReportSql).toContain("Causal typing hint -> ingress accepted");
+    expect(coldStartReportSql).toContain("Causal shell-prewarm hint -> ingress accepted");
     expect(coldStartReportSql).not.toContain("shellPrewarmLastHintAtEpochMs");
   });
 });
@@ -209,7 +225,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("attributes typing prewarm metrics to one causal trace and excludes ambiguous sources", async () => {
+    it("attributes causal shell prewarm metrics and requires exact message-routing identity", async () => {
       const connection = readLocalPostgresConnection(databaseUrl);
       if (!connection) {
         throw new Error("Expected a validated local PostgreSQL connection.");
@@ -231,23 +247,66 @@ describe.skipIf(!runPostgresProof)(
         ]);
 
         expect(stdout).toContain(
-          "prewarm_cold_start_observed,Causal typing hint -> ingress accepted,1,500.0,500.0,500.0",
+          "prewarm_typing_cold_start_observed,Causal shell-prewarm hint -> ingress accepted,1,500.0,500.0,500.0",
         );
         expect(stdout).toContain(
-          "prewarm_cold_start_observed,Ingress accepted -> runner job,1,1000.0,1000.0,1000.0",
+          "prewarm_typing_cold_start_observed,Ingress accepted -> runner job,1,1000.0,1000.0,1000.0",
         );
         expect(stdout).toContain(
-          "prewarm_cold_start_observed,Ingress accepted -> provider start,1,2000.0,2000.0,2000.0",
+          "prewarm_typing_cold_start_observed,Ingress accepted -> provider start,1,2000.0,2000.0,2000.0",
         );
         expect(stdout).toContain(
-          "prewarm_cold_start_observed,Ingress accepted -> reply accepted,1,3000.0,3000.0,3000.0",
+          "prewarm_typing_cold_start_observed,Ingress accepted -> reply accepted,1,3000.0,3000.0,3000.0",
         );
         expect(stdout).toContain(
           "no_observed_prewarm,Ingress accepted -> reply accepted,1,4000.0,4000.0,4000.0",
         );
-        expect(stdout).not.toContain("prewarm_failed,");
-        expect(stdout).not.toContain("prewarm_start_issued_warm,");
-        expect(stdout).not.toContain("prewarm_superseded,");
+        expect(stdout).toContain(
+          "prewarm_message_routing_cold_start_observed,Causal shell-prewarm hint -> ingress accepted,1,900.0,900.0,900.0",
+        );
+        expect(stdout).toContain(
+          "prewarm_message_routing_cold_start_observed,Ingress accepted -> runner job,1,1000.0,1000.0,1000.0",
+        );
+        expect(stdout).toContain(
+          "prewarm_message_routing_cold_start_observed,Ingress accepted -> provider start,1,2000.0,2000.0,2000.0",
+        );
+        expect(stdout).toContain(
+          "prewarm_message_routing_cold_start_observed,Ingress accepted -> reply accepted,1,4000.0,4000.0,4000.0",
+        );
+        expect(stdout).toContain(
+          "Prewarm request -> auth,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain("Prewarm auth,1,10.0,10.0,10.0");
+        expect(stdout).toContain(
+          "Prewarm auth -> Cloudflare route,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain(
+          "Prewarm route -> UserRunner constructor start,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain(
+          "Prewarm UserRunner constructor,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain(
+          "Prewarm constructor -> RPC,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain(
+          "Prewarm RPC -> consent lock,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain(
+          "Prewarm health-data admission,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain(
+          "Prewarm admission -> container hint,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain(
+          "Prewarm request -> container hint,1,100.0,100.0,100.0",
+        );
+        expect(stdout).toContain(
+          "Prewarm container hint -> direct ensure route,1,1050.0,1050.0,1050.0",
+        );
+        expect(stdout).not.toContain("prewarm_typing_failed,");
+        expect(stdout).not.toContain("prewarm_typing_start_issued_warm,");
+        expect(stdout).not.toContain("prewarm_typing_superseded,");
       } finally {
         await runPsql(connection, [
           "--quiet",
@@ -357,7 +416,9 @@ function createShellPrewarmFixtureSql(schemaName: string): string {
     UNION ALL SELECT 'delivery-handoff', t0 + INTERVAL '34 seconds' FROM clock
     UNION ALL SELECT 'delivery-instant', t0 + INTERVAL '44 seconds' FROM clock
     UNION ALL SELECT 'delivery-unknown', t0 + INTERVAL '54 seconds' FROM clock
-    UNION ALL SELECT 'delivery-negative', t0 + INTERVAL '64 seconds' FROM clock;
+    UNION ALL SELECT 'delivery-negative', t0 + INTERVAL '64 seconds' FROM clock
+    UNION ALL SELECT 'delivery-message-routing-exact', t0 + INTERVAL '74 seconds' FROM clock
+    UNION ALL SELECT 'delivery-message-routing-mismatch', t0 + INTERVAL '84 seconds' FROM clock;
     WITH clock AS (
       SELECT
         date_trunc(
@@ -566,6 +627,80 @@ function createShellPrewarmFixtureSql(schemaName: string): string {
         'shellPrewarmFirstHintAtEpochMs', base_ms + 60500,
         'shellPrewarmOutcome', 'cold_start_observed',
         'shellPrewarmSource', 'linq-typing-started'
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'message-routing-exact',
+      t0 + INTERVAL '70 seconds',
+      t0 + INTERVAL '71 seconds',
+      t0 + INTERVAL '72 seconds',
+      'attempt-message-routing-exact',
+      'attempt-message-routing-exact',
+      'delivery-message-routing-exact',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 70100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 70200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-message-routing-exact',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-message-routing-exact',
+        'cloudflareRouteReceivedAtEpochMs', base_ms + 70150,
+        'freshStartRequestedAtEpochMs', base_ms + 70300,
+        'shellPrewarmRequestStartedAtEpochMs', base_ms + 69000,
+        'shellPrewarmRuntimeControlAuthStartedAtEpochMs', base_ms + 69010,
+        'shellPrewarmRuntimeControlAuthFinishedAtEpochMs', base_ms + 69020,
+        'shellPrewarmCloudflareRouteReceivedAtEpochMs', base_ms + 69030,
+        'shellPrewarmUserRunnerConstructorStartedAtEpochMs', base_ms + 69040,
+        'shellPrewarmUserRunnerConstructorFinishedAtEpochMs', base_ms + 69050,
+        'shellPrewarmUserRunnerRpcStartedAtEpochMs', base_ms + 69060,
+        'shellPrewarmConsentLockAcquiredAtEpochMs', base_ms + 69070,
+        'shellPrewarmAdmissionReadStartedAtEpochMs', base_ms + 69080,
+        'shellPrewarmAdmissionReadFinishedAtEpochMs', base_ms + 69090,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 69100,
+        'shellPrewarmExpectedOrchestrationAttemptId',
+          'web-prewarm-123e4567-e89b-42d3-a456-426614174000',
+        'shellPrewarmOrchestrationAttemptId',
+          'web-prewarm-123e4567-e89b-42d3-a456-426614174000',
+        'shellPrewarmOutcome', 'cold_start_observed',
+        'shellPrewarmSource', 'linq-message-routing'
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'message-routing-mismatch',
+      t0 + INTERVAL '80 seconds',
+      t0 + INTERVAL '81 seconds',
+      t0 + INTERVAL '82 seconds',
+      'attempt-message-routing-mismatch',
+      'attempt-message-routing-mismatch',
+      'delivery-message-routing-mismatch',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 80100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 80200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-message-routing-mismatch',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-message-routing-mismatch',
+        'cloudflareRouteReceivedAtEpochMs', base_ms + 80150,
+        'freshStartRequestedAtEpochMs', base_ms + 80300,
+        'shellPrewarmRequestStartedAtEpochMs', base_ms + 79000,
+        'shellPrewarmRuntimeControlAuthStartedAtEpochMs', base_ms + 79010,
+        'shellPrewarmRuntimeControlAuthFinishedAtEpochMs', base_ms + 79020,
+        'shellPrewarmCloudflareRouteReceivedAtEpochMs', base_ms + 79030,
+        'shellPrewarmUserRunnerConstructorStartedAtEpochMs', base_ms + 79040,
+        'shellPrewarmUserRunnerConstructorFinishedAtEpochMs', base_ms + 79050,
+        'shellPrewarmUserRunnerRpcStartedAtEpochMs', base_ms + 79060,
+        'shellPrewarmConsentLockAcquiredAtEpochMs', base_ms + 79070,
+        'shellPrewarmAdmissionReadStartedAtEpochMs', base_ms + 79080,
+        'shellPrewarmAdmissionReadFinishedAtEpochMs', base_ms + 79090,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 79100,
+        'shellPrewarmExpectedOrchestrationAttemptId',
+          'web-prewarm-123e4567-e89b-42d3-a456-426614174001',
+        'shellPrewarmOrchestrationAttemptId',
+          'web-prewarm-123e4567-e89b-42d3-a456-426614174002',
+        'shellPrewarmOutcome', 'cold_start_observed',
+        'shellPrewarmSource', 'linq-message-routing'
       ))
     FROM fixture;
   `;

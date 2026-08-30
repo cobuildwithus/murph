@@ -15,6 +15,7 @@ import { verifyReleaseArtifacts } from './release-artifact-secret-guard.mjs';
 
 const execFileAsync = promisify(execFile);
 const npmPackMetadataMaxBufferBytes = 64 * 1024 * 1024;
+const assistantCliSurfacePackagingTimeoutMs = 5 * 60_000;
 const assistantCliSurfaceGeneratorPath = path.join(
   'packages',
   'assistant-engine',
@@ -342,7 +343,11 @@ async function ensureGeneratedPackageArtifacts(context) {
   if (context.workspacePackageByName.has('@murphai/assistant-engine')) {
     await execFileAsync(
       process.execPath,
-      [assistantCliSurfaceGeneratorPath],
+      [
+        assistantCliSurfaceGeneratorPath,
+        '--manifest-timeout-ms',
+        String(assistantCliSurfacePackagingTimeoutMs),
+      ],
       {
         cwd: context.repoRoot,
       },

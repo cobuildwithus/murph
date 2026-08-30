@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphHostedPermissionProfileTomlLines,
+  buildMurphMemberReadPermissionProfileTomlLines,
   buildMurphMemberWorkspacePermissionProfileTomlLines,
 } from "../src/assistant-permissions.ts";
 
@@ -64,6 +66,15 @@ describe("group-read Codex permissions", () => {
       "[permissions.murph-member-workspace.network]",
       "enabled = true",
       "",
+    ]);
+  });
+
+  it("composes every hosted permission profile from the canonical builders", () => {
+    expect(buildMurphHostedPermissionProfileTomlLines()).toEqual([
+      ...buildMurphGroupReadPermissionProfileTomlLines(),
+      ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
+      ...buildMurphMemberReadPermissionProfileTomlLines(),
+      ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
     ]);
   });
 
