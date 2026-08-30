@@ -928,7 +928,22 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode runs already-imported pending device-sync without new mailbox rows", async () => {
+  test.each([
+    {
+      runtimeWakeStage: "before_readiness" as const,
+      scenario: "before readiness",
+    },
+    {
+      runtimeWakeStage: "initial_fetch" as const,
+      scenario: "during the initial system-lane fetch",
+    },
+    {
+      runtimeWakeStage: "after_import" as const,
+      scenario: "after import before selected device execution",
+    },
+  ])("system mailbox mode absorbs a same-owner wake $scenario and completes device processing", async ({
+    runtimeWakeStage,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -937,12 +952,14 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const staleAssistantWakeAt = "2026-04-26T23:59:59.000Z";
     const deviceItem = createMailboxItem({
-      dedupeKey: "device-sync.wake:already-imported",
-      id: "mailbox_item_system_mailbox_device_already_imported",
+      dedupeKey: `device-sync.wake:same-owner-${runtimeWakeStage}`,
+      id: `mailbox_item_system_mailbox_device_same_owner_${runtimeWakeStage}`,
       kind: "device-sync.wake",
       lane: "system",
       laneSeq: "1",
     });
+    let importCalls = 0;
+    let runtimeWakeSent = false;
 
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -952,23 +969,47 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.cancelPendingWarmCodexPreinitialization.mockClear();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await enqueueDeviceSyncSystemMailboxItemForTest({
-        item: deviceItem,
-        vaultRoot,
-      });
+      if (runtimeWakeStage !== "after_import") {
+        await enqueueDeviceSyncSystemMailboxItemForTest({
+          item: deviceItem,
+          vaultRoot,
+        });
+      }
       const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "1";
+      importState.watermarks.system = runtimeWakeStage === "after_import" ? "0" : "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-already-imported-device-before.bundle.json",
+        key: `users/bundles/member-synthetic/system-mailbox-same-owner-${runtimeWakeStage}-before.bundle.json`,
         vaultRoot,
       });
-      runtimeWakeSignal.notify({ requestedProcessingMode: "system_mailbox" });
+      const baseMailboxPort = createMailboxPort({
+        events,
+        fetchRequests,
+        items: runtimeWakeStage === "after_import" ? [deviceItem] : [],
+      });
+      const mailboxPort: HostedRuntimeMailboxPort = runtimeWakeStage === "initial_fetch"
+        ? {
+            ...baseMailboxPort,
+            async fetch(request, context) {
+              runtimeWakeSent = true;
+              runtimeWakeSignal.notify({ requestedProcessingMode: "system_mailbox" });
+              await Promise.resolve();
+              const fetchSignal = context?.signal ?? null;
+              assert.ok(fetchSignal);
+              assert.equal(fetchSignal.aborted, false);
+              return await baseMailboxPort.fetch(request, context);
+            },
+          }
+        : baseMailboxPort;
+      if (runtimeWakeStage === "before_readiness") {
+        runtimeWakeSent = true;
+        runtimeWakeSignal.notify({ requestedProcessingMode: "system_mailbox" });
+      }
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_system_mailbox_already_imported_device",
+            attemptId: `attempt_synthetic_system_mailbox_same_owner_${runtimeWakeStage}`,
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
@@ -980,22 +1021,29 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             return {
               snapshotRef: createBundleRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-already-imported-device.bundle.json",
+                key: `users/bundles/member-synthetic/system-mailbox-same-owner-${runtimeWakeStage}.bundle.json`,
                 size: 512,
               }),
             };
           },
-          async importItem() {
-            throw new Error("Already-imported system mailbox work should not import a new row.");
+          async importItem(item) {
+            if (runtimeWakeStage !== "after_import") {
+              throw new Error("Already-imported system mailbox work should not import a new row.");
+            }
+            importCalls += 1;
+            assert.equal(item.item.id, deviceItem.id);
+            await enqueueDeviceSyncSystemMailboxItemForTest({
+              item: deviceItem,
+              vaultRoot,
+            });
+            runtimeWakeSent = true;
+            runtimeWakeSignal.notify({ requestedProcessingMode: "system_mailbox" });
+            return { status: "imported" as const };
           },
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
             deviceSyncPort,
-            mailboxPort: createMailboxPort({
-              events,
-              fetchRequests,
-              items: [],
-            }),
+            mailboxPort,
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
@@ -1015,11 +1063,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         },
       );
 
+      assert.equal(runtimeWakeSent, true);
       assert.deepEqual(
         fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
         [["system"]],
       );
-      assert.equal(fetchRequests[0]?.lanes[0]?.importedSeq, "1");
+      assert.equal(
+        fetchRequests[0]?.lanes[0]?.importedSeq,
+        runtimeWakeStage === "after_import" ? "0" : "1",
+      );
+      assert.equal(importCalls, runtimeWakeStage === "after_import" ? 1 : 0);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
@@ -1037,6 +1090,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
       assert.equal(result.nextWakeReason ?? null, null);
+      assert.equal(runtimeWakeSignal.consumePending(), null);
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
       expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
       expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledWith(
@@ -6895,12 +6949,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     {
       dueAssistantWakePending: false,
       runtimeWakeStage: "scope_resolution" as const,
-      scenario: "with a redundant runtime wake during scope resolution",
+      scenario: "with a same-owner runtime wake during scope resolution",
     },
     {
       dueAssistantWakePending: false,
       runtimeWakeStage: "prepare_checkpoint" as const,
-      scenario: "with a redundant runtime wake after its preparation checkpoint",
+      scenario: "with a same-owner runtime wake after its preparation checkpoint",
     },
     {
       dueAssistantWakePending: true,
@@ -7063,7 +7117,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               async listActiveProjectionScopes() {
                 if (runtimeWakeStage === "scope_resolution" && !runtimeWakeSent) {
                   runtimeWakeSent = true;
-                  runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+                  runtimeWakeSignal.notify({
+                    requestedProcessingMode: "system_mailbox",
+                  });
                 }
                 return {
                   generationTokensByProjectionScopeKey: {
