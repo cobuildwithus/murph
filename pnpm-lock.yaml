@@ -54,6 +54,9 @@ overrides:
   fast-xml-parser@5.7.2>fast-xml-builder: 1.2.0
 
 patchedDependencies:
+  '@cobuild/review-gpt@0.5.139':
+    hash: c5f4cc59ec59d75191ddd9d9ac91ffdfca07be1181a745999eddd0c823982397
+    path: patches/@cobuild__review-gpt@0.5.139.patch
   incur@0.4.5:
     hash: 0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3
     path: patches/incur@0.4.5.patch
@@ -79,7 +82,7 @@ importers:
         version: 0.1.17
       '@cobuild/review-gpt':
         specifier: ^0.5.139
-        version: 0.5.139(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
+        version: 0.5.139(patch_hash=c5f4cc59ec59d75191ddd9d9ac91ffdfca07be1181a745999eddd0c823982397)(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
       '@elevenlabs/elevenlabs-js':
         specifier: 2.62.0
         version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -11093,7 +11096,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.17': {}
 
-  '@cobuild/review-gpt@0.5.139(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
+  '@cobuild/review-gpt@0.5.139(patch_hash=c5f4cc59ec59d75191ddd9d9ac91ffdfca07be1181a745999eddd0c823982397)(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
       '@cobuild/repo-tools': 0.1.17
       incur: 0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3)
