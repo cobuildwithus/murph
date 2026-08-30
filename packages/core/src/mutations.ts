@@ -5994,6 +5994,16 @@ interface ExactDocumentSource {
   rawRef: string;
 }
 
+export interface LiveExactDocumentImportEvidence {
+  documentId: string;
+  manifestPath: string;
+  note: string | null;
+  occurredAt: string;
+  rawRef: string;
+  source: string;
+  title: string;
+}
+
 const DOCUMENT_SOURCE_AUDIT_COMMAND = "core.importDocument";
 const WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND = "core.importEventBatch.sourceRawRefOnce";
 
@@ -6393,6 +6403,36 @@ async function findExactDocumentImport(input: {
     );
   }
   return exactSources.liveSources[0]?.result ?? null;
+}
+
+export async function listLiveExactDocumentImportEvidence(input: {
+  byteLength: number;
+  sha256: string;
+  vaultRoot: string;
+}): Promise<LiveExactDocumentImportEvidence[]> {
+  const exactSources = await inspectExactDocumentSourceSet({
+    vaultRoot: input.vaultRoot,
+    sourceReceipt: {
+      byteLength: input.byteLength,
+      sha256: input.sha256,
+    },
+  });
+  if (exactSources.deletedExactSourceExists) {
+    throw new VaultError(
+      "DOCUMENT_EXACT_SOURCE_DELETED",
+      "An exact source document existed but was deleted. Exact reuse will not create a replacement identity.",
+    );
+  }
+
+  return exactSources.liveSources.map(({ rawRef, result }) => ({
+    documentId: result.documentId,
+    manifestPath: result.manifestPath,
+    note: result.event.note ?? null,
+    occurredAt: result.event.occurredAt,
+    rawRef,
+    source: result.event.source,
+    title: result.event.title,
+  }));
 }
 
 export const WORKOUT_SOURCE_IMPORT_STATUS_VALUES = [

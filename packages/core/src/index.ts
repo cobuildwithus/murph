@@ -140,6 +140,7 @@ export {
   deleteProvider,
   deleteRecipe,
   ensureJournalDay,
+  listLiveExactDocumentImportEvidence,
   importAssessmentResponse,
   importDeviceBatch,
   importDocument,
@@ -353,6 +354,7 @@ export {
   WORKOUT_SOURCE_IMPORT_STATUS_VALUES,
 } from "./mutations.ts";
 export type {
+  LiveExactDocumentImportEvidence,
   WorkoutSourceImportStatus,
 } from "./mutations.ts";
 export type {

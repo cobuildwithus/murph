@@ -15,9 +15,11 @@ import {
 import {
   normalizeRelativeVaultPath,
   acquireCanonicalWriteLock,
+  listLiveExactDocumentImportEvidence,
   isVaultError,
   listEventLedgerShardPaths,
   readJsonlRecords,
+  resolveRawManifestPath,
   resolveVaultPathOnDisk,
   runCanonicalWrite,
   statAndHashVaultFileInterruptible,
@@ -32,8 +34,11 @@ export const INBOX_MEDIA_RETENTION_DAYS = 14;
 export const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE = 100;
+const MAX_PROMOTED_DOCUMENT_EVIDENCE_PATHS = 20;
 const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
-const RETENTION_REASON = "inbox_media_retention" as const;
+const RAW_DOCUMENTS_PREFIX = `${VAULT_LAYOUT.rawDocumentsDirectory}/`;
+const MEDIA_RETENTION_REASON = "inbox_media_retention" as const;
+const DOCUMENT_RETENTION_REASON = "inbox_document_copy_retention" as const;
 
 export interface RunInboxMediaRetentionInput {
   materializeCandidatePaths?: (
@@ -61,13 +66,20 @@ export interface InboxMediaRetentionResult {
   records: InboxAttachmentRetentionRecord[];
 }
 
-interface InboxMediaRetentionCandidate {
+interface InboxAttachmentRetentionCandidate {
   attachment: InboxCaptureAttachmentRecord;
+  canonicalDocumentMaterializationPaths: readonly string[];
   capture: InboxCaptureRecord;
   cutoffMs: number;
   materialize: boolean;
   retentionWindowMs: number;
   storedPath: string;
+}
+
+interface InboxRetentionReferenceInventory {
+  durableRawInboxRefs: Set<string>;
+  promotedDocumentDefaultPromotionKeysBySha256: Map<string, Set<string>>;
+  promotedDocumentMaterializationPathsBySha256: Map<string, Set<string>>;
 }
 
 export interface ListTransientInboxVideoStoredPathsInput {
@@ -91,18 +103,19 @@ export async function runInboxMediaRetention(
   const protectedMediaRecheckAt = new Date(
     nowMs + INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS,
   ).toISOString();
-  const [captureRecords, durableRawInboxRefs, initialRetentionRecords] = await Promise.all([
+  const [captureRecords, referenceInventory, initialRetentionRecords] = await Promise.all([
     listInboxCaptureRecords(input.vaultRoot),
-    listDurableRawInboxReferences(input.vaultRoot),
+    listInboxRetentionReferenceInventory(input.vaultRoot),
     listInboxAttachmentRetentionRecords(input.vaultRoot),
   ]);
+  const durableRawInboxRefs = referenceInventory.durableRawInboxRefs;
   const initiallyRetainedAttachmentIds = new Set(
     initialRetentionRecords.map((record) => record.attachmentId),
   );
   const initiallyRetainedStoredPaths = new Set(
     initialRetentionRecords.map((record) => record.storedPath),
   );
-  const candidates: InboxMediaRetentionCandidate[] = [];
+  const candidates: InboxAttachmentRetentionCandidate[] = [];
   let activeParserJobProtector: ActiveAttachmentParseJobProtector | null = null;
   let hasMoreEligibleAttachments = false;
   let nextEligibleAt: string | null = null;
@@ -130,7 +143,21 @@ export async function runInboxMediaRetention(
       for (const attachment of capture.attachments) {
         throwIfRetentionAborted(input.signal);
         const storedPath = normalizeRawInboxMediaPath(attachment.storedPath ?? null);
-        if (!storedPath || !attachment.sha256 || !isRetainableInboxMediaKind(attachment.kind)) {
+        if (!storedPath || !attachment.sha256) {
+          continue;
+        }
+        const isPromotedDocument = attachment.kind === "document";
+        const canonicalDocumentMaterializationPaths = isPromotedDocument
+          ? resolvePromotedDocumentMaterializationPaths(
+              referenceInventory,
+              attachment,
+              capture,
+            )
+          : [];
+        if (
+          !isRetainableInboxMediaKind(attachment.kind)
+          && canonicalDocumentMaterializationPaths.length === 0
+        ) {
           continue;
         }
         const retentionWindowMs = resolveInboxMediaRetentionWindowMs({
@@ -172,7 +199,7 @@ export async function runInboxMediaRetention(
           continue;
         }
 
-        if (presentCandidateCount >= maxAttachments) {
+        if (!isPromotedDocument && presentCandidateCount >= maxAttachments) {
           hasMoreEligibleAttachments = true;
           break captureLoop;
         }
@@ -193,24 +220,27 @@ export async function runInboxMediaRetention(
           if (alreadyRetained || !input.materializeCandidatePaths) {
             continue;
           }
-          if (materializeCandidateCount >= maxAttachments) {
+          if (!isPromotedDocument && materializeCandidateCount >= maxAttachments) {
             hasMoreEligibleAttachments = true;
             continue;
           }
-          materializeCandidateCount += 1;
+          if (!isPromotedDocument) {
+            materializeCandidateCount += 1;
+          }
         }
         if (fileState.kind === "invalid") {
           continue;
         }
         candidates.push({
           attachment,
+          canonicalDocumentMaterializationPaths,
           capture,
           cutoffMs,
           materialize: fileState.kind === "missing",
           retentionWindowMs,
           storedPath,
         });
-        if (fileState.kind !== "missing") {
+        if (!isPromotedDocument && fileState.kind !== "missing") {
           presentCandidateCount += 1;
         }
       }
@@ -224,15 +254,19 @@ export async function runInboxMediaRetention(
     }
 
     const pathsToMaterialize = uniqueRetentionStoredPaths(
-      candidates
-        .filter((candidate) => candidate.materialize)
-        .map((candidate) => candidate.storedPath),
+      candidates.flatMap((candidate) => [
+        ...(candidate.materialize ? [candidate.storedPath] : []),
+        ...candidate.canonicalDocumentMaterializationPaths,
+      ]),
     );
     const missingAfterMaterialization = new Set<string>();
     if (pathsToMaterialize.length > 0) {
       throwIfRetentionAborted(input.signal);
       const materializeResult = await input.materializeCandidatePaths?.(pathsToMaterialize);
-      for (const storedPath of normalizeMaterializedMissingStoredPaths(materializeResult)) {
+      for (const storedPath of normalizeMaterializedMissingStoredPaths(
+        materializeResult,
+        pathsToMaterialize,
+      )) {
         missingAfterMaterialization.add(storedPath);
       }
       throwIfRetentionAborted(input.signal);
@@ -243,10 +277,11 @@ export async function runInboxMediaRetention(
 
       try {
         throwIfRetentionAborted(input.signal);
-        const [existingRetentionRecords, latestDurableRawInboxRefs] = await Promise.all([
+        const [existingRetentionRecords, latestReferenceInventory] = await Promise.all([
           listInboxAttachmentRetentionRecords(input.vaultRoot),
-          listDurableRawInboxReferences(input.vaultRoot),
+          listInboxRetentionReferenceInventory(input.vaultRoot),
         ]);
+        const latestDurableRawInboxRefs = latestReferenceInventory.durableRawInboxRefs;
         const alreadyRetainedAttachmentIds = new Set(
           existingRetentionRecords.map((record) => record.attachmentId),
         );
@@ -263,6 +298,7 @@ export async function runInboxMediaRetention(
           const alreadyRetained =
             alreadyRetainedAttachmentIds.has(candidate.attachment.attachmentId) ||
             alreadyRetainedStoredPaths.has(candidate.storedPath);
+          let verifiedByteSize: number | null = null;
           if (
             latestDurableRawInboxRefs.has(candidate.storedPath)
           ) {
@@ -285,6 +321,10 @@ export async function runInboxMediaRetention(
             });
             continue;
           }
+          if (selectedCandidateCount >= maxAttachments) {
+            hasMoreEligibleAttachments = true;
+            break;
+          }
 
           const parserJobProtectionExpiresAt = await resolveActiveParserJobProtectionExpiresAt(
             candidate.attachment,
@@ -295,6 +335,17 @@ export async function runInboxMediaRetention(
               nextEligibleAt,
               parserJobProtectionExpiresAt,
             );
+            continue;
+          }
+
+          const hasMissingDocumentEvidence = candidate.attachment.kind === "document"
+            && candidate.canonicalDocumentMaterializationPaths.some((relativePath) =>
+              missingAfterMaterialization.has(relativePath)
+            );
+          if (
+            candidate.attachment.kind === "document"
+            && (isMissingAfterMaterialization || hasMissingDocumentEvidence)
+          ) {
             continue;
           }
 
@@ -318,9 +369,17 @@ export async function runInboxMediaRetention(
             if (integrity.kind !== "match") {
               continue;
             }
-            if (selectedCandidateCount >= maxAttachments) {
-              hasMoreEligibleAttachments = true;
-              break;
+            verifiedByteSize = integrity.byteSize;
+            if (
+              candidate.attachment.kind === "document"
+              && !await hasMatchingLivePromotedDocument({
+                byteLength: integrity.byteSize,
+                candidate,
+                sha256: integrity.sha256,
+                vaultRoot: input.vaultRoot,
+              })
+            ) {
+              continue;
             }
             selectedCandidateCount += 1;
           }
@@ -332,6 +391,7 @@ export async function runInboxMediaRetention(
                 capture: candidate.capture,
                 purgedAt: now,
                 storedPath: candidate.storedPath,
+                verifiedByteSize,
               }),
             );
           }
@@ -360,7 +420,7 @@ export async function runInboxMediaRetention(
           await runCanonicalWrite({
             vaultRoot: input.vaultRoot,
             operationType: "inbox_media_retention",
-            summary: `Record ${records.length} raw inbox media attachment expiration${records.length === 1 ? "" : "s"}.`,
+            summary: `Record ${records.length} raw inbox attachment expiration${records.length === 1 ? "" : "s"}.`,
             occurredAt: now,
             mutate: async ({ batch }) => {
               for (const record of records) {
@@ -398,7 +458,7 @@ export async function listTransientInboxVideoStoredPaths(
   throwIfRetentionAborted(input.signal);
   const [captureRecords, durableRawInboxRefs] = await Promise.all([
     listInboxCaptureRecords(input.vaultRoot, { rejectInvalidRecords: true }),
-    listDurableRawInboxReferences(input.vaultRoot, { rejectInvalidRecords: true }),
+    listInboxRetentionReferenceInventory(input.vaultRoot, { rejectInvalidRecords: true }),
   ]);
   throwIfRetentionAborted(input.signal);
 
@@ -410,7 +470,7 @@ export async function listTransientInboxVideoStoredPaths(
         continue;
       }
       const storedPath = normalizeRawInboxMediaPath(attachment.storedPath ?? null);
-      if (storedPath && !durableRawInboxRefs.has(storedPath)) {
+      if (storedPath && !durableRawInboxRefs.durableRawInboxRefs.has(storedPath)) {
         storedPaths.add(storedPath);
       }
     }
@@ -425,12 +485,18 @@ function uniqueRetentionStoredPaths(paths: readonly string[]): string[] {
 
 function normalizeMaterializedMissingStoredPaths(
   result: InboxMediaRetentionMaterializeResult | void,
+  requestedPaths: readonly string[],
 ): Set<string> {
+  const requested = new Set(requestedPaths);
   const output = new Set<string>();
   for (const storedPath of result?.missingStoredPaths ?? []) {
-    const normalized = normalizeRawInboxMediaPath(storedPath);
-    if (normalized) {
-      output.add(normalized);
+    try {
+      const normalized = normalizeRelativeVaultPath(storedPath);
+      if (requested.has(normalized)) {
+        output.add(normalized);
+      }
+    } catch {
+      // Ignore malformed or unrelated callback output.
     }
   }
   return output;
@@ -449,25 +515,44 @@ function buildRetentionRecord(input: {
   capture: InboxCaptureRecord;
   purgedAt: string;
   storedPath: string;
+  verifiedByteSize: number | null;
 }): InboxAttachmentRetentionRecord {
+  const common = {
+    captureId: input.capture.captureId,
+    attachmentId: input.attachment.attachmentId,
+    ordinal: input.attachment.ordinal,
+    mime: input.attachment.mime ?? null,
+    fileName: input.attachment.fileName ?? null,
+    storedPath: input.storedPath,
+    sha256: input.attachment.sha256,
+    captureOccurredAt: input.capture.occurredAt,
+    recordedAt: input.capture.recordedAt,
+    purgedAt: input.purgedAt,
+  };
+  let value: unknown;
+  if (input.attachment.kind === "document") {
+    if (input.verifiedByteSize === null) {
+      throw new TypeError("Document retention requires verified source bytes.");
+    }
+    value = {
+      ...common,
+      schemaVersion: "murph.inbox-attachment-retention.v2",
+      kind: input.attachment.kind,
+      byteSize: input.verifiedByteSize,
+      reason: DOCUMENT_RETENTION_REASON,
+    };
+  } else {
+    value = {
+      ...common,
+      schemaVersion: "murph.inbox-attachment-retention.v1",
+      kind: input.attachment.kind,
+      byteSize: input.attachment.byteSize ?? null,
+      reason: MEDIA_RETENTION_REASON,
+    };
+  }
   const record = assertContract<InboxAttachmentRetentionRecord>(
     inboxAttachmentRetentionRecordSchema,
-    {
-      schemaVersion: "murph.inbox-attachment-retention.v1",
-      captureId: input.capture.captureId,
-      attachmentId: input.attachment.attachmentId,
-      ordinal: input.attachment.ordinal,
-      kind: input.attachment.kind,
-      mime: input.attachment.mime ?? null,
-      fileName: input.attachment.fileName ?? null,
-      byteSize: input.attachment.byteSize ?? null,
-      storedPath: input.storedPath,
-      sha256: input.attachment.sha256,
-      captureOccurredAt: input.capture.occurredAt,
-      recordedAt: input.capture.recordedAt,
-      purgedAt: input.purgedAt,
-      reason: RETENTION_REASON,
-    },
+    value,
     "inbox attachment retention record",
   );
   return record;
@@ -523,11 +608,13 @@ export async function listInboxAttachmentRetentionRecords(
   return records;
 }
 
-async function listDurableRawInboxReferences(
+async function listInboxRetentionReferenceInventory(
   vaultRoot: string,
   options: { rejectInvalidRecords?: boolean } = {},
-): Promise<Set<string>> {
-  const references = new Set<string>();
+): Promise<InboxRetentionReferenceInventory> {
+  const durableRawInboxRefs = new Set<string>();
+  const promotedDocumentDefaultPromotionKeysBySha256 = new Map<string, Set<string>>();
+  const promotedDocumentMaterializationPathsBySha256 = new Map<string, Set<string>>();
   const ledgerPaths = await listEventLedgerShardPaths(vaultRoot);
 
   for (const relativePath of ledgerPaths) {
@@ -542,13 +629,153 @@ async function listDurableRawInboxReferences(
       for (const referencedPath of collectEventRawReferencePaths(record)) {
         const storedPath = normalizeRawInboxMediaPath(referencedPath);
         if (storedPath) {
-          references.add(storedPath);
+          durableRawInboxRefs.add(storedPath);
         }
+      }
+      if (parsed.success) {
+        collectPromotedDocumentMaterializationPaths(
+          parsed.data,
+          promotedDocumentDefaultPromotionKeysBySha256,
+          promotedDocumentMaterializationPathsBySha256,
+        );
       }
     }
   }
 
-  return references;
+  return {
+    durableRawInboxRefs,
+    promotedDocumentDefaultPromotionKeysBySha256,
+    promotedDocumentMaterializationPathsBySha256,
+  };
+}
+
+function collectPromotedDocumentMaterializationPaths(
+  record: EventRecord,
+  promotionKeysBySha256: Map<string, Set<string>>,
+  pathsBySha256: Map<string, Set<string>>,
+): void {
+  if (record.kind !== "document") {
+    return;
+  }
+
+  for (const attachment of record.attachments ?? []) {
+    if (
+      attachment.kind !== "document"
+      || attachment.role !== "source_document"
+      || !record.rawRefs?.includes(attachment.relativePath)
+    ) {
+      continue;
+    }
+
+    let rawPath: string;
+    let manifestPath: string;
+    try {
+      rawPath = normalizeRelativeVaultPath(attachment.relativePath);
+      if (!rawPath.startsWith(RAW_DOCUMENTS_PREFIX)) {
+        continue;
+      }
+      manifestPath = resolveRawManifestPath({
+        artifacts: [attachment],
+        importId: record.documentId,
+        importedAt: record.recordedAt,
+      });
+    } catch {
+      continue;
+    }
+
+    const paths = pathsBySha256.get(attachment.sha256) ?? new Set<string>();
+    paths.add(rawPath);
+    paths.add(manifestPath);
+    pathsBySha256.set(attachment.sha256, paths);
+
+    const promotionKeys = promotionKeysBySha256.get(attachment.sha256) ?? new Set<string>();
+    promotionKeys.add(buildDefaultPromotionKey({
+      note: record.note ?? null,
+      occurredAt: record.occurredAt,
+      source: record.source,
+      title: record.title,
+    }));
+    promotionKeysBySha256.set(attachment.sha256, promotionKeys);
+  }
+}
+
+function resolvePromotedDocumentMaterializationPaths(
+  inventory: InboxRetentionReferenceInventory,
+  attachment: InboxCaptureAttachmentRecord,
+  capture: InboxCaptureRecord,
+): string[] {
+  const expectedTitle = normalizePromotionText(attachment.fileName ?? null);
+  if (!expectedTitle) {
+    return [];
+  }
+  const promotionKey = buildDefaultPromotionKey({
+    note: normalizePromotionText(capture.text ?? null),
+    occurredAt: capture.occurredAt,
+    source: "import",
+    title: expectedTitle,
+  });
+  if (!inventory.promotedDocumentDefaultPromotionKeysBySha256
+    .get(attachment.sha256 ?? "")
+    ?.has(promotionKey)) {
+    return [];
+  }
+  const paths = inventory.promotedDocumentMaterializationPathsBySha256.get(
+    attachment.sha256 ?? "",
+  );
+  if (!paths || paths.size === 0 || paths.size > MAX_PROMOTED_DOCUMENT_EVIDENCE_PATHS) {
+    return [];
+  }
+  return [...paths].sort((left, right) => left.localeCompare(right));
+}
+
+async function hasMatchingLivePromotedDocument(input: {
+  byteLength: number;
+  candidate: InboxAttachmentRetentionCandidate;
+  sha256: string;
+  vaultRoot: string;
+}): Promise<boolean> {
+  let evidence: Awaited<ReturnType<typeof listLiveExactDocumentImportEvidence>>;
+  try {
+    evidence = await listLiveExactDocumentImportEvidence({
+      byteLength: input.byteLength,
+      sha256: input.sha256,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    if (isVaultError(error)) {
+      return false;
+    }
+    throw error;
+  }
+  if (evidence.length === 0) {
+    return false;
+  }
+
+  const materializedPaths = new Set(input.candidate.canonicalDocumentMaterializationPaths);
+  const expectedTitle = normalizePromotionText(input.candidate.attachment.fileName ?? null);
+  const expectedNote = normalizePromotionText(input.candidate.capture.text ?? null);
+  return expectedTitle !== null && evidence.some((candidate) =>
+    materializedPaths.has(candidate.manifestPath)
+    && materializedPaths.has(candidate.rawRef)
+    && candidate.note === expectedNote
+    && candidate.occurredAt === input.candidate.capture.occurredAt
+    && candidate.source === "import"
+    && candidate.title === expectedTitle
+  );
+}
+
+function buildDefaultPromotionKey(input: {
+  note: string | null;
+  occurredAt: string;
+  source: string;
+  title: string;
+}): string {
+  return JSON.stringify([input.source, input.occurredAt, input.title, input.note]);
+}
+
+function normalizePromotionText(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function normalizeRetentionNow(now: Date | string | undefined): string {
@@ -569,7 +796,7 @@ function normalizeRetentionBatchSize(value: number | undefined): number {
 }
 
 function resolveInboxMediaRetentionWindowMs(input: {
-  kind: "audio" | "image" | "video";
+  kind: InboxCaptureAttachmentRecord["kind"];
   videoRetentionWindowMs: number | undefined;
 }): number {
   const candidate = input.kind === "video" ? input.videoRetentionWindowMs : undefined;
@@ -739,7 +966,7 @@ type RetentionCandidateIntegrityResult =
   | { kind: "missing" }
   | { kind: "mismatch" }
   | { kind: "invalid" }
-  | { kind: "match" };
+  | { byteSize: number; kind: "match"; sha256: string };
 
 async function safeVerifyRetentionCandidateIntegrity(input: {
   attachment: InboxCaptureAttachmentRecord;
@@ -783,7 +1010,11 @@ async function safeVerifyRetentionCandidateIntegrity(input: {
     return { kind: "mismatch" };
   }
 
-  return { kind: "match" };
+  return {
+    byteSize: integrity.integrity.byteSize,
+    kind: "match",
+    sha256: integrity.integrity.sha256,
+  };
 }
 
 async function statExistingVaultRegularFile(

@@ -8,6 +8,7 @@ import {
 import {
   addMeal as addMealInternal,
   dedupeDeviceEventsByExternalRef as dedupeDeviceEventsByExternalRefInternal,
+  listLiveExactDocumentImportEvidence as listLiveExactDocumentImportEvidenceInternal,
   importDeviceBatch as importDeviceBatchInternal,
   importEventBatch as importEventBatchInternal,
   importDocument as importDocumentInternal,
@@ -105,6 +106,12 @@ export {
   removeAutomaticMealPhotoInternal as removeAutomaticMealPhoto,
   upsertEventInternal as upsertEvent,
 };
+
+export async function listLiveExactDocumentImportEvidence(
+  input: Parameters<typeof listLiveExactDocumentImportEvidenceInternal>[0],
+): ReturnType<typeof listLiveExactDocumentImportEvidenceInternal> {
+  return listLiveExactDocumentImportEvidenceInternal(input);
+}
 
 export interface CanonicalTextWriteInput {
   relativePath: string;
