@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "reminders-stay-on-time-during-syncs",
+    "kind": "fix",
+    "priority": 4,
+    "title": "Reminders stay on time during syncs",
+    "summary": "Scheduled reminders now keep their turn while Murph works through a large connected-health backlog.",
+    "details": "Background sync retries slow down when they stop making progress, while due reminders and current conversations continue without waiting for that backlog to clear.",
+    "relevanceTags": ["reminders", "wearables", "reliability"],
+    "sourcePullRequests": [2600]
+  }
+}
