@@ -1412,6 +1412,12 @@ test('descriptor direct service bindings resolve against the declared service su
 
 test('root and group schema json requests return command indexes', async () => {
   const rootOutput = await runSourceCliRaw(['--schema', '--format', 'json'])
+  const pagedRootOutput = await runSourceCliRaw([
+    '--schema',
+    '--format',
+    'json',
+    '--token-limit=24',
+  ])
   const groupOutput = await runSourceCliRaw([
     'goal',
     '--schema',
@@ -1432,6 +1438,11 @@ test('root and group schema json requests return command indexes', async () => {
   assert.equal(rootIndex.commands.some((command) => command.name === 'vault show'), true)
   assert.equal(rootIndex.commands.some((command) => command.name?.startsWith('inbox')), false)
   assert.ok(Buffer.byteLength(rootOutput, 'utf8') < 100_000)
+  assert.match(
+    pagedRootOutput,
+    /\[truncated: showing tokens 0–24 of \d+\]/u,
+  )
+  assert.ok(pagedRootOutput.length < rootOutput.length)
   assert.equal(
     rootIndex.commands.every((command) =>
       Object.keys(command).every((key) => key === 'name' || key === 'description'),

@@ -26,6 +26,13 @@ interface SchemaIndex {
   version: 'murph.schema-index.v1'
 }
 
+interface SchemaIndexTokenControls {
+  argv: string[]
+  count: boolean
+  limit?: number
+  offset?: number
+}
+
 const SCHEMA_INDEX_NOTE =
   'This is a command index for a root or command group. Run one leaf command with --schema --format json for its args/options/output schema. File-body contracts for supported JSON/JSONL imports live under payload-schema commands.'
 
@@ -38,7 +45,12 @@ export function installVaultCliSchemaIndex(cli: Cli.Cli): void {
       return
     }
 
-    const originalResult = await captureServeOutput(serve, argv, options)
+    const tokenControls = extractTokenControls(argv)
+    const originalResult = await captureServeOutput(
+      serve,
+      tokenControls.argv,
+      options,
+    )
     if (originalResult.exitCode !== null || parsesAsJson(originalResult.output)) {
       replayServeResult(originalResult, options)
       return
@@ -61,7 +73,10 @@ export function installVaultCliSchemaIndex(cli: Cli.Cli): void {
       return
     }
 
-    writeStdout(options, renderSchemaIndex(buildSchemaIndex(commandPath, manifest), argv))
+    writeStdout(
+      options,
+      renderSchemaIndex(buildSchemaIndex(commandPath, manifest), tokenControls),
+    )
   }
 }
 
@@ -226,9 +241,11 @@ function projectSchemaIndexCommands(
   return projected
 }
 
-function renderSchemaIndex(index: SchemaIndex, argv: readonly string[]): string {
+function renderSchemaIndex(
+  index: SchemaIndex,
+  tokenControls: SchemaIndexTokenControls,
+): string {
   const formatted = JSON.stringify(index, null, 2)
-  const tokenControls = extractTokenControls(argv)
 
   if (tokenControls.count) {
     return `${estimateTokenCount(formatted)}\n`
@@ -252,11 +269,8 @@ function renderSchemaIndex(index: SchemaIndex, argv: readonly string[]): string 
   return `${sliced}\n[truncated: showing tokens ${offset}–${actualEnd} of ${total}]\n`
 }
 
-function extractTokenControls(argv: readonly string[]): {
-  count: boolean
-  limit?: number
-  offset?: number
-} {
+function extractTokenControls(argv: readonly string[]): SchemaIndexTokenControls {
+  const delegateArgv: string[] = []
   let count = false
   let limit: number | undefined
   let offset: number | undefined
@@ -267,27 +281,51 @@ function extractTokenControls(argv: readonly string[]): {
       break
     }
     if (token === '--token-count') {
+      delegateArgv.push(token)
       count = true
       continue
     }
-    if (token === '--token-limit' || token === '--token-offset') {
-      const value = argv[index + 1]
+    if (
+      token === '--token-limit' ||
+      token === '--token-offset' ||
+      token.startsWith('--token-limit=') ||
+      token.startsWith('--token-offset=')
+    ) {
+      const isLimit =
+        token === '--token-limit' || token.startsWith('--token-limit=')
+      const isSeparated = token === '--token-limit' || token === '--token-offset'
+      const value = isSeparated
+        ? argv[index + 1]
+        : token.slice(token.indexOf('=') + 1)
+      const delegateFlag = isLimit ? '--token-limit' : '--token-offset'
+
+      delegateArgv.push(delegateFlag)
+      if (value !== undefined) {
+        delegateArgv.push(value)
+      }
+
       const parsed = value === undefined ? Number.NaN : Number(value)
-      index += 1
+      if (isSeparated) {
+        index += 1
+      }
 
       if (!Number.isFinite(parsed) || value?.trim() === '') {
         continue
       }
 
-      if (token === '--token-limit') {
+      if (isLimit) {
         limit = parsed
       } else {
         offset = parsed
       }
+      continue
     }
+
+    delegateArgv.push(token)
   }
 
   return {
+    argv: delegateArgv,
     count,
     ...(limit === undefined ? {} : { limit }),
     ...(offset === undefined ? {} : { offset }),

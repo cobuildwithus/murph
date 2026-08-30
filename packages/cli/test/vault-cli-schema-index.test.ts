@@ -219,3 +219,97 @@ test('schema-index fallback applies token counting and pagination to compact out
   assert.ok(firstPage.output.length < full.output.length)
   assert.ok(secondPage.output.length < full.output.length)
 })
+
+test('schema-index fallback accepts equals-form token limits', async () => {
+  const cli = createSchemaIndexCli()
+  const full = await runRawCli(cli, ['--schema', '--format', 'json'])
+  const firstPage = await runRawCli(cli, [
+    '--schema',
+    '--format',
+    'json',
+    '--token-limit=24',
+  ])
+
+  const total = estimateTokenCount(full.output.trimEnd())
+  assert.match(
+    firstPage.output,
+    new RegExp(`\\[truncated: showing tokens 0–24 of ${total}\\]`, 'u'),
+  )
+  assert.ok(firstPage.output.length < full.output.length)
+})
+
+test('schema-index fallback accepts equals-form offsets and limits', async () => {
+  const cli = createSchemaIndexCli()
+  const full = await runRawCli(cli, ['--schema', '--format', 'json'])
+  const secondPage = await runRawCli(cli, [
+    '--schema',
+    '--format',
+    'json',
+    '--token-offset=24',
+    '--token-limit=24',
+  ])
+
+  const total = estimateTokenCount(full.output.trimEnd())
+  assert.match(
+    secondPage.output,
+    new RegExp(`\\[truncated: showing tokens 24–48 of ${total}\\]`, 'u'),
+  )
+  assert.ok(secondPage.output.length < full.output.length)
+})
+
+test('schema-index fallback keeps the last explicit value across mixed token-control spellings', async () => {
+  const cli = createSchemaIndexCli()
+  const full = await runRawCli(cli, ['--schema', '--format', 'json'])
+  const mixed = await runRawCli(cli, [
+    '--schema',
+    '--format',
+    'json',
+    '--token-offset=8',
+    '--token-offset',
+    '24',
+    '--token-limit',
+    '12',
+    '--token-limit=24',
+  ])
+
+  const total = estimateTokenCount(full.output.trimEnd())
+  assert.match(
+    mixed.output,
+    new RegExp(`\\[truncated: showing tokens 24–48 of ${total}\\]`, 'u'),
+  )
+
+  const invalidEquals = await runRawCli(cli, [
+    '--schema',
+    '--format',
+    'json',
+    '--token-limit=not-a-number',
+  ])
+  const invalidSeparated = await runRawCli(cli, [
+    '--schema',
+    '--format',
+    'json',
+    '--token-limit',
+    'not-a-number',
+  ])
+  assert.deepEqual(invalidEquals, invalidSeparated)
+})
+
+test('schema-index fallback ignores token-control literals after the positional terminator', async () => {
+  const cli = createSchemaIndexCli()
+  const full = await runRawCli(cli, ['--schema', '--format', 'json'])
+  const page = await runRawCli(cli, [
+    '--schema',
+    '--format',
+    'json',
+    '--token-limit=24',
+    '--',
+    '--token-offset=24',
+    '--token-limit=1',
+  ])
+
+  const total = estimateTokenCount(full.output.trimEnd())
+  assert.match(
+    page.output,
+    new RegExp(`\\[truncated: showing tokens 0–24 of ${total}\\]`, 'u'),
+  )
+})
