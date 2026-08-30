@@ -1,8 +1,8 @@
 # Frog #2429 ReviewGPT First-Turn Identity
 
-Status: active
+Status: completed
 Created: 2026-08-29
-Updated: 2026-08-29
+Updated: 2026-08-30
 
 ## Goal
 
@@ -86,3 +86,4 @@ Updated: 2026-08-29
 - `pnpm deps:audit` reports the repository's existing dependency advisories.
   The task changes no package version or transitive dependency edge; its lockfile
   diff adds only the patch hash/path to the already-installed ReviewGPT snapshot.
+Completed: 2026-08-30
