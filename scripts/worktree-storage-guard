@@ -486,18 +486,20 @@ disk_rows=0
 disk_floor_failed=0
 disk_capacity_rows="$(LC_ALL=C awk '
   NR > 1 {
-    matched = 0
+    candidate_count = 0
+    candidate_available = ""
     for (field = 1; field <= NF; field++) {
       if ($field ~ /^[0-9]+%$/ && field >= 5 \
         && $(field - 1) ~ /^[0-9]+$/ \
         && $(field - 2) ~ /^[0-9]+$/ \
         && $(field - 3) ~ /^[0-9]+$/) {
-        print $(field - 1)
-        matched = 1
-        break
+        candidate_count++
+        candidate_available = $(field - 1)
       }
     }
-    if (!matched && NF > 0) {
+    if (candidate_count == 1) {
+      print candidate_available
+    } else if (NF > 0) {
       print "unsupported"
     }
   }
