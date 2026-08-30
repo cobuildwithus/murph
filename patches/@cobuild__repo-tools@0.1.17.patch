@@ -2,7 +2,7 @@ diff --git a/src/committer.sh b/src/committer.sh
 index 1f1a8fa458dcd1d1c267610c3737f014c474af9b..99f20b29956bb95972e7b37bb02e2e87fcc26e36 100755
 --- a/src/committer.sh
 +++ b/src/committer.sh
-@@ -409,7 +409,28 @@ else
+@@ -409,4 +409,25 @@ else
    GIT_INDEX_FILE="$tmp_index" git read-tree --empty
    comparison_tree="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
  fi
@@ -29,6 +29,3 @@ index 1f1a8fa458dcd1d1c267610c3737f014c474af9b..99f20b29956bb95972e7b37bb02e2e87
 +if [ "${#untracked_files[@]}" -gt 0 ]; then
 +  GIT_INDEX_FILE="$tmp_index" git -C "$repo_root" --literal-pathspecs add -A -- "${untracked_files[@]}"
 +fi
- 
- initial_changed_files=()
- while IFS= read -r -d '' changed_path; do
