@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -141,6 +142,7 @@ fi
       MURPH_TEST_PNPM_LOG: pnpmLog,
       MURPH_TEST_ROOT: root,
     },
+    gitDirectory,
     lockLog,
     pnpmLog,
     root,
@@ -190,6 +192,21 @@ function runReviewGptAsync(
   });
 }
 
+function readFileIfPresent(filePath: string): string {
+  return existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+}
+
+async function waitForCondition(
+  condition: () => boolean,
+  failureMessage: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(failureMessage);
+}
+
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { force: true, recursive: true });
 });
@@ -223,6 +240,36 @@ describe("ReviewGPT fresh-worktree toolchain bootstrap", () => {
     expect(readFileSync(harness.pnpmLog, "utf8")).toBe(
       "exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m --zip --dry-run\n",
     );
+  });
+
+  it("waits for an active setup owner when toolchain paths already look ready", async () => {
+    const harness = createHarness(true);
+    provideReviewGptToolchain(harness.root);
+    const lockFile = path.join(
+      harness.gitDirectory,
+      "murph-locks",
+      "review-gpt-toolchain-install.lock",
+    );
+    const heldLockDirectory = `${lockFile}.held`;
+    mkdirSync(heldLockDirectory, { recursive: true });
+
+    const resultPromise = runReviewGptAsync(harness);
+    await waitForCondition(
+      () =>
+        readFileIfPresent(harness.lockLog).length > 0 ||
+        readFileIfPresent(harness.pnpmLog).includes("exec cobuild-review-gpt"),
+      "ReviewGPT neither attempted the setup lock nor invoked its tool.",
+    );
+    const lockAttemptsBeforeRelease = readFileIfPresent(harness.lockLog);
+    const pnpmCallsBeforeRelease = readFileIfPresent(harness.pnpmLog);
+    rmSync(heldLockDirectory, { recursive: true });
+    const result = await resultPromise;
+
+    expect(lockAttemptsBeforeRelease).toContain(
+      "review-gpt-toolchain-install.lock",
+    );
+    expect(pnpmCallsBeforeRelease).not.toContain("exec cobuild-review-gpt");
+    expect(result.status, result.stderr).toBe(0);
   });
 
   it("serializes concurrent fresh-worktree setup and installs once", async () => {

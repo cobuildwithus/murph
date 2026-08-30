@@ -99,9 +99,6 @@ review_gpt_prepare_local_toolchain() {
   local lock_status=0
   local script_path="$ROOT_DIR/scripts/review-gpt-pr-head-preflight.sh"
 
-  if review_gpt_local_toolchain_is_ready; then
-    return 0
-  fi
   if ! git_dir="$(
     git -C "$ROOT_DIR" rev-parse --path-format=absolute --git-dir 2>/dev/null
   )" || [[ -z "$git_dir" ]]; then
@@ -495,12 +492,15 @@ review_gpt_run() {
       echo "Error: could not resolve a PR for the current branch." >&2
       exit 1
     fi
+  fi
+
+  review_gpt_prepare_local_toolchain
+
+  if [[ -n "$detected_phase" ]]; then
     review_gpt_require_pr_head "$pr_ref"
     export REVIEW_GPT_PR_URL="$pr_ref"
     export REVIEW_GPT_REVIEW_PHASE="$detected_phase"
   fi
-
-  review_gpt_prepare_local_toolchain
 
   exec pnpm exec cobuild-review-gpt \
     --config scripts/review-gpt.config.sh \
