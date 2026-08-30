@@ -4619,6 +4619,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("re-prepares once when the direct mailbox ingress root changes under lock", async () => {
     mocks.enforceDirectMailboxPreparation = true;
+    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
+      prewarmRuntimeShell,
+    });
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
     );
@@ -4749,6 +4754,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
     )).toHaveLength(4);
+    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      source: "linq-message-routing",
+      userId: "member_123",
+    }));
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
