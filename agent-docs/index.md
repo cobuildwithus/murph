@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-29
+Last verified: 2026-08-30
 
 ## Purpose
 
@@ -12,10 +12,11 @@ while its system sequence remains ahead of the durable consumed watermark and
 never beyond the mailbox privacy deadline; `agent-docs/SECURITY.md` owns that
 boundary.
 
-Receipt-owned positive Stripe payment notifications cover subscription starts
-and renewals, paid plan-change and recurring-usage invoices, and fulfilled
-usage-credit payments without exposing member or customer identity. Their
-retry, privacy, configuration, and deploy-skew contracts are specified by
+Receipt-owned positive Stripe payment notifications cover subscription starts,
+paid plan-change and recurring-usage invoices, and fulfilled usage-credit
+payments without exposing member or customer identity. Ordinary
+`subscription_cycle` renewal invoices remain silent. Their retry, privacy,
+configuration, and deploy-skew contracts are specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, `agent-docs/SECURITY.md`,
 `agent-docs/product-specs/hosted-usage-topups.md`, and `apps/web/README.md`.
 

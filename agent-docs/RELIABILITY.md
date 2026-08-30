@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-29
+Last verified: 2026-08-30
 
 ## Current Guardrails
 
@@ -935,9 +935,11 @@ Last verified: 2026-08-29
   entitlement outcome. There is no new queue, cursor, retry loop, or persisted
   alert state.
 - Positive Stripe payment email is a receipt-completion obligation, not the
-  best-effort failure-alert projection. A positive `invoice.paid` amount or a
-  fulfilled usage-credit Checkout or saved-card PaymentIntent sends once after
-  canonical reconciliation. The existing receipt remains the only retry owner:
+  best-effort failure-alert projection. A positive `invoice.paid` amount whose
+  billing reason is not `subscription_cycle`, or a fulfilled usage-credit
+  Checkout or saved-card PaymentIntent, sends once after canonical
+  reconciliation. Ordinary subscription-cycle renewals complete without a
+  notification attempt. The existing receipt remains the only retry owner:
   missing configuration or provider failure leaves it claimable without
   rolling back billing, entitlement, or usage credit. A receipt-local sent
   marker is written only after provider success, while an event-derived Resend
@@ -962,8 +964,9 @@ Last verified: 2026-08-29
   activation-wake owner before notification work, even when provider success
   already wrote the sent marker. A rejected first wake can therefore overlap
   provider, sent-marker, or receipt-completion failure without losing the exact
-  retry target or creating another activation. Zero-dollar invoices and
-  no-charge plan changes complete without notification.
+  retry target or creating another activation. Subscription-cycle renewals,
+  zero-dollar invoices, and no-charge plan changes complete without
+  notification.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.
