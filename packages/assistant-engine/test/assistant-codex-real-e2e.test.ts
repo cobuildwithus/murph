@@ -8374,11 +8374,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         await stopWarmCodexAppServer(
           'group-private-handoff-flow-e2e-cold-follow-up',
         )
+        const followUpTraceEvents: unknown[] = []
         const followUp = await sendAssistantMessageLocal({
           ...route,
           deliverResponse: false,
           executionContext,
           includeEarlySessionOnboarding: false,
+          onTraceEvent: (event) => followUpTraceEvents.push(event),
           persistUserPromptOnFailure: false,
           prompt: 'What do you think about 8,000 over four months?',
           sessionId: handoff.session.sessionId,
@@ -8394,6 +8396,15 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           })}\n`,
         )
         expect(followUp.session.sessionId).toBe(handoff.session.sessionId)
+        expect(followUpTraceEvents).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            rawEvent: expect.objectContaining({
+              type: 'assistant.context.diagnostics',
+              stage: 'assistant-session-resolved',
+              source: 'assistant-message',
+            }),
+          }),
+        ]))
         expect(followUp.response).toMatch(/steps?|days?|months?|long-term|pattern|activity/iu)
         expect(followUp.response).not.toMatch(
           /8,?000 of what|of what, averaged|what does 8,?000 refer to|can you clarify what 8,?000/iu,
