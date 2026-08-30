@@ -1335,6 +1335,16 @@ function createWorkspacePort(input: {
             ? input.checkpointWorkspace(request)
             : createWorkspaceState({
                 inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                ...(request.systemMailboxProgressGeneration === undefined
+                  ? {}
+                  : {
+                      nextDefaultProcessingWakeAt:
+                        request.nextDefaultProcessingWakeAt ?? null,
+                      nextDefaultProcessingWakeReason:
+                        request.nextDefaultProcessingWakeReason ?? null,
+                      systemMailboxProgressGeneration:
+                        request.systemMailboxProgressGeneration,
+                    }),
                 nextWakeAt: request.nextWakeAt ?? null,
                 nextWakeReason: request.nextWakeReason ?? null,
                 redactedStatus: request.redactedStatus ?? null,

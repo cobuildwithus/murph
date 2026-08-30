@@ -6987,6 +6987,33 @@ function parseHostedRuntimeLatencyTraceMilestoneEvent(
 
 export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState {
   const record = requireObject(value, "Hosted workspace state");
+  const progressProjectionKeys = [
+    "nextDefaultProcessingWakeAt",
+    "nextDefaultProcessingWakeReason",
+    "systemMailboxProgressGeneration",
+  ] as const;
+  const progressProjectionKeyCount = progressProjectionKeys.filter((key) =>
+    Object.prototype.hasOwnProperty.call(record, key)
+  ).length;
+  if (
+    progressProjectionKeyCount !== 0
+    && progressProjectionKeyCount !== progressProjectionKeys.length
+  ) {
+    throw new TypeError(
+      "Hosted workspace state system progress projection must include generation, wake, and reason together.",
+    );
+  }
+  if (
+    record.systemMailboxProgressGeneration === null
+    && (
+      record.nextDefaultProcessingWakeAt !== null
+      || record.nextDefaultProcessingWakeReason !== null
+    )
+  ) {
+    throw new TypeError(
+      "Hosted workspace state disabled system progress projection must be entirely null.",
+    );
+  }
 
   return {
     ...(record.browserVaultReplicaRef === undefined
@@ -7014,6 +7041,22 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
             "Hosted workspace state inboxMediaRetentionWakeAt",
           ),
         }),
+    ...(record.nextDefaultProcessingWakeAt === undefined
+      ? {}
+      : {
+          nextDefaultProcessingWakeAt: readNullableString(
+            record.nextDefaultProcessingWakeAt,
+            "Hosted workspace state nextDefaultProcessingWakeAt",
+          ),
+        }),
+    ...(record.nextDefaultProcessingWakeReason === undefined
+      ? {}
+      : {
+          nextDefaultProcessingWakeReason: readNullableString(
+            record.nextDefaultProcessingWakeReason,
+            "Hosted workspace state nextDefaultProcessingWakeReason",
+          ),
+        }),
     ...(record.nextWakeAt === undefined
       ? {}
       : { nextWakeAt: readNullableString(record.nextWakeAt, "Hosted workspace state nextWakeAt") }),
@@ -7038,6 +7081,16 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
       record.snapshotRef === undefined ? null : record.snapshotRef,
       "Hosted workspace state snapshotRef",
     ),
+    ...(record.systemMailboxProgressGeneration === undefined
+      ? {}
+      : {
+          systemMailboxProgressGeneration: record.systemMailboxProgressGeneration === null
+            ? null
+            : requireNonNegativeBigIntString(
+                record.systemMailboxProgressGeneration,
+                "Hosted workspace state systemMailboxProgressGeneration",
+              ),
+        }),
     updatedAt: requireString(record.updatedAt, "Hosted workspace state updatedAt"),
     userId: requireString(record.userId, "Hosted workspace state userId"),
     version: requireNonNegativeBigIntString(record.version, "Hosted workspace state version"),
@@ -7103,6 +7156,22 @@ export function parseHostedWorkspaceCheckpointRequest(
   value: unknown,
 ): HostedWorkspaceCheckpointRequest {
   const record = requireObject(value, "Hosted workspace checkpoint request");
+  const progressProjectionKeys = [
+    "nextDefaultProcessingWakeAt",
+    "nextDefaultProcessingWakeReason",
+    "systemMailboxProgressGeneration",
+  ] as const;
+  const progressProjectionKeyCount = progressProjectionKeys.filter((key) =>
+    Object.prototype.hasOwnProperty.call(record, key)
+  ).length;
+  if (
+    progressProjectionKeyCount !== 0
+    && progressProjectionKeyCount !== progressProjectionKeys.length
+  ) {
+    throw new TypeError(
+      "Hosted workspace checkpoint request system progress projection must include generation, wake, and reason together.",
+    );
+  }
 
   return {
     attemptId: requireString(
@@ -7140,6 +7209,22 @@ export function parseHostedWorkspaceCheckpointRequest(
       record.leaseGeneration,
       "Hosted workspace checkpoint request leaseGeneration",
     ),
+    ...(progressProjectionKeyCount === 0
+      ? {}
+      : {
+          nextDefaultProcessingWakeAt: readNullableString(
+            record.nextDefaultProcessingWakeAt,
+            "Hosted workspace checkpoint request nextDefaultProcessingWakeAt",
+          ),
+          nextDefaultProcessingWakeReason: readNullableString(
+            record.nextDefaultProcessingWakeReason,
+            "Hosted workspace checkpoint request nextDefaultProcessingWakeReason",
+          ),
+          systemMailboxProgressGeneration: requireNonNegativeBigIntString(
+            record.systemMailboxProgressGeneration,
+            "Hosted workspace checkpoint request systemMailboxProgressGeneration",
+          ),
+        }),
     ...(record.inboxMediaRetentionWakeAt === undefined
       ? {}
       : {

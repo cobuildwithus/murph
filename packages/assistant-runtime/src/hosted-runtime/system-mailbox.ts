@@ -1169,6 +1169,9 @@ async function executePendingHostedSystemMailboxItem(input: {
           : {}),
         postCheckpointRecord: outcome.postCheckpointRecord ?? null,
         redactedLogEntries: outcome.redactedLogEntries ?? [],
+        ...(outcome.systemProgressed === true
+          ? { systemProgressed: true as const }
+          : {}),
       };
     }
     wake = preparation.wake;

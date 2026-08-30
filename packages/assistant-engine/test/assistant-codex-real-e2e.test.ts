@@ -10822,7 +10822,19 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         'Send the separately requested workout reminder for today.',
       scenario: 'skips when current evidence proves the occurrence already happened',
     },
-  ])('$scenario', async ({ context, expectedKind, savedInstructions }) => {
+    {
+      context: [
+        'Current occurrence evidence:',
+        '- An unrelated health-device maintenance pass completed before this scheduled occurrence.',
+        '- There is no delivery or completion evidence for this occurrence.',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      expectedText: /mobility/iu,
+      savedInstructions:
+        'Send a brief cue: Time for today\'s mobility routine.',
+      scenario: 'keeps a scheduled mobility reminder deliverable after unrelated device maintenance',
+    },
+  ])('$scenario', async ({ context, expectedKind, expectedText, savedInstructions }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-independent-reminder-e2e-'),
@@ -10856,6 +10868,14 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         result.finalMessage,
       )
       expect(decision.kind).toBe(expectedKind)
+      if (decision.kind === 'send_message') {
+        if (expectedText) {
+          expect(decision.text).toMatch(expectedText)
+        }
+        console.info(
+          `[real-codex independent reminder] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}`,
+        )
+      }
     } finally {
       await removeRealCodexTemporaryPaths([
         workingDirectory,

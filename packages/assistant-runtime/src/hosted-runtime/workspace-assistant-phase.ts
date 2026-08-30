@@ -3989,6 +3989,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   const deviceSyncMaintenanceRan =
     input.systemMailboxResult.deviceSyncMaintenanceRan === true
     || input.assistantResult.deviceSyncMaintenanceRan === true;
+  const systemMailboxProgressed =
+    input.systemMailboxResult.systemMailboxProgressed === true
+    || input.assistantResult.systemMailboxProgressed === true;
   const afterCheckpointKeepsForegroundImportLoop =
     input.systemMailboxResult.afterCheckpointKeepsForegroundImportLoop === true
     || input.assistantResult.afterCheckpointKeepsForegroundImportLoop === true;
@@ -4031,6 +4034,7 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
       ...(invocationLocalAssistantWakeAt
         ? { invocationLocalAssistantWakeAt }
         : {}),
+      ...(systemMailboxProgressed ? { systemMailboxProgressed: true as const } : {}),
       ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
@@ -4053,6 +4057,7 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
     ...(invocationLocalAssistantWakeAt
       ? { invocationLocalAssistantWakeAt }
       : {}),
+    ...(systemMailboxProgressed ? { systemMailboxProgressed: true as const } : {}),
     ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }
@@ -5114,6 +5119,9 @@ function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
     nextWakeAt,
     ...(dirtyDeviceSyncWake.reason ? { nextWakeReason: dirtyDeviceSyncWake.reason } : {}),
     progressed: true,
+    ...(input.dirtyDeviceSyncMetrics.systemProgressed === true
+      ? { systemMailboxProgressed: true as const }
+      : {}),
     redactedStatus: buildHostedWorkspaceAssistantPhaseRedactedStatus({
       deliveryEffectCount: 0,
       nextWakeAt,
@@ -6293,6 +6301,12 @@ async function runSystemMailboxMaintenancePhase(input: {
   const deviceSyncMaintenanceRan =
     systemMailboxDeviceSyncRan
     || (dirtyDeviceSyncMetrics !== null && !dirtyDeviceSyncMetrics.deviceSyncSkipped);
+  const systemMailboxProgressed =
+    (
+      "metrics" in systemMailboxPreparation
+      && systemMailboxPreparation.metrics.systemProgressed === true
+    )
+    || dirtyDeviceSyncMetrics?.systemProgressed === true;
   const cleanupPlan: HostedProviderCleanupPlan =
     phaseInput.foregroundCausalOnly === true
       ? {
@@ -6515,6 +6529,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         ? { nextWakeReason: nextWake.reason }
         : {}),
       progressed: true,
+      ...(systemMailboxProgressed ? { systemMailboxProgressed: true as const } : {}),
       redactedStatus: {
         ...buildHostedWorkspaceAssistantPhaseRedactedStatus({
           deliveryEffectCount: systemMailboxDeliveryEffects.length,

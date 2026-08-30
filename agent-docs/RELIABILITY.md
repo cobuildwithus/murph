@@ -310,6 +310,19 @@ Last verified: 2026-08-29
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- Hosted background admission uses one capability-scoped projection on the
+  existing workspace checkpoint row. A capable runtime checkpoints an absolute
+  `systemMailboxProgressGeneration` plus the independently calculated next
+  default-processing wake; the generation stays equal or advances by exactly
+  one only after explicitly proven durable system progress. Legacy checkpoints
+  clear the projection atomically so an older runtime disables the gate instead
+  of preserving stale authority. Orchestration may delay repeated system-only
+  processing for 30 seconds, two minutes, then ten minutes while the progress
+  generation and handled-through frontier remain unchanged. Workspace-version,
+  attempt, signal, and selected-wake churn are not progress. Due foreground,
+  default-processing, provider-owned, and retention work bypasses the delay
+  without clearing it. This reuses the workspace CAS and Temporal timer owners;
+  it adds no queue, scheduler, per-member state table, or second wake authority.
 - A hosted-group projection grant that needs its first private projection and
   one generation-stable `runtime.maintenance-requested` control row commit in
   the same Web transaction. An append failure therefore rolls back the grant

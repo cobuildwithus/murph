@@ -1275,6 +1275,34 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(snapshotRequest.expectedWorkspaceVersion, "3");
   });
 
+  test("materializes checkpoint progress metadata before snapshot creation", async () => {
+    const defaultWakeAt = "2026-04-27T08:00:00.000Z";
+    const snapshotBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: (snapshotInput) => {
+        assert.equal(snapshotInput.systemMailboxProgressGeneration, "7");
+        assert.equal(snapshotInput.nextDefaultProcessingWakeAt, defaultWakeAt);
+        assert.equal(snapshotInput.nextDefaultProcessingWakeReason, "assistant");
+        return { snapshotRef: null };
+      },
+      metadata: {
+        attemptId: "attempt_synthetic_runner_snapshot_progress_projection",
+        expectedWorkspaceVersion: "3",
+        leaseGeneration: "1",
+        nextDefaultProcessingWakeAt: defaultWakeAt,
+        nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+      },
+    });
+
+    const snapshotRequest = await snapshotBuilder.createRequest({
+      reason: "idle_shutdown",
+    });
+
+    assert.equal(snapshotRequest.systemMailboxProgressGeneration, "7");
+    assert.equal(snapshotRequest.nextDefaultProcessingWakeAt, defaultWakeAt);
+    assert.equal(snapshotRequest.nextDefaultProcessingWakeReason, "assistant");
+  });
+
   test("passes imported conversation seq through redacted idle snapshot status", async () => {
     const snapshotBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
       createSnapshot: () => ({

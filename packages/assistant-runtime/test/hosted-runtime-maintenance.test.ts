@@ -6494,6 +6494,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       parserProcessed: 0,
       postCheckpointRecord: null,
     });
+    assert.equal(Object.hasOwn(result, "systemProgressed"), false);
     expect(drainWorker).toHaveBeenCalledWith(
       HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
       "local_scheduled_account",
@@ -6663,7 +6664,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       runSchedulerOnce: vi.fn(async () => undefined),
     });
 
-    await runHostedDeviceSyncWakeLane({
+    const result = await runHostedDeviceSyncWakeLane({
       deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
       resolvedConfig: {
         deviceSync: DEVICE_SYNC_CONFIG,
@@ -6688,6 +6689,8 @@ describe("runHostedDeviceSyncWakeLane", () => {
       },
     });
     await drainHostedRuntimeLogWritesBestEffort();
+
+    assert.equal(result.systemProgressed, true);
 
     const finishedEntry = logRequests
       .flatMap((request) => request.entries)
@@ -6880,6 +6883,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       expect(result.deviceSyncSkipped).toBe(false);
       expect(result.nextWakeAt).toBe("2026-04-08T00:30:00.000Z");
       expect(result.nextWakeReason).toBe("device-sync.reconcile");
+      expect(Object.hasOwn(result, "systemProgressed")).toBe(false);
       expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledTimes(1);
       expect(drainWorker).toHaveBeenCalled();
       expect(logRequests.flatMap((request) => request.entries).map((entry) =>
