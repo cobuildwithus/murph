@@ -51,14 +51,14 @@ function createRepository(): string {
   return repository;
 }
 
-function runCommitter(repository: string, selectedPath: string) {
+function runCommitter(repository: string, ...selectedPaths: string[]) {
   return spawnSync(
     "bash",
     [
       committerPath,
       "--skip-hooks",
       "fix(test): update selected evidence",
-      selectedPath,
+      ...selectedPaths,
     ],
     {
       cwd: repository,
@@ -104,6 +104,35 @@ describe("repo-tools scoped committer staging", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(runGit(repository, ["show", "HEAD:new.txt"])).toBe("new");
+  });
+
+  it("replaces a tracked directory with a selected file", () => {
+    const repository = createRepository();
+    const selectedPath = "artifact";
+    const descendantPath = `${selectedPath}/part.txt`;
+    mkdirSync(path.join(repository, selectedPath));
+    writeFileSync(path.join(repository, descendantPath), "before\n");
+    runGit(repository, ["add", descendantPath]);
+    runGit(repository, ["commit", "-q", "-m", "baseline"]);
+
+    rmSync(path.join(repository, selectedPath), { force: true, recursive: true });
+    runGit(repository, ["add", "-u", "--", descendantPath]);
+    writeFileSync(path.join(repository, selectedPath), "replacement\n");
+    const realIndexTree = runGit(repository, ["write-tree"]);
+
+    const result = runCommitter(repository, selectedPath, descendantPath);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(runGit(repository, ["show", `HEAD:${selectedPath}`])).toBe(
+      "replacement",
+    );
+    expect(runGit(repository, ["ls-tree", "-r", "--name-only", "HEAD"])).toBe(
+      selectedPath,
+    );
+    expect(runGit(repository, ["write-tree"])).toBe(realIndexTree);
+    expect(readFileSync(path.join(repository, selectedPath), "utf8")).toBe(
+      "replacement\n",
+    );
   });
 
   it("keeps rejecting a selected ignored untracked file", () => {
