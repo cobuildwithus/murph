@@ -4,8 +4,11 @@ import path from "node:path";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
+  extractHostedAssistantNotificationRedactedDetails,
+  isHostedAssistantNotificationValidationFailureReason,
   readHostedRuntimeSafeErrorText,
   sanitizeHostedExecutionStructuredLogText,
+  type HostedAssistantNotificationValidationFailureReason,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -74,6 +77,8 @@ import {
 const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 const HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS = 60_000;
+const HOSTED_VAULT_SHARE_PROJECTION_FAILED_ERROR_CODE =
+  "HOSTED_VAULT_SHARE_PROJECTION_FAILED";
 const HOSTED_GROUP_CONTEXT_HANDOFF_MAX_ATTEMPTS = 2;
 const HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE =
   "HOSTED_VAULT_SHARE_PROJECTION_DEFERRED";
@@ -94,6 +99,8 @@ export type {
 
 export type HostedSystemMailboxCheckpointPreparation =
   | {
+      assistantNotificationValidationFailureReason?:
+        HostedAssistantNotificationValidationFailureReason;
       attemptCount: number;
       errorCode: string | null;
       errorMessage: string | null;
@@ -567,7 +574,15 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
             wake: prepared.wake,
           })
         : null;
+    const assistantNotificationValidationFailureReason =
+      prepared.wake.kind === "assistant.notification.requested"
+      && normalized.code === "ASSISTANT_NOTIFICATION_INVALID_RESPONSE"
+        ? readHostedAssistantNotificationValidationFailureReason(error)
+        : null;
     return {
+      ...(assistantNotificationValidationFailureReason
+        ? { assistantNotificationValidationFailureReason }
+        : {}),
       attemptCount: prepared.attemptCount,
       errorCode: normalized.code,
       errorMessage: normalized.message,
@@ -582,17 +597,43 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   }
 }
 
+export function resolveHostedBrowserVaultRefreshAttempt(
+  item: HostedSystemMailboxPendingItem,
+): "initial" | "retry" | null {
+  if (
+    item.status !== "recording"
+    || item.postCheckpointRecord !== null
+    || item.routeAction !== "apply-runtime-control-request"
+    || item.wake.kind !== "runtime.browser-vault-refresh-requested"
+  ) {
+    return null;
+  }
+  // Projection backoff is the only other writer of nextAttemptAt for this
+  // exact retained item; its existing error code keeps timeout ownership distinct.
+  return item.nextAttemptAt !== null
+      && item.lastErrorCode !== HOSTED_VAULT_SHARE_PROJECTION_FAILED_ERROR_CODE
+    ? "retry"
+    : "initial";
+}
+
+function readHostedAssistantNotificationValidationFailureReason(
+  error: unknown,
+): HostedAssistantNotificationValidationFailureReason | null {
+  const reason = extractHostedAssistantNotificationRedactedDetails(error)
+    ?.assistantNotificationValidationFailureReason;
+  return isHostedAssistantNotificationValidationFailureReason(reason)
+    ? reason
+    : null;
+}
+
 function shouldResumeHostedBrowserVaultRecordingItemReadOnly(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
-  return item.status === "recording"
-    && item.postCheckpointRecord === null
-    && (
-      item.routeAction === "run-device-sync-wake"
-      || (
-        item.routeAction === "apply-runtime-control-request"
-        && item.wake.kind === "runtime.browser-vault-refresh-requested"
-      )
+  return resolveHostedBrowserVaultRefreshAttempt(item) !== null
+    || (
+      item.status === "recording"
+      && item.postCheckpointRecord === null
+      && item.routeAction === "run-device-sync-wake"
     );
 }
 
@@ -965,14 +1006,54 @@ export async function deferHostedSystemMailboxItemAfterVaultShareProjectionFailu
   item: HostedSystemMailboxPendingItem;
   vaultRoot: string;
 }): Promise<HostedRuntimeWakeCandidate> {
+  const preservesBrowserVaultTimeoutRetry =
+    resolveHostedBrowserVaultRefreshAttempt(input.item) === "retry";
   const nextWakeAt = new Date(
     Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
   ).toISOString();
   await updateHostedSystemMailboxPendingItem({
     item: {
       ...input.item,
-      lastErrorCode: "HOSTED_VAULT_SHARE_PROJECTION_FAILED",
-      lastErrorMessage: "Vault-share projection failed before device-sync acknowledgement.",
+      lastErrorCode: preservesBrowserVaultTimeoutRetry
+        ? null
+        : HOSTED_VAULT_SHARE_PROJECTION_FAILED_ERROR_CODE,
+      lastErrorMessage: preservesBrowserVaultTimeoutRetry
+        ? null
+        : "Vault-share projection failed before device-sync acknowledgement.",
+      nextAttemptAt: nextWakeAt,
+      status: "recording",
+    },
+    vaultRoot: input.vaultRoot,
+  });
+  return createHostedRuntimeWakeCandidate(
+    nextWakeAt,
+    resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
+  );
+}
+
+export function createHostedBrowserVaultRefreshTimeoutRetryWakeCandidate(
+): HostedRuntimeWakeCandidate {
+  return createHostedRuntimeWakeCandidate(
+    new Date(Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS).toISOString(),
+    null,
+  );
+}
+
+export async function deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout(input: {
+  item: HostedSystemMailboxPendingItem;
+  vaultRoot: string;
+}): Promise<HostedRuntimeWakeCandidate | null> {
+  if (resolveHostedBrowserVaultRefreshAttempt(input.item) !== "initial") {
+    return null;
+  }
+  const nextWakeAt = new Date(
+    Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
+  ).toISOString();
+  await updateHostedSystemMailboxPendingItem({
+    item: {
+      ...input.item,
+      lastErrorCode: null,
+      lastErrorMessage: null,
       nextAttemptAt: nextWakeAt,
       status: "recording",
     },

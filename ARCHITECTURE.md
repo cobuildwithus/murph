@@ -383,18 +383,28 @@ a joined group Murph. `apps/web` derives the exact group runtime, membership
 generation, origin, expiry, and private return route from the signed caller and
 web-owned rows. Before an Ask or handoff, the private runtime lists the caller's
 current membership page. Each entry carries its opaque membership generation,
-existing title, Murph member count, and a separately available live chat roster
-summary: real human participant count plus requester-authorized Contacts names,
-masked phone hints, or a generic email marker. Provider handles remain transient.
-A missing route, unsupported provider, incomplete roster, provider failure, or
-optional Contacts failure is scoped to that entry; it does not hide otherwise
-usable memberships. The model reasons over those safe summaries, asks a natural
-clarification when several entries fit, and passes only the exact returned
-`membershipId` with the bounded question or handoff context. It never exposes,
-invents, edits, or derives the identifier. Web locks and revalidates that exact
-membership belongs to the requester, is still active, points to the expected
-group runtime, and retains route authority before queueing. Leaving and rejoining
-creates a new membership id, so an older clarification is a stale generation.
+existing title, Murph member count, per-group action availability, and an
+independently available live chat roster summary: real human participant count
+plus requester-authorized Contacts names, masked phone hints, or a generic
+email marker. Provider handles remain transient. For Linq groups, the durable
+exact route remains available unless a complete current provider roster
+affirmatively shows that the route's sending account has departed; transient
+roster reads do not turn it into a false negative. Sender presence is derived
+independently from participant parsing, roster bounds, identity resolution, and
+the optional Contacts overlay, so presentation failure cannot make a departed
+sender actionable. A missing route, unsupported roster, incomplete roster,
+provider failure, or optional Contacts failure is scoped to that entry; it does
+not hide otherwise usable memberships. The model resolves identity across all
+matching destinations before applying action availability, asks a natural
+clarification when several entries fit, and never silently selects a usable
+group by discarding an unavailable match. It passes only the exact returned
+`membershipId` with the bounded question or handoff context and never exposes,
+invents, edits, or derives the identifier. Before a new Ask or handoff is
+queued, Web repeats the same bounded live provider check outside the database
+transaction, then locks and revalidates that the exact membership belongs to
+the requester, is still active, points to the expected group runtime, and
+retains route authority. Leaving and rejoining creates a new membership id, so
+an older clarification is a stale generation.
 Ask and handoff replay remain pinned to the stored membership id; no title or
 participant matcher, target digest, directory, or selector state exists.
 After Temporal accepts each pointer-only mailbox signal, Web starts the
@@ -1833,9 +1843,11 @@ Private food-name search bounds indexed matches before similarity scoring,
 canonical-key deduplication, and window sorting. A literal-equality btree lane
 admits up to 250 exact names without SQL-pattern semantics, an unordered GIN
 lane admits up to 10,000 full-text matches without sorting the whole match set,
-and one GiST trigram branch is realized per query. Full-text searches supplement
-GIN recall with up to 10,000 strict-word-nearest names. When FTS finds nothing,
-typo recovery instead admits up to 10,000 names by whole-name distance and then
+and at most one GiST trigram branch is realized per query. A full-text search
+supplements GIN recall with up to 10,000 strict-word-nearest names only when
+the GIN set reaches its cap and may be truncated; an unsaturated set is
+exhaustive and skips that whole-catalog scan. When FTS finds nothing, typo
+recovery instead admits up to 10,000 names by whole-name distance and then
 applies the matching whole-name threshold; eligible names necessarily precede
 ineligible names because ordering and eligibility use the same similarity.
 Canonical-key deduplication happens only after those bounded admissions.

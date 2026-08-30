@@ -624,17 +624,18 @@ describe("foods query helpers", () => {
     expect(ftsIndexSql).toContain("to_tsvector");
     expect(ftsIndexSql).not.toContain("ORDER BY");
     expect(nameNearestSql).not.toContain("to_tsvector");
+    expect(nameNearestSql).toContain(
+      "(SELECT count(*) FROM fts_index_matches) = 10000",
+    );
     expect(nameNearestSql).toContain("ORDER BY name <->>> $1::text");
     expect(ftsNearestSql).toContain("FROM name_nearest_matches");
-    expect(ftsNearestSql).toContain(
-      "EXISTS (SELECT 1 FROM fts_index_matches)",
-    );
+    expect(ftsNearestSql).not.toContain("EXISTS");
     expect(ftsNearestSql).not.toContain("FROM foods");
     expect(searchCall?.text).toMatch(
       /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 10000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
     );
     expect(searchCall?.text).toMatch(
-      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 10000/u,
+      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?count\(\*\) FROM fts_index_matches\) = 10000[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 10000/u,
     );
     expect(searchCall?.text).toMatch(
       /fts_nearest_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches[\s\S]*?to_tsvector/u,

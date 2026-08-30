@@ -1023,7 +1023,9 @@ export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER =
 export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE = "v3";
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM =
   "membershipInventoryProtocol";
-export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE = "v2";
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE =
+  "v2";
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE = "v3";
 
 export function isHostedRuntimeAssistantAskDiagnosticCode(
   value: unknown,
@@ -1217,7 +1219,16 @@ export type HostedRuntimeGroupParticipantRoster =
       unavailableReason: string;
     };
 
+export type HostedRuntimeGroupMembershipAvailability =
+  | { status: "available" }
+  | {
+      status: "unavailable";
+      unavailableReason: string;
+    };
+
 export interface HostedRuntimeGroupMembershipSummary {
+  /** Omitted by Web deployments or callers from before inventory v3. */
+  availability?: HostedRuntimeGroupMembershipAvailability;
   displayName: string | null;
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
@@ -2364,6 +2375,17 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     replacedStaleFence?: boolean;
     freshStartRequestedAtEpochMs?: number;
     freshStartFenceBoundAtEpochMs?: number;
+    freshStartContainerReadinessRequestedAtEpochMs?: number;
+    freshStartContainerLifecycleLockAcquiredAtEpochMs?: number;
+    freshStartContainerStateReadFinishedAtEpochMs?: number;
+    freshStartContainerStartIssuedAtEpochMs?: number;
+    freshStartContainerOnStartAtEpochMs?: number;
+    freshStartContainerPortsReadyAtEpochMs?: number;
+    freshStartContainerHealthStartedAtEpochMs?: number;
+    freshStartContainerHealthFinishedAtEpochMs?: number;
+    freshStartContainerProcessStartedAtEpochMs?: number;
+    freshStartContainerListeningAtEpochMs?: number;
+    freshStartContainerReadyObservedAtEpochMs?: number;
     freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
@@ -2750,6 +2772,17 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "replacedStaleFence",
     "freshStartRequestedAtEpochMs",
     "freshStartFenceBoundAtEpochMs",
+    "freshStartContainerReadinessRequestedAtEpochMs",
+    "freshStartContainerLifecycleLockAcquiredAtEpochMs",
+    "freshStartContainerStateReadFinishedAtEpochMs",
+    "freshStartContainerStartIssuedAtEpochMs",
+    "freshStartContainerOnStartAtEpochMs",
+    "freshStartContainerPortsReadyAtEpochMs",
+    "freshStartContainerHealthStartedAtEpochMs",
+    "freshStartContainerHealthFinishedAtEpochMs",
+    "freshStartContainerProcessStartedAtEpochMs",
+    "freshStartContainerListeningAtEpochMs",
+    "freshStartContainerReadyObservedAtEpochMs",
     "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",

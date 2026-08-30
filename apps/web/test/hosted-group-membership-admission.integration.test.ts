@@ -104,8 +104,11 @@ import {
   requestHostedGroupContextHandoff,
 } from "../src/lib/hosted-groups/group-assistant-ask";
 import {
-  readHostedGroupMembershipParticipantRosters,
+  readHostedGroupMembershipInventory,
 } from "../src/lib/hosted-groups/group-membership-participants";
+import {
+  createHostedLinqParticipantContact,
+} from "../src/lib/hosted-onboarding/linq-participant-contact";
 
 const NOW = new Date("2026-08-26T12:00:00.000Z");
 const ORIGIN_MEMBER_ID = "member_requester";
@@ -113,8 +116,16 @@ const ORIGIN_ASSISTANT_INPUT_ID = `ain_${"a".repeat(32)}`;
 const ORIGIN_SESSION_ID = "session_private_participant_target";
 const REQUESTER_PHONE = "+12125550000";
 const PROVIDER_PHONE = "+15550000000";
+const PROVIDER_LOOKUP_KEY = createHostedLinqParticipantContact({
+  kind: "phone",
+  value: PROVIDER_PHONE,
+})?.lookupKey;
 const FIRST_RUNTIME_MEMBER_ID = "runtime_first_group";
 const SECOND_RUNTIME_MEMBER_ID = "runtime_second_group";
+
+if (!PROVIDER_LOOKUP_KEY) {
+  throw new TypeError("Synthetic provider phone must produce a lookup key.");
+}
 
 interface MembershipFixture {
   group: {
@@ -196,7 +207,7 @@ function createPrisma(memberships: readonly MembershipFixture[]) {
 
 function routeAuthority(runtimeMemberId: string, threadId: string) {
   return {
-    accountLookupKey: "linq_account",
+    accountLookupKey: PROVIDER_LOOKUP_KEY,
     channel: "linq" as const,
     containerMemberId: runtimeMemberId,
     threadId,
@@ -594,7 +605,7 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
       requestedHandleCount: 1,
     });
 
-    await expect(readHostedGroupMembershipParticipantRosters({
+    await expect(readHostedGroupMembershipInventory({
       memberId: ORIGIN_MEMBER_ID,
       memberships: [{
         membershipId: selected.id,
@@ -602,14 +613,20 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
       }],
       now: NOW,
       prisma: prisma as never,
-    })).resolves.toEqual(new Map([[
-      "membership_second",
-      {
-        participantCount: 2,
-        participantLabels: [{ displayName: "Jordan" }],
-        status: "available",
-      },
-    ]]));
+    })).resolves.toEqual({
+      availabilityByMembershipId: new Map([[
+        "membership_second",
+        { status: "available" },
+      ]]),
+      participantRosterByMembershipId: new Map([[
+        "membership_second",
+        {
+          participantCount: 2,
+          participantLabels: [{ displayName: "Jordan" }],
+          status: "available",
+        },
+      ]]),
+    });
 
     dependencyMocks.resolveHostedAssistantNotificationDestination
       .mockResolvedValue(null);

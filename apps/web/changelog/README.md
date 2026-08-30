@@ -23,10 +23,19 @@ when order matters, and do not renumber unrelated entries.
     "summary": "One sentence describing what changed for the member.",
     "details": "The most important boundary, limitation, or recovery behavior.",
     "relevanceTags": ["product-area"],
-    "sourcePullRequests": [1234]
+    "sourcePullRequests": [1234],
+    "tryIt": {
+      "label": "Ask about recovery",
+      "prompt": "Help me review my recovery today."
+    }
   }
 }
 ```
+
+`item.tryIt` is optional. When present, it must be an object with a `label`
+string and exactly one action: either an `href` string for a supported route or
+a `prompt` string for a supported conversation request. Those are the only
+accepted keys; a string value or any additional key is invalid.
 
 Optional edition-level title and summary live at
 `editions/YYYY-MM-DD.json`. They are not required: dates without metadata use a

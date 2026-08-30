@@ -6,6 +6,7 @@ import {
   deriveHostedExecutionErrorCode,
   sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
+  type HostedAssistantNotificationValidationFailureReason,
   type HostedExecutionSystemWake,
   type HostedExecutionRedactedLogEntry,
   type HostedExecutionStructuredLogDetails,
@@ -6414,6 +6415,10 @@ async function runSystemMailboxMaintenancePhase(input: {
     });
   }
   await writeHostedSystemMailboxRuntimeLog({
+    assistantNotificationValidationFailureReason:
+      systemMailboxPreparation.status === "retryable_failed"
+        ? systemMailboxPreparation.assistantNotificationValidationFailureReason ?? null
+        : null,
     assistantAskCompletionFirstAttemptDelayed,
     attemptCount: systemMailboxPreparation.status === "retryable_failed"
       ? systemMailboxPreparation.attemptCount
@@ -8478,6 +8483,8 @@ async function resolveHostedLocalDeviceSyncScheduledWake(
 }
 
 async function writeHostedSystemMailboxRuntimeLog(input: {
+  assistantNotificationValidationFailureReason?:
+    HostedAssistantNotificationValidationFailureReason | null;
   assistantAskCompletionFirstAttemptDelayed?: boolean;
   attemptCount: number | null;
   errorCode?: string | null;
@@ -8517,6 +8524,12 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
       phase: "checkpoint",
       redactedJson: {
         attemptCount: input.attemptCount,
+        ...(input.assistantNotificationValidationFailureReason
+          ? {
+              assistantNotificationValidationFailureReason:
+                input.assistantNotificationValidationFailureReason,
+            }
+          : {}),
         assistantAskCompletionFirstAttemptDelayed:
           input.assistantAskCompletionFirstAttemptDelayed ?? false,
         errorCode: input.errorCode ? errorCode : null,

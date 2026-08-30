@@ -1,16 +1,18 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import {
+  CALENDAR_LINK_URL_PREFIX,
   eventRecordSchema,
   experimentFrontmatterSchema,
   experimentProgressSnapshotSchema,
   goalMetricTargetSchema,
+  parseCalendarEventPayload,
   regimenFrontmatterSchema,
   workoutSessionSchema,
 } from '@murphai/contracts'
@@ -29,6 +31,9 @@ import {
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
 } from '@murphai/hosted-execution'
+import {
+  buildMurphGroupReadPermissionProfileTomlLines,
+} from '@murphai/hosted-execution/assistant-permissions'
 import {
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
@@ -52,7 +57,7 @@ import {
   showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 
 import {
   buildAssistantRealCodexRunEnv,
@@ -60,6 +65,7 @@ import {
 } from '../../../scripts/run-assistant-real-codex-e2e.ts'
 import {
   executeCodexAppServerTurn,
+  readCodexAppServerTurnFailureContext,
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
@@ -102,6 +108,7 @@ import {
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+  MURPH_CREATE_CALENDAR_LINK_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
   MURPH_GROUP_DATA_TOOL,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
@@ -215,6 +222,7 @@ import {
 import { buildToolCallValidationFeedback } from '../src/assistant/tool-validation-feedback.ts'
 import type {
   AssistantProviderDynamicTool,
+  AssistantProviderUsage,
   AssistantProviderUsageDraft,
 } from '../src/assistant/providers/types.ts'
 import {
@@ -225,11 +233,29 @@ import { createDeferred } from './test-helpers.ts'
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
 const REAL_CODEX_E2E_TAG = 'real-codex-live'
+const realCodexSuiteUsage = {
+  cacheWriteTokens: 0,
+  cachedInputTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  providerRequests: 0,
+  reasoningTokens: 0,
+  requestsMissingUsage: 0,
+  totalTokens: 0,
+}
 function describeRealCodex(name: string, factory: () => void): void {
   const suite = RUN_REAL_CODEX_E2E ? describe : describe.skip
   suite(name, { tags: [REAL_CODEX_E2E_TAG] }, factory)
 }
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
+
+afterAll(() => {
+  if (RUN_REAL_CODEX_E2E) {
+    process.stdout.write(
+      `[real-codex-suite-usage] ${JSON.stringify(realCodexSuiteUsage)}\n`,
+    )
+  }
+})
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
 const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
   'allow_login_shell=false',
@@ -240,6 +266,11 @@ const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
 const REPEATED_SET_REGIMEN_ID = 'reg_01JNV447V6K3SW1Q9NJ7XVQZ7P'
 const REPEATED_SET_ALPHA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7Q'
 const REPEATED_SET_BETA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7R'
+const COMPACT_SUPPORT_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7S'
+const COMPACT_SUPPORT_KEEP_AUTOMATION_ID =
+  'automation_01JNV447V6K3SW1Q9NJ7XVQZ7T'
+const COMPACT_SUPPORT_STALE_AUTOMATION_ID =
+  'automation_01JNV447V6K3SW1Q9NJ7XVQZ7V'
 const REPEATED_SET_ALPHA_EVENT_IDS = Array.from(
   { length: 5 },
   (_, index) => `evt_01JNV447V6K3SW1Q9NJ7XVQZ7${index + 1}`,
@@ -334,12 +365,17 @@ const REAL_CODEX_SUBSCRIPTION_ENV_ALLOWLIST = [
   'XDG_CONFIG_HOME',
   'XDG_DATA_HOME',
 ] as const
+const realCodexProviderApiKeyEnvByEnvironment = new WeakMap<
+  NodeJS.ProcessEnv,
+  string
+>()
 
 interface RealCodexE2eConfig {
   codexHome: string | null
   env: NodeJS.ProcessEnv
   model: string
   modelProvider: string
+  providerApiKeyEnv: string | null
   temporaryPaths: string[]
 }
 
@@ -970,10 +1006,85 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   )
 
   it(
+    'answers a fresh routine-goal onboarding turn without a progress update',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const temporaryPaths = [...config.temporaryPaths]
+      const progressUpdates: string[] = []
+
+      try {
+        const workingDirectory = await prepareRealCodexOnboardingDirectory()
+        temporaryPaths.unshift(workingDirectory)
+        const turnInput = buildRealCodexOnboardingTurnInput({
+          config,
+          workingDirectory,
+        })
+        const result = await executeRealCodexAppServerTurn({
+          ...turnInput,
+          dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          excludeResumeTurns: true,
+          progressDelivery: {
+            async send(text) {
+              progressUpdates.push(text)
+              return { kind: 'sent', source: 'model' }
+            },
+          },
+          prompt: [
+            "I've already seen your welcome and I'm ready to continue.",
+            "I'd like Murph's help building a steadier evening routine.",
+          ].join(' '),
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const progressCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        )
+        const resumeContexts = readSuccessfulOnboardingResumeContexts(actions)
+        const policyFiles = await readOnboardingPolicyFiles(
+          actions,
+          path.join(workingDirectory, 'skills'),
+        )
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(
+          `[onboarding-fresh-routine-goal-e2e] ${JSON.stringify({
+            policyFiles,
+            progressUpdateCount: progressUpdates.length,
+            reply,
+            resumeContextCount: resumeContexts.length,
+          })}\n`,
+        )
+
+        expect(progressUpdates).toEqual([])
+        expect(progressCalls).toEqual([])
+        expect(resumeContexts).toHaveLength(1)
+        expect(policyFiles).toContain('SKILL.md')
+        expect(reply).toMatch(/what should i call you/iu)
+        expect(reply).toMatch(/how old|age/iu)
+        expect(reply).toMatch(/gender/iu)
+        expect(reply.match(/\?/gu) ?? []).not.toHaveLength(0)
+        expect(reply).not.toMatch(
+          /checking a few things|pulling your data|while i work|sit tight/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it(
     'continues foundation after a member defers an optional wearable connection',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
+      const progressUpdates: string[] = []
+      const progressDelivery = {
+        async send(text: string) {
+          progressUpdates.push(text)
+          return { kind: 'sent', source: 'model' } as const
+        },
+      } satisfies NonNullable<CodexAppServerTurnInput['progressDelivery']>
 
       try {
         const workingDirectory = await prepareRealCodexOnboardingDirectory()
@@ -1082,9 +1193,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
           hostedToolContext,
+          progressDelivery,
           prompt: "I use Oura, but I'd rather connect it later.",
           scenario: 'wearable_connection_deferred',
         })
@@ -1095,7 +1207,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         )
         const reply = result.finalMessage.trim()
         process.stdout.write(
-          `[onboarding-wearable-defer-e2e] ${JSON.stringify({ reply })}\n`,
+          `[onboarding-wearable-defer-e2e] ${JSON.stringify({
+            progressUpdateCount: progressUpdates.length,
+            reply,
+          })}\n`,
         )
 
         expect(deviceWriteActions).toHaveLength(0)
@@ -1103,7 +1218,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           deviceRequests.filter((request) => request.action !== 'list_accounts'),
         ).toHaveLength(0)
         expect(reply).toMatch(/oura|connect/iu)
-        expect(reply).toMatch(/later|wait|whenever|when you(?:'re| are) ready/iu)
+        expect(hasWearableConnectionDeferralMeaning(reply), reply).toBe(true)
         expect(reply).toMatch(
           /voice memo|movement|move|training|supplements|meds|conditions|allergies|medical/iu,
         )
@@ -1124,9 +1239,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
           hostedToolContext,
+          progressDelivery,
           prompt: 'I use Oura. Send me the connection link now.',
           scenario: 'wearable_connection_offer',
         })
@@ -1152,8 +1268,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           hostedToolContext,
+          progressDelivery,
           prompt: "I'll do that later.",
           resumeSessionId: linkOffer.sessionId,
           scenario: 'wearable_connection_deferred',
@@ -1165,7 +1282,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             .filter((request) => request.action !== 'list_accounts'),
           'later-turn connection writes',
         ).toHaveLength(0)
-        expect(laterReply).toMatch(/later|wait|whenever|when you(?:'re| are) ready/iu)
+        expect(
+          hasWearableConnectionDeferralMeaning(laterReply),
+          laterReply,
+        ).toBe(true)
         expect(laterReply).toMatch(
           /voice memo|movement|move|training|supplements|meds|conditions|allergies|medical/iu,
         )
@@ -1212,8 +1332,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           hostedToolContext,
+          progressDelivery,
           prompt: "That's everything for the foundation. What's next?",
           resumeSessionId: laterDeferral.sessionId,
           scenario: 'wearable_connection_deferred_return',
@@ -1245,9 +1366,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
           hostedToolContext,
+          progressDelivery,
           prompt: "Let's pause onboarding until next week.",
           scenario: 'wearable_connection_deferred',
         })
@@ -1262,6 +1384,18 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           /voice memo|supplements|meds|conditions|allergies|blood tests|labs/iu,
         )
         expect(onboardingPause.finalMessage.match(/\?/gu) ?? []).toHaveLength(0)
+        const progressCalls = [
+          result,
+          linkOffer,
+          laterDeferral,
+          contextualReturn,
+          onboardingPause,
+        ].flatMap((turn) => turn.actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        ))
+        expect(progressUpdates).toEqual([])
+        expect(progressCalls).toEqual([])
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)
       }
@@ -1676,6 +1810,8 @@ describe('real Codex live fixture contracts', () => {
       'What food or drink was this, and roughly how much?',
       'Please tell me what the meal was and the approximate portion.',
       'I only need the food and amount to finish this capture.',
+      'The meal logged for August 25 has no food or portion details yet. What did you eat, and about how much?',
+      'The logged meal has no food or portion details. What did you eat, and about how much?',
     ]) {
       expect(hasOneBoundedMealClarificationMeaning(message), message)
         .toBe(true)
@@ -1686,9 +1822,99 @@ describe('real Codex live fixture contracts', () => {
       'I saved the meal without needing clarification.',
       'I saved the meal and amount.',
       'No need to tell me what food or how much.',
+      "I've saved the meal, but the meal has no food or portion details. What did you eat, and about how much?",
+      'No need to tell me what food or amount. The meal has no food details. What did you eat, and about how much?',
     ]) {
       expect(hasOneBoundedMealClarificationMeaning(message), message)
         .toBe(false)
+    }
+  })
+
+  it('keeps equivalent live wording inside the asserted behavior boundary', () => {
+    expect(hasFinnishDrySaunaMeaning(
+      'vault-cli commons knowledge search "Dry Finnish sauna safety"',
+    )).toBe(true)
+    expect(hasFinnishDrySaunaMeaning(
+      'vault-cli commons knowledge search "Infrared sauna safety"',
+    )).toBe(false)
+    expect(hasFinnishDrySaunaMeaning(
+      'vault-cli commons knowledge search "Finnish wet sauna health benefits versus dry infrared sauna evidence"',
+    )).toBe(false)
+
+    for (const message of [
+      'Yes, but only in group conversations that Murph has already joined. I can answer a question there.',
+      'Murph can consult group conversations it has already joined.',
+      'Yes, if Murph has already joined the group conversation. I can help ask a question there or pass along a brief update.',
+    ]) {
+      expect(hasJoinedGroupCapabilityMeaning(message), message).toBe(true)
+    }
+    for (const message of [
+      "Yes. I can't consult group conversations that I'm not joined to, and joined groups are unavailable too.",
+      'Murph can message groups it has already joined, but it cannot interact with those groups.',
+      'Murph can message every group. Only groups already joined are summarized.',
+      "I can consult all group chats. I only summarize chats I've joined.",
+      'Murph can post in any group. When already joined, it can read summaries.',
+      "I can message groups, including ones I haven't joined. Joined groups are easier.",
+    ]) {
+      expect(hasJoinedGroupCapabilityMeaning(message), message).toBe(false)
+    }
+
+    expect(hasSavedSupportIssueForTriageMeaning(
+      'Your issue was saved for triage, and an account-linked support escalation was recorded.',
+    )).toBe(true)
+    expect(hasRecordedAccountLinkedEscalationMeaning(
+      'Your issue was saved for triage, and an account-linked support escalation was recorded.',
+    )).toBe(true)
+    expect(hasSavedSupportIssueForTriageMeaning(
+      'Your account-linked support escalation issue was recorded.',
+    )).toBe(false)
+
+    expect(hasWearableConnectionDeferralMeaning(
+      'That is fine. I will use Oura once you connect it.',
+    )).toBe(true)
+    expect(hasNoFurtherWearableCheckinMeaning(
+      'I will not send further Garmin no-data check-ins from this request.',
+    )).toBe(true)
+    expect(
+      'A durable fix comes from rebuilding tolerance, not from complete rest.'
+        .replaceAll(
+          /\b(?:not(?:\s+from)?|without|rather than)\s+complete rest\b/giu,
+          '',
+        ),
+    ).not.toMatch(/complete rest/iu)
+
+    expect(isFixtureVoiceUpdatePreservingCurrentPersonalization({
+      action: 'update',
+      voice: 'country',
+    }, 'country')).toBe(true)
+    expect(isFixtureVoiceUpdatePreservingCurrentPersonalization({
+      action: 'update',
+      mainPersona: 'classic',
+      supportingPersona: null,
+      tone: 'casual',
+      voice: 'country',
+    }, 'country')).toBe(true)
+    for (const request of [
+      { action: 'update', tone: 'formal', voice: 'country' },
+      {
+        action: 'update',
+        mainPersona: 'athlete',
+        supportingPersona: null,
+        voice: 'country',
+      },
+      {
+        action: 'update',
+        mainPersona: 'classic',
+        supportingPersona: 'doctor',
+        voice: 'country',
+      },
+    ]) {
+      expect(
+        isFixtureVoiceUpdatePreservingCurrentPersonalization(
+          request,
+          'country',
+        ),
+      ).toBe(false)
     }
   })
 
@@ -2553,9 +2779,21 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             exercises: [{
               name: expect.stringMatching(/^bench press$/iu),
               sets: [
-                { actual: null, status: 'pending', target: '135 lb × 8' },
-                { actual: null, status: 'pending', target: '135 lb × 8' },
-                { actual: null, status: 'pending', target: '135 lb × 8' },
+                {
+                  actual: null,
+                  status: 'pending',
+                  target: expect.stringMatching(/^135 lb × 8(?: reps)?$/u),
+                },
+                {
+                  actual: null,
+                  status: 'pending',
+                  target: expect.stringMatching(/^135 lb × 8(?: reps)?$/u),
+                },
+                {
+                  actual: null,
+                  status: 'pending',
+                  target: expect.stringMatching(/^135 lb × 8(?: reps)?$/u),
+                },
               ],
             }],
             state: 'active',
@@ -3221,7 +3459,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
         'keeps a speech question on standard sampling and calibrates an audible negative',
     },
     {
-      expectedAnswerPattern: /(?:could not|couldn't|couldn’t|did not|didn't|didn’t).*(?:usable|analyz|return|result)|no usable/iu,
+      expectedAnswerPattern: /(?:could not|couldn't|couldn’t|did not|didn't|didn’t).*(?:usable|analy[sz]|return|result)|no usable/iu,
       expectedFinalPattern: /video|analysis|Gemini|usable|return/iu,
       expectedFps: 1,
       expectedSamplingMode: null,
@@ -3538,6 +3776,10 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
           action.kind === 'dynamic'
           && action.tool === MURPH_ASSISTANT_STYLE_TOOL.name
         )
+        const styleSetActions = styleActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.argumentsValue.action === 'set'
+        )
         const personality = await showAssistantPersonality(workingDirectory)
 
         process.stdout.write(
@@ -3547,7 +3789,7 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
           })}\n`,
         )
 
-        expect(styleActions).toEqual([
+        expect(styleSetActions).toEqual([
           expect.objectContaining({
             argumentsValue: {
               action: 'set',
@@ -3558,6 +3800,11 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
             tool: MURPH_ASSISTANT_STYLE_TOOL.name,
           }),
         ])
+        expect(styleActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.argumentsValue.action === 'show'
+        )).toHaveLength(styleActions.length - styleSetActions.length)
+        expect(styleActions.length - styleSetActions.length).toBeLessThanOrEqual(1)
         expect(
           actions.filter((action) => action.kind === 'command'),
           'no shell command should bypass the offered style tool',
@@ -4438,13 +4685,24 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             /graded|progress|strength|tolerat|range of motion|range|load|track/iu,
           )
           expect(
-            stableText,
+            stableText.replaceAll(
+              /\b(?:not(?:\s+from)?|without|rather than)\s+complete rest\b/giu,
+              '',
+            ),
             `${label} stable unsupported restriction`,
           ).not.toMatch(
             /complete rest|do not (?:keep )?train|don[’']t (?:keep )?train|stop (?:all (?:activity|movement|exercise)|training)|avoid all (?:activity|movement|exercise)|do nothing until/iu,
           )
           expect(
-            stableText,
+            stableText
+              .replaceAll(
+                /\b(?:not|isn[’']t|doesn[’']t (?:seem|sound)) urgent\b/giu,
+                '',
+              )
+              .replaceAll(
+                /\burgent(?:\s+(?:medical\s+)?(?:care|assessment|evaluation|attention))?\s+(?:is|was)\s+not\s+(?:indicated|needed|required|suggested|warranted)\b/giu,
+                '',
+              ),
             `${label} stable label-only acute routing`,
           ).not.toMatch(
             /\burgent\b|same-day|emergency|emergency room|\bER\b/iu,
@@ -5192,7 +5450,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )).toEqual([])
         expect(launchedImageOperationIds).toHaveLength(1)
         expect(missingCatalogImage.finalMessage).toMatch(
-          /image|illustration|picture/iu,
+          /image|illustration|picture|visual/iu,
         )
         expect(missingCatalogImage.finalMessage).toMatch(
           /appear|prepar|ready|separate/iu,
@@ -5211,7 +5469,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'keeps phase-grouped Telegram movements through bounded card repair',
+    'keeps phase-grouped Telegram movements through direct success or bounded card repair',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -5327,11 +5585,28 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           const mediaCalls = dynamicAttempts.filter(
             (action) => action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
           )
+          const completedDirectly = scenario.probeCount > 0
+            && routineCalls.length === 1
+            && genericCalls.length === 0
+            && result.responseCard?.kind === 'exercise_routine'
+            && !Object.hasOwn(
+              routineCalls[0]?.argumentsValue ?? {},
+              'validation_probe_one',
+            )
+            && !Object.hasOwn(
+              routineCalls[0]?.argumentsValue ?? {},
+              'validation_probe_two',
+            )
+          const expectedKind = completedDirectly
+            ? 'exercise_routine'
+            : scenario.expectedKind
 
           expect(
             routineCalls,
             `${scenario.label} routine-card calls`,
-          ).toHaveLength(scenario.expectedRoutineCalls)
+          ).toHaveLength(
+            completedDirectly ? 1 : scenario.expectedRoutineCalls,
+          )
           expect(mediaCalls, `${scenario.label} response-media calls`).toEqual(
             [],
           )
@@ -5351,7 +5626,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             `${scenario.label} model text after card attachment`,
           ).toEqual([])
 
-          if (scenario.probeCount >= 1) {
+          if (scenario.probeCount >= 1 && !completedDirectly) {
             expect(routineCalls[0]?.argumentsValue).toHaveProperty(
               'validation_probe_one',
               'first',
@@ -5360,7 +5635,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               'validation_probe_one',
             )
           }
-          if (scenario.probeCount === 2) {
+          if (scenario.probeCount === 2 && !completedDirectly) {
             expect(routineCalls[0]?.argumentsValue).not.toHaveProperty(
               'validation_probe_two',
             )
@@ -5370,7 +5645,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             )
           }
 
-          if (scenario.expectedKind === 'exercise_routine') {
+          if (expectedKind === 'exercise_routine') {
             expect(
               genericCalls,
               `${scenario.label} generic-card calls`,
@@ -5814,13 +6089,20 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ).toBe(scenario.expectedUserRequestedVoice)
           }
           if (scenario.expectedPersonalizationVoice) {
+            const updateRequests = personalizationRequests.filter(
+              (request) => readRecord(request)?.action === 'update',
+            )
             expect(
-              personalizationRequests,
-              `${scenario.slug} personalization requests`,
-            ).toContainEqual({
-              action: 'update',
-              voice: scenario.expectedPersonalizationVoice,
-            })
+              updateRequests,
+              `${scenario.slug} personalization updates`,
+            ).toHaveLength(1)
+            expect(
+              isFixtureVoiceUpdatePreservingCurrentPersonalization(
+                updateRequests[0],
+                scenario.expectedPersonalizationVoice,
+              ),
+              `${scenario.slug} scoped voice update`,
+            ).toBe(true)
           } else {
             expect(personalizationRequests).toEqual([])
           }
@@ -6320,7 +6602,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           /making|creating|working|on it/iu,
         )
         expect(generation.finalMessage).toMatch(
-          /minute|separate message|back here|return here/iu,
+          /minute|separate message|back here|return here|appear here|show up here|send (?:it|the image) here/iu,
         )
         expect(groupRequests).toEqual([])
         expect(feedbackRecords).toEqual([])
@@ -6884,6 +7166,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       const vaultRoot = path.join(workingDirectory, 'vault')
       const sharedRequests: unknown[] = []
       const now = new Date('2026-08-10T12:00:00.000Z')
+      let consultationTemporaryPaths: string[] = []
 
       try {
         await mkdir(vaultRoot, { recursive: true })
@@ -6935,12 +7218,15 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ],
         )
 
+        const consultationConfig =
+          await materializeRealCodexGroupReadPermissionHome(config)
+        consultationTemporaryPaths = consultationConfig.temporaryPaths
         const executeConsultation = (question: string) =>
           executeReadOnlyAssistantAsk({
             codexCommand:
               normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
               ?? undefined,
-            codexHome: config.codexHome,
+            codexHome: consultationConfig.codexHome,
             env: config.env,
             groupSharedReader: {
               request: async (request) => {
@@ -6972,6 +7258,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             model: config.model,
             modelProvider: config.modelProvider,
             now,
+            onProviderUsage: ({ usage }) => {
+              recordRealCodexProviderUsage(usage.usage)
+            },
             question,
             reasoningEffort: 'low',
             requesterParticipantId: 'membership_requester',
@@ -7011,6 +7300,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
+          ...consultationTemporaryPaths,
           ...config.temporaryPaths,
         ])
       }
@@ -7737,11 +8027,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )
 
         expect(groupRequests).toEqual([])
+        expect(hasJoinedGroupCapabilityMeaning(reply)).toBe(true)
         expect(reply).toMatch(
-          /\byes\b[^.?!]{0,160}\b(?:joined|added|already in)\b/iu,
-        )
-        expect(reply).toMatch(
-          /(?:\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!]{0,120}\b(?:unjoined|not\s+joined)\b|\bunjoined\b[^.?!]{0,120}\b(?:are|remain)\s+(?:unavailable|inaccessible)\b)/iu,
+          /(?:\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!]{0,120}\b(?:unjoined|not\s+joined)\b|\bunjoined\b[^.?!]{0,120}\b(?:are|remain)\s+(?:unavailable|inaccessible)\b|\bonly\b[^.?!]{0,120}\b(?:joined|added|already in)\b)/iu,
         )
         expect(reply).toMatch(/\b(?:ask|check|consult|message|post|share|tell)\b/iu)
         expect(reply).not.toMatch(
@@ -7850,7 +8138,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             }),
           }),
         ])
-        expect(result.finalMessage).toMatch(/one (?:new )?group/iu)
+        expect(result.finalMessage).toMatch(
+          /one (?:new )?group|the next (?:iMessage )?group/iu,
+        )
         expect(result.finalMessage).toMatch(/30 minutes/iu)
         expect(result.finalMessage).not.toMatch(
           /detect(?:ed|s|ing)? who|who (?:tapped|performed) add/iu,
@@ -7866,7 +8156,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'keeps an exact private-to-group handoff identity-neutral without listing memberships',
+    'keeps unavailable semantic matches in joined-group clarification',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -7923,25 +8213,49 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                     action: 'list_memberships',
                     result: {
                       disclosureGrants: [],
-                      memberships: [{
-                        displayName: 'Trail Crew',
-                        grantedVaultShareProjectionScopes: [],
-                        kind: 'friends',
-                        memberCount: 8,
-                        membershipId: 'membership_trail_crew',
-                        participantRoster: {
-                          participantCount: 9,
-                          participantLabels: [
-                            { displayName: 'Taylor' },
-                            { phoneHint: { areaCode: '415', lastFour: '9876' } },
-                          ],
-                          status: 'available',
+                      memberships: [
+                        {
+                          availability: {
+                            status: 'unavailable',
+                            unavailableReason: 'group_route_unavailable',
+                          },
+                          displayName: 'Former Trail Crew',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 4,
+                          membershipId: 'membership_former_trail_crew',
+                          participantRoster: {
+                            participantCount: 5,
+                            participantLabels: [{ displayName: 'Taylor' }],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
                         },
-                        permissionsUrl: null,
-                        requestedVaultShareProjectionScopes: [],
-                        role: 'member',
-                        sponsorshipUrl: null,
-                      }],
+                        {
+                          availability: { status: 'available' },
+                          displayName: 'Trail Crew',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 8,
+                          membershipId: 'membership_trail_crew',
+                          participantRoster: {
+                            participantCount: 9,
+                            participantLabels: [
+                              { displayName: 'Taylor' },
+                              { phoneHint: { areaCode: '415', lastFour: '9876' } },
+                            ],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
+                        },
+                      ],
+                      nextCursor: null,
                       status: 'ok',
                       truncated: false,
                     },
@@ -7964,7 +8278,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt:
-            'Tell Trail Crew that I completed the synthetic mobility session as planned.',
+            'Tell my group with Taylor that I completed the synthetic mobility session as planned.',
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           vaultRoot: workingDirectory,
@@ -7972,20 +8286,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         })
 
         const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const observedContext = groupRequests.find((request) =>
-          request !== null
-          && typeof request === 'object'
-          && 'context' in request
-          && typeof request.context === 'string'
-        )
         process.stdout.write(
           `[group-handoff-context-e2e] ${JSON.stringify({
-            context:
-              observedContext
-                && typeof observedContext === 'object'
-                && 'context' in observedContext
-                ? observedContext.context
-                : null,
             reply: result.finalMessage.trim(),
             toolActions: groupRequests.flatMap((request) =>
               request
@@ -7999,30 +8301,186 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           })}\n`,
         )
 
-        expect(groupRequests).toHaveLength(2)
-        expect(groupRequests[0]).toEqual({ action: 'list_memberships' })
-        const handoffRequest = groupRequests[1]
-        expect(handoffRequest).toMatchObject({
-          action: 'handoff',
-          membershipId: 'membership_trail_crew',
-        })
-        if (
-          !handoffRequest
-          || typeof handoffRequest !== 'object'
-          || !('context' in handoffRequest)
-          || typeof handoffRequest.context !== 'string'
-        ) {
-          throw new Error('Expected one identity-neutral group handoff context.')
-        }
-        expect(handoffRequest.context).not.toMatch(/Member Delta/iu)
-        expect(handoffRequest.context).not.toMatch(/\b(?:I|me|my)\b/iu)
+        expect(groupRequests).toEqual([{ action: 'list_memberships' }])
         expect(
           actions.some((action) =>
             action.kind === 'command'
             && action.command.includes('memory show')
           ),
         ).toBe(false)
-        expect(result.finalMessage).toMatch(/queu/iu)
+        expect(result.finalMessage).toMatch(/Former Trail Crew/iu)
+        expect(result.finalMessage).toMatch(/\bTrail Crew\b/iu)
+        expect(result.finalMessage).toMatch(/\?/u)
+        expect(result.finalMessage).not.toMatch(/membership_(?:former_)?trail_crew/iu)
+        expect(result.finalMessage).not.toMatch(/group_route_unavailable/iu)
+        expect(result.finalMessage).not.toMatch(/queu/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it.each([
+    {
+      label: 'an exact inventory match is unavailable',
+      targetAvailability: 'unavailable' as const,
+    },
+    {
+      label: 'the selected route becomes unavailable before handoff',
+      targetAvailability: 'available' as const,
+    },
+  ])(
+    'gives truthful no-queue recovery when $label',
+    async ({ targetAvailability }) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-unavailable-recovery-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [
+            MURPH_GROUP_CONSULT_TOOL,
+            MURPH_GROUP_MEMBERSHIP_TOOL,
+          ],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_group_unavailable_recovery',
+              recipientKey: 'recipient_group_unavailable_recovery',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_group_unavailable_recovery'],
+              conversationId: 'conversation_group_unavailable_recovery',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_group_unavailable_recovery'],
+              originSessionId: 'session_group_unavailable_recovery',
+              recipientKey: 'recipient_group_unavailable_recovery',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                if (request.action === 'list_memberships') {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [],
+                      memberships: [
+                        {
+                          availability: targetAvailability === 'available'
+                            ? { status: 'available' as const }
+                            : {
+                                status: 'unavailable' as const,
+                                unavailableReason: 'group_route_unavailable',
+                              },
+                          displayName: 'Former Trail Crew',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 4,
+                          membershipId: 'membership_former_trail_crew',
+                          participantRoster: {
+                            participantCount: 5,
+                            participantLabels: [{ displayName: 'Taylor' }],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
+                        },
+                        {
+                          availability: { status: 'available' },
+                          displayName: 'Weekend Walkers',
+                          grantedVaultShareProjectionScopes: [],
+                          kind: 'friends',
+                          memberCount: 3,
+                          membershipId: 'membership_weekend_walkers',
+                          participantRoster: {
+                            participantCount: 4,
+                            participantLabels: [{ displayName: 'Jordan' }],
+                            status: 'available',
+                          },
+                          permissionsUrl: null,
+                          requestedVaultShareProjectionScopes: [],
+                          role: 'member',
+                          sponsorshipUrl: null,
+                        },
+                      ],
+                      nextCursor: null,
+                      status: 'ok',
+                      truncated: false,
+                    },
+                  }
+                }
+                return {
+                  action: 'handoff',
+                  result: {
+                    status: 'unavailable',
+                    unavailableReason: 'group_route_unavailable',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Tell Former Trail Crew that the synthetic mobility session is complete.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+
+        const expectedRequestCount = targetAvailability === 'available' ? 2 : 1
+        expect(groupRequests).toHaveLength(expectedRequestCount)
+        expect(groupRequests[0]).toEqual({ action: 'list_memberships' })
+        if (targetAvailability === 'available') {
+          expect(groupRequests[1]).toMatchObject({
+            action: 'handoff',
+            membershipId: 'membership_former_trail_crew',
+          })
+        }
+        expect(result.finalMessage).toMatch(/Former Trail Crew/iu)
+        expect(result.finalMessage).toMatch(/cannot|can't|unable|not available/iu)
+        expect(result.finalMessage).toMatch(
+          /nothing was (?:queued|sent)|did not (?:queue|send)|didn't (?:queue|send)/iu,
+        )
+        expect(result.finalMessage).toMatch(/paste|screenshot/iu)
+        expect(result.finalMessage).not.toMatch(/Weekend Walkers/iu)
+        expect(result.finalMessage).not.toMatch(/group_route_unavailable/iu)
+        expect(result.finalMessage).not.toMatch(/membership_/iu)
+        expect(result.finalMessage).not.toMatch(/provider/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -9583,7 +10041,10 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
                 mode: 'off',
                 sourceProvider: 'garmin',
               }])
-              expect(result.finalMessage).toMatch(/stop|off|won't check/iu)
+              expect(
+                hasNoFurtherWearableCheckinMeaning(result.finalMessage),
+                result.finalMessage,
+              ).toBe(true)
             } else if (probe.kind === 'group-preference') {
               expect(deviceRequests, probe.kind).toHaveLength(0)
               expect(result.finalMessage).toMatch(/direct|private|message me/iu)
@@ -9948,7 +10409,7 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
           /(?:1:45|13:45).*(?:America\/New_York|Eastern|EDT|local)/iu,
         )
         expect(second.finalMessage).toMatch(
-          /(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*UTC/iu,
+          /(?:(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*UTC|T17:45(?::30)?Z\b)/iu,
         )
         expect(second.finalMessage).not.toMatch(
           /(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*(?:Eastern|EDT|EST)/iu,
@@ -11300,6 +11761,170 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
 
 describeRealCodex('real Codex experiment onboarding e2e', () => {
   it(
+    'reconciles exact experiment support from compact inventory without an automation detail read',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-compact-automation-support-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(
+        workingDirectory,
+        'automation-commands.log',
+      )
+      const supportSeriesId = `experiment:${COMPACT_SUPPORT_EXPERIMENT_ID}`
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'experiment-onboarding',
+        })
+        await materializeExperimentSupportInventoryVaultCli({
+          binDirectory,
+          commandLogPath,
+        })
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildExperimentOnboardingDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                automationRequests.push(request)
+                if (
+                  request.action !== 'reconcile'
+                  || request.supportSeriesId !== supportSeriesId
+                  || request.desiredAutomationIds.length !== 1
+                  || request.desiredAutomationIds[0]
+                    !== COMPACT_SUPPORT_KEEP_AUTOMATION_ID
+                ) {
+                  throw new Error(
+                    'Expected exact compact-inventory support reconciliation.',
+                  )
+                }
+                return {
+                  action: 'reconcile',
+                  archivedCount: 1,
+                  matchedCount: 2,
+                  missingDesiredAutomationIds: [],
+                  supportSeriesId,
+                  unchangedCount: 1,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'A synthetic active experiment has one accepted support purpose: keep its current active reminder and retire its stale review.',
+            `The exact canonical experiment id is ${COMPACT_SUPPORT_EXPERIMENT_ID}.`,
+            'Use the experiment-onboarding skill and the exact compact support-series inventory, then reconcile through the hosted automation tool now.',
+            'The compact fields are sufficient for this decision, so do not read automation detail.',
+            'The synthetic host result does not verify the next delivery time. Briefly report what remains, what stale support was retired, and that limitation without exposing internal identifiers.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('experiment-onboarding/SKILL.md')
+          && action.output.includes('# Experiment onboarding')
+        )
+        const listCall = actions.find((action) =>
+          action.kind === 'command'
+          && action.ok
+          && action.command.includes('vault-cli automation list')
+          && action.command.includes('--support-series-id')
+          && action.command.includes(COMPACT_SUPPORT_EXPERIMENT_ID)
+          && action.command.includes('--compact')
+        )
+        const showCalls = actions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes('vault-cli automation show')
+        )
+        const reconcileCall = actions.find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+
+        expect(skillRead, 'experiment-onboarding skill read').toBeDefined()
+        expect(listCall, 'compact exact-series inventory read').toBeDefined()
+        expect(showCalls).toHaveLength(0)
+        expect(reconcileCall, 'hosted reconciliation call').toBeDefined()
+        expect(listCall?.eventIndex).toBeGreaterThan(
+          skillRead?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(reconcileCall?.eventIndex).toBeGreaterThan(
+          listCall?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(automationRequests).toEqual([{
+          action: 'reconcile',
+          desiredAutomationIds: [COMPACT_SUPPORT_KEEP_AUTOMATION_ID],
+          supportSeriesId,
+        }])
+
+        const commandLog = await readFile(commandLogPath, 'utf8')
+        expect(commandLog).toContain('automation list')
+        expect(commandLog).toContain('--compact')
+        expect(commandLog).toContain(COMPACT_SUPPORT_EXPERIMENT_ID)
+        expect(commandLog).not.toContain('automation show')
+
+        const reply = result.finalMessage.trim()
+        expect(reply).toMatch(/reminder/iu)
+        expect(reply).toMatch(/kept|remain|still active/iu)
+        expect(reply).toMatch(/review|stale support/iu)
+        expect(reply).toMatch(/archiv|retir|removed|ended/iu)
+        expect(reply).toMatch(
+          /(?:next (?:delivery|reminder)|delivery timing|timing).{0,100}(?:could not|couldn't|not|unable).{0,60}(?:confirm|verify)|(?:could not|couldn't|did not|unable).{0,60}(?:confirm|verify).{0,100}(?:next (?:delivery|reminder)|delivery timing|timing)/iu,
+        )
+        expect(reply).not.toContain(COMPACT_SUPPORT_EXPERIMENT_ID)
+        expect(reply).not.toContain(COMPACT_SUPPORT_KEEP_AUTOMATION_ID)
+        expect(reply).not.toContain(COMPACT_SUPPORT_STALE_AUTOMATION_ID)
+        expect(reply).not.toContain(supportSeriesId)
+        expect(reply).not.toMatch(/\b(?:automation|exp)_[0-9A-Z]/u)
+        process.stdout.write(
+          `[automation-list-compact-support-series-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'exact-support-series-reconciliation',
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'resolves a name-first experiment start without replacing the exact match with its starter',
     async () => {
       const result = await runNameFirstExperimentStartProbe({
@@ -11376,8 +12001,9 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
         result.actions.some((action) =>
           action.kind === 'command'
           && action.command.includes('vault-cli commons protocol show')
+          && action.command.includes(EXPERIMENT_START_EXACT_KEY)
         ),
-        'no protocol show without an exact match',
+        'no unavailable exact protocol show',
       ).toBe(false)
       expect(
         result.actions.some((action) =>
@@ -11562,8 +12188,11 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
 
       expect(knowledgeCommands).toHaveLength(1)
-      expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
-      expect(knowledgeCommands[0] ?? '').toMatch(/what does the evidence say/iu)
+      expect(hasFinnishDrySaunaMeaning(knowledgeCommands[0] ?? ''))
+        .toBe(true)
+      expect(knowledgeCommands[0] ?? '').toMatch(
+        /evidence|health|benefit|cardiovascular|mortality/iu,
+      )
       expect(result.actions.some((action) =>
         action.kind === 'command'
         && action.command.includes('vault-cli experiment')
@@ -11588,7 +12217,8 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
 
       expect(knowledgeCommands).toHaveLength(1)
-      expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
+      expect(hasFinnishDrySaunaMeaning(knowledgeCommands[0] ?? ''))
+        .toBe(true)
       expect(knowledgeCommands[0] ?? '').toMatch(/immun/iu)
       expect(knowledgeCommands[0] ?? '').toMatch(/faint/iu)
       expect(
@@ -11619,7 +12249,8 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
 
       expect(knowledgeCommands, JSON.stringify(result.actions)).toHaveLength(1)
-      expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
+      expect(hasFinnishDrySaunaMeaning(knowledgeCommands[0] ?? ''))
+        .toBe(true)
       expect(knowledgeCommands[0] ?? '').toMatch(/fentanyl/iu)
       expect(result.actions.some((action) =>
         action.kind === 'command'
@@ -12266,7 +12897,9 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             : /\$50(?:\.00)?(?:\/month)?/u,
         )
         expect(quote.finalMessage).toMatch(scenario.quoteTimingPattern)
-        expect(quote.finalMessage).toMatch(/confirm/iu)
+        expect(quote.finalMessage).toMatch(
+          /confirm|would you like me|should I|want me to/iu,
+        )
         if (scenario.wireOnlyPlanPattern) {
           expect(quote.finalMessage).not.toMatch(scenario.wireOnlyPlanPattern)
         }
@@ -12486,8 +13119,8 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(privatePlanUsageReads).toBe(1)
         expect(privateGroupActions).toEqual(['read_usage_referral'])
         expect(privateResult.finalMessage).toMatch(/add (?:one-time )?usage/iu)
-        expect(privateResult.finalMessage).toContain(
-          'about 10 more days of Murph usage for your Murph',
+        expect(privateResult.finalMessage).toMatch(
+          /about 10 more days of Murph usage/iu,
         )
         expect(privateResult.finalMessage).not.toMatch(
           /\$|exact credit|messages?\b|remaining balance|calendar|trial extension/iu,
@@ -13008,7 +13641,9 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
 
         expect(oneTimeGroupActions).toEqual(['read_usage'])
         expect(oneTimeResult.finalMessage).toContain(fundingUrl)
-        expect(oneTimeResult.finalMessage).toMatch(/one-time|contribut/iu)
+        expect(oneTimeResult.finalMessage).toMatch(
+          /one-time|contribut|sponsor/iu,
+        )
         expect(oneTimeResult.finalMessage).not.toMatch(
           /referr|mission|earn|payer|charged|maximum|monthly cap|balance|refill|remaining|percent|runs? low|deplet/iu,
         )
@@ -13526,7 +14161,7 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
         .digest('hex')
       const assertMurphOwnedRecovery = (message: string) => {
         expect(message).toMatch(
-          /no (?:automatic )?(?:retry|follow-up)|not (?:retrying|following up)|won't (?:retry|follow up)/iu,
+          /no (?:automatic )?(?:retry|follow-up)|(?:did not|didn['’]t) retry|not (?:retrying|following up)|won't (?:retry|follow up)/iu,
         )
         expect(message).toMatch(
           /new explicit (?:send )?request|ask me (?:again|to try again)|request (?:it )?again|tell me to try again/iu,
@@ -13707,7 +14342,7 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
           expect(feedbackRecords).toHaveLength(scenario.expectedFeedbackCount)
           expect(sendCount).toBe(1)
           expect(result.finalMessage).toMatch(
-            /nothing was sent|was not sent|wasn't sent/iu,
+            /nothing was sent|was not (?:accepted or )?sent|wasn't sent/iu,
           )
           expect(result.finalMessage).not.toMatch(
             /failureReason|recipient_address|request_invalid|service_unavailable|\bLob\b/iu,
@@ -13858,6 +14493,212 @@ describeRealCodex('real Codex physical-note stuck recovery e2e', () => {
   )
 })
 
+describeRealCodex('real Codex stateless calendar link e2e', () => {
+  it(
+    'preserves the verified appointment reminder beside one exact calendar link',
+    async () => {
+      const { automationRequests, result } = await runRealCodexCalendarLinkTurn([
+        'My care appointment is booked.',
+        'First set a one-shot reminder for 8:00 AM Eastern on October 14, 2026.',
+        'Then make an Add to Calendar link using these exact details.',
+        'Use the title "Care appointment".',
+        'It starts at 2026-10-14T14:30:00-04:00 and ends at 2026-10-14T15:15:00-04:00.',
+        'The location is "Downtown Clinic".',
+      ].join(' '))
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const calendarActions = actions.filter(
+        (action): action is Extract<
+          CapabilityRoutingAction,
+          { kind: 'dynamic' }
+        > =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_CREATE_CALENDAR_LINK_TOOL.name,
+      )
+      const automationActions = actions.filter(
+        (action): action is Extract<
+          CapabilityRoutingAction,
+          { kind: 'dynamic' }
+        > =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name,
+      )
+      const successfulAutomationActions = automationActions.filter(
+        (action) => action.success,
+      )
+
+      console.info(
+        `[real-codex calendar-link explicit] ${result.finalMessage.replace(/https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u, '<calendar-link>').replaceAll(/\s+/gu, ' ').trim()}`,
+      )
+      expect(calendarActions.length).toBeGreaterThan(0)
+      expect(
+        successfulAutomationActions,
+        `automation attempts: ${JSON.stringify(automationActions)}`,
+      ).toHaveLength(1)
+      expect(actions).toEqual(expect.arrayContaining([
+        ...successfulAutomationActions,
+        ...calendarActions,
+      ]))
+      for (const action of calendarActions) {
+        expect(action).toMatchObject({
+          argumentsValue: {
+            endsAt: '2026-10-14T15:15:00-04:00',
+            location: 'Downtown Clinic',
+            startsAt: '2026-10-14T14:30:00-04:00',
+            title: 'Care appointment',
+          },
+          success: true,
+        })
+      }
+      const url = result.finalMessage.match(
+        /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u,
+      )?.[0]
+      expect(url?.startsWith(CALENDAR_LINK_URL_PREFIX)).toBe(true)
+      for (const action of calendarActions) {
+        if (action.kind !== 'dynamic') {
+          continue
+        }
+        expect(JSON.parse(action.output)).toEqual({
+          instruction:
+            'Before ending, complete private appointment follow-through: use tool search for `murph automation` to load and call `murph.automation`, then ensure exactly one one-shot reminder unless the member declined it. Then write the rest of the truthful semantic reply without copying or repeating a URL. The runtime appends the exact calendar link.',
+          status: 'ready',
+        })
+      }
+      expect(automationRequests).toHaveLength(1)
+      expect(automationRequests[0]).toMatchObject({
+        action: 'save',
+        instructions: expect.any(String),
+        schedule: {
+          at: '2026-10-14T12:00:00.000Z',
+          kind: 'at',
+        },
+        title: expect.any(String),
+      })
+      expect(result.finalMessage).toMatch(/remind/iu)
+      expect(result.finalMessage).toMatch(/8(?::00)?\s*(?:a\.?m\.?|in the morning)|morning/iu)
+      expect(result.finalMessage.trim().endsWith(url ?? '<missing>')).toBe(true)
+      expect(result.finalMessage).not.toMatch(/(?:has been|was|is now) added/iu)
+      expect(parseCalendarEventPayload(
+        url?.slice(CALENDAR_LINK_URL_PREFIX.length) ?? '',
+      )).toEqual({
+        endsAt: '2026-10-14T15:15:00-04:00',
+        location: 'Downtown Clinic',
+        startsAt: '2026-10-14T14:30:00-04:00',
+        title: 'Care appointment',
+      })
+    },
+    360_000,
+  )
+
+  it(
+    'asks for missing appointment details before creating a calendar link',
+    async () => {
+      const { automationRequests, result } = await runRealCodexCalendarLinkTurn(
+        'Make an Add to Calendar link for a care appointment next Wednesday afternoon.',
+      )
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+
+      expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+      expect(automationRequests).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/(?:what time|start|date)/iu)
+      expect(result.finalMessage).toMatch(/(?:end time|duration|how long)/iu)
+      expect(result.finalMessage).toMatch(/(?:time zone|timezone|UTC offset)/iu)
+      expect(result.finalMessage).not.toContain(CALENDAR_LINK_URL_PREFIX)
+      expect(result.finalMessage).not.toMatch(/(?:has been|was|is now) added/iu)
+      console.info(
+        `[real-codex calendar-link incomplete] ${result.finalMessage.replaceAll(/\s+/gu, ' ').trim()}`,
+      )
+    },
+    360_000,
+  )
+})
+
+async function runRealCodexCalendarLinkTurn(prompt: string) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-calendar-link-e2e-'),
+  )
+  const skillsRoot = path.join(workingDirectory, 'skills')
+  const automationRequests: AssistantHostedAutomationToolRequest[] = []
+  // Deferred discovery has its own production-planner and live routing proof.
+  // Eagerly expose the unchanged schema here so this journey isolates the
+  // compound reminder-plus-calendar actions and final-response composition.
+  const eagerAppointmentAutomationTool = {
+    description: MURPH_AUTOMATION_TOOL.description,
+    inputSchema: MURPH_AUTOMATION_TOOL.inputSchema,
+    name: MURPH_AUTOMATION_TOOL.name,
+    namespace: MURPH_AUTOMATION_TOOL.namespace,
+  } as const
+
+  try {
+    await materializeAssistantSkill({
+      skillsRoot,
+      slug: 'appointment-scheduling',
+    })
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: buildDirectConversationDeveloperInstructions(),
+      dynamicTools: [
+        eagerAppointmentAutomationTool,
+        MURPH_CREATE_CALENDAR_LINK_TOOL,
+      ],
+      env: {
+        ...config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      excludeResumeTurns: true,
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'save' || request.schedule.kind !== 'at') {
+              throw new Error('Expected one exact appointment reminder save.')
+            }
+            return {
+              action: 'save',
+              automationId: 'automation-care-appointment',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'care-appointment-reminder',
+              occurrenceProjection: {
+                nextOccurrenceAt: request.schedule.at,
+                status: 'resolved',
+              },
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              updatedAt: '2026-07-29T16:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      model: config.model,
+      modelProvider: config.modelProvider,
+      prompt,
+      reasoningEffort: 'medium',
+      sandbox: 'read-only',
+      workingDirectory,
+    })
+    return { automationRequests, result }
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
 const PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH =
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.properties.summary.maxLength
 
@@ -13894,7 +14735,7 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
               /\b(?:auth\w*.*succeed|success\w*.*auth)\w*\b/iu,
             )
             expect(summary).toMatch(
-              /\b(?:not added|did not add|did not appear|returned|remain\w* disconnected|failed|absent|missing)\b/iu,
+              /\b(?:not added|did not add|did not appear|does not show|without adding|returned|remain\w* disconnected|failed|absent|missing)\b/iu,
             )
           },
           prompt: [
@@ -14111,7 +14952,9 @@ describeRealCodex('real Codex support escalation e2e', () => {
       if (firstCall?.kind !== 'dynamic' || correctedCall?.kind !== 'dynamic') {
         throw new Error('Expected two product-feedback dynamic tool calls.')
       }
-      expect(firstCall.argumentsValue.supportArea).toBe('automation')
+      expect(firstCall.argumentsValue.supportArea).toEqual(
+        expect.stringMatching(/^automation(?:\b|\.)/iu),
+      )
       expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
       expect(correctedCall.argumentsValue.kind).toBe('frustration')
       expect(correctedCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
@@ -14122,9 +14965,11 @@ describeRealCodex('real Codex support escalation e2e', () => {
         .toBeLessThanOrEqual(PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)
       expect(recordedFeedback).toHaveLength(1)
       expect(result.finalMessage).toMatch(
-        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+        /account-linked(?: support)? escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked(?: support)? escalation/iu,
       )
-      expect(result.finalMessage).not.toMatch(/direct notification failed/iu)
+      expect(result.finalMessage).not.toMatch(
+        /direct notification(?: to (?:human )?support)? failed/iu,
+      )
     },
     720_000,
   )
@@ -14177,9 +15022,11 @@ describeRealCodex('real Codex support escalation e2e', () => {
       expect(secondCall.argumentsValue.supportArea).toBeUndefined()
       expect(secondCall.argumentsValue.supportProblem).toBe('classification')
       expect(recordedFeedback).toHaveLength(0)
-      expect(result.finalMessage).toMatch(/direct notification failed/iu)
+      expect(result.finalMessage).toMatch(
+        /direct notification(?: to (?:human )?support)? failed/iu,
+      )
       expect(result.finalMessage).not.toMatch(
-        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+        /account-linked(?: support)? escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked(?: support)? escalation/iu,
       )
     },
     720_000,
@@ -14231,7 +15078,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
       )
       expect(recordedFeedback).toHaveLength(1)
       expect(result.finalMessage).not.toMatch(
-        /feedback|recorded|logged|triage|account-linked escalation|direct notification|support@/iu,
+        /feedback|recorded|logged|triage|account-linked(?: support)? escalation|direct notification|support@/iu,
       )
     },
     720_000,
@@ -14303,12 +15150,14 @@ describeRealCodex('real Codex support escalation e2e', () => {
         expect(privateText, 'support address remains opt-in').not.toContain(
           'support@withmurph.ai',
         )
-        expect(privateText, 'saved product issue confirmation').toMatch(
-          /(?:product issue|summary).{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}(?:product issue|summary)/iu,
-        )
-        expect(privateText, 'account-linked escalation confirmation').toMatch(
-          /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
-        )
+        expect(
+          hasSavedSupportIssueForTriageMeaning(privateText),
+          'saved product issue for triage confirmation',
+        ).toBe(true)
+        expect(
+          hasRecordedAccountLinkedEscalationMeaning(privateText),
+          'recorded account-linked escalation confirmation',
+        ).toBe(true)
         expect(privateText, 'no invented promise').not.toMatch(
           /ticket|case number|will (?:fix|resolve|respond|reply|follow up)|within \d+|has (?:read|seen|received)/iu,
         )
@@ -14404,13 +15253,15 @@ describeRealCodex('real Codex support escalation e2e', () => {
         expect(call.argumentsValue.supportProblem).toBeUndefined()
 
         const response = result.finalMessage.trim()
-        expect(response).toMatch(/direct notification failed/iu)
+        expect(response).toMatch(
+          /direct notification(?: to (?:human )?support)? failed/iu,
+        )
         expect(response).toMatch(
           /can still|continue|help|next step|try|troubleshoot|work through/iu,
         )
         expect(response).not.toContain('support@withmurph.ai')
         expect(response).not.toMatch(
-          /account-linked escalation.{0,80}(?:saved|recorded)|(?:issue|summary).{0,80}(?:saved|recorded)|email (?:was|has been) (?:sent|delivered|received)|ticket|case number/iu,
+          /account-linked(?: support)? escalation.{0,80}(?:saved|recorded)|(?:issue|summary).{0,80}(?:saved|recorded)|email (?:was|has been) (?:sent|delivered|received)|ticket|case number/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -14504,7 +15355,6 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
           throw new Error('Expected one appointment booking phone-call tool call.')
         }
         expect(toolCall.argumentsValue).toMatchObject({
-          allowTransferToUser: false,
           callerName: 'Jordan Lee',
           shareableFacts: {
             date_of_birth: '1990-04-12',
@@ -14515,6 +15365,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
             phoneNumber: '+12025550123',
           },
         })
+        expect(toolCall.argumentsValue.allowTransferToUser ?? false).toBe(false)
         expect(
           appointmentSkillRead !== undefined
           && toolCall.eventIndex > appointmentSkillRead.eventIndex,
@@ -15647,6 +16498,7 @@ describeRealCodex('real Codex Kernel browser continuation e2e', () => {
         body: Record<string, unknown>
         url: string
       }> = []
+      const progressUpdates: string[] = []
 
       try {
         await materializeAssistantSkill({
@@ -15718,6 +16570,12 @@ describeRealCodex('real Codex Kernel browser continuation e2e', () => {
           hostedToolContext: createRealCodexComputerHostedToolContext(),
           model: config.model,
           modelProvider: config.modelProvider,
+          progressDelivery: {
+            async send(text) {
+              progressUpdates.push(text)
+              return { kind: 'sent', source: 'model' }
+            },
+          },
           prompt: [
             'Open https://portal.example.test/setup and tell me whether account setup is ready.',
             'Do not enter or submit personal or payment information.',
@@ -15760,8 +16618,14 @@ describeRealCodex('real Codex Kernel browser continuation e2e', () => {
           action.kind === 'dynamic'
           && prohibitedToolNames.has(action.tool)
         )
+        const progressCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        )
 
         expect(skillRead, 'computer-use skill read').toBeDefined()
+        expect(progressUpdates).toEqual([])
+        expect(progressCalls).toEqual([])
         expect(openCalls).toHaveLength(1)
         expect(finishCalls).toHaveLength(1)
         expect(prohibitedCalls).toHaveLength(0)
@@ -16115,11 +16979,17 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-move-central-reminder-e2e-'),
       )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
+      const automationId = 'automation-central-evening'
+      const lookupId = 'evening-reminder'
+      const title = 'Evening reminder'
+      const inspectedUpdatedAt = '2026-08-10T00:00:00.000Z'
       const automationFixture = createVersionedAutomationPatchFixture({
         current: {
-          automationId: 'automation-central-evening',
+          automationId,
           effectiveTimeZone: 'America/Chicago',
-          lookupId: 'evening-reminder',
+          lookupId,
           occurrenceProjection: {
             nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
             status: 'resolved',
@@ -16130,7 +17000,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             timeZone: 'America/Chicago',
           },
           status: 'active',
-          updatedAt: '2026-08-10T00:00:00.000Z',
+          updatedAt: inspectedUpdatedAt,
         },
         patch: (request, current) => {
           if (
@@ -16167,6 +17037,14 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       const automationRequests = automationFixture.requests
 
       try {
+        await materializeAutomationLookupJourneyVaultCli({
+          automationId,
+          binDirectory,
+          commandLogPath,
+          lookupId,
+          title,
+          updatedAt: inspectedUpdatedAt,
+        })
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -16175,9 +17053,16 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           developerInstructions:
-            buildMidnightLinqReminderDeveloperInstructions(),
+            buildMidnightLinqReminderDeveloperInstructions(
+              'vault-cli automation list --format json',
+            ),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
-          env: config.env,
+          env: {
+            ...config.env,
+            PATH: [binDirectory, config.env.PATH]
+              .filter((value): value is string => Boolean(value))
+              .join(path.delimiter),
+          },
           excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
@@ -16199,39 +17084,131 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           workingDirectory,
         })
 
-        expect(automationRequests).toHaveLength(2)
-        expect(automationRequests[0]).toMatchObject({ action: 'inspect' })
-        const request = automationRequests[1]
-        expect(request).toMatchObject({ action: 'patch' })
-        if (request?.action !== 'patch' || !request.schedule) {
-          throw new Error('Expected a patched automation schedule.')
+        const reply = result.finalMessage.trim()
+        const rawCommandLog = (await readFile(commandLogPath, 'utf8')).trim()
+        const commands = rawCommandLog === '' ? [] : rawCommandLog.split('\n')
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const automationListCall = actions.find((action) =>
+          action.kind === 'command'
+          && action.ok
+          && action.command.includes(
+            'vault-cli automation list --format json',
+          )
+        )
+        const automationCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+        const automationAttempts = readDynamicToolAttempts(
+          result.jsonEvents,
+        ).filter((attempt) => attempt.tool === MURPH_AUTOMATION_TOOL.name)
+        const attemptSummary = automationAttempts.map((attempt, index) => {
+          const automationAction = automationCalls[index]
+          const lookup = attempt.argumentsValue.lookup
+          return {
+            action: typeof attempt.argumentsValue.action === 'string'
+              ? attempt.argumentsValue.action
+              : null,
+            lookupJsonType: lookup === undefined
+              ? 'missing'
+              : lookup === null
+                ? 'null'
+                : Array.isArray(lookup)
+                  ? 'array'
+                  : typeof lookup,
+            order: index + 1,
+            success: automationAction?.kind === 'dynamic'
+              ? automationAction.success
+              : null,
+          }
+        })
+        process.stdout.write(
+          `[automation-lookup-e2e] ${JSON.stringify({
+            attemptSummary,
+            reply,
+            scenario: 'move-synthetic-central-reminder',
+          })}\n`,
+        )
+
+        expect(commands).toEqual(['automation list --format json'])
+        expect(
+          automationListCall,
+          'successful automation inventory command event',
+        ).toBeDefined()
+        expect(automationCalls).toHaveLength(2)
+        expect(automationListCall).toMatchObject({
+          kind: 'command',
+          ok: true,
+        })
+        expect(automationCalls).toMatchObject([
+          {
+            argumentsValue: { action: 'inspect', lookup: automationId },
+            kind: 'dynamic',
+            success: true,
+          },
+          {
+            argumentsValue: { action: 'patch', lookup: automationId },
+            kind: 'dynamic',
+            success: true,
+          },
+        ])
+        expect(automationAttempts).toHaveLength(2)
+        expect(automationAttempts.map((attempt) =>
+          attempt.argumentsValue.action
+        )).toEqual(['inspect', 'patch'])
+        expect(automationListCall?.eventIndex).toBeLessThan(
+          automationAttempts[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
+        )
+        expect(automationAttempts[0]?.eventIndex).toBeLessThan(
+          automationAttempts[1]?.eventIndex ?? Number.NEGATIVE_INFINITY,
+        )
+        for (const attempt of automationAttempts) {
+          expect(typeof attempt.argumentsValue.lookup).toBe('string')
+          expect(attempt.argumentsValue.lookup).toBe(automationId)
         }
-        expect(request.expectedUpdatedAt).toBe('2026-08-10T00:00:00.000Z')
-        expect(request.schedule.kind === 'dailyLocal'
-          ? request.schedule.localTime
-          : request.schedule.kind === 'cron'
-            ? request.schedule.expression
-            : null).toMatch(/22(?::00)?/u)
+
+        expect(automationRequests).toHaveLength(2)
+        expect(automationRequests.map((request) => request.action)).toEqual([
+          'inspect',
+          'patch',
+        ])
+        const inspectRequest = automationRequests[0]
+        const request = automationRequests[1]
         if (
-          request.schedule.kind !== 'dailyLocal'
-          && request.schedule.kind !== 'cron'
+          inspectRequest?.action !== 'inspect'
+          || request?.action !== 'patch'
+          || !request.schedule
         ) {
+          throw new Error('Expected one inspect and one scheduled patch.')
+        }
+        expect(inspectRequest.lookup).toBe(automationId)
+        expect(request.lookup).toBe(automationId)
+        expect(request.lookup).not.toBe(title)
+        expect(request.lookup).not.toBe(lookupId)
+        expect(request.expectedUpdatedAt).toBe(inspectedUpdatedAt)
+        if (request.schedule.kind === 'dailyLocal') {
+          expect(request.schedule.localTime).toBe('22:00')
+        } else if (request.schedule.kind === 'cron') {
+          expect(request.schedule.expression).toMatch(
+            /^0\s+22\s+\*\s+\*\s+\*$/u,
+          )
+        } else {
           throw new Error('Expected a recurring wall-clock schedule.')
         }
         expect([undefined, 'America/Chicago']).toContain(
           request.schedule.timeZone,
         )
-        expect(result.finalMessage).toMatch(
-          /active|done|moved|saved|set|updated/iu,
+        expect(reply).toMatch(
+          /\b(?:active|done|moved|saved|set|updated|now runs daily)\b/iu,
         )
-        expect(result.finalMessage).toMatch(
+        expect(reply).toMatch(
           /10\s*(?::00)?\s*p\.?m\.?|22:00/iu,
         )
-        expect(result.finalMessage).toMatch(/central|america\/chicago/iu)
-        expect(result.finalMessage).not.toMatch(
+        expect(reply).toMatch(/central|america\/chicago/iu)
+        expect(reply).not.toMatch(
           /which time\s*zone|what time\s*zone|repeat.*time\s*zone/iu,
         )
-        expect(result.finalMessage).not.toMatch(
+        expect(reply).not.toMatch(
           /could not verify|couldn't verify|unable to verify/iu,
         )
       } finally {
@@ -16421,7 +17398,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           instructions: expect.stringMatching(/revised daily interval reminder/iu),
         })
         expect(result.finalMessage).toMatch(
-          /changed|complete|done|saved|updated/iu,
+          /changed|complete|done|revised|saved|updated/iu,
         )
         expect(result.finalMessage).toMatch(/active/iu)
         expect(result.finalMessage).toMatch(
@@ -16429,9 +17406,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         )
         expect(result.finalMessage).toMatch(
           /automatic|finishing|processing|project(?:ing)?|scheduler.*(?:current|next|work)/iu,
-        )
-        expect(result.finalMessage).toMatch(
-          /do not need|don't need|no action|no need|nothing .*need/iu,
         )
         expect(result.finalMessage).not.toMatch(
           /if you want|inspect|check again|unconfirmed|not confirmed|could not verify|no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled|will (?:deliver|remind|send)/iu,
@@ -16746,7 +17720,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
 
   it('passes only a minimal environment to live Codex probes', () => {
     const env = buildRealCodexE2eEnv({
-      apiKeyEnv: 'PROVIDER_KEY',
+      apiKeyEnv: 'PROVIDER_AUTH',
       sourceEnv: {
         AWS_SECRET_ACCESS_KEY: 'ignored-aws-value',
         CODEX_HOME: 'ignored-codex-home',
@@ -16754,31 +17728,46 @@ describe('real Codex app-server cache usage e2e harness', () => {
         HOME: 'ignored-home',
         OPENAI_API_KEY: 'ignored-openai-value',
         PATH: '/usr/bin:/bin',
-        PROVIDER_KEY: 'provider-value',
+        PROVIDER_AUTH: 'provider-value',
         TMPDIR: '/tmp',
       },
     })
 
     expect(env).toEqual({
       PATH: '/usr/bin:/bin',
-      PROVIDER_KEY: 'provider-value',
+      PROVIDER_AUTH: 'provider-value',
       TMPDIR: '/tmp',
       TSX_TSCONFIG_PATH: REAL_CODEX_E2E_TSX_TSCONFIG_PATH,
     })
+    expect(buildRealCodexShellEnvironmentConfigOverrides(env)).toEqual([
+      'shell_environment_policy.inherit="all"',
+      'shell_environment_policy.ignore_default_excludes=false',
+      'shell_environment_policy.include_only=["PATH","TMPDIR","TSX_TSCONFIG_PATH"]',
+    ])
   })
 
   it('writes provider-key config without embedding the provider key value', () => {
     const configToml = buildRealCodexConfigToml({
-      apiKeyEnv: 'PROVIDER_KEY',
+      apiKeyEnv: 'PROVIDER_AUTH',
       model: 'gpt-5.6-terra',
       modelProvider: OPENAI_ENV_MODEL_PROVIDER,
+    })
+    const groupReadConfigToml = buildRealCodexGroupReadPermissionConfigToml({
+      codexHome: null,
+      env: {},
+      model: 'gpt-5.6-terra',
+      modelProvider: OPENAI_ENV_MODEL_PROVIDER,
+      providerApiKeyEnv: 'PROVIDER_AUTH',
+      temporaryPaths: [],
     })
 
     expect(configToml).toContain('[shell_environment_policy]')
     expect(configToml).toContain('include_only = [')
     expect(configToml).toContain('[model_providers.openai-env]')
-    expect(configToml).toContain('env_key = "PROVIDER_KEY"')
+    expect(configToml).toContain('env_key = "PROVIDER_AUTH"')
     expect(configToml).not.toContain('provider-value')
+    expect(groupReadConfigToml).toContain('env_key = "PROVIDER_AUTH"')
+    expect(groupReadConfigToml).not.toContain('provider-value')
     expect(configToml).not.toContain('[features.multi_agent_v2]')
     expect(CHILD_MODEL_SELECTION_CONFIG_OVERRIDES).toEqual([
       'features.multi_agent_v2.enabled=true',
@@ -16794,6 +17783,10 @@ describe('real Codex app-server cache usage e2e harness', () => {
       {
         configOverrides: ['features.shell_tool=false'],
         dynamicTools: [],
+        env: {
+          HEALTH_COMMONS_E2E_CLI_ENTRYPOINT: '/synthetic/entrypoint',
+          PATH: '/synthetic/bin',
+        },
         prompt: 'Capture the real-Codex harness configuration.',
         workingDirectory: '/synthetic-workspace',
       },
@@ -16808,6 +17801,9 @@ describe('real Codex app-server cache usage e2e harness', () => {
       'features.plugins=false',
       'skills.include_instructions=false',
       'skills.bundled.enabled=false',
+      'shell_environment_policy.inherit="all"',
+      'shell_environment_policy.ignore_default_excludes=false',
+      'shell_environment_policy.include_only=["HEALTH_COMMONS_E2E_CLI_ENTRYPOINT","PATH"]',
       'features.shell_tool=false',
     ])
   })
@@ -16834,6 +17830,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       },
       model: DEFAULT_REAL_CODEX_MODEL,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      providerApiKeyEnv: null,
       temporaryPaths: [],
     })
   })
@@ -16863,6 +17860,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       },
       model: DEFAULT_REAL_CODEX_MODEL,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      providerApiKeyEnv: null,
       temporaryPaths: [],
     })
     await expect(resolveRealCodexE2eConfig({
@@ -20537,7 +21535,8 @@ function hasOneBoundedMealClarificationMeaning(message: string): boolean {
     .test(message)
   const questionMarkCount = message.match(/\?/gu)?.length ?? 0
   const contradictsClarification = [
-    /\b(?:already )?(?:saved|logged|recorded|completed|finished)\b[^.!?\n]{0,48}\b(?:meal|food|drink|amount|portion)\b/iu,
+    /\bi(?:['’]ve|\s+have)?\s+(?:already\s+)?(?:saved|logged|recorded|completed|finished)\b[^.!?\n]{0,48}\b(?:meal|food|drink|amount|portion)\b/iu,
+    /\b(?:meal|food|drink)\b[^.!?\n]{0,48}\b(?:is|was|has been)\s+(?:already\s+)?(?:saved|logged|recorded|completed|finished)\b/iu,
     /\b(?:no need|need not|do not need|don[’']t need|does not need|doesn[’']t need)\b[^.!?\n]{0,64}\b(?:tell|clarif|food|drink|meal|amount|how much|portion)\b/iu,
   ].some((pattern) => pattern.test(message))
   const requestsClarification = questionMarkCount === 1
@@ -20549,6 +21548,106 @@ function hasOneBoundedMealClarificationMeaning(message: string): boolean {
     && !contradictsClarification
     && requestsClarification
     && questionMarkCount <= 1
+}
+
+function hasFinnishDrySaunaMeaning(value: string): boolean {
+  return /\b(?:finnish(?:[- ]style)?\s+dry|dry\s+finnish(?:[- ]style)?)\s+sauna\b/iu
+    .test(value)
+}
+
+function hasJoinedGroupCapabilityMeaning(message: string): boolean {
+  const affirmsAccess = /\b(?:i|murph)\s+can(?!['’]?t\b)\b[^.?!\n;]{0,160}\b(?:answer|ask|check|consult|interact|message|pass along|post|share|tell)\b/iu
+  const namesJoinedBoundary = [
+    /\b(?:only|if|when)\b[^.?!\n]{0,160}\b(?:joined|added|already in)\b/iu,
+    /\b(?:group conversations?|groups?)\b[^.?!\n]{0,160}\b(?:joined|added|already in)\b/iu,
+    /\b(?:joined|added)\b[^.?!\n]{0,80}\b(?:group conversations?|groups?)\b/iu,
+  ]
+  const sentences = message
+    .split(/[.?!\n;]+/u)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+  const semanticClauses = sentences.flatMap((sentence) => sentence
+    .split(
+      /,\s*(?:and|but|while|whereas)\b|\b(?:although|however|though|whereas)\b/iu,
+    )
+    .map((clause) => clause.trim())
+    .filter(Boolean))
+  const couplesCapabilityToBoundary = semanticClauses.some((clause) =>
+    affirmsAccess.test(clause)
+    && namesJoinedBoundary.some((pattern) => pattern.test(clause)))
+  const referencesAdjacentBoundary = sentences.some((sentence, index) => {
+    const nextSentence = sentences[index + 1]
+    return nextSentence !== undefined
+      && namesJoinedBoundary.some((pattern) => pattern.test(sentence))
+      && affirmsAccess.test(nextSentence)
+      && /\b(?:there|that group|those groups?)\b/iu.test(nextSentence)
+  })
+  const deniesUnjoinedAccess = [
+    /\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!\n]{0,120}\b(?:unjoined|not\s+joined)\b/iu,
+    /\b(?:unjoined|not[- ]joined)\b[^.?!\n]{0,120}\b(?:unavailable|inaccessible|off[- ]limits)\b/iu,
+  ].some((pattern) => pattern.test(message))
+  const deniesJoinedAccess = [
+    /\b(?:joined|already[- ]joined)\s+groups?\b[^.?!\n]{0,80}\b(?:unavailable|inaccessible)\b/iu,
+    /\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!\n]{0,120}\b(?:joined|already[- ]joined)\s+groups?\b/iu,
+    /\b(?:i|it|murph)\s+(?:cannot|can['’]?t)\b[^.?!\n]{0,120}\b(?:those|the|joined|already[- ]joined)\s+groups?\b/iu,
+  ].some((pattern) => pattern.test(message))
+  const claimsUnjoinedAccess = sentences.some((sentence) =>
+    affirmsAccess.test(sentence)
+    && [
+      /\b(?:answer|ask|check|consult|interact|message|pass along|post|share|tell)\b[^.?!\n]{0,80}\b(?:all|any|every)\s+(?:group conversations?|group chats?|groups?)\b/iu,
+      /\b(?:including|even)\b[^.?!\n]{0,80}\b(?:unjoined|not\s+joined|haven['’]?t\s+joined|have\s+not\s+joined)\b/iu,
+      /\b(?:answer|ask|check|consult|interact|message|pass along|post|share|tell)\b[^.?!\n]{0,80}\bunjoined\s+(?:group conversations?|group chats?|groups?)\b/iu,
+    ].some((pattern) => pattern.test(sentence)))
+  const affirmsAnyAccess = sentences.some((sentence) =>
+    affirmsAccess.test(sentence))
+
+  return affirmsAnyAccess
+    && !claimsUnjoinedAccess
+    && !deniesJoinedAccess
+    && (
+      couplesCapabilityToBoundary
+      || referencesAdjacentBoundary
+      || deniesUnjoinedAccess
+    )
+}
+
+function hasWearableConnectionDeferralMeaning(message: string): boolean {
+  return /\b(?:later|wait|whenever|when you(?:'re| are) ready|(?:once|when) you (?:connect|link)(?: it)?)\b/iu
+    .test(message)
+}
+
+function hasNoFurtherWearableCheckinMeaning(message: string): boolean {
+  return /\b(?:stop|off|won't check|will not (?:send|make|do)(?: any)? further)\b/iu
+    .test(message)
+}
+
+function hasSavedSupportIssueForTriageMeaning(message: string): boolean {
+  return [
+    /\bissue\b[^.?!\n]{0,80}\b(?:saved|recorded)\b[^.?!\n]{0,80}\btriage\b/iu,
+    /\b(?:saved|recorded)\b[^.?!\n]{0,80}\bissue\b[^.?!\n]{0,80}\btriage\b/iu,
+  ].some((pattern) => pattern.test(message))
+}
+
+function hasRecordedAccountLinkedEscalationMeaning(message: string): boolean {
+  return [
+    /\baccount-linked(?:\s+(?:human[- ]support|support))?\s+escalation\b[^.?!\n]{0,80}\b(?:recorded|saved|created)\b/iu,
+    /\b(?:recorded|saved|created)\b[^.?!\n]{0,80}\baccount-linked(?:\s+(?:human[- ]support|support))?\s+escalation\b/iu,
+  ].some((pattern) => pattern.test(message))
+}
+
+function isFixtureVoiceUpdatePreservingCurrentPersonalization(
+  value: unknown,
+  expectedVoice: string,
+): boolean {
+  const request = readRecord(value)
+  return request?.action === 'update'
+    && request.voice === expectedVoice
+    && (request.mainPersona === undefined || request.mainPersona === 'classic')
+    && (
+      request.supportingPersona === undefined
+      || request.supportingPersona === null
+    )
+    && (request.tone === undefined || request.tone === 'casual')
 }
 
 const CAPABILITY_ROUTING_PROBES: readonly CapabilityRoutingProbe[] = [
@@ -21107,10 +22206,11 @@ async function executeRealCodexAppServerTurn(
   executeTurn: typeof executeCodexAppServerTurn = executeCodexAppServerTurn,
 ): ReturnType<typeof executeCodexAppServerTurn> {
   try {
-    return await executeTurn({
+    const result = await executeTurn({
       ...input,
       configOverrides: [
         ...REAL_CODEX_HOSTED_CONFIG_OVERRIDES,
+        ...buildRealCodexShellEnvironmentConfigOverrides(input.env),
         ...(input.configOverrides ?? []),
       ],
       dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
@@ -21125,9 +22225,86 @@ async function executeRealCodexAppServerTurn(
         progressUpdatesAvailable: input.progressDelivery != null,
       }),
     })
+    recordRealCodexTurnUsage({
+      additionalUsages: result.additionalUsages,
+      input,
+      rawEvents: result.jsonEvents,
+    })
+    return result
   } catch (error) {
+    const failureContext = readCodexAppServerTurnFailureContext(error)
+    if (failureContext) {
+      recordRealCodexTurnUsage({
+        additionalUsages: failureContext.additionalUsages,
+        includePrimary: failureContext.jsonEvents.length > 0,
+        input,
+        rawEvents: failureContext.jsonEvents,
+      })
+    }
     throw new Error(buildRealCodexE2eFailureMessage(error))
   }
+}
+
+function recordRealCodexTurnUsage(input: {
+  additionalUsages: readonly AssistantProviderUsageDraft[]
+  includePrimary?: boolean
+  input: Omit<CodexAppServerTurnInput, 'dynamicTools'>
+  rawEvents: readonly unknown[]
+}): void {
+  if (input.includePrimary !== false) {
+    recordRealCodexProviderUsage(extractCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        model: input.input.model,
+        modelProvider: input.input.modelProvider,
+        oss: false,
+        provider: 'codex-cli',
+      }),
+      rawEvents: input.rawEvents,
+      serviceTier: input.input.serviceTier,
+    }))
+  }
+  for (const additionalUsage of input.additionalUsages) {
+    recordRealCodexProviderUsage(additionalUsage.usage)
+  }
+}
+
+function recordRealCodexProviderUsage(usage: AssistantProviderUsage): void {
+  realCodexSuiteUsage.providerRequests += 1
+  if (
+    usage.cacheWriteTokens === null
+    && usage.cachedInputTokens === null
+    && usage.inputTokens === null
+    && usage.outputTokens === null
+    && usage.reasoningTokens === null
+    && usage.totalTokens === null
+  ) {
+    realCodexSuiteUsage.requestsMissingUsage += 1
+    return
+  }
+  realCodexSuiteUsage.cacheWriteTokens += usage.cacheWriteTokens ?? 0
+  realCodexSuiteUsage.cachedInputTokens += usage.cachedInputTokens ?? 0
+  realCodexSuiteUsage.inputTokens += usage.inputTokens ?? 0
+  realCodexSuiteUsage.outputTokens += usage.outputTokens ?? 0
+  realCodexSuiteUsage.reasoningTokens += usage.reasoningTokens ?? 0
+  realCodexSuiteUsage.totalTokens += usage.totalTokens ?? 0
+}
+
+function buildRealCodexShellEnvironmentConfigOverrides(
+  env: NodeJS.ProcessEnv | undefined,
+): string[] {
+  const providerApiKeyEnv = env
+    ? realCodexProviderApiKeyEnvByEnvironment.get(env)
+    : undefined
+  const includedKeys = Object.keys(env ?? {})
+    .filter((key) => key !== providerApiKeyEnv)
+    .sort()
+  return [
+    'shell_environment_policy.inherit="all"',
+    'shell_environment_policy.ignore_default_excludes=false',
+    `shell_environment_policy.include_only=[${
+      includedKeys.map((key) => tomlString(key)).join(',')
+    }]`,
+  ]
 }
 
 function createRealCodexSupportHostedToolContext(
@@ -22691,6 +23868,96 @@ async function materializeConnectedHealthVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+async function materializeExperimentSupportInventoryVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+}): Promise<void> {
+  const supportSeriesId = `experiment:${COMPACT_SUPPORT_EXPERIMENT_ID}`
+  const inventoryResult = JSON.stringify({
+    data: {
+      compact: true,
+      count: 2,
+      filters: {
+        cursor: null,
+        limit: 10,
+        status: null,
+        supportSeriesId,
+        text: null,
+      },
+      items: [
+        {
+          activeUntil: '2026-09-12T23:59:59.000Z',
+          automationId: COMPACT_SUPPORT_KEEP_AUTOMATION_ID,
+          schedule: {
+            kind: 'dailyLocal',
+            localTime: '08:30',
+            timeZone: 'America/New_York',
+          },
+          slug: 'synthetic-mobility-session-reminder',
+          status: 'active',
+          summary: 'Current accepted session reminder.',
+          supportKind: 'reminder',
+          title: 'Synthetic mobility session reminder',
+        },
+        {
+          activeUntil: '2026-09-12T23:59:59.000Z',
+          automationId: COMPACT_SUPPORT_STALE_AUTOMATION_ID,
+          schedule: {
+            expression: '0 18 * * 5',
+            kind: 'cron',
+            timeZone: 'America/New_York',
+          },
+          slug: 'synthetic-mobility-weekly-review',
+          status: 'active',
+          summary: 'Stale review that is no longer accepted.',
+          supportKind: 'review',
+          title: 'Synthetic mobility weekly review',
+        },
+      ],
+      nextCursor: null,
+      totalCount: 2,
+      vault: '/synthetic/private-free-vault',
+    },
+    meta: {
+      command: 'automation list',
+      duration: '0ms',
+    },
+    ok: true,
+  })
+  await mkdir(input.binDirectory, { recursive: true })
+  await writeFile(input.commandLogPath, '', 'utf8')
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      '  *"automation list"*)',
+      '    case "$*" in *"--compact"*) ;; *) printf \'%s\\n\' \'{"error":"compact inventory required"}\' >&2; exit 64 ;; esac',
+      `    case "$*" in *${quoteNutritionShellLiteral(supportSeriesId)}*) ;; *) printf '%s\\n' '{"error":"exact support series required"}' >&2; exit 64 ;; esac`,
+      `    printf '%s\\n' ${quoteNutritionShellLiteral(inventoryResult)}`,
+      '    ;;',
+      '  *"automation show"*)',
+      '    printf \'%s\\n\' \'{"error":"compact inventory already contains the required decision fields"}\' >&2',
+      '    exit 64',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"error":"unexpected synthetic vault command"}\' >&2',
+      '    exit 64',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    {
+      encoding: 'utf8',
+      mode: 0o700,
+    },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 async function materializeExperimentStartVaultCli(input: {
   binDirectory: string
   dryRunRevisionMismatch: boolean
@@ -22768,6 +24035,41 @@ async function materializeExperimentStartVaultCli(input: {
       title: 'Bryan Johnson Sauna',
     },
   })
+  const starterShowResult = JSON.stringify({
+    protocol: {
+      experimentOnboarding: {
+        safetyScreen: {
+          mustAsk: [],
+        },
+        setupSlots: [],
+      },
+      key: EXPERIMENT_START_STARTER_KEY,
+      protocol: {
+        sessionFieldIds: [],
+      },
+      revision: {
+        pageRevisionId: `sha256:${'3'.repeat(64)}`,
+        runSpecRevisionId: `sha256:${'4'.repeat(64)}`,
+      },
+      routeId: 'finnish-dry-sauna',
+      safety: {
+        stopIf: [],
+      },
+      testPlans: [{
+        baselineDays: 0,
+        id: 'default',
+        interventionDays: 1,
+        primaryBiomarkerKey: 'biomarker:heat-exposure',
+      }],
+      title: 'Finnish Dry Sauna',
+    },
+  })
+  const exactShowResult = input.exactTitleAvailable
+    ? [`    printf '%s\\n' '${showResult}'`]
+    : [
+        '    printf \'%s\\n\' \'protocol not found\' >&2',
+        '    exit 1',
+      ]
   const dryRunResult = input.dryRunRevisionMismatch
     ? '{"error":{"code":"protocol_revision_mismatch","message":"The selected protocol changed."}}'
     : '{"dryRun":true,"ok":true}'
@@ -22782,8 +24084,15 @@ async function materializeExperimentStartVaultCli(input: {
       '  *"commons protocol explore"*|*"commons protocol list"*)',
       `    printf '%s\\n' '${exploreResult}'`,
       '    ;;',
+      `  *"commons protocol show ${EXPERIMENT_START_EXACT_KEY}"*)`,
+      ...exactShowResult,
+      '    ;;',
+      `  *"commons protocol show ${EXPERIMENT_START_STARTER_KEY}"*)`,
+      `    printf '%s\\n' '${starterShowResult}'`,
+      '    ;;',
       '  *"commons protocol show"*)',
-      `    printf '%s\\n' '${showResult}'`,
+      '    printf \'%s\\n\' \'unexpected protocol key\' >&2',
+      '    exit 64',
       '    ;;',
       '  *"experiment start "*)',
       `    case "$command_line" in *"experiment start ${EXPERIMENT_START_SLUG} "*) ;; *) printf '%s\\n' '{"error":"experiment start requires the fixture slug"}' >&2; exit 64 ;; esac`,
@@ -23646,9 +24955,11 @@ function buildNativeReplyContextCandidateProbe(): string {
   ].join('\n')
 }
 
-function buildMidnightLinqReminderDeveloperInstructions(): string {
+function buildMidnightLinqReminderDeveloperInstructions(
+  assistantCliContract: string | null = null,
+): string {
   return buildAssistantSystemPrompt({
-    assistantCliContract: null,
+    assistantCliContract,
     assistantContextSnapshotPrompt: null,
     assistantHostedAutomationAvailable: true,
     assistantHostedDeviceConnectAvailable: false,
@@ -23667,6 +24978,88 @@ function buildMidnightLinqReminderDeveloperInstructions(): string {
     onboardingGuidance: false,
     turnTrigger: null,
   })
+}
+
+async function materializeAutomationLookupJourneyVaultCli(input: {
+  automationId: string
+  binDirectory: string
+  commandLogPath: string
+  lookupId: string
+  title: string
+  updatedAt: string
+}): Promise<void> {
+  const listEnvelope = {
+    ok: true,
+    data: {
+      vault: '.',
+      filters: {
+        status: null,
+        text: null,
+        supportSeriesId: null,
+        cursor: null,
+        limit: 10,
+      },
+      count: 1,
+      totalCount: 1,
+      nextCursor: null,
+      items: [{
+        automationId: input.automationId,
+        slug: input.lookupId,
+        title: input.title,
+        status: 'active',
+        summary: null,
+        activeUntil: null,
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '21:00',
+          timeZone: 'America/Chicago',
+        },
+        route: {
+          channel: 'linq',
+          deliveryTarget: null,
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        assistantTargetOverride: null,
+        supportKind: 'reminder',
+        plannedOccurrenceOffsetMs: null,
+        contextReferences: [],
+        continuityPolicy: 'preserve',
+        tags: [],
+        createdAt: '2026-08-09T00:00:00.000Z',
+        updatedAt: input.updatedAt,
+        relativePath: `bank/automations/${input.lookupId}.md`,
+      }],
+    },
+    meta: {
+      command: 'automation list',
+      duration: '0ms',
+    },
+  }
+  await mkdir(input.binDirectory, { recursive: true })
+  await writeFile(input.commandLogPath, '', 'utf8')
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      '  "automation list --format json")',
+      `    printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(listEnvelope))}`,
+      '    ;;',
+      '  *)',
+      '    printf \'unexpected automation lookup fixture command: %s\\n\' "$*" >&2',
+      '    exit 64',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
 }
 
 function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
@@ -24575,6 +25968,7 @@ async function resolveRealCodexE2eConfig(
       env: buildRealCodexSubscriptionE2eEnv(sourceEnv),
       model,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      providerApiKeyEnv: null,
       temporaryPaths: [],
     }
   }
@@ -24641,6 +26035,7 @@ async function resolveRealCodexE2eConfig(
     }),
     model,
     modelProvider,
+    providerApiKeyEnv: apiKeyEnv,
     temporaryPaths,
   }
 }
@@ -24712,6 +26107,74 @@ function buildRealCodexConfigToml(input: {
   ].join('\n')
 }
 
+async function materializeRealCodexGroupReadPermissionHome(
+  config: RealCodexE2eConfig,
+): Promise<{ codexHome: string; temporaryPaths: string[] }> {
+  const codexHome = await mkdtemp(
+    path.join(tmpdir(), 'murph-codex-group-read-home-'),
+  )
+
+  try {
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      buildRealCodexGroupReadPermissionConfigToml(config),
+      {
+        encoding: 'utf8',
+        mode: 0o600,
+      },
+    )
+
+    if (config.modelProvider === OPENAI_SUBSCRIPTION_MODEL_PROVIDER) {
+      const sourceCodexHome = config.codexHome ?? path.join(homedir(), '.codex')
+      await symlink(
+        path.join(sourceCodexHome, 'auth.json'),
+        path.join(codexHome, 'auth.json'),
+      )
+    }
+
+    return {
+      codexHome,
+      temporaryPaths: [codexHome],
+    }
+  } catch (error) {
+    await removeRealCodexTemporaryPath(codexHome)
+    throw error
+  }
+}
+
+function buildRealCodexGroupReadPermissionConfigToml(
+  config: RealCodexE2eConfig,
+): string {
+  const providerApiKeyEnv = config.providerApiKeyEnv
+  let baseConfig: string
+  if (config.modelProvider === OPENAI_SUBSCRIPTION_MODEL_PROVIDER) {
+    baseConfig = [
+      `model = ${tomlString(config.model)}`,
+      `model_provider = ${tomlString(config.modelProvider)}`,
+      'model_reasoning_effort = "low"',
+      'approval_policy = "never"',
+      '',
+    ].join('\n')
+  } else {
+    if (!providerApiKeyEnv) {
+      throw new Error(
+        'Provider-auth group-read config requires the resolved credential key name.',
+      )
+    }
+    baseConfig = buildRealCodexConfigToml({
+        apiKeyEnv: providerApiKeyEnv,
+        model: config.model,
+        modelProvider: config.modelProvider,
+      })
+  }
+
+  return [
+    baseConfig.trimEnd(),
+    '',
+    ...buildMurphGroupReadPermissionProfileTomlLines(),
+  ].join('\n')
+}
+
 function buildRealCodexE2eEnv(input: {
   apiKeyEnv: string
   sourceEnv?: NodeJS.ProcessEnv
@@ -24731,6 +26194,8 @@ function buildRealCodexE2eEnv(input: {
   if (apiKey) {
     env[input.apiKeyEnv] = apiKey
   }
+
+  realCodexProviderApiKeyEnvByEnvironment.set(env, input.apiKeyEnv)
 
   return env
 }

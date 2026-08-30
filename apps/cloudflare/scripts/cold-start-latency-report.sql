@@ -264,6 +264,17 @@ WITH direct_rows AS (
     (orchestration ->> 'runnerStateReadFinishedAtEpochMs')::double precision AS state_read_finished_ms,
     (orchestration ->> 'freshStartRequestedAtEpochMs')::double precision AS fresh_start_requested_ms,
     (orchestration ->> 'freshStartFenceBoundAtEpochMs')::double precision AS fresh_start_fence_bound_ms,
+    (orchestration ->> 'freshStartContainerReadinessRequestedAtEpochMs')::double precision AS container_readiness_requested_ms,
+    (orchestration ->> 'freshStartContainerLifecycleLockAcquiredAtEpochMs')::double precision AS container_lifecycle_lock_acquired_ms,
+    (orchestration ->> 'freshStartContainerStateReadFinishedAtEpochMs')::double precision AS container_state_read_finished_ms,
+    (orchestration ->> 'freshStartContainerStartIssuedAtEpochMs')::double precision AS container_start_issued_ms,
+    (orchestration ->> 'freshStartContainerOnStartAtEpochMs')::double precision AS container_on_start_ms,
+    (orchestration ->> 'freshStartContainerPortsReadyAtEpochMs')::double precision AS container_ports_ready_ms,
+    (orchestration ->> 'freshStartContainerHealthStartedAtEpochMs')::double precision AS container_health_started_ms,
+    (orchestration ->> 'freshStartContainerHealthFinishedAtEpochMs')::double precision AS container_health_finished_ms,
+    (orchestration ->> 'freshStartContainerProcessStartedAtEpochMs')::double precision AS container_process_started_ms,
+    (orchestration ->> 'freshStartContainerListeningAtEpochMs')::double precision AS container_listening_ms,
+    (orchestration ->> 'freshStartContainerReadyObservedAtEpochMs')::double precision AS container_ready_observed_ms,
     (orchestration ->> 'freshStartContainerReadyAtEpochMs')::double precision AS fresh_start_container_ready_ms,
     (orchestration ->> 'freshStartInvocationPreparedAtEpochMs')::double precision AS fresh_start_invocation_prepared_ms,
     (orchestration ->> 'freshStartInvocationAcceptedAtEpochMs')::double precision AS fresh_start_invocation_accepted_ms
@@ -310,6 +321,20 @@ WITH direct_rows AS (
       ('State ready -> fresh start request', fresh_start_requested_ms - state_read_finished_ms),
       ('Fresh start request -> fence bound', fresh_start_fence_bound_ms - fresh_start_requested_ms),
       ('Fence bound -> container ready', fresh_start_container_ready_ms - fresh_start_fence_bound_ms),
+      ('Fence bound -> readiness RPC', container_readiness_requested_ms - fresh_start_fence_bound_ms),
+      ('Container lifecycle lock wait', container_lifecycle_lock_acquired_ms - container_readiness_requested_ms),
+      ('Container state read', container_state_read_finished_ms - container_lifecycle_lock_acquired_ms),
+      ('Container state read -> start issued', container_start_issued_ms - container_state_read_finished_ms),
+      ('Container start issued -> onStart', container_on_start_ms - container_start_issued_ms),
+      ('Container start issued -> ports ready', container_ports_ready_ms - container_start_issued_ms),
+      ('Container onStart -> ports ready', container_ports_ready_ms - container_on_start_ms),
+      ('Container start issued -> process start', container_process_started_ms - container_start_issued_ms),
+      ('Container process -> TCP listen', container_listening_ms - container_process_started_ms),
+      ('Container TCP listen -> ports ready', container_ports_ready_ms - container_listening_ms),
+      ('Container ports ready -> health check', container_health_started_ms - container_ports_ready_ms),
+      ('Container health check', container_health_finished_ms - container_health_started_ms),
+      ('Container health -> ready observation', container_ready_observed_ms - container_health_finished_ms),
+      ('Container ready observation -> RPC return', fresh_start_container_ready_ms - container_ready_observed_ms),
       ('Fence bound -> invocation prepared', fresh_start_invocation_prepared_ms - fresh_start_fence_bound_ms),
       ('Fresh-start parallel preparation', GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms) - fresh_start_fence_bound_ms),
       ('Parallel preparation -> invocation launched', fresh_start_invocation_accepted_ms - GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms)),
@@ -342,11 +367,25 @@ ORDER BY min(
     WHEN 'State ready -> fresh start request' THEN 11
     WHEN 'Fresh start request -> fence bound' THEN 12
     WHEN 'Fence bound -> container ready' THEN 13
-    WHEN 'Fence bound -> invocation prepared' THEN 14
-    WHEN 'Fresh-start parallel preparation' THEN 15
-    WHEN 'Parallel preparation -> invocation launched' THEN 16
-    WHEN 'Invocation launched -> runner job accepted' THEN 17
-    WHEN 'Cloudflare route -> fresh start request' THEN 18
-    ELSE 19
+    WHEN 'Fence bound -> readiness RPC' THEN 14
+    WHEN 'Container lifecycle lock wait' THEN 15
+    WHEN 'Container state read' THEN 16
+    WHEN 'Container state read -> start issued' THEN 17
+    WHEN 'Container start issued -> onStart' THEN 18
+    WHEN 'Container start issued -> ports ready' THEN 19
+    WHEN 'Container onStart -> ports ready' THEN 20
+    WHEN 'Container start issued -> process start' THEN 21
+    WHEN 'Container process -> TCP listen' THEN 22
+    WHEN 'Container TCP listen -> ports ready' THEN 23
+    WHEN 'Container ports ready -> health check' THEN 24
+    WHEN 'Container health check' THEN 25
+    WHEN 'Container health -> ready observation' THEN 26
+    WHEN 'Container ready observation -> RPC return' THEN 27
+    WHEN 'Fence bound -> invocation prepared' THEN 28
+    WHEN 'Fresh-start parallel preparation' THEN 29
+    WHEN 'Parallel preparation -> invocation launched' THEN 30
+    WHEN 'Invocation launched -> runner job accepted' THEN 31
+    WHEN 'Cloudflare route -> fresh start request' THEN 32
+    ELSE 33
   END
 );

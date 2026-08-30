@@ -78,7 +78,7 @@ jobs:
     name: Non-destructive production native iOS canary
     needs: select-main
     if: ${{ needs.select-main.outputs.should_run == 'true' }}
-    environment: native-ios-production-canary
+    environment: native-ios-hosted-e2e
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -116,7 +116,7 @@ jobs:
         with:
           app-id: ${{ vars.NATIVE_IOS_E2E_GITHUB_APP_ID }}
           private-key: ${{ secrets.NATIVE_IOS_E2E_GITHUB_APP_PRIVATE_KEY }}
-          owner: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER }}
+          owner: ${{ github.repository_owner }}
           repositories: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
           permission-actions: write
           permission-contents: read
@@ -127,10 +127,10 @@ jobs:
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
-          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.NATIVE_IOS_E2E_VERCEL_TOKEN }}
           NATIVE_IOS_E2E_GITHUB_TOKEN: ${{ steps.ios-app-token.outputs.token }}
-          NATIVE_IOS_E2E_IOS_REPOSITORY: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER }}/${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
-          NATIVE_IOS_E2E_IOS_WORKFLOW: ${{ vars.NATIVE_IOS_E2E_IOS_WORKFLOW }}
+          NATIVE_IOS_E2E_IOS_REPOSITORY: ${{ github.repository_owner }}/${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
+          NATIVE_IOS_E2E_IOS_WORKFLOW: native-ios-hosted-e2e.yml
           PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
         shell: bash
         run: |

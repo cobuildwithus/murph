@@ -116,8 +116,10 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // Measured 222 resolved modules on 2026-07-10 after scoping the family
     // and deferring its typed-save core import. Compose that 30% ratchet with
     // the one reviewed CLI-owned domain-projector module; the exact candidate
-    // resolves 290 modules locally and on Linux CI without adding a package.
-    maxResolvedModules: 290,
+    // resolved 290 modules locally and on Linux CI without adding a package.
+    // Remeasured 291 modules on 2026-08-28 after the stateless calendar link
+    // contract joined the public @murphai/contracts barrel.
+    maxResolvedModules: 291,
   },
 ]
 

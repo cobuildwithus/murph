@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-28",
+  "order": 200,
+  "item": {
+    "id": "joined-group-handoff-availability",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable joined-group handoffs",
+    "summary": "Murph now keeps similarly named joined chats distinct, then checks the selected chat before queueing a handoff.",
+    "details": "Safe participant counts and labels help clarify the intended destination, including when one matching chat is not currently usable.",
+    "relevanceTags": ["assistant", "groups", "imessage", "reliability"],
+    "sourcePullRequests": [2507]
+  }
+}
