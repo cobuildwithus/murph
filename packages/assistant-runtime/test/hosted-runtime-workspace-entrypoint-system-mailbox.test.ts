@@ -934,6 +934,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const deviceSyncPort = createEmptyDeviceSyncPort();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const staleAssistantWakeAt = "2026-04-26T23:59:59.000Z";
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:already-imported",
@@ -962,6 +963,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         key: "users/bundles/member-synthetic/system-mailbox-already-imported-device-before.bundle.json",
         vaultRoot,
       });
+      runtimeWakeSignal.notify({ requestedProcessingMode: "system_mailbox" });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -1008,6 +1010,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           async runAssistantPhase() {
             throw new Error("System mailbox device-sync must not enter assistant phase.");
           },
+          runtimeWakeSignal,
           vaultRoot,
         },
       );

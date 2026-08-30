@@ -2211,6 +2211,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     if (
       returnSystemMailboxBeforeInitialImport
       && initialPendingRuntimeWake !== null
+      && initialPendingRuntimeWake.requestedProcessingMode !== "system_mailbox"
     ) {
       return await returnSystemMailboxBeforeInitialImport(
         initialPendingRuntimeWake.requestedProcessingMode ?? null,
