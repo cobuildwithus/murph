@@ -33,6 +33,9 @@ import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
+import type {
+  HostedStandbySlotBinding,
+} from "../src/standby-runner-contract.ts";
 import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
@@ -1075,6 +1078,64 @@ describe("HostedUserRunner execution coordination", () => {
     expect(priorDestroyInstance).toHaveBeenCalledOnce();
     expect(currentDestroyInstance).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
+  });
+
+  it("retires the exact claimed standby before acknowledging consent withdrawal", async () => {
+    const slotName = `standby--v-release_1--${"b".repeat(32)}`;
+    const claimId = "claim_consent_test";
+    const binding: HostedStandbySlotBinding = {
+      claimId,
+      releaseId: "release_1",
+      region: "ENAM",
+      slotName,
+      state: "bound",
+      userId: TEST_USER_ID,
+    };
+    const readStandbySlotBinding = vi.fn(async () => binding);
+    const destroyInstance = vi.fn(async () => {
+      throw new Error("Claimed standby cleanup must use retirement.");
+    });
+    let sql!: TestSqlStorageLike;
+    const retireStandbySlot = vi.fn(async (input: { claimId?: string }) => {
+      expect(input).toEqual({ claimId });
+      expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+      expect(readActiveRunnerContainerNameForTest(sql)).toBe(slotName);
+      return { retired: true as const };
+    });
+    const harness = createRunnerHarness({
+      readHealthDataConsentState: () => "revoked",
+      runnerContainerStubForName(name, defaultStub) {
+        expect(name).toBe(slotName);
+        return {
+          ...defaultStub,
+          destroyInstance,
+          readStandbySlotBinding,
+          retireStandbySlot,
+        };
+      },
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "release_1" },
+      },
+    });
+    sql = harness.sql;
+    await harness.runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, { runnerContainerName: slotName });
+
+    await expect(
+      harness.runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
+    ).resolves.toMatchObject({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+
+    expect(harness.runnerContainerNames).toEqual([slotName]);
+    expect(readStandbySlotBinding).toHaveBeenCalledOnce();
+    expect(retireStandbySlot).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
   });
 
