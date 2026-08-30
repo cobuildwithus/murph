@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-29
+Last verified: 2026-08-30
 
 ## Purpose
 
@@ -542,6 +542,13 @@ and the retired public-upload hard cut with generic effects-port 404
 diagnostics are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
+
+Linq group-avatar ingestion accepts only the extension-bearing private-media
+capability on the configured Worker origin. Its URL validation, encrypted R2
+staging, one-day lifetime, and GET/HEAD trust boundary are jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `apps/cloudflare/DEPLOY.md`.
+The private deploy workflow's existing Images-named GitHub Environment secret
+maps only to the current Worker capability key and grants no Images URL access.
 
 Ready hosted generated-image completions enter the next Codex admission by
 exact trusted input id. If newer conversation input is already waiting, the

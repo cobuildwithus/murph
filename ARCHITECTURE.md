@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-26
+Last verified: 2026-08-30
 
 ## Accepted-Message Targeting
 
@@ -3034,18 +3034,15 @@ write-fence check and staging serialize with account deletion under one
 mutation lock, and returns a one-day AES-GCM capability on Murph's fixed Worker
 origin for the immediate Linq mutation. The canonical URL ends in
 `group-avatar.<ext>`, where the extension is derived from the verified MIME
-type. The Worker serves both that path and the already-shipped extensionless
-path during rolling deployment and rollback, supports GET and HEAD with the
+type. The Worker serves only that path, supports GET and HEAD with the
 same successful content headers, and returns no HEAD body. Deletion that owns the lock first
 clears the fence so queued staging fails; staging that owns it first completes
 before deletion sweeps the object and reports completion. The public GET/HEAD route
 decrypts and hash/size/signature-verifies the object, responds with
 `private, no-store`, and reveals no member id, object key, storage namespace, or
-image hash in the URL. An extension-bearing request must match the decrypted
-MIME type. Web and runtime validators accept both Worker URL generations before
-the Worker begins canonical minting; rollback reverts minting first and retains
-dual-shape serving and validation through the one-day capability lifetime plus
-the warm-container drain window. Retry reuses the same object without refreshing its R2
+image hash in the URL. The extension must match the decrypted MIME type, and
+Web and runtime validators require the same extension-bearing path on the
+configured Worker origin. Retry reuses the same object without refreshing its R2
 age. Account deletion synchronously sweeps the member prefix; the R2 lifecycle
 makes any remaining object eligible for asynchronous deletion after 24 hours
 and is not a physical-deletion deadline. Neither cleanup path treats provider

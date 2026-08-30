@@ -3445,35 +3445,32 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       .not.toContain("private-media");
   });
 
-  it("keeps queryless public Images avatars compatible during the Web-first rollout", async () => {
-    const legacyIconUrl =
-      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
-
+  it("rejects retired Images avatar URLs before provider egress", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
         action: "set_chat_avatar",
-        groupChatIconUrl: legacyIconUrl,
+        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
       action: "set_chat_avatar",
-      result: { status: "requested" },
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_chat_icon_url_unavailable",
+      },
     });
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
       expect.objectContaining({ authority: LINQ_THREAD.authority }),
     );
-    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
-      chatId: "chat_group_1",
-      groupChatIconUrl: legacyIconUrl,
-    });
+    expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
   });
 
   it("updates a preview group avatar only through the preview Worker origin", async () => {
     const previewOrigin = "https://hosted-runner-staging.example.test";
     const previewIconUrl =
-      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
     vi.stubEnv("HOSTED_EXECUTION_CONTROL_URL", previewOrigin);
 
     await expect(handleHostedRuntimeGroupTool({
@@ -3539,7 +3536,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "set_chat_avatar",
         groupChatIconUrl:
-          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -3575,7 +3572,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "set_chat_avatar",
         groupChatIconUrl:
-          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
