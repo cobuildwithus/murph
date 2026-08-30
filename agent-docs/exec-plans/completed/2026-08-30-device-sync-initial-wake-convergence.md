@@ -1,6 +1,6 @@
 # Fix initial device-sync wake convergence
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -106,6 +106,7 @@ Product UX effort: Patch
 - Green result on candidate: the focused regression passed; the complete
   system-mailbox file passed 49/49; the explicit foreground-preemption test
   passed; assistant-runtime typecheck passed; `git diff --check` passed.
-- Pending: changelog source update, scoped commit, push, draft PR, exact-head
-  specialist and final ReviewGPT gates, CI, current-base merge-tree proof, and
-  deployment handoff.
+- Draft PR: #2581.
+- Pending: exact-head specialist and final ReviewGPT gates, CI, current-base
+  merge-tree proof, merge, and deployment handoff.
+Completed: 2026-08-30

@@ -9,6 +9,6 @@
     "summary": "Murph now finishes retained wearable imports before starting another scheduled sync pass, helping connected activity and health data reach follow-up work without repeated delay.",
     "details": "Scheduled sync checks resume only after retained imports finish. Murph may need more than one pass to work through the backlog, and it does not mark data processed until the import succeeds or reaches a confirmed failure.",
     "relevanceTags": ["wearables", "assistant", "reliability"],
-    "sourcePullRequests": [2568]
+    "sourcePullRequests": [2568, 2581]
   }
 }
