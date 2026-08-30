@@ -85,6 +85,27 @@ workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It 
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 
+## Reconciliation-facts failure observability
+
+The Web-owned reconciliation-facts route emits one additional failure-only
+Vercel record with the fixed message
+`Hosted runtime reconciliation facts failed.` and schema
+`murph.hosted-runtime.reconciliation-facts.failure.v1`. Its `stage` is one of
+`canonical_access_workspace`, `canonical_consent`, `canonical_mailbox`,
+`canonical_projection`, `canonical_usage`, `visible_access`,
+`blocked_access_notice`, or `canonical_recheck`; its `errorClass` is one of
+`hosted_onboarding`, `type_error`, `error`, or `non_error`. Its structured
+metadata contains only `schema`, `stage`, and `errorClass`. It never includes
+raw errors, messages,
+stacks, causes, identifiers, route or request data, payloads, provider or query
+text, or arbitrary metadata. No record is emitted on success.
+
+Verification uses natural traffic only. From the Web deployment-ready timestamp
+through the next natural occurrence, filter Vercel logs by the exact message and
+schema, then count grouped only by message, `stage`, and `errorClass`. The record
+is additive and Web-only: older deployments and readers tolerate its absence,
+and rollback is an ordinary Web rollback with no state or cross-plane drain.
+
 ## Health-data withdrawal rollback floor
 
 Deploy the consent-aware Cloudflare Worker before the Web deployment that can
@@ -767,10 +788,12 @@ The current search path uses built-in Postgres full-text search plus the
 their existing 250-candidate SQL bound, and supplement searches retain their
 existing ranking path. Private food-name search uses a separate bounded
 retrieval contract for the roughly two-million-row foods corpus: it admits at
-most 250 literal exact-name rows, 10,000 GIN full-text matches, and 10,000 GiST
-nearest-name candidates before similarity scoring, canonical-key deduplication,
-and window sorting. Exactly one GiST branch is realized: full-text searches use
-strict-word-nearest names, while no-FTS typo searches use whole-name distance
+most 250 literal exact-name rows and 10,000 GIN full-text matches before
+similarity scoring, canonical-key deduplication, and window sorting. When the
+GIN set reaches that cap and may be truncated, one GiST branch admits up to
+10,000 strict-word-nearest names to recover stronger full-text candidates. An
+unsaturated GIN set is already exhaustive and skips that whole-catalog scan.
+When FTS finds nothing, the one GiST branch instead uses whole-name distance
 and its matching whole-name threshold. That shared metric keeps eligible typo
 matches ahead of ineligible names before the cap. The bounded admissions
 preserve representative choice and canonical diversity across the established
@@ -872,7 +895,7 @@ Hosted onboarding extras:
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
-- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
+- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. The fixed identity configured by `HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER` is skipped before that gate and is also omitted from operator Growth member reporting. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe

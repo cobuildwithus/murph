@@ -72,6 +72,22 @@ vault-cli workout import-json --input @workout.json --vault ./vault
 vault-cli workout format import-json --input @routine.json --vault ./vault
 ```
 
+To make later conversational workout capture use one duration when a report
+omits it, save or clear the canonical default:
+
+```bash
+vault-cli workout defaults show --vault ./vault
+vault-cli workout defaults set --duration 60 --vault ./vault
+vault-cli workout defaults set --clear-duration --vault ./vault
+```
+
+Positional workout text is preserved only as the note. Pass facts stated in the
+current report through typed flags such as `--duration`, `--type`, and
+`--distance-km`; an explicit typed duration wins over the saved default. If
+typed state is unset, ordinary capture also promotes one unambiguous legacy
+workout default from saved Preferences; conflicting legacy records are never
+applied. Structured imports remain explicit and never use capture defaults.
+
 When you need route distance or duration between two points for a run, walk, ride, or hike, use:
 
 ```bash

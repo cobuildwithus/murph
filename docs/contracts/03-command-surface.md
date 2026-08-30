@@ -572,8 +572,7 @@ new document normally.
 }
 ```
 
-The freeform note is preserved verbatim in `note`. Top-level `activityType`, optional `durationMinutes`, and optional `distanceKm` stay as summary fields, while all rich workout detail lives under the canonical nested `workout` payload.
-For freeform capture, Murph only infers `durationMinutes` when the note states one clear total workout duration. Mixed-activity notes, segmented notes, or notes without a clear total duration must pass `--duration`.
+Positional workout text is preserved verbatim as `note` and is never parsed into structured fields. Duration, activity type, distance, and exercises must come from typed flags or structured payloads; an applicable saved capture default may supply an omitted duration. All rich workout detail lives under the canonical nested `workout` payload. This keeps the CLI deterministic while the assistant translates member language into typed arguments.
 
 For structured agent writes, `workout payload-schema --format json` emits the import file-body contract used by `workout import-json --input @file.json|-`. Its `strengthExercises` form is the compact path for repeated strength sets such as `setCount` plus `repsPerSet`; ambiguous load text belongs in `loadDescription` so the note is preserved without inventing a numeric weight.
 
@@ -613,7 +612,7 @@ The generic transform does not invent `externalRef` identity. Exact-artifact com
 }
 ```
 
-Saved workout formats are vault-local Markdown docs only. They store a reusable workout template plus optional duration, type, and distance summaries, and they are validated up front by the same inference rules that power `workout add`.
+Saved workout formats are vault-local Markdown docs only. They store a reusable workout template plus optional typed duration, type, and distance summaries. Positional template text is preserved as text and is not parsed into those summaries.
 
 ### `workout format log`
 

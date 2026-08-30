@@ -8,11 +8,14 @@ import {
   hostedRunnerRuntimePackageName,
 } from "../runner-bundle-contract.js";
 
-import { runNpmCommand, runPnpmCommand } from "./process.js";
+import { runNodeCommand, runNpmCommand, runPnpmCommand } from "./process.js";
 
 const HEALTH_COMMONS_PACKAGE_NAME = "@murphai/health-commons";
 const CONTRACTS_PACKAGE_NAME = "@murphai/contracts";
 const CLI_PACKAGE_NAME = "@murphai/murph";
+const ASSISTANT_ENGINE_PACKAGE_NAME = "@murphai/assistant-engine";
+const ASSISTANT_CLI_SURFACE_GENERATION_MODE_ENV =
+  "MURPH_ASSISTANT_CLI_SURFACE_GENERATION";
 const HEALTH_COMMONS_RUNTIME_GENERATED_FILES = [
   "generated/biomarker-desired-directions.json",
   "generated/knowledge.sqlite",
@@ -52,10 +55,57 @@ export async function buildHostedRunnerWorkspaceArtifacts(
     return;
   }
 
-  await runPnpmCommand(
-    buildHostedRunnerWorkspaceBuildArgs(sortedPackageNames),
-    { cwd: input.repoRoot },
+  const plan = buildHostedRunnerWorkspaceArtifactPlan(sortedPackageNames, {
+    env: process.env,
+    repoRoot: input.repoRoot,
+  });
+  await runPnpmCommand(plan.buildArgs, {
+    cwd: input.repoRoot,
+    env: plan.buildEnv,
+  });
+  if (plan.assistantCliSurfaceGenerationArgs) {
+    await runNodeCommand(plan.assistantCliSurfaceGenerationArgs, {
+      cwd: input.repoRoot,
+    });
+  }
+}
+
+export function buildHostedRunnerWorkspaceArtifactPlan(
+  packageNames: readonly string[],
+  input: {
+    env?: NodeJS.ProcessEnv;
+    repoRoot: string;
+  },
+): {
+  assistantCliSurfaceGenerationArgs: string[] | null;
+  buildArgs: string[];
+  buildEnv: NodeJS.ProcessEnv | undefined;
+} {
+  const shouldDeferAssistantCliSurfaceGeneration = packageNames.includes(
+    ASSISTANT_ENGINE_PACKAGE_NAME,
   );
+
+  return {
+    assistantCliSurfaceGenerationArgs: shouldDeferAssistantCliSurfaceGeneration
+      ? [
+          path.join(
+            input.repoRoot,
+            "packages",
+            "assistant-engine",
+            "dist",
+            "assistant",
+            "generate-cli-surface-contract.js",
+          ),
+          "--prefer-built-workspace-cli",
+        ]
+      : null,
+    buildArgs: buildHostedRunnerWorkspaceBuildArgs(packageNames, input.env),
+    buildEnv: shouldDeferAssistantCliSurfaceGeneration
+      ? {
+          [ASSISTANT_CLI_SURFACE_GENERATION_MODE_ENV]: "defer",
+        }
+      : undefined,
+  };
 }
 
 export async function stageHostedRunnerRuntimeArtifact(

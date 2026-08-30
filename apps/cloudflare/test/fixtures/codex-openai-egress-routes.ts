@@ -5,13 +5,15 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "ff29a44391deccde0aba0f8390337d7f3c319ea4",
+  upstreamCommit: "78c290807ce710180111df227df3b7a4fe845452",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "9613761a816ff43cad33708250829f4e34a61115",
-  upstreamTag: "rust-v0.149.1",
-  version: "0.149.1",
+  upstreamSourceTree: "e8397c0f448c6975be857ebf3d77be00537d3c9d",
+  upstreamTag: "rust-v0.151.0",
+  version: "0.151.0",
   baseRelativeProviderRoutes: [
     "alpha/search",
+    "guardian",
+    "guardian-classifier",
     "images/edits",
     "images/generations",
     "live",
@@ -107,6 +109,26 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
     {
       disposition: "blocked",
+      feature: "Guardian approval review inference",
+      method: "POST",
+      owner: "codex",
+      pathname: "/v1/guardian",
+      proof: "reviewed_source",
+      source: "codex-rs/codex-api/src/endpoint/responses.rs",
+      transport: "http",
+    },
+    {
+      disposition: "blocked",
+      feature: "Guardian risk classification",
+      method: "POST",
+      owner: "codex",
+      pathname: "/v1/guardian-classifier",
+      proof: "reviewed_source",
+      source: "codex-rs/codex-api/src/endpoint/responses.rs",
+      transport: "http",
+    },
+    {
+      disposition: "blocked",
       feature: "memory trace summarization",
       method: "POST",
       owner: "codex",
@@ -186,10 +208,10 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "Agent identity registration targets the configured auth service, not api.openai.com.",
     },
     {
-      candidate: "/v1/analytics/codex/turn-costsopenai-organizationopenai-projectskipping",
+      candidate: "/v1/analytics/codex/turn-costs",
       disposition: "different_origin",
       owner: "codex-analytics",
-      reason: "The scanner joins the turn-cost route to adjacent header and log literals; Codex rewrites supported ChatGPT hosts to the separate api.chatgpt.com analytics origin.",
+      reason: "The optional OTEL turn-cost worker is inactive in Murph; for built-in OpenAI API-key auth Codex derives this route from the ChatGPT base URL and rewrites it to the separate api.chatgpt.com analytics origin.",
     },
     {
       candidate: "/v1/files",

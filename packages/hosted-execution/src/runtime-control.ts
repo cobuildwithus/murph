@@ -2375,6 +2375,17 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     replacedStaleFence?: boolean;
     freshStartRequestedAtEpochMs?: number;
     freshStartFenceBoundAtEpochMs?: number;
+    freshStartContainerReadinessRequestedAtEpochMs?: number;
+    freshStartContainerLifecycleLockAcquiredAtEpochMs?: number;
+    freshStartContainerStateReadFinishedAtEpochMs?: number;
+    freshStartContainerStartIssuedAtEpochMs?: number;
+    freshStartContainerOnStartAtEpochMs?: number;
+    freshStartContainerPortsReadyAtEpochMs?: number;
+    freshStartContainerHealthStartedAtEpochMs?: number;
+    freshStartContainerHealthFinishedAtEpochMs?: number;
+    freshStartContainerProcessStartedAtEpochMs?: number;
+    freshStartContainerListeningAtEpochMs?: number;
+    freshStartContainerReadyObservedAtEpochMs?: number;
     freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
@@ -2761,6 +2772,17 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "replacedStaleFence",
     "freshStartRequestedAtEpochMs",
     "freshStartFenceBoundAtEpochMs",
+    "freshStartContainerReadinessRequestedAtEpochMs",
+    "freshStartContainerLifecycleLockAcquiredAtEpochMs",
+    "freshStartContainerStateReadFinishedAtEpochMs",
+    "freshStartContainerStartIssuedAtEpochMs",
+    "freshStartContainerOnStartAtEpochMs",
+    "freshStartContainerPortsReadyAtEpochMs",
+    "freshStartContainerHealthStartedAtEpochMs",
+    "freshStartContainerHealthFinishedAtEpochMs",
+    "freshStartContainerProcessStartedAtEpochMs",
+    "freshStartContainerListeningAtEpochMs",
+    "freshStartContainerReadyObservedAtEpochMs",
     "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",

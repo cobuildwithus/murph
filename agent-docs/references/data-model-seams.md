@@ -496,9 +496,9 @@ Canonical recurring vault automations follow the vault timezone when their sched
 **Seam:** `packages/contracts/src/preferences.ts`, `packages/core/src/preferences.ts`, `packages/vault-usecases/src/usecases/workout-measurement.ts`
 
 This seam stays intentionally narrow after the profile hard cut.
-Contracts own the canonical `bank/preferences.json` document contract, core owns reading and updating that singleton, and workout-oriented usecases adapt those machine-facing defaults into unit-selection behavior.
+Contracts own the canonical `bank/preferences.json` document contract, core owns reading and updating that singleton, and workout-oriented usecases adapt those machine-facing defaults into capture-duration and unit-selection behavior. The capture default applies only to ordinary `workout add` when current input omits duration; explicit or ambiguous current input and structured imports retain their own resolution rules. As a bounded compatibility bridge, that write path can promote exactly one explicit, unambiguous legacy workout-default record from the Preferences section of memory when typed state is still unset; conflicts or malformed candidates are ignored.
 
-**Why keep it:** the write boundary stays explicit and typed, while memory and wiki remain freeform human-facing surfaces instead of becoming machine-facing settings stores.
+**Why keep it:** the write boundary and durable owner stay explicit and typed. Memory and wiki remain freeform human-facing surfaces; the legacy read is migration-only and immediately promotes a recognized value into the typed owner.
 
 **Main failure mode if changed poorly:** widening preferences into a narrative profile replacement would blur the boundary between operator-readable context and programmatic defaults and re-create the same mixed-responsibility surface the hard cut removed.
 

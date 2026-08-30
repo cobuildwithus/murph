@@ -2284,6 +2284,79 @@ printf '%s\\n' 'testfs 200000000 1 30000000 85% /'
     expect(result.stdout).toContain('free=28GiB')
   })
 
+  it('selects Capacity only after a complete POSIX numeric column triplet', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '%s\n' 'network mirror quota 40% snapshot 200000000 1 30000000 85% /Volumes/Capacity Fixture'
+`,
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MIN_FREE_GIB: '20',
+    })
+
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout).toContain('free=28GiB')
+  })
+
+  it('fails closed when filesystem text mimics a POSIX capacity sequence', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '%s\n' 'network 100000000 100000000 90000000 40% snapshot 50000000 1 10000000 80% /Volumes/Capacity Fixture'
+`,
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      '`df -Pk` returned an unsupported capacity row while probing 1 filesystem path(s)',
+    )
+    expect(result.stderr).not.toContain(harness.primary)
+    expect(result.stdout).not.toContain('free=85GiB')
+  })
+
+  it('reports a bounded actionable capacity-command failure', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      '#!/usr/bin/env bash\nexit 23\n',
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      '`df -Pk` exited with status 23 while probing 1 filesystem path(s)',
+    )
+    expect(result.stderr).not.toContain(harness.primary)
+  })
+
+  it('reports a bounded malformed capacity row without exposing probe paths', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '%s\n' 'testfs capacity unavailable /fixture'
+`,
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      '`df -Pk` returned an unsupported capacity row while probing 1 filesystem path(s)',
+    )
+    expect(result.stderr).not.toContain(harness.primary)
+  })
+
   it('fails closed when the fixed free-space floor is missed', () => {
     const harness = createHarness()
     executable(

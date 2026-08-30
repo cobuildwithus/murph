@@ -472,28 +472,48 @@ if [[ -n "$target_path" ]]; then
   disk_paths+=("$target_probe")
 fi
 
-df_output="$(df -Pk "${disk_paths[@]}" 2>/dev/null)" || {
-  printf 'worktree storage guard: could not read filesystem capacity\n' >&2
+df_probe_count="${#disk_paths[@]}"
+df_status=0
+df_output="$(LC_ALL=C df -Pk "${disk_paths[@]}" 2>/dev/null)" || df_status=$?
+if (( df_status != 0 )); then
+  printf 'worktree storage guard: `df -Pk` exited with status %d while probing %d filesystem path(s); verify every registered worktree filesystem is mounted and readable\n' \
+    "$df_status" "$df_probe_count" >&2
   exit 1
-}
+fi
 minimum_kib=$((min_free_gib * 1024 * 1024))
 minimum_available_kib=''
 disk_rows=0
 disk_floor_failed=0
-disk_capacity_rows="$(awk '
+disk_capacity_rows="$(LC_ALL=C awk '
   NR > 1 {
+    candidate_count = 0
+    candidate_available = ""
     for (field = 1; field <= NF; field++) {
-      if ($field ~ /^[0-9]+%$/ && field >= 4) {
-        print $(field - 1)
-        break
+      if ($field ~ /^[0-9]+%$/ && field >= 5 \
+        && $(field - 1) ~ /^[0-9]+$/ \
+        && $(field - 2) ~ /^[0-9]+$/ \
+        && $(field - 3) ~ /^[0-9]+$/) {
+        candidate_count++
+        candidate_available = $(field - 1)
       }
+    }
+    if (candidate_count == 1) {
+      print candidate_available
+    } else if (NF > 0) {
+      print "unsupported"
     }
   }
 ' <<<"$df_output")"
 while read -r available_kib; do
   [[ -n "$available_kib" ]] || continue
+  if [[ "$available_kib" == 'unsupported' ]]; then
+    printf 'worktree storage guard: `df -Pk` returned an unsupported capacity row while probing %d filesystem path(s); expected numeric size, used, available, and capacity columns\n' \
+      "$df_probe_count" >&2
+    exit 1
+  fi
   if [[ ! "$available_kib" =~ ^[0-9]+$ ]]; then
-    printf 'worktree storage guard: could not read filesystem capacity\n' >&2
+    printf 'worktree storage guard: `df -Pk` returned a non-numeric available-capacity value while probing %d filesystem path(s)\n' \
+      "$df_probe_count" >&2
     exit 1
   fi
   disk_rows=$((disk_rows + 1))
@@ -505,7 +525,8 @@ while read -r available_kib; do
   fi
 done <<<"$disk_capacity_rows"
 if (( disk_rows == 0 )); then
-  printf 'worktree storage guard: could not read filesystem capacity\n' >&2
+  printf 'worktree storage guard: `df -Pk` returned no filesystem capacity rows while probing %d filesystem path(s)\n' \
+    "$df_probe_count" >&2
   exit 1
 fi
 if (( disk_floor_failed == 1 )); then

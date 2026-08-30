@@ -14,6 +14,9 @@ export {
 export {
   DeviceWebhookQueueHealthDurableObject,
 } from "./worker/device-webhook-queue-health-durable-object.ts";
+export {
+  OpenAiAuthorizationAlertDurableObject,
+} from "./worker/openai-authorization-alert-durable-object.ts";
 
 import {
   handleHostedEmailIngress,

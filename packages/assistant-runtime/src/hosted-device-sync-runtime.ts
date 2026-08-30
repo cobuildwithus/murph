@@ -163,6 +163,7 @@ type HostedDirtyDeviceSyncStateSkipReason =
 type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
 
 const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON = "retained_completion_fence";
+const HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON = "retained_dirty_remainder";
 const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS = 30_000;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
@@ -881,12 +882,17 @@ export function resolveHostedDeviceSyncSchedulerAccountId(input: {
   wake: HostedRuntimeEvent;
 }): string | null {
   const localAccountId = resolveHostedDeviceSyncWakeLocalAccountId(input);
-  if (!localAccountId || input.wake.kind !== "device-sync.wake") {
+  if (
+    !localAccountId
+    || input.wake.kind !== "device-sync.wake"
+    || input.wake.reason === "webhook_hint"
+  ) {
     return null;
   }
   const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
   if (
     wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+    || wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON
     || normalizeHostedDeviceSyncJobHints(wakeContext.hint).length > 0
   ) {
     return null;
@@ -976,7 +982,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
           ...(input.wake.hint ?? {}),
           jobs: [],
           nextReconcileAt: account.nextReconcileAt ?? null,
-          reason: "retained_dirty_remainder",
+          reason: HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON,
         },
       },
     };

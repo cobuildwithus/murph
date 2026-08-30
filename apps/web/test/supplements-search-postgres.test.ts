@@ -1297,9 +1297,10 @@ describe.runIf(Boolean(testDatabaseUrl))(
         const broadPlan = broadExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
         expect(broadPlan).toBeDefined();
         const broadNodes = flattenExplainPlan(broadPlan ?? {});
-        expect(broadNodes.some((node) =>
-          node["Index Name"] === "foods_perf_name_rank_idx"
-        )).toBe(true);
+        expect(broadNodes.filter((node) =>
+          node["Index Name"] === "foods_perf_name_rank_idx" &&
+          (node["Actual Loops"] ?? 0) > 0
+        )).toHaveLength(1);
         expectBoundedFoodSortInputs(broadNodes);
         await client.query("SET LOCAL statement_timeout = '8s'");
 
@@ -1321,10 +1322,15 @@ describe.runIf(Boolean(testDatabaseUrl))(
         );
         const brandPlan = brandExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
         expect(brandPlan).toBeDefined();
-        expect(flattenExplainPlan(brandPlan ?? {}).some((node) =>
+        const brandNodes = flattenExplainPlan(brandPlan ?? {});
+        expect(brandNodes.some((node) =>
           node["Index Name"] === "foods_perf_search_idx" ||
           node["Index Name"] === "foods_perf_search_english_idx"
         )).toBe(true);
+        expect(brandNodes.filter((node) =>
+          node["Index Name"] === "foods_perf_name_rank_idx" &&
+          (node["Actual Loops"] ?? 0) > 0
+        )).toHaveLength(0);
 
         const exact = await queries.searchFoods({
           includeOffMarket: false,

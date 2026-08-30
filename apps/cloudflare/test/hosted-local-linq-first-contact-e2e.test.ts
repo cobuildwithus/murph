@@ -523,6 +523,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+      calendarLinkAvailable: true,
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       messageTargetingAvailable: true,

@@ -535,6 +535,87 @@ describe("visible runtime access reconciliation", () => {
     expect(mocks.resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
     expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
   });
+
+  it("reports visible access before a pending-conversation read fails", async () => {
+    const facts = blockedFacts("user_not_active");
+    const failure = new Error("synthetic visible-access failure");
+    const stages: string[] = [];
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxLatestPendingConversationItem.mockRejectedValue(failure);
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess(
+      { userId: "member_123" },
+      (stage) => stages.push(stage),
+    )).rejects.toBe(failure);
+
+    expect(stages.at(-1)).toBe("visible_access");
+  });
+
+  it("reports canonical recheck before a restored-access recheck fails", async () => {
+    const blocked = blockedFacts("user_not_active");
+    const failure = new Error("synthetic canonical-recheck failure");
+    const stages: string[] = [];
+    mocks.readHostedRuntimeReconciliationFacts
+      .mockResolvedValueOnce(blocked)
+      .mockRejectedValueOnce(failure);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "telegram",
+      eventId: "telegram:update:recheck",
+      kind: "conversation.message",
+      message: {
+        telegramMessage: {
+          messageId: "7",
+          threadId: "456",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "allowed",
+    });
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess(
+      { userId: "member_123" },
+      (stage) => stages.push(stage),
+    )).rejects.toBe(failure);
+
+    expect(stages.at(-1)).toBe("canonical_recheck");
+  });
+
+  it("reports blocked-access notice before Telegram delivery fails", async () => {
+    const facts = blockedFacts("ai_usage_denied");
+    const failure = new Error("synthetic access-notice failure");
+    const stages: string[] = [];
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "telegram",
+      eventId: "telegram:update:notice",
+      kind: "conversation.message",
+      message: {
+        telegramMessage: {
+          messageId: "7",
+          threadId: "456",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Synthetic account notice.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    mocks.sendHostedTelegramAccessNotice.mockRejectedValue(failure);
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess(
+      { userId: "member_123" },
+      (stage) => stages.push(stage),
+    )).rejects.toBe(failure);
+
+    expect(stages.at(-1)).toBe("blocked_access_notice");
+  });
 });
 
 function blockedFacts(reason: "ai_usage_denied" | "user_not_active") {
