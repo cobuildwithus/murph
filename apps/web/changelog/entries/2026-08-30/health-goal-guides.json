@@ -9,7 +9,7 @@
     "summary": "Browse practical, research-backed guides for outcomes like sleeping better, lowering resting heart rate, building strength, and training for an event.",
     "details": "Every guide works on its own. If you want help carrying it out, the Murph action opens an editable draft in your messaging app; nothing is sent or saved until you choose to send and later approve a plan.",
     "relevanceTags": ["goals", "health", "assistant"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [2616],
     "tryIt": {
       "label": "Browse health goals",
       "href": "/goals"

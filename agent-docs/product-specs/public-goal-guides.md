@@ -127,6 +127,23 @@ Generated goal artifacts carry:
 The private Goal stores the public key and both exact goal revisions under
 `commonsGoalRef`. It does not copy the public article into the private vault.
 
+## Deployment And Rollback
+
+`commonsGoalRef` is optional to the compatible Goal reader, so existing Goals
+need no migration. The Goal frontmatter contract is strict, however, and the
+preceding reader does not recognize the new field. Deploy the Cloudflare Worker
+and runner bundle together with `container_rollout=immediate`, require the
+managed-container smoke to prove the exact compatible bundle fingerprint and
+Goal/Commons CLI surface, and publish the Web discovery surface after runner
+convergence.
+
+Before the first lineage-bearing Goal write, the preceding runner remains a
+safe rollback. After that write, the compatible reader is the rollback floor
+for the affected workspace. Recover with a forward fix or a release that
+retains the reader; do not roll that workspace back to the preceding strict
+schema. The Web library and editable messaging handoff create no private state
+and can roll back independently.
+
 ## Verification
 
 Shipping changes require:

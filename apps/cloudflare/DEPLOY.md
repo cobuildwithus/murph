@@ -712,6 +712,26 @@ finite workout through stored repetitions, terse final-set completion, automatic
 closure, and a subsequent workout start. Monitor bounded hosted-runtime error
 aggregates for strict workout parse failures and rejected workout CLI commands.
 
+## Public Goal Lineage Rollout
+
+The public Goal guide release adds optional `commonsGoalRef` lineage to the
+strict private Goal record and changes the bundled assistant CLI, prompt, skill
+tree, and compact Health Commons artifact set. Deploy the Cloudflare Worker and
+runner together with `container_rollout=immediate`. Require managed-container
+smoke to report the exact new runner-bundle fingerprint, verify bundled
+`commons goal list/show`, and round-trip an old-style and lineage-bearing Goal
+before publishing the Web Goals library.
+
+Existing Goals need no migration. Before the first lineage write, the preceding
+runner is a safe rollback. After that write, the compatible runner is the hard
+rollback floor for the affected workspace because the preceding strict core
+parser rejects `commonsGoalRef`; its assistant context snapshot can omit the
+Goal, and core Goal mutations fail until a compatible reader returns. Forward-
+fix on this bundle or newer instead of rolling back below the floor. The public
+Web pages and editable messaging handoff do not write private state and can be
+rolled back independently. Monitor bounded hosted-runtime error aggregates for
+`VAULT_INVALID_GOAL` and rejected Goal commands after convergence.
+
 ## Audience-Key Rollout
 
 The first production deploy that can write assistant conversation keys with an
