@@ -1,6 +1,6 @@
 # Suppress progress updates during routine onboarding
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -52,8 +52,8 @@ Updated: 2026-08-30
 1. Add a focused regression for the observed onboarding shape.
 2. Tighten the shared instruction without new runtime machinery.
 3. Run deterministic and real-model verification and inspect the reply.
-4. Push a scoped PR, run preliminary and final ReviewGPT with CI, remediate
-   accepted findings, and merge.
+4. Push a scoped PR, run the prompt-primary preliminary ReviewGPT pass with
+   CI, remediate accepted findings, and merge.
 5. Deploy both production surfaces and replay the live journey.
 
 ## Decisions
@@ -62,6 +62,12 @@ Updated: 2026-08-30
   wording remained too permissive.
 - Keep `murph.send_progress_update` model-controlled; correct the one shared
   instruction rather than add a feature-specific gate.
+- Accept ReviewGPT's product finding that a blanket onboarding exclusion could
+  hide useful feedback during substantive return-stage work. Routine setup does
+  not count, while otherwise-qualifying work still uses the shared threshold.
+- Accept ReviewGPT's coverage finding by exposing the real progress tool in the
+  existing wearable-onboarding journey. This adds test proof only, not runtime
+  state or another policy owner.
 
 ## Verification
 
@@ -72,3 +78,9 @@ Updated: 2026-08-30
 - Expected outcomes: no progress tool call in routine onboarding, one useful
   onboarding reply, green required gates, and deployed fingerprints containing
   the merged commit.
+- Local results: the prompt contract passed (3 tests), assistant-engine
+  typecheck passed, a fresh GPT-5.6 onboarding turn sent zero progress updates,
+  the representative wearable sequence sent zero updates across its setup and
+  device actions, and a three-source GPT-5.6 task sent exactly one update before
+  its first qualifying read.
+Completed: 2026-08-30
