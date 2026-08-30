@@ -1,6 +1,6 @@
 # Device-sync wake convergence
 
-Status: completed
+Status: active
 Created: 2026-08-29
 Updated: 2026-08-29
 
@@ -37,7 +37,7 @@ Updated: 2026-08-29
 1. Completed: added a failing scheduler-admission regression for the retained dirty-remainder wake.
 2. Completed: corrected the scheduler gate at the hosted runtime owner.
 3. Completed locally: ran focused tests, package typecheck, build, and documentation checks.
-4. Remaining outside the implementation commit: exact-head PR review, merge, deploy, and hosted runtime convergence proof.
+4. Remaining: exact-head PR review, merge, deploy, and hosted runtime convergence proof.
 
 ## Decisions
 
@@ -47,4 +47,3 @@ Updated: 2026-08-29
 
 - Passed: focused assistant-runtime test (118 tests), assistant-runtime typecheck, assistant-runtime build, docs drift, and docs gardening.
 - Remaining gates: PR CI, ReviewGPT, hosted integration, and production convergence proof.
-Completed: 2026-08-29
