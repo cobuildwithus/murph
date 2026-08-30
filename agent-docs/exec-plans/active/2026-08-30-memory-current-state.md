@@ -1,0 +1,172 @@
+# Versioned memory and bounded current state
+
+Status: active
+Created: 2026-08-30
+Updated: 2026-08-30
+
+## Goal
+
+- Let Murph safely revise or retire saved memory without overwriting a newer
+  correction, and give private direct conversations a small, fresh view of the
+  member's current saved context.
+- Reuse the canonical memory document, its audited core owner, and the existing
+  private-turn context path. Do not introduce another source of truth.
+
+## Success criteria
+
+- Maintenance reads expose each memory record's `updatedAt` value.
+- Maintenance updates and retirements require that value and fail without a
+  write when the canonical record changed after the read.
+- Retirements reuse the existing audited exact-ID forget operation.
+- Private direct turns receive a deterministic, bounded selection of current
+  memory alongside the existing bounded goal/regimen snapshot.
+- Missing, malformed, or unreadable memory omits only that memory block; it
+  never blocks the conversation or removes the existing snapshot.
+- Group, maintenance, and other non-private-direct turns do not receive the new
+  personal-memory block.
+- Focused tests, package typechecks/builds, the real-assistant journey, and
+  required review gates pass for the exact submitted head.
+
+## Scope
+
+- In scope:
+  - Optimistic concurrency for core memory update/forget using existing
+    `updatedAt` metadata.
+  - A maintenance-only exact-ID forget action with narrow retirement rules.
+  - A transient bounded memory projection composed into the existing
+    private-direct-turn context.
+  - Focused contract/core/assistant tests and prompt guidance.
+- Out of scope:
+  - New persisted memory fields, tombstones, semantic provenance, confidence,
+    dependency graphs, or a second current-state file.
+  - Scanning automations on the direct-reply hot path. Scheduling remains owned
+    by the existing automation runtime.
+  - Changing typed preferences, goals, regimens, or their canonical owners.
+  - A broad redesign of maintenance evidence admission.
+
+## Constraints
+
+- Technical constraints:
+  - Old memory documents must remain readable without migration.
+  - Compare the expected version only after the core owner re-reads the record
+    inside its existing resource lock.
+  - Keep the direct-turn projection hard-bounded by record count, per-record
+    text length, and total rendered size.
+  - Preserve one-way data flow from canonical memory into a derived prompt.
+- Product/process constraints:
+  - Current user input, safety rules, and effect authority outrank saved memory.
+  - A stale maintenance action stops safely instead of retrying from a new read
+    in the same turn.
+  - The established private-member journey improves; sparse/new-member and
+    non-private journeys remain unchanged.
+  - Use the repository's isolated worktree, finish-task, Product UX review,
+    ReviewGPT, and assistant live-verification workflow.
+
+## Risks and mitigations
+
+1. Risk: Background consolidation overwrites a foreground correction.
+   Mitigation: Require `expectedUpdatedAt` on maintenance mutations and compare
+   it under the canonical memory lock.
+2. Risk: Personal memory causes context growth or stale duplication.
+   Mitigation: Select only the newest few records per section, omit oversized
+   facts without changing their meaning, report omitted counts, and enforce a
+   total byte ceiling.
+3. Risk: A malformed memory file breaks every reply.
+   Mitigation: Fail open for only the optional memory block while preserving the
+   existing context snapshot.
+4. Risk: Saved instructions are mistaken for permission.
+   Mitigation: Label the projection as context only and retain the existing
+   authority hierarchy in the system prompt.
+
+## Tasks
+
+1. Trace the canonical memory write owner and private-turn context owner.
+2. Add expected-version checks to the existing update/forget operations and
+   expose guarded maintenance mutations.
+3. Build and inject a bounded transient memory block through the existing
+   private-turn context path.
+4. Add focused deterministic regression coverage and a real-assistant journey.
+5. Run Product UX and code review gates, verify the exact head, commit, and open
+   the PR.
+
+## Decisions
+
+- Use `updatedAt` as the version token. A separate revision field would duplicate
+  existing state and require a migration.
+- Use update as correction and the existing hard delete plus audit entry as
+  retirement. Tombstones would retain private text and multiply filtering rules.
+- Do not add semantic provenance until maintenance evidence has a trusted,
+  stable canonical evidence identifier; free-text provenance would be dead or
+  unverifiable metadata.
+- Extend the existing bounded context snapshot at read time instead of adding a
+  persisted `CurrentState` owner or dirty/rebuild lifecycle.
+- Leave automations out of this projection. Due-state belongs to the scheduler,
+  and a direct-turn automation scan would add hot-path fan-out without a new
+  demonstrated need.
+
+## Product UX
+
+- Effort: Product change.
+- Outcome: A private reply can use a small amount of relevant saved context
+  naturally, while background maintenance cannot overwrite or remove a record
+  that changed after its read.
+- Entry and promise: The member enters through an ordinary private direct
+  message and receives the normal immediate reply. Overnight consolidation
+  remains silent.
+- Affected journeys:
+  - Established members can receive a context-aware reply without an extra
+    memory lookup.
+  - New or sparse-memory members keep the existing behavior.
+  - Explicit correction or withdrawal can update or forget exactly one
+    unchanged record.
+  - Group, maintenance-delivery, and other non-private-direct turns do not
+    receive the personal current-state block.
+- Challenge and resolution: Current input and canonical reads outrank the
+  bounded projection; omitted detail can be read exactly on demand; and a
+  stale maintenance mutation fails without changing the newer record. An
+  oversized newer fact stops that section instead of exposing older facts
+  behind it, and retirement requires explicit withdrawal or revocation.
+- Walkthrough evidence:
+  - A live private journey used the saved preference in the natural reply,
+    `A short waterside walk would be a good low-effort reset after work.`, with
+    zero actions and no reference to internal memory machinery. The journey
+    used the production-shaped per-turn context path.
+  - A live maintenance journey performed only `show` then `update`, copied the
+    exact record id and `updatedAt` from a compact 24-record result, and ended
+    silently.
+  - Deterministic tests prove stale update and forget attempts leave the newer
+    canonical record unchanged.
+- Verdict: Ready after resolving four review findings by narrowing behavior:
+  exact withdrawal-only retirement, no older backfill behind an oversized
+  fact, production-shaped live proof, and no read triggered solely by an absent
+  memory block.
+
+## Candidate review
+
+- Accepted Product UX findings:
+  - Removed duplicate-based retirement because a silent hard delete could
+    orphan a downstream reference and has no member undo.
+  - Changed selection to a contiguous newest prefix so an oversized correction
+    cannot expose an older fact behind it.
+  - Moved live proof to the production-shaped per-turn context role.
+  - Made block absence non-triggering for new and empty-memory members.
+- Accepted code-review finding:
+  - Classified successful maintenance `forget` calls as non-replayable writes
+    in the existing notification recovery owner, with focused regression proof.
+- Rejected findings: None.
+- Corrected-diff Product UX verdict: Ready.
+
+## Verification
+
+- Passed: focused core memory tests (11 tests).
+- Passed: focused assistant maintenance/current-state tests (11 tests).
+- Passed: assistant planning, model-behavior, and managed-automation tests (278
+  tests).
+- Passed: core and assistant-engine typechecks and package builds.
+- Passed: real-Codex guarded correction journey (`show` then exact guarded
+  `update`, no unrelated tools, silent completion).
+- Passed: real-Codex private current-state journey (natural relevant reply, no
+  memory read or other action, no internal-memory wording).
+- Passed: `git diff --check` and task-file privacy scan.
+- Pending: independent candidate review, provider-input measurement, PR gates,
+  ReviewGPT, and CI on the exact pushed head.

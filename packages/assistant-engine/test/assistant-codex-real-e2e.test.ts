@@ -194,6 +194,7 @@ import {
 import {
   buildAssistantMaintenanceConversationEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
+import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import {
   prepareAssistantCronNotificationInput,
 } from '../src/assistant/cron/output-history.ts'
@@ -11569,10 +11570,11 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
         expect(JSON.parse(showAction.output)).toEqual({
           document: {
             exists: true,
-            records: before.records.map(({ id, section, text }) => ({
+            records: before.records.map(({ id, section, text, updatedAt }) => ({
               id,
               section,
               text,
+              updatedAt,
             })),
           },
           memory: null,
@@ -11587,10 +11589,13 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
         expect(updateAction.success).toBe(true)
         expect(updateAction.argumentsValue.action).toBe('update')
         expect(updateAction.argumentsValue.memoryId).toBe(target.record.id)
+        expect(updateAction.argumentsValue.expectedUpdatedAt).toBe(
+          target.record.updatedAt,
+        )
         expect(Object.keys(updateAction.argumentsValue).sort()).toEqual(
           updateAction.argumentsValue.section === undefined
-            ? ['action', 'memoryId', 'text']
-            : ['action', 'memoryId', 'section', 'text'],
+            ? ['action', 'expectedUpdatedAt', 'memoryId', 'text']
+            : ['action', 'expectedUpdatedAt', 'memoryId', 'section', 'text'],
         )
         if (updateAction.argumentsValue.section !== undefined) {
           expect(updateAction.argumentsValue.section).toBe('Preferences')
@@ -11617,6 +11622,7 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
             id: target.record.id,
             section: 'Preferences',
             text: updatedText,
+            updatedAt: updatedRecord.updatedAt,
           },
         })
         expect(updatedRecord).toMatchObject({
@@ -11654,6 +11660,79 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
             decision: decision.kind,
             recordCount: after.records.length,
             updatedExactId: updatedRecord.id === target.record.id,
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
+describeRealCodex('real Codex bounded current-state memory e2e', () => {
+  it(
+    'uses a relevant saved preference without rereading memory',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-bounded-current-state-e2e-'),
+      )
+
+      try {
+        const saved = await upsertMemory(workingDirectory, {
+          now: new Date('2026-08-29T18:00:00.000Z'),
+          section: 'Preferences',
+          text: 'For a quick after-work reset, prefers a short waterside walk.',
+        })
+        const currentStatePrompt = await readAssistantCurrentStatePrompt({
+          vaultRoot: workingDirectory,
+        })
+        expect(currentStatePrompt).toContain(saved.record.text)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools: [],
+            prompt: 'I need one quick after-work reset. What would suit me? Answer in one sentence.',
+            providerConfig: normalizeAssistantProviderConfig({
+              provider: 'codex-cli',
+            }),
+            turnContextPrompt: currentStatePrompt,
+            workingDirectory,
+          }),
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        expect(actions.filter((action) => action.kind === 'dynamic')).toEqual([])
+        expect(result.finalMessage).toMatch(
+          /waterside|waterfront|walk.{0,40}(?:water|river|lake|ocean)|(?:water|river|lake|ocean).{0,40}walk/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /saved (?:memory|context)|current-state|injected|memory record/iu,
+        )
+        process.stdout.write(
+          `[bounded-current-state-memory-e2e] ${JSON.stringify({
+            actionCount: actions.length,
+            reply: result.finalMessage.trim(),
           })}\n`,
         )
       } finally {

@@ -1109,7 +1109,10 @@ describe('assistant Codex turn planning', () => {
       'Never save medical or health details, credentials, identifiers of any kind',
     )
     expect(maintenancePlan.systemPrompt).toContain(
-      'deduplication and update targeting only',
+      'deduplication and mutation targeting only',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'Use `update` or `forget` only with an exact memory id and its exact `updatedAt` returned by `show`',
     )
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')

@@ -2638,66 +2638,74 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
 
-  vi.clearAllMocks()
-  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
-    kind: 'succeeded',
-    providerTurn: {
-      ...createProviderResult({
-        rawEvents: [
-          {
-            method: 'item/completed',
-            params: {
-              item: {
-                arguments: {
-                  action: 'upsert',
-                  section: 'Context',
-                  text: 'Prefers morning summaries.',
+  for (const action of ['upsert', 'forget'] as const) {
+    vi.clearAllMocks()
+    mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
+      kind: 'succeeded',
+      providerTurn: {
+        ...createProviderResult({
+          rawEvents: [
+            {
+              method: 'item/completed',
+              params: {
+                item: {
+                  arguments: action === 'upsert'
+                    ? {
+                        action,
+                        section: 'Context',
+                        text: 'Prefers morning summaries.',
+                      }
+                    : {
+                        action,
+                        expectedUpdatedAt: '2026-04-09T03:00:00.000Z',
+                        memoryId: 'mem_exact',
+                      },
+                  id: `member-memory-${action}`,
+                  namespace: 'murph',
+                  success: true,
+                  tool: 'member_memory',
+                  type: 'dynamicToolCall',
                 },
-                id: 'member-memory-write',
-                namespace: 'murph',
-                success: true,
-                tool: 'member_memory',
-                type: 'dynamicToolCall',
               },
             },
-          },
-        ],
-        response: JSON.stringify({
-          kind: 'send_message',
-          privateSummary: 'Should not send.',
-          text: 'Visible maintenance message.',
+          ],
+          response: JSON.stringify({
+            kind: 'send_message',
+            privateSummary: 'Should not send.',
+            text: 'Visible maintenance message.',
+          }),
+          session: providerSession,
         }),
-        session: providerSession,
-      }),
-      additionalUsages: [],
-    },
-  })
-
-  let invalidMaintenanceError: unknown
-  try {
-    await sendAssistantNotificationLocal({
-      instructions: 'Run overnight memory maintenance.',
-      turnPolicy: {
-        kind: 'maintenance-exact-skip',
-        maintenanceProfile: 'member-memory',
-        privateSummary: 'No notification required.',
+        additionalUsages: [],
       },
-      vault: '/vaults/skip',
     })
-  } catch (error) {
-    invalidMaintenanceError = error
+
+    let invalidMaintenanceError: unknown
+    try {
+      await sendAssistantNotificationLocal({
+        instructions: 'Run overnight memory maintenance.',
+        turnPolicy: {
+          kind: 'maintenance-exact-skip',
+          maintenanceProfile: 'member-memory',
+          privateSummary: 'No notification required.',
+        },
+        vault: '/vaults/skip',
+      })
+    } catch (error) {
+      invalidMaintenanceError = error
+    }
+    expect(invalidMaintenanceError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+    })
+    expect((invalidMaintenanceError as Error & {
+      details?: Record<string, unknown>
+    }).details).toMatchObject({
+      assistantNotificationProviderNonReplayableWork: true,
+      assistantNotificationStage: 'provider',
+    })
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(deliverMessage).not.toHaveBeenCalled()
   }
-  expect(invalidMaintenanceError).toMatchObject({
-    code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
-  })
-  expect((invalidMaintenanceError as Error & {
-    details?: Record<string, unknown>
-  }).details).toMatchObject({
-    assistantNotificationProviderNonReplayableWork: true,
-    assistantNotificationStage: 'provider',
-  })
-  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-  expect(deliverMessage).not.toHaveBeenCalled()
 
   vi.clearAllMocks()
   mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
