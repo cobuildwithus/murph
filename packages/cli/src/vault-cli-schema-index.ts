@@ -1,4 +1,5 @@
 import type { Cli } from 'incur'
+import { estimateTokenCount, sliceByTokens } from 'tokenx'
 
 type CliServeOptions = Parameters<Cli.Cli['serve']>[1]
 
@@ -9,13 +10,16 @@ interface CommandManifest {
 
 interface CommandManifestEntry {
   description?: string
-  examples?: unknown[]
   name?: string
-  schema?: unknown
+}
+
+interface SchemaIndexCommand {
+  description?: string
+  name: string
 }
 
 interface SchemaIndex {
-  commands: CommandManifestEntry[]
+  commands: SchemaIndexCommand[]
   command: string | null
   kind: 'group' | 'root'
   note: string
@@ -57,7 +61,7 @@ export function installVaultCliSchemaIndex(cli: Cli.Cli): void {
       return
     }
 
-    writeStdout(options, `${JSON.stringify(buildSchemaIndex(commandPath, manifest), null, 2)}\n`)
+    writeStdout(options, renderSchemaIndex(buildSchemaIndex(commandPath, manifest), argv))
   }
 }
 
@@ -113,28 +117,52 @@ function exitProcess(options: CliServeOptions | undefined, code: number): void {
 }
 
 function isJsonSchemaRequest(argv: readonly string[]): boolean {
-  return argv.includes('--schema') && usesJsonFormat(argv)
+  return hasFlagBeforeTerminator(argv, ['--schema']) && usesJsonFormat(argv)
 }
 
 function isHelpRequest(argv: readonly string[]): boolean {
-  return argv.includes('--help') || argv.includes('-h')
+  return hasFlagBeforeTerminator(argv, ['--help', '-h'])
 }
 
-function usesJsonFormat(argv: readonly string[]): boolean {
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index]
-    if (token === '--json') {
-      return true
+function hasFlagBeforeTerminator(
+  argv: readonly string[],
+  flags: readonly string[],
+): boolean {
+  for (const token of argv) {
+    if (token === '--') {
+      break
     }
-    if (token === '--format' && argv[index + 1] === 'json') {
-      return true
-    }
-    if (token === '--format=json') {
+    if (flags.includes(token)) {
       return true
     }
   }
 
   return false
+}
+
+function usesJsonFormat(argv: readonly string[]): boolean {
+  let format: string | null = null
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--') {
+      break
+    }
+    if (token === '--json') {
+      format = 'json'
+      continue
+    }
+    if (token === '--format') {
+      format = argv[index + 1] ?? null
+      index += 1
+      continue
+    }
+    if (token.startsWith('--format=')) {
+      format = token.slice('--format='.length)
+    }
+  }
+
+  return format === 'json'
 }
 
 function parsesAsJson(output: string): boolean {
@@ -173,7 +201,96 @@ function buildSchemaIndex(
     kind: commandPath.length === 0 ? 'root' : 'group',
     command: commandPath.length === 0 ? null : commandPath.join(' '),
     note: SCHEMA_INDEX_NOTE,
-    commands: manifest.commands ?? [],
+    commands: projectSchemaIndexCommands(manifest.commands ?? []),
+  }
+}
+
+function projectSchemaIndexCommands(
+  commands: readonly CommandManifestEntry[],
+): SchemaIndexCommand[] {
+  const projected: SchemaIndexCommand[] = []
+
+  for (const command of commands) {
+    if (typeof command.name !== 'string' || command.name.length === 0) {
+      continue
+    }
+
+    projected.push({
+      name: command.name,
+      ...(typeof command.description === 'string' && command.description.length > 0
+        ? { description: command.description }
+        : {}),
+    })
+  }
+
+  return projected
+}
+
+function renderSchemaIndex(index: SchemaIndex, argv: readonly string[]): string {
+  const formatted = JSON.stringify(index, null, 2)
+  const tokenControls = extractTokenControls(argv)
+
+  if (tokenControls.count) {
+    return `${estimateTokenCount(formatted)}\n`
+  }
+
+  if (tokenControls.limit === undefined && tokenControls.offset === undefined) {
+    return `${formatted}\n`
+  }
+
+  const total = estimateTokenCount(formatted)
+  const offset = tokenControls.offset ?? 0
+  const end =
+    tokenControls.limit === undefined ? total : offset + tokenControls.limit
+
+  if (offset === 0 && end >= total) {
+    return `${formatted}\n`
+  }
+
+  const sliced = sliceByTokens(formatted, offset, end)
+  const actualEnd = Math.min(end, total)
+  return `${sliced}\n[truncated: showing tokens ${offset}–${actualEnd} of ${total}]\n`
+}
+
+function extractTokenControls(argv: readonly string[]): {
+  count: boolean
+  limit?: number
+  offset?: number
+} {
+  let count = false
+  let limit: number | undefined
+  let offset: number | undefined
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--') {
+      break
+    }
+    if (token === '--token-count') {
+      count = true
+      continue
+    }
+    if (token === '--token-limit' || token === '--token-offset') {
+      const value = argv[index + 1]
+      const parsed = value === undefined ? Number.NaN : Number(value)
+      index += 1
+
+      if (!Number.isFinite(parsed) || value?.trim() === '') {
+        continue
+      }
+
+      if (token === '--token-limit') {
+        limit = parsed
+      } else {
+        offset = parsed
+      }
+    }
+  }
+
+  return {
+    count,
+    ...(limit === undefined ? {} : { limit }),
+    ...(offset === undefined ? {} : { offset }),
   }
 }
 

@@ -1411,20 +1411,39 @@ test('descriptor direct service bindings resolve against the declared service su
 })
 
 test('root and group schema json requests return command indexes', async () => {
-  const rootIndex = JSON.parse(
-    await runSourceCliRaw(['--schema', '--format', 'json']),
-  ) as {
+  const rootOutput = await runSourceCliRaw(['--schema', '--format', 'json'])
+  const groupOutput = await runSourceCliRaw([
+    'goal',
+    '--schema',
+    '--format',
+    'json',
+  ])
+  const rootIndex = JSON.parse(rootOutput) as {
     command: string | null
-    commands: Array<{ name?: string }>
+    commands: Array<{ description?: string; name: string }>
     kind: string
     version: string
   }
+  const groupIndex = JSON.parse(groupOutput) as typeof rootIndex
 
   assert.equal(rootIndex.version, 'murph.schema-index.v1')
   assert.equal(rootIndex.kind, 'root')
   assert.equal(rootIndex.command, null)
   assert.equal(rootIndex.commands.some((command) => command.name === 'vault show'), true)
   assert.equal(rootIndex.commands.some((command) => command.name?.startsWith('inbox')), false)
+  assert.ok(Buffer.byteLength(rootOutput, 'utf8') < 100_000)
+  assert.equal(
+    rootIndex.commands.every((command) =>
+      Object.keys(command).every((key) => key === 'name' || key === 'description'),
+    ),
+    true,
+  )
+
+  assert.equal(groupIndex.version, 'murph.schema-index.v1')
+  assert.equal(groupIndex.kind, 'group')
+  assert.equal(groupIndex.command, 'goal')
+  assert.equal(groupIndex.commands.some((command) => command.name === 'goal list'), true)
+  assert.ok(Buffer.byteLength(groupOutput, 'utf8') < 20_000)
 })
 
 test('read-only vault commands reject uninitialized vault roots before query reads', async () => {
