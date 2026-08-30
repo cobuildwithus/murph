@@ -22,6 +22,9 @@ import {
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
   buildAssistantProviderMurphToolCall,
+  buildAssistantProviderRequestDerivedMurphToolCall,
+  type HostedLocalAssistantProviderRequestContext,
+  readHostedLocalAssistantProviderToolOutputs,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   buildHostedLinqInboundEvent,
@@ -808,10 +811,14 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
 
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("group", {
+      buildAssistantProviderMurphToolCall("group_membership", {
+        action: "list_memberships",
+      }),
+      buildAssistantProviderRequestDerivedMurphToolCall("group_consult", (input) => ({
         action: "handoff",
         context: handoffContext,
-      }),
+        membershipId: requireSingleMembershipId(input),
+      })),
       privateHandoffAcknowledgment,
     ], {
       matchInputContains: privateHandoffRequestText,
@@ -1060,6 +1067,25 @@ function collectJsonStrings(value: unknown): string[] {
     return Object.values(value).flatMap(collectJsonStrings);
   }
   return [];
+}
+
+function requireSingleMembershipId(
+  input: HostedLocalAssistantProviderRequestContext,
+): string {
+  const membershipIds = new Set(
+    readHostedLocalAssistantProviderToolOutputs({
+      body: input.requestBody,
+      method: "POST",
+      url: "/v1/responses",
+    }).flatMap((output) =>
+      [...output.matchAll(/\\?"membershipId\\?"\s*:\s*\\?"([^"]+?)\\?"/gu)]
+        .flatMap((match) => match[1] ? [match[1]] : [])
+    ),
+  );
+  if (membershipIds.size !== 1) {
+    throw new Error("Expected exactly one opaque membership id from group inventory.");
+  }
+  return [...membershipIds][0]!;
 }
 
 function readConversationMailboxLane(

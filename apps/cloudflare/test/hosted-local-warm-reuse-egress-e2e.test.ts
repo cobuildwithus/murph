@@ -274,7 +274,9 @@ function expectCurrentResponsesLiteToolEnvelope(body: string): void {
   ) {
     throw new TypeError("Expected one Responses Lite tool envelope.");
   }
-  expect(Reflect.has(additionalTools, "id")).toBe(false);
+  expect(Reflect.get(additionalTools, "id")).toEqual(
+    expect.stringMatching(/^at_.+/u),
+  );
   expect(Reflect.get(additionalTools, "role")).toBe("developer");
   const tools: unknown = Reflect.get(additionalTools, "tools");
   if (!Array.isArray(tools) || tools.length === 0) {
