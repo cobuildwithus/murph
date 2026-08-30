@@ -75,6 +75,31 @@ set -euo pipefail
 } > "\${REVIEW_GPT_TEST_CAPTURE}"
 `,
   )
+  mkdirSync(path.join(harnessRoot, 'node_modules', '.bin'), { recursive: true })
+  mkdirSync(
+    path.join(harnessRoot, 'node_modules', '@cobuild', 'repo-tools', 'src'),
+    { recursive: true },
+  )
+  writeExecutable(
+    path.join(harnessRoot, 'node_modules', '.bin', 'cobuild-review-gpt'),
+    '#!/usr/bin/env bash\nexit 0\n',
+  )
+  writeExecutable(
+    path.join(harnessRoot, 'node_modules', '.bin', 'tsx'),
+    '#!/usr/bin/env bash\nexit 0\n',
+  )
+  writeFileSync(
+    path.join(
+      harnessRoot,
+      'node_modules',
+      '@cobuild',
+      'repo-tools',
+      'src',
+      'consumer-shell.sh',
+    ),
+    '#!/usr/bin/env bash\n',
+    'utf8',
+  )
 
   execFileSync('git', ['init', '-q'], { cwd: harnessRoot })
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: harnessRoot })
