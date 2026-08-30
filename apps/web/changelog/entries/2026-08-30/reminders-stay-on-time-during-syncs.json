@@ -3,7 +3,7 @@
   "order": 100,
   "item": {
     "id": "reminders-stay-on-time-during-syncs",
-    "kind": "fix",
+    "kind": "improvement",
     "priority": 4,
     "title": "Reminders stay on time during syncs",
     "summary": "Scheduled reminders now keep their turn while Murph works through a large connected-health backlog.",
