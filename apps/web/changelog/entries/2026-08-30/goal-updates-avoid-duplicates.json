@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "goal-updates-avoid-duplicates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Goal updates avoid accidental duplicates",
+    "summary": "Updating a saved goal now stops safely when its ID no longer exists instead of creating a duplicate goal.",
+    "details": "Creating a new goal still works normally, and valid updates keep the existing record. If the requested goal is gone, Murph leaves saved goals unchanged and returns a clear recovery step.",
+    "relevanceTags": ["goals", "reliability", "recovery"],
+    "sourcePullRequests": [2610]
+  }
+}
