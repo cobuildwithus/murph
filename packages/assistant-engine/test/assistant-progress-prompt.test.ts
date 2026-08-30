@@ -23,28 +23,28 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Send one early update only for direct reply-critical work that requires three or more distinct substantive checks or tool actions beyond routine turn setup',
+      'Send one early update only for reply-critical work needing 3+ substantive checks/actions beyond routine setup',
     )
     expect(prompt).toContain(
-      'When it applies, send it before the first qualifying check or action, then continue immediately',
+      'Send it before the first qualifying action, then continue',
     )
     expect(prompt).toContain(
-      'Routine onboarding and setup steps do not count toward that threshold by themselves',
+      'Routine onboarding/setup does not count by itself',
     )
     expect(prompt).toContain(
-      'this includes goal capture, skill or policy reads, resume/status/context reads, device-availability checks, state saves, connection choices, and the next setup question',
+      'goal capture, policy reads, resume/status/context reads, device checks, saves, connection choices, and the next setup question stay silent when that is all',
     )
     expect(prompt).toContain(
-      'Keep those turns silent when that is all they require; if the remaining reply-critical work still requires slow inspection or three substantive evidence checks or actions, apply the ordinary threshold',
+      'If remaining reply-critical work still needs slow inspection or 3+ substantive evidence checks/actions, use the ordinary threshold',
     )
     expect(prompt).toContain(
-      'Also skip progress for ordinary conversation, choosing a straightforward next step, and quick resume checks',
+      'Also skip ordinary conversation, a straightforward next step, and quick resume checks',
     )
     expect(prompt).toContain(
       'Send a child-wait update after spawning',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement',
+      'Background work does not trigger progress by itself unless an active skill requires a receipt or start acknowledgement',
     )
     expect(prompt).toContain(
       'A single routine daily-card read alone does not trigger progress',
