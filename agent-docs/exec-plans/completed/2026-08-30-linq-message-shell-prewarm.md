@@ -1,6 +1,6 @@
 # Early Linq message shell prewarm
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -103,3 +103,4 @@ Updated: 2026-08-30
   The composed hosted-local scenario is checked in but could not start locally
   because this checkout has no external Temporal worker package configured; CI
   owns that provisioned run.
+Completed: 2026-08-30
