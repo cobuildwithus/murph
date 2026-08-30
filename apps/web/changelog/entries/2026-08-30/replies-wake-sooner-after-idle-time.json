@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "replies-wake-sooner-after-idle-time",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Replies wake sooner after idle time",
+    "summary": "When an established conversation needs a cold hosted assistant, Murph now starts waking it earlier while safely preparing your message.",
+    "details": "The earlier wake is best-effort; message acceptance and reply processing keep their existing durable path if it is unavailable.",
+    "relevanceTags": ["assistant", "performance", "reliability"],
+    "sourcePullRequests": [2584]
+  }
+}
