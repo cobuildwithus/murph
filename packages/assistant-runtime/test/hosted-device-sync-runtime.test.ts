@@ -11924,6 +11924,18 @@ describe("hosted device-sync runtime", () => {
         reason: "reconcile_due",
       }),
     }), null);
+    assert.equal(resolveHostedDeviceSyncSchedulerAccountId({
+      state,
+      wake: buildDeviceSyncWake({
+        connectionId: "hosted_conn_scheduler",
+        hint: {
+          jobs: [],
+          reason: "retained_dirty_remainder",
+        },
+        occurredAt,
+        reason: "reconcile_due",
+      }),
+    }), null);
   });
 
   test("retains a failed Junction summary continuation from a manual reconcile wake through cold reconstruction", async () => {
