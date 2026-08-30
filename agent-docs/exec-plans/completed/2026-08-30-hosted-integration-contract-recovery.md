@@ -1,6 +1,6 @@
 # Restore hosted integration contracts
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -96,3 +96,4 @@ Updated: 2026-08-30
   - Both scenarios pass with their existing terminal/delivery assertions.
   - The PostgreSQL concurrency step starts from a fully initialized schema.
   - The only production source change is the narrow Venice identity validator.
+Completed: 2026-08-30
