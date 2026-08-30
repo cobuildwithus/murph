@@ -455,6 +455,39 @@ describe('worktree storage guard', () => {
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
+  it.each([
+    [
+      'managed destination before data/research lock',
+      ['--codex-worktree', 'combined-task', '--data-research', 'research proof'],
+    ],
+    [
+      'data/research lock before managed destination',
+      ['--data-research', 'research proof', '--codex-worktree', 'combined-task'],
+    ],
+  ])('composes %s', (_name, optionArgs) => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const target = path.join(
+      codexHome,
+      'worktrees',
+      'primary',
+      'combined-task',
+    )
+    mkdirSync(codexHome)
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      [...optionArgs, '-b', 'combined-task'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain']))
+      .toContain('locked data/research: research proof')
+  })
+
   it('rejects unsafe Codex-managed destination inputs before branch creation', () => {
     const harness = createHarness()
     const codexHome = path.join(harness.root, 'selected-codex-home')
@@ -529,6 +562,70 @@ describe('worktree storage guard', () => {
     expect(runGit(harness.primary, ['worktree', 'list', '--porcelain']))
       .not.toContain(target)
     expect(existsSync(intent)).toBe(false)
+  })
+
+  it.each([
+    [
+      'a missing data reason before managed intent',
+      ['-B', 'victim', '--data-research', '--codex-worktree', 'managed-task'],
+    ],
+    [
+      'a missing data reason after managed intent',
+      ['--codex-worktree', 'managed-task', '--data-research', '-B', 'victim'],
+    ],
+    [
+      'a missing managed leaf after a data reason',
+      ['--data-research', 'research proof', '--codex-worktree', '-B', 'victim'],
+    ],
+    [
+      'a missing branch before managed intent',
+      ['-B', '--codex-worktree', 'managed-task'],
+    ],
+  ])('rejects %s before any managed-to-explicit crossover', (_name, args) => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const explicitTarget = path.join(harness.primary, 'managed-task')
+    const managedTarget = path.join(
+      codexHome,
+      'worktrees',
+      'primary',
+      'managed-task',
+    )
+    mkdirSync(codexHome)
+    runGit(harness.primary, ['branch', 'victim'])
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'advanced\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+    runGit(harness.primary, ['commit', '-m', 'advance main'])
+    const beforeBranches = runGit(harness.primary, [
+      'for-each-ref',
+      '--format=%(refname):%(objectname)',
+      'refs/heads',
+    ])
+    const beforeWorktrees = runGit(harness.primary, [
+      'worktree',
+      'list',
+      '--porcelain',
+    ])
+    const beforeStatus = runGit(harness.primary, ['status', '--porcelain=v1'])
+
+    const creation = runScript(harness, 'create-worktree', args, {
+      CODEX_HOME: codexHome,
+    })
+
+    expect(creation.status).toBe(2)
+    expect(runGit(harness.primary, [
+      'for-each-ref',
+      '--format=%(refname):%(objectname)',
+      'refs/heads',
+    ])).toBe(beforeBranches)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain']))
+      .toBe(beforeWorktrees)
+    expect(runGit(harness.primary, ['status', '--porcelain=v1']))
+      .toBe(beforeStatus)
+    expect(existsSync(explicitTarget)).toBe(false)
+    expect(existsSync(managedTarget)).toBe(false)
+    expect(existsSync(path.join(harness.state, 'worktree-create-intents')))
+      .toBe(false)
   })
 
   it('uses the stable primary repository owner from a sanctioned linked worktree', () => {

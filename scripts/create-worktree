@@ -10,6 +10,13 @@ usage() {
   exit 2
 }
 
+require_option_value() {
+  [[ $# -ge 2 && -n "$2" ]] || usage
+  case "$2" in
+    --data-research|--codex-worktree|-b|-B|--detach|--) usage ;;
+  esac
+}
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 data_reason=''
 codex_worktree_name=''
@@ -19,17 +26,19 @@ branch=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --data-research)
-      [[ $# -ge 2 && -n "$2" ]] || usage
+      require_option_value "$@"
       data_reason="$2"
       shift 2
       ;;
     --codex-worktree)
-      [[ $# -ge 2 && -n "$2" && -z "$codex_worktree_name" ]] || usage
+      require_option_value "$@"
+      [[ -z "$codex_worktree_name" ]] || usage
       codex_worktree_name="$2"
       shift 2
       ;;
     -b|-B)
-      [[ $# -ge 2 && -z "$mode" ]] || usage
+      require_option_value "$@"
+      [[ -z "$mode" ]] || usage
       mode="$1"
       branch="$2"
       shift 2

@@ -86,7 +86,9 @@ canonicalizes the `worktrees/<repository>` owner directories from the stable
 primary checkout identity; and rejects symlink redirection or any pre-existing
 final target. The existing explicit-path form remains available when an
 established alternate destination has already passed the caller's
-repository-policy preflight.
+repository-policy preflight. Value-taking options never consume another
+recognized option token, so malformed combined invocations fail through the
+usage boundary before mode selection, storage admission, or branch handling.
 
 The creation helper prepares the shared local exclude rule before registration,
 registers each worktree with checkout materialization suppressed, and writes
