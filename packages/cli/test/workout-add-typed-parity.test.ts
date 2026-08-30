@@ -53,7 +53,7 @@ interface WorkoutAddResult {
   durationMinutes: number
   distanceKm: number | null
   workout: WorkoutSession | null
-  note: string
+  note: string | null
 }
 
 interface WorkoutShowResult {
@@ -348,6 +348,7 @@ test('workout add honors explicit titles with and without positional note text',
   assert.equal(noteLessData.title, 'Morning track session')
   assert.equal(noteLessData.activityType, 'running')
   assert.equal(noteLessData.durationMinutes, 30)
+  assert.equal(noteLessData.note, null)
 
   const noteLessShown = await showWorkout(
     cli,

@@ -422,7 +422,7 @@ export async function addStructuredWorkoutRecord(input: {
       distanceKm: typeof result.event.distanceKm === 'number' ? result.event.distanceKm : null,
       workout: result.event.workout ?? null,
       manifestFile: result.manifestPath,
-      note: result.event.note ?? result.event.title,
+      note: result.event.note ?? null,
     }
   } catch (error) {
     throw toEventUpsertVaultCliError(error)
