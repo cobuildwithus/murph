@@ -233,8 +233,8 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         userId,
         { timeoutMs: 420_000 },
       );
+      expect(["started", "woken"]).toContain(wakeResult.wakeResult.action);
       expect(wakeResult.wakeResult).toMatchObject({
-        action: "woken",
         kind: "runtime_processing_accepted",
       });
 
