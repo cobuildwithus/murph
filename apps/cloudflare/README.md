@@ -47,8 +47,8 @@ Internal control routes:
   cancellation. Callback-signed Temporal/default work retains the cooperative
   wake-and-retry behavior.
 - `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
-  Vercel OIDC-authenticated typing, established-message-routing, or instant-start
-  shell hint. Its bounded source and UUID-shaped attempt id distinguish those
+  Vercel OIDC-authenticated typing, direct-message-routing, or instant-start shell
+  hint. Its bounded source and UUID-shaped attempt id distinguish those
   callers and correlate only diagnostic phase stamps; a legacy request without
   correlation fields remains accepted but cannot enter an exact-id cohort. It
   rechecks live admission and returns after the named

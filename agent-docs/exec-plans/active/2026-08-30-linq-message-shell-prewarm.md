@@ -7,7 +7,7 @@ Updated: 2026-08-30
 ## Goal
 
 - Start the existing payloadless Cloudflare shell prewarm as soon as an
-  established Linq message resolves an active hosted member,
+  direct Linq message resolves an active hosted member,
   before the mailbox planning transaction and Temporal signal complete.
 - Preserve the ordinary post-Temporal direct ensure as the only foreground
   processing owner.
@@ -38,7 +38,7 @@ Updated: 2026-08-30
 
 ## Scope
 
-- In scope: established Linq message routing, existing shell-prewarm contracts,
+- In scope: established direct Linq message routing, existing shell-prewarm contracts,
   request/activation/admission timing carried by the existing observation,
   identifier-free cold-start reporting, focused tests, and matching durable
   runtime/security/deployment documentation.
@@ -71,10 +71,9 @@ Updated: 2026-08-30
 
 - Root cause and earliest safe eligibility boundary are confirmed from the
   production trace and current Web/Cloudflare owners.
-- The established-route hint now starts after the existing active/root-eligible
-  member resolution and before KMS unwrap. The direct-route hint starts as soon
-  as the existing active-member access read resolves, while sibling routing
-  reads continue in parallel. Neither path adds a query.
+- The direct-route hint starts as soon as the existing active-member access
+  read resolves, while sibling routing reads continue in parallel. Established
+  group/thread routing does not invoke the optimization. No path adds a query.
 - One request-local correlation ID follows the existing Web client, Worker
   route, UserRunner activation/admission, and first RunnerContainer hint. The
   final wake expects that exact ID, so the report attributes overlap only when
@@ -84,15 +83,23 @@ Updated: 2026-08-30
     reply after Murph has been idle.
   - Reaches: ordinary direct Linq messages that need a cold hosted runtime.
   - Proof: focused routing tests show the best-effort hint starts before KMS
-    work and the direct ensure remains after Temporal acceptance; exact-ID
-    report contracts expose the resulting overlap without member identifiers.
+    work and the direct ensure remains after Temporal acceptance; the signed
+    hosted-local journey and exact-ID report contracts tie that hint to the
+    delivered reply without exposing member identifiers.
 - Product UX walkthrough: `Ready`. The ordinary message journey and its final
   destination are unchanged; only best-effort shell startup moves earlier.
   Ineligible, failed, duplicate, or skipped hints preserve the existing safe
   path and never delay durable acceptance or processing.
-- Focused hosted-execution, Cloudflare control, Cloudflare runtime, and hosted
-  Web suites pass. The latest composed Web rerun covered 256 routing, mailbox
-  prewarm, and direct-wake tests after the earliest-access refinement. All four
-  affected typechecks, both changed package builds, the Cloudflare app build,
-  focused Web lint, and `git diff --check` pass. The opt-in PostgreSQL report
-  fixture remains CI-owned when no loopback database is configured.
+- Review follow-up keeps the producer direct-only, records auth timing on the
+  signed shell-prewarm route, and suppresses the message-routing callback on
+  post-enrollment instant-start replans. Tests prove the instant-start wake has
+  no message-routing attempt identity.
+- Focused Cloudflare control/report and hosted Web routing/mailbox suites pass
+  (120, 210, and 24 tests respectively), as do both affected typechecks,
+  focused Web lint, the Cloudflare build exercised by hosted-local preparation,
+  and `git diff --check`.
+- The opt-in PostgreSQL report fixture passes against a disposable loopback
+  PostgreSQL instance, including exact-match and mismatch message-routing rows.
+  The composed hosted-local scenario is checked in but could not start locally
+  because this checkout has no external Temporal worker package configured; CI
+  owns that provisioned run.

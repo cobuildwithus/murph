@@ -1658,9 +1658,9 @@ therefore relinquishes the existing lifecycle boundary without leaving a stale
 hint or partially initialized start ahead of foreground work. If a Worker
 version changes before authoritative start, the `UserRunner` destroys and
 clears a different pending versioned target before binding the current fence.
-For an ordinary established Linq message, pre-transaction routing preparation
-may fire that same request immediately after it resolves an active member,
-before root KMS work and transaction entry. It threads
+For an ordinary established direct Linq message, pre-transaction routing
+preparation may fire that same request immediately after it resolves an active
+member, before root KMS work and transaction entry. It threads
 one UUID-shaped attempt id through Web, the authenticated route, UserRunner
 activation and admission, and the container's first coalesced observation. The
 final wake carries the same id as expected evidence; the latency report treats

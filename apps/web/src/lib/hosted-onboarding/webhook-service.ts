@@ -677,7 +677,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         instantFirstTurnGeneration = generation;
       };
       let requiredPendingGroupSetupCandidateId: string | null = null;
-      const runPlan = async (instantStartAllowed = true) => {
+      const runPlan = async (options: {
+        instantStartAllowed?: boolean;
+        messageRoutingShellPrewarmAllowed?: boolean;
+      } = {}) => {
+        const {
+          instantStartAllowed = true,
+          messageRoutingShellPrewarmAllowed = true,
+        } = options;
         let reusableDirectCryptoDomainRoots: {
           memberId: string;
           preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
@@ -772,7 +779,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
               event: planningEvent,
-              onEligibleMember: startMessageRoutingShellPrewarm,
+              ...(messageRoutingShellPrewarmAllowed
+                ? { onEligibleMember: startMessageRoutingShellPrewarm }
+                : {}),
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
               pendingGroupRosterUnavailable:
@@ -819,7 +828,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const planAfterBlockedAdmission = (reason?: string) =>
         requireFirstContactAdmission
           ? Promise.resolve(buildBlockedHostedLinqFirstContactAdmissionPlan(reason))
-          : runPlan(false);
+          : runPlan({ instantStartAllowed: false });
 
       if (firstContactAdmissionDecision?.kind === "block") {
         plan = await planAfterBlockedAdmission();
@@ -870,7 +879,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             // under this event id, and instant start is off here: only a
             // classification of this exact inbound may mint that entitlement.
             firstContactAdmissionDecision = admissionBudget.decision;
-            plan = await runPlan(false);
+            plan = await runPlan({ instantStartAllowed: false });
           } else if (admissionBudget.kind === "exhausted") {
             plan = await planAfterBlockedAdmission(
               "first-contact-admission-budget-exhausted",
@@ -962,7 +971,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             },
           );
         }
-        plan = await runPlan(!enrollmentFailed);
+        plan = await runPlan({
+          instantStartAllowed: !enrollmentFailed,
+          messageRoutingShellPrewarmAllowed: false,
+        });
         if (plan.instantStartEnrollment) {
           logHostedOnboardingDiagnostic(
             "hosted-onboarding.webhook.linq.instant-start-not-active",
@@ -970,7 +982,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
             },
           );
-          plan = await runPlan(false);
+          plan = await runPlan({
+            instantStartAllowed: false,
+            messageRoutingShellPrewarmAllowed: false,
+          });
         }
       }
 
@@ -2419,7 +2434,6 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
           }),
         warmMailboxRoot: () => warmHostedLinqMailboxPayloadRoot({
           event: input.event,
-          onEligibleMember: input.onEligibleMember,
           prisma: input.prisma,
           threadRoute,
         }),
@@ -2956,16 +2970,15 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
  * scoped around this transaction, so unwrapping beforehand leaves the
  * in-transaction encrypt as local AES work against the cached root.
  *
- * An established group reuses the planning-event route. A direct message uses
- * a narrow blind-index/member-id preflight that mirrors planner precedence
- * without decrypting private identity or routing fields. Both remain hints:
- * the planner repeats every authority check inside the transaction.
+ * An established thread reuses the planning-event route. A direct message
+ * uses a narrow blind-index/member-id preflight that mirrors planner
+ * precedence without decrypting private identity or routing fields. The
+ * planner repeats every authority check inside the transaction.
  * `laneSeq` is authenticated metadata allocated inside the transaction, so
  * only required roots are warmed; the payload is still encrypted in place.
  */
 export async function warmHostedLinqMailboxPayloadRoot(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
-  onEligibleMember?: (memberId: string) => void;
   prisma: PrismaClient | Prisma.TransactionClient;
   threadRoute: Pick<HostedThreadRouteSnapshot, "containerMemberId"> | null;
 }): Promise<{
@@ -2980,8 +2993,6 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
   if (!memberId) {
     return null;
   }
-  input.onEligibleMember?.(memberId);
-
   return {
     memberId,
     rootKeyId: await warmHostedDomainRootForWeb({

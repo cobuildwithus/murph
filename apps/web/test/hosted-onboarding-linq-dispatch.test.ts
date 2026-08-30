@@ -151,6 +151,7 @@ const mocks = vi.hoisted(() => {
     })),
     logHostedOnboardingDiagnostic: vi.fn(),
     logHostedOnboardingWarning: vi.fn(),
+    maybeHandoffHostedExecutionWebhookWake: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     createHostedLinqChat: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
@@ -407,6 +408,20 @@ vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", async ()
       mocks.ensureHostedLinqInstantStartStarterUsageEnrollment,
     runHostedLinqInstantStartDeferredActivationWakeBestEffort:
       mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-service-wake", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/webhook-service-wake")
+  >("@/src/lib/hosted-onboarding/webhook-service-wake");
+  mocks.maybeHandoffHostedExecutionWebhookWake.mockImplementation(
+    actual.maybeHandoffHostedExecutionWebhookWake,
+  );
+  return {
+    ...actual,
+    maybeHandoffHostedExecutionWebhookWake:
+      mocks.maybeHandoffHostedExecutionWebhookWake,
   };
 });
 
@@ -4759,6 +4774,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       source: "linq-message-routing",
       userId: "member_123",
     }));
+    expect(
+      prewarmRuntimeShell.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(prepareHostedCryptoDomainRootCandidates).mock
+        .invocationCallOrder[0]
+        ?? Number.NEGATIVE_INFINITY,
+    );
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
@@ -8131,7 +8153,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     const ensureRuntimeProcessing = vi.fn();
-    const prewarmRuntimeShell = vi.fn(() => {
+    const prewarmRuntimeShell = vi.fn<
+      (request: {
+        source: "linq-instant-start" | "linq-message-routing" | "linq-typing-started";
+      }) => Promise<{ accepted: true }>
+    >(() => {
       callOrder.push("shell-prewarm");
       return new Promise<{ accepted: true }>(() => undefined);
     });
@@ -8243,6 +8269,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       source: "linq-instant-start",
       userId: memberId,
     }));
+    expect(prewarmRuntimeShell.mock.calls.map(([request]) => request.source))
+      .toEqual(["linq-instant-start"]);
+    expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
+      expect.objectContaining({
+        wakeHandoff: expect.not.objectContaining({
+          runtimeShellPrewarmOrchestrationAttemptId: expect.any(String),
+        }),
+      }),
+    );
     expect(ensureRuntimeProcessing).toHaveBeenCalledOnce();
     expect(ensureRuntimeProcessing).toHaveBeenCalledWith(expect.objectContaining({
       userId: memberId,

@@ -3543,7 +3543,9 @@ describe("cloudflare worker routes", () => {
     });
 
     it("routes shell startup through the consent-owning user runner", async () => {
-      const prewarmRuntimeShellForUser = vi.fn(async () => undefined);
+      const prewarmRuntimeShellForUser = vi.fn<
+        NonNullable<UserRunnerDurableObjectStubLike["prewarmRuntimeShellForUser"]>
+      >(async () => undefined);
       const stub = createUserRunnerStub({ prewarmRuntimeShellForUser });
       const runnerContainerGetByName = vi.fn();
       const userRunnerGetByName = vi.fn(() => stub);
@@ -3577,12 +3579,20 @@ describe("cloudflare worker routes", () => {
         "test-user",
         "linq-message-routing",
         expect.objectContaining({
+          shellPrewarmRuntimeControlAuthFinishedAtEpochMs: expect.any(Number),
+          shellPrewarmRuntimeControlAuthStartedAtEpochMs: expect.any(Number),
           shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
           shellPrewarmOrchestrationAttemptId:
             "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
           shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
         }),
       );
+      const orchestration = prewarmRuntimeShellForUser.mock.calls[0]?.[2];
+      expect(orchestration?.shellPrewarmRuntimeControlAuthStartedAtEpochMs)
+        .toBeLessThanOrEqual(
+          orchestration?.shellPrewarmRuntimeControlAuthFinishedAtEpochMs
+            ?? Number.NEGATIVE_INFINITY,
+        );
       expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
 

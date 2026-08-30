@@ -19,10 +19,10 @@ Last verified: 2026-08-30
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
   before granting. An instant-start, authenticated established-direct-chat
-  typing, or eligible established-message shell-prewarm hint uses that same
-  per-user barrier and live admission read. The message producer may start only
-  after ordinary routing preparation resolves an extant active member, before
-  KMS and transaction work; the planner still
+  typing, or eligible established-direct-message shell-prewarm hint uses that
+  same per-user barrier and live admission read. The message producer may start
+  only after direct routing preparation resolves an extant active member,
+  before KMS and transaction work; the planner still
   repeats authority inside the transaction. The typing producer resolves only
   the private home-chat blind index and performs an advisory active-access/root
   check after acknowledging the webhook. Neither producer receives a member id

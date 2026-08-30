@@ -2173,8 +2173,8 @@ latency parser and the best-effort message-routing producer, then deploy the
 Cloudflare Worker/runner reader. During that short window the old Worker may
 reject the new optional request shape; the authoritative post-Temporal ensure
 and message path are unchanged. After Cloudflare converges, verify a synthetic
-established-message trace has matching expected/observed prewarm attempt ids and
-the request, auth, UserRunner, admission, and container-hint phase stamps.
+established-direct-message trace has matching expected/observed prewarm attempt
+ids and the request, auth, UserRunner, admission, and container-hint phase stamps.
 
 There is no persisted-state rollback floor. Rolling Web back first stops the
 new producer; rolling Cloudflare back first merely makes remaining hints fail

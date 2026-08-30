@@ -647,9 +647,9 @@ Last verified: 2026-08-30
   back settlement without creating a synthetic skipped row. The
   active-member replan still owns route promotion, inbound accounting, and the
   canonical inbound mailbox append before any generated reply can be sent.
-  Ordinary established Linq messages use the same authority-free shell hint as
-  soon as pre-transaction routing preparation resolves the eligible active
-  member, before mailbox-root KMS work and transaction entry. This hint may
+  Ordinary established direct Linq messages use the same authority-free shell
+  hint as soon as pre-transaction routing preparation resolves the eligible
+  active member, before mailbox-root KMS work and transaction entry. This hint may
   overlap or fail without changing the plan: it creates no fence or mailbox
   owner, and only the accepted Temporal signal permits the direct ensure.
   A definite route-read or route-projection failure after generation confirms
