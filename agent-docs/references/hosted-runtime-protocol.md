@@ -1658,8 +1658,19 @@ therefore relinquishes the existing lifecycle boundary without leaving a stale
 hint or partially initialized start ahead of foreground work. If a Worker
 version changes before authoritative start, the `UserRunner` destroys and
 clears a different pending versioned target before binding the current fence.
-The existing Web helper carries its bounded `linq-instant-start` or
-`linq-typing-started` source through the same request and RPC. During additive
+For an ordinary established Linq message, pre-transaction routing preparation
+may fire that same request immediately after it resolves an active member,
+before root KMS work and transaction entry. It threads
+one UUID-shaped attempt id through Web, the authenticated route, UserRunner
+activation and admission, and the container's first coalesced observation. The
+final wake carries the same id as expected evidence; the latency report treats
+the hint as causal only when the consumed observation matches it exactly. No
+attempt id is authority, and a retry that resolves another member starts a new
+hint while the planner remains authoritative.
+
+The existing Web helper carries its bounded `linq-instant-start`,
+`linq-message-routing`, or `linq-typing-started` source through the same request
+and RPC. During additive
 rollout an empty legacy request remains accepted and is recorded as `unknown`;
 unknown is never assumed to mean typing. Cloudflare logs one bounded admission outcome (`scheduled`,
 `skipped_consent_busy`, `skipped_admission_unavailable`,
@@ -1673,8 +1684,9 @@ do not imply port or health readiness.
 
 The container also consumes its in-memory hint observation on the next
 authoritative `ensureReadyForProcessing` call. One observation belongs to one
-shell-prewarm operation and carries its triggering source, first causal hint
-timestamp, completion time and duration, coalesced hint count, and one terminal
+shell-prewarm operation and carries its triggering source, bounded
+orchestration attempt and phase timestamps, first causal hint timestamp,
+completion time and duration, coalesced hint count, and one terminal
 outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
 After that operation settles, later hints may only increment its bounded hint
 count until readiness consumes it; they cannot launch a second operation or
@@ -1683,12 +1695,12 @@ leaves into the existing orchestration latency phase breakdown; it adds no
 request, persisted state owner, awaited reporting step, or work on the
 message-ingress path. A stop, explicit destroy, or Durable Object eviction may
 erase the optional observation, so an absent observation means `no observed
-prewarm`, not proof that no typing hint occurred. The aggregate cold-start
-report includes only typing-sourced, chronology-safe, uniquely matched
-Web-direct traces whose reply belongs to the same runtime attempt. It omits
-instant-start, unknown-source, ambiguous, backlog, and attempt-handoff rows
-rather than guessing, and returns no member, mailbox, trace, delivery, or
-runtime-attempt identifiers.
+prewarm`, not proof that no hint occurred. The aggregate cold-start report
+includes chronology-safe typing hints and exact-id-matched message-routing
+hints on uniquely matched Web-direct traces whose reply belongs to the same
+runtime attempt. It omits instant-start, unknown-source, ambiguous, backlog,
+and attempt-handoff rows rather than guessing, and returns no member, mailbox,
+trace, delivery, or runtime-attempt identifiers.
 The signal
 reconciles both the foreground conversation lane and the already-durable
 activation item. Web then

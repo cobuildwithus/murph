@@ -525,6 +525,9 @@ describe("hosted Linq mailbox payload root prewarm", () => {
 
     await expect(warmHostedLinqMailboxPayloadRoot({
       event: JSON.parse(buildLinqMessageWebhookBody()),
+      onEligibleMember: (memberId) => {
+        calls.push(`prewarm:${memberId}`);
+      },
       prisma,
       threadRoute: { containerMemberId: "member_prewarm_1" } as never,
     })).resolves.toEqual({
@@ -538,6 +541,10 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       retainFailureInScopedCache: true,
       userId: "member_prewarm_1",
     });
+    expect(calls.slice(0, 2)).toEqual([
+      "prewarm:member_prewarm_1",
+      "unwrap",
+    ]);
     // The scoped cache hands out a private copy and expects it wiped; warming
     // needs the unwrap, not the plaintext.
     expect(issuedRootKeys).toHaveLength(1);

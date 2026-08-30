@@ -1333,10 +1333,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       prisma: expect.any(Object),
     });
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith({
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
+      requestStartedAtEpochMs: expect.any(Number),
       source: "linq-typing-started",
       userId: "member_typing",
-    });
+    }));
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
@@ -3445,6 +3447,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("signals Temporal after an active-member mailbox append", async () => {
+    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId
+      .mockResolvedValueOnce("member_123");
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
+      prewarmRuntimeShell,
+    });
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -3482,6 +3491,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expectHostedLinqPointerSignalAccepted("evt_required_nudge_failed");
+    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
+      requestStartedAtEpochMs: expect.any(Number),
+      source: "linq-message-routing",
+      userId: "member_123",
+    }));
     expectHostedLinqReadReceiptSent();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -8211,10 +8227,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(shellPrewarmIndex).toBeGreaterThanOrEqual(0);
     expect(shellPrewarmIndex).toBeLessThan(enrollmentIndex);
     expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith({
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
+      requestStartedAtEpochMs: expect.any(Number),
       source: "linq-instant-start",
       userId: memberId,
-    });
+    }));
     expect(ensureRuntimeProcessing).toHaveBeenCalledOnce();
     expect(ensureRuntimeProcessing).toHaveBeenCalledWith(expect.objectContaining({
       userId: memberId,
@@ -8415,10 +8433,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith({
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
+      requestStartedAtEpochMs: expect.any(Number),
       source: "linq-instant-start",
       userId: memberId,
-    });
+    }));
     expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {

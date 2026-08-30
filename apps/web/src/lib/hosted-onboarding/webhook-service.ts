@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type {
   Prisma,
   PrismaClient,
@@ -284,6 +286,24 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   let messagePartsInspection: HostedLinqMessageReceivedPartsInspection | null = null;
   let responseReason: string | null = null;
   let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
+  const messageRoutingShellPrewarm: {
+    current: {
+      orchestrationAttemptId: string;
+      userId: string;
+    } | null;
+  } = { current: null };
+  const startMessageRoutingShellPrewarm = (userId: string): void => {
+    if (messageRoutingShellPrewarm.current?.userId === userId) {
+      return;
+    }
+    const orchestrationAttemptId = `web-prewarm-${randomUUID()}`;
+    messageRoutingShellPrewarm.current = { orchestrationAttemptId, userId };
+    void startHostedRuntimeShellPrewarmBestEffort({
+      orchestrationAttemptId,
+      source: "linq-message-routing",
+      userId,
+    });
+  };
   let pendingInstantStartActivationWake: {
     continuation: HostedLinqInstantStartDeferredActivationWake;
     prisma: PrismaClient;
@@ -752,6 +772,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
               event: planningEvent,
+              onEligibleMember: startMessageRoutingShellPrewarm,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
               pendingGroupRosterUnavailable:
@@ -1150,6 +1171,17 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           throw error;
         }
       }
+    }
+
+    if (
+      wakeHandoff
+      && messageRoutingShellPrewarm.current?.userId === wakeHandoff.userId
+    ) {
+      wakeHandoff = {
+        ...wakeHandoff,
+        runtimeShellPrewarmOrchestrationAttemptId:
+          messageRoutingShellPrewarm.current.orchestrationAttemptId,
+      };
     }
 
     scheduleHostedLinqProviderEventIngestionBestEffort({
@@ -2342,6 +2374,7 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
 
 async function prepareHostedLinqThreadRoutingCrypto(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  onEligibleMember?: (memberId: string) => void;
   participantMemberIds: readonly string[];
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
@@ -2386,6 +2419,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
           }),
         warmMailboxRoot: () => warmHostedLinqMailboxPayloadRoot({
           event: input.event,
+          onEligibleMember: input.onEligibleMember,
           prisma: input.prisma,
           threadRoute,
         }),
@@ -2446,6 +2480,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
       preparedDirectMailboxPayloadRoot:
         await prepareHostedLinqDirectMailboxPayloadRoot({
           event: input.event,
+          onEligibleMember: input.onEligibleMember,
           prisma: input.prisma,
           ...(input.reusableDirectCryptoDomainRoots
             ? {
@@ -2930,6 +2965,7 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
  */
 export async function warmHostedLinqMailboxPayloadRoot(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  onEligibleMember?: (memberId: string) => void;
   prisma: PrismaClient | Prisma.TransactionClient;
   threadRoute: Pick<HostedThreadRouteSnapshot, "containerMemberId"> | null;
 }): Promise<{
@@ -2944,6 +2980,7 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
   if (!memberId) {
     return null;
   }
+  input.onEligibleMember?.(memberId);
 
   return {
     memberId,
@@ -2957,6 +2994,7 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
 
 async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  onEligibleMember?: (memberId: string) => void;
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
     memberId: string;
@@ -2983,6 +3021,15 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   }
 
   const context = resolveHostedOnboardingLinqMessageContext(input.event);
+  const activeMemberAccess = readActiveHostedMemberAccess({
+    memberId,
+    prisma: input.prisma,
+  }).then((accessAllowed) => {
+    if (accessAllowed) {
+      input.onEligibleMember?.(memberId);
+    }
+    return accessAllowed;
+  });
   const [identityRecord, routingRecord, accessAllowed, preparedFamilyInvite] =
     await Promise.all([
       readHostedMemberIdentityRecord({
@@ -2993,10 +3040,7 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
         memberId,
         prisma: input.prisma,
       }),
-      readActiveHostedMemberAccess({
-        memberId,
-        prisma: input.prisma,
-      }),
+      activeMemberAccess,
       context.participantContact?.kind === "phone"
         ? resolveHostedFamilyPhoneInvitePreparation({
             acceptedMemberId: memberId,

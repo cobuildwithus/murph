@@ -3094,9 +3094,12 @@ only to cut wake latency and may be dropped at any time with no correctness
 impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
-fence coalesces runners that overlap in the same invocation. The typing-start
-shell hint is the only established-member Web-to-Cloudflare prewarm before
-durable message acceptance. The separate
+fence coalesces runners that overlap in the same invocation. An established
+Linq message starts the same shell hint as soon as pre-transaction routing
+preparation resolves an active member, before KMS and transaction work. That
+request-local hint is advisory and may be dropped;
+the transaction repeats every authority check and the post-Temporal direct
+ensure remains the immediate processing owner. The separate
 first-contact instant-start shell hint obtains the named `UserRunner` stub
 without binding durable state, enters the same per-user consent-mutation barrier
 as authoritative ensures and withdrawal, and re-reads live Web-owned admission.

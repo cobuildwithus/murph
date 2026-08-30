@@ -144,11 +144,27 @@ describe("hosted runtime operational report contracts", () => {
     );
     expect(coldStartReportSql).toContain("Container health check");
     expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-typing-started'");
+    expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-message-routing'");
+    expect(coldStartReportSql).toContain(
+      "shellPrewarmOrchestrationAttemptId}' =",
+    );
+    expect(coldStartReportSql).toContain(
+      "shellPrewarmExpectedOrchestrationAttemptId}'",
+    );
+    expect(coldStartReportSql).toContain(
+      "Prewarm route -> UserRunner constructor start",
+    );
+    expect(coldStartReportSql).toContain(
+      "Prewarm admission -> container hint",
+    );
+    expect(coldStartReportSql).toContain(
+      "Prewarm container hint -> direct ensure route",
+    );
     expect(coldStartReportSql).toContain(
       "trace.reply_runtime_attempt_id = trace.runtime_attempt_id",
     );
     expect(coldStartReportSql).toContain("causal_candidate_count = 1");
-    expect(coldStartReportSql).toContain("Causal typing hint -> ingress accepted");
+    expect(coldStartReportSql).toContain("Causal shell-prewarm hint -> ingress accepted");
     expect(coldStartReportSql).not.toContain("shellPrewarmLastHintAtEpochMs");
   });
 });
@@ -231,23 +247,23 @@ describe.skipIf(!runPostgresProof)(
         ]);
 
         expect(stdout).toContain(
-          "prewarm_cold_start_observed,Causal typing hint -> ingress accepted,1,500.0,500.0,500.0",
+          "prewarm_typing_cold_start_observed,Causal shell-prewarm hint -> ingress accepted,1,500.0,500.0,500.0",
         );
         expect(stdout).toContain(
-          "prewarm_cold_start_observed,Ingress accepted -> runner job,1,1000.0,1000.0,1000.0",
+          "prewarm_typing_cold_start_observed,Ingress accepted -> runner job,1,1000.0,1000.0,1000.0",
         );
         expect(stdout).toContain(
-          "prewarm_cold_start_observed,Ingress accepted -> provider start,1,2000.0,2000.0,2000.0",
+          "prewarm_typing_cold_start_observed,Ingress accepted -> provider start,1,2000.0,2000.0,2000.0",
         );
         expect(stdout).toContain(
-          "prewarm_cold_start_observed,Ingress accepted -> reply accepted,1,3000.0,3000.0,3000.0",
+          "prewarm_typing_cold_start_observed,Ingress accepted -> reply accepted,1,3000.0,3000.0,3000.0",
         );
         expect(stdout).toContain(
           "no_observed_prewarm,Ingress accepted -> reply accepted,1,4000.0,4000.0,4000.0",
         );
-        expect(stdout).not.toContain("prewarm_failed,");
-        expect(stdout).not.toContain("prewarm_start_issued_warm,");
-        expect(stdout).not.toContain("prewarm_superseded,");
+        expect(stdout).not.toContain("prewarm_typing_failed,");
+        expect(stdout).not.toContain("prewarm_typing_start_issued_warm,");
+        expect(stdout).not.toContain("prewarm_typing_superseded,");
       } finally {
         await runPsql(connection, [
           "--quiet",

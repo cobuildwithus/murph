@@ -47,9 +47,11 @@ Internal control routes:
   cancellation. Callback-signed Temporal/default work retains the cooperative
   wake-and-retry behavior.
 - `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
-  Vercel OIDC-authenticated typing/instant-start shell hint. Its bounded source
-  distinguishes those two existing callers; an empty legacy request remains
-  accepted as `unknown`. It rechecks live admission and returns after the named
+  Vercel OIDC-authenticated typing, established-message-routing, or instant-start
+  shell hint. Its bounded source and UUID-shaped attempt id distinguish those
+  callers and correlate only diagnostic phase stamps; a legacy request without
+  correlation fields remains accepted but cannot enter an exact-id cohort. It
+  rechecks live admission and returns after the named
   container registers an asynchronous start attempt; it does not wait for
   readiness or create runtime authority.
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
@@ -462,17 +464,19 @@ murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
 
 Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
 window. The first result groups uniquely matched Web-direct Linq runtime
-attempts by the causal typing shell-prewarm observation consumed by their
-container readiness call. It shows causal-hint lead time plus
+attempts by a chronology-safe typing observation or an exact attempt-id-matched
+message-routing shell-prewarm observation consumed by their container readiness
+call. It shows causal-hint lead time plus
 accepted-to-runner, provider, and reply percentiles, all from the same ingress
 trace and same reply runtime attempt. Instant-start, unknown-source, ambiguous,
 backlog, and reply-handoff rows are omitted rather than inferred. A
 `no_observed_prewarm` row is a comparison cohort, not proof that no hint was
 sent, because stop, destroy, or Durable Object eviction may clear optional
-in-memory diagnostics. `prewarm_start_issued_warm` means the platform start call
+in-memory diagnostics. `prewarm_typing_start_issued_warm` and
+`prewarm_message_routing_start_issued_warm` mean the platform start call
 completed without a newly observed lifecycle start;
-`prewarm_cold_start_observed` means the same container lifecycle did observe a
-cold start. Neither means health readiness completed. One observation contains
+their corresponding `*_cold_start_observed` cohorts mean the same container
+lifecycle did observe a cold start. Neither means health readiness completed. One observation contains
 one terminal operation outcome; later hints may increase only its bounded
 coalesced-hint count and never launch another operation before readiness
 consumes it.
@@ -501,8 +505,11 @@ marker differences cannot discard a coherent multi-item invocation. Temporal
 activities that begin after runner acceptance are active wakes, not startup
 candidates, and are removed before ambiguity is assessed. Conflicting
 launch-owner evidence also fails closed. Warm direct
-wakes are omitted because they create no new runner job. The final table splits
-the same causal direct samples across Durable Object dispatch, UserRunner
+wakes are omitted because they create no new runner job. The final table first
+splits an exact matched message-routing hint across Web request/auth,
+prewarm-specific Durable Object activation, consent admission, container-hint
+registration, and effective lead time. It then splits the same causal direct
+samples across Durable Object dispatch, UserRunner
 constructor initialization, consent locking, the existing health-data admission
 callback, runner-state operations, the parallel container-readiness and
 invocation-preparation branches, invocation launch, and runner-job acceptance.

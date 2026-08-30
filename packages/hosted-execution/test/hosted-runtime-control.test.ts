@@ -57,6 +57,7 @@ import {
   resolveHostedAiUsageTokenPricingBasis,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
+  sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -1614,6 +1615,20 @@ describe("hosted runtime control contracts", () => {
         directEnsureResultKind: "runtime_processing_accepted",
         directEnsureAction: "woken",
         directEnsureRuntimeAttemptId: "runtime-attempt-direct",
+        shellPrewarmExpectedOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_001,
+        shellPrewarmRuntimeControlAuthStartedAtEpochMs: 1_777_000_000_002,
+        shellPrewarmRuntimeControlAuthFinishedAtEpochMs: 1_777_000_000_003,
+        shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_777_000_000_004,
+        shellPrewarmUserRunnerConstructorStartedAtEpochMs: 1_777_000_000_005,
+        shellPrewarmUserRunnerConstructorFinishedAtEpochMs: 1_777_000_000_006,
+        shellPrewarmUserRunnerRpcStartedAtEpochMs: 1_777_000_000_007,
+        shellPrewarmConsentLockAcquiredAtEpochMs: 1_777_000_000_008,
+        shellPrewarmAdmissionReadStartedAtEpochMs: 1_777_000_000_009,
+        shellPrewarmAdmissionReadFinishedAtEpochMs: 1_777_000_000_010,
         runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
         runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
@@ -1663,7 +1678,7 @@ describe("hosted runtime control contracts", () => {
         shellPrewarmOperationElapsedMs: 2,
         shellPrewarmHintCount: 2,
         shellPrewarmOutcome: "cold_start_observed",
-        shellPrewarmSource: "linq-typing-started",
+        shellPrewarmSource: "linq-message-routing",
         workspaceReadElapsedMs: 30,
         runtimeStoreEnsureElapsedMs: 40,
         runtimeInvocationPreparationElapsedMs: 60,
@@ -1933,6 +1948,8 @@ describe("hosted runtime control contracts", () => {
       { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
       { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
       { directEnsureOrchestrationAttemptId: "web-ingress-not-a-uuid" }, // correlation id must be bounded
+      { shellPrewarmOrchestrationAttemptId: "web-prewarm-not-a-uuid" }, // prewarm correlation ids have their own exact prefix and shape
+      { shellPrewarmExpectedOrchestrationAttemptId: "web-ingress-123e4567-e89b-42d3-a456-426614174000" }, // direct-wake ids cannot enter the prewarm channel
       { directEnsureResultKind: "failed", rawError: "secret" }, // result values and arbitrary error metadata are forbidden
       { directEnsureResultKind: "retry_later", directEnsureRetryReason: "container_rpc_timeout" }, // retry reasons remain in structured logs only
       { directEnsureResultKind: "retry_later", directEnsureAction: "woken" }, // accepted metadata must match the result
@@ -2327,6 +2344,26 @@ describe("hosted runtime control contracts", () => {
       directEnsureAction: "woken",
       directEnsureRuntimeAttemptId: "runtime-attempt-direct",
       directEnsureRetryReason: "container_rpc_timeout",
+    })).toBeNull();
+  });
+
+  it("projects shell-prewarm diagnostics onto the narrow correlation schema", () => {
+    expect(sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics({
+      directEnsureRequestStartedAtEpochMs: 1_777_000_000_099,
+      shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_777_000_000_030,
+      shellPrewarmOrchestrationAttemptId:
+        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+      shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_000,
+      shellPrewarmSource: "linq-message-routing",
+    })).toEqual({
+      shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_777_000_000_030,
+      shellPrewarmOrchestrationAttemptId:
+        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+      shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_000,
+    });
+
+    expect(sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics({
+      shellPrewarmOrchestrationAttemptId: "invalid",
     })).toBeNull();
   });
 

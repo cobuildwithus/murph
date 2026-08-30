@@ -3556,7 +3556,12 @@ describe("cloudflare worker routes", () => {
         await signControlRequest(new Request(
           "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
           {
-            body: JSON.stringify({ source: "linq-typing-started" }),
+            body: JSON.stringify({
+              orchestrationAttemptId:
+                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+              requestStartedAtEpochMs: 1_788_000_000_000,
+              source: "linq-message-routing",
+            }),
             headers: { "content-type": "application/json; charset=utf-8" },
             method: "POST",
           },
@@ -3570,7 +3575,13 @@ describe("cloudflare worker routes", () => {
       expect(stub.bindUser).not.toHaveBeenCalled();
       expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
         "test-user",
-        "linq-typing-started",
+        "linq-message-routing",
+        expect.objectContaining({
+          shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
+          shellPrewarmOrchestrationAttemptId:
+            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+          shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+        }),
       );
       expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
@@ -3598,9 +3609,15 @@ describe("cloudflare worker routes", () => {
       const bindUser = vi.fn(async (userId: string) =>
         await harness.runner.bindUser(userId)
       );
-      const prewarmRuntimeShellForUser = vi.fn(async (userId: string) =>
-        await harness.runner.prewarmRuntimeShellForUser(userId)
-      );
+      const prewarmRuntimeShellForUser = vi.fn(async (
+        userId: string,
+        source?: Parameters<typeof harness.runner.prewarmRuntimeShellForUser>[1],
+        orchestration?: Parameters<typeof harness.runner.prewarmRuntimeShellForUser>[2],
+      ) => await harness.runner.prewarmRuntimeShellForUser(
+        userId,
+        source,
+        orchestration,
+      ));
       const stub = createUserRunnerStub({
         bindUser,
         prewarmRuntimeShellForUser,
@@ -3619,6 +3636,9 @@ describe("cloudflare worker routes", () => {
       expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
         "test-user",
         undefined,
+        expect.objectContaining({
+          shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
+        }),
       );
       expect(harness.namespace.getByName).not.toHaveBeenCalled();
       expect(

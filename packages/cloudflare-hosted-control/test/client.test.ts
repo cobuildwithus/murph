@@ -433,6 +433,8 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     await expect(client.prewarmRuntimeShell({
+      orchestrationAttemptId: "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+      requestStartedAtEpochMs: 1_788_000_000_000,
       source: "linq-typing-started",
       userId: "user_123",
     })).resolves.toEqual({
@@ -445,7 +447,7 @@ describe("createCloudflareHostedControlClient", () => {
       "https://runner.example.test/internal/users/user_123/runtime/shell-prewarm",
     );
     expect(init).toMatchObject({
-      body: '{"source":"linq-typing-started"}',
+      body: '{"orchestrationAttemptId":"web-prewarm-123e4567-e89b-42d3-a456-426614174000","requestStartedAtEpochMs":1788000000000,"source":"linq-typing-started"}',
       method: "POST",
     });
     const headers = new Headers(init.headers);
@@ -463,6 +465,8 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     await expect(client.prewarmRuntimeShell({
+      orchestrationAttemptId: "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+      requestStartedAtEpochMs: 1_788_000_000_000,
       source: "linq-typing-started",
       userId: "user_123",
     })).rejects.toThrow(
