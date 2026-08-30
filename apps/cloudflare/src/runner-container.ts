@@ -2501,127 +2501,158 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     });
 
-    const remainingTimeoutMs = Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt));
-    const readinessTimeoutMs = Math.min(remainingTimeoutMs, readyTimeoutMs);
-
-    const coldStartWaitStartedAtMs = Date.now();
-    const currentStart = this.recordContainerStartIssued(
-      coldStartWaitStartedAtMs,
+    let readinessTimeoutMs = Math.min(
+      Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt)),
       readyTimeoutMs,
     );
     let coldStartTiming: RunnerContainerEnsureReadyResult["coldStartTiming"];
-    try {
-      await this.startAndWaitForPorts({
-        cancellationOptions: {
-          abort: combineRunnerContainerAbortSignals(
-            operationAbortSignal,
-            AbortSignal.timeout(readinessTimeoutMs),
-          ),
-          instanceGetTimeoutMS: readinessTimeoutMs,
-          portReadyTimeoutMS: readinessTimeoutMs,
-          waitInterval: RUNNER_WAIT_INTERVAL_MS,
-        },
-      });
+    for (
+      let coldStartAttempt = 0;
+      coldStartAttempt < 2;
+      coldStartAttempt += 1
+    ) {
+      throwIfRunnerContainerOperationAborted(operationAbortSignal);
       if (options.startupFailureObservation) {
-        options.startupFailureObservation.stage = "cold_health_or_finalization";
+        options.startupFailureObservation.stage = "cold_start_or_ports";
       }
-      const portsReadyAtEpochMs = Date.now();
-      const healthCheckStartedAtEpochMs = Date.now();
-      const healthStartupTiming = await assertRunnerHealthy(
-        this,
-        readinessTimeoutMs,
-        this.environment,
-        operationAbortSignal,
+      readinessTimeoutMs = Math.min(
+        Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt)),
+        readyTimeoutMs,
       );
-      const healthCheckFinishedAtEpochMs = Date.now();
-      const readyStart = this.recordContainerReady(
-        "cold-start-ready",
-        undefined,
-        currentStart,
+      const coldStartWaitStartedAtMs = Date.now();
+      const currentStart = this.recordContainerStartIssued(
+        coldStartWaitStartedAtMs,
+        readyTimeoutMs,
       );
-      if (!readyStart) {
-        throw new Error(
-          "Hosted runner container changed while cold readiness was recorded.",
-        );
-      }
-      this.recordRecentReadinessProof(input.userId, readyStart);
-      const readyObservedAtEpochMs = Date.now();
-
-      coldStartTiming = {
-        healthCheckFinishedAtEpochMs,
-        healthCheckStartedAtEpochMs,
-        ...(currentStart.onStartAtMs === null ? {} : {
-          onStartAtEpochMs: currentStart.onStartAtMs,
-        }),
-        portsReadyAtEpochMs,
-        ...(healthStartupTiming.processStartedAtEpochMs === undefined ? {} : {
-          processStartedAtEpochMs: healthStartupTiming.processStartedAtEpochMs,
-        }),
-        readyObservedAtEpochMs,
-        ...(healthStartupTiming.serverListeningAtEpochMs === undefined ? {} : {
-          serverListeningAtEpochMs: healthStartupTiming.serverListeningAtEpochMs,
-        }),
-        startIssuedAtEpochMs:
-          currentStart.issuedAtMs ?? coldStartWaitStartedAtMs,
-        stateReadFinishedAtEpochMs,
-      };
-    } catch (error) {
-      if (this.currentContainerStart !== currentStart) {
-        throw error;
-      }
-      const pendingColdStart = this.readPendingColdStart({
-        error,
-        expectedStart: currentStart,
-        maxAgeMs: readyTimeoutMs,
-        operationAbortSignal,
-        state: {
-          lastChange: currentStart.startedAtMs,
-          status: "running",
-        },
-      });
-      if (pendingColdStart) {
-        this.logPendingColdStart({
-          ageMs: pendingColdStart.ageMs,
-          maxAgeMs: readyTimeoutMs,
-          readinessStartedAtMs: readinessStartedAt,
+      try {
+        await this.startAndWaitForPorts({
+          cancellationOptions: {
+            abort: combineRunnerContainerAbortSignals(
+              operationAbortSignal,
+              AbortSignal.timeout(readinessTimeoutMs),
+            ),
+            instanceGetTimeoutMS: readinessTimeoutMs,
+            portReadyTimeoutMS: readinessTimeoutMs,
+            waitInterval: RUNNER_WAIT_INTERVAL_MS,
+          },
+        });
+        if (options.startupFailureObservation) {
+          options.startupFailureObservation.stage = "cold_health_or_finalization";
+        }
+        const portsReadyAtEpochMs = Date.now();
+        const healthCheckStartedAtEpochMs = Date.now();
+        const healthStartupTiming = await assertRunnerHealthy(
+          this,
           readinessTimeoutMs,
-          statusBeforeStart: status,
+          this.environment,
+          operationAbortSignal,
+        );
+        const healthCheckFinishedAtEpochMs = Date.now();
+        const readyStart = this.recordContainerReady(
+          "cold-start-ready",
+          undefined,
+          currentStart,
+        );
+        if (!readyStart) {
+          throw new Error(
+            "Hosted runner container changed while cold readiness was recorded.",
+          );
+        }
+        this.recordRecentReadinessProof(input.userId, readyStart);
+        const readyObservedAtEpochMs = Date.now();
+
+        coldStartTiming = {
+          healthCheckFinishedAtEpochMs,
+          healthCheckStartedAtEpochMs,
+          ...(currentStart.onStartAtMs === null ? {} : {
+            onStartAtEpochMs: currentStart.onStartAtMs,
+          }),
+          portsReadyAtEpochMs,
+          ...(healthStartupTiming.processStartedAtEpochMs === undefined ? {} : {
+            processStartedAtEpochMs: healthStartupTiming.processStartedAtEpochMs,
+          }),
+          readyObservedAtEpochMs,
+          ...(healthStartupTiming.serverListeningAtEpochMs === undefined ? {} : {
+            serverListeningAtEpochMs: healthStartupTiming.serverListeningAtEpochMs,
+          }),
+          startIssuedAtEpochMs:
+            currentStart.issuedAtMs ?? coldStartWaitStartedAtMs,
+          stateReadFinishedAtEpochMs,
+        };
+        break;
+      } catch (error) {
+        if (this.currentContainerStart !== currentStart) {
+          throw error;
+        }
+        const pendingColdStart = this.readPendingColdStart({
+          error,
+          expectedStart: currentStart,
+          maxAgeMs: readyTimeoutMs,
+          operationAbortSignal,
+          state: {
+            lastChange: currentStart.startedAtMs,
+            status: "running",
+          },
+        });
+        if (pendingColdStart) {
+          this.logPendingColdStart({
+            ageMs: pendingColdStart.ageMs,
+            maxAgeMs: readyTimeoutMs,
+            readinessStartedAtMs: readinessStartedAt,
+            readinessTimeoutMs,
+            statusBeforeStart: status,
+            userId: input.userId,
+          });
+          throw error;
+        }
+        this.clearContainerPendingWindow(currentStart);
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            readinessLatencyMs: Date.now() - readinessStartedAt,
+            readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
+            readinessTimeoutMs,
+            runnerPort: RUNNER_PORT,
+            startMode: "cold",
+            statusBeforeStart: status,
+          },
+          error,
+          level: "error",
+          message: "Hosted execution container failed to start or listen.",
+          phase: "container.starting",
           userId: input.userId,
         });
+        const replaceStaleRolloutImage =
+          coldStartAttempt === 0
+          && error instanceof HostedRunnerContainerBundleMismatchError;
+        let cleanupSettled = false;
+        if (options.surfaceCleanupUnsettled) {
+          await this.stopWarmContainerForReadiness({
+            cause: error,
+            expectedStart: currentStart,
+            failClosed: false,
+            reason: "cold-start-failure",
+          });
+          cleanupSettled = true;
+        } else {
+          cleanupSettled = await this.stopWarmContainer({
+            expectedStart: currentStart,
+            failClosed: false,
+            reason: "cold-start-failure",
+          }).catch(() => false);
+        }
+        if (
+          replaceStaleRolloutImage
+          && cleanupSettled
+          && this.currentContainerStart === null
+        ) {
+          throwIfRunnerContainerOperationAborted(operationAbortSignal);
+          if ((Date.now() - readinessStartedAt) < readinessBudgetMs) {
+            continue;
+          }
+        }
         throw error;
       }
-      this.clearContainerPendingWindow(currentStart);
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          readinessLatencyMs: Date.now() - readinessStartedAt,
-          readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
-          readinessTimeoutMs,
-          runnerPort: RUNNER_PORT,
-          startMode: "cold",
-          statusBeforeStart: status,
-        },
-        error,
-        level: "error",
-        message: "Hosted execution container failed to start or listen.",
-        phase: "container.starting",
-        userId: input.userId,
-      });
-      if (options.surfaceCleanupUnsettled) {
-        await this.stopWarmContainerForReadiness({
-          cause: error,
-          expectedStart: currentStart,
-          failClosed: false,
-          reason: "cold-start-failure",
-        });
-      } else {
-        await this.stopWarmContainer({
-          expectedStart: currentStart,
-          failClosed: false,
-          reason: "cold-start-failure",
-        }).catch(() => undefined);
-      }
-      throw error;
     }
 
     emitHostedExecutionStructuredLog({
