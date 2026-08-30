@@ -21,6 +21,12 @@ interface StaticHeader {
   value: string;
 }
 
+interface HostedWebWebpackConfig {
+  resolve: {
+    alias?: Record<string, unknown>;
+  };
+}
+
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
 const MURPH_SAFE_HEADER_SOURCE = "/search/:path*";
 const PRIVY_CUSTOM_DOMAIN_ENV_KEYS = ["PRIVY_CUSTOM_AUTH_DOMAIN"] as const;
@@ -271,6 +277,22 @@ export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
   };
 }
 
+export function configureHostedWebWebpack(
+  config: HostedWebWebpackConfig,
+): HostedWebWebpackConfig {
+  if (!hasOptionalModule("@farcaster/mini-app-solana")) {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "@farcaster/mini-app-solana": path.resolve(
+        appDir,
+        "src/lib/empty-module.ts",
+      ),
+    };
+  }
+
+  return config;
+}
+
 export function configureHostedWebWorkflowLocalDataDir(
   phase: string,
   environment: NodeJS.ProcessEnv = process.env,
@@ -320,8 +342,10 @@ export function buildHostedWebNextConfig(
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(environment),
       // Source-map emission is the largest proven build-memory cost.
       turbopackSourceMaps: false,
-      // Workflow contributes Webpack configuration, so Next keeps compilation
-      // in the CLI process unless webpackBuildWorker is explicitly forced.
+      // Workflow contributes Webpack configuration, which disables Next's
+      // automatic worker selection. Force the supported worker so compiler
+      // memory is released before static-generation workers start.
+      webpackBuildWorker: true,
       webpackMemoryOptimizations: true,
     },
     outputFileTracingIncludes: {
@@ -385,6 +409,7 @@ export function buildHostedWebNextConfig(
           === HOSTED_WEB_PREPARED_TYPECHECK_COMPLETE,
       tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
     },
+    webpack: configureHostedWebWebpack,
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,

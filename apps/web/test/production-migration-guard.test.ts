@@ -1975,12 +1975,12 @@ describe("hosted web production migration guard", () => {
     assert.match(buildScript, /^pnpm public-routes:waf-check/u);
     assert.doesNotMatch(buildScript, /run-with-host-verification-slot/u);
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
-    assert.match(productionNextBuildScript, /build_old_space_mb=3072/u);
-    assert.doesNotMatch(productionNextBuildScript, /build_worker_old_space_mb/u);
+    assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
+    assert.match(productionNextBuildScript, /build_worker_old_space_mb=3072/u);
     assert.match(productionNextBuildScript, /typecheck_old_space_mb=3584/u);
     assert.match(
       productionNextBuildScript,
-      /build_cache_epoch=webpack-next-16\.3-v4-in-process-cold-webpack/u,
+      /build_cache_epoch=webpack-next-16\.3-v5-isolated-worker-cold-webpack/u,
     );
     assert.match(productionNextBuildScript, /webpack_cache_dir=\.next\/cache\/webpack/u);
     assert.match(
@@ -1998,7 +1998,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /node "--max-old-space-size=\$build_old_space_mb" "\$next_bin" build --webpack/u,
+      /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
     assert.match(
       productionNextBuildScript,
