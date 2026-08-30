@@ -1471,12 +1471,12 @@ async function initializeWarmTurn(
 function writeSubAgentActivity(
   child: MockChildProcess,
   threadId: string,
+  turnId: string,
   agentThreadId: string,
   kind: 'completed' | 'interacted' | 'interrupted' | 'started' = 'started',
   metadata: {
     agentPath?: string
     id?: string
-    turnId?: string
   } = {},
 ): void {
   child.stdout.write(jsonLine({
@@ -1490,7 +1490,7 @@ function writeSubAgentActivity(
         type: 'subAgentActivity',
       },
       threadId,
-      ...(metadata.turnId ? { turnId: metadata.turnId } : {}),
+      turnId,
     },
   }))
 }

@@ -2842,12 +2842,12 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-background-boundary-parent',
+          'turn-background-boundary-parent',
           'thread-background-boundary-child',
           'started',
           {
             agentPath: '/root/onboarding-import',
             id: 'spawn-background-boundary-child',
-            turnId: 'turn-background-boundary-parent',
           },
         )
         writeCompletedTurn(
@@ -2915,6 +2915,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-interrupted-boundary-parent',
+          'turn-interrupted-boundary-parent',
           'thread-interrupted-boundary-child',
         )
         writeStartedTurn(
@@ -2991,12 +2992,8 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-multi-root-boundary-parent-a',
+          'turn-multi-root-boundary-parent-a',
           'thread-multi-root-boundary-child-a',
-        )
-        writeStartedTurn(
-          child,
-          'thread-multi-root-boundary-child-a',
-          'turn-multi-root-boundary-child-a',
         )
         writeCompletedTurn(
           child,
@@ -3011,9 +3008,17 @@ describe('assistant codex event shaping', () => {
           threadId: 'thread-multi-root-boundary-parent-b',
           turnId: 'turn-multi-root-boundary-parent-b',
         })
+        // The first root already admitted this child. Its own start can arrive
+        // after the later root binds without transferring parent ownership.
+        writeStartedTurn(
+          child,
+          'thread-multi-root-boundary-child-a',
+          'turn-multi-root-boundary-child-a',
+        )
         writeSubAgentActivity(
           child,
           'thread-multi-root-boundary-parent-b',
+          'turn-multi-root-boundary-parent-b',
           'thread-multi-root-boundary-child-b',
         )
         writeStartedTurn(
@@ -3107,6 +3112,7 @@ describe('assistant codex event shaping', () => {
           writeSubAgentActivity(
             child,
             'thread-three-child-parent',
+            'turn-three-child-parent',
             `thread-three-child-${suffix}`,
           )
           writeStartedTurn(
@@ -3186,6 +3192,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-failed-child-parent',
+          'turn-failed-child-parent',
           'thread-failed-child-child',
         )
         writeStartedTurn(
@@ -3233,6 +3240,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-completed-child-parent',
+          'turn-completed-child-parent',
           'thread-completed-child-child',
         )
         writeStartedTurn(
@@ -3248,11 +3256,11 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-completed-child-parent',
+          'turn-completed-child-parent',
           'thread-completed-child-child',
           'completed',
           {
             id: 'subagent-completed-turn-completed-child-child',
-            turnId: 'turn-completed-child-parent',
           },
         )
 
@@ -3292,6 +3300,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-late-completed-child-parent',
+          'turn-late-completed-child-parent',
           'thread-late-completed-child-child',
         )
         writeStartedTurn(
@@ -3316,11 +3325,11 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-late-completed-child-parent',
+          'turn-late-completed-child-parent',
           'thread-late-completed-child-child',
           'completed',
           {
             id: 'subagent-completed-turn-late-completed-child-child',
-            turnId: 'turn-late-completed-child-parent',
           },
         )
         lateCompletionWritten.resolve(undefined)
@@ -3342,9 +3351,36 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
-    it('ignores a prior child completion while a successor boundary is active', async () => {
-      const workingDirectory = await createTempDir('assistant-codex-stale-completed-child-work-')
-      const codexHome = await createTempDir('assistant-codex-stale-completed-child-home-')
+    it.each([
+      {
+        name: 'an independent later root',
+        resumeSessionId: null,
+        scenario: 'independent',
+        successorThreadId: 'thread-stale-completed-child-parent-b',
+      },
+      {
+        name: 'a resumed root thread',
+        resumeSessionId: 'thread-stale-completed-child-parent-a',
+        scenario: 'resumed',
+        successorThreadId: 'thread-stale-completed-child-parent-a',
+      },
+    ])('ignores a prior child completion while $name is active', async ({
+      resumeSessionId,
+      scenario,
+      successorThreadId,
+    }) => {
+      const successorChildThreadId =
+        `thread-stale-completed-child-child-b-${scenario}`
+      const successorChildTurnId =
+        `turn-stale-completed-child-child-b-${scenario}`
+      const successorTurnId =
+        `turn-stale-completed-child-parent-b-${scenario}`
+      const workingDirectory = await createTempDir(
+        `assistant-codex-stale-completed-child-${scenario}-work-`,
+      )
+      const codexHome = await createTempDir(
+        `assistant-codex-stale-completed-child-${scenario}-home-`,
+      )
       const spawnedChildren: MockChildProcess[] = []
       const completeSuccessorChild = createDeferred<void>()
       const staleCompletionWritten = createDeferred<void>()
@@ -3358,6 +3394,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-stale-completed-child-parent-a',
+          'turn-stale-completed-child-parent-a',
           'thread-stale-completed-child-child-a',
         )
         writeStartedTurn(
@@ -3381,45 +3418,65 @@ describe('assistant codex event shaping', () => {
           scannedThreadIds.push(String(asRecord(request.params).threadId))
         }
 
-        await writeWarmTurnStarted({
-          child,
-          requestCount: 2,
-          threadId: 'thread-stale-completed-child-parent-b',
-          turnId: 'turn-stale-completed-child-parent-b',
-        })
+        if (resumeSessionId) {
+          const resume = await waitForRpcMethod(child, 'thread/resume')
+          const resumeParams = asRecord(resume.params)
+          child.stdout.write(jsonLine({
+            id: resume.id,
+            result: {
+              approvalPolicy: resumeParams.approvalPolicy,
+              cwd: resumeParams.cwd,
+              sandbox: codexSandboxPolicyForMode('workspace-write'),
+              thread: { id: successorThreadId },
+            },
+          }))
+          const turn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: turn.id,
+            result: { turn: { id: successorTurnId } },
+          }))
+        } else {
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 2,
+            threadId: successorThreadId,
+            turnId: successorTurnId,
+          })
+        }
         writeSubAgentActivity(
           child,
-          'thread-stale-completed-child-parent-b',
-          'thread-stale-completed-child-child-b',
+          successorThreadId,
+          successorTurnId,
+          successorChildThreadId,
         )
         writeStartedTurn(
           child,
-          'thread-stale-completed-child-child-b',
-          'turn-stale-completed-child-child-b',
+          successorChildThreadId,
+          successorChildTurnId,
         )
 
         writeSubAgentActivity(
           child,
           'thread-stale-completed-child-parent-a',
+          'turn-stale-completed-child-parent-a',
           'thread-stale-completed-child-child-a',
           'completed',
           {
             id: 'subagent-completed-turn-stale-completed-child-child-a',
-            turnId: 'turn-stale-completed-child-parent-a',
           },
         )
         staleCompletionWritten.resolve(undefined)
         writeCompletedTurn(
           child,
-          'thread-stale-completed-child-parent-b',
-          'turn-stale-completed-child-parent-b',
+          successorThreadId,
+          successorTurnId,
         )
 
         await completeSuccessorChild.promise
         writeCompletedTurn(
           child,
-          'thread-stale-completed-child-child-b',
-          'turn-stale-completed-child-child-b',
+          successorChildThreadId,
+          successorChildTurnId,
         )
         for (let requestCount = 3; requestCount <= 4; requestCount += 1) {
           const request = await respondToBackgroundTerminals(child, requestCount)
@@ -3434,11 +3491,15 @@ describe('assistant codex event shaping', () => {
       )
       await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
 
-      await executeBackgroundBoundaryTurn(
+      await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
         codexHome,
+        env: { PATH: '/custom/bin' },
+        prompt: 'start the successor child boundary',
+        resumeSessionId,
+        sandbox: 'workspace-write',
         workingDirectory,
-        'start the successor child boundary',
-      )
+      })
       await staleCompletionWritten.promise
 
       const publishCheckpoint = vi.fn()
@@ -3454,11 +3515,51 @@ describe('assistant codex event shaping', () => {
       expect(scannedThreadIds).toEqual([
         'thread-stale-completed-child-parent-a',
         'thread-stale-completed-child-child-a',
-        'thread-stale-completed-child-parent-b',
-        'thread-stale-completed-child-child-b',
+        successorThreadId,
+        successorChildThreadId,
       ])
       expect(spawnedChildren[0]?.signalCode).toBeNull()
       expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('fails closed on a current-turn completion for an unadmitted child', async () => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-untracked-completed-child-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-untracked-completed-child-home-',
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_876, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-untracked-completed-child-parent',
+          'turn-untracked-completed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-untracked-completed-child-parent',
+          'turn-untracked-completed-child-parent',
+          'thread-untracked-completed-child-child',
+          'completed',
+          { id: 'subagent-completed-turn-untracked-completed-child-child' },
+        )
+        writeCompletedTurn(
+          child,
+          'thread-untracked-completed-child-parent',
+          'turn-untracked-completed-child-parent',
+        )
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'attempt to complete an unadmitted child',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
+      })
+      expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
     })
 
     it('tracks every sequential child admitted before the boundary', async () => {
@@ -3475,6 +3576,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-sequential-parent',
+          'turn-sequential-parent',
           'thread-sequential-child-a',
         )
         writeStartedTurn(
@@ -3502,6 +3604,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-sequential-parent',
+          'turn-sequential-parent',
           'thread-sequential-child-b',
         )
         writeCompletedTurn(
@@ -3551,12 +3654,14 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-child-interaction-child',
+          'turn-child-interaction-child',
           'thread-child-interaction-parent',
           'interacted',
         )
         writeSubAgentActivity(
           child,
           'thread-child-interaction-parent',
+          'turn-child-interaction-parent',
           'thread-child-interaction-child',
         )
         writeCompletedTurn(
@@ -3590,6 +3695,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-child-terminal-parent',
+          'turn-child-terminal-parent',
           'thread-child-terminal-child',
         )
         writeStartedTurn(
