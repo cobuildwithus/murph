@@ -8,6 +8,7 @@ import type { HealthCommonsCatalogEntity } from "@murphai/contracts";
 
 const buildHealthCommonsCatalogMock = vi.hoisted(() => vi.fn());
 const generatedRootRenameControl = vi.hoisted(() => ({
+  beforeReleaseDelayedTargetMove: null as (() => Promise<void>) | null,
   delayFirstTargetMove: false,
   delayedTargetMoves: 0,
   releaseDelayedTargetMove: null as (() => void) | null,
@@ -62,6 +63,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         generatedRootRenameControl.delayFirstTargetMove
         && newPath === generatedRootRenameControl.targetRoot
       ) {
+        await generatedRootRenameControl.beforeReleaseDelayedTargetMove?.();
         generatedRootRenameControl.releaseDelayedTargetMove?.();
         generatedRootRenameControl.releaseDelayedTargetMove = null;
       }
@@ -167,6 +169,7 @@ describe("@murphai/health-commons build determinism", () => {
     buildHealthCommonsCatalogMock.mockReset();
     buildHealthCommonsSourceArtifactIndexMock.mockClear();
     buildHealthCommonsSourceIndexMock.mockClear();
+    generatedRootRenameControl.beforeReleaseDelayedTargetMove = null;
     generatedRootRenameControl.delayFirstTargetMove = false;
     generatedRootRenameControl.delayedTargetMoves = 0;
     generatedRootRenameControl.releaseDelayedTargetMove = null;
@@ -322,6 +325,45 @@ describe("@murphai/health-commons build determinism", () => {
 
       generatedRootRenameControl.delayFirstTargetMove = true;
       generatedRootRenameControl.targetRoot = generatedRoot;
+
+      const outcomes = await Promise.allSettled([
+        writeHealthCommonsGeneratedArtifacts({
+          check: false,
+          contentRoot: "health-commons-content",
+          generatedRoot,
+        }),
+        writeHealthCommonsGeneratedArtifacts({
+          check: false,
+          contentRoot: "health-commons-content",
+          generatedRoot,
+        }),
+      ]);
+
+      expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+      expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+      await expect(readdir(testRoot)).resolves.toEqual(["generated"]);
+    } finally {
+      await rm(testRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a concurrent generated tree with different bytes", async () => {
+    const testRoot = await pathFromTempDir("health-commons-byte-mismatch-generated-");
+    const generatedRoot = path.join(testRoot, "generated");
+    buildHealthCommonsCatalogMock.mockResolvedValue(createCatalog("�"));
+
+    try {
+      await writeHealthCommonsGeneratedArtifacts({
+        check: false,
+        contentRoot: "health-commons-content",
+        generatedRoot,
+      });
+
+      generatedRootRenameControl.delayFirstTargetMove = true;
+      generatedRootRenameControl.targetRoot = generatedRoot;
+      generatedRootRenameControl.beforeReleaseDelayedTargetMove = async () => {
+        await writeFile(path.join(generatedRoot, "catalog.hash"), Buffer.from([0xff, 0x0a]));
+      };
 
       const outcomes = await Promise.allSettled([
         writeHealthCommonsGeneratedArtifacts({

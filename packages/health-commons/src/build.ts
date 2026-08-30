@@ -259,36 +259,65 @@ async function readGeneratedTree(root: string): Promise<Map<string, string | nul
 }
 
 async function generatedTreesMatchExactly(leftRoot: string, rightRoot: string): Promise<boolean> {
-  const [leftFiles, rightFiles] = await Promise.all([
-    readGeneratedTree(leftRoot),
-    readGeneratedTree(rightRoot),
+  const [leftEntries, rightEntries] = await Promise.all([
+    readGeneratedTreeSnapshot(leftRoot),
+    readGeneratedTreeSnapshot(rightRoot),
   ]);
-  if (leftFiles.size !== rightFiles.size) {
+  if (leftEntries.size !== rightEntries.size) {
     return false;
   }
 
-  for (const [fileName, leftContent] of leftFiles.entries()) {
-    if (!rightFiles.has(fileName)) {
+  for (const [entryName, leftEntry] of leftEntries.entries()) {
+    const rightEntry = rightEntries.get(entryName);
+    if (!rightEntry || leftEntry.kind !== rightEntry.kind) {
       return false;
     }
-    const rightContent = rightFiles.get(fileName);
-    if (leftContent !== null || rightContent !== null) {
-      if (leftContent !== rightContent) {
-        return false;
-      }
+    if (leftEntry.kind === "directory") {
       continue;
     }
-
-    const [leftBytes, rightBytes] = await Promise.all([
-      readFile(path.join(leftRoot, fileName)),
-      readFile(path.join(rightRoot, fileName)),
-    ]);
-    if (!leftBytes.equals(rightBytes)) {
+    if (rightEntry.kind !== "file" || !leftEntry.bytes.equals(rightEntry.bytes)) {
       return false;
     }
   }
 
   return true;
+}
+
+type GeneratedTreeSnapshotEntry =
+  | { kind: "directory" }
+  | { bytes: Buffer; kind: "file" };
+
+async function readGeneratedTreeSnapshot(
+  root: string,
+): Promise<Map<string, GeneratedTreeSnapshotEntry>> {
+  const entries = new Map<string, GeneratedTreeSnapshotEntry>();
+  await collectGeneratedTreeSnapshot(path.resolve(root), "", entries);
+  return entries;
+}
+
+async function collectGeneratedTreeSnapshot(
+  absoluteRoot: string,
+  relativeDir: string,
+  entries: Map<string, GeneratedTreeSnapshotEntry>,
+): Promise<void> {
+  const directoryEntries = await readdir(path.join(absoluteRoot, relativeDir), {
+    withFileTypes: true,
+  });
+  directoryEntries.sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const entry of directoryEntries) {
+    const relativePath = relativeDir ? path.posix.join(relativeDir, entry.name) : entry.name;
+    const absolutePath = path.join(absoluteRoot, relativePath);
+    if (entry.isDirectory()) {
+      entries.set(relativePath, { kind: "directory" });
+      await collectGeneratedTreeSnapshot(absoluteRoot, relativePath, entries);
+      continue;
+    }
+    if (!entry.isFile()) {
+      throw new Error("Unsupported entry in Health Commons generated tree.");
+    }
+    entries.set(relativePath, { bytes: await readFile(absolutePath), kind: "file" });
+  }
 }
 
 async function collectGeneratedTreeFiles(
