@@ -62,6 +62,10 @@ export function registerBatchCommands(cli: Cli.Cli) {
           VAULT_CLI_BATCH_RESULT_SCHEMA as typeof VAULT_CLI_BATCH_RESULT_SCHEMA,
         vault: options.vault,
         count: commands.length,
+        requested: options.command.length,
+        executed: commands.length,
+        succeeded: commands.filter((command) => command.ok).length,
+        stoppedEarly: commands.length < options.command.length,
         failed: commands.filter((command) => !command.ok).length,
         commands,
       }
@@ -198,7 +202,9 @@ async function runBatchCommand(input: {
     const output = renderedFormat && parsedInternalOutput.ok
       ? formatBatchChildOutput(parsedInternalOutput.data, renderedFormat)
       : internalOutput
-    const childError = parseChildCommandError(internalOutput) ?? projectBatchCommandError(error)
+    const parsedOutput = parseJsonOutput(output)
+    const parsedChildError = parseChildCommandError(internalOutput)
+    const childError = parsedChildError ?? projectBatchCommandError(error)
     return {
       index: input.index,
       argv,
@@ -206,7 +212,10 @@ async function runBatchCommand(input: {
       ok: false,
       outputBytes: Buffer.byteLength(output, 'utf8'),
       outputChars: output.length,
-      stdout: output,
+      stdout:
+        input.compact && parsedOutput.ok && parsedChildError !== null
+          ? ''
+          : output,
       error: childError,
     }
   } finally {

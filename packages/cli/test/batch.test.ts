@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 
+import { VAULT_LAYOUT } from '@murphai/contracts'
 import {
   VAULT_CLI_BATCH_RESULT_SCHEMA,
+  vaultCliBatchResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 
 import { runMurphCliAction } from '../src/cli-entry.ts'
@@ -406,6 +408,86 @@ test('batch captures executed child command failures and continues by default', 
       false,
     )
     assert.equal(typeof result.commands[0]?.stdout, 'string')
+  } finally {
+    await rm(parent, {
+      recursive: true,
+      force: true,
+    })
+  }
+})
+
+test('batch preserves query-source recovery fields without echoing private source data', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-query-source-'))
+  const vault = path.join(parent, 'vault')
+  const relativeSourcePath = path.posix.join(
+    VAULT_LAYOUT.auditDirectory,
+    '2026',
+    'invalid.jsonl',
+  )
+  const sourcePath = path.join(vault, relativeSourcePath)
+  const privateMarker = 'private-batch-query-source-marker'
+  const invalidSource = `${JSON.stringify({
+    occurredAt: '2026-08-30T12:00:00.000Z',
+    privatePayload: privateMarker,
+  })}\n`
+
+  try {
+    await runCli(['init', '--vault', vault, '--format', 'json'])
+    await mkdir(path.dirname(sourcePath), { recursive: true })
+    await writeFile(sourcePath, invalidSource, 'utf8')
+
+    const raw = await runCli([
+      'batch',
+      '--compact',
+      '--vault',
+      vault,
+      '--command',
+      '["timeline"]',
+      '--command',
+      '["memory","show"]',
+      '--stopOnError',
+      '--format',
+      'json',
+    ])
+    const result = vaultCliBatchResultSchema.parse(JSON.parse(raw))
+    const command = result.commands[0]
+
+    assert.equal(result.requested, 2)
+    assert.equal(result.executed, 1)
+    assert.equal(result.count, 1)
+    assert.equal(result.succeeded, 0)
+    assert.equal(result.failed, 1)
+    assert.equal(result.stoppedEarly, true)
+    assert.equal(command?.ok, false)
+    assert.deepEqual(command?.error, {
+      code: 'query_source_invalid',
+      message: `Canonical vault source ${relativeSourcePath}:1 could not be read.`,
+      retryable: false,
+      fieldErrors: [
+        {
+          code: 'missing_field',
+          path: 'id',
+          expected: '',
+          received: 'missing',
+          message: 'This canonical source field is invalid or missing.',
+          missing: true,
+        },
+      ],
+      hint:
+        `Repair ${relativeSourcePath}:1, then rerun the command. Vault validation can identify additional source issues.`,
+      stage: 'query_source',
+    })
+    assert.equal(command?.stdout, '')
+    const safeFailureOutput = JSON.stringify({
+      error: command?.error,
+      stdout: command?.stdout,
+    })
+    assert.doesNotMatch(safeFailureOutput, new RegExp(privateMarker, 'u'))
+    assert.doesNotMatch(
+      safeFailureOutput,
+      new RegExp(parent.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'),
+    )
+    assert.equal(await readFile(sourcePath, 'utf8'), invalidSource)
   } finally {
     await rm(parent, {
       recursive: true,
