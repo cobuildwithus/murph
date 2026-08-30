@@ -23,10 +23,16 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Send one early update before direct reply-critical work that requires three or more distinct substantive checks or tool actions',
+      'Send one early update only before direct reply-critical work that requires three or more distinct substantive checks or tool actions beyond routine turn setup',
     )
     expect(prompt).toContain(
-      'Source count alone does not trigger it: routine context reads, especially during onboarding or setup, and one or two quick calls stay silent and answer directly',
+      'Never count skill or policy reads, onboarding resume/status/context reads, device-availability checks, or state saves toward that threshold',
+    )
+    expect(prompt).toContain(
+      'Routine onboarding and setup stay silent through the final answer, including goal capture, context gathering, connection choices, and the next setup question',
+    )
+    expect(prompt).toContain(
+      'only separate user-requested long research or external action can trigger the ordinary threshold',
     )
     expect(prompt).toContain(
       'Also skip progress for ordinary conversation, choosing a straightforward next step, and quick resume checks',
@@ -70,6 +76,7 @@ describe('assistant progress prompt contract', () => {
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
     expect(prompt).not.toContain('orient the member even when each lookup is routine')
+    expect(prompt).not.toContain('Source count alone does not trigger it')
   })
 
   it('does not instruct routes without progress delivery to call the tool', () => {

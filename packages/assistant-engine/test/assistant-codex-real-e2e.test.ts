@@ -1005,7 +1005,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   )
 
   it(
-    'answers a simple onboarding next-step turn without a progress update',
+    'answers a fresh routine-goal onboarding turn without a progress update',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
@@ -1014,7 +1014,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
       try {
         const workingDirectory = await prepareRealCodexOnboardingDirectory()
         temporaryPaths.unshift(workingDirectory)
-        await writeRealCodexOnboardingResumeContext(workingDirectory, 'later')
         const turnInput = buildRealCodexOnboardingTurnInput({
           config,
           workingDirectory,
@@ -1030,8 +1029,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             },
           },
           prompt: [
-            "Let's continue onboarding and pick up the health goal we parked earlier.",
-            "Use whatever saved onboarding context is available; I don't want to repeat it.",
+            "I've already seen your welcome and I'm ready to continue.",
+            "I'd like Murph's help building a steadier evening routine.",
           ].join(' '),
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
@@ -1047,7 +1046,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         const reply = result.finalMessage.trim()
 
         process.stdout.write(
-          `[onboarding-simple-next-step-e2e] ${JSON.stringify({
+          `[onboarding-fresh-routine-goal-e2e] ${JSON.stringify({
             policyFiles,
             progressUpdateCount: progressUpdates.length,
             reply,
@@ -1058,9 +1057,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(progressUpdates).toEqual([])
         expect(progressCalls).toEqual([])
         expect(resumeContexts).toHaveLength(1)
-        expect(policyFiles).toContain('return-launch-completion.md')
-        expect(reply).toMatch(/sleep|bed|wake|wind[- ]down|routine/iu)
-        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(policyFiles).toContain('SKILL.md')
+        expect(reply).toMatch(/what should i call you/iu)
+        expect(reply).toMatch(/how old|age/iu)
+        expect(reply).toMatch(/gender/iu)
+        expect(reply.match(/\?/gu) ?? []).not.toHaveLength(0)
         expect(reply).not.toMatch(
           /checking a few things|pulling your data|while i work|sit tight/iu,
         )
