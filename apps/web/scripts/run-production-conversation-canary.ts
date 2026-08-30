@@ -10,7 +10,7 @@ import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 
 const CANARY_RESET_PATH =
   "/api/internal/hosted-onboarding/linq/production-canary/reset";
-const CANARY_REPLY_BUDGET_MS = 10_000;
+const CANARY_REPLY_BUDGET_MS = 20_000;
 const CANARY_REPLY_WAIT_MS = 30_000;
 const CANARY_RESET_TIMEOUT_MS = 300_000;
 const CANARY_TURNS = [

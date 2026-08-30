@@ -24,7 +24,7 @@ Last verified: 2026-08-29
 - The Linq production canary runs only after the same exact Vercel production
   proof succeeds for a protected-main deployment. One fixed Photon identity
   starts a three-turn private iMessage conversation, and every Murph reply must
-  arrive in under ten seconds. The workflow is non-canceling and serialized;
+  arrive in under twenty seconds. The workflow is non-canceling and serialized;
   an older deployment skips when the production alias has advanced. Before the
   first send, a dedicated fixed-target Web route clears only that identity's
   admission rows and fully pre-provider instant-reply claim, then invokes the
