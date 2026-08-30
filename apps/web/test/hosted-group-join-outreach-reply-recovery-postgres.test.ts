@@ -447,8 +447,36 @@ describe.skipIf(!runPostgresProof)(
   () => {
     beforeEach(() => {
       setHostedSecureBoxStringTestCodecForTests({
-        decrypt: ({ value }) => value,
-        encrypt: ({ value }) => value,
+        decrypt(input) {
+          const decoded = JSON.parse(
+            Buffer.from(
+              input.value.replace(/^hsb-test:/u, ""),
+              "base64url",
+            ).toString("utf8"),
+          ) as {
+            lane?: string;
+            scope?: string;
+            userId?: string;
+            value?: string;
+          };
+          if (
+            decoded.lane !== input.lane
+            || decoded.scope !== input.scope
+            || decoded.userId !== input.userId
+            || typeof decoded.value !== "string"
+          ) {
+            throw new Error("Hosted secure-box test codec metadata mismatch.");
+          }
+          return decoded.value;
+        },
+        encrypt(input) {
+          return `hsb-test:${Buffer.from(JSON.stringify({
+            lane: input.lane,
+            scope: input.scope,
+            userId: input.userId,
+            value: input.value,
+          }), "utf8").toString("base64url")}`;
+        },
       });
     });
 
