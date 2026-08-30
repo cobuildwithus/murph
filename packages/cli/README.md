@@ -81,10 +81,12 @@ vault-cli workout defaults set --duration 60 --vault ./vault
 vault-cli workout defaults set --clear-duration --vault ./vault
 ```
 
-An explicit duration in the current workout still wins. Ambiguous stated
-durations and structured imports keep requiring explicit resolution. If typed
-state is unset, ordinary capture also promotes one unambiguous legacy workout
-default from saved Preferences; conflicting legacy records are never applied.
+Positional workout text is preserved only as the note. Pass facts stated in the
+current report through typed flags such as `--duration`, `--type`, and
+`--distance-km`; an explicit typed duration wins over the saved default. If
+typed state is unset, ordinary capture also promotes one unambiguous legacy
+workout default from saved Preferences; conflicting legacy records are never
+applied. Structured imports remain explicit and never use capture defaults.
 
 When you need route distance or duration between two points for a run, walk, ride, or hike, use:
 

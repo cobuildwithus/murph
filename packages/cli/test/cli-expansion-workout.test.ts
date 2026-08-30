@@ -234,7 +234,7 @@ async function runSliceCliRaw(args: string[]) {
   return output.join('').trim()
 }
 
-test('workout add schema exposes the freeform workout capture surface', async () => {
+test('workout add schema exposes a note-only positional text surface', async () => {
   const schema = JSON.parse(
     await runSliceCliRaw(['workout', 'add', '--schema']),
   ) as SchemaEnvelope
@@ -274,7 +274,7 @@ test('workout add help keeps the positional text optional for typed captures', a
   assert.match(help, /Usage: vault-cli workout add \[text\] \[options\]/u)
   assert.match(
     help,
-    /Optional freeform workout text such as "Went for a 30-minute run\."/u,
+    /Optional workout note preserved verbatim; structured facts are never inferred from it\./u,
   )
   assert.doesNotMatch(help, /^\s+--input\s+/mu)
   assert.match(help, /workout import-json --input @workout\.json/u)
@@ -309,6 +309,10 @@ test(
         'save',
         'Push Day A',
         '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+        '--duration',
+        '20',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -436,21 +440,7 @@ test(
       assert.equal(requireData(logFormat).activityType, 'strength-training')
       assert.equal(requireData(logFormat).durationMinutes, 20)
       assert.equal(requireData(logFormat).title, '20-minute strength training')
-      assert.deepEqual(summarizeWorkoutExercises(requireData(logFormat).workout), [
-        {
-          exercise: 'pushups',
-          setCount: 4,
-          repsPerSet: 20,
-        },
-        {
-          exercise: 'incline bench',
-          setCount: 4,
-          repsPerSet: 12,
-          load: 65,
-          loadUnit: 'lb',
-          loadDescription: '45 lb bar plus 10 lb plates on both sides',
-        },
-      ])
+      assert.equal(summarizeWorkoutExercises(requireData(logFormat).workout), null)
 
       const showLoggedWorkout = await runCli<ShowEnvelope>([
         'event',
@@ -477,27 +467,13 @@ test(
       ])
       assert.equal(editedMediaOnly.ok, true)
       const editedWorkout = requireData(editedMediaOnly).entity.data.workout
-      assert.deepEqual(
+      assert.equal(
         summarizeWorkoutExercises(
           typeof editedWorkout === 'object' && editedWorkout !== null
             ? (editedWorkout as Record<string, unknown>)
             : null,
         ),
-        [
-          {
-            exercise: 'pushups',
-            setCount: 4,
-            repsPerSet: 20,
-          },
-          {
-            exercise: 'incline bench',
-            setCount: 4,
-            repsPerSet: 12,
-            load: 65,
-            loadUnit: 'lb',
-            loadDescription: '45 lb bar plus 10 lb plates on both sides',
-          },
-        ],
+        null,
       )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
@@ -554,6 +530,10 @@ templateText: Garage day template.
         'save',
         'Garage Day',
         '40 min strength training. 5 sets of 15 kettlebell swings.',
+        '--duration',
+        '40',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -592,7 +572,7 @@ templateText: Garage day template.
 )
 
 test(
-  'workout format save validates future loggability up front',
+  'workout format save requires typed duration instead of parsing template text',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
 
@@ -605,20 +585,20 @@ test(
       assert.equal(initResult.ok, true)
       assert.equal(requireData(initResult).created, true)
 
-      const invalidSavedFormat = await runCli([
+      const missingTypedDuration = await runCli([
         'workout',
         'format',
         'save',
-        'Ambiguous Lift',
-        'Strength training for the last 20 or 30 minutes. Did like 80 push-ups and incline bench at 115 lb.',
+        'Morning Lift',
+        '45 minute strength training.',
         '--vault',
         vaultRoot,
       ])
 
-      assert.equal(invalidSavedFormat.ok, false)
-      assert.equal(invalidSavedFormat.error.code, 'invalid_option')
+      assert.equal(missingTypedDuration.ok, false)
+      assert.equal(missingTypedDuration.error.code, 'invalid_option')
       assert.match(
-        invalidSavedFormat.error.message ?? '',
+        missingTypedDuration.error.message ?? '',
         /Pass --duration <minutes> to record it explicitly/u,
       )
     } finally {
@@ -692,6 +672,10 @@ test(
         'save',
         'Push Day A',
         '20 min strength training. 4 sets of 20 pushups.',
+        '--duration',
+        '20',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -704,6 +688,10 @@ test(
         'save',
         'Push Day A',
         '25 min strength training. 5 sets of 10 pushups.',
+        '--duration',
+        '25',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -862,6 +850,10 @@ template:
         'save',
         'Garage Day',
         '40 min strength training. 5 sets of 15 kettlebell swings.',
+        '--duration',
+        '40',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -1178,7 +1170,7 @@ text: Legacy gym day template.
 )
 
 test(
-  'workout add captures activity_session events and fails fast on ambiguous, mixed, or missing durations',
+  'workout add preserves notes and captures only typed structured facts',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
 
@@ -1195,6 +1187,10 @@ test(
         'workout',
         'add',
         'Went for a 30-minute run around the neighborhood.',
+        '--duration',
+        '30',
+        '--type',
+        'running',
         '--vault',
         vaultRoot,
       ])
@@ -1247,6 +1243,10 @@ test(
         'workout',
         'add',
         '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+        '--duration',
+        '20',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -1256,21 +1256,10 @@ test(
         'strength-training',
       )
       assert.equal(requireData(structuredStrengthWorkout).durationMinutes, 20)
-      assert.deepEqual(summarizeWorkoutExercises(requireData(structuredStrengthWorkout).workout), [
-        {
-          exercise: 'pushups',
-          setCount: 4,
-          repsPerSet: 20,
-        },
-        {
-          exercise: 'incline bench',
-          setCount: 4,
-          repsPerSet: 12,
-          load: 65,
-          loadUnit: 'lb',
-          loadDescription: '45 lb bar plus 10 lb plates on both sides',
-        },
-      ])
+      assert.equal(
+        summarizeWorkoutExercises(requireData(structuredStrengthWorkout).workout),
+        null,
+      )
 
       const showStructuredStrengthWorkout = await runCli<ShowEnvelope>([
         'event',
@@ -1280,82 +1269,32 @@ test(
         vaultRoot,
       ])
       assert.equal(showStructuredStrengthWorkout.ok, true)
-      assert.deepEqual(
+      assert.equal(
         summarizeWorkoutExercises(
           requireData(showStructuredStrengthWorkout).entity.data.workout as Record<string, unknown> | null | undefined,
         ),
-        [
-          {
-            exercise: 'pushups',
-            setCount: 4,
-            repsPerSet: 20,
-          },
-          {
-            exercise: 'incline bench',
-            setCount: 4,
-            repsPerSet: 12,
-            load: 65,
-            loadUnit: 'lb',
-            loadDescription: '45 lb bar plus 10 lb plates on both sides',
-          },
-        ],
+        null,
       )
 
-      const ambiguous = await runCli([
-        'workout',
-        'add',
-        'Strength training for the last 20 or 30 minutes. Did like 80 push-ups and incline bench at 115 lb.',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(ambiguous.ok, false)
-      assert.equal(ambiguous.error.code, 'invalid_option')
-      assert.match(
-        ambiguous.error.message ?? '',
-        /Pass --duration <minutes> to record it explicitly/u,
-      )
-
-      const mixedActivities = await runCli([
-        'workout',
-        'add',
-        'Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(mixedActivities.ok, false)
-      assert.equal(mixedActivities.error.code, 'invalid_option')
-      assert.match(
-        mixedActivities.error.message ?? '',
-        /Workout note includes multiple activities or segments/u,
-      )
-
-      const missingDuration = await runCli([
-        'workout',
-        'add',
+      for (const note of [
+        'Strength training for the last 20 or 30 minutes.',
+        'Morning run followed by a swim for 10 minutes.',
         'Easy run around the neighborhood.',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(missingDuration.ok, false)
-      assert.equal(missingDuration.error.code, 'invalid_option')
-      assert.match(
-        missingDuration.error.message ?? '',
-        /Workout duration is missing/u,
-      )
-
-      const segmentedSameSport = await runCli([
-        'workout',
-        'add',
-        '10-minute warmup jog then easy run home.',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(segmentedSameSport.ok, false)
-      assert.equal(segmentedSameSport.error.code, 'invalid_option')
-      assert.match(
-        segmentedSameSport.error.message ?? '',
-        /Workout note includes multiple activities or segments/u,
-      )
+      ]) {
+        const missingDuration = await runCli([
+          'workout',
+          'add',
+          note,
+          '--vault',
+          vaultRoot,
+        ])
+        assert.equal(missingDuration.ok, false)
+        assert.equal(missingDuration.error.code, 'invalid_option')
+        assert.match(
+          missingDuration.error.message ?? '',
+          /Workout duration is missing/u,
+        )
+      }
 
       const mixedWithExplicitDuration = await runCli<WorkoutAddEnvelope>([
         'workout',
@@ -1363,6 +1302,10 @@ test(
         'Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.',
         '--duration',
         '70',
+        '--type',
+        'running',
+        '--distance-km',
+        '8.56',
         '--vault',
         vaultRoot,
       ])
@@ -1400,7 +1343,7 @@ test(
   },
 )
 
-test('workout capture defaults apply only when a reported workout omits duration', async () => {
+test('workout capture defaults fill only the typed duration field', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
 
   try {
@@ -1483,15 +1426,17 @@ test('workout capture defaults apply only when a reported workout omits duration
     assert.equal(defaulted.ok, true)
     assert.equal(requireData(defaulted).durationMinutes, 60)
 
-    const textOverride = await runCli<WorkoutAddEnvelope>([
+    const noteWithFacts = await runCli<WorkoutAddEnvelope>([
       'workout',
       'add',
-      '20-minute walk.',
+      '20-minute walk covering 5 km.',
       '--vault',
       vaultRoot,
     ])
-    assert.equal(textOverride.ok, true)
-    assert.equal(requireData(textOverride).durationMinutes, 20)
+    assert.equal(noteWithFacts.ok, true)
+    assert.equal(requireData(noteWithFacts).durationMinutes, 60)
+    assert.equal(requireData(noteWithFacts).activityType, 'workout')
+    assert.equal(requireData(noteWithFacts).distanceKm, null)
 
     const flagOverride = await runCli<WorkoutAddEnvelope>([
       'workout',
@@ -1499,17 +1444,20 @@ test('workout capture defaults apply only when a reported workout omits duration
       'Morning row.',
       '--duration',
       '35',
+      '--type',
+      'rowing',
       '--vault',
       vaultRoot,
     ])
     assert.equal(flagOverride.ok, true)
     assert.equal(requireData(flagOverride).durationMinutes, 35)
+    assert.equal(requireData(flagOverride).activityType, 'rowing')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
 }, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
 
-test('workout capture fails closed for ambiguous, imported, and cleared duration', async () => {
+test('workout capture ignores note phrasing while imports and cleared defaults stay strict', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
 
   try {
@@ -1529,25 +1477,21 @@ test('workout capture fails closed for ambiguous, imported, and cleared duration
     ])
     assert.equal(saved.ok, true)
 
-    const ambiguous = await runCli([
-      'workout',
-      'add',
+    for (const note of [
       'Run for 20 or 30 minutes.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(ambiguous.ok, false)
-    assert.match(ambiguous.error.message ?? '', /duration is ambiguous/iu)
-
-    const segmented = await runCli([
-      'workout',
-      'add',
       'Morning run followed by a swim.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(segmented.ok, false)
-    assert.match(segmented.error.message ?? '', /multiple activities or segments/iu)
+    ]) {
+      const defaulted = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        note,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(defaulted.ok, true)
+      assert.equal(requireData(defaulted).durationMinutes, 60)
+      assert.equal(requireData(defaulted).activityType, 'workout')
+    }
 
     const importPayloadPath = path.join(vaultRoot, 'missing-duration.json')
     await writeFile(
@@ -1600,7 +1544,7 @@ test('workout capture fails closed for ambiguous, imported, and cleared duration
   }
 }, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
 
-test('workout capture preserves explicit hours and the manual source boundary', async () => {
+test('workout capture treats raw text as a note and keeps the manual source boundary', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
 
   try {
@@ -1620,126 +1564,18 @@ test('workout capture preserves explicit hours and the manual source boundary', 
     ])
     assert.equal(saved.ok, true)
 
-    for (const report of ['Yoga for an hour.', 'Yoga for one hour.']) {
-      const explicitHour = await runCli<WorkoutAddEnvelope>([
-        'workout',
-        'add',
-        report,
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(explicitHour.ok, true)
-      assert.equal(requireData(explicitHour).durationMinutes, 60)
-    }
-
-    const compoundHour = await runCli<WorkoutAddEnvelope>([
+    const noteOnly = await runCli<WorkoutAddEnvelope>([
       'workout',
       'add',
-      'I did yoga for an hour and a half.',
+      'One hour of yoga, then 90 minutes of rowing for 8 km; 4 sets of 10 squats.',
       '--vault',
       vaultRoot,
     ])
-    assert.equal(compoundHour.ok, true)
-    assert.equal(requireData(compoundHour).durationMinutes, 90)
-
-    const ambiguousWordHours = await runCli([
-      'workout',
-      'add',
-      'I worked out for an hour or two.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(ambiguousWordHours.ok, false)
-    assert.match(
-      ambiguousWordHours.error.message ?? '',
-      /duration is ambiguous/iu,
-    )
-
-    const temporalHour = await runCli<WorkoutAddEnvelope>([
-      'workout',
-      'add',
-      'I did yoga an hour ago.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(temporalHour.ok, true)
-    assert.equal(requireData(temporalHour).durationMinutes, 25)
-
-    const definiteBeforeTemporalHour = await runCli<WorkoutAddEnvelope>([
-      'workout',
-      'add',
-      'I ran 30 minutes one hour ago.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(definiteBeforeTemporalHour.ok, true)
-    assert.equal(requireData(definiteBeforeTemporalHour).durationMinutes, 30)
-
-    const numericDurationBeforeSchedule = await runCli<WorkoutAddEnvelope>([
-      'workout',
-      'add',
-      'Yoga for 30 minutes after lunch.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(numericDurationBeforeSchedule.ok, true)
-    assert.equal(requireData(numericDurationBeforeSchedule).durationMinutes, 30)
-
-    const wordDurationBeforeSchedule = await runCli<WorkoutAddEnvelope>([
-      'workout',
-      'add',
-      'Yoga for one hour before breakfast.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(wordDurationBeforeSchedule.ok, true)
-    assert.equal(requireData(wordDurationBeforeSchedule).durationMinutes, 60)
-
-    const unframedBeforeSchedule = await runCli([
-      'workout',
-      'add',
-      'Yoga an hour before breakfast.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(unframedBeforeSchedule.ok, false)
-    assert.match(
-      unframedBeforeSchedule.error.message ?? '',
-      /duration is ambiguous/iu,
-    )
-
-    for (const report of [
-      'I worked out for one hour or maybe two.',
-      'I worked out for one hour, maybe two.',
-      'I worked out for an hour and a half, maybe two.',
-      'I worked out for one hour and 20 minutes, maybe two hours.',
-    ]) {
-      const hedgedWordHours = await runCli([
-        'workout',
-        'add',
-        report,
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(hedgedWordHours.ok, false)
-      assert.match(
-        hedgedWordHours.error.message ?? '',
-        /duration is ambiguous/iu,
-      )
-    }
-
-    const competingDurationEvidence = await runCli([
-      'workout',
-      'add',
-      'I did yoga for 30 minutes, an hour and a half after lunch.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(competingDurationEvidence.ok, false)
-    assert.match(
-      competingDurationEvidence.error.message ?? '',
-      /duration is ambiguous/iu,
-    )
+    assert.equal(noteOnly.ok, true)
+    assert.equal(requireData(noteOnly).durationMinutes, 25)
+    assert.equal(requireData(noteOnly).activityType, 'workout')
+    assert.equal(requireData(noteOnly).distanceKm, null)
+    assert.equal(summarizeWorkoutExercises(requireData(noteOnly).workout), null)
 
     const explicitManual = await runCli<WorkoutAddEnvelope>([
       'workout',
@@ -1747,11 +1583,16 @@ test('workout capture preserves explicit hours and the manual source boundary', 
       'Manual elliptical session.',
       '--source',
       'manual',
+      '--duration',
+      '40',
+      '--type',
+      'elliptical',
       '--vault',
       vaultRoot,
     ])
     assert.equal(explicitManual.ok, true)
-    assert.equal(requireData(explicitManual).durationMinutes, 25)
+    assert.equal(requireData(explicitManual).durationMinutes, 40)
+    assert.equal(requireData(explicitManual).activityType, 'elliptical')
 
     for (const source of ['import', 'device', 'derived']) {
       const nonManual = await runCli([
@@ -2150,6 +1991,10 @@ test(
         'workout',
         'add',
         'Went for a 45-minute ride.',
+        '--duration',
+        '45',
+        '--type',
+        'cycling',
         '--distance-km',
         '15',
         '--vault',
@@ -2234,6 +2079,10 @@ test(
         'workout',
         'add',
         'Went for a 45-minute walk.',
+        '--duration',
+        '45',
+        '--type',
+        'walking',
         '--media',
         mediaPath,
         '--occurred-at',

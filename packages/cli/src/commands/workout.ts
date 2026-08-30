@@ -395,7 +395,7 @@ export function registerWorkoutCommands(
 
   workout.command('add', {
     description:
-      'Record one workout from typed fields or freeform text.',
+      'Record one workout from typed fields while preserving positional text as the note.',
     args: z.object({
       text: z
         .string()
@@ -403,17 +403,19 @@ export function registerWorkoutCommands(
         .max(4000)
         .optional()
         .describe(
-          'Optional freeform workout text such as "Went for a 30-minute run."',
+          'Optional workout note preserved verbatim; structured facts are never inferred from it.',
         ),
     }),
     examples: [
       {
-        description: 'Capture a run directly from one note.',
+        description: 'Capture a run while preserving the member-provided note.',
         args: {
           text: "'Went for a 30-minute run around the neighborhood.'",
         },
         options: {
           vault: './vault',
+          duration: 30,
+          type: 'running',
         },
       },
       {
@@ -435,7 +437,7 @@ export function registerWorkoutCommands(
       },
     ],
     hint:
-      'Use typed flags for one workout record. Use workout import-json --input @workout.json for bulk/import payloads or advanced nested fields outside the typed surface.',
+      'Positional text is the note only. Pass structured facts through typed flags. Use workout import-json --input @workout.json for bulk/import payloads or advanced nested fields outside the typed surface.',
     options: withBaseOptions({
       note: z
         .string()
@@ -456,7 +458,7 @@ export function registerWorkoutCommands(
         .max(24 * 60)
         .optional()
         .describe(
-          'Optional duration override in minutes when the note is missing or ambiguous.',
+          'Typed duration in minutes. Required unless an applicable saved default or workout timestamps supply it.',
         ),
       type: z
         .string()
@@ -464,14 +466,14 @@ export function registerWorkoutCommands(
         .max(120)
         .optional()
         .describe(
-          'Optional workout type override such as "run" or "strength training".',
+          'Typed workout type such as "run" or "strength training".',
         ),
       distanceKm: z
         .number()
         .positive()
         .max(1_000)
         .optional()
-        .describe('Optional workout distance override in kilometers.'),
+        .describe('Typed workout distance in kilometers.'),
       occurredAt: occurredAtOptionSchema
         .optional()
         .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
@@ -573,7 +575,7 @@ export function registerWorkoutCommands(
         .min(1)
         .max(4000)
         .optional()
-        .describe('Optional freeform workout text used when the payload omits note text.'),
+        .describe('Optional workout note used when the payload omits note text.'),
     }),
     examples: [
       {
@@ -608,7 +610,7 @@ export function registerWorkoutCommands(
         .max(24 * 60)
         .optional()
         .describe(
-          'Optional duration override in minutes when the payload is missing or ambiguous.',
+          'Optional typed duration in minutes when the payload omits it.',
         ),
       type: z
         .string()
@@ -1340,7 +1342,7 @@ export function registerWorkoutCommands(
 
   format.command('save', {
     description:
-      'Save or update one reusable workout format from typed routine-template fields or freeform text.',
+      'Save or update one reusable workout format from typed fields while preserving optional template text.',
     args: z.object({
       name: z
         .string()
@@ -1353,17 +1355,19 @@ export function registerWorkoutCommands(
         .min(1)
         .max(4000)
         .optional()
-        .describe('Saved workout text.'),
+        .describe('Saved template text; structured facts are never inferred from it.'),
     }),
     examples: [
       {
-        description: 'Save one reusable strength workout format from freeform text.',
+        description: 'Save one reusable strength workout format with template text.',
         args: {
           name: "'Push Day A'",
           text: "'20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.'",
         },
         options: {
           vault: './vault',
+          duration: 20,
+          type: 'strength-training',
         },
       },
       {
@@ -1444,7 +1448,7 @@ export function registerWorkoutCommands(
         .max(24 * 60)
         .optional()
         .describe(
-          'Optional default duration override in minutes when the saved note is missing or ambiguous.',
+          'Typed default duration in minutes.',
         ),
       type: z
         .string()
@@ -1452,14 +1456,14 @@ export function registerWorkoutCommands(
         .max(120)
         .optional()
         .describe(
-          'Optional default workout type override such as "run" or "strength training".',
+          'Typed default workout type such as "run" or "strength training".',
         ),
       distanceKm: z
         .number()
         .positive()
         .max(1_000)
         .optional()
-        .describe('Optional default workout distance override in kilometers.'),
+        .describe('Typed default workout distance in kilometers.'),
     }),
     output: workoutFormatSaveResultSchema,
     async run({ args, options }) {

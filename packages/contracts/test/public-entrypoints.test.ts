@@ -71,7 +71,6 @@ describe("@murphai/contracts public entrypoint", () => {
     expect(createEmptyPreferencesDocument(new Date("2026-04-08T10:11:12.000Z"))).toEqual({
       schemaVersion: 1,
       updatedAt: "2026-04-08T10:11:12.000Z",
-      workoutCapturePreferences: {},
       workoutUnitPreferences: {},
       wearablePreferences: {
         desiredProviders: [],
@@ -202,7 +201,6 @@ describe("@murphai/contracts public entrypoint", () => {
     expect(createEmptyPreferencesDocument(new Date("2026-04-08T00:00:00.000Z"))).toEqual({
       schemaVersion: 1,
       updatedAt: "2026-04-08T00:00:00.000Z",
-      workoutCapturePreferences: {},
       workoutUnitPreferences: {},
       wearablePreferences: {
         desiredProviders: [],

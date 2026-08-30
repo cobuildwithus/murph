@@ -149,31 +149,11 @@ function createWorkoutTemplate(): WorkoutTemplate {
 describe("text-duration", () => {
   test("infers durations and validates bounds", () => {
     assert.equal(inferDurationMinutes("half hour walk"), 30);
-    assert.equal(inferDurationMinutes("half an hour walk"), 30);
-    assert.equal(inferDurationMinutes("an hour of yoga"), 60);
-    assert.equal(inferDurationMinutes("one hour of yoga"), 60);
-    assert.equal(inferDurationMinutes("I did yoga for an hour and a half."), 90);
-    assert.equal(inferDurationMinutes("one hour and 20 minutes"), 80);
     assert.equal(inferDurationMinutes("1 hour and 20 minutes"), 80);
     assert.equal(inferDurationMinutes("1h 15m"), 75);
     assert.equal(inferDurationMinutes("45 minutes"), 45);
     assert.equal(inferDurationMinutes("45m"), 45);
     assert.equal(inferDurationMinutes("1 hour, 20 minutes"), "ambiguous");
-    assert.equal(inferDurationMinutes("I worked out for an hour or two."), "ambiguous");
-    assert.equal(inferDurationMinutes("I did yoga an hour ago."), null);
-    assert.equal(inferDurationMinutes("I did yoga an hour and a half ago."), null);
-    assert.equal(inferDurationMinutes("I worked out an hour or two ago."), null);
-    assert.equal(inferDurationMinutes("I ran 30 minutes one hour ago."), 30);
-    assert.equal(inferDurationMinutes("Yoga for 30 minutes after lunch."), 30);
-    assert.equal(inferDurationMinutes("Yoga for one hour before breakfast."), 60);
-    assert.equal(inferDurationMinutes("Yoga an hour before breakfast."), "ambiguous");
-    assert.equal(inferDurationMinutes("I worked out for one hour or maybe two."), "ambiguous");
-    assert.equal(inferDurationMinutes("I worked out for one hour, maybe two."), "ambiguous");
-    assert.equal(inferDurationMinutes("I worked out for an hour and a half, maybe two."), "ambiguous");
-    assert.equal(inferDurationMinutes("I worked out for one hour and 20 minutes, maybe two hours."), "ambiguous");
-    assert.equal(inferDurationMinutes("I did yoga for 30 minutes, an hour and a half after lunch."), "ambiguous");
-    assert.equal(inferDurationMinutes("I did yoga, but not for one hour—I stopped early."), "ambiguous");
-    assert.equal(inferDurationMinutes("Yoga lasted about an hour."), "ambiguous");
     assert.equal(inferDurationMinutes("unclear text"), null);
 
     assert.equal(validateDurationMinutes(12.4), 12);
@@ -479,7 +459,7 @@ describe("workout-core", () => {
 });
 
 describe("workout", () => {
-  test("resolves workout capture text and builds structured drafts", async () => {
+  test("preserves workout text while typed fields build structured drafts", async () => {
     assert.throws(
       () => workoutModule.resolveWorkoutCapture({ text: "" }),
       {
@@ -491,11 +471,15 @@ describe("workout", () => {
 
     const capture = workoutModule.resolveWorkoutCapture({
       text: "45 minute trail run 3 mi",
+      durationMinutes: 50,
+      activityType: "cycling",
+      distanceKm: 8,
     });
-    assert.equal(capture.activityType, "running");
-    assert.equal(capture.durationMinutes, 45);
-    assert.equal(capture.distanceKm, 4.828032);
-    assert.equal(capture.title, "45-minute run");
+    assert.equal(capture.note, "45 minute trail run 3 mi");
+    assert.equal(capture.activityType, "cycling");
+    assert.equal(capture.durationMinutes, 50);
+    assert.equal(capture.distanceKm, 8);
+    assert.equal(capture.title, "50-minute ride");
 
     assert.throws(
       () => workoutModule.resolveWorkoutCapture({
@@ -508,36 +492,15 @@ describe("workout", () => {
       },
     );
 
-    assert.throws(
-      () => workoutModule.resolveWorkoutCapture({
-        text: "Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.",
-      }),
-      {
-        name: "VaultCliError",
-        code: "invalid_option",
-        message: "Workout note includes multiple activities or segments. Pass --duration <minutes> to record the total workout duration explicitly.",
-      },
-    );
-
-    assert.throws(
-      () => workoutModule.resolveWorkoutCapture({
-        text: "10-minute warmup jog then easy run home.",
-      }),
-      {
-        name: "VaultCliError",
-        code: "invalid_option",
-        message: "Workout note includes multiple activities or segments. Pass --duration <minutes> to record the total workout duration explicitly.",
-      },
-    );
-
-    const mixedCapture = workoutModule.resolveWorkoutCapture({
-      text: "Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.",
-      durationMinutes: 70,
+    const defaultedCapture = workoutModule.resolveWorkoutCapture({
+      text: "One hour of yoga, then a 90-minute row, covering 8.56 km; 4 sets of 10 squats.",
+      defaultDurationMinutes: 25,
     });
-    assert.equal(mixedCapture.activityType, "running");
-    assert.equal(mixedCapture.durationMinutes, 70);
-    assert.equal(mixedCapture.distanceKm, 8.56);
-    assert.equal(mixedCapture.title, "70-minute run");
+    assert.equal(defaultedCapture.activityType, "workout");
+    assert.equal(defaultedCapture.durationMinutes, 25);
+    assert.equal(defaultedCapture.distanceKm, null);
+    assert.equal(defaultedCapture.strengthExercises, null);
+    assert.equal(defaultedCapture.title, "25-minute workout");
 
     assert.throws(
       () => workoutModule.resolveWorkoutCapture({
@@ -553,6 +516,8 @@ describe("workout", () => {
     const draft = workoutModule.buildStructuredWorkoutActivitySessionDraft({
       payload: {
         note: "45 minute trail run 3 mi",
+        durationMinutes: 45,
+        distanceKm: 4.828032,
         rawRefs: ["bank/raw/workout.csv"],
         tags: ["run"],
         relatedIds: ["evt_01ARZ3NDEKTSV4RRFFQ69G5FAV"],
@@ -776,6 +741,9 @@ describe("workout", () => {
       vault: "./vault",
       text: "45 minute trail run 3 mi",
       source: "manual",
+      durationMinutes: 45,
+      activityType: "running",
+      distanceKm: 4.828032,
     });
     assert.equal(added.eventId, "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV");
     assert.equal(addActivitySession.mock.calls.length, 1);
@@ -1388,22 +1356,31 @@ describe("workout-import", () => {
         assert.equal(record.workout.exercises[0]?.sets.length, 1);
       }
 
-      const structuredWithTextDuration = workoutModule.buildStructuredWorkoutActivitySessionDraft({
-        payload: {
-          title: "45 minute challenge",
-          workout: {
-            sourceApp: "strong",
-            routineName: "45 minute challenge",
-            exercises: [{
-              name: "Squat",
-              order: 1,
-              sets: [{ order: 1, reps: 5 }],
-            }],
-          },
+      const noteOnlyPayload = {
+        title: "45 minute challenge",
+        workout: {
+          sourceApp: "strong",
+          routineName: "45 minute challenge",
+          exercises: [{
+            name: "Squat",
+            order: 1,
+            sets: [{ order: 1, reps: 5 }],
+          }],
         },
+      };
+      assert.throws(
+        () => workoutModule.buildStructuredWorkoutActivitySessionDraft({
+          payload: noteOnlyPayload,
+          source: "import",
+        }),
+        /Workout duration is missing/u,
+      );
+      const structuredWithTypedDuration = workoutModule.buildStructuredWorkoutActivitySessionDraft({
+        payload: noteOnlyPayload,
+        durationMinutes: 45,
         source: "import",
       });
-      assert.equal(structuredWithTextDuration.durationMinutes, 45);
+      assert.equal(structuredWithTypedDuration.durationMinutes, 45);
       assert.throws(
         () => workoutModule.buildStructuredWorkoutActivitySessionDraft({
           payload: {

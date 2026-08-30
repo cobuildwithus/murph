@@ -1432,16 +1432,19 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('`vault-cli workout defaults set --duration <minutes>`')
     expect(prompt).toContain(
-      'Later `vault-cli workout add` calls apply that default when the reported workout omits duration',
+      'Later `vault-cli workout add` calls apply that default when the report omits duration',
     )
     expect(prompt).toContain(
-      'An explicit duration in the current report always wins',
+      'Explicit current duration wins',
     )
     expect(prompt).toContain(
       'Do not duplicate this typed default into freeform memory',
     )
     expect(prompt).toContain(
-      'The add command also promotes one explicit, unambiguous legacy memory preference into the typed default when needed',
+      'The command promotes one unambiguous legacy memory preference when needed',
+    )
+    expect(prompt).toContain(
+      'Positional text is only the note; pass current duration, type, distance, and exercise facts as typed flags',
     )
     expect(prompt).toContain(
       'Never infer a default from workout history, a past workout, or conflicting memory',
@@ -1451,6 +1454,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain(
       'never pass route-estimated duration into workout capture',
+    )
+    expect(prompt).toContain(
+      'use `walking` for runs, walks, or hikes; `cycling` for rides',
     )
     expect(prompt).not.toContain(
       'estimated distance, duration, or elevation are often useful fields to recover',

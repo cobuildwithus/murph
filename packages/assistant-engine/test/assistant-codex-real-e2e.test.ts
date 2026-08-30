@@ -1948,7 +1948,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
             assistantCliContract: [
               'vault-cli workout defaults set [--duration <minutes>] [--clear-duration]',
               'vault-cli workout defaults show --format json',
-              'vault-cli workout add <text> [--duration <minutes>] --format json',
+              'vault-cli workout add <text> [--duration <minutes>] [--type <type>] [--distance-km <km>] --format json',
               'vault-cli route estimate <origin> <destination> [--profile walking|cycling|driving|driving-traffic] --format json',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
@@ -2038,6 +2038,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
 
         expect(workouts).toHaveLength(1)
         expect(workouts[0]?.attributes.durationMinutes).toBe(60)
+        expect(workouts[0]?.attributes.activityType).toBe('yoga')
         expect(reported.finalMessage).toMatch(/logged|saved|recorded/iu)
         expect(reported.finalMessage).toMatch(/yoga/iu)
         expect(reported.finalMessage).not.toMatch(/how long|duration|\?/iu)
@@ -2045,12 +2046,51 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         expect(
           commands.filter((command) => command.startsWith('workout defaults set ')),
         ).toHaveLength(1)
-        expect(
-          commands.filter((command) => command.startsWith('workout add ')),
-        ).toHaveLength(1)
+        const workoutAddCommands = commands.filter((command) =>
+          command.startsWith('workout add '),
+        )
+        expect(workoutAddCommands).toHaveLength(1)
+        expect(workoutAddCommands[0]).toMatch(/--type(?:=|\s)yoga\b/iu)
         expect(commands.join('\n')).not.toContain('memory upsert')
         expect(saved.runtimeIssueInputs).toEqual([])
         expect(reported.runtimeIssueInputs).toEqual([])
+
+        const explicitReported = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'I swam for 35 minutes this afternoon. Log it.',
+        })
+        const explicitVault = await readVaultRawTolerant(workingDirectory)
+        const explicitWorkouts = explicitVault.events.filter(
+          (event) => event.kind === 'activity_session',
+        )
+        const explicitCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        const explicitWorkoutCommand = explicitCommands
+          .filter((command) => command.startsWith('workout add '))
+          .at(-1)
+
+        process.stdout.write(
+          `[workout-capture-default-e2e] ${JSON.stringify({
+            activityType:
+              explicitWorkouts.at(-1)?.attributes.activityType ?? null,
+            durationMinutes:
+              explicitWorkouts.at(-1)?.attributes.durationMinutes ?? null,
+            explicitWorkoutCommand: explicitWorkoutCommand ?? null,
+            finalMessage: explicitReported.finalMessage,
+            scenario: 'explicit-current-report',
+            workoutCount: explicitWorkouts.length,
+          })}\n`,
+        )
+
+        expect(explicitWorkouts).toHaveLength(2)
+        expect(explicitWorkouts.at(-1)?.attributes.durationMinutes).toBe(35)
+        expect(explicitWorkouts.at(-1)?.attributes.activityType).toBe('swimming')
+        expect(explicitWorkoutCommand).toMatch(/--duration(?:=|\s)35\b/u)
+        expect(explicitWorkoutCommand).toMatch(/--type(?:=|\s)(?:swim|swimming)\b/iu)
+        expect(explicitReported.finalMessage).not.toMatch(/how long|duration|\?/iu)
+        expect(explicitReported.runtimeIssueInputs).toEqual([])
 
         const routeReported = await executeRealCodexAppServerTurn({
           ...commonInput,
@@ -2084,11 +2124,12 @@ describeRealCodex('real Codex workout capture default e2e', () => {
           })}\n`,
         )
 
-        expect(routeWorkouts).toHaveLength(2)
+        expect(routeWorkouts).toHaveLength(3)
         expect(routeWorkouts.at(-1)?.attributes.durationMinutes).toBe(60)
         expect(routeEstimateCommand).toBeDefined()
         expect(routeWorkoutCommand).toBeDefined()
         expect(routeWorkoutCommand).not.toMatch(/--duration(?:=|\s)/u)
+        expect(routeWorkoutCommand).toMatch(/--type(?:=|\s)(?:run|running)\b/iu)
         expect(routeReported.finalMessage).not.toMatch(/how long|duration|\?/iu)
         expect(routeReported.runtimeIssueInputs).toEqual([])
       } finally {

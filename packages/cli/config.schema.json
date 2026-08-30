@@ -6336,19 +6336,19 @@
                           "maxLength": 240
                         },
                         "duration": {
-                          "description": "Optional duration override in minutes when the note is missing or ambiguous.",
+                          "description": "Typed duration in minutes. Required unless an applicable saved default or workout timestamps supply it.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1440
                         },
                         "type": {
-                          "description": "Optional workout type override such as \"run\" or \"strength training\".",
+                          "description": "Typed workout type such as \"run\" or \"strength training\".",
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 120
                         },
                         "distanceKm": {
-                          "description": "Optional workout distance override in kilometers.",
+                          "description": "Typed workout distance in kilometers.",
                           "type": "number",
                           "exclusiveMinimum": 0,
                           "maximum": 1000
@@ -6488,7 +6488,7 @@
                           "maxLength": 240
                         },
                         "duration": {
-                          "description": "Optional duration override in minutes when the payload is missing or ambiguous.",
+                          "description": "Optional typed duration in minutes when the payload omits it.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1440
@@ -7186,19 +7186,19 @@
                                   }
                                 },
                                 "duration": {
-                                  "description": "Optional default duration override in minutes when the saved note is missing or ambiguous.",
+                                  "description": "Typed default duration in minutes.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 1440
                                 },
                                 "type": {
-                                  "description": "Optional default workout type override such as \"run\" or \"strength training\".",
+                                  "description": "Typed default workout type such as \"run\" or \"strength training\".",
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 120
                                 },
                                 "distanceKm": {
-                                  "description": "Optional default workout distance override in kilometers.",
+                                  "description": "Typed default workout distance in kilometers.",
                                   "type": "number",
                                   "exclusiveMinimum": 0,
                                   "maximum": 1000

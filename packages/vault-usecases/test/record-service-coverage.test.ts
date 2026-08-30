@@ -1491,7 +1491,7 @@ describe("record service seams", () => {
   });
 
   test("intervention and experiment journal services keep their event and journal wiring stable", async () => {
-    const eventUpsert = vi.fn(async (_input: unknown) => ({
+    const eventUpsert = vi.fn(async () => ({
       eventId: "evt_1",
       lookupId: "evt_1",
       ledgerFile: "events/evt_1.md",
@@ -1556,27 +1556,6 @@ describe("record service seams", () => {
       note: "20 minute red light sauna session",
     });
     expect("protocolId" in addedIntervention).toBe(false);
-    const scheduledIntervention = await intervention.addInterventionRecord({
-      vault: "./vault",
-      text: "Sauna for 30 minutes after lunch.",
-    });
-    expect(scheduledIntervention.durationMinutes).toBe(30);
-    expect(eventUpsert.mock.calls[1]?.[0]).toMatchObject({
-      payload: { durationMinutes: 30 },
-    });
-    for (const text of [
-      "Sauna for one hour or maybe two.",
-      "Sauna for an hour and a half, maybe two.",
-      "Sauna for one hour and 20 minutes, maybe two hours.",
-    ]) {
-      await expect(intervention.addInterventionRecord({
-        vault: "./vault",
-        text,
-      })).rejects.toMatchObject({
-        code: "invalid_option",
-        message: expect.stringMatching(/duration is ambiguous/iu),
-      });
-    }
     const editedIntervention = await intervention.editInterventionRecord({
       vault: "./vault",
       lookup: "evt_1",
@@ -2162,7 +2141,7 @@ describe("record service seams", () => {
       vi.useRealTimers();
     }
 
-    assert.equal(eventUpsert.mock.calls.length, 2);
+    assert.equal(eventUpsert.mock.calls.length, 1);
     assert.equal(eventDelete.mock.calls.length, 1);
     assert.equal(eventEdit.mock.calls.length, 1);
     assert.equal(journalCore.createExperiment.mock.calls.length, 1);

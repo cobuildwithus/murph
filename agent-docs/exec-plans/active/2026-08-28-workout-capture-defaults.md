@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-28
-Updated: 2026-08-29
+Updated: 2026-08-30
 
 ## Goal
 
@@ -17,8 +17,9 @@ Effort: Product change.
 - Outcome: a member sets one workout-duration default once, then reports later
   workouts naturally without being asked for that duration again.
 - Entry and promise: in a private conversation, an explicit ongoing default is
-  saved immediately; later `workout add` writes use an explicit duration when
-  supplied, otherwise the saved default.
+  saved immediately; later `workout add` writes use typed current-report facts
+  when supplied, otherwise the saved duration default. Positional workout text
+  is preserved only as the note and never interpreted as structured authority.
 - Affected people: an established member with a typed default, a member whose
   explicit default still exists only in legacy freeform memory, a member who
   states a different duration for one workout, and a member with no default.
@@ -39,11 +40,13 @@ Effort: Product change.
   preference owner. On a missing-duration write, a narrow compatibility path
   can recognize one explicit legacy preference, reject ambiguity or conflicts,
   and atomically promote it into typed state only when the typed value is unset.
-- Resolve duration in this order: explicit command/payload evidence, the saved
-  typed capture default, then one eligible legacy value promoted into typed
-  state. The default lookup is an explicit member-report capability used only
-  by ordinary `workout add`; imports, devices, derived records, and workout
-  format logging do not opt into it. The write receipt remains authoritative.
+- Resolve duration in this order: an explicit typed command/payload value, the
+  saved typed capture default, then one eligible legacy value promoted into
+  typed state. Raw workout-note text never decides duration, type, distance,
+  segmentation, or exercise structure. The default lookup is an explicit
+  member-report capability used only by ordinary `workout add`; imports,
+  devices, derived records, and workout format logging do not opt into it. The
+  write receipt remains authoritative.
 - Keep legacy compatibility narrow: recognize only two affirmative default
   sentence forms, aggregate all strictly matched values, and fail closed on
   conflicts. Negated, historical, preference-adjacent, and unrelated prose is
@@ -62,6 +65,9 @@ Effort: Product change.
    assistant-instruction regressions.
 4. Add and run one focused real-Codex journey, then complete the required
    Product UX and ReviewGPT gates.
+5. Delete workout-note parsing from the canonical capture path. Keep the text
+   verbatim as evidence and require the assistant or direct caller to pass
+   structured facts through existing typed flags.
 
 ## Review remediation
 
@@ -83,40 +89,44 @@ candidate now:
 
 - Product UX walkthrough:
   - Fresh default: the real-Codex journey saved 60 minutes, then a fresh later
-    yoga report produced one 60-minute workout write with no duration question.
-  - Current-report precedence: focused CLI proof covered text and flag
-    overrides, while ambiguous duration still failed closed.
+    yoga report sent typed `--type yoga`, omitted `--duration`, produced one
+    60-minute workout write, and asked no duration question.
+  - Current-report precedence: a later 35-minute swim sent typed
+    `--duration 35 --type swimming` and produced a 35-minute workout instead of
+    consuming the saved default.
+  - Note boundary: the built CLI received a note containing multiple duration,
+    activity, distance, and exercise phrases. It preserved the text, used the
+    saved 25-minute default, and produced generic `workout` type with no
+    distance or exercises. Typed flags produced the requested 40-minute,
+    5.5-kilometer cycling record from conflicting note text.
   - Established member: focused CLI proof rejected conflicting legacy
     preferences, promoted agreeing explicit legacy preferences, and persisted
     the promoted duration in the typed owner.
   - Recovery/no default: clearing remained authoritative after migration;
     ordinary missing-duration capture without an applicable default still
     returned the established explicit-duration error.
-  - Verdict: Ready. The tested entry, feedback, precedence, recovery, and
-    legacy paths match the product promise without changing import semantics.
+  - Verdict: Ready pending final review. The tested entry, feedback,
+    precedence, note boundary, recovery, and legacy paths match the product
+    promise without changing import semantics.
 - Deterministic proof:
-  - contracts preference tests: 10 passed, including old-shape empty-document
-    compatibility.
-  - core preference tests: 2 passed, including unrelated-writer preservation of
-    the old strict serialized shape.
-  - shared duration/parser and workout-format seam tests: 2 passed; the seam
-    proves format logging does not opt into member-report defaults.
-  - built CLI workout-capture slice: 6 passed, including explicit-hour
-    precedence, manual-source boundaries, bounded legacy migration, unsupported
-    prose, clearing, ambiguity, and imports.
-  - assistant composed-prompt route-duration regression: 1 passed.
-  - relevant contracts, core, operator-config, vault-usecases, CLI, and
-    assistant-engine typechecks passed.
+  - contracts preference/public-entrypoint tests: 13 passed, including
+    old-shape empty-document compatibility; core preference tests: 23 passed.
+  - vault-usecases workout and record-service coverage: 39 passed, including
+    structured payloads, format logging, intervention parser isolation, and the
+    note-only workout boundary.
+  - CLI workout surface: 28 passed; generated schema/hash contracts: 16 passed;
+    package shape verified.
+  - assistant composed-prompt regressions: 77 passed, including typed workout
+    facts, saved defaults, and route-duration boundaries.
+  - contracts, core, operator-config, vault-usecases, CLI, and assistant-engine
+    typechecks passed. Generated CLI schema and skill hash are current.
 - Real assistant proof:
-  - `pnpm test:assistant:live -- --test "applies a saved workout duration default on a fresh later report"`: 1 passed; actual reply confirmed one logged 60-minute yoga workout and no duration question.
-  - The exact correction candidate added a route-bearing continuation and was
-    attempted twice on 2026-08-29. The second attempt selected the correct
-    `workout defaults set --duration 60` command, but the real CLI process did
-    not return within the assistant tool window under severe host contention;
-    Murph correctly declined to claim the write succeeded, and the journey did
-    not reach the route step. This is recorded as a live-lane environment
-    limitation, not a passing check; the exact built CLI and deterministic
-    prompt/route boundaries above are green.
+  - `pnpm test:assistant:live -- --test "applies a saved workout duration default on a fresh later report"`: 1 passed.
+  - The journey saved the default through `workout defaults set`, used the
+    default with typed yoga and no duration flag, passed the current swim's
+    35-minute duration and type as flags, and mapped a running route to the
+    supported walking route profile without allowing estimated route duration
+    to override the saved member default.
 
 ## Round 2 anomaly retrospective
 
@@ -198,3 +208,28 @@ candidate now:
   rebuilt CLI workout-capture slice 6 passed; vault-usecases and CLI typechecks
   and builds passed. Direct built CLI proof now rejects both compound examples
   and the competing-duration example with `invalid_option`, writing no event.
+
+## Round 6 architecture collapse
+
+- ReviewGPT round 6 proved the shared prose grammar could still select one
+  word-hour compound while overlooking another word-hour duration elsewhere in
+  the same note. The built CLI reproduced one successful 90-minute write from
+  a note containing two separately timed activities.
+- The user rejected another grammar patch and chose the smaller durable
+  contract: canonical workout writes do not interpret raw note text. Existing
+  typed flags and structured payloads own duration, activity type, distance,
+  and exercise structure; a saved typed duration fills only an omitted typed
+  duration on ordinary member-report capture.
+- Implementation direction: revert this PR's word-hour parser expansion,
+  remove workout-note inference and segmented-note heuristics from the workout
+  owner, preserve the note verbatim, and update assistant guidance so current
+  facts are passed explicitly. Keep the legacy preference bridge bounded to
+  decoding the duration token captured by its whole-record grammar.
+- Complexity target: net-delete parser branches and authority checks. Add no
+  command, abstraction, durable state, compatibility framework, or downstream
+  guard.
+- Required proof: built CLI must show that numbers and duration words embedded
+  in the note do not affect the record; typed `--duration`, `--type`, and
+  `--distance-km` remain authoritative; the saved default fills only omitted
+  typed duration; imports and non-manual sources remain excluded; and the real
+  assistant passes a member-stated current duration as a typed flag.

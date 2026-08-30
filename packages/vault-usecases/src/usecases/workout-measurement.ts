@@ -4,7 +4,7 @@ import type {
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { loadRuntimeModule } from '../runtime-import.js'
-import { inferDurationMinutes } from './text-duration.js'
+import { validateDurationMinutes } from './text-duration.js'
 import { compactObject } from './vault-usecase-helpers.js'
 
 interface WorkoutPreferencesDocument {
@@ -46,6 +46,8 @@ interface WorkoutMeasurementCoreRuntime {
 
 const legacyWorkoutDefaultDurationText =
   '(\\d+(?:\\.\\d+)?\\s*-?\\s*(?:minutes?|mins?|min|hours?|hrs?|hr)|half(?:\\s+an)?\\s+hour|half-hour|(?:an|one)\\s+hour)'
+const legacyWorkoutDefaultNumericDurationPattern =
+  /^(\d+(?:\.\d+)?)\s*-?\s*(minutes?|mins?|min|hours?|hrs?|hr)$/iu
 const legacyWorkoutDefaultPatterns = [
   new RegExp(
     `^\\s*workouts?(?:\\s+(?:I\\s+)?report(?:ed)?\\s+here)?\\s+defaults?\\s+to\\s+${legacyWorkoutDefaultDurationText}\\s+unless\\s+(?:(?:(?:another|a\\s+different)\\s+duration\\s+is\\s+(?:stated|specified|provided))|(?:(?:stated|specified|provided)\\s+otherwise))\\b\\s*[.!]?\\s*$`,
@@ -86,8 +88,21 @@ function parseLegacyWorkoutDurationDefaults(text: string): number[] {
 
   return matches.flatMap((match) => {
     try {
-      const duration = inferDurationMinutes(match)
-      return typeof duration === 'number' ? [duration] : []
+      const normalized = match.trim()
+      if (/^(?:half(?:\s+an)?\s+hour|half-hour)$/iu.test(normalized)) {
+        return [30]
+      }
+      if (/^(?:an|one)\s+hour$/iu.test(normalized)) {
+        return [60]
+      }
+
+      const numeric = legacyWorkoutDefaultNumericDurationPattern.exec(normalized)
+      if (!numeric) {
+        return []
+      }
+      const value = Number.parseFloat(numeric[1] ?? '')
+      const unit = numeric[2]?.toLowerCase() ?? ''
+      return [validateDurationMinutes(unit.startsWith('h') ? value * 60 : value)]
     } catch {
       return []
     }
