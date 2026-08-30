@@ -397,6 +397,85 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(JSON.stringify(loggedMetadata)).not.toContain(MEMBER_ID);
   });
 
+  it.each([
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedWorkspace.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_access_workspace",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.hostedConsentGrantFindUnique.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_consent",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedMailboxMaxSeqByLane.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_mailbox",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedWorkspace.mockResolvedValueOnce(buildWorkspaceRecord({
+          nextWakeAt: "2026-05-20T11:59:59.000Z",
+          nextWakeReason: "assistant_due",
+        }));
+        mocks.hasHostedMemberEstablishedLinqHomeRoute
+          .mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_projection",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedWorkspace.mockResolvedValueOnce(buildWorkspaceRecord({
+          nextWakeAt: "2026-05-20T11:59:59.000Z",
+          nextWakeReason: "assistant_due",
+        }));
+        mocks.resolveHostedRuntimeAiUsageGate.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_usage",
+    },
+  ] as const)(
+    "logs a fixed failure record for $stage",
+    async ({ arrange, stage }) => {
+      const failure = new Error("synthetic canonical reconciliation failure");
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      arrange(failure);
+
+      const response = await reconciliationRoute.GET(
+        requestForFacts(),
+        routeContext(),
+      );
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
+        },
+      });
+      expect(
+        consoleErrorSpy.mock.calls.filter(
+          ([message]) =>
+            message === "Hosted runtime reconciliation facts failed.",
+        ),
+      ).toEqual([
+        [
+          "Hosted runtime reconciliation facts failed.",
+          {
+            errorClass: "error",
+            schema: "murph.hosted-runtime.reconciliation-facts.failure.v1",
+            stage,
+          },
+        ],
+      ]);
+    },
+  );
+
   it("imports pending system mailbox work before applying model gates", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {

@@ -31,18 +31,25 @@ import {
 import { getPrisma } from "../prisma";
 import {
   readHostedRuntimeReconciliationFacts,
+  type HostedRuntimeReconciliationFactsStage,
 } from "./runtime-reconciliation-facts";
 
 const HOSTED_VISIBLE_ACCESS_RETRY_MS = 30_000;
 type HostedRuntimeReconciliationFacts = Awaited<
   ReturnType<typeof readHostedRuntimeReconciliationFacts>
 >;
+export type HostedRuntimeReconciliationFactsProcessingStage =
+  | HostedRuntimeReconciliationFactsStage
+  | "visible_access"
+  | "blocked_access_notice"
+  | "canonical_recheck";
 
 export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
   input: Parameters<typeof readHostedRuntimeReconciliationFacts>[0],
+  reportStage?: (stage: HostedRuntimeReconciliationFactsProcessingStage) => void,
 ): Promise<HostedRuntimeReconciliationFacts> {
   const reconciledAt = new Date();
-  const facts = await readHostedRuntimeReconciliationFacts(input);
+  const facts = await readHostedRuntimeReconciliationFacts(input, reportStage);
   const blockedReason = facts.blocked?.reason;
   if (
     blockedReason !== "user_not_active"
@@ -52,6 +59,7 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
     return facts;
   }
 
+  reportStage?.("visible_access");
   const prisma = getPrisma();
   const item = await readHostedMailboxLatestPendingConversationItem({
     afterSeq: 0n,
@@ -106,15 +114,20 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
     prisma,
   });
   if (access.kind === "allowed") {
-    return blockedReason === "user_not_active"
-        || blockedReason === "health_data_consent_withdrawn"
-      ? await readHostedRuntimeReconciliationFacts(input)
-      : facts;
+    if (
+      blockedReason === "user_not_active"
+      || blockedReason === "health_data_consent_withdrawn"
+    ) {
+      reportStage?.("canonical_recheck");
+      return await readHostedRuntimeReconciliationFacts(input);
+    }
+    return facts;
   }
   if (access.kind === "silent") {
     return facts;
   }
 
+  reportStage?.("blocked_access_notice");
   if (isHostedLinqConversationMessageWake(wake)) {
     const participantContact = createHostedLinqParticipantContact({
       kind: wake.message.contactKind ?? "phone",

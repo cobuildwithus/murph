@@ -86,6 +86,13 @@ type HostedRuntimeReconciliationDecisionSource = "workflow" | "status";
 type HostedRuntimeDeniedAiUsageDecision =
   Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>["decision"];
 
+export type HostedRuntimeReconciliationFactsStage =
+  | "canonical_access_workspace"
+  | "canonical_consent"
+  | "canonical_mailbox"
+  | "canonical_projection"
+  | "canonical_usage";
+
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
 const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
@@ -134,7 +141,9 @@ export async function readHostedRuntimeReconciliationFacts(
     now?: Date | string;
     usageGateMode?: HostedRuntimeReconciliationUsageGateMode;
   },
+  reportStage?: (stage: HostedRuntimeReconciliationFactsStage) => void,
 ): Promise<HostedRuntimeReconciliationFacts> {
+  reportStage?.("canonical_access_workspace");
   const prisma = getPrisma();
   const now = normalizeHostedRuntimeReconciliationDate(input.now);
   const [hasActiveAccess, workspace] = await Promise.all([
@@ -144,6 +153,7 @@ export async function readHostedRuntimeReconciliationFacts(
     }),
     readHostedWorkspace({ prisma, userId: input.userId }),
   ]);
+  reportStage?.("canonical_projection");
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
   if (!hasActiveAccess) {
@@ -169,10 +179,13 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
-  if (await readHostedHealthDataConsentState({
+  reportStage?.("canonical_consent");
+  const healthDataConsentState = await readHostedHealthDataConsentState({
     memberId: input.userId,
     prisma,
-  }) === "revoked") {
+  });
+  reportStage?.("canonical_projection");
+  if (healthDataConsentState === "revoked") {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag: [],
       reason: "health_data_consent_withdrawn",
@@ -188,6 +201,7 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
+  reportStage?.("canonical_mailbox");
   const [
     maxSeqByLane,
     consumedSeqByLane,
@@ -199,6 +213,7 @@ export async function readHostedRuntimeReconciliationFacts(
       userId: input.userId,
     }),
   ]);
+  reportStage?.("canonical_projection");
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
   );
@@ -225,6 +240,7 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
+  reportStage?.("canonical_mailbox");
   const workspaceWithSystemMailboxFrontier = {
     ...projectedWorkspace,
     systemMailboxFrontier: await readHostedRuntimeSystemMailboxFrontier({
@@ -237,6 +253,7 @@ export async function readHostedRuntimeReconciliationFacts(
     }),
   } satisfies HostedRuntimeReconciliationFactsWorkspace;
 
+  reportStage?.("canonical_projection");
   const freshConversationMailboxLag = hasHostedFreshConversationMailboxLag({
     consumedSeqByLane,
     mailboxLag,
@@ -283,6 +300,7 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
+  reportStage?.("canonical_usage");
   const usageGateRequired = hostedRuntimeReconciliationNeedsAiUsageGate({
     freshConversationMailboxLag,
     now,
@@ -303,6 +321,7 @@ export async function readHostedRuntimeReconciliationFacts(
     ]);
 
     if (gate.status === "health_data_consent_withdrawn") {
+      reportStage?.("canonical_projection");
       const facts = buildHostedRuntimeBlockedFacts({
         mailboxLag,
         reason: "health_data_consent_withdrawn",
@@ -343,6 +362,7 @@ export async function readHostedRuntimeReconciliationFacts(
           userId: input.userId,
         });
       }
+      reportStage?.("canonical_projection");
       const facts = buildHostedRuntimeBlockedFacts({
         mailboxLag,
         reason: "ai_usage_denied",
@@ -363,6 +383,7 @@ export async function readHostedRuntimeReconciliationFacts(
       return facts;
     }
 
+    reportStage?.("canonical_projection");
     const facts = parseHostedRuntimeReconciliationFacts({
       blocked: null,
       mailboxLag,
@@ -377,6 +398,7 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
+  reportStage?.("canonical_projection");
   const facts = parseHostedRuntimeReconciliationFacts({
     blocked: null,
     mailboxLag,

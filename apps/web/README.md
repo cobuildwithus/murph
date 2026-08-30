@@ -85,6 +85,27 @@ workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It 
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 
+## Reconciliation-facts failure observability
+
+The Web-owned reconciliation-facts route emits one additional failure-only
+Vercel record with the fixed message
+`Hosted runtime reconciliation facts failed.` and schema
+`murph.hosted-runtime.reconciliation-facts.failure.v1`. Its `stage` is one of
+`canonical_access_workspace`, `canonical_consent`, `canonical_mailbox`,
+`canonical_projection`, `canonical_usage`, `visible_access`,
+`blocked_access_notice`, or `canonical_recheck`; its `errorClass` is one of
+`hosted_onboarding`, `type_error`, `error`, or `non_error`. Its structured
+metadata contains only `schema`, `stage`, and `errorClass`. It never includes
+raw errors, messages,
+stacks, causes, identifiers, route or request data, payloads, provider or query
+text, or arbitrary metadata. No record is emitted on success.
+
+Verification uses natural traffic only. From the Web deployment-ready timestamp
+through the next natural occurrence, filter Vercel logs by the exact message and
+schema, then count grouped only by message, `stage`, and `errorClass`. The record
+is additive and Web-only: older deployments and readers tolerate its absence,
+and rollback is an ordinary Web rollback with no state or cross-plane drain.
+
 ## Health-data withdrawal rollback floor
 
 Deploy the consent-aware Cloudflare Worker before the Web deployment that can
