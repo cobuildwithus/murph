@@ -240,6 +240,7 @@ export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
   options: {
     analyzeVideoAvailable?: boolean;
+    calendarLinkAvailable?: boolean;
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     exerciseRoutineResponseCardAvailable?: boolean;
@@ -266,6 +267,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.analyzeVideoAvailable !== true
         && name === "murph.analyze_video"
+      ) {
+        return false;
+      }
+
+      if (
+        options.calendarLinkAvailable !== true
+        && name === "murph.create_calendar_link"
       ) {
         return false;
       }
