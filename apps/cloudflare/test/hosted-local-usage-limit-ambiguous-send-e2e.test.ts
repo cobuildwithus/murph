@@ -63,7 +63,8 @@ const groupBacklogReply = "I caught up with the whole group in one reply.";
 const handoffGroupBootstrapText = "Start a synthetic group conversation.";
 const handoffGroupBootstrapReply = "The synthetic group conversation is ready.";
 const privateHandoffRequestText = "Please share a short update with my joined group.";
-const privateHandoffAcknowledgment = "I queued the update for your group.";
+const privateHandoffAcknowledgment =
+  "I queued that for your group; delivery isn't confirmed yet.";
 const handoffContext = `COMPOSED_HANDOFF_CONTEXT_${runId}`;
 const handoffGroupMessage = "The weekly check-in is ready for the group.";
 const blockedGroupFollowUpText = `BLOCKED_GROUP_FOLLOW_UP_${runId}`;
@@ -760,12 +761,23 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
   it("composes a plain-text private handoff through settlement and the next-call fence", async () => {
     const groupReplyPath =
       `/chats/${encodeURIComponent(handoffGroupChatId)}/messages`;
+    const privateReplyPath =
+      `/chats/${encodeURIComponent(handoffPrivateChatId)}/messages`;
     const bootstrapReplyMatcher = (request: ObservedLinqRequest): boolean =>
       requireLinqStub().readObservedMessageText(request)
         === handoffGroupBootstrapReply;
+    const privateAcknowledgmentMatcher = (
+      request: ObservedLinqRequest,
+    ): boolean =>
+      requireLinqStub().readObservedMessageText(request)
+        === privateHandoffAcknowledgment;
     const bootstrapSendBaseline = requireLinqStub().countObservedSends(
       groupReplyPath,
       bootstrapReplyMatcher,
+    );
+    const privateAcknowledgmentBaseline = requireLinqStub().countObservedSends(
+      privateReplyPath,
+      privateAcknowledgmentMatcher,
     );
     requireScenario().queueAssistantResponses([handoffGroupBootstrapReply], {
       matchInputContains: handoffGroupBootstrapText,
@@ -871,6 +883,13 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       reason: "wake-appended-active-member",
     });
 
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: privateAcknowledgmentBaseline + 1,
+      expectedPath: privateReplyPath,
+      matchRequest: privateAcknowledgmentMatcher,
+      scenario: requireScenario(),
+      userId: handoffOwnerUserId,
+    });
     await requireLinqStub().waitForMatchingSendCount({
       expectedCount: handoffSendBaseline + 1,
       expectedPath: groupReplyPath,
