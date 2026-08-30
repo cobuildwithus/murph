@@ -244,7 +244,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     'Other source roots present: 1 research note, raw inbox evidence, and derived inbox artifacts.',
   )
   expect(overview).toContain(
-    'Treat `vault-cli memory show`, relevant wiki/knowledge reads, and the canonical preferences surface as the synthesized truth surfaces.',
+    'Treat `vault-cli memory show --compact --format json`, relevant wiki/knowledge reads, and the canonical preferences surface as the synthesized truth surfaces.',
   )
 })
 
