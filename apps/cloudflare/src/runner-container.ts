@@ -79,6 +79,7 @@ const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS = 1_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
 const RUNNER_READINESS_ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
+export const RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS = 60_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
 const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
 const RUNNER_TRANSPORT_FAILURE_DETAIL_MAX_CHARS = 1_024;
@@ -213,6 +214,23 @@ type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest
 export interface RunnerContainerEnsureReadyForProcessingInput {
   timeoutMs: number;
   userId: string;
+}
+
+export type RunnerContainerStartupFailureStage =
+  | "caller_deadline"
+  | "cold_health_or_finalization"
+  | "cold_start_or_ports"
+  | "lifecycle_lock_or_state_read"
+  | "rpc_unattributed"
+  | "warm_health_or_cleanup";
+
+type RunnerContainerLocalStartupFailureStage = Exclude<
+  RunnerContainerStartupFailureStage,
+  "caller_deadline" | "rpc_unattributed"
+>;
+
+interface RunnerContainerStartupFailureObservation {
+  stage: RunnerContainerLocalStartupFailureStage;
 }
 
 export type RunnerContainerEnsureReadyForProcessingResult =
@@ -850,6 +868,9 @@ export class RunnerContainer extends Container {
     const readinessSignal = AbortSignal.timeout(input.timeoutMs);
     let lifecycleLockAcquired = false;
     let cleanupSettlementTimedOut = false;
+    const startupFailureObservation: RunnerContainerStartupFailureObservation = {
+      stage: "lifecycle_lock_or_state_read",
+    };
     const readiness = this.withLifecycleLock(async () => {
       lifecycleLockAcquired = true;
       const lifecycleLockAcquiredAtEpochMs = Date.now();
@@ -866,6 +887,7 @@ export class RunnerContainer extends Container {
             readinessSignal,
             {
               completeSupersededShellPrewarm: supersededShellPrewarm,
+              startupFailureObservation,
               surfaceCleanupUnsettled: true,
             },
           );
@@ -896,7 +918,7 @@ export class RunnerContainer extends Container {
       }
     });
     try {
-      return await raceRunnerContainerOperationAbort(
+      const result = await raceRunnerContainerOperationAbort(
         readiness,
         readinessSignal,
         async () => {
@@ -915,7 +937,20 @@ export class RunnerContainer extends Container {
           return settled ? "use_operation_outcome" : undefined;
         },
       );
+      if (result.kind === "cleanup_unsettled") {
+        emitRunnerContainerStartupFailureObservation({
+          cleanupUnsettled: true,
+          readinessRequestedAtEpochMs,
+          stage: startupFailureObservation.stage,
+        });
+      }
+      return result;
     } catch (error) {
+      emitRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: cleanupSettlementTimedOut,
+        readinessRequestedAtEpochMs,
+        stage: startupFailureObservation.stage,
+      });
       if (cleanupSettlementTimedOut) {
         return { kind: "cleanup_unsettled" };
       }
@@ -2276,6 +2311,7 @@ export class RunnerContainer extends Container {
     operationAbortSignal: AbortSignal,
     options: {
       completeSupersededShellPrewarm?: boolean;
+      startupFailureObservation?: RunnerContainerStartupFailureObservation;
       surfaceCleanupUnsettled?: boolean;
     } = {},
   ): Promise<RunnerContainerEnsureReadyResult> {
@@ -2291,6 +2327,9 @@ export class RunnerContainer extends Container {
       this.recordCurrentContainerStopped();
       this.warmShellInvalidatedByUnsettledDestroy = false;
     } else if (this.warmShellInvalidatedByUnsettledDestroy) {
+      if (options.startupFailureObservation) {
+        options.startupFailureObservation.stage = "warm_health_or_cleanup";
+      }
       const invalidatedStart = this.currentContainerStart;
       this.clearRecentReadinessProof();
       emitHostedExecutionStructuredLog({
@@ -2323,6 +2362,9 @@ export class RunnerContainer extends Container {
       !isRunnerContainerStopped(status)
       && !options.completeSupersededShellPrewarm
     ) {
+      if (options.startupFailureObservation) {
+        options.startupFailureObservation.stage = "warm_health_or_cleanup";
+      }
       const observedStart = this.observeRecentPlatformStart(
         initialState,
         readyTimeoutMs,
@@ -2438,6 +2480,9 @@ export class RunnerContainer extends Container {
       }
     }
     throwIfRunnerContainerOperationAborted(operationAbortSignal);
+    if (options.startupFailureObservation) {
+      options.startupFailureObservation.stage = "cold_start_or_ports";
+    }
 
     emitHostedExecutionStructuredLog({
       component: "container",
@@ -2477,6 +2522,9 @@ export class RunnerContainer extends Container {
           waitInterval: RUNNER_WAIT_INTERVAL_MS,
         },
       });
+      if (options.startupFailureObservation) {
+        options.startupFailureObservation.stage = "cold_health_or_finalization";
+      }
       const portsReadyAtEpochMs = Date.now();
       const healthCheckStartedAtEpochMs = Date.now();
       const healthStartupTiming = await assertRunnerHealthy(
@@ -4279,6 +4327,35 @@ function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boo
   return normalizedLeft.length > 0
     && normalizedRight.length > 0
     && (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft));
+}
+
+function emitRunnerContainerStartupFailureObservation(input: {
+  cleanupUnsettled: boolean;
+  readinessRequestedAtEpochMs: number;
+  stage: RunnerContainerLocalStartupFailureStage;
+}): void {
+  try {
+    const rawElapsedMs = Date.now() - input.readinessRequestedAtEpochMs;
+    const elapsedMs = Number.isFinite(rawElapsedMs) && rawElapsedMs > 0
+      ? Math.min(
+          Math.floor(rawElapsedMs),
+          RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
+        )
+      : 0;
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
+        runtimeStartupFailureElapsedMs: elapsedMs,
+        runtimeStartupFailureStage: input.stage,
+      },
+      level: "warn",
+      message: "Hosted execution container startup confirmation failed.",
+      phase: "container.starting",
+    });
+  } catch {
+    // Telemetry must not replace or mutate the startup failure returned to the caller.
+  }
 }
 
 function emitRunnerContainerLifecycleFailure(input: {

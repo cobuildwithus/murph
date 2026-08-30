@@ -125,6 +125,22 @@ const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
   OPENAI_API_KEY: "test-openai-key",
 } as const;
 
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readStructuredLogDetails(message: string): Record<string, unknown> {
+  const matchingLogs = mocks.emitHostedExecutionStructuredLog.mock.calls
+    .map(([input]) => input)
+    .filter((input) => input.message === message);
+  expect(matchingLogs).toHaveLength(1);
+  const details = matchingLogs[0]?.details;
+  if (!isUnknownRecord(details)) {
+    throw new Error(`Expected structured details for ${message}`);
+  }
+  return details;
+}
+
 describe("HostedUserRunner execution coordination", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -3036,6 +3052,14 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup confirmation failed.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeStartupFailureElapsedMs: 0,
+      runtimeStartupFailureStage: "rpc_unattributed",
+      transportFailureFenceCleared: true,
+    });
   });
 
   it("settles 15-second readiness cleanup before the 21-second controller guard", async () => {
@@ -3136,6 +3160,15 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup cleanup did not settle.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeStartupCleanupUnsettled: true,
+      runtimeStartupFailureElapsedMs: 0,
+      runtimeStartupFailureStage: "rpc_unattributed",
+      runtimeStartupWriteFencePreserved: true,
+    });
   });
 
   it("preserves the fresh fence when only the outer startup guard settles", async () => {
@@ -3191,6 +3224,14 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup confirmation guard elapsed.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeStartupFailureElapsedMs: 8_950,
+      runtimeStartupFailureStage: "caller_deadline",
+      runtimeStartupWriteFencePreserved: true,
+    });
   });
 
   it("clears a fresh fence when the command budget expires before readiness dispatch", async () => {
@@ -3202,7 +3243,7 @@ describe("HostedUserRunner execution coordination", () => {
     const { invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       runnerContainerStubForName(_name, stub) {
-        vi.setSystemTime(new Date("2026-04-27T00:00:05.000Z"));
+        vi.setSystemTime(new Date("2026-04-27T00:01:05.000Z"));
         return stub;
       },
       workspace: createWorkspaceState({ version: "5" }),
@@ -3215,7 +3256,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:15.000Z",
+      retryAt: "2026-04-27T00:01:15.000Z",
     });
 
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
@@ -3238,6 +3279,14 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup confirmation failed.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "command_budget_exhausted",
+      runtimeStartupFailureElapsedMs: 60_000,
+      runtimeStartupFailureStage: "caller_deadline",
+      transportFailureFenceCleared: true,
+    });
   });
 
   it("invokes startup readiness directly on the container stub", async () => {
@@ -3342,6 +3391,14 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup confirmation failed.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "container_rpc_error",
+      runtimeStartupFailureElapsedMs: 0,
+      runtimeStartupFailureStage: "rpc_unattributed",
+      transportFailureFenceCleared: true,
+    });
   });
 
   it("sends activation diagnostics behind an active write fence without starting another container run", async () => {
