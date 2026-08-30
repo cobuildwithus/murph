@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "faster-private-dashboard-refreshes",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster private dashboard refreshes",
+    "summary": "Larger private dashboards now spend less time preparing saved health data in the background, helping updates finish more reliably.",
+    "details": "The data shown and privacy boundaries are unchanged. Foreground messages still take priority, and existing pages continue to read the same saved data.",
+    "relevanceTags": ["health-data", "performance", "reliability", "privacy"],
+    "sourcePullRequests": [2593]
+  }
+}

@@ -1857,13 +1857,24 @@ does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
 The production runner first performs route type generation and an explicit
 app-local generated-contract TypeScript check with a 3.5 GiB limit. It marks
-only that prepared check complete before starting Webpack. Compilation then
-runs in the Next CLI process with a 3 GiB old-space limit; the runner preserves
-unrelated inherited Node options while replacing inherited old-space flags.
-These phases are sequential, so their limits do not compose. The same runner is
-used by the Vercel package build and the CI memory-observation lane. Forced-cold
-Standard previews remain the direct acceptance evidence, and a Next upgrade
-must revalidate the heap boundary.
+only that prepared check complete before starting Webpack. The Next CLI parent
+uses a 1 GiB old-space limit and the isolated Webpack worker uses 3 GiB. The
+worker exits and releases compiler memory before static-generation workers
+start. The runner preserves unrelated inherited Node options while replacing
+inherited old-space flags. TypeScript, Webpack compilation, and static
+generation are sequential, so their heap limits do not compose. The same
+runner is used by the Vercel package build and the CI memory-observation lane.
+Forced-cold Standard previews remain the direct acceptance evidence, and a
+Next upgrade must revalidate the parent/worker heap boundary.
+
+The worker boundary is required by measured composed memory, not by the duration
+of an individual route. A cold single-process GitHub build reached 9.11 GB
+immediately before static generation and 11.18 GB when export workers started,
+including 8.06 GB of anonymous memory. Vercel Standard provides 8 GB total and
+the repository reserves 0.8 GB for host overhead, so reducing only page
+concurrency cannot make that single-process shape fit the 7.2 GB build budget.
+The isolated worker preserves the ordinary `next build` output while removing
+compiler residency from the static-generation peak.
 
 Next's static-generation export loop defaults to eight concurrent pages in each
 of the two configured export workers, allowing up to sixteen page renders at
@@ -1874,14 +1885,17 @@ skipping any static output; exact-head Vercel builds remain the duration and
 capacity proof.
 
 Production builds use Next 16.3's supported Webpack fallback. The production
-script passes `--webpack` and enables `webpackMemoryOptimizations`. The Workflow
-integration contributes custom Webpack configuration, so Next's canonical
-default is to compile in the CLI process. Do not force `webpackBuildWorker`:
-that creates a second compiler-process owner and previously left Standard
-deployments stuck inside an opaque worker after compilation stopped making
-progress. The hosted local-development wrapper remains on Turbopack and rejects
-an explicit Webpack flag. The production runner also owns a versioned cache
-epoch inside `.next/cache`.
+runner passes `--webpack`, and the config enables `webpackBuildWorker` and
+`webpackMemoryOptimizations`. The Workflow integration contributes custom
+Webpack configuration, which disables Next's automatic worker selection, so
+the worker must be enabled explicitly. Three consecutive forced-cold Webpack
+previews, a later integration preview, and the final corrected head previously
+completed on the Standard builder with this worker boundary. The later
+single-process simplification is no longer acceptable: an exact-head cgroup
+trace measured 11.18 GB at static generation, and production reproduced the
+same intermittent 70-page stall. The hosted local-development wrapper remains
+on Turbopack and rejects an explicit Webpack flag. The production runner also
+owns a versioned cache epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
 compilation and writes the epoch only after Next succeeds. Production Webpack
 compiles are additionally cold-cache by policy: the runner removes
