@@ -5,9 +5,9 @@
     "id": "goal-updates-avoid-duplicates",
     "kind": "improvement",
     "priority": 3,
-    "title": "Goal updates avoid accidental duplicates",
-    "summary": "Updating a saved goal now stops safely when its ID no longer exists instead of creating a duplicate goal.",
-    "details": "Creating a new goal still works normally, and valid updates keep the existing record. If the requested goal is gone, Murph leaves saved goals unchanged and returns a clear recovery step.",
+    "title": "Typed goal ID updates avoid accidental duplicates",
+    "summary": "When Murph uses typed goal save with an existing goal ID, a missing ID now stops the update instead of creating another goal.",
+    "details": "Murph can inspect the current goal list, but it will not retry against a different goal without confirmation. This safeguard is limited to typed goal save --id updates; advanced JSON imports keep their existing behavior.",
     "relevanceTags": ["goals", "reliability", "recovery"],
     "sourcePullRequests": [2610]
   }

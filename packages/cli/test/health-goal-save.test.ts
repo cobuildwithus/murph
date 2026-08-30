@@ -220,7 +220,10 @@ test("goal save with a missing id fails closed without falling back to a matchin
       assert.equal(missing.envelope.error.message, "Goal was not found.");
       assert.equal(missing.envelope.error.retryable, false);
       assert.equal(missing.envelope.error.stage, "read");
-      assert.match(missing.envelope.error.hint ?? "", /goal list/u);
+      assert.equal(
+        missing.envelope.error.hint,
+        "Before replying, run goal list; this read is recovery, not a write retry. Never retry goal save with a different id unless the user confirms that exact listed goal as the target. Then stop and ask one question offering both choices: update that exact goal or create a new goal.",
+      );
     }
 
     const goalsAfter = await listGoals(vaultRoot);
