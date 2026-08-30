@@ -1,6 +1,6 @@
 # Suppress Stripe renewal alert emails
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -97,4 +97,9 @@ Updated: 2026-08-30
   owner tests, including fresh and stale Family renewal silence, direct trial
   conversion, Family billing transition, access restoration, sent-marker, and
   replay behavior.
-- [ ] Complete exact-head CI and the preliminary and final ReviewGPT gates.
+- [x] Complete exact-head CI and the final ReviewGPT gate. All four required
+  checks passed. ReviewGPT identified that a retryable provider failure after a
+  newly committed transition can lose the attempt-local notification fact; the
+  user explicitly accepted that notification-only edge case to avoid adding
+  retained receipt state in this change.
+Completed: 2026-08-30
