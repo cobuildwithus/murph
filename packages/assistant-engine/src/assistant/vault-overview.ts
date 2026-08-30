@@ -67,7 +67,7 @@ export async function buildAssistantVaultOverviewBlock(
     rawCoverage,
     bankCoverage,
     otherSources,
-    '- Treat `vault-cli memory show`, relevant wiki/knowledge reads, and the canonical preferences surface as the synthesized truth surfaces.',
+    '- Treat `vault-cli memory show --compact --format json`, relevant wiki/knowledge reads, and the canonical preferences surface as the synthesized truth surfaces.',
     '- Query the vault before making factual claims, especially about current state, dates, or counts.',
   ].filter((value): value is string => Boolean(value))
 

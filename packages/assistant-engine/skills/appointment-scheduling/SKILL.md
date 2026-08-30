@@ -42,7 +42,7 @@ Before asking the user for appointment details:
 1. Read the current message and recent conversation for already stated facts,
    including facts given before an information-only or test call.
 2. In a direct/private conversation, inspect canonical Durable Memory with
-   `vault-cli memory show --vault "$VAULT" --format json` when a saved name,
+   `vault-cli memory show --compact --vault "$VAULT" --format json` when a saved name,
    date of birth, provider relationship, location, modality, recurring
    availability, or standing scheduling rule could answer part of the brief.
 3. Inspect the relevant canonical provider or health record when it could own
@@ -259,7 +259,7 @@ accepting a cancellation fee. They remain defaults, not current authorization.
 
 For any other durable, user-approved fact:
 
-1. Read `vault-cli memory show --vault "$VAULT" --format json` first.
+1. Read `vault-cli memory show --compact --vault "$VAULT" --format json` first.
 2. Use `vault-cli memory set-name <displayName> --vault "$VAULT"` only for the
    user's preferred display name. Do not assume it is their legal patient name.
 3. If a semantically matching record exists, use
