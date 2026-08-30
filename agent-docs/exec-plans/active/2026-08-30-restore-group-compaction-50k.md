@@ -9,8 +9,9 @@ Updated: 2026-08-30
 - Restore authenticated group-chat idle compaction from 100,000 to 50,000
   context tokens while preserving the existing off-turn, abortable, fail-open
   maintenance path.
-- Let long-lived group sessions amortize compaction before repeated resumed
-  turns resend the retained context.
+- Restore the earlier maintenance boundary for long-lived group sessions;
+  provider-dollar savings remain an operational measurement, not a guaranteed
+  outcome of the threshold alone.
 
 ## Success criteria
 
@@ -66,7 +67,7 @@ Updated: 2026-08-30
 ## Decisions
 
 - Product UX Patch:
-  - Outcome: long-lived group chats compact at the prior cost-amortizing 50k
+  - Outcome: long-lived group chats compact at the prior 50k maintenance
     boundary.
   - Reaches: authenticated group sessions during idle shutdown only.
   - Proof: exact boundary tests plus compact and skip cold-resume journeys.
@@ -100,3 +101,9 @@ Updated: 2026-08-30
     two tests.
   - Assistant Runtime and Assistant Engine typechecks: passed.
   - `git diff --check`: passed.
+  - Preliminary specialist review: accepted the evidence-wording finding and
+    removed the unsupported exact-savings implication; no new A/B harness was
+    added because existing production continuation data and exact boundary
+    tests are sufficient for this restoration, while historical provider
+    compact usage cannot be recovered exactly.
+  - Final cross-cutting ReviewGPT round: passed with no findings.
