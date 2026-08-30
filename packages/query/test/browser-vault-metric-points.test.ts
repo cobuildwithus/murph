@@ -97,6 +97,45 @@ test("browser-vault metric indexing preserves biomarker-specific selections for 
   );
 });
 
+test("browser-vault metric indexing bounds reads of the original point collections", () => {
+  const metricKeyCount = 12;
+  const points = Array.from({ length: 240 }, (_entry, index) => {
+    const metricKey = `metric-${String(index % metricKeyCount).padStart(2, "0")}`;
+    const day = String((index % 28) + 1).padStart(2, "0");
+    return point(
+      `2026-04-${day}`,
+      metricKey,
+      `biomarker:${metricKey}`,
+      index,
+      "score",
+    );
+  });
+  const requestedMetrics = Array.from({ length: metricKeyCount }, (_entry, index) => {
+    const metricKey = `metric-${String(index).padStart(2, "0")}`;
+    return { biomarkerKey: `biomarker:${metricKey}`, metricKey };
+  });
+
+  const rowPoints = trackIndexedReads(points);
+  const rows = toBrowserVaultMetricRows({ points: rowPoints.values });
+  assert.equal(rows.length, points.length);
+  assert.ok(rowPoints.readCount() <= points.length * 2);
+
+  const metricPoints = trackIndexedReads(points);
+  const selectionPoints = trackIndexedReads(points);
+  const selections = createBrowserVaultMetricSelectionRows({
+    generatedAt: "2026-04-30T12:00:00.000Z",
+    metricPoints: metricPoints.values,
+    requestedMetrics,
+    selectionPoints: selectionPoints.values,
+  });
+  assert.deepEqual(
+    selections.map((selection) => selection.metricKey),
+    requestedMetrics.map((request) => request.metricKey),
+  );
+  assert.ok(metricPoints.readCount() <= points.length);
+  assert.ok(selectionPoints.readCount() <= points.length * 2);
+});
+
 test("browser-vault selection uses recorded order for comparable non-sleep facts", () => {
   const source = {
     family: "event" as const,
@@ -159,6 +198,25 @@ test("browser-vault selection uses recorded order for comparable non-sleep facts
   assert.deepEqual(selection?.pointIds, [newer.id]);
   assert.ok(selection?.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"));
 });
+
+function trackIndexedReads<T>(values: readonly T[]): {
+  readCount: () => number;
+  values: readonly T[];
+} {
+  let readCount = 0;
+  const trackedValues = new Proxy([...values], {
+    get(target, property, receiver) {
+      if (typeof property === "string" && /^(0|[1-9]\d*)$/.test(property)) {
+        readCount += 1;
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  return {
+    readCount: () => readCount,
+    values: trackedValues,
+  };
+}
 
 function point(
   date: string,
