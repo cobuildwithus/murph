@@ -398,10 +398,10 @@ test("next.config leaves agent guidance under repository ownership", () => {
   assert.equal(productionNextConfig.agentRules, false);
 });
 
-test("production build config keeps Webpack compilation in the Next process", () => {
+test("production build config isolates Webpack compilation from static generation", () => {
   assert.equal(productionNextConfig.experimental?.turbopackFileSystemCacheForBuild, false);
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
-  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, undefined);
+  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, true);
   assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, true);
 });
 

@@ -342,8 +342,10 @@ export function buildHostedWebNextConfig(
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(environment),
       // Source-map emission is the largest proven build-memory cost.
       turbopackSourceMaps: false,
-      // Workflow contributes Webpack configuration, so Next keeps compilation
-      // in the CLI process unless webpackBuildWorker is explicitly forced.
+      // Workflow contributes Webpack configuration, which disables Next's
+      // automatic worker selection. Force the supported worker so compiler
+      // memory is released before static-generation workers start.
+      webpackBuildWorker: true,
       webpackMemoryOptimizations: true,
     },
     outputFileTracingIncludes: {

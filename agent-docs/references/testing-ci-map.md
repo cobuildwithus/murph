@@ -464,7 +464,8 @@ gate unset and makes no paid request.
   owner for the mutable production build cache, epoch, and deadline contract.
   The CI-relevant fact is that the verify lane's `VERCEL=1 VERCEL_ENV=preview`
   build shape compiles Webpack cold without arming the production-only build
-  deadline. The split reduces the compile-parent peak without
+  deadline. The worker boundary removes compiler residency from the
+  static-generation peak without
   weakening generated-contract validation, while repeated forced-cold Standard
   previews remain the real Vercel acceptance proof. A 2 GiB parent-bound
   candidate passed one forced-cold Standard preview but the next identical
