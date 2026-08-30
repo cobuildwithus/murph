@@ -30,9 +30,13 @@ export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 // Every batched retention category uses ordered work with an explicit per-run
 // ceiling, so one hourly invocation can never open a long transaction against
-// the production pool.
+// the production pool. High-volume callback nonces keep the same small
+// statement size while using a dedicated catch-up ceiling; unrelated retention
+// categories retain the shared four-batch limit.
 export const HOSTED_RETENTION_BATCH_SIZE = 5_000;
 export const HOSTED_RETENTION_MAX_BATCHES = 4;
+export const HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES =
+  HOSTED_RETENTION_MAX_BATCHES * 100;
 // Short-lived control artifacts are normally tiny and should never inherit the
 // high-volume diagnostic drain budget. Across the seven owners below this caps
 // one hourly pass at 14 statements and 3,500 deleted rows.
@@ -113,10 +117,6 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  // These background deletes must never fan out across the same pool that
-  // serves user-facing control-plane work.
-  const expiredCallbackRequestNoncesDeleted =
-    await deleteExpiredHostedCallbackRequestNonces({ prisma });
   const expiredGroupCurrentSenderClarificationsDeleted =
     await deleteExpiredGroupCurrentSenderClarifications({ now, prisma });
   const expiredGroupParticipantObservationsDeleted =
@@ -145,6 +145,13 @@ export async function runHostedRetentionCleanup(input: {
     now: () => now,
     store: new PrismaComputerUseStore(prisma),
   }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
+  // Run the high-volume catch-up lane last so reaching its dedicated ceiling
+  // cannot delay the other primary-database retention owners, but keep it
+  // before external runtime signals so database cleanup never overlaps signal
+  // fan-out. These background deletes remain serial and do not fan out across
+  // the foreground pool.
+  const expiredCallbackRequestNoncesDeleted =
+    await deleteExpiredHostedCallbackRequestNonces({ prisma });
   const mediaRetentionSignals = await signalDueInboxMediaRetentionRuntimes({
     now,
     prisma,
@@ -597,28 +604,31 @@ export async function retireExpiredMailboxContent(input: {
 export async function deleteExpiredHostedCallbackRequestNonces(input: {
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
-  return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH database_clock AS MATERIALIZED (
-      SELECT date_trunc(
-        'milliseconds',
-        clock_timestamp() AT TIME ZONE 'UTC'
-      ) AS "now"
-    ),
-    doomed AS MATERIALIZED (
-      SELECT request_nonce."nonce_hash"
-      FROM "hosted_web_internal_request_nonce" AS request_nonce
-      CROSS JOIN database_clock
-      WHERE request_nonce."expires_at" < database_clock."now"
-      ORDER BY
-        request_nonce."expires_at" ASC,
-        request_nonce."nonce_hash" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-      FOR UPDATE OF request_nonce SKIP LOCKED
-    )
-    DELETE FROM "hosted_web_internal_request_nonce" AS request_nonce
-    USING doomed
-    WHERE request_nonce."nonce_hash" = doomed."nonce_hash"
-  `);
+  return await runRetentionBatches(
+    () => input.prisma.$executeRaw`
+      WITH database_clock AS MATERIALIZED (
+        SELECT date_trunc(
+          'milliseconds',
+          clock_timestamp() AT TIME ZONE 'UTC'
+        ) AS "now"
+      ),
+      doomed AS MATERIALIZED (
+        SELECT request_nonce."nonce_hash"
+        FROM "hosted_web_internal_request_nonce" AS request_nonce
+        CROSS JOIN database_clock
+        WHERE request_nonce."expires_at" < database_clock."now"
+        ORDER BY
+          request_nonce."expires_at" ASC,
+          request_nonce."nonce_hash" ASC
+        LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+        FOR UPDATE OF request_nonce SKIP LOCKED
+      )
+      DELETE FROM "hosted_web_internal_request_nonce" AS request_nonce
+      USING doomed
+      WHERE request_nonce."nonce_hash" = doomed."nonce_hash"
+    `,
+    HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES,
+  );
 }
 
 export async function deleteExpiredConnectedAppConnectIntents(input: {
@@ -918,12 +928,14 @@ async function runMailboxRetentionBatches(
 }
 
 // Runs one bounded batch at a time and stops as soon as a batch comes back
-// short, so a normal hour does one statement and a backlog drains over hours.
+// short. The caller-owned ceiling bounds total work without enlarging any one
+// lock-holding statement.
 async function runRetentionBatches(
   mutateBatch: () => Promise<number>,
+  maxBatches = HOSTED_RETENTION_MAX_BATCHES,
 ): Promise<number> {
   let affected = 0;
-  for (let batch = 0; batch < HOSTED_RETENTION_MAX_BATCHES; batch += 1) {
+  for (let batch = 0; batch < maxBatches; batch += 1) {
     const count = await mutateBatch();
     affected += count;
     if (count < HOSTED_RETENTION_BATCH_SIZE) {

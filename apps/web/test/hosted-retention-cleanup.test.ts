@@ -14,6 +14,7 @@ import { HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS } from "@/src/lib/co
 import {
   CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
   DEVICE_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+  HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES,
   HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
   HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES,
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
@@ -555,7 +556,7 @@ describe("hosted retention cleanup", () => {
     }
   });
 
-  it("stops each category at its per-run batch ceiling", async () => {
+  it("gives callback nonces a catch-up ceiling without widening other categories", async () => {
     // A backlog that keeps returning full batches must not turn one hourly run
     // into an unbounded delete loop.
     let nonceBatches = 0;
@@ -579,11 +580,14 @@ describe("hosted retention cleanup", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       expiredCallbackRequestNoncesDeleted:
-        HOSTED_RETENTION_BATCH_SIZE * HOSTED_RETENTION_MAX_BATCHES,
+        HOSTED_RETENTION_BATCH_SIZE
+        * HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES,
       expiredIngressLatencyTracesDeleted:
         HOSTED_RETENTION_BATCH_SIZE * HOSTED_RETENTION_MAX_BATCHES,
     });
-    expect(nonceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
+    expect(nonceBatches).toBe(
+      HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES,
+    );
     expect(traceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
   });
 

@@ -61,6 +61,8 @@ describe("hosted retention cron route", () => {
   });
 
   it("requires the Vercel cron header and returns the cleanup summary", async () => {
+    expect(hostedRetentionCronRoute.maxDuration).toBe(800);
+
     const response = await hostedRetentionCronRoute.GET(
       new Request("https://join.example.test/api/internal/hosted-execution/retention/cron"),
     );

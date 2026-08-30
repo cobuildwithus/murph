@@ -1288,6 +1288,11 @@ Callback auth contract:
   only the `bindings-v1` Web owner/key identity with `Cache-Control: no-store`.
 - the existing hourly hosted-retention cron removes only strictly expired nonce
   rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
+  each statement remains capped at 5,000 rows, while callback nonces alone use
+  a 100-times-higher max-batch ceiling to drain sustained control-plane volume.
+  That catch-up lane runs after the other primary-database retention owners and
+  before external runtime-signal fan-out under the route's explicit 800-second
+  duration ceiling; a caught-up hour still stops after the first short batch;
   account deletion still independently deletes the member's nonce rows
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;

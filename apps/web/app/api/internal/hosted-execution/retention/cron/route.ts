@@ -4,6 +4,8 @@ import {
   runHostedRetentionCleanupWithRuntimeLogDatabase,
 } from "@/src/lib/hosted-retention/runtime-log-database-cleanup";
 
+export const maxDuration = 800;
+
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
