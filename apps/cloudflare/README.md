@@ -144,6 +144,8 @@ Bindings:
   Queue metrics
 - `DEVICE_WEBHOOK_QUEUE_MONITOR`, one environment-scoped SQLite Durable Object
   for five-minute Queue-health observations and restart-safe operator paging
+- `OPENAI_AUTHORIZATION_ALERT_MONITOR`, one global SQLite Durable Object for
+  privacy-safe authorized OpenAI upstream 401/403 incident paging
 - `RUNNER_CONTAINER`
 - `BUNDLES`
 - `CF_VERSION_METADATA` version metadata binding, used by deploy smoke to prove the requested Worker version actually handled the request
@@ -210,6 +212,29 @@ production origin or when callback origins use HTTP, localhost, Docker bridge,
 loopback, preview/development, or private-network hosts. The GitHub workflow
 runs that preflight before artifact preparation; the local `deploy:worker`
 path also runs it inside the apply step before artifact validation and upload.
+
+### OpenAI authorization alert monitor
+
+Only an HTTP 401 or 403 returned by OpenAI after provider-egress authorization
+succeeds and the Worker injects `OPENAI_API_KEY` reports to the fixed
+`production` Durable Object. The RPC carries exactly `{ status, observedAtMs }`;
+it carries no member, request, runner, attempt, prompt, body, path, model, URL,
+response, header, token, or other identifier or payload detail. Murph-local
+credential, route, and authorization failures, transport exceptions, other
+providers, and every other upstream status do not touch this namespace. The
+report is failure-isolated, is deferred with the request `waitUntil` when
+available, and never clones, consumes, replaces, or otherwise changes the
+original upstream response. Successful OpenAI egress is unchanged.
+
+`OpenAiAuthorizationAlertDurableObject` reuses the existing `LINQ_API_TOKEN` and
+the two existing database-alert direct operator chats. It persists the first
+page, coalesces repeats, retries the exact pending message and idempotency key
+after five minutes, admits at most one hourly reminder on a fresh failure, and
+closes after 15 quiet minutes without sending a recovery message. Native Durable
+Object alarms own retry and quiet handling; the existing five-minute Worker cron
+is unchanged. Production binds `OPENAI_AUTHORIZATION_ALERT_MONITOR` to the class
+through append-only SQLite migration `v6`. This adds no secret, recipient, cron,
+queue, route, service, or member-facing message.
 
 ### Production database-health monitor
 

@@ -21,6 +21,10 @@
       {
         "name": "DEVICE_WEBHOOK_QUEUE_MONITOR",
         "class_name": "DeviceWebhookQueueHealthDurableObject"
+      },
+      {
+        "name": "OPENAI_AUTHORIZATION_ALERT_MONITOR",
+        "class_name": "OpenAiAuthorizationAlertDurableObject"
       }
     ]
   },
@@ -40,6 +44,10 @@
     {
       "tag": "v4",
       "new_sqlite_classes": ["DeviceWebhookQueueHealthDurableObject"]
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["OpenAiAuthorizationAlertDurableObject"]
     }
   ],
   "queues": {

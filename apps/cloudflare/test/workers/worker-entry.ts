@@ -44,6 +44,9 @@ import {
   DeviceWebhookQueueHealthDurableObject,
 } from "../../src/worker/device-webhook-queue-health-durable-object.ts";
 import {
+  OpenAiAuthorizationAlertDurableObject,
+} from "../../src/worker/openai-authorization-alert-durable-object.ts";
+import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
   clearRunnerOutputBundleFault,
@@ -62,6 +65,7 @@ import {
 
 export { DatabaseHealthDurableObject };
 export { DeviceWebhookQueueHealthDurableObject };
+export { OpenAiAuthorizationAlertDurableObject };
 
 export class VitestDatabaseHealthDurableObject
   extends DatabaseHealthDurableObject {
