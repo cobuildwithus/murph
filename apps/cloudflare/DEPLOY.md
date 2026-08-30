@@ -388,6 +388,41 @@ the former single-recipient implementation: it can clear that page after only
 the primary provider operation. The two-recipient Worker is the rollback floor
 until alerts are disabled or the pending page has cleared.
 
+## OpenAI Authorization Alert Rollout
+
+Deploy this change on Cloudflare only; no Vercel tandem deploy or compatibility
+window is needed, and successful OpenAI egress is unchanged. The Worker artifact
+and production config must land together with the
+`OpenAiAuthorizationAlertDurableObject` export, the
+`OPENAI_AUTHORIZATION_ALERT_MONITOR` binding, and append-only SQLite migration
+`v6`. Do not alter the existing `*/5 * * * *` cron: this owner uses native
+Durable Object alarms. It adds no secret or recipient and reuses the existing
+`LINQ_API_TOKEN`, `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`, and
+`HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`.
+
+The trigger is limited to an authorized OpenAI upstream HTTP 401 or 403 after
+Worker key injection, and the singleton RPC contains only `{ status,
+observedAtMs }`. The owner persists and coalesces the first page, retries the
+exact pending bytes and idempotency key after five minutes, admits at most one
+hourly reminder on a fresh failure, and closes after 15 quiet minutes without a
+recovery message. Reporting failure never changes the upstream response. It is
+scheduled with `waitUntil` when available; when the Containers outbound context
+cannot own the promise, only the failed 401/403 path awaits the short Durable
+Object admission.
+
+For a safe rollback, deploy a Cloudflare-only compatibility build that disables
+the egress call site while retaining the class export, binding, and append-only
+`v6` migration so an already-armed retry or quiet alarm can finish. Do not delete,
+renumber, or reuse the namespace or migration. No Vercel rollback is required.
+For read-only post-deploy proof, compare the active Worker binding metadata with
+the generated config, verify checked-in/generated class, binding, and `v6`
+migration parity, confirm the cron remains unchanged, and inspect Workers
+Observability for the fixed `openai_authorization_alert_report_failed` code. Do
+not invoke `reportFailure`, manufacture an OpenAI 401/403, or send a Linq message
+for smoke;
+the fake-provider integration and Durable Object suites own trigger and delivery
+proof.
+
 ## Device-Sync Wake Epoch Rollout
 
 Connection-scoped `device-sync.wake` items bind their authority to the

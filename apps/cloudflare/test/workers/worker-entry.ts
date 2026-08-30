@@ -7,6 +7,14 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import worker from "../../src/index.ts";
+import { sendOperatorLinqAlert } from "../../src/operator-alert/linq.ts";
+import {
+  handleHostedRunnerOpenAiOutbound,
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "../../src/runner-egress-intercept.ts";
+import {
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+} from "../../src/runner-outbound/headers.ts";
 import type { R2BucketLike } from "../../src/bundle-store.js";
 import {
   DatabaseHealthMonitor,
@@ -43,6 +51,10 @@ import {
 import {
   DeviceWebhookQueueHealthDurableObject,
 } from "../../src/worker/device-webhook-queue-health-durable-object.ts";
+import {
+  OpenAiAuthorizationAlertDurableObject as ProductionOpenAiAuthorizationAlertDurableObject,
+  type OpenAiAuthorizationAlertEnvironment,
+} from "../../src/worker/openai-authorization-alert-durable-object.ts";
 import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
@@ -94,6 +106,31 @@ export class VitestDatabaseHealthDurableObject
 
   readAlertState(): DatabaseHealthAlertState {
     return this.testMonitor.readAlertState();
+  }
+}
+
+export class VitestOpenAiAuthorizationAlertDurableObject
+  extends ProductionOpenAiAuthorizationAlertDurableObject {
+  constructor(
+    state: DurableObjectStateLike,
+    environment: OpenAiAuthorizationAlertEnvironment,
+  ) {
+    super(state, environment, {
+      async send(input): Promise<void> {
+        await sendOperatorLinqAlert({
+          apiBaseUrl: environment.LINQ_API_BASE_URL?.trim()
+            || "https://api.linqapp.com/api/partner/v3",
+          apiToken: environment.LINQ_API_TOKEN ?? "",
+          chatIds: [
+            environment.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID ?? "",
+            environment.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID ?? "",
+          ],
+          fetchImplementation: handleDatabaseHealthEgress,
+          idempotencyKey: input.idempotencyKey,
+          message: input.message,
+        });
+      },
+    });
   }
 }
 
@@ -432,7 +469,61 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     });
   }
 
+  if (
+    url.pathname === "/__test/openai-authorization-alert"
+    && request.method === "POST"
+  ) {
+    return await runOpenAiAuthorizationAlertTest();
+  }
+
   return null;
+}
+
+async function runOpenAiAuthorizationAlertTest(): Promise<Response> {
+  const userId = "member-private-openai-alert";
+  const runner = getUserRunnerStub(userId);
+  await runner.bindUser(userId);
+  const lease = await runner.beginWriteFenceForTest({
+    userId,
+    workspaceVersion: "7",
+  });
+  const headers = new Headers({
+    authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+    "content-type": "application/json; charset=utf-8",
+    [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId,
+    "x-private-request-header": "private-request-header",
+  });
+  writeRunnerRuntimeWriteFenceHeaders(headers, {
+    attemptId: lease.attemptId,
+    generation: lease.generation,
+    workspaceVersion: lease.workspaceVersion ?? "7",
+  });
+  const providerRequest = new Request(
+    "https://api.openai.com/v1/images/generations?private_query=private-query",
+    {
+      body: JSON.stringify({
+        attemptDetail: "private-attempt-detail",
+        model: "private-model",
+        prompt: "private-provider-payload",
+      }),
+      headers,
+      method: "POST",
+    },
+  );
+
+  return await handleHostedRunnerOpenAiOutbound(
+    providerRequest,
+    readWorkerEnvironmentSource(),
+    { containerId: "private-runner-container-id" },
+    async () => new Response("private-upstream-response-body", {
+      headers: {
+        "content-type": "application/problem+json",
+        "x-private-response-header": "private-response-header",
+      },
+      status: 401,
+      statusText: "Synthetic Unauthorized",
+    }),
+  );
 }
 
 function getUserRunnerStub(userId: string) {

@@ -84,6 +84,7 @@ import {
 import {
   updateAssistantPreferences as updateAssistantPreferencesInternal,
   updateWearablePreferences as updateWearablePreferencesInternal,
+  updateWorkoutCapturePreferences as updateWorkoutCapturePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
 } from "./preferences.ts";
 import { commitAuditedCanonicalWrite, type CanonicalMutationAuditInput } from "./audited-write.ts";
@@ -662,6 +663,12 @@ export async function updateWorkoutUnitPreferences(
   input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
 ): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
   return updateWorkoutUnitPreferencesInternal(input);
+}
+
+export async function updateWorkoutCapturePreferences(
+  input: Parameters<typeof updateWorkoutCapturePreferencesInternal>[0],
+): ReturnType<typeof updateWorkoutCapturePreferencesInternal> {
+  return updateWorkoutCapturePreferencesInternal(input);
 }
 
 export async function updateWearablePreferences(
