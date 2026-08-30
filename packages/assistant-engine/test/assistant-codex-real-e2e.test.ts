@@ -19124,16 +19124,15 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
 
       try {
         const result = await runRealCompactMemoryReadJourney({ config })
+        const expandedCommands = expandRecordedVaultCommands(result.commands)
         process.stdout.write(
           `[compact-memory-read-e2e] ${JSON.stringify({
+            commands: result.commands,
             reply: result.message,
             scenario: 'synthetic numeric-target suitability',
           })}\n`,
         )
-        expect(result.commands).toHaveLength(1)
-        expect(expandRecordedVaultCommands(result.commands)).toEqual([
-          'memory show --compact',
-        ])
+        expect(expandedCommands).toEqual(['memory show --compact'])
         expect(result.message).toMatch(/protein/iu)
         expect(result.message).toMatch(/suitable|appropriate|reasonable/iu)
         expect(result.message).not.toMatch(/not suitable|unsuitable/iu)
