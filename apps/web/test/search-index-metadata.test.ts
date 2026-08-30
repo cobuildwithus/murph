@@ -6,7 +6,10 @@ import { metadata as designMetadata } from "../app/design/page";
 import robots from "../app/robots";
 import sitemap from "../app/sitemap";
 import { metadata as pitchMetadata } from "../app/pitch/page";
-import { listComparisonRoutes } from "../src/lib/comparisons/catalog";
+import {
+  listComparisonRoutes,
+  listComparisonSitemapEntries,
+} from "../src/lib/comparisons/catalog";
 import { listHealthCommonsBiomarkerRoutes } from "../src/lib/health-commons/biomarker-projections";
 import { listHealthCommonsExperimentRouteParams } from "../src/lib/health-commons/experiment-browse";
 import { listHealthCommonsMeasurementMethodRoutes } from "../src/lib/health-commons/measurement-method-detail";
@@ -71,11 +74,16 @@ describe("public search indexing metadata", () => {
       ),
     ].sort();
 
-    const comparisonRoutes = new Set(listComparisonRoutes());
+    const comparisonLastModifiedByRoute = new Map(
+      listComparisonSitemapEntries().map(({ lastModified, route }) => [
+        route,
+        lastModified,
+      ]),
+    );
 
     expect(sitemap()).toEqual(expectedRoutes.map((route) => ({
-      ...(comparisonRoutes.has(route)
-        ? { lastModified: "2026-08-30" }
+      ...(comparisonLastModifiedByRoute.has(route)
+        ? { lastModified: comparisonLastModifiedByRoute.get(route) }
         : {}),
       url: publicUrl(route),
     })));
