@@ -30,7 +30,7 @@ function writeExecutable(filePath: string, contents: string): void {
   chmodSync(filePath, 0o755);
 }
 
-function provideReviewGptToolchain(root: string): void {
+function provideReviewGptToolchain(root: string, importerVersion = "prepared"): void {
   writeExecutable(
     path.join(root, "node_modules", ".bin", "cobuild-review-gpt"),
     "#!/usr/bin/env bash\nexit 0\n",
@@ -49,6 +49,10 @@ function provideReviewGptToolchain(root: string): void {
   );
   mkdirSync(path.dirname(consumerShell), { recursive: true });
   writeFileSync(consumerShell, "#!/usr/bin/env bash\n");
+  writeFileSync(
+    path.join(root, "node_modules", ".murph-test-importer-version"),
+    `${importerVersion}\n`,
+  );
 }
 
 function createHarness(installProvidesToolchain: boolean) {
@@ -57,6 +61,7 @@ function createHarness(installProvidesToolchain: boolean) {
   const fakeBin = path.join(root, "fake-bin");
   const gitDirectory = path.join(root, "git-admin");
   const pnpmLog = path.join(root, "pnpm.log");
+  const executionLog = path.join(root, "execution.log");
   const lockLog = path.join(root, "lock.log");
   const wrapper = path.join(scriptsDirectory, "review-gpt-pr-head-preflight.sh");
 
@@ -107,7 +112,7 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$MURPH_TEST_PNPM_LOG"
 if [[ "$1" == "install" ]]; then
   [[ "$*" == "install --frozen-lockfile --filter . --ignore-scripts" ]]
-  if [[ "$MURPH_TEST_INSTALL_STATUS" != "0" ]]; then
+  if [[ "$MURPH_TEST_INSTALL_STATUS" != "0" && "$MURPH_TEST_FAIL_AFTER_TOOLCHAIN" != "1" ]]; then
     printf 'install failed below %s and %s\n' "$MURPH_TEST_ROOT" "$HOME" >&2
     exit "$MURPH_TEST_INSTALL_STATUS"
   fi
@@ -122,11 +127,17 @@ if [[ "$1" == "install" ]]; then
     chmod +x "$MURPH_TEST_ROOT/node_modules/.bin/cobuild-review-gpt"
     chmod +x "$MURPH_TEST_ROOT/node_modules/.bin/tsx"
     printf '#!/usr/bin/env bash\n' > "$MURPH_TEST_ROOT/node_modules/@cobuild/repo-tools/src/consumer-shell.sh"
+    printf '%s\n' "$MURPH_TEST_IMPORTER_VERSION" > "$MURPH_TEST_ROOT/node_modules/.murph-test-importer-version"
+  fi
+  if [[ "$MURPH_TEST_INSTALL_STATUS" != "0" ]]; then
+    printf 'install failed below %s and %s\n' "$MURPH_TEST_ROOT" "$HOME" >&2
+    exit "$MURPH_TEST_INSTALL_STATUS"
   fi
   exit 0
 fi
 [[ "$1" == "exec" ]]
 [[ "$2" == "cobuild-review-gpt" ]]
+cat "$MURPH_TEST_ROOT/node_modules/.murph-test-importer-version" >> "$MURPH_TEST_EXECUTION_LOG"
 `,
   );
 
@@ -135,13 +146,17 @@ fi
       ...process.env,
       PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
       MURPH_TEST_GIT_DIR: gitDirectory,
+      MURPH_TEST_EXECUTION_LOG: executionLog,
+      MURPH_TEST_FAIL_AFTER_TOOLCHAIN: "0",
       MURPH_TEST_INSTALL_DELAY: "0",
       MURPH_TEST_INSTALL_PROVIDES_TOOLCHAIN: installProvidesToolchain ? "1" : "0",
       MURPH_TEST_INSTALL_STATUS: "0",
+      MURPH_TEST_IMPORTER_VERSION: "current",
       MURPH_TEST_LOCK_LOG: lockLog,
       MURPH_TEST_PNPM_LOG: pnpmLog,
       MURPH_TEST_ROOT: root,
     },
+    executionLog,
     gitDirectory,
     lockLog,
     pnpmLog,
@@ -219,7 +234,7 @@ describe("ReviewGPT fresh-worktree toolchain bootstrap", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toContain(
-      "ReviewGPT repository tools are missing; linking the frozen root workspace importer.",
+      "Reconciling the frozen root workspace importer for ReviewGPT.",
     );
     expect(readFileSync(harness.pnpmLog, "utf8")).toBe(
       "install --frozen-lockfile --filter . --ignore-scripts\n" +
@@ -230,15 +245,40 @@ describe("ReviewGPT fresh-worktree toolchain bootstrap", () => {
     );
   });
 
-  it("uses the ready local toolchain without running an install", () => {
+  it("reconciles a ready-looking local toolchain before invoking ReviewGPT", () => {
     const harness = createHarness(true);
-    provideReviewGptToolchain(harness.root);
+    provideReviewGptToolchain(harness.root, "stale");
 
     const result = runReviewGpt(harness);
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(harness.pnpmLog, "utf8")).toBe(
-      "exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m --zip --dry-run\n",
+      "install --frozen-lockfile --filter . --ignore-scripts\n" +
+        "exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m --zip --dry-run\n",
+    );
+    expect(readFileSync(harness.executionLog, "utf8")).toBe("current\n");
+  });
+
+  it("reconciles a stale importer before a later worktree-head invocation", () => {
+    const harness = createHarness(true);
+
+    const firstResult = runReviewGptWithEnvironment(harness, {
+      MURPH_TEST_IMPORTER_VERSION: "importer-a",
+    });
+    const secondResult = runReviewGptWithEnvironment(harness, {
+      MURPH_TEST_IMPORTER_VERSION: "importer-b",
+    });
+
+    expect(firstResult.status, firstResult.stderr).toBe(0);
+    expect(secondResult.status, secondResult.stderr).toBe(0);
+    expect(
+      readFileSync(harness.pnpmLog, "utf8")
+        .trim()
+        .split("\n")
+        .filter((call) => call.startsWith("install ")),
+    ).toHaveLength(2);
+    expect(readFileSync(harness.executionLog, "utf8")).toBe(
+      "importer-a\nimporter-b\n",
     );
   });
 
@@ -272,7 +312,7 @@ describe("ReviewGPT fresh-worktree toolchain bootstrap", () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it("serializes concurrent fresh-worktree setup and installs once", async () => {
+  it("serializes concurrent importer reconciliation", async () => {
     const harness = createHarness(true);
 
     const results = await Promise.all([
@@ -288,7 +328,10 @@ describe("ReviewGPT fresh-worktree toolchain bootstrap", () => {
       .split("\n");
     expect(
       pnpmCalls.filter((call) => call.startsWith("install ")),
-    ).toEqual(["install --frozen-lockfile --filter . --ignore-scripts"]);
+    ).toEqual([
+      "install --frozen-lockfile --filter . --ignore-scripts",
+      "install --frozen-lockfile --filter . --ignore-scripts",
+    ]);
     expect(
       pnpmCalls.filter((call) => call.startsWith("exec ")),
     ).toHaveLength(2);
@@ -308,6 +351,31 @@ describe("ReviewGPT fresh-worktree toolchain bootstrap", () => {
     );
     expect(readFileSync(harness.pnpmLog, "utf8")).toBe(
       "install --frozen-lockfile --filter . --ignore-scripts\n",
+    );
+  });
+
+  it("retries after a failed install leaves every readiness path behind", () => {
+    const harness = createHarness(true);
+
+    const failedResult = runReviewGptWithEnvironment(harness, {
+      MURPH_TEST_FAIL_AFTER_TOOLCHAIN: "1",
+      MURPH_TEST_IMPORTER_VERSION: "incomplete-importer",
+      MURPH_TEST_INSTALL_STATUS: "17",
+    });
+    const retryResult = runReviewGptWithEnvironment(harness, {
+      MURPH_TEST_IMPORTER_VERSION: "reconciled-importer",
+    });
+
+    expect(failedResult.status).toBe(17);
+    expect(retryResult.status, retryResult.stderr).toBe(0);
+    expect(
+      readFileSync(harness.pnpmLog, "utf8")
+        .trim()
+        .split("\n")
+        .filter((call) => call.startsWith("install ")),
+    ).toHaveLength(2);
+    expect(readFileSync(harness.executionLog, "utf8")).toBe(
+      "reconciled-importer\n",
     );
   });
 

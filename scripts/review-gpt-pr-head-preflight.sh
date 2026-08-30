@@ -67,15 +67,12 @@ review_gpt_prepare_local_toolchain_under_lock() {
   local install_output
   local install_status
 
-  if review_gpt_local_toolchain_is_ready; then
-    return 0
-  fi
   if ! command -v pnpm >/dev/null 2>&1; then
     echo "Error: pnpm is required to prepare the repository ReviewGPT toolchain." >&2
     return 127
   fi
 
-  echo "ReviewGPT repository tools are missing; linking the frozen root workspace importer." >&2
+  echo "Reconciling the frozen root workspace importer for ReviewGPT." >&2
   if install_output="$(
     pnpm install --frozen-lockfile --filter . --ignore-scripts 2>&1
   )"; then
