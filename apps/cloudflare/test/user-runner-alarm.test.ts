@@ -52,6 +52,9 @@ import {
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { HostedUserRunnerWithTestControls } from "../src/user-runner/hosted-user-runner-test.ts";
 import {
+  HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
+} from "../src/runner-outbound/headers.ts";
+import {
   HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
 } from "../src/user-runner/runtime-processing-responses.ts";
 import {
@@ -147,6 +150,166 @@ describe("HostedUserRunner execution coordination", () => {
     vi.clearAllMocks();
     mocks.emitHostedExecutionStructuredLog.mockReset();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
+  });
+
+  it("classifies a hosted workspace failure without changing the plain caller error", async () => {
+    const privateDetail = "private workspace failure detail";
+    const responseBody: {
+      controller?: ReadableStreamDefaultController<Uint8Array>;
+    } = {};
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        responseBody.controller = controller;
+      },
+    }), {
+      headers: {
+        [HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER]: "1",
+      },
+      status: 400,
+    });
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      workspaceResponse: () => response,
+    });
+
+    let caught: unknown;
+    try {
+      await runner.readHostedWorkspaceFromWebForTest({
+        timeoutMs: 321,
+        userId: TEST_USER_ID,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    if (!(caught instanceof Error)) {
+      throw new TypeError("Expected hosted workspace read to throw Error.");
+    }
+    expect(Object.getPrototypeOf(caught)).toBe(Error.prototype);
+    expect(caught.message).toBe("Hosted workspace read failed with HTTP 400.");
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        boundUserId: TEST_USER_ID,
+        path: HOSTED_RUNTIME_WORKSPACE_PATH,
+        timeoutMs: 321,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
+
+    const responseBodyController = responseBody.controller;
+    if (!responseBodyController) {
+      throw new TypeError("Expected hosted workspace response body controller.");
+    }
+    responseBodyController.enqueue(new TextEncoder().encode(JSON.stringify({
+      error: {
+        code: "HOSTED_EXECUTION_USER_ID_REQUIRED",
+        message: privateDetail,
+        retryable: false,
+      },
+    })));
+    responseBodyController.close();
+
+    await flushWaitUntil();
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "hosted.runner",
+      details: {
+        workspaceReadFailureCode: "HOSTED_EXECUTION_USER_ID_REQUIRED",
+        workspaceReadFailureEnvelopeOutcome: "classified",
+        workspaceReadFailureForwardedFromWeb: true,
+        workspaceReadFailureRetryable: false,
+        workspaceReadFailureStatus: 400,
+      },
+      level: "warn",
+      message: "Hosted workspace read failure classified.",
+      phase: "runtime.starting",
+    });
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain(privateDetail);
+  });
+
+  it("buckets an unrecognized hosted workspace error code without logging it", async () => {
+    const privateCode = "PRIVATE_DYNAMIC_WORKSPACE_CODE";
+    const privateDetail = "private dynamic workspace detail";
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      workspaceResponse: () => createWorkspaceFailureResponse({
+        code: privateCode,
+        message: privateDetail,
+        retryable: true,
+        status: 400,
+      }),
+    });
+
+    await expect(runner.readHostedWorkspaceFromWebForTest({
+      userId: TEST_USER_ID,
+    })).rejects.toThrow("Hosted workspace read failed with HTTP 400.");
+    await flushWaitUntil();
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          workspaceReadFailureCode: "unknown",
+          workspaceReadFailureEnvelopeOutcome: "code_unknown",
+          workspaceReadFailureForwardedFromWeb: false,
+          workspaceReadFailureRetryable: true,
+          workspaceReadFailureStatus: 400,
+        },
+        message: "Hosted workspace read failure classified.",
+      }),
+    );
+    const emitted = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(emitted).not.toContain(privateCode);
+    expect(emitted).not.toContain(privateDetail);
+  });
+
+  it("classifies malformed and oversized workspace failure bodies without logging them", async () => {
+    const malformedDetail = "private malformed workspace detail";
+    const oversizedDetail = "private oversized workspace detail";
+    let responseIndex = 0;
+    const responses = [
+      new Response(`{"error":{"message":"${malformedDetail}"`, {
+        status: 400,
+      }),
+      new Response(oversizedDetail, {
+        headers: {
+          "content-length": "4097",
+        },
+        status: 400,
+      }),
+    ];
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      workspaceResponse: () => responses[responseIndex++]!,
+    });
+
+    await expect(runner.readHostedWorkspaceFromWebForTest({
+      userId: TEST_USER_ID,
+    })).rejects.toThrow("Hosted workspace read failed with HTTP 400.");
+    await expect(runner.readHostedWorkspaceFromWebForTest({
+      userId: TEST_USER_ID,
+    })).rejects.toThrow("Hosted workspace read failed with HTTP 400.");
+    await flushWaitUntil();
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          workspaceReadFailureCode: "unknown",
+          workspaceReadFailureEnvelopeOutcome: "invalid_envelope",
+        }),
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          workspaceReadFailureCode: "unknown",
+          workspaceReadFailureEnvelopeOutcome: "body_too_large",
+        }),
+      }),
+    );
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(2);
+    const emitted = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(emitted).not.toContain(malformedDetail);
+    expect(emitted).not.toContain(oversizedDetail);
   });
 
   it("denies runtime processing when the authoritative consent read is revoked", async () => {
@@ -8226,6 +8389,7 @@ function createRunnerHarness(input: {
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onStoragePut?: (input: { key: string; value: unknown }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
+  workspaceResponse?: () => Promise<Response> | Response;
   platformAiUsageAllowed?: boolean | (() => boolean);
   prewarmShell?: HostedExecutionContainerStubLike["prewarmShell"];
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
@@ -8398,6 +8562,7 @@ function createRunnerHarness(input: {
     platformAiUsageAllowed: input.platformAiUsageAllowed,
     runtimeLogResponse: input.runtimeLogResponse,
     ownerReleaseResponse: input.ownerReleaseResponse,
+    workspaceResponse: input.workspaceResponse,
   });
 
   const bucket = input.bucket ?? new MemoryEncryptedR2Bucket();
@@ -8598,6 +8763,7 @@ function installWebControlResponses(
       | "revoked"
       | Promise<"granted" | "missing" | "revoked">;
     onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
+    workspaceResponse?: () => Promise<Response> | Response;
     onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
     onStatusRead?: () => Promise<void> | void;
     readMailboxLag?: () => HostedRuntimeWebStatusResponse["mailboxLag"];
@@ -8614,6 +8780,9 @@ function installWebControlResponses(
     }) => {
       if (input.path === HOSTED_RUNTIME_WORKSPACE_PATH) {
         await hooks.onWorkspaceRead?.({ timeoutMs: input.timeoutMs });
+        if (hooks.workspaceResponse) {
+          return await hooks.workspaceResponse();
+        }
         return jsonResponse({
           fetchedAt: FIXED_NOW,
           ...(hooks.platformAiUsageAllowed === undefined
@@ -8683,6 +8852,27 @@ function jsonResponse(value: unknown): Response {
       "content-type": "application/json; charset=utf-8",
     },
     status: 200,
+  });
+}
+
+function createWorkspaceFailureResponse(input: {
+  code: string;
+  forwardedFromWeb?: boolean;
+  message: string;
+  retryable: boolean;
+  status: number;
+}): Response {
+  return Response.json({
+    error: {
+      code: input.code,
+      message: input.message,
+      retryable: input.retryable,
+    },
+  }, {
+    headers: input.forwardedFromWeb
+      ? { [HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER]: "1" }
+      : undefined,
+    status: input.status,
   });
 }
 
