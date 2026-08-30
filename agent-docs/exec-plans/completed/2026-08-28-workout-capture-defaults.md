@@ -1,6 +1,6 @@
 # Apply saved workout capture defaults
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-30
 
@@ -69,21 +69,21 @@ Effort: Product change.
    verbatim as evidence and require the assistant or direct caller to pass
    structured facts through existing typed flags.
 
-## Review remediation
+## Final review disposition
 
-Final ReviewGPT round 1 found six reachable boundary gaps. The correction
-candidate now:
-
-- recognizes explicit `an hour` and `one hour` workout reports while preserving
-  `half an hour` as 30 minutes;
-- replaces broad legacy-memory inference with bounded affirmative grammar and
-  conflict aggregation;
-- makes saved-default lookup opt-in only for ordinary member-report capture, so
-  workout formats and non-manual sources cannot consume or migrate it;
-- omits an empty workout-capture object from unrelated preference writes to
-  preserve the old strict serialized document shape;
-- prevents route-estimated duration from becoming explicit workout duration;
-  saved member defaults remain authoritative when the member omitted duration.
+- Review rounds 1–6 exposed a repeated architectural problem: prose parsing
+  could not safely distinguish authoritative workout facts from temporal,
+  segmented, hedged, or competing language.
+- The final correction deletes that authority path. Workout and format text is
+  preserved as note evidence only. Typed flags, structured payloads, workout
+  timestamps, and the typed saved duration default own structured facts.
+- Legacy compatibility remains deliberately narrower than ordinary workout
+  capture: only two whole-record affirmative preference forms can promote one
+  agreeing duration into the typed preference owner.
+- ReviewGPT round 7 checked the architecture-collapse candidate and returned
+  `ROUND_OUTCOME: PASS` with no qualifying findings. The exact response was
+  recovered from the accepted thread after browser capture timed out and was
+  bound to the committed user-turn message id and browser-reported model.
 
 ## Verification
 
@@ -105,7 +105,7 @@ candidate now:
   - Recovery/no default: clearing remained authoritative after migration;
     ordinary missing-duration capture without an applicable default still
     returned the established explicit-duration error.
-  - Verdict: Ready pending final review. The tested entry, feedback,
+  - Verdict: Ready. The tested entry, feedback,
     precedence, note boundary, recovery, and legacy paths match the product
     promise without changing import semantics.
 - Deterministic proof:
@@ -118,6 +118,8 @@ candidate now:
     package shape verified.
   - assistant composed-prompt regressions: 77 passed, including typed workout
     facts, saved defaults, and route-duration boundaries.
+  - complete CLI workspace after the final test-fixture corrections: 132 files
+    passed; 1,388 tests passed and 30 were skipped.
   - contracts, core, operator-config, vault-usecases, CLI, and assistant-engine
     typechecks passed. Generated CLI schema and skill hash are current.
 - Real assistant proof:
@@ -233,3 +235,20 @@ candidate now:
   `--distance-km` remain authoritative; the saved default fills only omitted
   typed duration; imports and non-manual sources remain excluded; and the real
   assistant passes a member-stated current duration as a typed flag.
+
+## Outcome
+
+- Members can save one typed default with
+  `workout defaults set --duration <minutes>` and ordinary manual
+  `workout add` capture uses it only when typed current duration and derivable
+  workout timestamps are absent.
+- Explicit current facts win. Imports, non-manual sources, live tracking, and
+  saved-format logging do not consume the member-report default.
+- Positional workout text remains a convenient note surface but has no
+  structured authority. No replacement workout prose grammar was added.
+- The assistant preserves natural reporting by translating current message
+  facts into typed CLI arguments and trying the canonical write before asking
+  for an omitted duration.
+
+Completed: 2026-08-30
+Completed: 2026-08-30
