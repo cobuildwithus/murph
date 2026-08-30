@@ -1,6 +1,6 @@
 # Linear Browser Vault JSON serialization
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -109,3 +109,4 @@ Updated: 2026-08-30
   - The neutral 5.85 MB fixture retains its exact 5,854,294-byte output while
     combined unsorted and sorted serialization falls from 12.69 seconds to
     1.59 seconds.
+Completed: 2026-08-30
