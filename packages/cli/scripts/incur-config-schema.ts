@@ -73,10 +73,7 @@ async function withGeneratedIncurArtifacts<T>(
   }
 
   if ((options.rebuildCli ?? true) || !existsSync(distEntryPath)) {
-    await execFileAsync('pnpm', ['build'], {
-      cwd: packageDir,
-      env: process.env,
-    })
+    await prepareBuiltCliRuntime()
   }
 
   const tempDir = await mkdtemp(path.join(tmpdir(), 'murph-incur-gen-'))
@@ -113,6 +110,13 @@ async function withGeneratedIncurArtifacts<T>(
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
+}
+
+export async function prepareBuiltCliRuntime(): Promise<void> {
+  await execFileAsync('pnpm', ['build:test-runtime:prepared'], {
+    cwd: repoDir,
+    env: process.env,
+  })
 }
 
 function quoteInvalidTypePropertyNames(types: string): string {
