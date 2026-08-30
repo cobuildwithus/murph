@@ -16,19 +16,37 @@ const artifactPath = path.join(
   moduleDirectory,
   assistantCliSurfacePrebuiltArtifactFileName,
 )
+const generationModeEnv = 'MURPH_ASSISTANT_CLI_SURFACE_GENERATION'
+const preferBuiltWorkspaceCliArg = '--prefer-built-workspace-cli'
 
-const manifest = await readAssistantCliLlmsFullManifest({
-  workingDirectory: workspaceRoot,
-})
-const contract = buildAssistantCliSurfaceContract(manifest)
-
-if (!contract) {
-  throw new Error('Could not render the assistant CLI surface contract.')
+const generationMode = process.env[generationModeEnv]?.trim()
+if (generationMode !== undefined && generationMode !== 'defer') {
+  throw new Error(
+    `${generationModeEnv} must be unset or \`defer\`.`,
+  )
 }
 
-const artifact: AssistantCliSurfacePrebuiltArtifact = {
-  contract,
-  schemaVersion: assistantCliSurfacePrebuiltSchemaVersion,
-}
+if (generationMode !== 'defer') {
+  const args = process.argv.slice(2)
+  const unknownArg = args.find((arg) => arg !== preferBuiltWorkspaceCliArg)
+  if (unknownArg) {
+    throw new Error(`Unknown assistant CLI surface generation argument: ${unknownArg}`)
+  }
 
-await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')
+  const manifest = await readAssistantCliLlmsFullManifest({
+    preferBuiltWorkspaceCli: args.includes(preferBuiltWorkspaceCliArg),
+    workingDirectory: workspaceRoot,
+  })
+  const contract = buildAssistantCliSurfaceContract(manifest)
+
+  if (!contract) {
+    throw new Error('Could not render the assistant CLI surface contract.')
+  }
+
+  const artifact: AssistantCliSurfacePrebuiltArtifact = {
+    contract,
+    schemaVersion: assistantCliSurfacePrebuiltSchemaVersion,
+  }
+
+  await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')
+}

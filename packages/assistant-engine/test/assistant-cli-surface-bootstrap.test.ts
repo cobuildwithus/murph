@@ -14,7 +14,10 @@ const repoRoot = path.resolve(
   '../../..',
 )
 const prebuiltArtifactPathEnv = 'MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH'
+const generationModeEnv = 'MURPH_ASSISTANT_CLI_SURFACE_GENERATION'
 const originalPrebuiltArtifactPathEnv = process.env[prebuiltArtifactPathEnv]
+const originalGenerationModeEnv = process.env[generationModeEnv]
+const originalArgv = [...process.argv]
 
 function createManifestCommandChildProcess(output: unknown): EventEmitter & {
   kill: () => void
@@ -51,6 +54,8 @@ function createManifestCommandChildProcess(output: unknown): EventEmitter & {
 }
 
 beforeEach(() => {
+  delete process.env[generationModeEnv]
+  process.argv = [...originalArgv]
   process.env[prebuiltArtifactPathEnv] = path.join(
     path.sep,
     'tmp',
@@ -64,6 +69,12 @@ afterEach(async () => {
   } else {
     process.env[prebuiltArtifactPathEnv] = originalPrebuiltArtifactPathEnv
   }
+  if (originalGenerationModeEnv === undefined) {
+    delete process.env[generationModeEnv]
+  } else {
+    process.env[generationModeEnv] = originalGenerationModeEnv
+  }
+  process.argv = [...originalArgv]
   vi.resetModules()
   vi.restoreAllMocks()
   vi.clearAllMocks()
@@ -685,6 +696,62 @@ test('readAssistantCliLlmsFullManifest launches the full schema-bearing manifest
   assert.deepEqual(spawnCall.args.slice(3), ['--llms-full', '--format', 'json'])
 })
 
+test('readAssistantCliLlmsFullManifest explicitly prefers the built workspace CLI for composed builds', async () => {
+  vi.resetModules()
+
+  const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
+  const spawnCalls: Array<{
+    args: string[]
+    command: string
+  }> = []
+
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      access: vi.fn(async (targetPath: string) => {
+        if (
+          targetPath === fakeTsxBinary ||
+          targetPath.endsWith('tsconfig.base.json') ||
+          targetPath.endsWith(path.join('packages', 'cli', 'src', 'bin.ts')) ||
+          targetPath.endsWith(path.join('packages', 'cli', 'dist', 'bin.js'))
+        ) {
+          return
+        }
+
+        throw new Error(`missing test executable: ${targetPath}`)
+      }),
+    }
+  })
+  vi.doMock('node:child_process', () => ({
+    spawn: vi.fn((command: string, args: string[]) => {
+      spawnCalls.push({ args: [...args], command })
+      return createManifestCommandChildProcess({
+        commands: [{ name: 'goal save' }],
+      })
+    }),
+  }))
+
+  const {
+    readAssistantCliLlmsFullManifest,
+  } = await import('../src/assistant/cli-surface-manifest.ts')
+
+  await readAssistantCliLlmsFullManifest({
+    cliEnv: {
+      PATH: path.dirname(fakeTsxBinary),
+    },
+    preferBuiltWorkspaceCli: true,
+  })
+
+  assert.equal(spawnCalls.length, 1)
+  const spawnCall = spawnCalls[0]
+  assert.ok(spawnCall)
+  assert.equal(spawnCall.command, process.execPath)
+  assert.match(spawnCall.args[0] ?? '', /packages[\\/]cli[\\/]dist[\\/]bin\.js$/u)
+  assert.deepEqual(spawnCall.args.slice(1), ['--llms-full', '--format', 'json'])
+})
+
 test('generate-cli-surface-contract builds the prebuilt artifact from the full manifest', async () => {
   vi.resetModules()
 
@@ -778,6 +845,32 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
     artifact.contract,
     /- `goal save`: Create or update one goal from typed command fields\.; args <title>; options --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,
   )
+})
+
+test('generate-cli-surface-contract lets a composed build defer only its artifact substep', async () => {
+  vi.resetModules()
+  process.env[generationModeEnv] = 'defer'
+
+  const writeFileMock = vi.fn(async () => undefined)
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      writeFile: writeFileMock,
+    }
+  })
+  const readAssistantCliLlmsFullManifest = vi.fn(async () => ({ commands: [] }))
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
+    buildAssistantCliProcessEnv: () => ({}),
+    readAssistantCliLlmsFullManifest,
+    readAssistantCliLlmsManifest: vi.fn(),
+  }))
+
+  await import('../src/assistant/generate-cli-surface-contract.ts')
+
+  assert.equal(readAssistantCliLlmsFullManifest.mock.calls.length, 0)
+  assert.equal(writeFileMock.mock.calls.length, 0)
 })
 
 test('readAssistantCliLlmsManifest skips workspace CLI source when base tsconfig is missing', async () => {
