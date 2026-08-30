@@ -1172,6 +1172,7 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
     let failureArtifactStdoutDescriptor = null;
     let failureArtifactStderrDescriptor = null;
     let failureArtifactWriteFailed = false;
+    let outputRelayWriteFailed = false;
     let settled = false;
 
     if (failureArtifact) {
@@ -1224,28 +1225,75 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
     });
 
     const relayOutput = (source, destination, artifactDescriptor) => {
-      source?.on("data", (chunk) => {
-        if (!destination.write(chunk)) {
-          source.pause();
-          destination.once("drain", () => source.resume());
+      if (!source) {
+        return null;
+      }
+      let destinationOpen = !destination.destroyed;
+      let waitingForDrain = false;
+      const resumeSource = () => {
+        waitingForDrain = false;
+        source.resume();
+      };
+      const stopRelaying = () => {
+        destinationOpen = false;
+        if (waitingForDrain) {
+          destination.off("drain", resumeSource);
+          resumeSource();
         }
-        if (artifactDescriptor === null || failureArtifactWriteFailed) {
-          return;
-        }
-        try {
-          writeSync(artifactDescriptor, chunk);
-        } catch {
-          failureArtifactWriteFailed = true;
+      };
+      const onDestinationError = (error) => {
+        stopRelaying();
+        if (!isOutputDestinationClosure(error)) {
+          outputRelayWriteFailed = true;
           signalChild(child, useDetachedProcessGroup, "SIGTERM");
         }
-      });
+      };
+      const writeDestination = (chunk) => {
+        if (!destinationOpen) {
+          return false;
+        }
+        try {
+          if (!destination.write(chunk) && !waitingForDrain) {
+            waitingForDrain = true;
+            source.pause();
+            destination.once("drain", resumeSource);
+          }
+          return true;
+        } catch (error) {
+          onDestinationError(error);
+          return false;
+        }
+      };
+      destination.on("close", stopRelaying);
+      destination.on("error", onDestinationError);
+      const onData = (chunk) => {
+        if (artifactDescriptor !== null && !failureArtifactWriteFailed) {
+          try {
+            writeSync(artifactDescriptor, chunk);
+          } catch {
+            failureArtifactWriteFailed = true;
+            signalChild(child, useDetachedProcessGroup, "SIGTERM");
+          }
+        }
+        writeDestination(chunk);
+      };
+      source.on("data", onData);
+      return {
+        cleanup() {
+          stopRelaying();
+          source.off("data", onData);
+          destination.off("close", stopRelaying);
+          destination.off("error", onDestinationError);
+        },
+        write: writeDestination,
+      };
     };
-    relayOutput(
+    const stdoutRelay = relayOutput(
       child.stdout,
       process.stdout,
       failureArtifactStdoutDescriptor,
     );
-    relayOutput(
+    const stderrRelay = relayOutput(
       child.stderr,
       process.stderr,
       failureArtifactStderrDescriptor,
@@ -1264,7 +1312,7 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
     process.once("SIGTERM", onSigterm);
     process.once("SIGHUP", onSighup);
 
-    const cleanup = () => {
+    const cleanupChildOwnership = () => {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
       process.off("SIGHUP", onSighup);
@@ -1277,18 +1325,29 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
         failureArtifactStderrDescriptor = null;
       }
     };
+    const cleanupRelays = () => {
+      stdoutRelay?.cleanup();
+      stderrRelay?.cleanup();
+    };
+    const reportFailureArtifact = () => {
+      if (!failureArtifact) {
+        return;
+      }
+      const message =
+        `[verification-dispatch] failure-artifact=${failureArtifact.displayPath}\n`;
+      if (!stderrRelay?.write(message)) {
+        stdoutRelay?.write(message);
+      }
+    };
 
     child.once("error", (error) => {
       if (settled) {
         return;
       }
       settled = true;
-      cleanup();
-      if (failureArtifact) {
-        process.stderr.write(
-          `[verification-dispatch] failure-artifact=${failureArtifact.displayPath}\n`,
-        );
-      }
+      cleanupChildOwnership();
+      reportFailureArtifact();
+      cleanupRelays();
       reject(error);
     });
     child.once("close", (code, signal) => {
@@ -1296,14 +1355,17 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
         return;
       }
       settled = true;
-      cleanup();
+      cleanupChildOwnership();
       if (failureArtifactWriteFailed) {
-        if (failureArtifact) {
-          process.stderr.write(
-            `[verification-dispatch] failure-artifact=${failureArtifact.displayPath}\n`,
-          );
-        }
+        reportFailureArtifact();
+        cleanupRelays();
         reject(new Error("Unable to persist delegated Testbox failure evidence."));
+        return;
+      }
+      if (outputRelayWriteFailed) {
+        reportFailureArtifact();
+        cleanupRelays();
+        reject(new Error("Unable to relay delegated Testbox output."));
         return;
       }
       if (failureArtifact && code === 0 && signal === null) {
@@ -1312,10 +1374,9 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
           recursive: true,
         });
       } else if (failureArtifact) {
-        process.stderr.write(
-          `[verification-dispatch] failure-artifact=${failureArtifact.displayPath}\n`,
-        );
+        reportFailureArtifact();
       }
+      cleanupRelays();
       if (signal === "SIGINT") {
         resolve(130);
         return;
@@ -1331,6 +1392,17 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
       resolve(code ?? 1);
     });
   });
+}
+
+function isOutputDestinationClosure(error) {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      ["EPIPE", "ERR_STREAM_DESTROYED", "ERR_STREAM_WRITE_AFTER_END"].includes(
+        error.code,
+      ),
+  );
 }
 
 function signalChild(child, useDetachedProcessGroup, signal) {

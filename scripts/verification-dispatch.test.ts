@@ -486,6 +486,114 @@ describe("verification dispatcher", () => {
     expect(existsSync(failureArtifactPath)).toBe(false);
   });
 
+  it.each(["stdout", "stderr"] as const)(
+    "reaps Testbox and preserves failure evidence after its %s destination closes",
+    async (closedDestination) => {
+      const tempRoot = makeTempRoot();
+      const binDir = path.join(tempRoot, "bin");
+      const fakeCrabboxPath = path.join(binDir, "crabbox");
+      const testRepoDir = path.join(tempRoot, "repo");
+      const testScriptsDir = path.join(testRepoDir, "scripts");
+      const childCompletedPath = path.join(tempRoot, "child-completed.txt");
+      const failureArtifactPath = path.join(
+        testRepoDir,
+        ".artifacts",
+        "verification",
+        "crabbox-last-failure",
+      );
+      mkdirSync(testScriptsDir, { recursive: true });
+      writeFileSync(
+        path.join(testScriptsDir, "verification-dispatch.mjs"),
+        readFileSync(dispatcherPath, "utf8"),
+        "utf8",
+      );
+      writeFileSync(
+        path.join(testRepoDir, ".gitignore"),
+        "/.artifacts/\n",
+        "utf8",
+      );
+      runGit(testRepoDir, ["init", "--quiet"]);
+      runGit(testRepoDir, ["add", ".gitignore", "scripts"]);
+      runGit(testRepoDir, [
+        "-c",
+        "user.name=Crabbox Test",
+        "-c",
+        "user.email=crabbox-test@users.noreply.github.com",
+        "commit",
+        "--quiet",
+        "-m",
+        "initial",
+      ]);
+      writeExecutable(
+        fakeCrabboxPath,
+        [
+          "#!/bin/sh",
+          'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+          'printf "%s\\n" "delegated stdout before close"',
+          'printf "%s\\n" "delegated stderr before close" >&2',
+          "sleep 0.1",
+          'printf "%s\\n" "delegated stdout after close"',
+          'printf "%s\\n" "delegated stderr after close" >&2',
+          "sleep 0.3",
+          `printf "%s\\n" "completed" > ${shellQuote(childCompletedPath)}`,
+          'printf "%s\\n" "delegated stderr after close" >&2',
+          "exit 37",
+        ].join("\n"),
+      );
+      writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
+      const dispatcher = spawn(
+        process.execPath,
+        [
+          realpathSync(path.join(testScriptsDir, "verification-dispatch.mjs")),
+          "test:diff",
+          "scripts/verification-dispatch.mjs",
+        ],
+        {
+          cwd: testRepoDir,
+          env: {
+            ...withoutVerificationRoutingEnvironment(process.env),
+            MURPH_ALLOW_TESTBOX_SPEND: "1",
+            MURPH_VERIFY_EXECUTOR: "crabbox",
+            MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
+            PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const stderrChunks: Buffer[] = [];
+      const stdoutChunks: Buffer[] = [];
+      dispatcher.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+      dispatcher.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+      const closedChunks = closedDestination === "stdout"
+        ? stdoutChunks
+        : stderrChunks;
+      await waitForCondition(
+        () => Buffer.concat(closedChunks).toString("utf8").includes(
+          `delegated ${closedDestination} before close`,
+        ),
+        `delegated ${closedDestination} output before destination close`,
+      );
+      dispatcher[closedDestination].destroy();
+
+      const result = await waitForChild(dispatcher);
+
+      expect(result).toEqual({ code: 37, signal: null });
+      expect(readFileSync(childCompletedPath, "utf8")).toBe("completed\n");
+      expect(
+        readFileSync(path.join(failureArtifactPath, "stdout.log"), "utf8"),
+      ).toContain("delegated stdout after close");
+      expect(
+        readFileSync(path.join(failureArtifactPath, "stderr.log"), "utf8"),
+      ).toContain("delegated stderr after close");
+      const survivingChunks = closedDestination === "stdout"
+        ? stderrChunks
+        : stdoutChunks;
+      expect(Buffer.concat(survivingChunks).toString("utf8")).toContain(
+        "[verification-dispatch] failure-artifact=.artifacts/verification/crabbox-last-failure",
+      );
+    },
+  );
+
   it("uses one isolated, secret-free static macOS workspace per local worktree", () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");

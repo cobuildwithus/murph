@@ -118,8 +118,9 @@ The focused `scripts/verification-dispatch.test.ts` lifecycle proof also runs a
 failed and successful fake paid Testbox command. It requires failure stdout,
 stderr, complete command argument vector, and candidate-tree evidence to survive
 under the one stable ignored checkout-local bundle, requires the dispatcher to
-print its repository-relative location, and requires a later success to remove
-the stale bundle.
+print its repository-relative location, keeps the dispatcher attached until the
+delegated child closes when the caller's output pipe closes, and requires a later
+success to remove the stale bundle.
 
 Ordinary package, app, and repo-tool Vitest configs share one marked
 process-owned temp root. Teardown removes the whole root after success or
