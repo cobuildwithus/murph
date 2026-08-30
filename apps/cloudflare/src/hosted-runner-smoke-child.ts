@@ -25,10 +25,7 @@ import {
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import {
-  buildMurphGroupReadPermissionProfileTomlLines,
-  buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphMemberReadPermissionProfileTomlLines,
-  buildMurphMemberWorkspacePermissionProfileTomlLines,
+  buildMurphHostedPermissionProfileTomlLines,
   MURPH_GROUP_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
@@ -776,10 +773,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     // exercises the same PATH semantics as production turns.
     "allow_login_shell = false",
     "",
-    ...buildMurphGroupReadPermissionProfileTomlLines(),
-    ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
-    ...buildMurphMemberReadPermissionProfileTomlLines(),
-    ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(),
     "[skills]",
     "include_instructions = false",
     "",
