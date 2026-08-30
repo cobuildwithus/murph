@@ -772,6 +772,161 @@ describe('knowledge service helpers', () => {
     expect(writes[0]?.content).toContain('[Magnesium](pages/magnesium.md)')
   })
 
+  it('keeps valid reads available while reporting bounded malformed-page degradation and truthful counts', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-degraded-reads-')
+    const validPages = [
+      ['active-one', 'Active one'],
+      ['active-two', 'Active two'],
+      ['active-three', 'Active three'],
+    ] as const
+
+    for (const [slug, title] of validPages) {
+      await writeKnowledgePage(
+        vaultRoot,
+        slug,
+        [
+          '---',
+          `title: ${title}`,
+          `slug: ${slug}`,
+          'pageType: concept',
+          'status: active',
+          '---',
+          '',
+          `# ${title}`,
+          '',
+          'Recovery evidence remains available.',
+          '',
+        ].join('\n'),
+      )
+    }
+
+    await writeKnowledgePage(
+      vaultRoot,
+      'archived-page',
+      [
+        '---',
+        'title: Archived page',
+        'slug: archived-page',
+        'pageType: concept',
+        'status: archived',
+        '---',
+        '',
+        '# Archived page',
+        '',
+        'Recovery evidence is archived.',
+        '',
+      ].join('\n'),
+    )
+
+    for (let index = 0; index < 12; index += 1) {
+      const slug = `broken-${String(index).padStart(2, '0')}`
+      await writeKnowledgePageAt(
+        vaultRoot,
+        index === 0 ? `legacy/${slug}` : slug,
+        [
+          '---',
+          `title: Private malformed sentinel ${index}`,
+          `slug: Private malformed sentinel ${index}`,
+          '---',
+          '',
+          '# Unusable page',
+          '',
+        ].join('\n'),
+      )
+    }
+
+    const listed = await listKnowledgePages({
+      limit: 2,
+      pageType: 'concept',
+      status: 'active',
+      vault: vaultRoot,
+    })
+    expect(listed).toMatchObject({
+      degradation: {
+        issueCodes: ['parse_frontmatter'],
+        issueCount: 12,
+        recoveryAction: 'knowledge lint',
+      },
+      limit: 2,
+      pageCount: 2,
+      returnedCount: 2,
+      totalCount: 3,
+      truncated: true,
+    })
+    expect(listed.pages.map((page) => page.slug)).toEqual([
+      'active-one',
+      'active-three',
+    ])
+
+    const searched = await searchKnowledgePages({
+      limit: 1,
+      pageType: 'concept',
+      query: 'recovery evidence',
+      status: 'active',
+      vault: vaultRoot,
+    })
+    expect(searched).toMatchObject({
+      degradation: listed.degradation,
+      returnedCount: 1,
+      total: 3,
+      truncated: true,
+    })
+    expect(searched.hits).toHaveLength(1)
+
+    const shown = await getKnowledgePage({
+      slug: 'active-one',
+      vault: vaultRoot,
+    })
+    expect(shown).toMatchObject({
+      degradation: listed.degradation,
+      page: {
+        slug: 'active-one',
+      },
+    })
+
+    const degradationText = JSON.stringify(listed.degradation)
+    expect(Object.keys(listed.degradation ?? {})).toEqual([
+      'issueCodes',
+      'issueCount',
+      'recoveryAction',
+    ])
+    expect(degradationText).not.toContain('Private malformed sentinel')
+    expect(degradationText).not.toContain(vaultRoot)
+    expect(listed.degradation?.issueCodes).toHaveLength(1)
+
+    let invalidPageError: unknown
+    try {
+      await getKnowledgePage({
+        slug: 'broken-00',
+        vault: vaultRoot,
+      })
+    } catch (error) {
+      invalidPageError = error
+    }
+    expect(invalidPageError).toBeInstanceOf(VaultCliError)
+    expect(invalidPageError).toMatchObject({
+      code: 'knowledge_page_invalid',
+      context: {
+        hint: 'Run `knowledge lint` for bounded repair details, then retry `knowledge show`.',
+        retryable: false,
+        stage: 'integrity',
+      },
+      message: 'The derived knowledge page for slug "broken-00" exists but is invalid.',
+    })
+    expect(JSON.stringify({
+      context: (invalidPageError as VaultCliError).context,
+      message: (invalidPageError as VaultCliError).message,
+    })).not.toContain('Private malformed sentinel')
+    expect(JSON.stringify((invalidPageError as VaultCliError).context)).not.toContain(vaultRoot)
+
+    await expect(getKnowledgePage({
+      slug: 'missing-page',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'knowledge_page_not_found',
+    })
+  })
+
   it('reports lint problems for invalid source paths, missing files, and missing related pages', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-lint-')
     await writeKnowledgePage(
