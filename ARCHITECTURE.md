@@ -2388,6 +2388,10 @@ state. A receipt-local sent marker
 and event-derived Resend idempotency key prevent replay after provider success;
 configuration or provider failure leaves that receipt retryable while the
 already-committed billing, entitlement, and usage-credit result remains intact.
+Stable payment categories reproduce their notification candidate on retry. The
+cycle-only transition fact is intentionally not retained, so a provider failure
+after that transition commits can leave the retry with no notification
+candidate. This accepted notification-only limitation avoids new durable state.
 The notification and the receipt's existing post-canonical effects are separate
 attempts inside that one owner: failure of runtime recheck, sponsorship,
 cleanup, or member email work cannot suppress the payment email attempt, and
@@ -2398,8 +2402,9 @@ concurrency is bounded to one payment-email request plus the existing single
 post-canonical effect chain. If both fail while the sent marker is absent,
 the existing runtime-recheck pending code takes precedence because replay
 consumes it to reconstruct a direct-paid wake; the absent sent marker still
-retries notification on that receipt. Other simultaneous failures retain
-notification priority so a poisonable cleanup cannot suppress unmarked email.
+retries any reproducible notification candidate on that receipt. Other
+simultaneous failures retain notification priority so a poisonable cleanup
+cannot suppress unmarked email.
 After the marker exists, the other effect retains its existing retry and poison
 policy.
 

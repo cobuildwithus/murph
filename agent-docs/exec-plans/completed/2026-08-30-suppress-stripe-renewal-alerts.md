@@ -100,6 +100,6 @@ Updated: 2026-08-30
 - [x] Complete exact-head CI and the final ReviewGPT gate. All four required
   checks passed. ReviewGPT identified that a retryable provider failure after a
   newly committed transition can lose the attempt-local notification fact; the
-  user explicitly accepted that notification-only edge case to avoid adding
-  retained receipt state in this change.
+  product scope explicitly accepts that notification-only edge case to avoid
+  adding retained receipt state in this change.
 Completed: 2026-08-30

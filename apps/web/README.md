@@ -1377,6 +1377,9 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   no paid-service or usage-plan transition; accepted paid trial conversions and
   other meaningful cycle transitions remain eligible. Runtime-recheck member
   lists remain recovery scheduling only and never control notification policy.
+  Cycle-transition eligibility is attempt-local: if the provider request fails
+  after that transition commits, a retry can complete without reproducing the
+  alert. This accepted notification-only limitation adds no retained state.
   Checkout action owners cover mandatory
   price reads, customer provisioning, saved-card preparation, and Checkout
   Session create/resume. Paid-plan upgrades, paid-trial transitions, and

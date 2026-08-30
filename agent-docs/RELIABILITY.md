@@ -948,7 +948,12 @@ Last verified: 2026-08-30
   rolling back billing, entitlement, or usage credit. A receipt-local sent
   marker is written only after provider success, while an event-derived Resend
   idempotency key covers response loss before that marker. Receipt replay after
-  the marker must skip send and finish remaining work. When canonical billing
+  the marker must skip send and finish remaining work. Stable payment categories
+  reproduce their notification candidate on retry. The transition fact for a
+  `subscription_cycle` is intentionally not retained, so a provider failure
+  after the transition commits can leave the retry with no notification
+  candidate. This accepted notification-only limitation avoids new durable
+  state. When canonical billing
   succeeds, the notification and all existing post-canonical effects are
   attempted independently inside the same receipt owner. Both promises start
   before either is awaited, with concurrency bounded to one payment-email
@@ -957,14 +962,13 @@ Last verified: 2026-08-30
   the marker is absent, a direct-paid runtime-recheck failure retains its
   existing persisted retry code even when notification also fails, because
   replay consumes that code to reconstruct the wake; the absent marker retries
-  notification on the same receipt. For other simultaneous failures,
-  notification keeps the receipt retryable even if the other effect would
-  otherwise poison it. Once marked, the other effect keeps its existing retry
-  and poison behavior. When canonical billing commits activation mailbox items,
-  their
-  exact pointers are retained on the receipt in that same transaction. Every
-  positive-payment attempt restores
-  retained pointers and best-effort signals them through the existing
+  any reproducible notification candidate on the same receipt. For other
+  simultaneous failures, notification keeps the receipt retryable if the other
+  effect would otherwise poison it. Once marked, the other effect keeps its
+  existing retry and poison behavior. When canonical billing commits activation
+  mailbox items, their exact pointers are retained on the receipt in that same
+  transaction. Every positive-payment attempt restores retained pointers and
+  best-effort signals them through the existing
   activation-wake owner before notification work, even when provider success
   already wrote the sent marker. A rejected first wake can therefore overlap
   provider, sent-marker, or receipt-completion failure without losing the exact
