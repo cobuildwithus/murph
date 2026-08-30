@@ -1555,18 +1555,11 @@ class CodexAppServerProcess {
           && this.detachedChildThreadIds.has(activity.agentThreadId)
         ) {
           this.detachedCompletedChildThreadIds.add(activity.agentThreadId)
-        } else if (
-          this.detachedRootThreadIds.size > 0
-          || this.detachedChildThreadIds.size > 0
-        ) {
-          this.recordDetachedChildViolation(
-            'Codex emitted an untracked detached-child completion.',
-          )
         }
-        // A child thread's own turn/completed can let the prior boundary clear
-        // before this root-thread acknowledgement is delivered. Completion is
-        // idempotent and grants no new authority, so an empty boundary may
-        // safely ignore that late acknowledgement.
+        // A child thread's own turn/completed can let its boundary clear before
+        // this acknowledgement arrives, including after a successor root has
+        // bound the warm process. Completion is idempotent and grants no new
+        // authority, so only an exact current root/child pair may affect state.
       } else {
         this.recordDetachedChildViolation(
           'Detached Codex children may not be messaged, reused, or interrupted.',

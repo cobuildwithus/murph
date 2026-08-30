@@ -3342,42 +3342,123 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
-    it('fails closed on an untracked child completion acknowledgement', async () => {
-      const workingDirectory = await createTempDir('assistant-codex-untracked-completed-child-work-')
-      const codexHome = await createTempDir('assistant-codex-untracked-completed-child-home-')
+    it('ignores a prior child completion while a successor boundary is active', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-stale-completed-child-work-')
+      const codexHome = await createTempDir('assistant-codex-stale-completed-child-home-')
       const spawnedChildren: MockChildProcess[] = []
+      const completeSuccessorChild = createDeferred<void>()
+      const staleCompletionWritten = createDeferred<void>()
+      const scannedThreadIds: string[] = []
       mockWarmCodexProcess(spawnedChildren, 31_874, async (child) => {
         await initializeWarmTurn(
           child,
-          'thread-untracked-completed-child-parent',
-          'turn-untracked-completed-child-parent',
+          'thread-stale-completed-child-parent-a',
+          'turn-stale-completed-child-parent-a',
         )
         writeSubAgentActivity(
           child,
-          'thread-untracked-completed-child-parent',
-          'thread-untracked-completed-child-child',
-          'completed',
-          {
-            id: 'subagent-completed-turn-untracked-completed-child-child',
-            turnId: 'turn-untracked-completed-child-parent',
-          },
+          'thread-stale-completed-child-parent-a',
+          'thread-stale-completed-child-child-a',
+        )
+        writeStartedTurn(
+          child,
+          'thread-stale-completed-child-child-a',
+          'turn-stale-completed-child-child-a',
         )
         writeCompletedTurn(
           child,
-          'thread-untracked-completed-child-parent',
-          'turn-untracked-completed-child-parent',
+          'thread-stale-completed-child-child-a',
+          'turn-stale-completed-child-child-a',
         )
+        writeCompletedTurn(
+          child,
+          'thread-stale-completed-child-parent-a',
+          'turn-stale-completed-child-parent-a',
+        )
+
+        for (let requestCount = 1; requestCount <= 2; requestCount += 1) {
+          const request = await respondToBackgroundTerminals(child, requestCount)
+          scannedThreadIds.push(String(asRecord(request.params).threadId))
+        }
+
+        await writeWarmTurnStarted({
+          child,
+          requestCount: 2,
+          threadId: 'thread-stale-completed-child-parent-b',
+          turnId: 'turn-stale-completed-child-parent-b',
+        })
+        writeSubAgentActivity(
+          child,
+          'thread-stale-completed-child-parent-b',
+          'thread-stale-completed-child-child-b',
+        )
+        writeStartedTurn(
+          child,
+          'thread-stale-completed-child-child-b',
+          'turn-stale-completed-child-child-b',
+        )
+
+        writeSubAgentActivity(
+          child,
+          'thread-stale-completed-child-parent-a',
+          'thread-stale-completed-child-child-a',
+          'completed',
+          {
+            id: 'subagent-completed-turn-stale-completed-child-child-a',
+            turnId: 'turn-stale-completed-child-parent-a',
+          },
+        )
+        staleCompletionWritten.resolve(undefined)
+        writeCompletedTurn(
+          child,
+          'thread-stale-completed-child-parent-b',
+          'turn-stale-completed-child-parent-b',
+        )
+
+        await completeSuccessorChild.promise
+        writeCompletedTurn(
+          child,
+          'thread-stale-completed-child-child-b',
+          'turn-stale-completed-child-child-b',
+        )
+        for (let requestCount = 3; requestCount <= 4; requestCount += 1) {
+          const request = await respondToBackgroundTerminals(child, requestCount)
+          scannedThreadIds.push(String(asRecord(request.params).threadId))
+        }
       })
 
       await executeBackgroundBoundaryTurn(
         codexHome,
         workingDirectory,
-        'attempt to complete an untracked child',
+        'complete the first child boundary',
       )
-      await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
-        code: 'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
-      })
-      expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'start the successor child boundary',
+      )
+      await staleCompletionWritten.promise
+
+      const publishCheckpoint = vi.fn()
+      const successorBoundary = waitForWarmCodexBackgroundWork().then(
+        publishCheckpoint,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 75))
+      expect(publishCheckpoint).not.toHaveBeenCalled()
+
+      completeSuccessorChild.resolve(undefined)
+      await expect(successorBoundary).resolves.toBeUndefined()
+
+      expect(scannedThreadIds).toEqual([
+        'thread-stale-completed-child-parent-a',
+        'thread-stale-completed-child-child-a',
+        'thread-stale-completed-child-parent-b',
+        'thread-stale-completed-child-child-b',
+      ])
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
     })
 
     it('tracks every sequential child admitted before the boundary', async () => {
