@@ -156,6 +156,7 @@ describe("hosted local analyze-video Linq roundtrip e2e", () => {
     )).toBe(true);
     expectAdvertisedMurphDynamicTools(successProviderRequests, {
       analyzeVideoAvailable: true,
+      calendarLinkAvailable: true,
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       messageTargetingAvailable: true,

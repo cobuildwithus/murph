@@ -1,9 +1,9 @@
-import { randomInt, randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomInt, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
 import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
 import Stripe from "stripe";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const providerMocks = vi.hoisted(() => ({
   answerHostedTelegramCallbackQueryBestEffort: vi.fn(),
@@ -161,6 +161,71 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async () => {
     ...actual,
     createHostedLinqChat: providerMocks.createHostedLinqChat,
     getHostedLinqChatSummary: providerMocks.getHostedLinqChatSummary,
+  };
+});
+
+vi.mock("@/src/lib/hosted-crypto/env", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/env")
+  >();
+  const {
+    createHostedAuthorityVerifyKeyring,
+    createHostedRecipientPublicKeyring,
+  } = await vi.importActual<typeof import("@murphai/runtime-state")>(
+    "@murphai/runtime-state",
+  );
+  const { createHostedGcpKmsClientFromEnv } = await vi.importActual<
+    typeof import("@/src/lib/hosted-crypto/gcp-kms")
+  >("@/src/lib/hosted-crypto/gcp-kms");
+  const authoritySignKeyVersionName =
+    "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/1";
+  const authorityKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const automationKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "jwk" },
+  });
+  const cloudflareAutomationRecipientKeyId = "test-automation-key";
+  const cloudflareAutomationPublicKeyring = createHostedRecipientPublicKeyring({
+    activePublicJwk: automationKey.publicKey,
+    activeRecipient: "cloudflare-automation-secret",
+    activeRecipientKeyId: cloudflareAutomationRecipientKeyId,
+  });
+  const gcpKms = createHostedGcpKmsClientFromEnv({
+    HOSTED_CRYPTO_ENV: "test",
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+      JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
+    NODE_ENV: "test",
+  });
+
+  return {
+    ...actual,
+    getHostedWebCryptoConfig: () => ({
+      authoritySignKeyVersionName,
+      authoritySignPublicKeyPem: authorityKey.publicKey,
+      authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({
+        activeKeyVersionName: authoritySignKeyVersionName,
+        activePublicKeyPem: authorityKey.publicKey,
+      }),
+      cloudflareAutomationPublicJwk: automationKey.publicKey,
+      cloudflareAutomationPublicKeyring,
+      cloudflareAutomationRecipientKeyId,
+      env: "test",
+      gcpKms,
+      recoveryPublicJwk: null,
+      recoveryRecipientKeyId: null,
+      teeRuntimeAttestedPolicyId: null,
+      teeRuntimePublicJwk: null,
+      teeRuntimeRecipientKeyId: null,
+      webWrapKmsKeyName:
+        "projects/example/locations/global/keyRings/hosted/cryptoKeys/group-reply-recovery",
+    }),
   };
 });
 
@@ -380,6 +445,45 @@ if (runPostgresProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl)
 describe.skipIf(!runPostgresProof)(
   "hosted group join reply recovery with PostgreSQL",
   () => {
+    beforeEach(() => {
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          const decoded = JSON.parse(
+            Buffer.from(
+              input.value.replace(/^hsb-test:/u, ""),
+              "base64url",
+            ).toString("utf8"),
+          ) as {
+            lane?: string;
+            scope?: string;
+            userId?: string;
+            value?: string;
+          };
+          if (
+            decoded.lane !== input.lane
+            || decoded.scope !== input.scope
+            || decoded.userId !== input.userId
+            || typeof decoded.value !== "string"
+          ) {
+            throw new Error("Hosted secure-box test codec metadata mismatch.");
+          }
+          return decoded.value;
+        },
+        encrypt(input) {
+          return `hsb-test:${Buffer.from(JSON.stringify({
+            lane: input.lane,
+            scope: input.scope,
+            userId: input.userId,
+            value: input.value,
+          }), "utf8").toString("base64url")}`;
+        },
+      });
+    });
+
+    afterEach(() => {
+      setHostedSecureBoxStringTestCodecForTests(null);
+    });
+
     it("preserves a blocked reply and consumes it exactly once after accepted delivery", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -3785,6 +3889,12 @@ describe.skipIf(!runPostgresProof)(
         "https://join.example.test",
       );
       const fixture = await createDeletionReplyRaceFixture();
+      // This case owns the first-contact fallback path. Keep it independent
+      // from the active-member direct-route behavior covered earlier.
+      await fixture.deletionPrisma.hostedMember.update({
+        data: { billingStatus: HostedBillingStatus.not_started },
+        where: { id: fixture.participantMemberId },
+      });
       const recipientPhone = createUniqueTestPhone("+1303");
       const recoveryLinePhone = createUniqueTestPhone("+1303");
       const participantPhoneLookupKey =

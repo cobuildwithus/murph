@@ -2360,7 +2360,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     },
   )
 
-  it('compacts current-shape group usage and preserves pre-compaction attribution', async () => {
+  it('compacts current-shape group usage at the 50k boundary and preserves attribution', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
@@ -2514,7 +2514,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     await expect(
       compactWarmCodexThread({
         groupMinThreadTokens: 50_000,
-        minThreadTokens: 100_000,
+        minThreadTokens: 90_000,
         timeoutMs: 5_000,
       }),
     ).resolves.toMatchObject({
