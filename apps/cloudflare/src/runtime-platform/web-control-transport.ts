@@ -464,7 +464,7 @@ async function fetchHostedWebControlPlaneJsonAttempt(
   }
 }
 
-async function readHostedWebControlPlaneResponseText(input: {
+export async function readHostedWebControlPlaneResponseText(input: {
   description: string;
   maxBytes: number | undefined;
   response: Response;

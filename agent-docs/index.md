@@ -60,6 +60,11 @@ timeout retry, the 30-second deadline, fixed-schema timeout diagnostics,
 joined-cancellation ownership, and direct proof expectations are specified by
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Hosted workspace-read failure classification, including the unchanged caller
+error, background bounded envelope inspection, closed error-code allowlist, and
+privacy-safe Worker fields, is specified by
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 Joined-group inventory v2/v3 compatibility, Web-first rollout, and exact
 routed-account availability are jointly specified by
 `agent-docs/product-specs/personal-group-awareness.md` and
