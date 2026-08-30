@@ -6223,6 +6223,13 @@ exit 1
     expect(packPublishables).toContain("path.basename(sourcePath) === 'node_modules'")
     expect(packPublishables).toContain('isNonRuntimeIncurPayloadPath')
     expect(packPublishables).toContain('/(?:^|\\/)[^/]+\\.test\\.[cm]?[jt]sx?$/u')
+    expect(packPublishables).toContain(
+      'const assistantCliSurfacePackagingTimeoutMs = 5 * 60_000;',
+    )
+    expect(packPublishables).toContain("'--manifest-timeout-ms'")
+    expect(packPublishables).toContain(
+      'String(assistantCliSurfacePackagingTimeoutMs)',
+    )
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)
