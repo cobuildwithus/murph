@@ -222,9 +222,11 @@ it carries no member, request, runner, attempt, prompt, body, path, model, URL,
 response, header, token, or other identifier or payload detail. Murph-local
 credential, route, and authorization failures, transport exceptions, other
 providers, and every other upstream status do not touch this namespace. The
-report is failure-isolated, is deferred with the request `waitUntil` when
-available, and never clones, consumes, replaces, or otherwise changes the
-original upstream response. Successful OpenAI egress is unchanged.
+report is failure-isolated and is deferred with the request `waitUntil` when
+available. When the Containers outbound context cannot own the promise, only
+the failed 401/403 path awaits the short Durable Object admission before
+returning the original upstream response unchanged. Successful OpenAI egress is
+unchanged.
 
 `OpenAiAuthorizationAlertDurableObject` reuses the existing `LINQ_API_TOKEN` and
 the two existing database-alert direct operator chats. It persists the first

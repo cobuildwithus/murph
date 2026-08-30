@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-29
-Updated: 2026-08-29
+Updated: 2026-08-30
 
 ## Goal
 
@@ -73,8 +73,9 @@ Updated: 2026-08-29
    Mitigation: serialize through one named Durable Object, persist one pending
    body/key, and claim each attempt before provider entry.
 2. Risk: alerting adds latency or changes a failed member request.
-   Mitigation: persist through a best-effort background RPC, catch every alert
-   error, and return the original OpenAI response unchanged.
+   Mitigation: use `waitUntil` when the runtime owns it; otherwise await only
+   the short failed-401/403 Durable Object admission. Catch every alert error
+   and return the original OpenAI response object unchanged.
 3. Risk: operator texts expose private runtime evidence.
    Mitigation: accept only status and timestamp at the RPC boundary and format
    a closed aggregate-only message inside the Durable Object.
@@ -107,6 +108,19 @@ Updated: 2026-08-29
   rejection. No recovery text is sent; incident.io owns live coordination.
 - Reuse the existing operator chat identities and Linq sender instead of adding
   phone numbers, recipient state, or another provider configuration.
+- ReviewGPT's final round-one lifetime finding was accepted: the real
+  Containers outbound context has no `waitUntil`, so the failed 401/403 path
+  must await the same caught report promise when registration is unavailable or
+  throws. Successful egress and all nonqualifying paths remain non-alerting.
+- ReviewGPT's complexity-collapse finding was accepted: delete the redundant
+  attempt generation and lease state. The exact pending tuple plus its
+  five-minute retry timestamp now owns both reservation and retry timing; the
+  production sender's bounded phases complete well inside that interval.
+- The preliminary coverage finding was accepted and resolved with one
+  Workers-pool composition across the alert binding behavior and real Linq
+  sender using only synthetic fake transport.
+- Changelog: not applicable. This changes internal operator paging only;
+  members receive no new message, response, control, or visible recovery state.
 
 ## Verification
 
@@ -126,6 +140,22 @@ Updated: 2026-08-29
   - `pnpm --filter @murphai/cloudflare-runner typecheck` — passed.
   - `pnpm --filter @murphai/hosted-local-harness typecheck` — passed.
   - `git diff --check` — passed.
+- Corrected-candidate proof after accepted ReviewGPT remediation:
+  - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts
+    --no-coverage apps/cloudflare/test/openai-authorization-alert-durable-object.test.ts
+    apps/cloudflare/test/runner-egress-intercept.test.ts` — 275 tests passed.
+  - `pnpm exec vitest run --config apps/cloudflare/vitest.workers.config.ts
+    --no-coverage apps/cloudflare/test/workers/openai-authorization-alert-e2e.test.ts`
+    — 1 composed Workers-pool test passed.
+  - `pnpm --filter @murphai/cloudflare-runner typecheck` — passed after
+    ReviewGPT replaced the package-typed Containers test import with the
+    existing production-shaped repository stub; no cast or production change.
+  - Focused rerun of `runner-egress-intercept.test.ts` — 264 tests passed.
+  - ReviewGPT patch gzip SHA-256
+    `0e049693b56262330ca89a9d131ecaa3e054bbb1f78be203ac9bcd2e84cb7596`
+    and decoded patch SHA-256
+    `4ab51b92d8c9e45b6730dd30f1e8cb0529ed0f57b8551a422a52dc4938c2f2e5`
+    independently matched; `git apply --check --whitespace=error-all` passed.
 - Direct Product UX walkthrough:
   - Each existing operator recipient gets the same four-line SEV1 page with
     only status, aggregate count, and first/last UTC timestamps.
@@ -136,6 +166,8 @@ Updated: 2026-08-29
     for five-minute alarm retry. Members receive no new message, and alert
     failure leaves the original OpenAI response object unchanged.
 - Remaining gates:
-  - Exact pushed-head preliminary Product UX/coverage specialist ReviewGPT,
-    final sensitive-context ReviewGPT, required GitHub checks, and parent final
-    review.
+  - The preliminary Product UX/coverage specialist ReviewGPT is complete; its
+    one coverage finding is resolved by the composed Worker proof above.
+  - Push the corrected candidate, run final sensitive-context ReviewGPT round
+    two against the immutable round-one baseline, require exact-head GitHub
+    checks, and complete the parent final review.

@@ -1517,7 +1517,7 @@ function reportOpenAiAuthorizationFailureSafely(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   status: 401 | 403;
-}): void {
+}): Promise<void> | undefined {
   let failureLogged = false;
   const logFailure = (): void => {
     if (failureLogged) {
@@ -1541,16 +1541,22 @@ function reportOpenAiAuthorizationFailureSafely(input: {
         observedAtMs: Date.now(),
         status: input.status,
       })
+      .then(() => undefined)
       .catch(() => {
         logFailure();
       });
-    try {
-      input.ctx?.waitUntil?.(reportPromise);
-    } catch {
-      logFailure();
+    if (typeof input.ctx?.waitUntil === "function") {
+      try {
+        input.ctx.waitUntil(reportPromise);
+        return;
+      } catch {
+        logFailure();
+      }
     }
+    return reportPromise;
   } catch {
     logFailure();
+    return;
   }
 }
 
@@ -1673,11 +1679,14 @@ async function maybeHandleOpenAiRequest(input: {
     url: input.url,
   });
   if (response.status === 401 || response.status === 403) {
-    reportOpenAiAuthorizationFailureSafely({
+    const reportPromise = reportOpenAiAuthorizationFailureSafely({
       ctx: input.ctx,
       env: input.env,
       status: response.status,
     });
+    if (reportPromise) {
+      await reportPromise;
+    }
   }
   if (diagnosticPromise && typeof input.ctx?.waitUntil !== "function") {
     await diagnosticPromise;

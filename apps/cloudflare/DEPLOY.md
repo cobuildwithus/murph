@@ -388,8 +388,10 @@ Worker key injection, and the singleton RPC contains only `{ status,
 observedAtMs }`. The owner persists and coalesces the first page, retries the
 exact pending bytes and idempotency key after five minutes, admits at most one
 hourly reminder on a fresh failure, and closes after 15 quiet minutes without a
-recovery message. Reporting failure never changes or delays the upstream
-response beyond scheduling the RPC with `waitUntil`.
+recovery message. Reporting failure never changes the upstream response. It is
+scheduled with `waitUntil` when available; when the Containers outbound context
+cannot own the promise, only the failed 401/403 path awaits the short Durable
+Object admission.
 
 For a safe rollback, deploy a Cloudflare-only compatibility build that disables
 the egress call site while retaining the class export, binding, and append-only

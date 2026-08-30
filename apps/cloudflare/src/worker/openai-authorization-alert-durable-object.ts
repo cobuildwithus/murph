@@ -36,8 +36,6 @@ export interface OpenAiAuthorizationAlertSender {
 
 export interface OpenAiAuthorizationAlertState {
   alertSequence: number;
-  attemptGeneration: number;
-  attemptLeaseUntilMs: number;
   failureCount: number;
   firstFailureAtMs: number | null;
   incidentOpen: boolean;
@@ -55,8 +53,6 @@ export interface OpenAiAuthorizationAlertState {
 interface OpenAiAuthorizationAlertMetaRow
   extends Record<string, DurableObjectSqlValue> {
   alert_sequence: number;
-  attempt_generation: number;
-  attempt_lease_until_ms: number;
   failure_count: number;
   first_failure_at_ms: number | null;
   incident_open: number;
@@ -77,7 +73,6 @@ interface OpenAiAuthorizationFailureReport {
 }
 
 interface ClaimedOpenAiAuthorizationAlert {
-  attemptGeneration: number;
   idempotencyKey: string;
   incidentSequence: number;
   message: string;
@@ -246,9 +241,10 @@ export class OpenAiAuthorizationAlertDurableObject extends DurableObject {
         try {
           this.transactionSync(() => {
             this.store.recordAlertFailure({
-              attemptGeneration: activeClaim.attemptGeneration,
               failedAtMs,
+              idempotencyKey: activeClaim.idempotencyKey,
               incidentSequence: activeClaim.incidentSequence,
+              message: activeClaim.message,
               sequence: activeClaim.sequence,
             });
           });
@@ -298,8 +294,7 @@ export class OpenAiAuthorizationAlertDurableObject extends DurableObject {
 
   private async reconcileAlarmSafely(): Promise<void> {
     try {
-      const nowMs = normalizeTimestamp(this.nowImplementation());
-      const desiredAlarm = computeDesiredAlarm(this.store.readState(), nowMs);
+      const desiredAlarm = computeDesiredAlarm(this.store.readState());
       const currentAlarm = await this.getAlarm();
       if (desiredAlarm === null) {
         await this.deleteAlarm();
@@ -328,61 +323,41 @@ class OpenAiAuthorizationAlertStore {
       || state.pendingAlertSequence === null
       || state.pendingRetryAtMs === null
       || state.pendingRetryAtMs > nowMs
-      || state.attemptLeaseUntilMs > nowMs
     ) {
       return null;
     }
 
-    const leaseUntilMs = addTimestampDelay(
-      nowMs,
-      OPENAI_AUTHORIZATION_ALERT_RETRY_MS,
-    );
     const claimed = this.sql.exec(
       `UPDATE openai_authorization_alert_meta
-       SET
-         attempt_generation = attempt_generation + 1,
-         attempt_lease_until_ms = ?
+       SET pending_retry_at_ms = ?
        WHERE singleton = 1
          AND pending_alert_incident_sequence = ?
          AND pending_alert_sequence = ?
          AND pending_alert_idempotency_key = ?
          AND pending_alert_message = ?
-         AND pending_retry_at_ms <= ?
-         AND attempt_lease_until_ms <= ?`,
-      leaseUntilMs,
+         AND pending_retry_at_ms <= ?`,
+      addTimestampDelay(nowMs, OPENAI_AUTHORIZATION_ALERT_RETRY_MS),
       state.pendingAlertIncidentSequence,
       state.pendingAlertSequence,
       state.pendingAlertIdempotencyKey,
       state.pendingAlertMessage,
-      nowMs,
       nowMs,
     ).rowsWritten === 1;
     if (!claimed) {
       return null;
     }
 
-    const claimedState = this.readState();
-    if (
-      claimedState.pendingAlertIdempotencyKey === null
-      || claimedState.pendingAlertIncidentSequence === null
-      || claimedState.pendingAlertMessage === null
-      || claimedState.pendingAlertSequence === null
-    ) {
-      throw new Error("Claimed OpenAI authorization alert is missing.");
-    }
     return {
-      attemptGeneration: claimedState.attemptGeneration,
-      idempotencyKey: claimedState.pendingAlertIdempotencyKey,
-      incidentSequence: claimedState.pendingAlertIncidentSequence,
-      message: claimedState.pendingAlertMessage,
-      sequence: claimedState.pendingAlertSequence,
+      idempotencyKey: state.pendingAlertIdempotencyKey,
+      incidentSequence: state.pendingAlertIncidentSequence,
+      message: state.pendingAlertMessage,
+      sequence: state.pendingAlertSequence,
     };
   }
 
   isClaimCurrent(claim: ClaimedOpenAiAuthorizationAlert): boolean {
     const state = this.readState();
-    return state.attemptGeneration === claim.attemptGeneration
-      && state.pendingAlertIdempotencyKey === claim.idempotencyKey
+    return state.pendingAlertIdempotencyKey === claim.idempotencyKey
       && state.pendingAlertIncidentSequence === claim.incidentSequence
       && state.pendingAlertMessage === claim.message
       && state.pendingAlertSequence === claim.sequence;
@@ -415,8 +390,7 @@ class OpenAiAuthorizationAlertStore {
          pending_alert_sequence = alert_sequence + 1,
          pending_alert_idempotency_key = ?,
          pending_alert_message = ?,
-         pending_retry_at_ms = ?,
-         attempt_lease_until_ms = 0
+         pending_retry_at_ms = ?
        WHERE singleton = 1
          AND incident_open = 1
          AND pending_alert_idempotency_key IS NULL`,
@@ -462,9 +436,7 @@ class OpenAiAuthorizationAlertStore {
          pending_alert_sequence,
          pending_alert_idempotency_key,
          pending_alert_message,
-         pending_retry_at_ms,
-         attempt_generation,
-         attempt_lease_until_ms
+         pending_retry_at_ms
        FROM openai_authorization_alert_meta
        WHERE singleton = 1`,
     ).toArray()[0];
@@ -477,8 +449,6 @@ class OpenAiAuthorizationAlertStore {
     }
     return {
       alertSequence: row.alert_sequence,
-      attemptGeneration: row.attempt_generation,
-      attemptLeaseUntilMs: row.attempt_lease_until_ms,
       failureCount: row.failure_count,
       firstFailureAtMs: row.first_failure_at_ms,
       incidentOpen: row.incident_open === 1,
@@ -495,27 +465,28 @@ class OpenAiAuthorizationAlertStore {
   }
 
   recordAlertFailure(input: {
-    attemptGeneration: number;
     failedAtMs: number;
+    idempotencyKey: string;
     incidentSequence: number;
+    message: string;
     sequence: number;
   }): boolean {
     return this.sql.exec(
       `UPDATE openai_authorization_alert_meta
-       SET
-         pending_retry_at_ms = ?,
-         attempt_lease_until_ms = 0
+       SET pending_retry_at_ms = ?
        WHERE singleton = 1
          AND pending_alert_incident_sequence = ?
          AND pending_alert_sequence = ?
-         AND attempt_generation = ?`,
+         AND pending_alert_idempotency_key = ?
+         AND pending_alert_message = ?`,
       addTimestampDelay(
         input.failedAtMs,
         OPENAI_AUTHORIZATION_ALERT_RETRY_MS,
       ),
       input.incidentSequence,
       input.sequence,
-      input.attemptGeneration,
+      input.idempotencyKey,
+      input.message,
     ).rowsWritten === 1;
   }
 
@@ -538,8 +509,7 @@ class OpenAiAuthorizationAlertStore {
          pending_alert_sequence = NULL,
          pending_alert_idempotency_key = NULL,
          pending_alert_message = NULL,
-         pending_retry_at_ms = NULL,
-         attempt_lease_until_ms = 0
+         pending_retry_at_ms = NULL
        WHERE singleton = 1
          AND pending_alert_incident_sequence = ?
          AND pending_alert_sequence = ?
@@ -621,8 +591,6 @@ function ensureOpenAiAuthorizationAlertSchema(
       pending_alert_idempotency_key TEXT,
       pending_alert_message TEXT,
       pending_retry_at_ms INTEGER,
-      attempt_generation INTEGER NOT NULL DEFAULT 0 CHECK (attempt_generation >= 0),
-      attempt_lease_until_ms INTEGER NOT NULL DEFAULT 0 CHECK (attempt_lease_until_ms >= 0),
       CHECK (
         (
           incident_open = 0
@@ -649,7 +617,6 @@ function ensureOpenAiAuthorizationAlertSchema(
           AND pending_alert_idempotency_key IS NULL
           AND pending_alert_message IS NULL
           AND pending_retry_at_ms IS NULL
-          AND attempt_lease_until_ms = 0
         )
         OR
         (
@@ -756,18 +723,13 @@ function buildAlertMessage(state: OpenAiAuthorizationAlertState): string {
 
 function computeDesiredAlarm(
   state: OpenAiAuthorizationAlertState,
-  nowMs: number,
 ): number | null {
   const candidates: number[] = [];
   if (
     state.pendingRetryAtMs !== null
     && state.pendingAlertIdempotencyKey !== null
   ) {
-    candidates.push(
-      state.attemptLeaseUntilMs > nowMs
-        ? Math.max(state.pendingRetryAtMs, state.attemptLeaseUntilMs)
-        : state.pendingRetryAtMs,
-    );
+    candidates.push(state.pendingRetryAtMs);
   }
   if (state.incidentOpen && state.lastFailureAtMs !== null) {
     candidates.push(

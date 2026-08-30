@@ -1,3 +1,4 @@
+import { ContainerProxy } from "./stubs/cloudflare-containers.ts";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
@@ -75,6 +76,7 @@ import type {
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
+import { RunnerContainer } from "../src/runner-container.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
@@ -5107,38 +5109,138 @@ describe("hostedRunnerIntercept", () => {
     expect(await response.text()).toBe("private-upstream-response-body");
   });
 
-  it("reports an authorized upstream OpenAI 403", async () => {
+  it("awaits alert admission through the real Containers outbound context", async () => {
+    let admitReport = (_value: { accepted: true }): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    let reportStarted = (_value: void): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    const reportStartedPromise = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
+    const reportFailure = vi.fn(
+      (_report: OpenAiAuthorizationAlertReport) =>
+        new Promise<{ accepted: true }>((resolve) => {
+          admitReport = resolve;
+          reportStarted(undefined);
+        }),
+    );
+    const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
+    const upstreamResponse = new Response("original-upstream-body", {
+      headers: {
+        "content-type": "application/problem+json",
+        "x-original-header": "original-header-value",
+      },
+      status: 401,
+      statusText: "Original Unauthorized",
+    });
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => upstreamResponse));
+    const proxy = new ContainerProxy(
+      {
+        props: {
+          className: RunnerContainer.name,
+          containerId: "member_123--v-version_1",
+        },
+      },
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+        validateRuntimeWriteFence: async () => true,
+      }),
+    );
+
+    let handlerSettled = false;
+    const responsePromise = proxy.fetch(createAuthorizedOpenAiModelsRequest())
+      .then((response) => {
+        handlerSettled = true;
+        return response;
+      });
+    await reportStartedPromise;
+    await Promise.resolve();
+    expect(handlerSettled).toBe(false);
+
+    admitReport({ accepted: true });
+    const response = await responsePromise;
+
+    expect(response).toBe(upstreamResponse);
+    expect(response.status).toBe(401);
+    expect(response.statusText).toBe("Original Unauthorized");
+    expect(response.headers.get("content-type")).toBe(
+      "application/problem+json",
+    );
+    expect(response.headers.get("x-original-header")).toBe(
+      "original-header-value",
+    );
+    expect(await response.text()).toBe("original-upstream-body");
+    expect(alert.getByName).toHaveBeenCalledWith("production");
+    expect(reportFailure).toHaveBeenCalledOnce();
+  });
+
+  it("awaits an authorized upstream OpenAI 403 when waitUntil registration fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-29T19:00:00.000Z"));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let admitReport = (_value: { accepted: true }): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    let reportStarted = (_value: void): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    const reportStartedPromise = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
     const reportFailure = vi.fn(
-      async (report: OpenAiAuthorizationAlertReport) => {
+      (report: OpenAiAuthorizationAlertReport) => {
         expect(report).toEqual({
           observedAtMs: Date.parse("2026-08-29T19:00:00.000Z"),
           status: 403,
         });
-        return { accepted: true } as const;
+        return new Promise<{ accepted: true }>((resolve) => {
+          admitReport = resolve;
+          reportStarted(undefined);
+        });
       },
     );
     const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
-    const deferred = createWaitUntilCollector();
     const upstreamResponse = new Response("forbidden", { status: 403 });
+    const waitUntil = vi.fn((_promise: Promise<unknown>) => {
+      throw new Error("private-wait-until-detail");
+    });
 
-    const response = await handleHostedRunnerOpenAiOutbound(
+    let handlerSettled = false;
+    const responsePromise = handleHostedRunnerOpenAiOutbound(
       createAuthorizedOpenAiModelsRequest(),
       createInterceptEnv({
         OPENAI_API_KEY: "openai-worker-secret",
         OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
         validateRuntimeWriteFence: async () => true,
       }),
-      deferred.context,
+      { waitUntil },
       async () => upstreamResponse,
-    );
+    ).then((response) => {
+      handlerSettled = true;
+      return response;
+    });
+    await reportStartedPromise;
+    await Promise.resolve();
+    expect(handlerSettled).toBe(false);
+
+    admitReport({ accepted: true });
+    const response = await responsePromise;
 
     expect(response).toBe(upstreamResponse);
     expect(alert.getByName).toHaveBeenCalledWith("production");
     expect(reportFailure).toHaveBeenCalledOnce();
-    expect(deferred.promises).toHaveLength(1);
-    await Promise.all(deferred.promises);
+    expect(waitUntil).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledWith(
+      "OpenAI authorization alert report failed.",
+      { failureCode: "openai_authorization_alert_report_failed" },
+    );
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(
+      "private-wait-until-detail",
+    );
   });
 
   it("does not report OpenAI success, Murph-local authorization rejection, or transport failure", async () => {

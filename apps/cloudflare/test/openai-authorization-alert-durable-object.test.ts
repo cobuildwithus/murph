@@ -38,8 +38,6 @@ describe("OpenAiAuthorizationAlertDurableObject", () => {
     expect(harness.deliveries).toEqual([]);
     expect(persistedBeforeSend).toMatchObject({
       alertSequence: 1,
-      attemptGeneration: 1,
-      attemptLeaseUntilMs: BASE_TIME_MS + FIVE_MINUTES_MS,
       failureCount: 1,
       firstFailureAtMs: BASE_TIME_MS,
       incidentOpen: true,
@@ -50,7 +48,7 @@ describe("OpenAiAuthorizationAlertDurableObject", () => {
         "openai-authorization-alert:incident-1:page-1",
       pendingAlertIncidentSequence: 1,
       pendingAlertSequence: 1,
-      pendingRetryAtMs: BASE_TIME_MS,
+      pendingRetryAtMs: BASE_TIME_MS + FIVE_MINUTES_MS,
     });
     expect(persistedBeforeSend.pendingAlertMessage).toBe(
       [
@@ -159,53 +157,74 @@ describe("OpenAiAuthorizationAlertDurableObject", () => {
     expect(harness.deliveries).toHaveLength(2);
   });
 
-  it("retries the exact pending key and bytes after five minutes", async () => {
+  it("retries the exact failed effect from a recreated owner when due", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const harness = createHarness({
-      async send(_input, attempt) {
-        if (attempt === 1) {
-          throw new OperatorAlertLinqError("linq_retryable_response");
-        }
+    const firstOwner = createHarness({
+      async send() {
+        throw new OperatorAlertLinqError("linq_retryable_response");
       },
     });
 
-    harness.alert.reportFailure({ observedAtMs: BASE_TIME_MS, status: 403 });
-    await harness.flushWaitUntil();
+    firstOwner.alert.reportFailure({
+      observedAtMs: BASE_TIME_MS,
+      status: 401,
+    });
+    firstOwner.setNow(BASE_TIME_MS + 1);
+    firstOwner.alert.reportFailure({
+      observedAtMs: BASE_TIME_MS + 1,
+      status: 403,
+    });
+    await firstOwner.flushWaitUntil();
 
-    const failedState = harness.alert.readState();
-    expect(harness.deliveries).toHaveLength(1);
+    const retryAtMs = BASE_TIME_MS + 1 + FIVE_MINUTES_MS;
+    const failedState = firstOwner.alert.readState();
+    expect(firstOwner.deliveries).toHaveLength(1);
     expect(failedState).toMatchObject({
-      attemptLeaseUntilMs: 0,
+      failureCount: 2,
+      lastFailureAtMs: BASE_TIME_MS + 1,
+      lastStatus: 403,
       pendingAlertIdempotencyKey:
         "openai-authorization-alert:incident-1:page-1",
-      pendingRetryAtMs: BASE_TIME_MS + FIVE_MINUTES_MS,
+      pendingRetryAtMs: retryAtMs,
     });
-    expect(harness.activeAlarm()).toBe(BASE_TIME_MS + FIVE_MINUTES_MS);
+    expect(firstOwner.activeAlarm()).toBe(retryAtMs);
     expect(warning).toHaveBeenCalledWith(
       "OpenAI authorization alert operation failed.",
       { failureCode: "linq_retryable_response" },
     );
 
-    harness.setNow(BASE_TIME_MS + FIVE_MINUTES_MS - 1);
-    harness.alert.alarm();
-    await harness.flushWaitUntil();
-    expect(harness.deliveries).toHaveLength(1);
+    const retriedEffect = firstOwner.deliveries[0];
+    const recreatedOwner = createHarness({
+      persistence: firstOwner.persistence,
+    });
+    recreatedOwner.setNow(retryAtMs - 1);
+    recreatedOwner.alert.alarm();
+    await recreatedOwner.flushWaitUntil();
+    expect(recreatedOwner.deliveries).toEqual([]);
 
-    harness.setNow(BASE_TIME_MS + FIVE_MINUTES_MS);
-    harness.alert.alarm();
-    await harness.flushWaitUntil();
+    recreatedOwner.setNow(retryAtMs);
+    recreatedOwner.alert.alarm();
+    await recreatedOwner.flushWaitUntil();
 
-    expect(harness.deliveries).toHaveLength(2);
-    expect(harness.deliveries[1]).toEqual(harness.deliveries[0]);
-    expect(harness.alert.readState()).toMatchObject({
-      lastSuccessfulPageAtMs: BASE_TIME_MS + FIVE_MINUTES_MS,
+    expect(recreatedOwner.deliveries).toEqual([retriedEffect]);
+    expect(recreatedOwner.alert.readState()).toMatchObject({
+      alertSequence: 1,
+      failureCount: 2,
+      firstFailureAtMs: BASE_TIME_MS,
+      incidentOpen: true,
+      lastFailureAtMs: BASE_TIME_MS + 1,
+      lastStatus: 403,
+      lastSuccessfulPageAtMs: retryAtMs,
       pendingAlertIdempotencyKey: null,
+      pendingAlertIncidentSequence: null,
       pendingAlertMessage: null,
+      pendingAlertSequence: null,
+      pendingRetryAtMs: null,
     });
 
-    harness.alert.alarm();
-    await harness.flushWaitUntil();
-    expect(harness.deliveries).toHaveLength(2);
+    recreatedOwner.alert.alarm();
+    await recreatedOwner.flushWaitUntil();
+    expect(recreatedOwner.deliveries).toHaveLength(1);
   });
 
   it("closes after the quiet window and deletes the alarm", async () => {
@@ -360,45 +379,6 @@ describe("OpenAiAuthorizationAlertDurableObject", () => {
     expect(message).not.toMatch(/https?:|member|prompt|provider|request|runner/iu);
   });
 
-  it("serializes overlapping report and alarm work around one persisted claim", async () => {
-    const sendStarted = createDeferred<void>();
-    const releaseSend = createDeferred<void>();
-    const harness = createHarness({
-      async send() {
-        sendStarted.resolve(undefined);
-        await releaseSend.promise;
-      },
-    });
-
-    harness.alert.reportFailure({ observedAtMs: BASE_TIME_MS, status: 401 });
-    await sendStarted.promise;
-    expect(harness.deliveries).toHaveLength(1);
-
-    harness.alert.reportFailure({
-      observedAtMs: BASE_TIME_MS + 1,
-      status: 403,
-    });
-    harness.setNow(BASE_TIME_MS + FIVE_MINUTES_MS);
-    harness.alert.alarm();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(harness.deliveries).toHaveLength(1);
-    expect(harness.alert.readState()).toMatchObject({
-      attemptGeneration: 2,
-      failureCount: 2,
-      pendingAlertIdempotencyKey:
-        "openai-authorization-alert:incident-1:page-1",
-    });
-
-    releaseSend.resolve(undefined);
-    await harness.flushWaitUntil();
-    expect(harness.deliveries).toHaveLength(1);
-    expect(harness.alert.readState()).toMatchObject({
-      lastSuccessfulPageAtMs: BASE_TIME_MS + FIVE_MINUTES_MS,
-      pendingAlertIdempotencyKey: null,
-    });
-  });
 
   it("keeps one alarm on the earliest retry or closure and removes it when idle", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -467,7 +447,18 @@ describe("OpenAiAuthorizationAlertDurableObject", () => {
   });
 });
 
+type AlarmOperation =
+  | { kind: "delete" }
+  | { kind: "set"; scheduledAtMs: number };
+
+interface HarnessPersistence {
+  activeAlarm: number | null;
+  alarmOperations: AlarmOperation[];
+  sql: TestSqlStorageLike;
+}
+
 function createHarness(input: {
+  persistence?: HarnessPersistence;
   send?: (
     input: AlertInput,
     attempt: number,
@@ -475,25 +466,22 @@ function createHarness(input: {
   sql?: TestSqlStorageLike;
 } = {}): {
   activeAlarm(): number | null;
-  alarmOperations: Array<
-    | { kind: "delete" }
-    | { kind: "set"; scheduledAtMs: number }
-  >;
+  alarmOperations: AlarmOperation[];
   alert: OpenAiAuthorizationAlertDurableObject;
   deliveries: AlertInput[];
   flushWaitUntil(): Promise<void>;
+  persistence: HarnessPersistence;
   setNow(value: number): void;
   waitUntilCount(): number;
 } {
-  let activeAlarm: number | null = null;
   let nowMs = BASE_TIME_MS;
   let sendAttempt = 0;
-  const alarmOperations: Array<
-    | { kind: "delete" }
-    | { kind: "set"; scheduledAtMs: number }
-  > = [];
+  const persistence = input.persistence ?? {
+    activeAlarm: null,
+    alarmOperations: [],
+    sql: input.sql ?? createTestSqlStorage(),
+  };
   const deliveries: AlertInput[] = [];
-  const sql = input.sql ?? createTestSqlStorage();
   const waitUntilPromises: Promise<unknown>[] = [];
   let waitUntilCalls = 0;
   const storage: DurableObjectStorageLike = {
@@ -501,27 +489,27 @@ function createHarness(input: {
       return false;
     },
     async deleteAlarm() {
-      activeAlarm = null;
-      alarmOperations.push({ kind: "delete" });
+      persistence.activeAlarm = null;
+      persistence.alarmOperations.push({ kind: "delete" });
     },
     async get<T>() {
       return undefined as T | undefined;
     },
     async getAlarm() {
-      return activeAlarm;
+      return persistence.activeAlarm;
     },
     async put<T>(_key: string, _value: T) {},
     async setAlarm(scheduledTime) {
-      activeAlarm = scheduledTime instanceof Date
+      persistence.activeAlarm = scheduledTime instanceof Date
         ? scheduledTime.getTime()
         : scheduledTime;
-      alarmOperations.push({
+      persistence.alarmOperations.push({
         kind: "set",
-        scheduledAtMs: activeAlarm,
+        scheduledAtMs: persistence.activeAlarm,
       });
     },
-    sql,
-    transactionSync: sql.transactionSync,
+    sql: persistence.sql,
+    transactionSync: persistence.sql.transactionSync,
   };
   const state: DurableObjectStateLike = {
     storage,
@@ -546,8 +534,8 @@ function createHarness(input: {
   );
 
   return {
-    activeAlarm: () => activeAlarm,
-    alarmOperations,
+    activeAlarm: () => persistence.activeAlarm,
+    alarmOperations: persistence.alarmOperations,
     alert,
     deliveries,
     async flushWaitUntil() {
@@ -555,25 +543,10 @@ function createHarness(input: {
         await Promise.all(waitUntilPromises.splice(0));
       }
     },
+    persistence,
     setNow(value) {
       nowMs = value;
     },
     waitUntilCount: () => waitUntilCalls,
-  };
-}
-
-function createDeferred<T>(): {
-  promise: Promise<T>;
-  resolve(value: T): void;
-} {
-  let resolvePromise: (value: T) => void = () => {};
-  const promise = new Promise<T>((resolve) => {
-    resolvePromise = resolve;
-  });
-  return {
-    promise,
-    resolve(value) {
-      resolvePromise(value);
-    },
   };
 }
