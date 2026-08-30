@@ -34,6 +34,14 @@ if [[ ! -f "$plan_path" ]]; then
 fi
 
 completed_plan_path="agent-docs/exec-plans/completed/$(basename "$plan_path")"
+plan_tracked_in_head=false
+if git cat-file -e "HEAD:$plan_path" 2>/dev/null; then
+  plan_tracked_in_head=true
+fi
+plan_indexed=false
+if git ls-files --error-unmatch -- "$plan_path" >/dev/null 2>&1; then
+  plan_indexed=true
+fi
 
 resolved_commit_paths=()
 
@@ -132,9 +140,14 @@ for target in "$@"; do
 done
 
 bash scripts/close-exec-plan.sh "$plan_path"
+if [[ "$plan_indexed" == true ]]; then
+  git add -A -- "$plan_path" "$completed_plan_path"
+else
+  git add -A -- "$completed_plan_path"
+fi
 
 commit_paths=("$completed_plan_path")
-if git ls-files --error-unmatch -- "$plan_path" >/dev/null 2>&1; then
+if [[ "$plan_tracked_in_head" == true ]]; then
   commit_paths=("$plan_path" "$completed_plan_path")
 fi
 
