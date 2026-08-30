@@ -486,12 +486,21 @@ describe("verification dispatcher", () => {
     expect(existsSync(failureArtifactPath)).toBe(false);
   });
 
-  it.each(["stdout", "stderr"] as const)(
-    "reaps Testbox and preserves failure evidence after its %s destination closes",
-    async (closedDestination) => {
+  it.each([
+    { closedDestination: "stdout", delegatedStatus: 0 },
+    { closedDestination: "stdout", delegatedStatus: 37 },
+    { closedDestination: "stderr", delegatedStatus: 0 },
+    { closedDestination: "stderr", delegatedStatus: 37 },
+  ] as const)(
+    "reaps Testbox with status $delegatedStatus after a queued $closedDestination EPIPE",
+    async ({ closedDestination, delegatedStatus }) => {
       const tempRoot = makeTempRoot();
       const binDir = path.join(tempRoot, "bin");
       const fakeCrabboxPath = path.join(binDir, "crabbox");
+      const delayedOutputErrorPath = path.join(
+        tempRoot,
+        "delay-output-error.cjs",
+      );
       const testRepoDir = path.join(tempRoot, "repo");
       const testScriptsDir = path.join(testRepoDir, "scripts");
       const childCompletedPath = path.join(tempRoot, "child-completed.txt");
@@ -510,6 +519,24 @@ describe("verification dispatcher", () => {
       writeFileSync(
         path.join(testRepoDir, ".gitignore"),
         "/.artifacts/\n",
+        "utf8",
+      );
+      writeFileSync(
+        delayedOutputErrorPath,
+        [
+          "const destination = process[process.env.MURPH_TEST_DELAY_OUTPUT_ERROR];",
+          "const originalEmit = destination.emit;",
+          "let delayed = false;",
+          "destination.emit = function (event, ...args) {",
+          "  const error = args[0];",
+          '  if (!delayed && event === "error" && error?.code === "EPIPE") {',
+          "    delayed = true;",
+          "    setTimeout(() => originalEmit.call(destination, event, ...args), 100);",
+          "    return false;",
+          "  }",
+          "  return originalEmit.call(destination, event, ...args);",
+          "};",
+        ].join("\n"),
         "utf8",
       );
       runGit(testRepoDir, ["init", "--quiet"]);
@@ -534,10 +561,9 @@ describe("verification dispatcher", () => {
           "sleep 0.1",
           'printf "%s\\n" "delegated stdout after close"',
           'printf "%s\\n" "delegated stderr after close" >&2',
-          "sleep 0.3",
           `printf "%s\\n" "completed" > ${shellQuote(childCompletedPath)}`,
           'printf "%s\\n" "delegated stderr after close" >&2',
-          "exit 37",
+          `exit ${delegatedStatus}`,
         ].join("\n"),
       );
       writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
@@ -553,8 +579,10 @@ describe("verification dispatcher", () => {
           env: {
             ...withoutVerificationRoutingEnvironment(process.env),
             MURPH_ALLOW_TESTBOX_SPEND: "1",
+            MURPH_TEST_DELAY_OUTPUT_ERROR: closedDestination,
             MURPH_VERIFY_EXECUTOR: "crabbox",
             MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
+            NODE_OPTIONS: `--require=${delayedOutputErrorPath}`,
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
           },
           stdio: ["ignore", "pipe", "pipe"],
@@ -567,30 +595,41 @@ describe("verification dispatcher", () => {
       const closedChunks = closedDestination === "stdout"
         ? stdoutChunks
         : stderrChunks;
-      await waitForCondition(
-        () => Buffer.concat(closedChunks).toString("utf8").includes(
-          `delegated ${closedDestination} before close`,
-        ),
-        `delegated ${closedDestination} output before destination close`,
-      );
+      try {
+        await waitForCondition(
+          () => Buffer.concat(closedChunks).toString("utf8").includes(
+            `delegated ${closedDestination} before close`,
+          ),
+          `delegated ${closedDestination} output before destination close`,
+          15_000,
+        );
+      } catch (error) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}\n${Buffer.concat(stderrChunks).toString("utf8")}`,
+        );
+      }
       dispatcher[closedDestination].destroy();
 
       const result = await waitForChild(dispatcher);
 
-      expect(result).toEqual({ code: 37, signal: null });
+      expect(result).toEqual({ code: delegatedStatus, signal: null });
       expect(readFileSync(childCompletedPath, "utf8")).toBe("completed\n");
-      expect(
-        readFileSync(path.join(failureArtifactPath, "stdout.log"), "utf8"),
-      ).toContain("delegated stdout after close");
-      expect(
-        readFileSync(path.join(failureArtifactPath, "stderr.log"), "utf8"),
-      ).toContain("delegated stderr after close");
-      const survivingChunks = closedDestination === "stdout"
-        ? stderrChunks
-        : stdoutChunks;
-      expect(Buffer.concat(survivingChunks).toString("utf8")).toContain(
-        "[verification-dispatch] failure-artifact=.artifacts/verification/crabbox-last-failure",
-      );
+      if (delegatedStatus === 0) {
+        expect(existsSync(failureArtifactPath)).toBe(false);
+      } else {
+        expect(
+          readFileSync(path.join(failureArtifactPath, "stdout.log"), "utf8"),
+        ).toContain("delegated stdout after close");
+        expect(
+          readFileSync(path.join(failureArtifactPath, "stderr.log"), "utf8"),
+        ).toContain("delegated stderr after close");
+        const survivingChunks = closedDestination === "stdout"
+          ? stderrChunks
+          : stdoutChunks;
+        expect(Buffer.concat(survivingChunks).toString("utf8")).toContain(
+          "[verification-dispatch] failure-artifact=.artifacts/verification/crabbox-last-failure",
+        );
+      }
     },
   );
 

@@ -1229,7 +1229,9 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
         return null;
       }
       let destinationOpen = !destination.destroyed;
+      let destinationErrorObserved = false;
       let waitingForDrain = false;
+      const pendingWrites = new Set();
       const resumeSource = () => {
         waitingForDrain = false;
         source.resume();
@@ -1242,27 +1244,60 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
         }
       };
       const onDestinationError = (error) => {
+        destinationErrorObserved = true;
         stopRelaying();
-        if (!isOutputDestinationClosure(error)) {
+        if (!isOutputDestinationClosure(error) && !outputRelayWriteFailed) {
           outputRelayWriteFailed = true;
-          signalChild(child, useDetachedProcessGroup, "SIGTERM");
+          if (!settled) {
+            signalChild(child, useDetachedProcessGroup, "SIGTERM");
+          }
+        }
+        for (const pendingWrite of pendingWrites) {
+          if (pendingWrite.callbackError) {
+            pendingWrite.settle(false);
+          }
         }
       };
       const writeDestination = (chunk) => {
         if (!destinationOpen) {
-          return false;
+          return Promise.resolve(false);
         }
+        let resolveCompletion;
+        const completion = new Promise((resolve) => {
+          resolveCompletion = resolve;
+        });
+        const pendingWrite = {
+          callbackError: false,
+          completion,
+          settle(delivered) {
+            if (!pendingWrites.delete(pendingWrite)) {
+              return;
+            }
+            resolveCompletion(delivered);
+          },
+        };
+        pendingWrites.add(pendingWrite);
         try {
-          if (!destination.write(chunk) && !waitingForDrain) {
+          const hasCapacity = destination.write(chunk, (error) => {
+            if (!error) {
+              pendingWrite.settle(true);
+              return;
+            }
+            pendingWrite.callbackError = true;
+            if (destinationErrorObserved || !destinationOpen) {
+              pendingWrite.settle(false);
+            }
+          });
+          if (!hasCapacity && !waitingForDrain) {
             waitingForDrain = true;
             source.pause();
             destination.once("drain", resumeSource);
           }
-          return true;
         } catch (error) {
           onDestinationError(error);
-          return false;
+          pendingWrite.settle(false);
         }
+        return completion;
       };
       destination.on("close", stopRelaying);
       destination.on("error", onDestinationError);
@@ -1272,10 +1307,12 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
             writeSync(artifactDescriptor, chunk);
           } catch {
             failureArtifactWriteFailed = true;
-            signalChild(child, useDetachedProcessGroup, "SIGTERM");
+            if (!settled) {
+              signalChild(child, useDetachedProcessGroup, "SIGTERM");
+            }
           }
         }
-        writeDestination(chunk);
+        void writeDestination(chunk);
       };
       source.on("data", onData);
       return {
@@ -1284,6 +1321,13 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
           source.off("data", onData);
           destination.off("close", stopRelaying);
           destination.off("error", onDestinationError);
+        },
+        async settle() {
+          while (pendingWrites.size > 0) {
+            await Promise.all(
+              [...pendingWrites].map((pendingWrite) => pendingWrite.completion),
+            );
+          }
         },
         write: writeDestination,
       };
@@ -1329,15 +1373,22 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
       stdoutRelay?.cleanup();
       stderrRelay?.cleanup();
     };
-    const reportFailureArtifact = () => {
+    const settleRelays = async () => {
+      await Promise.all([
+        stdoutRelay?.settle() ?? Promise.resolve(),
+        stderrRelay?.settle() ?? Promise.resolve(),
+      ]);
+    };
+    const reportFailureArtifact = async () => {
       if (!failureArtifact) {
-        return;
+        return false;
       }
       const message =
         `[verification-dispatch] failure-artifact=${failureArtifact.displayPath}\n`;
-      if (!stderrRelay?.write(message)) {
-        stdoutRelay?.write(message);
+      if (await (stderrRelay?.write(message) ?? Promise.resolve(false))) {
+        return true;
       }
+      return await (stdoutRelay?.write(message) ?? Promise.resolve(false));
     };
 
     child.once("error", (error) => {
@@ -1345,51 +1396,68 @@ function runChild(invocation, env, { failureArtifact = null } = {}) {
         return;
       }
       settled = true;
-      cleanupChildOwnership();
-      reportFailureArtifact();
-      cleanupRelays();
-      reject(error);
+      void (async () => {
+        cleanupChildOwnership();
+        await settleRelays();
+        await reportFailureArtifact();
+        cleanupRelays();
+        reject(error);
+      })().catch((settlementError) => {
+        cleanupRelays();
+        reject(settlementError);
+      });
     });
     child.once("close", (code, signal) => {
       if (settled) {
         return;
       }
       settled = true;
-      cleanupChildOwnership();
-      if (failureArtifactWriteFailed) {
-        reportFailureArtifact();
+      void (async () => {
+        cleanupChildOwnership();
+        await settleRelays();
+        if (failureArtifactWriteFailed) {
+          await reportFailureArtifact();
+          cleanupRelays();
+          reject(new Error("Unable to persist delegated Testbox failure evidence."));
+          return;
+        }
+        if (outputRelayWriteFailed) {
+          await reportFailureArtifact();
+          cleanupRelays();
+          reject(new Error("Unable to relay delegated Testbox output."));
+          return;
+        }
+        if (failureArtifact && code === 0 && signal === null) {
+          rmSync(failureArtifact.absoluteDirectory, {
+            force: true,
+            recursive: true,
+          });
+        } else if (failureArtifact) {
+          await reportFailureArtifact();
+        }
+        if (outputRelayWriteFailed) {
+          cleanupRelays();
+          reject(new Error("Unable to relay delegated Testbox output."));
+          return;
+        }
         cleanupRelays();
-        reject(new Error("Unable to persist delegated Testbox failure evidence."));
-        return;
-      }
-      if (outputRelayWriteFailed) {
-        reportFailureArtifact();
+        if (signal === "SIGINT") {
+          resolve(130);
+          return;
+        }
+        if (signal === "SIGHUP") {
+          resolve(129);
+          return;
+        }
+        if (signal) {
+          resolve(143);
+          return;
+        }
+        resolve(code ?? 1);
+      })().catch((settlementError) => {
         cleanupRelays();
-        reject(new Error("Unable to relay delegated Testbox output."));
-        return;
-      }
-      if (failureArtifact && code === 0 && signal === null) {
-        rmSync(failureArtifact.absoluteDirectory, {
-          force: true,
-          recursive: true,
-        });
-      } else if (failureArtifact) {
-        reportFailureArtifact();
-      }
-      cleanupRelays();
-      if (signal === "SIGINT") {
-        resolve(130);
-        return;
-      }
-      if (signal === "SIGHUP") {
-        resolve(129);
-        return;
-      }
-      if (signal) {
-        resolve(143);
-        return;
-      }
-      resolve(code ?? 1);
+        reject(settlementError);
+      });
     });
   });
 }
