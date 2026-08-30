@@ -1754,9 +1754,6 @@ describe('assistant Codex turn planning', () => {
       executionContext: null,
       input: createMessageInput(),
       profile: executionProfile,
-      progressDelivery: {
-        send: async () => ({ kind: 'sent', source: 'model' }),
-      },
       promptTimeContext: {
         currentLocalDate: '2026-05-04',
         currentTimeZone: 'Asia/Kuala_Lumpur',
@@ -1769,13 +1766,6 @@ describe('assistant Codex turn planning', () => {
     const skillRef = buildAssistantSkillFileRef('murph-onboarding')
 
     expect(plan.onboardingGuidanceInjected).toBe(true)
-    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
-      'send_progress_update',
-    )
-    expect(plan.systemPrompt).toContain(
-      'Member-visible interim progress is unavailable on this route',
-    )
-    expect(plan.systemPrompt).not.toContain('murph.send_progress_update')
     expect(plan.systemPrompt).toContain(skillRef)
     expect(plan.turnContextPrompt).not.toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain('Murph onboarding:')
