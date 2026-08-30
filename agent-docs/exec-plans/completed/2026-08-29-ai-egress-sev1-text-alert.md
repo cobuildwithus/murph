@@ -1,6 +1,6 @@
 # Page operators on AI egress authorization failure
 
-Status: active
+Status: completed
 Created: 2026-08-29
 Updated: 2026-08-30
 
@@ -183,7 +183,26 @@ Updated: 2026-08-30
 - Remaining gates:
   - The preliminary Product UX/coverage specialist ReviewGPT is complete; its
     one coverage finding is resolved by the composed Worker proof above.
-  - Push the round-two remediation, run final sensitive-context ReviewGPT round
-    three against the immutable round-one baseline, require exact-head GitHub
-    checks, complete the parent final review, then merge through the protected
-    repository path.
+  - Final ReviewGPT round three first returned `INVALID` because the invocation
+    did not repeat the complete prior-finding ledger; the corrected invocation
+    then returned the mandatory round-number `RETROSPECTIVE_REQUIRED` gate with
+    no tactical finding.
+  - The completed requirement-level retrospective is recorded on PR #2570. It
+    chooses justified continuation: current production source is 13 lines
+    smaller than the immutable first-reviewed design, the lease/generation
+    lifecycle is deleted, and the implementation retains one Durable Object,
+    one SQLite row and pending tuple, one native alarm, and the existing Linq
+    sender. Splitting or moving the owner would add seams or another service
+    without deleting a required concept.
+  - Final sensitive-context ReviewGPT round four returned
+    `ROUND_OUTCOME: PASS` on exact head `6569469af994` with no qualifying
+    finding and verified every prior correction plus the retrospective.
+  - Exact-head CI initially failed one unrelated assistant-engine assertion in
+    the 4,445-test coverage shard; the PR does not touch assistant-engine and
+    the exact named test passed locally (1 passed, 127 skipped). The failed
+    GitHub jobs were rerun through the normal required-check path with no code
+    change or bypass.
+  - Current-main `git merge-tree --write-tree` is clean. Close this plan, require
+    the final docs-only closure head's GitHub checks, then merge through the
+    protected repository path.
+Completed: 2026-08-30
