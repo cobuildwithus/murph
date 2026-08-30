@@ -178,6 +178,7 @@ import {
   EnvironmentVoiceRefreshNotice,
 } from "../(dashboard)/environment/environment-page-client";
 import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
+import { PublicComparisonTableStudy } from "./public-comparison-table-study";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
@@ -2542,6 +2543,22 @@ export function ComponentsContent() {
             </div>
           </ScrollArea>
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="public-comparison-table"
+          id="public-comparison-table"
+          inert
+        >
+          <Section title="Public comparison table">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              The production comparison table with synthetic content, including
+              its labeled mobile scroll region and semantic row headers.
+            </p>
+            <PublicComparisonTableStudy />
+          </Section>
+        </div>
 
         <Separator />
 

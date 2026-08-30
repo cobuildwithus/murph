@@ -18,6 +18,9 @@ const ROUTES = [
   "/security",
   "/pitch",
   "/changelog",
+  "/compare",
+  "/compare/murph-vs-bodybuddy",
+  "/compare/murph-vs-whoop",
   "/growth",
   "/subprocessors",
   "/consumer-health-data-privacy-policy",
@@ -243,6 +246,9 @@ test("calendar links wrap maximum unbroken event text", async ({ page }) => {
 for (const route of ROUTES) {
   for (const width of WIDTHS) {
     test(`no horizontal overflow: ${route} @ ${width}px`, async ({ page }) => {
+      if (route.startsWith("/compare")) {
+        test.setTimeout(300_000);
+      }
       await page.setViewportSize({ width, height: 900 });
 
       // Measure the real, production-relevant page: drop every non-loopback
@@ -257,16 +263,15 @@ for (const route of ROUTES) {
         }
       });
 
-      // Freeze animation/transition so layout settles to a stable measurement.
-      await page.addInitScript(() => {
-        const style = document.createElement("style");
-        style.textContent =
-          "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";
-        (document.head ?? document.documentElement).appendChild(style);
-      });
-
       const response = await page.goto(route, { waitUntil: "load" });
       expect(response?.status(), `${route} should respond 200`).toBe(200);
+
+      // Freeze animation/transition after the document exists, then allow two
+      // frames for the resulting layout to settle before measurement.
+      await page.addStyleTag({
+        content:
+          "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}",
+      });
 
       // Web fonts change text width (and therefore min-content), so wait for
       // them and a couple of frames before measuring or the result drifts.

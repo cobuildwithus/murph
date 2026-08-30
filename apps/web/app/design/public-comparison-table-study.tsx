@@ -1,0 +1,65 @@
+import { ComparisonTable } from "@/src/components/comparisons/comparison-table";
+import type { ComparisonEntry } from "@/src/lib/comparisons/types";
+
+const DESIGN_COMPARISON = {
+  bestFor:
+    "People who want a dedicated recovery signal from a lightweight wearable.",
+  bottomLine:
+    "The wearable measures recovery directly. Murph helps connect that signal to the rest of a person's context and follow-through.",
+  category: "wearables",
+  chooseCompetitor:
+    "Choose the wearable when continuous sensing and a daily recovery score are the main job.",
+  chooseMurph:
+    "Choose Murph when the main job is making sense of several health inputs and carrying a plan into daily life.",
+  competitor: {
+    clinicalRole: "Consumer wellness product, not medical care.",
+    followThrough: "Daily scores, trends, and recovery guidance inside its app.",
+    format: "Wearable sensor with a companion mobile app.",
+    hardware: "A compatible band is required.",
+    inputs: "Signals collected by the wearable and optional app context.",
+    insightStyle: "Device-specific scores and trend summaries.",
+    platforms: "Mobile companion app.",
+    pricing: "Hardware purchase with an optional membership.",
+    primaryJob: "Measure sleep, strain, and recovery continuously.",
+  },
+  faqs: [
+    {
+      answer:
+        "No. The wearable measures signals, while Murph works across the context a person chooses to share.",
+      question: "Does Murph replace the wearable?",
+    },
+    {
+      answer:
+        "They can play complementary roles when the wearable remains the measurement source.",
+      question: "Can they be used together?",
+    },
+    {
+      answer:
+        "The right choice depends on whether continuous sensing or broader interpretation is the main need.",
+      question: "Which product is the better fit?",
+    },
+  ],
+  headline: "Murph vs a recovery wearable",
+  lastVerified: "2026-08-30",
+  metaDescription:
+    "Compare Murph with a representative recovery wearable across inputs, interpretation, follow-through, hardware, platforms, pricing, and clinical role.",
+  name: "Recovery wearable",
+  overview:
+    "This synthetic design study exercises the production comparison table without representing a real company or product claim.",
+  relationship: "complement",
+  slug: "recovery-wearable",
+  sources: [
+    { label: "Synthetic product overview", url: "https://example.com/product" },
+    { label: "Synthetic product support", url: "https://example.com/support" },
+  ],
+  tradeoffs: [
+    "A wearable adds continuous measurement but requires hardware.",
+    "A conversation layer can cover broader context but is not a sensor.",
+  ],
+  useTogether:
+    "Keep the wearable as the measurement source and use Murph to place its signals alongside other relevant context.",
+} satisfies ComparisonEntry;
+
+export function PublicComparisonTableStudy() {
+  return <ComparisonTable comparison={DESIGN_COMPARISON} />;
+}

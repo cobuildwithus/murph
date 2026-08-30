@@ -6,6 +6,7 @@ import { metadata as designMetadata } from "../app/design/page";
 import robots from "../app/robots";
 import sitemap from "../app/sitemap";
 import { metadata as pitchMetadata } from "../app/pitch/page";
+import { listComparisonRoutes } from "../src/lib/comparisons/catalog";
 import { listHealthCommonsBiomarkerRoutes } from "../src/lib/health-commons/biomarker-projections";
 import { listHealthCommonsExperimentRouteParams } from "../src/lib/health-commons/experiment-browse";
 import { listHealthCommonsMeasurementMethodRoutes } from "../src/lib/health-commons/measurement-method-detail";
@@ -56,6 +57,7 @@ describe("public search indexing metadata", () => {
   it("publishes the exact approved public route inventory", () => {
     const expectedRoutes = [
       ...EXPECTED_STATIC_PUBLIC_ROUTES,
+      ...listComparisonRoutes(),
       ...listHealthCommonsExperimentRouteParams().flatMap(({ experimentId }) => {
         const route = `/experiments/${encodeURIComponent(experimentId)}`;
         return [route, `${route}/research`];
@@ -69,7 +71,12 @@ describe("public search indexing metadata", () => {
       ),
     ].sort();
 
+    const comparisonRoutes = new Set(listComparisonRoutes());
+
     expect(sitemap()).toEqual(expectedRoutes.map((route) => ({
+      ...(comparisonRoutes.has(route)
+        ? { lastModified: "2026-08-30" }
+        : {}),
       url: publicUrl(route),
     })));
 

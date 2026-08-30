@@ -21,6 +21,7 @@ const NAV_LINKS: ReadonlyArray<{
   label: string;
 }> = [
   { href: "/#faq", label: "FAQ" },
+  { href: "/compare", label: "Compare" },
   { href: "/knowledge", label: "Knowledge" },
   { href: "/security", label: "Security" },
 ];
