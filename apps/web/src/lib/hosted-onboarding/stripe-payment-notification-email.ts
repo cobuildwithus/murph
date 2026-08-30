@@ -14,6 +14,7 @@ export type HostedStripePaymentNotificationCandidate = {
   category:
     | "invoice"
     | "subscription_create"
+    | "subscription_cycle"
     | "subscription_threshold"
     | "subscription_update"
     | "usage_credit";
@@ -31,13 +32,16 @@ type HostedStripePaymentNotificationEmailSend =
 
 export function resolveHostedStripePaymentNotificationCandidate(input: {
   event: Stripe.Event;
+  subscriptionCycleNotificationEligible: boolean;
   usageCreditEventHandled: boolean;
 }): HostedStripePaymentNotificationCandidate | null {
   if (input.event.type === "invoice.paid") {
     const invoice = input.event.data.object as Stripe.Invoice;
-    const category = resolveHostedStripeInvoicePaymentCategory(
-      invoice.billing_reason,
-    );
+    const category = resolveHostedStripeInvoicePaymentCategory({
+      billingReason: invoice.billing_reason,
+      subscriptionCycleNotificationEligible:
+        input.subscriptionCycleNotificationEligible,
+    });
     if (!category) {
       return null;
     }
@@ -162,15 +166,20 @@ function buildHostedStripePaymentNotificationCandidate(input: {
 }
 
 function resolveHostedStripeInvoicePaymentCategory(
-  billingReason: Stripe.Invoice["billing_reason"],
+  input: {
+    billingReason: Stripe.Invoice["billing_reason"];
+    subscriptionCycleNotificationEligible: boolean;
+  },
 ): HostedStripePaymentNotificationCandidate["category"] | null {
-  switch (billingReason) {
+  switch (input.billingReason) {
     case "subscription_cycle":
-      return null;
+      return input.subscriptionCycleNotificationEligible
+        ? "subscription_cycle"
+        : null;
     case "subscription_create":
     case "subscription_threshold":
     case "subscription_update":
-      return billingReason;
+      return input.billingReason;
     default:
       return "invoice";
   }
@@ -182,6 +191,8 @@ function formatHostedStripePaymentCategory(
   switch (category) {
     case "subscription_create":
       return "new subscription";
+    case "subscription_cycle":
+      return "recurring subscription";
     case "subscription_threshold":
       return "recurring usage invoice";
     case "subscription_update":

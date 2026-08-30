@@ -2805,6 +2805,105 @@ describe("hosted Stripe event reconciliation", () => {
     }));
   });
 
+  it("keeps an accepted paid trial conversion eligible for one payment email", async () => {
+    const prisma = createStripeEventPrismaHarness({
+      currentBillingPhase: "paid",
+    });
+    const actualBillingEvents = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/stripe-billing-events")
+    >("@/src/lib/hosted-onboarding/stripe-billing-events");
+    const priceId = "price_pulse_monthly_123";
+    const event = makeInvoicePaidEvent({
+      id: "evt_invoice_paid_trial_conversion",
+      invoiceId: "in_trial_conversion_123",
+      priceId,
+    });
+    const eventCreatedAt = new Date(event.created * 1_000);
+    const trialMember: HostedMemberBillingSnapshot = {
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-03-28T12:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-03-28T12:00:00.000Z"),
+      },
+    };
+    const paidMember: HostedMemberBillingSnapshot = {
+      billingRef: {
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+        usagePlanTransitionAt: eventCreatedAt,
+        usagePlanTransitionFromCode: "launch_monthly",
+        usagePlanTransitionKind: "trial_conversion",
+        usagePlanTransitionToCode: "launch_monthly",
+      },
+      core: trialMember.core,
+    };
+    let currentMember = trialMember;
+    mocks.findMemberForStripeInvoice.mockImplementation(async () => currentMember);
+    mocks.readHostedMemberBillingSnapshot.mockImplementation(async () => currentMember);
+    mocks.writeHostedMemberStripeBillingTx.mockImplementation(async () => {
+      currentMember = paidMember;
+      return paidMember;
+    });
+    mocks.applyStripeInvoicePaid.mockImplementation(
+      actualBillingEvents.applyStripeInvoicePaid,
+    );
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+      },
+      priceId,
+      status: "active",
+    }));
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPhase: "paid",
+        currentCheckoutOffer: "pulse_trial_7d",
+      }),
+    );
+    expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx)
+      .toHaveBeenCalledOnce();
+    expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledWith({
+      candidate: expect.objectContaining({
+        category: "subscription_cycle",
+        eventId: event.id,
+      }),
+    });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      paymentNotificationEmailSentAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toBeNull();
+    expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledOnce();
+  });
+
   it("uses checkout completion as a welcome candidate so invoice-before-checkout email ordering can recover", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();
@@ -4790,6 +4889,7 @@ function makeInvoicePaidEvent(overrides?: {
   billingReason?: Stripe.Invoice["billing_reason"];
   id?: string;
   invoiceId?: string;
+  priceId?: string;
 }): Stripe.Event {
   return makeStripeEvent({
     api_version: "2025-03-31.basil",
@@ -4804,6 +4904,20 @@ function makeInvoicePaidEvent(overrides?: {
         currency: "usd",
         customer: "cus_123",
         id: overrides?.invoiceId ?? "in_123",
+        ...(overrides?.priceId
+          ? {
+              lines: {
+                data: [{
+                  pricing: {
+                    price_details: {
+                      price: overrides.priceId,
+                      type: "price_details",
+                    },
+                  },
+                }],
+              },
+            }
+          : {}),
         payment_intent: "pi_123",
         post_payment_credit_notes_amount: 0,
         pre_payment_credit_notes_amount: 0,
@@ -5195,11 +5309,19 @@ function makeCanonicalSubscription(overrides?: Partial<{
   customer: string;
   id: string;
   metadata: Record<string, string>;
+  priceId: string;
   status: Stripe.Subscription.Status;
 }>): Stripe.Subscription {
   return {
     customer: overrides?.customer ?? "cus_123",
     id: overrides?.id ?? "sub_123",
+    ...(overrides?.priceId
+      ? {
+          items: {
+            data: [{ price: { id: overrides.priceId } }],
+          },
+        }
+      : {}),
     metadata: overrides?.metadata ?? {},
     status: overrides?.status ?? "active",
   } as Stripe.Subscription;

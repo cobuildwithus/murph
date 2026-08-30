@@ -11,11 +11,11 @@ Updated: 2026-08-30
 
 ## Success criteria
 
-- `invoice.paid` events with `billing_reason: subscription_cycle` produce no
-  payment-notification candidate and complete their receipt without sending or
-  marking an email.
-- New subscriptions, paid subscription changes, threshold invoices, generic
-  invoices, and fulfilled usage-credit payments retain their notifications.
+- `invoice.paid` events with `billing_reason: subscription_cycle` and no
+  canonical billing transition complete without sending or marking an email.
+- Paid trial conversions, new subscriptions, paid subscription changes,
+  threshold invoices, generic invoices, and fulfilled usage-credit payments
+  retain their notifications.
 - Focused payment-notification and reconciliation tests pass, along with the
   hosted Web typecheck and durable-doc checks.
 
@@ -46,18 +46,21 @@ Updated: 2026-08-30
 
 ## Tasks
 
-1. Map `subscription_cycle` to no payment-notification candidate.
-2. Add classifier and receipt-level regression tests while preserving coverage
-   for eligible invoice categories and retry behavior.
+1. Suppress a `subscription_cycle` payment-notification candidate only when the
+   existing canonical billing result reports no meaningful transition.
+2. Add classifier and receipt-level regression tests for both renewal silence
+   and paid trial-conversion delivery while preserving retry behavior.
 3. Update the live architecture, security, reliability, and Web deployment
    contracts.
 4. Run focused proof, review the diff, and complete the required PR gates.
 
 ## Decisions
 
-- Treat only Stripe `billing_reason: subscription_cycle` as an ordinary renewal;
-  keep `subscription_threshold` notifications because they represent recurring
-  usage charges rather than the base subscription renewal.
+- Treat Stripe `billing_reason: subscription_cycle` as ambiguous provider input.
+  Suppress it only when the existing runtime-recheck member set proves canonical
+  reconciliation found no paid-service or usage-plan transition. Keep
+  `subscription_threshold` notifications because they represent recurring usage
+  charges rather than the base subscription renewal.
 - Product UX effort: Product change. The operator receives less routine noise;
   the paying member's billing and access behavior are unchanged.
 - No schema or provider-subscription change is required.
@@ -69,15 +72,19 @@ Updated: 2026-08-30
   - hosted Web typecheck
   - `pnpm docs:drift`
   - `git diff --check`
-- Expected outcomes: renewal events complete with no email call or sent marker;
-  all eligible payment categories and existing receipt retry behavior remain
-  green.
+- Expected outcomes: no-transition renewal events complete with no email call or
+  sent marker; paid trial conversions send and mark exactly once; all other
+  eligible payment categories and existing receipt retry behavior remain green.
 
 ## Progress
 
-- [x] Suppress `subscription_cycle` notification candidates.
-- [x] Preserve explicit eligible-invoice coverage and add renewal-silence proof.
+- [x] Suppress only no-transition `subscription_cycle` notification candidates.
+- [x] Preserve paid trial-conversion eligibility and add receipt-level proof for
+  both conversion delivery and renewal silence.
 - [x] Update the live architecture, security, reliability, and deployment docs.
-- [x] Pass 109 focused tests, hosted Web typecheck, focused ESLint, docs drift,
-  and diff hygiene.
+- [x] Accept the ReviewGPT finding that raw `subscription_cycle` suppression
+  hid paid trial conversions; reuse the existing canonical transition result
+  without adding state, reads, provider calls, or another owner.
+- [x] Pass 111 corrected focused tests, hosted Web typecheck, focused ESLint,
+  docs drift, and diff hygiene.
 - [ ] Complete exact-head CI and the preliminary and final ReviewGPT gates.

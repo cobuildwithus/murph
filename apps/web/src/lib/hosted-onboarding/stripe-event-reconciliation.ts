@@ -1084,6 +1084,8 @@ async function processClaimedHostedStripeEvent(
     const paymentNotificationCandidate =
       resolveHostedStripePaymentNotificationCandidate({
         event: stripeEvent,
+        subscriptionCycleNotificationEligible:
+          result.runtimeRecheckMemberIds.length > 0,
         usageCreditEventHandled: usageCreditReconciliation.handled,
       });
     let paymentNotificationSent = false;
