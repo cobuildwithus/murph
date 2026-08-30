@@ -29,7 +29,9 @@ import {
   type HostedExecutionContainerStubLike,
   invokeHostedExecutionContainerRunner,
   resolveHostedExecutionRunnerContainerName,
+  RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   RunnerContainer,
+  type RunnerContainerStartupFailureStage,
 } from "../src/runner-container.ts";
 import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
@@ -70,6 +72,61 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
   }
 
   return value;
+}
+
+type RunnerContainerLocalStartupFailureStage = Exclude<
+  RunnerContainerStartupFailureStage,
+  "caller_deadline" | "rpc_unattributed"
+>;
+
+function expectRunnerContainerStartupFailureObservation(input: {
+  cleanupUnsettled: boolean;
+  expectedElapsedMs?: number;
+  forbiddenValues?: readonly string[];
+  stage: RunnerContainerLocalStartupFailureStage;
+}): void {
+  const observations = mocks.emitHostedExecutionStructuredLog.mock.calls
+    .map(([observation]) => observation)
+    .filter((observation) =>
+      observation.message
+        === "Hosted execution container startup confirmation failed."
+    );
+  expect(observations).toHaveLength(1);
+  const observation = observations[0];
+  if (!observation) {
+    throw new Error("Expected one startup failure observation.");
+  }
+  expect(observation).toEqual({
+    component: "container",
+    details: {
+      runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
+      runtimeStartupFailureElapsedMs: expect.any(Number),
+      runtimeStartupFailureStage: input.stage,
+    },
+    level: "warn",
+    message: "Hosted execution container startup confirmation failed.",
+    phase: "container.starting",
+  });
+  const details = requireObject(
+    observation.details,
+    "startup failure observation details",
+  );
+  const elapsedMs = details.runtimeStartupFailureElapsedMs;
+  expect(typeof elapsedMs).toBe("number");
+  if (typeof elapsedMs !== "number") {
+    throw new Error("Expected numeric startup failure elapsed milliseconds.");
+  }
+  expect(elapsedMs).toBeGreaterThanOrEqual(0);
+  expect(elapsedMs).toBeLessThanOrEqual(
+    RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
+  );
+  if (input.expectedElapsedMs !== undefined) {
+    expect(elapsedMs).toBe(input.expectedElapsedMs);
+  }
+  const serialized = JSON.stringify(observation);
+  for (const forbiddenValue of input.forbiddenValues ?? []) {
+    expect(serialized).not.toContain(forbiddenValue);
+  }
 }
 
 describe("RunnerContainer", () => {
@@ -1864,13 +1921,37 @@ describe("RunnerContainer", () => {
   it("ensureReadyForProcessing starts and health-checks without invoking workspace work", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
-    await expect(container.ensureReadyForProcessing({
+    const result = await container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    });
+    expect(result).toMatchObject({
       action: "started",
       kind: "ready",
     });
+    if (result.kind !== "ready" || !result.coldStartTiming) {
+      throw new Error("Expected cold readiness timing.");
+    }
+    const timing = result.coldStartTiming;
+    expect(timing.processStartedAtEpochMs).toEqual(expect.any(Number));
+    expect(timing.serverListeningAtEpochMs).toEqual(expect.any(Number));
+    expect(timing.onStartAtEpochMs).toEqual(expect.any(Number));
+    expect(timing.readinessRequestedAtEpochMs)
+      .toBeLessThanOrEqual(timing.lifecycleLockAcquiredAtEpochMs);
+    expect(timing.lifecycleLockAcquiredAtEpochMs)
+      .toBeLessThanOrEqual(timing.stateReadFinishedAtEpochMs);
+    expect(timing.stateReadFinishedAtEpochMs)
+      .toBeLessThanOrEqual(timing.startIssuedAtEpochMs);
+    expect(timing.startIssuedAtEpochMs)
+      .toBeLessThanOrEqual(timing.onStartAtEpochMs ?? Number.POSITIVE_INFINITY);
+    expect(timing.onStartAtEpochMs ?? Number.NEGATIVE_INFINITY)
+      .toBeLessThanOrEqual(timing.portsReadyAtEpochMs);
+    expect(timing.portsReadyAtEpochMs)
+      .toBeLessThanOrEqual(timing.healthCheckStartedAtEpochMs);
+    expect(timing.healthCheckStartedAtEpochMs)
+      .toBeLessThanOrEqual(timing.healthCheckFinishedAtEpochMs);
+    expect(timing.healthCheckFinishedAtEpochMs)
+      .toBeLessThanOrEqual(timing.readyObservedAtEpochMs);
 
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
     const healthCalls = containerFetch.mock.calls.filter(([url]) =>
@@ -1881,6 +1962,148 @@ describe("RunnerContainer", () => {
     );
     expect(healthCalls).toHaveLength(1);
     expect(executeCalls).toHaveLength(0);
+    expect(
+      mocks.emitHostedExecutionStructuredLog.mock.calls.filter(
+        ([observation]) =>
+          observation.message
+            === "Hosted execution container startup confirmation failed.",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("keeps cold readiness compatible with health responses that omit startup timestamps", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        return new Response(JSON.stringify({
+          activeJobCount: 0,
+          hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+          ok: true,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    const result = await container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    });
+
+    expect(result).toMatchObject({
+      action: "started",
+      kind: "ready",
+    });
+    if (result.kind !== "ready" || !result.coldStartTiming) {
+      throw new Error("Expected cold readiness timing.");
+    }
+    expect(result.coldStartTiming).not.toHaveProperty("processStartedAtEpochMs");
+    expect(result.coldStartTiming).not.toHaveProperty("serverListeningAtEpochMs");
+  });
+
+  it("classifies lifecycle and state-read failures with bounded privacy-safe details", async () => {
+    const privateUserId = "member_startup_telemetry_private";
+    const privateErrorText =
+      "state read failed for https://private.example.test/workspace/secret";
+    const stateReadFailure = new Error(privateErrorText);
+    let nowMs = Date.parse("2026-08-29T20:00:00.000Z");
+    const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    const { container } = createContainerDouble({
+      getState: vi.fn(async () => {
+        nowMs += 120_000;
+        throw stateReadFailure;
+      }),
+    });
+
+    try {
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 15_000,
+        userId: privateUserId,
+      })).rejects.toBe(stateReadFailure);
+
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: false,
+        expectedElapsedMs: RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
+        forbiddenValues: [privateErrorText, privateUserId, "private.example.test"],
+        stage: "lifecycle_lock_or_state_read",
+      });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("keeps startup failure telemetry fail-open", async () => {
+    const stateReadFailure = new Error("original startup state-read failure");
+    const { container } = createContainerDouble({
+      getState: vi.fn(async () => {
+        throw stateReadFailure;
+      }),
+    });
+    mocks.emitHostedExecutionStructuredLog.mockImplementationOnce(() => {
+      throw new Error("telemetry sink failed");
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_123",
+    })).rejects.toBe(stateReadFailure);
+  });
+
+  it("classifies cold start and port-readiness failures", async () => {
+    const privateErrorText = "port wait failed with token=private-start-token";
+    const startFailure = new Error(privateErrorText);
+    const { container } = createContainerDouble({
+      startAndWaitForPorts: vi.fn(async () => {
+        throw startFailure;
+      }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_private_cold_start",
+    })).rejects.toBe(startFailure);
+
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: false,
+      forbiddenValues: [privateErrorText, "member_private_cold_start"],
+      stage: "cold_start_or_ports",
+    });
+  });
+
+  it("classifies cold health and readiness-finalization failures", async () => {
+    const privateHealthValue = "private-health-payload";
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async () =>
+        new Response(JSON.stringify({
+          error: privateHealthValue,
+          hostedRuntimeArchitectureVersion: "stale-architecture",
+          ok: true,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        })
+      ),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_private_cold_health",
+    })).rejects.toThrow(
+      "Hosted runner container architecture version mismatch.",
+    );
+
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: false,
+      forbiddenValues: [privateHealthValue, "member_private_cold_health"],
+      stage: "cold_health_or_finalization",
+    });
   });
 
   it("starts the readiness deadline before lifecycle-lock admission", async () => {
@@ -1924,6 +2147,10 @@ describe("RunnerContainer", () => {
     queuedDeadline.abort(new DOMException("Timed out", "TimeoutError"));
 
     await expect(queued).rejects.toMatchObject({ name: "TimeoutError" });
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: false,
+      stage: "lifecycle_lock_or_state_read",
+    });
     expect(healthCalls).toBe(1);
     releaseFirstHealth.resolve(undefined);
     await expect(first).resolves.toMatchObject({ kind: "ready" });
@@ -2125,7 +2352,7 @@ describe("RunnerContainer", () => {
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 8_000,
         userId: "member_456",
-      })).resolves.toEqual({
+      })).resolves.toMatchObject({
         action: "started",
         kind: "ready",
       });
@@ -2730,8 +2957,10 @@ describe("RunnerContainer", () => {
   });
 
   it("reports unsettled warm-invalidated cleanup to readiness callers", async () => {
+    const privateErrorText = "destroy failed for /private/workspace/path";
+    const privateUserId = "member_private_warm_cleanup";
     const destroy = vi.fn(async () => {
-      throw new Error("destroy failed");
+      throw new Error(privateErrorText);
     });
     const { container } = createContainerDouble({
       destroy,
@@ -2743,9 +2972,14 @@ describe("RunnerContainer", () => {
 
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 15_000,
-      userId: "member_123",
+      userId: privateUserId,
     })).resolves.toEqual({ kind: "cleanup_unsettled" });
     expect(destroy).toHaveBeenCalledOnce();
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: true,
+      forbiddenValues: [privateErrorText, privateUserId, "/private/workspace/path"],
+      stage: "warm_health_or_cleanup",
+    });
   });
 
   it("reports unsettled warm-health-failure cleanup to readiness callers", async () => {
@@ -2790,6 +3024,10 @@ describe("RunnerContainer", () => {
 
       await expect(readiness).resolves.toEqual({ kind: "cleanup_unsettled" });
       expect(destroy).toHaveBeenCalledOnce();
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "warm_health_or_cleanup",
+      });
     } finally {
       timeout.mockRestore();
     }
@@ -2924,12 +3162,16 @@ describe("RunnerContainer", () => {
       await expect(queuedHealthStarted.promise).resolves.toBe(
         Date.parse("2026-04-27T00:00:05.000Z"),
       );
-      await expect(queuedReadiness).resolves.toEqual({
+      await expect(queuedReadiness).resolves.toMatchObject({
         action: "started",
         kind: "ready",
       });
       expect(destroy).toHaveBeenCalledTimes(2);
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "cold_start_or_ports",
+      });
     } finally {
       timeout.mockRestore();
       vi.useRealTimers();
@@ -3172,7 +3414,7 @@ describe("RunnerContainer", () => {
       action: "superseded",
       kind: "superseded",
     });
-    await expect(authoritativeReadiness).resolves.toEqual({
+    await expect(authoritativeReadiness).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3282,7 +3524,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3323,7 +3565,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3361,7 +3603,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3400,7 +3642,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3433,7 +3675,7 @@ describe("RunnerContainer", () => {
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 7_500,
         userId: "member_123",
-      })).resolves.toEqual({
+      })).resolves.toMatchObject({
         action: "started",
         kind: "ready",
       });
@@ -3486,7 +3728,7 @@ describe("RunnerContainer", () => {
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 7_500,
         userId: "member_123",
-      })).resolves.toEqual({
+      })).resolves.toMatchObject({
         action: "started",
         kind: "ready",
       });
@@ -3529,7 +3771,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3561,7 +3803,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3695,7 +3937,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -3714,7 +3956,7 @@ describe("RunnerContainer", () => {
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
@@ -10948,10 +11190,13 @@ function createRunnerResult(): HostedWorkspaceInvocationResult {
 }
 
 function createRunnerHealthResult(): Record<string, unknown> {
+  const now = Date.now();
   return {
     activeJobCount: 0,
     conversationWarmActivityCompletedAtEpochMs: null,
     hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     ok: true,
+    processStartedAtEpochMs: Math.max(0, now - 20),
+    serverListeningAtEpochMs: Math.max(0, now - 10),
   };
 }

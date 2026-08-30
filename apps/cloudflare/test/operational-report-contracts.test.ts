@@ -127,6 +127,22 @@ describe("hosted runtime operational report contracts", () => {
     expect(coldStartReportSql).toContain(
       "GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms)",
     );
+    expect(coldStartReportSql).toContain(
+      "freshStartContainerLifecycleLockAcquiredAtEpochMs",
+    );
+    expect(coldStartReportSql).toContain(
+      "Container start issued -> ports ready",
+    );
+    expect(coldStartReportSql).toContain(
+      "Container process -> TCP listen",
+    );
+    expect(coldStartReportSql).toContain(
+      "Container start issued -> process start",
+    );
+    expect(coldStartReportSql).toContain(
+      "Container TCP listen -> ports ready",
+    );
+    expect(coldStartReportSql).toContain("Container health check");
     expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-typing-started'");
     expect(coldStartReportSql).toContain(
       "trace.reply_runtime_attempt_id = trace.runtime_attempt_id",

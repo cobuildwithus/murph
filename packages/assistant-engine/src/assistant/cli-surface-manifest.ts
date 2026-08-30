@@ -111,6 +111,7 @@ export async function readAssistantCliLlmsFullManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
   preferBuiltWorkspaceCli?: boolean
+  timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
   const result = await executeAssistantCliManifestCommand({
@@ -119,6 +120,7 @@ export async function readAssistantCliLlmsFullManifest(input: {
     executionContext: input.executionContext,
     maxOutputChars: assistantCliFullManifestMaxOutputChars,
     preferBuiltWorkspaceCli: input.preferBuiltWorkspaceCli,
+    timeoutMs: input.timeoutMs,
     workingDirectory: input.workingDirectory,
   })
 
@@ -158,6 +160,7 @@ async function executeAssistantCliManifestCommand(input: {
   executionContext?: AssistantExecutionContext | null
   maxOutputChars?: number
   preferBuiltWorkspaceCli?: boolean
+  timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<{
   argv: string[]
@@ -167,6 +170,12 @@ async function executeAssistantCliManifestCommand(input: {
   stdout: string
 }> {
   const disableConfigAutodiscovery = Boolean(input.executionContext?.hosted?.memberId)
+  const timeoutMs = input.timeoutMs ?? assistantCliManifestTimeoutMs
+
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError('Assistant CLI manifest timeout must be a positive safe integer.')
+  }
+
   const argv = disableConfigAutodiscovery
     ? ['--no-config', ...input.args]
     : [...input.args]
@@ -201,12 +210,12 @@ async function executeAssistantCliManifestCommand(input: {
             `vault-cli ${argv.join(' ')} timed out while loading the CLI manifest.`,
             {
               argv,
-              timeoutMs: assistantCliManifestTimeoutMs,
+              timeoutMs,
             },
           ),
         )
       })
-    }, assistantCliManifestTimeoutMs)
+    }, timeoutMs)
 
     const settle = (handler: () => void) => {
       if (settled) {

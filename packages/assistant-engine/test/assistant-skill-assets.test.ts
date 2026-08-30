@@ -2616,13 +2616,13 @@ How old are you and what's your gender?
       'First make one bounded evidence pass across the foundation, relevant canonical records, connected data, and any confirmed enrichment that could materially change the choice.',
     )
     expect(compact).toContain(
-      'When that pass spans more than one source or owner, immediately call `murph.send_progress_update` once before the first read.',
+      'This bounded pass does not trigger an update merely because it spans multiple sources or owners',
     )
     expect(compact).toContain(
-      'name the few user-facing areas you are checking and why they matter to the chosen next step',
+      'routine context reads and a straightforward first-step question stay silent and answer directly.',
     )
-    expect(compact).toContain(
-      'This update is required even when each individual read is routine, and it is not needed for one targeted read.',
+    expect(compact).not.toContain(
+      'This update is required even when each individual read is routine',
     )
     expect(compact).toContain(
       'Before asking baseline, obstacle, prior-attempt, or support questions, ask which thread—if any—the user actually wants to work on now.',

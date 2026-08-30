@@ -19,8 +19,11 @@ import type {
 } from "../worker-contracts.js";
 import {
   destroyHostedExecutionContainer,
+  RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   type HostedExecutionContainerNamespaceLike,
+  type RunnerContainerColdStartTiming,
   type RunnerContainerShellPrewarmObservation,
+  type RunnerContainerStartupFailureStage,
 } from "../runner-container.js";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS,
@@ -106,6 +109,11 @@ type RuntimeProcessingOrchestrationDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
 >;
 
+type RuntimeStartupCallerFailureStage = Extract<
+  RunnerContainerStartupFailureStage,
+  "caller_deadline" | "rpc_unattributed"
+>;
+
 type FreshRuntimeStartPreparation =
   | {
       containerReadyAtEpochMs: number | null;
@@ -113,6 +121,7 @@ type FreshRuntimeStartPreparation =
       prepared: PreparedRuntimeInvocation;
       preparedAtEpochMs: number;
       runtimePreparationWaitAfterContainerReadyMs: number;
+      startupOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
       shellPrewarmOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
     }
   | {
@@ -164,6 +173,41 @@ function toShellPrewarmOrchestrationDiagnostics(
       shellPrewarmOutcome: observation.outcome,
     }),
     shellPrewarmSource: observation.source,
+  };
+}
+
+function toContainerColdStartOrchestrationDiagnostics(
+  timing: RunnerContainerColdStartTiming | undefined,
+): RuntimeProcessingOrchestrationDiagnostics | null {
+  if (!timing) {
+    return null;
+  }
+  return {
+    freshStartContainerReadinessRequestedAtEpochMs:
+      timing.readinessRequestedAtEpochMs,
+    freshStartContainerLifecycleLockAcquiredAtEpochMs:
+      timing.lifecycleLockAcquiredAtEpochMs,
+    freshStartContainerStateReadFinishedAtEpochMs:
+      timing.stateReadFinishedAtEpochMs,
+    freshStartContainerStartIssuedAtEpochMs: timing.startIssuedAtEpochMs,
+    ...(timing.onStartAtEpochMs === undefined ? {} : {
+      freshStartContainerOnStartAtEpochMs: timing.onStartAtEpochMs,
+    }),
+    freshStartContainerPortsReadyAtEpochMs: timing.portsReadyAtEpochMs,
+    freshStartContainerHealthStartedAtEpochMs:
+      timing.healthCheckStartedAtEpochMs,
+    freshStartContainerHealthFinishedAtEpochMs:
+      timing.healthCheckFinishedAtEpochMs,
+    ...(timing.processStartedAtEpochMs === undefined ? {} : {
+      freshStartContainerProcessStartedAtEpochMs:
+        timing.processStartedAtEpochMs,
+    }),
+    ...(timing.serverListeningAtEpochMs === undefined ? {} : {
+      freshStartContainerListeningAtEpochMs:
+        timing.serverListeningAtEpochMs,
+    }),
+    freshStartContainerReadyObservedAtEpochMs:
+      timing.readyObservedAtEpochMs,
   };
 }
 
@@ -1040,6 +1084,7 @@ export class RuntimeProcessingController {
         freshStartContainerReadyAtEpochMs: preparation.containerReadyAtEpochMs,
       }),
       freshStartInvocationPreparedAtEpochMs: preparation.preparedAtEpochMs,
+      ...(preparation.startupOrchestration ?? {}),
       ...(preparation.shellPrewarmOrchestration ?? {}),
     });
     const preparationOrchestration =
@@ -1226,6 +1271,9 @@ export class RuntimeProcessingController {
       prepared: preparation.prepared,
       preparedAtEpochMs: preparation.preparedAtEpochMs,
       runtimePreparationWaitAfterContainerReadyMs,
+      startupOrchestration: toContainerColdStartOrchestrationDiagnostics(
+        startupConfirmed.coldStartTiming,
+      ),
       shellPrewarmOrchestration: toShellPrewarmOrchestrationDiagnostics(
         startupConfirmed.shellPrewarmObservation,
       ),
@@ -1262,6 +1310,7 @@ export class RuntimeProcessingController {
     token: RunnerWriteFenceToken;
   }): Promise<
     | {
+        coldStartTiming?: RunnerContainerColdStartTiming;
         confirmed: true;
         shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
       }
@@ -1281,14 +1330,17 @@ export class RuntimeProcessingController {
       };
     }
 
+    const startupConfirmationStartedAtEpochMs = Date.now();
     const container = this.input.runnerContainerNamespace.getByName(
       input.runnerContainerName,
     );
     if (!container.ensureReadyForProcessing) {
       return await this.clearWriteFenceAfterStartupConfirmationFailure({
         error: new Error("Hosted runner container readiness method is unavailable."),
+        failureStage: "rpc_unattributed",
         input: input.input,
         retryReason: "container_rpc_error",
+        startupConfirmationStartedAtEpochMs,
         token: input.token,
       });
     }
@@ -1327,6 +1379,12 @@ export class RuntimeProcessingController {
           details: {
             orchestrationAttemptId: input.input.orchestrationAttemptId,
             runtimeProcessingRetryReason: "container_rpc_timeout",
+            runtimeStartupCleanupUnsettled: true,
+            runtimeStartupFailureElapsedMs:
+              readBoundedRuntimeStartupFailureElapsedMs(
+                startupConfirmationStartedAtEpochMs,
+              ),
+            runtimeStartupFailureStage: "rpc_unattributed",
             runtimeStartupWriteFencePreserved: true,
             workspaceAttemptId: input.token.attemptId,
           },
@@ -1356,6 +1414,9 @@ export class RuntimeProcessingController {
         userId: input.input.userId,
       });
       return {
+        ...(readinessResult.coldStartTiming === undefined ? {} : {
+          coldStartTiming: readinessResult.coldStartTiming,
+        }),
         confirmed: true,
         ...(readinessResult.shellPrewarmObservation === undefined ? {} : {
           shellPrewarmObservation: readinessResult.shellPrewarmObservation,
@@ -1375,6 +1436,11 @@ export class RuntimeProcessingController {
             ...buildHostedRunnerMetadataOnlyErrorDetails(error),
             orchestrationAttemptId: input.input.orchestrationAttemptId,
             runtimeProcessingRetryReason: "container_rpc_timeout",
+            runtimeStartupFailureElapsedMs:
+              readBoundedRuntimeStartupFailureElapsedMs(
+                startupConfirmationStartedAtEpochMs,
+              ),
+            runtimeStartupFailureStage: "caller_deadline",
             runtimeStartupWriteFencePreserved: true,
             workspaceAttemptId: input.token.attemptId,
           },
@@ -1394,10 +1460,14 @@ export class RuntimeProcessingController {
       }
       return await this.clearWriteFenceAfterStartupConfirmationFailure({
         error,
+        failureStage: isRuntimeProcessingCommandBudgetTimeout(error)
+          ? "caller_deadline"
+          : "rpc_unattributed",
         input: input.input,
         retryReason: isRuntimeProcessingCommandBudgetTimeout(error)
           ? "command_budget_exhausted"
           : undefined,
+        startupConfirmationStartedAtEpochMs,
         token: input.token,
       });
     }
@@ -1405,8 +1475,10 @@ export class RuntimeProcessingController {
 
   private async clearWriteFenceAfterStartupConfirmationFailure(input: {
     error: unknown;
+    failureStage: RuntimeStartupCallerFailureStage;
     input: RuntimeProcessingInput;
     retryReason?: RuntimeProcessingStartFailureRetryReason;
+    startupConfirmationStartedAtEpochMs: number;
     token: RunnerWriteFenceToken;
   }): Promise<{
     confirmed: false;
@@ -1417,6 +1489,12 @@ export class RuntimeProcessingController {
       input: input.input,
       message: "Hosted runner runtime processing startup confirmation failed.",
       retryReason: input.retryReason,
+      startupFailure: {
+        elapsedMs: readBoundedRuntimeStartupFailureElapsedMs(
+          input.startupConfirmationStartedAtEpochMs,
+        ),
+        stage: input.failureStage,
+      },
       token: input.token,
     });
   }
@@ -1426,6 +1504,10 @@ export class RuntimeProcessingController {
     input: RuntimeProcessingInput;
     message: string;
     retryReason?: RuntimeProcessingStartFailureRetryReason;
+    startupFailure?: {
+      elapsedMs: number;
+      stage: RuntimeStartupCallerFailureStage;
+    };
     token: RunnerWriteFenceToken;
   }): Promise<{
     confirmed: false;
@@ -1443,6 +1525,11 @@ export class RuntimeProcessingController {
       details: {
         ...buildHostedRunnerMetadataOnlyErrorDetails(input.error),
         orchestrationAttemptId: input.input.orchestrationAttemptId,
+        ...(input.startupFailure === undefined ? {} : {
+          runtimeProcessingRetryReason: retryReason,
+          runtimeStartupFailureElapsedMs: input.startupFailure.elapsedMs,
+          runtimeStartupFailureStage: input.startupFailure.stage,
+        }),
         transportFailureFenceCleared: failed.failed,
         workspaceAttemptId: input.token.attemptId,
       },
@@ -1502,6 +1589,18 @@ class HostedRuntimeHealthDataConsentStopError extends Error {
     super("Hosted runner container cleanup failed after health-data consent withdrawal.");
     this.name = "HostedRuntimeHealthDataConsentStopError";
   }
+}
+
+function readBoundedRuntimeStartupFailureElapsedMs(
+  startedAtEpochMs: number,
+): number {
+  const rawElapsedMs = Date.now() - startedAtEpochMs;
+  return Number.isFinite(rawElapsedMs) && rawElapsedMs > 0
+    ? Math.min(
+        Math.floor(rawElapsedMs),
+        RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
+      )
+    : 0;
 }
 
 function normalizeRuntimeProcessingMode(

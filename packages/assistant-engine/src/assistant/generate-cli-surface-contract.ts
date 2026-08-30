@@ -28,13 +28,13 @@ if (generationMode !== undefined && generationMode !== 'defer') {
 
 if (generationMode !== 'defer') {
   const args = process.argv.slice(2)
-  const unknownArg = args.find((arg) => arg !== preferBuiltWorkspaceCliArg)
-  if (unknownArg) {
-    throw new Error(`Unknown assistant CLI surface generation argument: ${unknownArg}`)
-  }
-
+  const preferBuiltWorkspaceCli = args.includes(preferBuiltWorkspaceCliArg)
+  const manifestTimeoutMs = readManifestTimeoutMs(
+    args.filter((arg) => arg !== preferBuiltWorkspaceCliArg),
+  )
   const manifest = await readAssistantCliLlmsFullManifest({
-    preferBuiltWorkspaceCli: args.includes(preferBuiltWorkspaceCliArg),
+    preferBuiltWorkspaceCli,
+    timeoutMs: manifestTimeoutMs,
     workingDirectory: workspaceRoot,
   })
   const contract = buildAssistantCliSurfaceContract(manifest)
@@ -49,4 +49,25 @@ if (generationMode !== 'defer') {
   }
 
   await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')
+}
+
+function readManifestTimeoutMs(args: readonly string[]): number | undefined {
+  if (args.length === 0) {
+    return undefined
+  }
+
+  const [flag, rawTimeoutMs] = args
+  const timeoutMs = Number(rawTimeoutMs)
+  if (
+    args.length !== 2 ||
+    flag !== '--manifest-timeout-ms' ||
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs <= 0
+  ) {
+    throw new Error(
+      'Usage: generate-cli-surface-contract.js [--prefer-built-workspace-cli] [--manifest-timeout-ms <positive-integer>]',
+    )
+  }
+
+  return timeoutMs
 }

@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-27
+Last verified: 2026-08-29
 
 ## Decision
 
@@ -3729,6 +3729,68 @@ and explicit no-child results. These fields are stamped onto the existing trace
 payload with no additional I/O. Prefer the same-call elapsed scalars when direct
 and Temporal retries may have contributed independently merged epoch
 timestamps.
+An actual cold readiness RPC also carries optional numeric-only subdivisions.
+`freshStartContainerReadinessRequestedAtEpochMs` and
+`freshStartContainerLifecycleLockAcquiredAtEpochMs` bound lifecycle-lock wait;
+`freshStartContainerStateReadFinishedAtEpochMs` and
+`freshStartContainerStartIssuedAtEpochMs` expose the state/read-to-start gap;
+`freshStartContainerOnStartAtEpochMs` records Cloudflare's lifecycle hook; and
+`freshStartContainerPortsReadyAtEpochMs` records resolution of
+`startAndWaitForPorts`, after both the configured port and `onStart` are ready.
+The explicit private health fetch is bounded by
+`freshStartContainerHealthStartedAtEpochMs` and
+`freshStartContainerHealthFinishedAtEpochMs`, followed by
+`freshStartContainerReadyObservedAtEpochMs` and the existing caller-side ready
+stamp. The health payload additionally supplies
+`freshStartContainerProcessStartedAtEpochMs` and
+`freshStartContainerListeningAtEpochMs`; subtract only that same-process pair
+for the exact Node-to-listen duration. The operational report also presents
+start-issue-to-process and listen-to-platform-port-ready cross-owner epoch
+deltas as directional diagnostics, dropping a sample when clock ordering is
+invalid and retaining the start-issue-to-ports total as the authoritative
+platform wait. Old warm containers may omit the health
+timestamps, and a lifecycle generation whose hook was not observed may omit the
+`onStart` stamp. Missing diagnostic fields never fail readiness. These stamps
+add no request, polling loop, persisted state owner, or reply-path work.
+
+Failed authoritative startup confirmation has one failure-only local
+observation because Durable Object RPC does not preserve custom properties on a
+thrown error. `Hosted execution container startup confirmation failed.` carries
+only `runtimeStartupFailureStage`, `runtimeStartupFailureElapsedMs`, and
+`runtimeStartupCleanupUnsettled`; it carries no user, workspace, message,
+command, provider, path, URL, prompt, transcript, argument, payload, health
+value, credential, environment value, raw error, stack, hash, or correlation
+identifier. Elapsed time is a non-negative integer saturated at 60,000 ms. The
+four container-local stages are `lifecycle_lock_or_state_read`,
+`warm_health_or_cleanup`, `cold_start_or_ports`, and
+`cold_health_or_finalization`. The cleanup boolean overlays the stage that
+triggered cleanup instead of replacing it.
+
+The existing UserRunner startup-confirmation warnings add the same bounded
+elapsed field and one of two caller-owned stages. `rpc_unattributed` means the
+RPC failed, timed out, was unavailable, or returned legacy cleanup-unsettled
+without a safely transported local stage; it must never be guessed into a
+container-local bucket. `caller_deadline` means the command budget or the outer
+startup guard elapsed. The generic
+`Hosted runner runtime processing startup confirmation failed.` warning also
+records its already-selected closed retry reason. Retry selection, fence
+clearing or preservation, cleanup, readiness, and exception/RPC behavior remain
+unchanged. Both observations reuse the existing structured logger and add no
+awaited I/O, timer, retry, state, queue, or telemetry backend. During skew, an
+old RunnerContainer simply lacks the local observation while a new UserRunner
+retains `rpc_unattributed`; an old UserRunner
+ignores the new local log, so either side can roll back independently.
+
+After at least two hours of natural traffic, aggregate the exact UserRunner
+warning by stage, retry reason/error code, and coarse elapsed bucket; aggregate
+the exact RunnerContainer failure-only message separately by the same stage
+enum and cleanup flag. Cloudflare-owned event metadata may be used internally
+to compare failed instances with later runtime-processing acceptance, but only
+aggregate counts leave that boundary. Confirm whether the dominant category
+still recurs on the deployed revision without synthetic production traffic.
+This instrumentation is internal-only: no Product UX review outcome or
+changelog item applies.
+
 Fence-attempt diagnostics remain one coherent bundle across replacement races.
 When a replacement compare-and-swap loses, UserRunner drops the superseded
 fence's observation, active-wake, and replacement-clear leaves before probing
