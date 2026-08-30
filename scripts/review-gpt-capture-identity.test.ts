@@ -66,7 +66,7 @@ async function loadReviewGptThreadSnapshotModule(): Promise<ReviewGptThreadSnaps
   return import(pathToFileURL(modulePath).href) as Promise<ReviewGptThreadSnapshotModule>;
 }
 
-function captureForPrompt(promptSignature: string): CaptureIdentity {
+function captureForPrompt(promptSignature: string, turnIndex = 0): CaptureIdentity {
   return {
     artifacts: [],
     assistantResponse: null,
@@ -74,8 +74,8 @@ function captureForPrompt(promptSignature: string): CaptureIdentity {
     chatUrl: "https://chatgpt.com/c/synthetic-thread",
     committedUserTurn: {
       signature: captureDigest(promptSignature),
-      turnId: provisionalTurnId("user", 0, promptSignature),
-      turnIndex: 0,
+      turnId: provisionalTurnId("user", turnIndex, promptSignature),
+      turnIndex,
     },
     schemaVersion: 2,
     targetId: "synthetic-target",
@@ -135,6 +135,60 @@ describe("ReviewGPT detached capture identity", () => {
 
     expect(() => reviewGpt.scopeThreadSnapshotToCaptureIdentity(snapshot, capture)).toThrow(
       "Captured committed user-turn identity resolved to 0 turns",
+    );
+  });
+
+  it("still rejects a same-signature canonical user turn at a different index", async () => {
+    const reviewGpt = await loadReviewGptThreadSnapshotModule();
+    const promptSignature = "captured guarded review request";
+    const capture = captureForPrompt(promptSignature, 1);
+    const snapshot: ThreadSnapshot = {
+      assistantSnapshots: [],
+      userSnapshots: [
+        {
+          signature: promptSignature,
+          turnId: "data-message-id:wrong-index-user-turn",
+          turnIndex: 0,
+        },
+      ],
+    };
+
+    expect(() => reviewGpt.scopeThreadSnapshotToCaptureIdentity(snapshot, capture)).toThrow(
+      "Captured committed user-turn identity resolved to 0 turns",
+    );
+  });
+
+  it("still rejects a completed assistant bound to a different user-turn index", async () => {
+    const reviewGpt = await loadReviewGptThreadSnapshotModule();
+    const promptSignature = "captured guarded review request";
+    const canonicalUserTurnId = "data-message-id:captured-user-turn";
+    const capture = captureForPrompt(promptSignature, 1);
+    const snapshot: ThreadSnapshot = {
+      assistantSnapshots: [
+        {
+          assistantTurnId: "data-message-id:synthetic-assistant-turn",
+          assistantTurnIndex: 0,
+          precedingUserMessageSignature: promptSignature,
+          precedingUserTurnId: canonicalUserTurnId,
+          precedingUserTurnIndex: 0,
+          signature: "synthetic completed response",
+          text: "Synthetic completed response.",
+        },
+      ],
+      userSnapshots: [
+        {
+          signature: promptSignature,
+          turnId: canonicalUserTurnId,
+          turnIndex: 1,
+        },
+      ],
+    };
+
+    const scoped = reviewGpt.scopeThreadSnapshotToCaptureIdentity(snapshot, capture);
+    expect(scoped.userSnapshots).toEqual(snapshot.userSnapshots);
+    expect(scoped.assistantSnapshots).toEqual([]);
+    expect(() => reviewGpt.completeThreadCaptureIdentity(capture, snapshot)).toThrow(
+      "Captured committed user turn resolved to 0 completed assistant responses",
     );
   });
 

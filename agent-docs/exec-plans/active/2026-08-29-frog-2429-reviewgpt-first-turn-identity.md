@@ -75,8 +75,9 @@ Updated: 2026-08-29
 
 - Pre-fix focused proof failed with `Captured committed user-turn identity
   resolved to 0 turns` for the exact first-turn stabilization case.
-- The repaired focused suite passes four cases: successful canonical rebinding,
-  signature mismatch rejection, later-request rejection, and ambiguous-candidate
+- The repaired focused suite passes six cases: successful canonical rebinding,
+  signature mismatch rejection, wrong user-index rejection, wrong assistant
+  preceding-index rejection, later-request rejection, and ambiguous-candidate
   rejection.
 - The owning CLI release-script audit passes 48 tests with one intentional skip.
 - `pnpm test:repo-tools` passes 50 files and 681 tests.
