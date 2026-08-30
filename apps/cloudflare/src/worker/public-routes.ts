@@ -4,6 +4,9 @@ import {
 import type {
   WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
+import {
+  readHostedStandbyMode,
+} from "../standby-runner-contract.ts";
 import type {
   DeclarativeRoute,
 } from "./routes.ts";
@@ -30,11 +33,14 @@ export const workerPublicRoutes: readonly DeclarativeRoute<{
   },
 ];
 
-function createServiceBannerResponse(env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA">): Response {
+function createServiceBannerResponse(
+  env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA" | "HOSTED_EXECUTION_STANDBY_MODE">,
+): Response {
   const workerVersionId = readWorkerVersionId(env);
   return json({
     ok: true,
     service: "cloudflare-hosted-runner",
+    standbyMode: readHostedStandbyMode(env),
     ...(workerVersionId ? { workerVersionId } : {}),
   });
 }

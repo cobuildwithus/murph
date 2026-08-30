@@ -1216,7 +1216,7 @@ The single member-scoped computer-use profile change is a greenfield hard cut,
 not an old-Web/old-Worker compatibility rollout. Keep hosted computer-use
 traffic paused during the Web/Worker skew window and finish the Worker deploy
 immediately after the hosted web deploy.
-Normal deploy smoke targets the public Worker banner and health endpoints after deploy, then runs managed-container smoke for both gradual and immediate rollouts: `deploy:smoke` signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, verifies the deployed assistant CLI surface contract still includes detailed hot-path schemas for onboarding saves and device setup, and compares the reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest. When the workflow runs with `container_rollout=immediate`, managed-container smoke also runs the direct-R2 upload check.
+Normal deploy smoke targets the public Worker banner and health endpoints after deploy, pins those requests to the newly deployed Worker version, and proves that version reports the rendered standby mode. It then runs managed-container smoke for both gradual and immediate rollouts: `deploy:smoke` signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, verifies the deployed assistant CLI surface contract still includes detailed hot-path schemas for onboarding saves and device setup, and compares the reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest. When the workflow runs with `container_rollout=immediate`, managed-container smoke also runs the direct-R2 upload check.
 
 The Worker also enforces that fingerprint contract on the normal user path. Before a warm or newly started runner receives a workspace invocation, its `/health` response must report the bundle and source fingerprints embedded in the generated Worker config. A stale warm shell is destroyed and restarted. Direct cold readiness may destroy and replace one stale bundle/source image inside the same lifecycle operation, using only the original caller deadline; the replacement must pass the exact architecture and fingerprint checks. A second mismatch, any other readiness failure, unsettled cleanup, an expired deadline, or changed container ownership still fails closed without receiving user work. Post-deploy smoke remains the rollout proof, while per-invocation admission prevents the window between a direct Worker deploy and that smoke from serving work through an old runner.
 
@@ -1443,8 +1443,9 @@ scheduling retry alarms until fresh nudge/manual input resets the counter.
 
 Deploy the Worker, both new Durable Object classes, bindings, migration `v7`,
 and the prepared `StandbyRunnerContainer` image while the mode remains `off`.
-Run managed-container smoke and prove the expected Worker release and runner
-bundle/source fingerprints first. Then use `shadow` for at least one ordinary
+Run exact-version endpoint smoke and managed-container smoke to prove the
+effective standby mode, expected Worker release, and runner bundle/source
+fingerprints first. Then use `shadow` for at least one ordinary
 observation window and verify that exactly one current-release ENAM slot stays
 ready, failed/stale slots retire, and no processing reports a claimed standby.
 Only then set `allocate`; no Web or Temporal deploy is required.
@@ -2205,7 +2206,8 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
 `pnpm --dir apps/cloudflare deploy:smoke` validates only the surviving execution-plane surface:
 
 - `GET /`
-- `GET /health`
+- `GET /health`, including the canonical effective standby mode when the deploy
+  workflow supplies an expected mode
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint and assistant CLI surface hot-path schema proof
 - the managed-container runner smoke also proves the native
   `murph-group-read` profile enforcement used by Assistant Ask:
@@ -2226,6 +2228,11 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true` to extend the managed-container smoke with the direct R2 presigned upload check; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
 - `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true` to extend the managed-container smoke with one real `gpt-5.6-terra` turn; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
+- `HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE` to require `off`, `shadow`, or
+  `allocate` from that exact Worker version; omission or mismatch fails the
+  deploy before its summary is published. In GitHub Actions, the current smoke
+  emits a boolean capability receipt so an older public smoke implementation
+  that ignores this check cannot pass the private deploy workflow.
 - `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS` and `HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS` to override the managed-container rollout wait
 - `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS` to bound that wait by wall clock (default 20 minutes). The Node smoke client disables its dispatcher's implicit response-header and response-body timers for this long-running request and applies this wall-clock budget as the explicit abort deadline. Keep it under the deploy job timeout: the attempt ceiling alone can outlast the job, which makes a non-converging rollout surface as a cancelled job with no reason instead of a named smoke failure. Each attempt addresses its own smoke Durable Object, so retries get a fresh container instead of re-reading one pre-rollout container for the whole run.
 

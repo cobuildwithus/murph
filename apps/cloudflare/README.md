@@ -78,6 +78,11 @@ HTTP route. `HOSTED_EXECUTION_STANDBY_MODE` has three strict values:
   replacement in background work, and falls back to the ordinary exact-user
   container when the claim does not finish within 250 ms.
 
+The public banner and health response report the canonical effective mode.
+Deployment smoke pins the newly deployed Worker version and requires its live
+mode to match the rendered config before the deploy workflow publishes that
+mode in its summary.
+
 A slot is ready only after its exact Worker release, bundle/source
 fingerprints, architecture, ENAM placement, heavy runtime hydration, pristine
 job counters, and a content-free Codex App Server initialize-and-stop probe all
