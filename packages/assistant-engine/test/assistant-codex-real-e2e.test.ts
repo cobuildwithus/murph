@@ -1005,11 +1005,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   )
 
   it(
-    'answers a fresh routine-goal onboarding turn without a progress update',
+    'answers a fresh routine-goal onboarding turn with progress unavailable',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
-      const progressUpdates: string[] = []
 
       try {
         const workingDirectory = await prepareRealCodexOnboardingDirectory()
@@ -1020,24 +1019,13 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         })
         const result = await executeRealCodexAppServerTurn({
           ...turnInput,
-          dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
-          progressDelivery: {
-            async send(text) {
-              progressUpdates.push(text)
-              return { kind: 'sent', source: 'model' }
-            },
-          },
           prompt: [
             "I've already seen your welcome and I'm ready to continue.",
             "I'd like Murph's help building a steadier evening routine.",
           ].join(' '),
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const progressCalls = actions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
-        )
         const resumeContexts = readSuccessfulOnboardingResumeContexts(actions)
         const policyFiles = await readOnboardingPolicyFiles(
           actions,
@@ -1048,14 +1036,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         process.stdout.write(
           `[onboarding-fresh-routine-goal-e2e] ${JSON.stringify({
             policyFiles,
-            progressUpdateCount: progressUpdates.length,
             reply,
             resumeContextCount: resumeContexts.length,
           })}\n`,
         )
 
-        expect(progressUpdates).toEqual([])
-        expect(progressCalls).toEqual([])
         expect(resumeContexts).toHaveLength(1)
         expect(policyFiles).toContain('SKILL.md')
         expect(reply).toMatch(/what should i call you/iu)
@@ -24339,6 +24324,7 @@ function buildDirectConversationDeveloperInstructions(
       assistantHostedDeviceConnectProviders.length > 0,
     assistantHostedDeviceConnectProviders,
     assistantKnowledgeToolsAvailable: false,
+    assistantProgressUpdatesAvailable: !onboardingGuidance,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',

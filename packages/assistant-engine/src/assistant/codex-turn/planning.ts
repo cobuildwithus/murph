@@ -666,6 +666,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'conversation' &&
     input.sharedPlan.onboardingGuidanceOpen &&
     privateInteractiveAudience
+  const progressUpdatesAvailable =
+    input.progressDelivery != null && !shouldInjectOnboardingGuidance
   const assistantToolNameAliases = null
   // Maintenance turns consume only their engine-supplied evidence and exact
   // policy-owned destination. The health context snapshot and hosted dynamic
@@ -873,7 +875,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             : 'none',
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
-      assistantProgressUpdatesAvailable: input.progressDelivery != null,
+      assistantProgressUpdatesAvailable: progressUpdatesAvailable,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:
@@ -993,7 +995,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         computerToolsAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
-        progressUpdatesAvailable: input.progressDelivery != null,
+        progressUpdatesAvailable,
         progressUpdateMode:
           conversationScope === 'group' ? 'group' : 'direct',
         connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
