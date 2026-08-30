@@ -28,6 +28,7 @@ export type HostedWebhookWakeHandoff = {
   eventId: string;
   linqChatId?: string | null;
   mailboxItemId: string;
+  runtimeShellPrewarmOrchestrationAttemptId?: string;
   source: "linq" | "telegram";
   userId: string;
   wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;
