@@ -12,7 +12,7 @@ export function resolvePublicGoalContactOptions(input: {
 
   return resolveMurphContactOptions({
     contactChannels: {
-      email: true,
+      email: false,
       telegram: true,
       text: input.contactInfo.phoneConfigured,
     },
