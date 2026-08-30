@@ -988,6 +988,7 @@ describe("hosted onboarding stripe billing events", () => {
       hostedExecutionEventId: "runtime-control:access-restored:test",
       hostedExecutionMailboxItemId: "mailbox_access_restored",
       newlyActivatedMemberIds: [],
+      positivePaymentTransitionOccurred: true,
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -1088,6 +1089,7 @@ describe("hosted onboarding stripe billing events", () => {
       hostedExecutionEventId: "wake_existing",
       hostedExecutionMailboxItemId: "mailbox_wake_existing",
       newlyActivatedMemberIds: [],
+      positivePaymentTransitionOccurred: true,
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -2024,6 +2026,7 @@ describe("hosted onboarding stripe billing events", () => {
         trialStart: 1_744_416_000,
       }),
     )).resolves.toMatchObject({
+      positivePaymentTransitionOccurred: true,
       runtimeRecheckMemberIds: ["member_123"],
     });
 

@@ -142,6 +142,7 @@ type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
   newlyActivatedMemberIds: string[];
+  positivePaymentTransitionOccurred?: true;
   runtimeRecheckMemberIds?: string[];
   welcomeEmailMemberId: string | null;
 };
@@ -1465,6 +1466,9 @@ export async function applyStripeInvoicePaid(
   if (!updatedMember) {
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
+      ...(runtimeRecheckMemberId
+        ? { positivePaymentTransitionOccurred: true as const }
+        : {}),
       runtimeRecheckMemberIds: runtimeRecheckMemberId
         ? [runtimeRecheckMemberId]
         : [],
@@ -1494,6 +1498,9 @@ export async function applyStripeInvoicePaid(
         accessRestorationHandoff?.hostedExecutionEventId ?? null,
       hostedExecutionMailboxItemId:
         accessRestorationHandoff?.hostedExecutionMailboxItemId ?? null,
+      ...(restoredDirectAccess || runtimeRecheckMemberId
+        ? { positivePaymentTransitionOccurred: true as const }
+        : {}),
       runtimeRecheckMemberIds: runtimeRecheckMemberId
         && !accessRestorationHandoff
         ? [runtimeRecheckMemberId]
@@ -1533,6 +1540,9 @@ export async function applyStripeInvoicePaid(
       ?? accessRestorationHandoff?.hostedExecutionMailboxItemId
       ?? null,
     newlyActivatedMemberIds: activation.activated ? [updatedMember.core.id] : [],
+    ...(restoredDirectAccess || runtimeRecheckMemberId
+      ? { positivePaymentTransitionOccurred: true as const }
+      : {}),
     runtimeRecheckMemberIds: runtimeRecheckMemberId
       && !accessRestorationHandoff
       ? [runtimeRecheckMemberId]
@@ -1638,6 +1648,10 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
     newlyActivatedMemberIds: familySubscription.activations
       .filter((activation) => activation.activated)
       .map((activation) => activation.memberId),
+    ...(familySubscription.accessRestoredMemberIds?.length
+      || familySubscription.billingModeChangedMemberIds?.length
+      ? { positivePaymentTransitionOccurred: true as const }
+      : {}),
     runtimeRecheckMemberIds: familySubscription.runtimeRecheckMemberIds ?? [],
     welcomeEmailMemberId: null,
   };

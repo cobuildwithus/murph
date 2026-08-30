@@ -438,6 +438,7 @@ async function processHostedStripeEventRecord(
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
   newlyActivatedMemberIds: string[];
+  positivePaymentTransitionOccurred: boolean;
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1084,8 +1085,8 @@ async function processClaimedHostedStripeEvent(
     const paymentNotificationCandidate =
       resolveHostedStripePaymentNotificationCandidate({
         event: stripeEvent,
-        subscriptionCycleNotificationEligible:
-          result.runtimeRecheckMemberIds.length > 0,
+        positivePaymentTransitionOccurred:
+          result.positivePaymentTransitionOccurred,
         usageCreditEventHandled: usageCreditReconciliation.handled,
       });
     let paymentNotificationSent = false;
@@ -2104,6 +2105,7 @@ function mapHostedStripeActivationOutcome(
     hostedExecutionEventId: string | null;
     hostedExecutionMailboxItemId?: string | null;
     newlyActivatedMemberIds: string[];
+    positivePaymentTransitionOccurred?: true;
     runtimeRecheckMemberIds?: string[];
     welcomeEmailMemberId?: string | null;
   },
@@ -2117,6 +2119,7 @@ function mapHostedStripeActivationOutcome(
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
   newlyActivatedMemberIds: string[];
+  positivePaymentTransitionOccurred: boolean;
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -2135,6 +2138,8 @@ function mapHostedStripeActivationOutcome(
     hostedExecutionMailboxItemId:
       outcome.hostedExecutionMailboxItemId ?? null,
     newlyActivatedMemberIds: outcome.newlyActivatedMemberIds,
+    positivePaymentTransitionOccurred:
+      outcome.positivePaymentTransitionOccurred ?? false,
     runtimeRecheckMemberIds: outcome.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
@@ -2178,6 +2183,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     hostedExecutionEventId?: string | null;
     hostedExecutionMailboxItemId?: string | null;
     newlyActivatedMemberIds?: string[];
+    positivePaymentTransitionOccurred?: true;
     runtimeRecheckMemberIds?: string[];
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
@@ -2192,6 +2198,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
   newlyActivatedMemberIds: string[];
+  positivePaymentTransitionOccurred: boolean;
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -2210,6 +2217,8 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     hostedExecutionMailboxItemId:
       outcome?.hostedExecutionMailboxItemId ?? null,
     newlyActivatedMemberIds: outcome?.newlyActivatedMemberIds ?? [],
+    positivePaymentTransitionOccurred:
+      outcome?.positivePaymentTransitionOccurred ?? false,
     runtimeRecheckMemberIds: outcome?.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
@@ -2227,6 +2236,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
   newlyActivatedMemberIds: string[];
+  positivePaymentTransitionOccurred: boolean;
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -2241,6 +2251,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     hostedExecutionEventId: null,
     hostedExecutionMailboxItemId: null,
     newlyActivatedMemberIds: [],
+    positivePaymentTransitionOccurred: false,
     runtimeRecheckMemberIds: [],
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,

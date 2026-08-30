@@ -26,7 +26,7 @@ describe("hosted Stripe payment notification email", () => {
     (billingReason, expectedCategory) => {
       expect(resolveHostedStripePaymentNotificationCandidate({
         event: makeInvoicePaidEvent({ billingReason }),
-        subscriptionCycleNotificationEligible: false,
+        positivePaymentTransitionOccurred: false,
         usageCreditEventHandled: false,
       })).toMatchObject({
         amountMinor: 800,
@@ -43,7 +43,7 @@ describe("hosted Stripe payment notification email", () => {
   it("ignores a subscription cycle without a billing transition", () => {
     expect(resolveHostedStripePaymentNotificationCandidate({
       event: makeInvoicePaidEvent({ billingReason: "subscription_cycle" }),
-      subscriptionCycleNotificationEligible: false,
+      positivePaymentTransitionOccurred: false,
       usageCreditEventHandled: false,
     })).toBeNull();
   });
@@ -51,7 +51,7 @@ describe("hosted Stripe payment notification email", () => {
   it("accepts a subscription cycle with a billing transition", () => {
     expect(resolveHostedStripePaymentNotificationCandidate({
       event: makeInvoicePaidEvent({ billingReason: "subscription_cycle" }),
-      subscriptionCycleNotificationEligible: true,
+      positivePaymentTransitionOccurred: true,
       usageCreditEventHandled: false,
     })).toMatchObject({
       category: "subscription_cycle",
@@ -64,7 +64,7 @@ describe("hosted Stripe payment notification email", () => {
     (amountPaid) => {
       expect(resolveHostedStripePaymentNotificationCandidate({
         event: makeInvoicePaidEvent({ amountPaid }),
-        subscriptionCycleNotificationEligible: false,
+        positivePaymentTransitionOccurred: false,
         usageCreditEventHandled: false,
       })).toBeNull();
     },
@@ -84,7 +84,7 @@ describe("hosted Stripe payment notification email", () => {
 
     expect(resolveHostedStripePaymentNotificationCandidate({
       event,
-      subscriptionCycleNotificationEligible: false,
+      positivePaymentTransitionOccurred: false,
       usageCreditEventHandled: true,
     })).toMatchObject({
       amountMinor: 1000,
@@ -93,7 +93,7 @@ describe("hosted Stripe payment notification email", () => {
     });
     expect(resolveHostedStripePaymentNotificationCandidate({
       event,
-      subscriptionCycleNotificationEligible: false,
+      positivePaymentTransitionOccurred: false,
       usageCreditEventHandled: false,
     })).toBeNull();
     expect(resolveHostedStripePaymentNotificationCandidate({
@@ -104,7 +104,7 @@ describe("hosted Stripe payment notification email", () => {
         mode: "payment",
         payment_status: "unpaid",
       }, "checkout.session.completed", "evt_checkout_unpaid_123"),
-      subscriptionCycleNotificationEligible: false,
+      positivePaymentTransitionOccurred: false,
       usageCreditEventHandled: true,
     })).toBeNull();
   });
@@ -119,7 +119,7 @@ describe("hosted Stripe payment notification email", () => {
 
     expect(resolveHostedStripePaymentNotificationCandidate({
       event,
-      subscriptionCycleNotificationEligible: false,
+      positivePaymentTransitionOccurred: false,
       usageCreditEventHandled: true,
     })).toMatchObject({
       amountMinor: 2500,
@@ -128,7 +128,7 @@ describe("hosted Stripe payment notification email", () => {
     });
     expect(resolveHostedStripePaymentNotificationCandidate({
       event,
-      subscriptionCycleNotificationEligible: false,
+      positivePaymentTransitionOccurred: false,
       usageCreditEventHandled: false,
     })).toBeNull();
   });
@@ -142,7 +142,7 @@ describe("hosted Stripe payment notification email", () => {
         customer: "cus_private_customer",
         customerEmail: "private-member@example.com",
       }),
-      subscriptionCycleNotificationEligible: false,
+      positivePaymentTransitionOccurred: false,
       usageCreditEventHandled: false,
     });
     expect(candidate).not.toBeNull();
@@ -179,7 +179,7 @@ describe("hosted Stripe payment notification email", () => {
     await expect(sendHostedStripePaymentNotificationEmail({
       candidate: resolveHostedStripePaymentNotificationCandidate({
         event: makeInvoicePaidEvent(),
-        subscriptionCycleNotificationEligible: false,
+        positivePaymentTransitionOccurred: false,
         usageCreditEventHandled: false,
       })!,
       env: {},

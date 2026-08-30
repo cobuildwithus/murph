@@ -16,8 +16,9 @@ Receipt-owned positive Stripe payment notifications cover subscription starts,
 paid trial conversions, paid plan-change and recurring-usage invoices, and
 fulfilled usage-credit payments without exposing member or customer identity.
 Ordinary `subscription_cycle` invoices with no canonical billing transition
-remain silent. Their retry, privacy, configuration, and deploy-skew contracts
-are specified by
+remain silent. The existing invoice owner exposes that transition as one
+transient semantic fact; runtime-wake membership remains operational scheduling
+only. Their retry, privacy, configuration, and deploy-skew contracts are specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, `agent-docs/SECURITY.md`,
 `agent-docs/product-specs/hosted-usage-topups.md`, and `apps/web/README.md`.
 

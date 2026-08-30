@@ -1468,9 +1468,10 @@ locally readable.
   environment-owned operational sender, recipient allowlist, and API key. They
   may be emitted only after the verified receipt owner accepts a positive
   `invoice.paid` amount whose billing reason is not `subscription_cycle`,
-  accepts a cycle whose canonical billing result reports a paid-service or
-  usage-plan transition, or fulfills a usage-credit Checkout or saved-card
-  PaymentIntent. The plain-text body is limited to amount and currency, a
+  accepts a cycle whose canonical invoice result reports the transient semantic
+  `positivePaymentTransitionOccurred` fact, or fulfills a usage-credit Checkout
+  or saved-card PaymentIntent. Operational runtime-recheck membership is not
+  notification authority. The plain-text body is limited to amount and currency, a
   bounded payment category, event type and time, live/test mode, and the opaque
   Stripe event id. It must not
   read or include member/customer identity,

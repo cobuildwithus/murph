@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaymentFailed: vi.fn(),
   applyStripeRefundCreated: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
+  applyHostedFamilyStripeSubscriptionUpdatedTx: vi.fn(),
   activateHostedMemberForPositiveSourceTx: vi.fn(),
   cleanupHostedFamilySponsoredDirectSubscription: vi.fn(),
   cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
@@ -116,10 +117,8 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
       activations: [],
       groupId: null,
     })),
-    applyHostedFamilyStripeSubscriptionUpdatedTx: vi.fn(async () => ({
-      activations: [],
-      groupId: null,
-    })),
+    applyHostedFamilyStripeSubscriptionUpdatedTx:
+      mocks.applyHostedFamilyStripeSubscriptionUpdatedTx,
     prepareHostedFamilyStripeActivationCryptoDomainRoots:
       mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots,
     prepareHostedLegacySyntheticFamilyCleanupTx:
@@ -600,6 +599,10 @@ describe("hosted Stripe event reconciliation", () => {
       hostedExecutionEventId: null,
       newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
+    });
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValue({
+      activations: [],
+      groupId: null,
     });
     mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValue({
       activated: false,
@@ -2803,6 +2806,113 @@ describe("hosted Stripe event reconciliation", () => {
       paymentNotificationEmailSentAt: null,
       status: HostedStripeEventStatus.completed,
     }));
+  });
+
+  it.each([
+    [
+      "fresh",
+      {
+        activations: [],
+        groupId: "hbag_family",
+      },
+    ],
+    [
+      "stale",
+      {
+        activations: [],
+        groupId: "hbag_family",
+        runtimeRecheckMemberIds: ["member_123"],
+      },
+    ],
+  ] as const)(
+    "keeps a %s no-change Family renewal silent",
+    async (_ordering, familyResult) => {
+      const prisma = createStripeEventPrismaHarness({
+        currentBillingPhase: "paid",
+      });
+      const actualBillingEvents = await vi.importActual<
+        typeof import("@/src/lib/hosted-onboarding/stripe-billing-events")
+      >("@/src/lib/hosted-onboarding/stripe-billing-events");
+      const event = makeInvoicePaidEvent({
+        id: `evt_invoice_paid_family_${_ordering}`,
+        invoiceId: `in_family_${_ordering}`,
+      });
+      mocks.applyHostedFamilyStripeSubscriptionUpdatedTx
+        .mockResolvedValueOnce(familyResult);
+      mocks.applyStripeInvoicePaid.mockImplementation(
+        actualBillingEvents.applyStripeInvoicePaid,
+      );
+      mocks.stripe.events.retrieve.mockResolvedValue(event);
+      mocks.stripe.subscriptions.retrieve.mockResolvedValue(
+        makeCanonicalSubscription(),
+      );
+
+      await recordHostedStripeEvent({ event, prisma: prisma.client });
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "completed" });
+
+      expect(mocks.applyHostedFamilyStripeSubscriptionUpdatedTx)
+        .toHaveBeenCalledOnce();
+      expect(mocks.sendHostedStripePaymentNotificationEmail).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(
+        _ordering === "stale" ? 1 : 0,
+      );
+      expect(prisma.rows[0]).toEqual(expect.objectContaining({
+        paymentNotificationEmailSentAt: null,
+        status: HostedStripeEventStatus.completed,
+      }));
+    },
+  );
+
+  it("keeps a Family billing transition eligible for one payment email", async () => {
+    const prisma = createStripeEventPrismaHarness({
+      currentBillingPhase: "paid",
+    });
+    const actualBillingEvents = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/stripe-billing-events")
+    >("@/src/lib/hosted-onboarding/stripe-billing-events");
+    const event = makeInvoicePaidEvent({
+      id: "evt_invoice_paid_family_transition",
+      invoiceId: "in_family_transition",
+    });
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [],
+      billingModeChangedMemberIds: ["member_123"],
+      groupId: "hbag_family",
+      runtimeRecheckMemberIds: ["member_123"],
+    });
+    mocks.applyStripeInvoicePaid.mockImplementation(
+      actualBillingEvents.applyStripeInvoicePaid,
+    );
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(
+      makeCanonicalSubscription(),
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledWith({
+      candidate: expect.objectContaining({
+        category: "subscription_cycle",
+        eventId: event.id,
+      }),
+    });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      paymentNotificationEmailSentAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toBeNull();
+    expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledOnce();
   });
 
   it("keeps an accepted paid trial conversion eligible for one payment email", async () => {

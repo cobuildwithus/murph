@@ -937,11 +937,13 @@ Last verified: 2026-08-30
 - Positive Stripe payment email is a receipt-completion obligation, not the
   best-effort failure-alert projection. A positive `invoice.paid` amount whose
   billing reason is not `subscription_cycle`, a subscription cycle whose
-  canonical billing result reports a paid-service or usage-plan transition, or
-  a fulfilled usage-credit Checkout or saved-card PaymentIntent sends once
-  after canonical reconciliation. Ordinary subscription-cycle renewals with no
-  transition complete without a notification attempt. The existing receipt
-  remains the only retry owner:
+  canonical invoice result reports `positivePaymentTransitionOccurred`, or a
+  fulfilled usage-credit Checkout or saved-card PaymentIntent sends once after
+  canonical reconciliation. The invoice owner derives that transient fact from
+  existing direct or Family billing/access transition facts; runtime-recheck
+  membership cannot make a notification eligible. Ordinary subscription-cycle
+  renewals with no transition complete without a notification attempt. The
+  existing receipt remains the only retry owner:
   missing configuration or provider failure leaves it claimable without
   rolling back billing, entitlement, or usage credit. A receipt-local sent
   marker is written only after provider success, while an event-derived Resend

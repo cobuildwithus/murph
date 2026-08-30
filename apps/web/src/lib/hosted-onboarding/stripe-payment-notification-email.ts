@@ -32,15 +32,15 @@ type HostedStripePaymentNotificationEmailSend =
 
 export function resolveHostedStripePaymentNotificationCandidate(input: {
   event: Stripe.Event;
-  subscriptionCycleNotificationEligible: boolean;
+  positivePaymentTransitionOccurred: boolean;
   usageCreditEventHandled: boolean;
 }): HostedStripePaymentNotificationCandidate | null {
   if (input.event.type === "invoice.paid") {
     const invoice = input.event.data.object as Stripe.Invoice;
     const category = resolveHostedStripeInvoicePaymentCategory({
       billingReason: invoice.billing_reason,
-      subscriptionCycleNotificationEligible:
-        input.subscriptionCycleNotificationEligible,
+      positivePaymentTransitionOccurred:
+        input.positivePaymentTransitionOccurred,
     });
     if (!category) {
       return null;
@@ -168,12 +168,12 @@ function buildHostedStripePaymentNotificationCandidate(input: {
 function resolveHostedStripeInvoicePaymentCategory(
   input: {
     billingReason: Stripe.Invoice["billing_reason"];
-    subscriptionCycleNotificationEligible: boolean;
+    positivePaymentTransitionOccurred: boolean;
   },
 ): HostedStripePaymentNotificationCandidate["category"] | null {
   switch (input.billingReason) {
     case "subscription_cycle":
-      return input.subscriptionCycleNotificationEligible
+      return input.positivePaymentTransitionOccurred
         ? "subscription_cycle"
         : null;
     case "subscription_create":

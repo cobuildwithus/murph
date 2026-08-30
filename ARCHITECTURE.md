@@ -2378,9 +2378,13 @@ same receipt must send one plain-text email before completion unless a
 transition. This covers subscription creation, paid trial conversion, paid
 plan-change invoices, recurring usage invoices, and one-time or automatic
 usage purchases. Ordinary renewal cycles, zero-dollar invoices, and plan
-changes that collect no money remain silent. The notification decision reuses
-the billing result's existing transient runtime-recheck member set; it adds no
-provider call, database read, or durable notification state. A receipt-local sent marker
+changes that collect no money remain silent. The invoice owner exposes one
+transient `positivePaymentTransitionOccurred` fact from its existing direct
+transition/access-restoration facts or the Family owner's existing billing-mode
+change/access-restoration sets. Runtime-wake membership remains independent
+operational scheduling metadata and cannot make a payment notification
+eligible. This adds no provider call, database read, or durable notification
+state. A receipt-local sent marker
 and event-derived Resend idempotency key prevent replay after provider success;
 configuration or provider failure leaves that receipt retryable while the
 already-committed billing, entitlement, and usage-credit result remains intact.
