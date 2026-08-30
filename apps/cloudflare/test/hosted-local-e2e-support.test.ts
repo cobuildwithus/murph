@@ -597,6 +597,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     const allToolNames = listMurphDynamicToolNames();
     const baseToolNames = allToolNames.filter((name) =>
       name !== "murph.analyze_video"
+      && name !== "murph.create_calendar_link"
       && !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
       && !hostedGroupFamilyToolNames.includes(name)
@@ -620,6 +621,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     const allToolsAvailable = {
       analyzeVideoAvailable: true,
       askGrokAvailable: true,
+      calendarLinkAvailable: true,
       connectedAppsAvailable: true,
       computerToolsAvailable: true,
       exerciseRoutineResponseCardAvailable: true,
@@ -642,6 +644,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.computer_open");
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
+    expect(allToolNames).toContain("murph.create_calendar_link");
     expect(hostedGroupFamilyToolNames).toHaveLength(6);
     expect(allToolNames)
       .toEqual(expect.arrayContaining(hostedGroupFamilyToolNames));
