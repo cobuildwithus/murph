@@ -1291,19 +1291,19 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Send one early update before direct reply-critical work that requires three or more distinct substantive checks or tool actions',
+      'Send one early update only for reply-critical work needing 3+ substantive checks/actions beyond routine setup',
     )
     expect(prompt).toContain(
-      'Source count alone does not trigger it: routine context reads, especially during onboarding or setup, and one or two quick calls stay silent and answer directly.',
+      'Routine onboarding/setup does not count by itself',
     )
     expect(prompt).toContain(
-      'Also skip progress for ordinary conversation, choosing a straightforward next step, and quick resume checks.',
+      'Also skip ordinary conversation, a straightforward next step, and quick resume checks.',
     )
     expect(prompt).toContain(
       'Send a child-wait update after spawning.',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
+      'Background work does not trigger progress by itself unless an active skill requires a receipt or start acknowledgement.',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update.',

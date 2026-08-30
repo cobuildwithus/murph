@@ -829,8 +829,10 @@ async function resolveHostedLocalScenarioDatabase(input: {
   return await createEphemeralHostedLocalDatabase(input.scenarioPrefix);
 }
 
-function shouldReuseExplicitHostedLocalScenarioDatabaseUrl(): boolean {
-  return process.env.CI === "true" || process.env[reuseExplicitDatabaseUrlEnv] === "1";
+export function shouldReuseExplicitHostedLocalScenarioDatabaseUrl(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return environment[reuseExplicitDatabaseUrlEnv] === "1";
 }
 
 function buildHostedLocalRunnerBundleCacheKey(env: NodeJS.ProcessEnv): string {
