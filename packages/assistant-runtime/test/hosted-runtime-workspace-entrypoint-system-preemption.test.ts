@@ -1855,6 +1855,13 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     const now = "2026-04-27T14:00:00.000Z";
     const staleDeviceSyncWakeAt = "2026-04-27T13:59:00.000Z";
     const automationId = "automation_01JQ8PWXP5A68SQM1W0GYM41WA";
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:due-assistant-handoff",
+      id: "mailbox_item_system_mailbox_due_assistant_handoff",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId: "device_sync_connection_due_assistant_handoff",
       nextReconcileAt: "2026-04-27T14:05:00.000Z",
@@ -1885,6 +1892,13 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         title: "Synthetic due reminder",
         vaultRoot,
       });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
         key: "users/bundles/member-synthetic/due-assistant-system-handoff-before.bundle.json",
         vaultRoot,
@@ -1940,7 +1954,9 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(result.status, "scheduled");
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, now);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(checkpointRequests[0]?.nextDefaultProcessingWakeAt, now);
+      assert.equal(checkpointRequests[0]?.nextDefaultProcessingWakeReason, "assistant");
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

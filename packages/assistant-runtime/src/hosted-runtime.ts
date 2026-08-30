@@ -3004,7 +3004,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           : assistantCronDeadlineMs !== null
               && Date.now() >= assistantCronDeadlineMs
             ? new Date(assistantCronDeadlineMs).toISOString()
-            : null;
+            : hostedRuntimeDefaultProcessingWakeIsDue(projectedWake)
+              ? projectedWake.nextDefaultProcessingWakeAt
+              : null;
         const defaultOwnerDueNow =
           requestedDefaultOwnerWakeAt !== null
           || projectedWake.assistantCronDueNow;
@@ -3546,8 +3548,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         );
       const initialProjectedWake = await resolveCurrentSystemMailboxModeWake();
       const defaultOwnerDueNow =
-        hostedRuntimeWakeReasonIsAssistant(initialProjectedWake.nextWakeReason)
-        && hostedRuntimeWakeIsDue(initialProjectedWake.nextWakeAt);
+        hostedRuntimeDefaultProcessingWakeIsDue(initialProjectedWake);
       const projectedAssistantCronDeadlineMs = Date.parse(
         initialProjectedWake.assistantCronWakeAt ?? "",
       );
@@ -7821,6 +7822,15 @@ function normalizeHostedRuntimeWakeReason(nextWakeReason: string | null): string
 
 function hostedRuntimeWakeReasonIsAssistant(nextWakeReason: string | null): boolean {
   return hostedRuntimeWakeReasonUsesAssistantPhase(nextWakeReason);
+}
+
+function hostedRuntimeDefaultProcessingWakeIsDue(input: {
+  nextDefaultProcessingWakeAt: string | null;
+  nextDefaultProcessingWakeReason: string | null;
+}): boolean {
+  return hostedRuntimeWakeReasonIsAssistant(
+    input.nextDefaultProcessingWakeReason,
+  ) && hostedRuntimeWakeIsDue(input.nextDefaultProcessingWakeAt);
 }
 
 function buildHostedRuntimeIdleCheckpointPhaseLogDetails(input: {

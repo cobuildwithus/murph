@@ -50,6 +50,8 @@ const reminderText = "Time for your short break.";
 const dirtyResourceCount = 113;
 const firstPassProcessedCount = 100;
 const firstPassRemainingCount = dirtyResourceCount - firstPassProcessedCount;
+const systemMailboxFirstAdmissionWindowMs = 30_000;
+const deviceSyncReminderOverlapLeadMs = 60_000;
 const scheduledReminderLeadMs = 180_000;
 const scheduledReminderMinimumRunwayMs = 10_000;
 const barrierTimeoutMs = 180_000;
@@ -225,6 +227,9 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
     let checkpointBarrierArmed = false;
 
     try {
+      await sleepUntil(new Date(
+        Date.parse(schedule.dueAtIso) - deviceSyncReminderOverlapLeadMs,
+      ).toISOString());
       await activeScenario.harness
         .armShutdownCheckpointPublicationBarrierForTest(userId);
       checkpointBarrierArmed = true;
@@ -240,7 +245,13 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       }
       expect(["started", "woken"]).toContain(acceptedWake.action);
 
-      await waitForShutdownCheckpointPublicationBarrier(schedule.dueAtIso);
+      const [firstWindowAdmissionCount] = await Promise.all([
+        countFirstSystemMailboxAdmissionWindow({
+          beforeAt: schedule.dueAtIso,
+          notBefore: runtimeLogsFrom,
+        }),
+        waitForShutdownCheckpointPublicationBarrier(schedule.dueAtIso),
+      ]);
       const firstPass = await waitForDeviceSyncPassFinished({
         expectedProcessedJobs: firstPassProcessedCount,
         fromAt: runtimeLogsFrom,
@@ -250,6 +261,11 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         processedJobs: firstPassProcessedCount,
         workerJobLimitReached: true,
       });
+      await expectPendingDirtyResourceCount(
+        seed.connectionId,
+        dirtyResourceCount,
+      );
+      expect(firstWindowAdmissionCount).toBe(1);
       await expectPendingDirtyResourceCount(
         seed.connectionId,
         dirtyResourceCount,
@@ -554,6 +570,84 @@ async function waitForDeviceSyncPassFinished(input: {
       processedJobs: readFiniteNumber(row.redactedJson, "processedJobs"),
     })))}`,
   ]));
+}
+
+interface RuntimeAdmissionObservation {
+  acceptedAt: string;
+  orchestrationAttemptId: string;
+}
+
+async function countFirstSystemMailboxAdmissionWindow(input: {
+  beforeAt: string;
+  notBefore: Date;
+}): Promise<number> {
+  const deadline = Date.now() + observationTimeoutMs;
+  let firstAdmissionAtMs: number | null = null;
+  let admissions: RuntimeAdmissionObservation[] = [];
+
+  while (Date.now() < deadline) {
+    admissions = listRuntimeAdmissionsSince(input.notBefore);
+    const firstAdmission = admissions[0] ?? null;
+    if (firstAdmissionAtMs === null && firstAdmission !== null) {
+      firstAdmissionAtMs = Date.parse(firstAdmission.acceptedAt);
+      const reminderDueAtMs = Date.parse(input.beforeAt);
+      if (
+        !Number.isFinite(reminderDueAtMs)
+        || reminderDueAtMs
+          < firstAdmissionAtMs + systemMailboxFirstAdmissionWindowMs
+      ) {
+        throw new Error(
+          "The reminder deadline does not leave one full system-mailbox admission window.",
+        );
+      }
+    }
+    if (
+      firstAdmissionAtMs !== null
+      && Date.now()
+        >= firstAdmissionAtMs + systemMailboxFirstAdmissionWindowMs
+    ) {
+      const admissionWindowEndMs =
+        firstAdmissionAtMs + systemMailboxFirstAdmissionWindowMs;
+      return admissions.filter((admission) =>
+        Date.parse(admission.acceptedAt) < admissionWindowEndMs
+      ).length;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out observing the first system-mailbox runtime admission window.",
+    `observed accepted attempts: ${JSON.stringify(admissions)}`,
+  ]));
+}
+
+function listRuntimeAdmissionsSince(
+  notBefore: Date,
+): RuntimeAdmissionObservation[] {
+  const admissions = new Map<string, RuntimeAdmissionObservation>();
+  for (const line of requireScenario().harness.cloudflareStdoutTail().split(/\r?\n/u)) {
+    const parsed = parseJson(line.trim());
+    if (
+      !isRecord(parsed)
+      || parsed.component !== "hosted.runner"
+      || parsed.phase !== "runtime.starting"
+      || typeof parsed.time !== "string"
+      || !Number.isFinite(Date.parse(parsed.time))
+      || Date.parse(parsed.time) < notBefore.getTime()
+      || !isRecord(parsed.details)
+      || typeof parsed.details.orchestrationAttemptId !== "string"
+      || typeof parsed.details.runtimeProcessingAction !== "string"
+    ) {
+      continue;
+    }
+    admissions.set(parsed.details.orchestrationAttemptId, {
+      acceptedAt: parsed.time,
+      orchestrationAttemptId: parsed.details.orchestrationAttemptId,
+    });
+  }
+  return [...admissions.values()].sort((left, right) =>
+    Date.parse(left.acceptedAt) - Date.parse(right.acceptedAt)
+  );
 }
 
 async function expectPendingDirtyResourceCount(

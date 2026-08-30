@@ -6961,6 +6961,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const projectedDefaultWakeAt = defaultOwnedSystemMailboxWakePending
       ? TEST_NOW
       : defaultAssistantWakeAt;
+    const defaultOwnerHandoffExpected =
+      dueAssistantWakePending || defaultOwnedSystemMailboxWakePending;
     const defaultOwnedItem = createMailboxItem({
       dedupeKey: "assistant.ask.requested:dirty-ack-follow-up",
       expiresAt: "2026-04-27T00:10:00.000Z",
@@ -7195,22 +7197,25 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         JSON.stringify(events),
       );
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, dueAssistantWakePending ? TEST_NOW : followUpWakeAt);
+      assert.equal(
+        result.nextWakeAt,
+        defaultOwnerHandoffExpected ? TEST_NOW : followUpWakeAt,
+      );
       assert.equal(
         result.nextWakeReason,
-        dueAssistantWakePending ? "assistant" : "device-sync.reconcile",
+        defaultOwnerHandoffExpected ? "assistant" : "device-sync.reconcile",
       );
       assert.equal(
         result.immediateRecheckRequested,
-        dueAssistantWakePending ? true : undefined,
+        defaultOwnerHandoffExpected ? true : undefined,
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextWakeAt,
-        dueAssistantWakePending ? TEST_NOW : followUpWakeAt,
+        defaultOwnerHandoffExpected ? TEST_NOW : followUpWakeAt,
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextWakeReason,
-        dueAssistantWakePending ? "assistant" : "device-sync.reconcile",
+        defaultOwnerHandoffExpected ? "assistant" : "device-sync.reconcile",
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextDefaultProcessingWakeAt,
@@ -7228,7 +7233,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId),
         defaultOwnedSystemMailboxWakePending ? [defaultOwnedItem.id] : [],
       );
-      if (!dueAssistantWakePending) {
+      if (!defaultOwnerHandoffExpected) {
         const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
           request.nextWakeAt === followUpWakeAt
           && request.nextWakeReason === "device-sync.reconcile"
