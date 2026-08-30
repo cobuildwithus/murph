@@ -1430,36 +1430,14 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).not.toContain('book another dentist appointment')
   })
 
-  it('routes ongoing workout duration defaults through the typed capture owner', () => {
+  it('keeps workout capture route duration out of typed duration', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
-    expect(prompt).toContain('`vault-cli workout defaults set --duration <minutes>`')
     expect(prompt).toContain(
-      'Later `vault-cli workout add` calls apply that default when the report omits duration',
+      'recover route distance/elevation, never route duration',
     )
     expect(prompt).toContain(
-      'Explicit current duration wins',
-    )
-    expect(prompt).toContain(
-      'Do not duplicate this typed default into freeform memory',
-    )
-    expect(prompt).toContain(
-      'The command promotes one unambiguous legacy memory preference when needed',
-    )
-    expect(prompt).toContain(
-      'Positional text is only the note; pass current duration, type, distance, and exercise facts as typed flags',
-    )
-    expect(prompt).toContain(
-      'Never infer a default from workout history, a past workout, or conflicting memory',
-    )
-    expect(prompt).toContain(
-      'Only a duration stated by the member may populate `workout add --duration`',
-    )
-    expect(prompt).toContain(
-      'never pass route-estimated duration into workout capture',
-    )
-    expect(prompt).toContain(
-      'use `walking` for runs, walks, or hikes; `cycling` for rides',
+      'call `vault-cli workout add` before asking for an omitted duration',
     )
     expect(prompt).not.toContain(
       'estimated distance, duration, or elevation are often useful fields to recover',
