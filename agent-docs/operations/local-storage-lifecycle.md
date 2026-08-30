@@ -82,10 +82,11 @@ When a task needs the standard Codex-managed destination, pass
 caller. The helper selects the explicit `CODEX_HOME` when present and otherwise
 uses the current user's standard Codex home. Before branch creation, it requires
 that home to be absolute, current-user-owned, and writable; creates and
-canonicalizes the `worktrees/<repository>` owner directories; rejects symlink
-redirection; and maintains the worktrees-root Spotlight marker. The existing
-explicit-path form remains available when an established alternate destination
-has already passed the caller's repository-policy preflight.
+canonicalizes the `worktrees/<repository>` owner directories from the stable
+primary checkout identity; and rejects symlink redirection or any pre-existing
+final target. The existing explicit-path form remains available when an
+established alternate destination has already passed the caller's
+repository-policy preflight.
 
 The creation helper prepares the shared local exclude rule before registration,
 registers each worktree with checkout materialization suppressed, and writes

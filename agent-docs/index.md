@@ -14,7 +14,8 @@ boundary.
 
 Codex-managed worktree creation may derive the current repository's sanctioned
 destination without relying on an exported `CODEX_HOME`. Its current-user
-ownership, containment, Spotlight, and focused proof contracts are specified by
+ownership, stable primary repository identity, final-leaf containment,
+per-worktree Spotlight, and focused proof contracts are specified by
 `agent-docs/operations/local-storage-lifecycle.md` and
 `agent-docs/references/testing-ci-map.md`.
 

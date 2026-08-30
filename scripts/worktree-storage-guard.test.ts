@@ -435,8 +435,7 @@ describe('worktree storage guard', () => {
 
     expect(creation.status, creation.stderr).toBe(0)
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
-    expect(existsSync(path.join(codexHome, 'worktrees', '.metadata_never_index')))
-      .toBe(true)
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
   })
 
   it('keeps a Codex-managed worktree inside an explicit valid Codex home', () => {
@@ -504,6 +503,124 @@ describe('worktree storage guard', () => {
     )
     expect(runGit(harness.primary, ['branch', '--list', 'redirected-task'])).toBe('')
     expect(existsSync(path.join(redirectedRoot, 'primary'))).toBe(false)
+  })
+
+  it('rejects an empty Codex-managed name before explicit-target branch movement', () => {
+    const harness = createHarness()
+    runGit(harness.primary, ['branch', 'victim'])
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'advanced\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+    runGit(harness.primary, ['commit', '-m', 'advance main'])
+    const victimHead = runGit(harness.primary, ['rev-parse', 'victim'])
+    const target = path.join(harness.primary, 'main')
+    const intent = worktreeCreationIntentPath(harness.state, target)
+
+    const creation = runScript(harness, 'create-worktree', [
+      '--codex-worktree',
+      '',
+      '-B',
+      'victim',
+      'main',
+    ])
+
+    expect(creation.status).toBe(2)
+    expect(runGit(harness.primary, ['rev-parse', 'victim'])).toBe(victimHead)
+    expect(existsSync(target)).toBe(false)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain']))
+      .not.toContain(target)
+    expect(existsSync(intent)).toBe(false)
+  })
+
+  it('uses the stable primary repository owner from a sanctioned linked worktree', () => {
+    const harness = createHarness()
+    const linked = path.join(harness.root, 'linked-invoker')
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const target = path.join(codexHome, 'worktrees', 'primary', 'managed-from-linked')
+    mkdirSync(codexHome)
+    const linkedCreation = runScript(
+      harness,
+      'create-worktree',
+      ['-b', 'linked-invoker', linked],
+      { MURPH_WORKTREE_MAX_LIVE: '3' },
+    )
+    expect(linkedCreation.status, linkedCreation.stderr).toBe(0)
+
+    const creation = spawnSync(
+      'bash',
+      [
+        path.join('scripts', 'create-worktree'),
+        '--codex-worktree',
+        'managed-from-linked',
+        '-b',
+        'managed-from-linked',
+      ],
+      {
+        cwd: linked,
+        encoding: 'utf8',
+        env: guardEnvironment(harness, {
+          CODEX_HOME: codexHome,
+          MURPH_WORKTREE_MAX_LIVE: '3',
+        }),
+      },
+    )
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(existsSync(path.join(codexHome, 'worktrees', 'linked-invoker')))
+      .toBe(false)
+  })
+
+  it('rejects a managed final-leaf symlink without touching its external target', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const ownerRoot = path.join(codexHome, 'worktrees', 'primary')
+    const externalTarget = path.join(harness.root, 'external-target')
+    const target = path.join(ownerRoot, 'redirected-task')
+    const intent = worktreeCreationIntentPath(harness.state, target)
+    mkdirSync(ownerRoot, { recursive: true })
+    mkdirSync(externalTarget)
+    symlinkSync(externalTarget, target, 'dir')
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'redirected-task', '-b', 'redirected-task'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status).toBe(1)
+    expect(creation.stderr).toContain('managed target must not already exist')
+    expect(existsSync(path.join(externalTarget, 'tracked.txt'))).toBe(false)
+    expect(runGit(harness.primary, ['branch', '--list', 'redirected-task'])).toBe('')
+    expect(existsSync(intent)).toBe(false)
+  })
+
+  it('rejects a pre-existing managed leaf before resetting a branch or publishing intent', () => {
+    const harness = createHarness()
+    const codexHome = path.join(harness.root, 'selected-codex-home')
+    const target = path.join(codexHome, 'worktrees', 'primary', 'occupied-task')
+    const sentinel = path.join(target, 'sentinel.txt')
+    const intent = worktreeCreationIntentPath(harness.state, target)
+    mkdirSync(target, { recursive: true })
+    writeFileSync(sentinel, 'preserve\n')
+    runGit(harness.primary, ['branch', 'victim'])
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'advanced\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+    runGit(harness.primary, ['commit', '-m', 'advance main'])
+    const victimHead = runGit(harness.primary, ['rev-parse', 'victim'])
+
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['--codex-worktree', 'occupied-task', '-B', 'victim'],
+      { CODEX_HOME: codexHome },
+    )
+
+    expect(creation.status).toBe(1)
+    expect(creation.stderr).toContain('managed target must not already exist')
+    expect(runGit(harness.primary, ['rev-parse', 'victim'])).toBe(victimHead)
+    expect(readFileSync(sentinel, 'utf8')).toBe('preserve\n')
+    expect(existsSync(intent)).toBe(false)
   })
 
   it('keeps both platform lock command bounds explicit', () => {
