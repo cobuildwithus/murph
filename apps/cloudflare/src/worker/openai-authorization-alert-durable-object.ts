@@ -140,7 +140,10 @@ export class OpenAiAuthorizationAlertDurableObject extends DurableObject {
           && priorState.lastFailureAtMs !== null
           && report.observedAtMs - priorState.lastFailureAtMs
             >= OPENAI_AUTHORIZATION_ALERT_QUIET_MS;
-        if (beginsNewIncident) {
+        if (
+          beginsNewIncident
+          && !isDeferredCurrentIncident(priorState)
+        ) {
           this.store.closeIncident();
         }
 
@@ -190,6 +193,7 @@ export class OpenAiAuthorizationAlertDurableObject extends DurableObject {
           && state.lastFailureAtMs !== null
           && nowMs - state.lastFailureAtMs
             >= OPENAI_AUTHORIZATION_ALERT_QUIET_MS
+          && !isDeferredCurrentIncident(state)
         ) {
           this.store.closeIncident();
         }
@@ -686,6 +690,14 @@ function shouldAdmitPage(input: {
       >= OPENAI_AUTHORIZATION_ALERT_REMINDER_MS;
 }
 
+function isDeferredCurrentIncident(
+  state: OpenAiAuthorizationAlertState,
+): boolean {
+  return state.incidentOpen
+    && state.alertSequence === 0
+    && state.pendingAlertIdempotencyKey !== null;
+}
+
 function buildIdempotencyKey(
   state: OpenAiAuthorizationAlertState,
 ): string {
@@ -731,7 +743,11 @@ function computeDesiredAlarm(
   ) {
     candidates.push(state.pendingRetryAtMs);
   }
-  if (state.incidentOpen && state.lastFailureAtMs !== null) {
+  if (
+    state.incidentOpen
+    && state.lastFailureAtMs !== null
+    && !isDeferredCurrentIncident(state)
+  ) {
     candidates.push(
       addTimestampDelay(
         state.lastFailureAtMs,

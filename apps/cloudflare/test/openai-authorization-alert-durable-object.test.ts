@@ -18,6 +18,10 @@ const BASE_TIME_MS = Date.parse("2026-08-29T12:00:00.000Z");
 const FIVE_MINUTES_MS = 5 * 60_000;
 const FIFTEEN_MINUTES_MS = 15 * 60_000;
 const ONE_HOUR_MS = 60 * 60_000;
+const INCIDENT_ONE_PAGE_KEY =
+  "openai-authorization-alert:incident-1:page-1";
+const INCIDENT_TWO_PAGE_KEY =
+  "openai-authorization-alert:incident-2:page-1";
 
 type AlertInput = Parameters<OpenAiAuthorizationAlertSender["send"]>[0];
 
@@ -225,6 +229,209 @@ describe("OpenAiAuthorizationAlertDurableObject", () => {
     recreatedOwner.alert.alarm();
     await recreatedOwner.flushWaitUntil();
     expect(recreatedOwner.deliveries).toHaveLength(1);
+  });
+
+  it("preserves a deferred incident across an alarm-driven quiet boundary", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let linqAvailable = false;
+    const harness = createHarness({
+      async send() {
+        if (!linqAvailable) {
+          throw new OperatorAlertLinqError("linq_retryable_response");
+        }
+      },
+    });
+
+    harness.alert.reportFailure({
+      observedAtMs: BASE_TIME_MS,
+      status: 401,
+    });
+    await harness.flushWaitUntil();
+
+    const incidentTwoStartedAtMs = BASE_TIME_MS + FIFTEEN_MINUTES_MS;
+    harness.setNow(incidentTwoStartedAtMs);
+    harness.alert.reportFailure({
+      observedAtMs: incidentTwoStartedAtMs,
+      status: 403,
+    });
+    const delayedFailureAtMs = BASE_TIME_MS + 26 * 60_000;
+    harness.setNow(delayedFailureAtMs);
+    await harness.flushWaitUntil();
+
+    const incidentOneRetryAtMs = delayedFailureAtMs + FIVE_MINUTES_MS;
+    const incidentTwoQuietAtMs =
+      incidentTwoStartedAtMs + FIFTEEN_MINUTES_MS;
+    expect(harness.alert.readState()).toMatchObject({
+      alertSequence: 0,
+      failureCount: 1,
+      incidentOpen: true,
+      incidentSequence: 2,
+      pendingAlertIdempotencyKey: INCIDENT_ONE_PAGE_KEY,
+      pendingAlertIncidentSequence: 1,
+      pendingRetryAtMs: incidentOneRetryAtMs,
+    });
+    expect(harness.activeAlarm()).toBe(incidentOneRetryAtMs);
+
+    const alarmOperationCount = harness.alarmOperations.length;
+    harness.setNow(incidentTwoQuietAtMs);
+    harness.alert.alarm();
+    await harness.flushWaitUntil();
+
+    expect(harness.alert.readState()).toMatchObject({
+      alertSequence: 0,
+      failureCount: 1,
+      firstFailureAtMs: incidentTwoStartedAtMs,
+      incidentOpen: true,
+      incidentSequence: 2,
+      lastFailureAtMs: incidentTwoStartedAtMs,
+      lastStatus: 403,
+      pendingAlertIdempotencyKey: INCIDENT_ONE_PAGE_KEY,
+      pendingRetryAtMs: incidentOneRetryAtMs,
+    });
+    expect(harness.activeAlarm()).toBe(incidentOneRetryAtMs);
+    expect(harness.alarmOperations.slice(alarmOperationCount)).toEqual([]);
+    expect(harness.deliveries.map((delivery) => delivery.idempotencyKey))
+      .toEqual([INCIDENT_ONE_PAGE_KEY, INCIDENT_ONE_PAGE_KEY]);
+
+    linqAvailable = true;
+    harness.setNow(incidentOneRetryAtMs);
+    harness.alert.alarm();
+    await harness.flushWaitUntil();
+
+    expect(harness.deliveries.map((delivery) => delivery.idempotencyKey))
+      .toEqual([
+        INCIDENT_ONE_PAGE_KEY,
+        INCIDENT_ONE_PAGE_KEY,
+        INCIDENT_ONE_PAGE_KEY,
+        INCIDENT_TWO_PAGE_KEY,
+      ]);
+    expect(harness.deliveries[2]).toEqual(harness.deliveries[0]);
+    expect(harness.deliveries[3]).toEqual({
+      idempotencyKey: INCIDENT_TWO_PAGE_KEY,
+      message: [
+        "SEV1 OpenAI 403",
+        "Aggregate count: 1",
+        "First observed UTC: 2026-08-29T12:15:00.000Z",
+        "Last observed UTC: 2026-08-29T12:15:00.000Z",
+      ].join("\n"),
+    });
+    expect(harness.alert.readState()).toMatchObject({
+      alertSequence: 1,
+      incidentOpen: true,
+      incidentSequence: 2,
+      pendingAlertIdempotencyKey: null,
+      pendingRetryAtMs: null,
+    });
+    expect(harness.activeAlarm()).toBe(incidentTwoQuietAtMs);
+    expect(harness.alarmOperations.filter(
+      (operation) => operation.kind === "set"
+        && operation.scheduledAtMs === incidentTwoQuietAtMs,
+    )).toHaveLength(1);
+
+    const deliveryCount = harness.deliveries.length;
+    harness.alert.alarm();
+    await harness.flushWaitUntil();
+
+    expect(harness.deliveries).toHaveLength(deliveryCount);
+    expect(harness.alert.readState()).toMatchObject({
+      alertSequence: 0,
+      failureCount: 0,
+      incidentOpen: false,
+      incidentSequence: 2,
+      pendingAlertIdempotencyKey: null,
+    });
+    expect(harness.activeAlarm()).toBeNull();
+  });
+
+  it("extends a deferred incident across a report-driven quiet boundary", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let linqAvailable = false;
+    const harness = createHarness({
+      async send() {
+        if (!linqAvailable) {
+          throw new OperatorAlertLinqError("linq_retryable_response");
+        }
+      },
+    });
+
+    harness.alert.reportFailure({
+      observedAtMs: BASE_TIME_MS,
+      status: 401,
+    });
+    await harness.flushWaitUntil();
+
+    const incidentTwoStartedAtMs = BASE_TIME_MS + FIFTEEN_MINUTES_MS;
+    harness.setNow(incidentTwoStartedAtMs);
+    harness.alert.reportFailure({
+      observedAtMs: incidentTwoStartedAtMs,
+      status: 403,
+    });
+    const delayedFailureAtMs = BASE_TIME_MS + 26 * 60_000;
+    harness.setNow(delayedFailureAtMs);
+    await harness.flushWaitUntil();
+
+    const incidentOneRetryAtMs = delayedFailureAtMs + FIVE_MINUTES_MS;
+    const nextFailureAtMs = incidentTwoStartedAtMs + FIFTEEN_MINUTES_MS;
+    harness.setNow(nextFailureAtMs);
+    harness.alert.reportFailure({
+      observedAtMs: nextFailureAtMs,
+      status: 401,
+    });
+    await harness.flushWaitUntil();
+
+    expect(harness.deliveries.map((delivery) => delivery.idempotencyKey))
+      .toEqual([INCIDENT_ONE_PAGE_KEY, INCIDENT_ONE_PAGE_KEY]);
+    expect(harness.alert.readState()).toMatchObject({
+      alertSequence: 0,
+      failureCount: 2,
+      firstFailureAtMs: incidentTwoStartedAtMs,
+      incidentOpen: true,
+      incidentSequence: 2,
+      lastFailureAtMs: nextFailureAtMs,
+      lastStatus: 401,
+      pendingAlertIdempotencyKey: INCIDENT_ONE_PAGE_KEY,
+      pendingAlertIncidentSequence: 1,
+      pendingRetryAtMs: incidentOneRetryAtMs,
+    });
+    expect(harness.activeAlarm()).toBe(incidentOneRetryAtMs);
+
+    linqAvailable = true;
+    harness.setNow(incidentOneRetryAtMs);
+    harness.alert.alarm();
+    await harness.flushWaitUntil();
+
+    expect(harness.deliveries.map((delivery) => delivery.idempotencyKey))
+      .toEqual([
+        INCIDENT_ONE_PAGE_KEY,
+        INCIDENT_ONE_PAGE_KEY,
+        INCIDENT_ONE_PAGE_KEY,
+        INCIDENT_TWO_PAGE_KEY,
+      ]);
+    expect(harness.deliveries[2]).toEqual(harness.deliveries[0]);
+    expect(harness.deliveries[3]).toEqual({
+      idempotencyKey: INCIDENT_TWO_PAGE_KEY,
+      message: [
+        "SEV1 OpenAI 401",
+        "Aggregate count: 2",
+        "First observed UTC: 2026-08-29T12:15:00.000Z",
+        "Last observed UTC: 2026-08-29T12:30:00.000Z",
+      ].join("\n"),
+    });
+    expect(harness.alert.readState()).toMatchObject({
+      alertSequence: 1,
+      failureCount: 2,
+      incidentOpen: true,
+      incidentSequence: 2,
+      lastFailureAtMs: nextFailureAtMs,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertIncidentSequence: null,
+      pendingAlertMessage: null,
+      pendingAlertSequence: null,
+      pendingRetryAtMs: null,
+    });
+    expect(harness.activeAlarm()).toBe(
+      nextFailureAtMs + FIFTEEN_MINUTES_MS,
+    );
   });
 
   it("closes after the quiet window and deletes the alarm", async () => {
