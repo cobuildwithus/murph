@@ -1,6 +1,6 @@
 # Cold rollout bundle convergence
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -48,7 +48,7 @@ message, permission, provider input, audience, or state owner is introduced.
 2. [x] Confirm no exact active owner and defer device-sync-owned work.
 3. [x] Obtain, inspect, and apply the ReviewGPT-authored bounded fix.
 4. [x] Run the full runner-container test file and Cloudflare typecheck.
-5. [ ] Complete changelog disposition, exact-head ReviewGPT/CI gates, PR
+5. [x] Complete changelog disposition, exact-head ReviewGPT/CI gates, PR
    readiness, and human-merge handoff.
 
 ## Decisions
@@ -61,6 +61,24 @@ message, permission, provider input, audience, or state owner is introduced.
 - Keep the ordinary bug-fix PR ready for human merge. Do not deploy or merge it
   autonomously.
 
+## Results
+
+- Production evidence localized 381 sampled fatal cold-health failures to the
+  strict bundle/source fingerprint mismatch during deploy-aligned mixed-image
+  windows. The direct cold path rejected the stale image correctly but had no
+  bounded convergence step after cleanup.
+- ReviewGPT authored the one-replacement implementation. The preliminary
+  specialist pass and recovered exact-head final round both passed with no
+  findings; the final round returned `ROUND_OUTCOME: PASS` and
+  `REVIEW_COMPLETE` for `b63efc6367b3d8eccbd3ff5089dd46ec4c8dacf0`.
+- The full runner-container suite passed 227 tests and Cloudflare typechecking
+  passed before and after the one permitted base reconciliation. The complete
+  changelog registry passed 39 tests after the base supplied the unrelated
+  device-sync copy correction that had caused the prior CI failure.
+- PR #2575 remains an ordinary human-merge bug fix. No production merge,
+  deployment, replay, message, provider mutation, or device-sync change was
+  performed.
+
 ## Verification
 
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runner-container.test.ts`
@@ -68,3 +86,4 @@ message, permission, provider input, audience, or state owner is introduced.
 - `git diff --check`
 - Preliminary `completion-specialists` and final ReviewGPT on the exact pushed
   head, run concurrently with required GitHub checks.
+Completed: 2026-08-30
