@@ -1,6 +1,6 @@
 # Raise group idle compaction threshold to 100k
 
-Status: active
+Status: completed
 Created: 2026-08-29
 Updated: 2026-08-29
 
@@ -99,10 +99,19 @@ Updated: 2026-08-29
 - Assistant Runtime and Assistant Engine typechecks: passed.
 - `git diff --check`: passed; privacy-safe final diff inspection remains part
   of the parent final review.
-- Required exact-head GitHub Actions and ReviewGPT results.
+- Required GitHub Actions passed on corrected exact head
+  `627d6a25e5fc2fe08d9fccd485f5a23ec1c83d09`, including release app
+  verification, runner-bundle budget, typecheck, all package coverage, both
+  host matrices, repository hygiene, billing/cardinality, and Temporal
+  compatibility.
 - Preliminary specialist review returned one accepted Product UX finding: the
   original verdict overclaimed reply-path latency and did not cold-resume the
   newly affected skip path. The corrected journey and rollout criterion resolve
   that finding; the preliminary pass is not rerun.
+- Final ReviewGPT round 1 passed on the original exact candidate. Final round 2
+  passed with no findings after a sensitive full-snapshot review of the
+  corrected head and explicitly confirmed the specialist finding resolved.
 - Protected-main Cloudflare deploy workflow plus deployed version and smoke
-  evidence.
+  evidence remain the authorized post-merge operational steps; their run URL
+  and result belong in the final handoff rather than this pre-merge snapshot.
+Completed: 2026-08-29
