@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-29
+Last verified: 2026-08-30
 
 ## Non-Negotiable Rules
 
@@ -18,11 +18,15 @@ Last verified: 2026-08-29
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. An instant-start or authenticated established-direct-chat
-  typing shell-prewarm hint uses that same per-user barrier and live admission
-  read. The typing producer resolves only the private home-chat blind index and
-  performs an advisory active-access/root check after acknowledging the webhook;
-  it receives no member id from Linq and grants no runtime authority. The shared
+  before granting. An instant-start, authenticated established-direct-chat
+  typing, or eligible established-direct-message shell-prewarm hint uses that
+  same per-user barrier and live admission read. The message producer may start
+  only after direct routing preparation resolves an extant active member,
+  before KMS and transaction work; the planner still
+  repeats authority inside the transaction. The typing producer resolves only
+  the private home-chat blind index and performs an advisory active-access/root
+  check after acknowledging the webhook. Neither producer receives a member id
+  from Linq or grants runtime authority. The shared
   HTTP route obtains the named runner stub without binding durable state.
   Because this hint is optional, it is admitted only when the barrier is idle;
   repeated hints and hints arriving during authoritative ensure, withdrawal, or

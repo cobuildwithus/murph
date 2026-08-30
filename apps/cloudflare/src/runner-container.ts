@@ -15,7 +15,9 @@ import {
 import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   isHostedRuntimeFailurePhaseCode,
+  sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeFailurePhaseCode,
+  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
@@ -271,6 +273,7 @@ type RunnerContainerEnsureReadyResult = {
 export interface RunnerContainerShellPrewarmObservation {
   firstHintAtEpochMs: number;
   hintCount: number;
+  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
   finishedAtEpochMs?: number;
   operationElapsedMs?: number;
   outcome?: RunnerContainerShellPrewarmOutcome;
@@ -285,6 +288,7 @@ export type RunnerContainerShellPrewarmOutcome =
 
 export interface RunnerContainerBeginShellPrewarmInput
   extends RunnerContainerEnsureReadyForProcessingInput {
+  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
   source?: CloudflareHostedControlRuntimeShellPrewarmSource;
 }
 
@@ -976,7 +980,10 @@ export class RunnerContainer extends Container {
       );
       return { accepted: true };
     }
-    const observation = this.recordShellPrewarmHint(input.source);
+    const observation = this.recordShellPrewarmHint(
+      input.source,
+      input.orchestration,
+    );
     const operation = this.getOrBeginShellPrewarm(input);
     this.observeShellPrewarmOperation({
       observation,
@@ -3527,11 +3534,13 @@ export class RunnerContainer extends Container {
 
   private recordShellPrewarmHint(
     source: CloudflareHostedControlRuntimeShellPrewarmSource | undefined,
+    orchestration: HostedRuntimeShellPrewarmOrchestrationDiagnostics | undefined,
   ): RunnerContainerShellPrewarmObservation {
     const hintedAtMs = Date.now();
     const observation: RunnerContainerShellPrewarmObservation = {
       firstHintAtEpochMs: hintedAtMs,
       hintCount: 1,
+      ...(orchestration === undefined ? {} : { orchestration }),
       source: source ?? "unknown",
     };
     this.shellPrewarmObservation = observation;
@@ -3571,6 +3580,14 @@ export class RunnerContainer extends Container {
               shellPrewarmColdStartObserved: coldStartObserved,
               shellPrewarmElapsedMs: elapsedMs,
               shellPrewarmHintCountAtCompletion: input.observation.hintCount,
+              ...(input.observation.orchestration
+                ?.shellPrewarmOrchestrationAttemptId === undefined
+                ? {}
+                : {
+                    orchestrationAttemptId:
+                      input.observation.orchestration
+                        .shellPrewarmOrchestrationAttemptId,
+                  }),
               shellPrewarmOutcome: result.action,
               shellPrewarmSource: input.observation.source,
             },
@@ -3596,6 +3613,14 @@ export class RunnerContainer extends Container {
               ...buildHostedExecutionSafeErrorDiagnostics(error),
               shellPrewarmElapsedMs: elapsedMs,
               shellPrewarmHintCountAtCompletion: input.observation.hintCount,
+              ...(input.observation.orchestration
+                ?.shellPrewarmOrchestrationAttemptId === undefined
+                ? {}
+                : {
+                    orchestrationAttemptId:
+                      input.observation.orchestration
+                        .shellPrewarmOrchestrationAttemptId,
+                  }),
               shellPrewarmOutcome: "failed",
               shellPrewarmSource: input.observation.source,
             },
@@ -4542,15 +4567,21 @@ function parseRunnerContainerBeginShellPrewarmInput(
   payload: RunnerContainerBeginShellPrewarmInput,
 ): RunnerContainerBeginShellPrewarmInput {
   const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+  const orchestration =
+    sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
+      payload.orchestration,
+    );
   if (
     payload.source !== undefined
     && payload.source !== "linq-instant-start"
+    && payload.source !== "linq-message-routing"
     && payload.source !== "linq-typing-started"
   ) {
     throw new TypeError("payload.source must be a supported shell-prewarm source.");
   }
   return {
     ...input,
+    ...(orchestration === null ? {} : { orchestration }),
     ...(payload.source === undefined ? {} : { source: payload.source }),
   };
 }
