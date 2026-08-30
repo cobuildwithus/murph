@@ -54,6 +54,9 @@ overrides:
   fast-xml-parser@5.7.2>fast-xml-builder: 1.2.0
 
 patchedDependencies:
+  '@cobuild/repo-tools@0.1.17':
+    hash: 679266b778f8ed833acc0ead5be87d57dbcff877ce899a72fbec8052563ab4fb
+    path: patches/@cobuild__repo-tools@0.1.17.patch
   '@cobuild/review-gpt@0.5.139':
     hash: dab3b5700dac04ea69380e41a04b64b748898b2d42f9794d8a48365fcf7e0247
     path: patches/@cobuild__review-gpt@0.5.139.patch
@@ -79,7 +82,7 @@ importers:
         version: 7.29.0
       '@cobuild/repo-tools':
         specifier: ^0.1.17
-        version: 0.1.17
+        version: 0.1.17(patch_hash=679266b778f8ed833acc0ead5be87d57dbcff877ce899a72fbec8052563ab4fb)
       '@cobuild/review-gpt':
         specifier: ^0.5.139
         version: 0.5.139(patch_hash=dab3b5700dac04ea69380e41a04b64b748898b2d42f9794d8a48365fcf7e0247)(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
@@ -11094,11 +11097,11 @@ snapshots:
 
   '@cloudflare/workers-types@4.20260511.1': {}
 
-  '@cobuild/repo-tools@0.1.17': {}
+  '@cobuild/repo-tools@0.1.17(patch_hash=679266b778f8ed833acc0ead5be87d57dbcff877ce899a72fbec8052563ab4fb)': {}
 
   '@cobuild/review-gpt@0.5.139(patch_hash=dab3b5700dac04ea69380e41a04b64b748898b2d42f9794d8a48365fcf7e0247)(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
-      '@cobuild/repo-tools': 0.1.17
+      '@cobuild/repo-tools': 0.1.17(patch_hash=679266b778f8ed833acc0ead5be87d57dbcff877ce899a72fbec8052563ab4fb)
       incur: 0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3)
       repomix: 1.16.0(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
     transitivePeerDependencies:
