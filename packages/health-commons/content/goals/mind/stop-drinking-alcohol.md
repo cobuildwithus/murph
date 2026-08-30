@@ -96,4 +96,3 @@ Do not stop abruptly without medical guidance if you drink heavily or have had w
 - [NIAAA: should you cut down or quit?](https://rethinkingdrinking.niaaa.nih.gov/thinking-about-change/cut-down-or-quit)
 - [NIAAA Alcohol Treatment Navigator](https://alcoholtreatment.niaaa.nih.gov/)
 - [ASAM Clinical Practice Guideline on Alcohol Withdrawal Management](https://pubmed.ncbi.nlm.nih.gov/32511109/)
-

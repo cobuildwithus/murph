@@ -93,4 +93,3 @@ Increase gradually if you are currently inactive. Stop for chest pain, fainting,
 - [Physical Activity Guidelines for Americans, 2nd edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
 - [WHO guidelines on physical activity and sedentary behaviour](https://www.who.int/publications/i/item/9789240015128)
 - [ODPHP: Top 10 things to know about the current U.S. guidelines](https://odphp.health.gov/our-work/nutrition-physical-activity/physical-activity-guidelines/current-guidelines/top-10-things-know)
-

@@ -93,4 +93,3 @@ Choose an alert, safe setting—never while driving or doing another task that r
 - [NCCIH: meditation and mindfulness—effectiveness and safety](https://www.nccih.nih.gov/health/meditation-and-mindfulness-effectiveness-and-safety)
 - [World Health Organization: Doing What Matters in Times of Stress](https://www.who.int/publications/i/item/9789240003927)
 - [Dose-response meta-regression of mindfulness-based programs](https://doi.org/10.1007/s12671-020-01319-4)
-

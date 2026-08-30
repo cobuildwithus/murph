@@ -85,4 +85,3 @@ New swelling, an inability to bear weight, a knee that locks or repeatedly gives
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [World guidelines for falls prevention and management](https://pubmed.ncbi.nlm.nih.gov/36178003/)
 - [World Health Organization: physical activity guidance](https://www.who.int/publications/i/item/9789240015128)
-

@@ -86,4 +86,3 @@ New exercise intolerance that feels out of proportion, or exercise accompanied b
 - [Physical Activity Guidelines for Americans, 2nd edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
 - [WHO guidelines on physical activity and sedentary behaviour](https://www.who.int/publications/i/item/9789240015128)
 - [Gormley et al.: Effect of intensity of aerobic training on VO2 max](https://pubmed.ncbi.nlm.nih.gov/18580415/)
-

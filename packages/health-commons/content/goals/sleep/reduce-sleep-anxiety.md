@@ -82,4 +82,3 @@ Get prompt support if nighttime anxiety includes suicidal thoughts, severe panic
 
 - [AASM guideline for behavioral and psychological treatment of chronic insomnia](https://jcsm.aasm.org/doi/10.5664/jcsm.8986)
 - [VA/DoD 2025 patient guide to treating insomnia with behavior change](https://www.healthquality.va.gov/guidelines/CD/insomnia/index.asp)
-

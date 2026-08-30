@@ -82,4 +82,3 @@ Avoid combining alcohol with sleep medicines or other sedatives. If severe sleep
 
 - [CDC Yellow Book 2026: jet lag disorder and travel planning](https://www.cdc.gov/yellow-book/hcp/travel-air-sea/jet-lag-disorder.html)
 - [NHLBI: healthy sleep habits](https://www.nhlbi.nih.gov/health/sleep-deprivation/healthy-sleep-habits)
-

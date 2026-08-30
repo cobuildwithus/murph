@@ -92,4 +92,3 @@ No personal routine can make an unsafe, abusive, or structurally impossible job 
 - [World Health Organization: burnout as an occupational phenomenon](https://www.who.int/standards/classifications/frequently-asked-questions/burn-out-an-occupational-phenomenon)
 - [WHO guidelines on mental health at work](https://www.who.int/publications/i/item/9789240053052)
 - [WHO and ILO: Mental Health at Work policy brief](https://www.who.int/publications/i/item/9789240057944)
-

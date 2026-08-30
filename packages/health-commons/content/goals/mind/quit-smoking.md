@@ -90,4 +90,3 @@ Seek urgent help for severe chest pain, trouble breathing, signs of stroke, or t
 - [CDC: How to Quit Smoking](https://www.cdc.gov/tobacco/about/how-to-quit.html)
 - [CDC: clinical interventions to treat tobacco dependence](https://www.cdc.gov/tobacco/hcp/patient-care-settings/clinical.html)
 - [U.S. Preventive Services Task Force: tobacco cessation in adults](https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/tobacco-use-in-adults-and-pregnant-women-counseling-and-interventions)
-

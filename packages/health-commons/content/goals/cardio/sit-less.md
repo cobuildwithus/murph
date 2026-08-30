@@ -85,4 +85,3 @@ People with dizziness, balance problems, or mobility limitations can use seated 
 - [WHO guidelines on physical activity and sedentary behaviour](https://www.who.int/publications/i/item/9789240015128)
 - [Physical Activity Guidelines for Americans, 2nd edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
 - [WHO physical activity fact sheet](https://www.who.int/news-room/fact-sheets/detail/physical-activity)
-

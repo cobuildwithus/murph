@@ -86,4 +86,3 @@ New weakness, numbness, severe pain after injury, or problems with balance and w
 - [Sports Medicine: resistance training and range of motion](https://pubmed.ncbi.nlm.nih.gov/36622555/)
 - [Randomized trial of workplace stretching and posture-related measures](https://pubmed.ncbi.nlm.nih.gov/22935854/)
 - [World Health Organization: physical activity guidance](https://www.who.int/publications/i/item/9789240015128)
-

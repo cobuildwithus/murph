@@ -92,4 +92,3 @@ Do not reduce access to emergency contacts, medical devices, navigation, or need
 - [BMC Medicine: smartphone screen-time reduction randomized trial](https://doi.org/10.1186/s12916-025-03944-z)
 - [PNAS Nexus: blocking mobile internet and sustained attention](https://doi.org/10.1093/pnasnexus/pgaf017)
 - [PLOS ONE: randomized restriction of digital and social media](https://doi.org/10.1371/journal.pone.0306910)
-

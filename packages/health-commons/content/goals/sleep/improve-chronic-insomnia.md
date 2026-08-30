@@ -83,4 +83,3 @@ Sleep-window restriction needs clinician guidance when you have bipolar disorder
 - [AASM guideline for behavioral and psychological treatment of chronic insomnia](https://jcsm.aasm.org/doi/10.5664/jcsm.8986)
 - [American College of Physicians guideline for chronic insomnia](https://pubmed.ncbi.nlm.nih.gov/27136449/)
 - [2025 VA/DoD insomnia and sleep apnea guideline](https://www.healthquality.va.gov/guidelines/CD/insomnia/index.asp)
-

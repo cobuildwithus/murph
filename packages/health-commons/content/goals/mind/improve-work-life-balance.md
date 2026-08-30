@@ -93,4 +93,3 @@ If work is causing persistent exhaustion, panic, depression, dangerous fatigue, 
 - [World Health Organization: guidelines on mental health at work](https://www.who.int/publications/i/item/9789240053052)
 - [WHO: mental health at work fact sheet](https://www.who.int/news-room/fact-sheets/detail/mental-health-at-work)
 - [WHO and ILO: Mental Health at Work policy brief](https://www.who.int/publications/i/item/9789240057944)
-

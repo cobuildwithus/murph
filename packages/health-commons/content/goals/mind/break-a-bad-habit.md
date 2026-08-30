@@ -87,4 +87,3 @@ If you repeatedly replace one compulsive behavior with another, focus on the nee
 - [Time to Form a Habit: systematic review and meta-analysis](https://doi.org/10.3390/healthcare12232488)
 - [Umbrella review of behavior-change techniques in lifestyle interventions](https://pmc.ncbi.nlm.nih.gov/articles/PMC11545567/)
 - [NICE: behavior change—individual approaches](https://www.nice.org.uk/guidance/ph49)
-

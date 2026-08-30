@@ -85,4 +85,3 @@ Jump on a clear, nonslip surface with enough overhead space. Stop after an acute
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [Systematic review and meta-analysis of training and vertical-jump performance](https://pmc.ncbi.nlm.nih.gov/articles/PMC12131147/)
 - [Systematic review of plyometric training and jump performance](https://pubmed.ncbi.nlm.nih.gov/41211139/)
-

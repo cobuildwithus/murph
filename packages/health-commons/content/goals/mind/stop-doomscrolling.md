@@ -94,4 +94,3 @@ Keep necessary emergency alerts for your location, health, and responsibilities.
 - [World Health Organization: mental health and news consumption during emergencies](https://www.who.int/news-room/questions-and-answers/item/stress)
 - [BMC Medicine: smartphone screen-time reduction randomized trial](https://doi.org/10.1186/s12916-025-03944-z)
 - [PNAS Nexus: blocking mobile internet and psychological functioning](https://doi.org/10.1093/pnasnexus/pgaf017)
-

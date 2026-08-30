@@ -93,4 +93,3 @@ If you have been drinking heavily for a prolonged period, do not suddenly stop o
 - [NIAAA Rethinking Drinking: strategies for cutting down](https://rethinkingdrinking.niaaa.nih.gov/thinking-about-change/tips-try)
 - [NIAAA: options for people thinking about their drinking](https://www.niaaa.nih.gov/sites/default/files/Options-People-Thinking-About-Drinking.pdf)
 - [Systematic review of digital interventions to reduce alcohol use](https://pubmed.ncbi.nlm.nih.gov/37864535/)
-

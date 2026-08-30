@@ -91,4 +91,3 @@ This is a practical wellbeing plan, not a diagnosis or a replacement for mental 
 - [World Health Organization: behavioral activation for adults with depression](https://www.who.int/teams/mental-health-and-substance-use/treatment-care/mental-health-gap-action-programme/evidence-centre/depression/behavioural-activation)
 - [Physical Activity Guidelines for Americans, second edition](https://health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
 - [U.S. Surgeon General: social connection and health](https://www.hhs.gov/surgeongeneral/reports-and-publications/connection/index.html)
-

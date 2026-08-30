@@ -91,4 +91,3 @@ Walking is appropriate for most people, but new chest symptoms, fainting, or sev
 - [Physical Activity Guidelines for Americans, 2nd edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
 - [WHO guidelines on physical activity and sedentary behaviour](https://www.who.int/publications/i/item/9789240015128)
 - [Paluch et al.: Daily steps and all-cause mortality across 15 cohorts](https://pubmed.ncbi.nlm.nih.gov/35247352/)
-

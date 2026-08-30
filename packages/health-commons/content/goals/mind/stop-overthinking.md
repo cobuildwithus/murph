@@ -90,4 +90,3 @@ Seek prompt support if repetitive thoughts include self-harm, harming someone el
 - [World Health Organization: Doing What Matters in Times of Stress](https://www.who.int/publications/i/item/9789240003927)
 - [NICE: low-intensity and cognitive behavioral approaches for anxiety](https://www.nice.org.uk/guidance/cg113/chapter/Recommendations)
 - [Journal of Medical Internet Research: mindfulness and repetitive negative thinking in daily life](https://pubmed.ncbi.nlm.nih.gov/37467038/)
-

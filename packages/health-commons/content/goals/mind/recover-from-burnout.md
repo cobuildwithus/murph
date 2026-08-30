@@ -90,4 +90,3 @@ This plan should reduce burden, not turn recovery into another performance proje
 - [World Health Organization: burnout as an occupational phenomenon](https://www.who.int/standards/classifications/frequently-asked-questions/burn-out-an-occupational-phenomenon)
 - [WHO guidelines on mental health at work](https://www.who.int/publications/i/item/9789240053052)
 - [WHO: mental health at work fact sheet](https://www.who.int/news-room/fact-sheets/detail/mental-health-at-work)
-

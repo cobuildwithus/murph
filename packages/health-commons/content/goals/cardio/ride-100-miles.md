@@ -89,4 +89,3 @@ Wear a helmet, use visible equipment, follow road rules, and carry repair and co
 - [USA Cycling coaching education resources](https://usacycling.org/coaches-old/coaching-courses)
 - [Gormley et al.: cycling-based aerobic training and VO2 max](https://pubmed.ncbi.nlm.nih.gov/18580415/)
 - [ACSM's Guidelines for Exercise Testing and Prescription, 12th edition](https://acsm.org/education-resources/books/guidelines-exercise-testing-prescription/)
-

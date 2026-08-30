@@ -85,4 +85,3 @@ Practice on a clear, nonslip surface away from furniture and other people. Avoid
 - [Skill-acquisition interventions in sports: scoping review](https://pubmed.ncbi.nlm.nih.gov/38401870/)
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [Sports Medicine: resistance training and range of motion](https://pubmed.ncbi.nlm.nih.gov/36622555/)
-

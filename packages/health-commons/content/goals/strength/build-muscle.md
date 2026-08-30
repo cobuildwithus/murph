@@ -87,4 +87,3 @@ Muscle burn and temporary soreness are expected; joint pain and steadily worseni
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [British Journal of Sports Medicine: resistance-training prescriptions for muscle growth](https://pubmed.ncbi.nlm.nih.gov/37414459/)
 - [British Journal of Sports Medicine: protein supplementation during resistance training](https://pubmed.ncbi.nlm.nih.gov/28698222/)
-

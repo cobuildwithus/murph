@@ -84,4 +84,3 @@ Stop a drill that produces sharp pain, new numbness, weakness, or symptoms that 
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [World Health Organization: chronic primary low-back-pain guideline](https://www.who.int/publications/i/item/9789240081789)
 - [British Journal of Sports Medicine: resistance-training prescription and strength](https://pubmed.ncbi.nlm.nih.gov/37414459/)
-

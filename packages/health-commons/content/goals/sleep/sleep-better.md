@@ -88,4 +88,3 @@ Get prompt help for dangerous daytime sleepiness, especially while driving. Seek
 - [American Academy of Sleep Medicine and Sleep Research Society: adult sleep duration](https://jcsm.aasm.org/doi/10.5664/jcsm.4758)
 - [National Sleep Foundation consensus statement on sleep regularity](https://pubmed.ncbi.nlm.nih.gov/37684151/)
 - [AASM guideline for behavioral treatment of chronic insomnia](https://jcsm.aasm.org/doi/10.5664/jcsm.8986)
-

@@ -83,4 +83,3 @@ Do not take iron without appropriate testing and guidance; excess iron can be ha
 
 - [AASM clinical practice guideline for restless legs syndrome and periodic limb movement disorder](https://jcsm.aasm.org/doi/10.5664/jcsm.11390)
 - [NHLBI: diagnosis of sleep disorders and restless legs](https://www.nhlbi.nih.gov/health/sleep-deprivation/diagnosis-treatment)
-

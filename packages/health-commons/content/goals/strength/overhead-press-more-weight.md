@@ -85,4 +85,3 @@ Stop for a sudden shoulder injury, a new inability to raise the arm, marked weak
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [British Journal of Sports Medicine: resistance-training prescription and strength](https://pubmed.ncbi.nlm.nih.gov/37414459/)
 - [Sports Medicine: resistance training and range of motion](https://pubmed.ncbi.nlm.nih.gov/36622555/)
-

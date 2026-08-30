@@ -84,4 +84,3 @@ Never bench a challenging load alone without safeties that can catch the bar. St
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [British Journal of Sports Medicine: resistance-training prescription and strength](https://pubmed.ncbi.nlm.nih.gov/37414459/)
 - [British Journal of Sports Medicine: protein and resistance-training adaptations](https://pubmed.ncbi.nlm.nih.gov/28698222/)
-

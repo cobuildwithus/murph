@@ -86,4 +86,3 @@ A recovery value by itself does not diagnose heart disease. New chest pain, fain
 - [ACSM's Guidelines for Exercise Testing and Prescription, 12th edition](https://acsm.org/education-resources/books/guidelines-exercise-testing-prescription/)
 - [Gormley et al.: aerobic-training intensity and fitness adaptation](https://pubmed.ncbi.nlm.nih.gov/18580415/)
 - [Cole et al.: heart-rate recovery after exercise and prognosis](https://pubmed.ncbi.nlm.nih.gov/10536127/)
-

@@ -89,4 +89,3 @@ Fast training should stop for chest pain, fainting, severe unusual breathlessnes
 - [Helgerud et al.: aerobic intervals and VO2 max](https://pubmed.ncbi.nlm.nih.gov/17414804/)
 - [World Athletics: 5000 metres training context](https://worldathletics.org/disciplines/middlelong/5000-metres)
 - [2023 IOC consensus statement on Relative Energy Deficiency in Sport](https://bjsm.bmj.com/content/57/17/1073)
-

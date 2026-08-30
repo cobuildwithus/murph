@@ -84,4 +84,3 @@ Use a bar that is firmly installed and clear the area below it. Stop for sudden 
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [British Journal of Sports Medicine: resistance-training prescription and strength](https://pubmed.ncbi.nlm.nih.gov/37414459/)
 - [Skill-acquisition interventions in sports: scoping review](https://pubmed.ncbi.nlm.nih.gov/38401870/)
-

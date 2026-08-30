@@ -85,4 +85,3 @@ Get urgent help for new loss of bowel or bladder control, numbness around the gr
 - [World Health Organization: chronic primary low-back-pain guideline](https://www.who.int/publications/i/item/9789240081789)
 - [NICE: low-back pain and sciatica assessment and management](https://www.nice.org.uk/guidance/ng59)
 - [Sports Medicine: resistance training and range of motion](https://pubmed.ncbi.nlm.nih.gov/36622555/)
-

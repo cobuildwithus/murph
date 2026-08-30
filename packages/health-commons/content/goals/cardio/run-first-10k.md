@@ -89,4 +89,3 @@ Do not train through pain that changes your stride, swelling, or focal pain that
 - [Physical Activity Guidelines for Americans, 2nd edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
 - [World Athletics health and science resources](https://worldathletics.org/about-iaaf/documents/health-science)
 - [ACSM's Guidelines for Exercise Testing and Prescription, 12th edition](https://acsm.org/education-resources/books/guidelines-exercise-testing-prescription/)
-

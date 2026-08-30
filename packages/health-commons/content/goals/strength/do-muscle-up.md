@@ -84,4 +84,3 @@ Use a secure bar or correctly set rings with enough clear space and a safe way d
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [Skill-acquisition interventions in sports: scoping review](https://pubmed.ncbi.nlm.nih.gov/38401870/)
 - [British Journal of Sports Medicine: resistance-training prescription and strength](https://pubmed.ncbi.nlm.nih.gov/37414459/)
-

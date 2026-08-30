@@ -88,4 +88,3 @@ Use a helmet, visible equipment, and a route appropriate to your handling skill.
 - [Gormley et al.: cycling-based aerobic training and VO2 max](https://pubmed.ncbi.nlm.nih.gov/18580415/)
 - [USA Cycling coaching education resources](https://usacycling.org/coaches-old/coaching-courses)
 - [Physical Activity Guidelines for Americans, 2nd edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
-

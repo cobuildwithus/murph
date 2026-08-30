@@ -86,4 +86,3 @@ Stretch sensation should be tolerable and should settle after the session. Stop 
 - [Journal of Sport and Health Science: chronic stretching and range of motion](https://pubmed.ncbi.nlm.nih.gov/37301370/)
 - [Sports Medicine: resistance training and range of motion](https://pubmed.ncbi.nlm.nih.gov/36622555/)
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
-

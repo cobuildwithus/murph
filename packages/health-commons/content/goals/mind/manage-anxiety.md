@@ -86,4 +86,3 @@ This page supports everyday self-management; it does not diagnose or replace tre
 - [NICE: generalized anxiety disorder and panic disorder in adults](https://www.nice.org.uk/guidance/cg113/chapter/Recommendations)
 - [World Health Organization: Doing What Matters in Times of Stress](https://www.who.int/publications/i/item/9789240003927)
 - [NCCIH: stress, anxiety, and sleep problems](https://www.nccih.nih.gov/health/stress-anxiety-and-sleep-problems-considering-complementary-approaches)
-

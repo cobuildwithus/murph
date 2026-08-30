@@ -89,4 +89,3 @@ Know emergency and withdrawal procedures. Confusion, collapse, chest pain, sever
 - [World Athletics: Nutrition for ultramarathon running](https://worldathletics.org/about-iaaf/documents/health-science)
 - [2023 IOC consensus statement on Relative Energy Deficiency in Sport](https://bjsm.bmj.com/content/57/17/1073)
 - [ACSM's Guidelines for Exercise Testing and Prescription, 12th edition](https://acsm.org/education-resources/books/guidelines-exercise-testing-prescription/)
-

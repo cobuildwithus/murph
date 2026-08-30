@@ -88,4 +88,3 @@ If you have known cardiovascular disease, uncontrolled blood pressure, advanced 
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [Experimental Gerontology: resistance training and lower-body muscle growth in older adults](https://pubmed.ncbi.nlm.nih.gov/39579806/)
 - [National Institute of Arthritis and Musculoskeletal and Skin Diseases: exercise for bone health](https://www.niams.nih.gov/health-topics/exercise-your-bone-health)
-

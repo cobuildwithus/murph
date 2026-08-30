@@ -86,4 +86,3 @@ Stop for chest pain, faintness, or severe unusual shortness of breath. People re
 - [Physical Activity Guidelines for Americans, 2nd edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
 - [WHO guidelines on physical activity and sedentary behaviour](https://www.who.int/publications/i/item/9789240015128)
 - [Gormley et al.: Effect of aerobic-training intensity on fitness](https://pubmed.ncbi.nlm.nih.gov/18580415/)
-

@@ -85,4 +85,3 @@ Persistent pain at the front or back of the elbow, sudden bruising, or a pop fol
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [British Journal of Sports Medicine: resistance-training prescriptions for muscle growth](https://pubmed.ncbi.nlm.nih.gov/37414459/)
 - [British Journal of Sports Medicine: protein and resistance-training adaptations](https://pubmed.ncbi.nlm.nih.gov/28698222/)
-

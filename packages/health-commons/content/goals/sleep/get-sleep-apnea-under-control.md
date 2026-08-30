@@ -85,4 +85,3 @@ Untreated apnea plus dangerous sleepiness can make driving unsafe. Seek prompt m
 - [2025 VA/DoD guideline for chronic insomnia and obstructive sleep apnea](https://www.healthquality.va.gov/guidelines/CD/insomnia/index.asp)
 - [AASM guideline for positive airway pressure treatment](https://jcsm.aasm.org/doi/10.5664/jcsm.7640)
 - [NHLBI: sleep apnea treatment](https://www.nhlbi.nih.gov/health/sleep-apnea/treatment)
-

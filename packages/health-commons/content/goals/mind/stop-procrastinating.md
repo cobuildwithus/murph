@@ -92,4 +92,3 @@ Do not solve procrastination by removing rest. A plan that fills every open hour
 - [Systematic review and meta-analysis: time and determinants of health habit formation](https://doi.org/10.3390/healthcare12232488)
 - [Implementation intentions and goal achievement: meta-analysis](https://doi.org/10.1016/S0065-2601%2806%2938002-1)
 - [Umbrella review of behavior-change techniques in lifestyle interventions](https://pmc.ncbi.nlm.nih.gov/articles/PMC11545567/)
-

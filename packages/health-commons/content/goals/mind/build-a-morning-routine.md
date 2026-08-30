@@ -88,4 +88,3 @@ Morning outdoor light is generally useful, but do not stare at the sun. People w
 - [NHLBI: healthy sleep habits](https://www.nhlbi.nih.gov/health/sleep-deprivation/healthy-sleep-habits)
 - [American Academy of Sleep Medicine: adult sleep duration](https://jcsm.aasm.org/doi/10.5664/jcsm.4758)
 - [Time to Form a Habit: systematic review and meta-analysis](https://doi.org/10.3390/healthcare12232488)
-

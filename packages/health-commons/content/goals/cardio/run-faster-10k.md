@@ -89,4 +89,3 @@ Stop hard exercise for chest pain, fainting, severe unusual breathlessness, or p
 - [Helgerud et al.: aerobic intervals and VO2 max](https://pubmed.ncbi.nlm.nih.gov/17414804/)
 - [Gormley et al.: aerobic-training intensity and VO2 max](https://pubmed.ncbi.nlm.nih.gov/18580415/)
 - [2023 IOC consensus statement on Relative Energy Deficiency in Sport](https://bjsm.bmj.com/content/57/17/1073)
-

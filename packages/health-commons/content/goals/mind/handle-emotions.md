@@ -91,4 +91,3 @@ Seek urgent help if an emotional state comes with an immediate risk of harming y
 - [World Health Organization: Doing What Matters in Times of Stress](https://www.who.int/publications/i/item/9789240003927)
 - [NCCIH: mind and body approaches for stress and anxiety](https://www.nccih.nih.gov/health/providers/digest/mind-and-body-approaches-for-stress)
 - [WHO: psychological interventions implementation manual](https://www.who.int/publications/i/item/9789240087149)
-

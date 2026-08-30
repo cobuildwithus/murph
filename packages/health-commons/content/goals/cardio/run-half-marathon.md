@@ -89,4 +89,3 @@ Stop for chest pain, fainting, severe unusual breathlessness, or pain that chang
 - [Physical Activity Guidelines for Americans, 2nd edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
 - [World Athletics health and science resources](https://worldathletics.org/about-iaaf/documents/health-science)
 - [2023 IOC consensus statement on Relative Energy Deficiency in Sport](https://bjsm.bmj.com/content/57/17/1073)
-

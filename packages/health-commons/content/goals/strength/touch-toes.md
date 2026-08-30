@@ -87,4 +87,3 @@ Stop for sharp pain, numbness, or symptoms that travel down a leg. Do not force 
 - [Journal of Sport and Health Science: chronic stretching and range of motion](https://pubmed.ncbi.nlm.nih.gov/37301370/)
 - [Randomized trial of hamstring stretching and toe-touch outcomes](https://pubmed.ncbi.nlm.nih.gov/22935854/)
 - [Study on what fingertip-to-floor distance does and does not measure](https://pubmed.ncbi.nlm.nih.gov/36832125/)
-

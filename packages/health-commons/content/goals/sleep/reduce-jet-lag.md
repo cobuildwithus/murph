@@ -85,4 +85,3 @@ Melatonin can interact with medicines and product quality varies. Get profession
 
 - [CDC Yellow Book 2026: jet lag disorder](https://www.cdc.gov/yellow-book/hcp/travel-air-sea/jet-lag-disorder.html)
 - [Consensus statement on managing travel fatigue and jet lag](https://pubmed.ncbi.nlm.nih.gov/34263388/)
-

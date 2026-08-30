@@ -87,4 +87,3 @@ Do not use “liver detox” products. Some supplements can injure the liver, an
 ## Related goals
 
 [Reduce My Liver Fat](/goals/reduce-liver-fat) · [Improve My Blood Sugar Control](/goals/improve-blood-sugar-control) · [Lower My Triglycerides](/goals/lower-triglycerides)
-

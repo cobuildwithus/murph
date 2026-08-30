@@ -88,4 +88,3 @@ Check weather, air quality, hydration needs, sun protection, and local safety in
 - [Scientific Reports: weekly nature contact and self-reported health and wellbeing](https://doi.org/10.1038/s41598-019-44097-3)
 - [2024 systematic review of nature-exposure therapies](https://pmc.ncbi.nlm.nih.gov/articles/PMC10969128/)
 - [CDC: health benefits of physical activity](https://www.cdc.gov/physical-activity/php/about/index.html)
-

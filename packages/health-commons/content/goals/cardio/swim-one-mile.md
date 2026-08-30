@@ -89,4 +89,3 @@ Do not swim alone in open water or rely on a tow float as rescue. Stop for chest
 - [U.S. Masters Swimming adult swim-training guide](https://www.usms.org/fitness-and-training/guides/swimming-101/adult-swim-training)
 - [U.S. Masters Swimming workout library and endurance plans](https://www.usms.org/workout-library/)
 - [ACSM's Guidelines for Exercise Testing and Prescription, 12th edition](https://acsm.org/education-resources/books/guidelines-exercise-testing-prescription/)
-

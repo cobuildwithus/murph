@@ -89,4 +89,3 @@ Do not start or continue a marathon with chest pain, fainting, severe illness, o
 - [World Athletics health and science resources](https://worldathletics.org/about-iaaf/documents/health-science)
 - [ACSM's Guidelines for Exercise Testing and Prescription, 12th edition](https://acsm.org/education-resources/books/guidelines-exercise-testing-prescription/)
 - [2023 IOC consensus statement on Relative Energy Deficiency in Sport](https://bjsm.bmj.com/content/57/17/1073)
-

@@ -85,4 +85,3 @@ Sharp hip or groin pain, a sudden injury, or pain that changes how you walk dese
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [British Journal of Sports Medicine: resistance-training prescriptions for strength and hypertrophy](https://pubmed.ncbi.nlm.nih.gov/37414459/)
 - [World Health Organization: physical activity guidance](https://www.who.int/publications/i/item/9789240015128)
-

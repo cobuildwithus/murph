@@ -84,4 +84,3 @@ Use only a surface that cannot slide or tip. Stop after a sudden wrist, elbow, o
 - [American College of Sports Medicine: 2026 resistance-training position stand](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 - [British Journal of Sports Medicine: resistance-training prescription and strength](https://pubmed.ncbi.nlm.nih.gov/37414459/)
 - [World Health Organization: physical activity guidance](https://www.who.int/publications/i/item/9789240015128)
-

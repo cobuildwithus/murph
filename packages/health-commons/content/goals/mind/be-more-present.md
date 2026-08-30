@@ -94,4 +94,3 @@ Presence should connect you with life, not make you monitor yourself all day. Ch
 - [NCCIH: meditation and mindfulness—effectiveness and safety](https://www.nccih.nih.gov/health/meditation-and-mindfulness-effectiveness-and-safety)
 - [World Health Organization: Doing What Matters in Times of Stress](https://www.who.int/publications/i/item/9789240003927)
 - [PNAS Nexus: mobile-internet restriction and sustained attention](https://doi.org/10.1093/pnasnexus/pgaf017)
-

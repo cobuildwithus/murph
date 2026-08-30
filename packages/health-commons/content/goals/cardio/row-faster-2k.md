@@ -90,4 +90,3 @@ Hard rowing can produce high cardiovascular and trunk demand. Stop for chest pai
 - [Concept2: 12-week 2K erg test training plan](https://www.concept2.com/training/plans/2k-erg-test-12-week)
 - [British Rowing: 2K training plan](https://insideindoor.britishrowing.org/training/training-plans/cam-buchans-2km-training-plan/)
 - [ACSM's Guidelines for Exercise Testing and Prescription, 12th edition](https://acsm.org/education-resources/books/guidelines-exercise-testing-prescription/)
-

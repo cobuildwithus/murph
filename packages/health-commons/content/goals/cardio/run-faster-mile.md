@@ -89,4 +89,3 @@ Fast running raises impact and cardiovascular demand. Stop for chest pain, faint
 - [Helgerud et al.: aerobic intervals and VO2 max](https://pubmed.ncbi.nlm.nih.gov/17414804/)
 - [World Athletics: 1500 metres overview and training context](https://worldathletics.org/disciplines/middle-distance/1500-metres)
 - [ACSM's Guidelines for Exercise Testing and Prescription, 12th edition](https://acsm.org/education-resources/books/guidelines-exercise-testing-prescription/)
-

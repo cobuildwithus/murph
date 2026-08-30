@@ -82,4 +82,3 @@ Seek urgent care for new weakness, loss of bladder or bowel control, chest pain,
 
 - [NCCIH: chronic pain and complementary health approaches](https://www.nccih.nih.gov/health/chronic-pain-in-depth)
 - [AASM guideline for behavioral treatment of chronic insomnia](https://jcsm.aasm.org/doi/10.5664/jcsm.8986)
-

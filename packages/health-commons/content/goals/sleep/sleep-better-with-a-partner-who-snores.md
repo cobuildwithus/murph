@@ -84,4 +84,3 @@ Breathing pauses, choking, severe daytime sleepiness, drowsy driving, or signifi
 
 - [NHLBI: sleep apnea symptoms and treatment](https://www.nhlbi.nih.gov/health/sleep-apnea)
 - [AASM and AADSM oral-appliance guideline for snoring and sleep apnea](https://jcsm.aasm.org/doi/10.5664/jcsm.4858)
-
