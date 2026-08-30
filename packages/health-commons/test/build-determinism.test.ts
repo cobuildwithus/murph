@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -7,6 +7,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HealthCommonsCatalogEntity } from "@murphai/contracts";
 
 const buildHealthCommonsCatalogMock = vi.hoisted(() => vi.fn());
+const generatedRootRenameControl = vi.hoisted(() => ({
+  beforeReleaseDelayedTargetMove: null as (() => Promise<void>) | null,
+  delayFirstTargetMove: false,
+  delayedTargetMoves: 0,
+  releaseDelayedTargetMove: null as (() => void) | null,
+  targetRoot: "",
+}));
 const buildHealthCommonsSourceIndexMock = vi.hoisted(() =>
   vi.fn((catalog: { catalogHash: string }) => ({
     schemaVersion: "murph.commons.source-index.v1",
@@ -36,6 +43,33 @@ vi.mock("../src/catalog.ts", () => ({
   buildHealthCommonsSourceArtifactIndex: buildHealthCommonsSourceArtifactIndexMock,
   buildHealthCommonsSourceIndex: buildHealthCommonsSourceIndexMock,
 }));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rename: async (oldPath: string, newPath: string): Promise<void> => {
+      await actual.rename(oldPath, newPath);
+      if (
+        generatedRootRenameControl.delayFirstTargetMove
+        && oldPath === generatedRootRenameControl.targetRoot
+        && generatedRootRenameControl.delayedTargetMoves === 0
+      ) {
+        generatedRootRenameControl.delayedTargetMoves += 1;
+        await new Promise<void>((resolve) => {
+          generatedRootRenameControl.releaseDelayedTargetMove = resolve;
+        });
+      } else if (
+        generatedRootRenameControl.delayFirstTargetMove
+        && newPath === generatedRootRenameControl.targetRoot
+      ) {
+        await generatedRootRenameControl.beforeReleaseDelayedTargetMove?.();
+        generatedRootRenameControl.releaseDelayedTargetMove?.();
+        generatedRootRenameControl.releaseDelayedTargetMove = null;
+      }
+    },
+  };
+});
 
 import { writeHealthCommonsGeneratedArtifacts } from "../src/build.ts";
 import { buildHealthCommonsWebBiomarkerOverview } from "../src/biomarker-web-artifacts.ts";
@@ -135,6 +169,11 @@ describe("@murphai/health-commons build determinism", () => {
     buildHealthCommonsCatalogMock.mockReset();
     buildHealthCommonsSourceArtifactIndexMock.mockClear();
     buildHealthCommonsSourceIndexMock.mockClear();
+    generatedRootRenameControl.beforeReleaseDelayedTargetMove = null;
+    generatedRootRenameControl.delayFirstTargetMove = false;
+    generatedRootRenameControl.delayedTargetMoves = 0;
+    generatedRootRenameControl.releaseDelayedTargetMove = null;
+    generatedRootRenameControl.targetRoot = "";
   });
 
   it("rejects check mode when two successive builds diverge", async () => {
@@ -230,6 +269,128 @@ describe("@murphai/health-commons build determinism", () => {
         .rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(generatedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("lets concurrent writers publish the same complete generated tree", async () => {
+    const testRoot = await pathFromTempDir("health-commons-concurrent-generated-");
+    const generatedRoot = path.join(testRoot, "generated");
+    buildHealthCommonsCatalogMock.mockResolvedValue(createCatalog("sha256:first"));
+
+    try {
+      await writeHealthCommonsGeneratedArtifacts({
+        check: false,
+        contentRoot: "health-commons-content",
+        generatedRoot,
+      });
+
+      generatedRootRenameControl.delayFirstTargetMove = true;
+      generatedRootRenameControl.targetRoot = generatedRoot;
+
+      await expect(Promise.all([
+        writeHealthCommonsGeneratedArtifacts({
+          check: false,
+          contentRoot: "health-commons-content",
+          generatedRoot,
+        }),
+        writeHealthCommonsGeneratedArtifacts({
+          check: false,
+          contentRoot: "health-commons-content",
+          generatedRoot,
+        }),
+      ])).resolves.toEqual([undefined, undefined]);
+
+      await expect(readFile(path.join(generatedRoot, "catalog.hash"), "utf8"))
+        .resolves.toBe("sha256:first\n");
+      await expect(readdir(testRoot)).resolves.toEqual(["generated"]);
+    } finally {
+      await rm(testRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a changed non-hash tree and preserves the concurrent winner", async () => {
+    const testRoot = await pathFromTempDir("health-commons-mismatched-generated-");
+    const generatedRoot = path.join(testRoot, "generated");
+    buildHealthCommonsCatalogMock.mockResolvedValue(createCatalog("sha256:first"));
+    let winningTree: Map<string, RawGeneratedTreeEntry> | null = null;
+
+    try {
+      await writeHealthCommonsGeneratedArtifacts({
+        check: false,
+        contentRoot: "health-commons-content",
+        generatedRoot,
+      });
+
+      generatedRootRenameControl.delayFirstTargetMove = true;
+      generatedRootRenameControl.targetRoot = generatedRoot;
+      generatedRootRenameControl.beforeReleaseDelayedTargetMove = async () => {
+        await writeFile(path.join(generatedRoot, "protocol-index.json"), "{\"winner\":true}\n", "utf8");
+        await mkdir(path.join(generatedRoot, "winner-only"), { recursive: true });
+        await writeFile(path.join(generatedRoot, "winner-only", "artifact.bin"), Buffer.from([0x00, 0xff]));
+        winningTree = await readRawGeneratedTree(generatedRoot);
+      };
+
+      const outcomes = await Promise.allSettled([
+        writeHealthCommonsGeneratedArtifacts({
+          check: false,
+          contentRoot: "health-commons-content",
+          generatedRoot,
+        }),
+        writeHealthCommonsGeneratedArtifacts({
+          check: false,
+          contentRoot: "health-commons-content",
+          generatedRoot,
+        }),
+      ]);
+
+      expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+      expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+      if (!winningTree) {
+        throw new Error("Concurrent winner was not captured.");
+      }
+      await expect(readRawGeneratedTree(generatedRoot)).resolves.toEqual(winningTree);
+      await expect(readdir(testRoot)).resolves.toEqual(["generated"]);
+    } finally {
+      await rm(testRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a concurrent generated tree with different bytes", async () => {
+    const testRoot = await pathFromTempDir("health-commons-byte-mismatch-generated-");
+    const generatedRoot = path.join(testRoot, "generated");
+    buildHealthCommonsCatalogMock.mockResolvedValue(createCatalog("�"));
+
+    try {
+      await writeHealthCommonsGeneratedArtifacts({
+        check: false,
+        contentRoot: "health-commons-content",
+        generatedRoot,
+      });
+
+      generatedRootRenameControl.delayFirstTargetMove = true;
+      generatedRootRenameControl.targetRoot = generatedRoot;
+      generatedRootRenameControl.beforeReleaseDelayedTargetMove = async () => {
+        await writeFile(path.join(generatedRoot, "catalog.hash"), Buffer.from([0xff, 0x0a]));
+      };
+
+      const outcomes = await Promise.allSettled([
+        writeHealthCommonsGeneratedArtifacts({
+          check: false,
+          contentRoot: "health-commons-content",
+          generatedRoot,
+        }),
+        writeHealthCommonsGeneratedArtifacts({
+          check: false,
+          contentRoot: "health-commons-content",
+          generatedRoot,
+        }),
+      ]);
+
+      expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+      expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+      await expect(readdir(testRoot)).resolves.toEqual(["generated"]);
+    } finally {
+      await rm(testRoot, { recursive: true, force: true });
     }
   });
 
@@ -510,4 +671,36 @@ describe("@murphai/health-commons build determinism", () => {
 
 async function pathFromTempDir(prefix: string): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+type RawGeneratedTreeEntry =
+  | { kind: "directory" }
+  | { bytes: Buffer; kind: "file" };
+
+async function readRawGeneratedTree(root: string): Promise<Map<string, RawGeneratedTreeEntry>> {
+  const entries = new Map<string, RawGeneratedTreeEntry>();
+
+  async function collect(relativeDir: string): Promise<void> {
+    const children = await readdir(path.join(root, relativeDir), { withFileTypes: true });
+    children.sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const child of children) {
+      const relativePath = relativeDir ? path.posix.join(relativeDir, child.name) : child.name;
+      if (child.isDirectory()) {
+        entries.set(relativePath, { kind: "directory" });
+        await collect(relativePath);
+        continue;
+      }
+      if (!child.isFile()) {
+        throw new Error("Unsupported entry in generated test tree.");
+      }
+      entries.set(relativePath, {
+        bytes: await readFile(path.join(root, relativePath)),
+        kind: "file",
+      });
+    }
+  }
+
+  await collect("");
+  return entries;
 }
