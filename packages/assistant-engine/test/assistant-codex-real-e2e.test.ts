@@ -1005,7 +1005,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   )
 
   it(
-    'answers a simple onboarding next-step turn without a progress update',
+    'answers a fresh routine-goal onboarding turn without a progress update',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
@@ -1014,7 +1014,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
       try {
         const workingDirectory = await prepareRealCodexOnboardingDirectory()
         temporaryPaths.unshift(workingDirectory)
-        await writeRealCodexOnboardingResumeContext(workingDirectory, 'later')
         const turnInput = buildRealCodexOnboardingTurnInput({
           config,
           workingDirectory,
@@ -1030,8 +1029,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             },
           },
           prompt: [
-            "Let's continue onboarding and pick up the health goal we parked earlier.",
-            "Use whatever saved onboarding context is available; I don't want to repeat it.",
+            "I've already seen your welcome and I'm ready to continue.",
+            "I'd like Murph's help building a steadier evening routine.",
           ].join(' '),
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
@@ -1047,7 +1046,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         const reply = result.finalMessage.trim()
 
         process.stdout.write(
-          `[onboarding-simple-next-step-e2e] ${JSON.stringify({
+          `[onboarding-fresh-routine-goal-e2e] ${JSON.stringify({
             policyFiles,
             progressUpdateCount: progressUpdates.length,
             reply,
@@ -1058,9 +1057,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(progressUpdates).toEqual([])
         expect(progressCalls).toEqual([])
         expect(resumeContexts).toHaveLength(1)
-        expect(policyFiles).toContain('return-launch-completion.md')
-        expect(reply).toMatch(/sleep|bed|wake|wind[- ]down|routine/iu)
-        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(policyFiles).toContain('SKILL.md')
+        expect(reply).toMatch(/what should i call you/iu)
+        expect(reply).toMatch(/how old|age/iu)
+        expect(reply).toMatch(/gender/iu)
+        expect(reply.match(/\?/gu) ?? []).not.toHaveLength(0)
         expect(reply).not.toMatch(
           /checking a few things|pulling your data|while i work|sit tight/iu,
         )
@@ -1076,6 +1077,13 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
+      const progressUpdates: string[] = []
+      const progressDelivery = {
+        async send(text: string) {
+          progressUpdates.push(text)
+          return { kind: 'sent', source: 'model' } as const
+        },
+      } satisfies NonNullable<CodexAppServerTurnInput['progressDelivery']>
 
       try {
         const workingDirectory = await prepareRealCodexOnboardingDirectory()
@@ -1184,9 +1192,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
           hostedToolContext,
+          progressDelivery,
           prompt: "I use Oura, but I'd rather connect it later.",
           scenario: 'wearable_connection_deferred',
         })
@@ -1197,7 +1206,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         )
         const reply = result.finalMessage.trim()
         process.stdout.write(
-          `[onboarding-wearable-defer-e2e] ${JSON.stringify({ reply })}\n`,
+          `[onboarding-wearable-defer-e2e] ${JSON.stringify({
+            progressUpdateCount: progressUpdates.length,
+            reply,
+          })}\n`,
         )
 
         expect(deviceWriteActions).toHaveLength(0)
@@ -1226,9 +1238,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
           hostedToolContext,
+          progressDelivery,
           prompt: 'I use Oura. Send me the connection link now.',
           scenario: 'wearable_connection_offer',
         })
@@ -1254,8 +1267,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           hostedToolContext,
+          progressDelivery,
           prompt: "I'll do that later.",
           resumeSessionId: linkOffer.sessionId,
           scenario: 'wearable_connection_deferred',
@@ -1267,7 +1281,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             .filter((request) => request.action !== 'list_accounts'),
           'later-turn connection writes',
         ).toHaveLength(0)
-        expect(laterReply).toMatch(/later|wait|whenever|when you(?:'re| are) ready/iu)
+        expect(
+          hasWearableConnectionDeferralMeaning(laterReply),
+          laterReply,
+        ).toBe(true)
         expect(laterReply).toMatch(
           /voice memo|movement|move|training|supplements|meds|conditions|allergies|medical/iu,
         )
@@ -1314,8 +1331,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           hostedToolContext,
+          progressDelivery,
           prompt: "That's everything for the foundation. What's next?",
           resumeSessionId: laterDeferral.sessionId,
           scenario: 'wearable_connection_deferred_return',
@@ -1347,9 +1365,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
           hostedToolContext,
+          progressDelivery,
           prompt: "Let's pause onboarding until next week.",
           scenario: 'wearable_connection_deferred',
         })
@@ -1364,6 +1383,18 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           /voice memo|supplements|meds|conditions|allergies|blood tests|labs/iu,
         )
         expect(onboardingPause.finalMessage.match(/\?/gu) ?? []).toHaveLength(0)
+        const progressCalls = [
+          result,
+          linkOffer,
+          laterDeferral,
+          contextualReturn,
+          onboardingPause,
+        ].flatMap((turn) => turn.actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        ))
+        expect(progressUpdates).toEqual([])
+        expect(progressCalls).toEqual([])
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)
       }
@@ -21339,7 +21370,7 @@ function hasJoinedGroupCapabilityMeaning(message: string): boolean {
 }
 
 function hasWearableConnectionDeferralMeaning(message: string): boolean {
-  return /\b(?:later|wait|whenever|when you(?:'re| are) ready|once you (?:connect|link)(?: it)?)\b/iu
+  return /\b(?:later|wait|whenever|when you(?:'re| are) ready|(?:once|when) you (?:connect|link)(?: it)?)\b/iu
     .test(message)
 }
 
