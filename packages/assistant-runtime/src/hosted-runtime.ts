@@ -221,6 +221,7 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedSystemMailboxItemAfterCheckpoint,
   retainHostedSystemMailboxItemUntilDeliveryWake,
+  resolveHostedBrowserVaultRefreshAttempt,
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
 } from "./hosted-runtime/system-mailbox.ts";
@@ -3287,11 +3288,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             return { preempted: true, prepared: true };
           }
           const browserVaultRefreshAttempt =
-            recordItem.routeAction === "apply-runtime-control-request"
-            && recordItem.wake.kind === "runtime.browser-vault-refresh-requested"
-            && recordItem.nextAttemptAt !== null
-              ? "retry"
-              : "initial";
+            resolveHostedBrowserVaultRefreshAttempt(recordItem) ?? "initial";
           emitPhaseLog({
             details: {
               workspacePresent: activeWorkspace !== null,

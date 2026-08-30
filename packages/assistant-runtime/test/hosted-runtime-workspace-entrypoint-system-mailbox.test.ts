@@ -3142,7 +3142,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode terminalizes a second browser timeout and exposes its model-free successor", async () => {
+  test("system mailbox mode preserves one browser timeout retry across projection backoff and exposes its successor", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -3155,6 +3155,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       kind: "runtime.browser-vault-refresh-requested",
       lane: "system",
       laneSeq: "1",
+    });
+    const refreshWake = buildHostedExecutionRuntimeControlWake({
+      eventId: refreshItem.dedupeKey,
+      kind: "runtime.browser-vault-refresh-requested",
+      occurredAt: refreshItem.occurredAt,
+      userId: TEST_USER_ID,
     });
     const successorText = "Synthetic Browser Vault successor completed.";
     const successorDeliveryKey = "group-join:browser-vault-timeout-successor";
@@ -3198,9 +3204,23 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     });
     const refreshImplementation =
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
-    const retryAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
-    const successorAt = new Date(Date.parse(retryAt) + 30_000).toISOString();
-    const secondRetryAt = new Date(Date.parse(retryAt) + 60_000).toISOString();
+    const projectionRetryAt = new Date(
+      Date.parse(TEST_NOW) + 60_000,
+    ).toISOString();
+    const timeoutRetryAt = new Date(
+      Date.parse(projectionRetryAt) + 60_000,
+    ).toISOString();
+    const projectionRetryAfterTimeoutAt = new Date(
+      Date.parse(timeoutRetryAt) + 60_000,
+    ).toISOString();
+    const successorAt = new Date(
+      Date.parse(projectionRetryAfterTimeoutAt) + 30_000,
+    ).toISOString();
+    const thirdRetryAt = new Date(
+      Date.parse(projectionRetryAfterTimeoutAt) + 60_000,
+    ).toISOString();
+    let projectionReads = 0;
+    let projectionShouldFail = true;
     let refreshCalls = 0;
     let snapshotIndex = 0;
 
@@ -3244,12 +3264,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       await enqueueHostedSystemMailboxItem({
         item: createResolvedRuntimeControlSystemMailboxItem(refreshItem),
         vaultRoot,
-        wake: buildHostedExecutionRuntimeControlWake({
-          eventId: refreshItem.dedupeKey,
-          kind: "runtime.browser-vault-refresh-requested",
-          occurredAt: refreshItem.occurredAt,
-          userId: TEST_USER_ID,
-        }),
+        wake: refreshWake,
       });
       await enqueueHostedSystemMailboxItem({
         item: {
@@ -3376,9 +3391,36 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           };
         },
       };
+      const persistHarnessVaultState = async (label: string) => {
+        snapshotIndex += 1;
+        const snapshot = await createVaultSnapshotBundle({
+          key: `users/bundles/member-synthetic/system-mailbox-browser-vault-${label}-${snapshotIndex}.bundle.json`,
+          vaultRoot,
+        });
+        artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+        currentWorkspace = {
+          ...currentWorkspace,
+          snapshotRef: snapshot.snapshotRef,
+        };
+      };
       const platform = createPlatform({
         artifactBytesByHash,
         mailboxPort: createMailboxPort({ events, items: [] }),
+        vaultSharePort: {
+          async listActiveProjectionScopes() {
+            projectionReads += 1;
+            if (projectionShouldFail) {
+              throw new Error("Synthetic Browser Vault projection failure.");
+            }
+            return {
+              projectionKinds: [],
+              projectionScopes: [],
+            };
+          },
+          async deliver() {
+            throw new Error("No Browser Vault projection should be delivered.");
+          },
+        },
         workspacePort,
       });
       const runSystemPass = async (attemptId: string) =>
@@ -3412,23 +3454,57 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           },
         );
 
+      const projectionFailedBeforeRefresh = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_projection_before_timeout",
+      );
+
+      assert.equal(refreshCalls, 0);
+      assert.equal(projectionReads, 1);
+      assert.equal(projectionFailedBeforeRefresh.status, "scheduled");
+      assert.equal(projectionFailedBeforeRefresh.nextWakeAt, projectionRetryAt);
+      assert.equal(projectionFailedBeforeRefresh.nextWakeReason, "assistant");
+      assert.equal(projectionFailedBeforeRefresh.immediateRecheckRequested, undefined);
+      assert.equal(checkpointRequests.length, 0);
+      const stateAfterProjectionFailure =
+        await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(stateAfterProjectionFailure.pending.length, 2);
+      const projectionBackoffItem = stateAfterProjectionFailure.pending.find(
+        (item) => item.itemId === refreshItem.id,
+      );
+      assert.ok(projectionBackoffItem);
+      assert.equal(projectionBackoffItem.status, "recording");
+      assert.equal(projectionBackoffItem.postCheckpointRecord, null);
+      assert.equal(projectionBackoffItem.nextAttemptAt, projectionRetryAt);
+      assert.equal(
+        projectionBackoffItem.lastErrorCode,
+        "HOSTED_VAULT_SHARE_PROJECTION_FAILED",
+      );
+      assert.equal(
+        projectionBackoffItem.lastErrorMessage,
+        "Vault-share projection failed before device-sync acknowledgement.",
+      );
+      await persistHarnessVaultState("projection-before-timeout");
+
+      projectionShouldFail = false;
+      vi.setSystemTime(new Date(projectionRetryAt));
       const timedOut = await runSystemPass(
         "attempt_synthetic_system_mailbox_browser_vault_timeout",
       );
 
       assert.equal(refreshCalls, 1);
+      assert.equal(projectionReads, 2);
       assert.equal(timedOut.status, "scheduled");
-      assert.equal(timedOut.nextWakeAt, retryAt);
+      assert.equal(timedOut.nextWakeAt, timeoutRetryAt);
       assert.equal(timedOut.nextWakeReason, "assistant");
       assert.equal(timedOut.immediateRecheckRequested, undefined);
       const checkpointCountAfterTimeout = checkpointRequests.length;
       assert.equal(checkpointCountAfterTimeout, 1);
       const timeoutCheckpoint = checkpointRequests.at(-1);
-      assert.equal(timeoutCheckpoint?.nextWakeAt, retryAt);
+      assert.equal(timeoutCheckpoint?.nextWakeAt, timeoutRetryAt);
       assert.equal(timeoutCheckpoint?.nextWakeReason, "assistant");
       assert.equal(
         checkpointRequests.filter((request) =>
-          request.nextWakeAt === retryAt
+          request.nextWakeAt === timeoutRetryAt
           && request.nextWakeReason === "assistant"
         ).length,
         1,
@@ -3445,16 +3521,25 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const retainedSuccessor = stateAfterFirstTimeout.pending.find(
         (item) => item.itemId === successorItem.id,
       );
+      assert.equal(retained?.itemId, refreshItem.id);
+      assert.equal(retained?.mailboxDedupeKey, refreshItem.dedupeKey);
+      assert.equal(retained?.mailboxLaneSeq, refreshItem.laneSeq);
+      assert.equal(retained?.occurredAt, refreshItem.occurredAt);
+      assert.deepEqual(retained?.wake, refreshWake);
       assert.equal(retained?.status, "recording");
       assert.equal(retained?.postCheckpointRecord, null);
-      assert.equal(retained?.nextAttemptAt, retryAt);
+      assert.equal(retained?.lastErrorCode, null);
+      assert.equal(retained?.lastErrorMessage, null);
+      assert.equal(retained?.nextAttemptAt, timeoutRetryAt);
       assert.ok(retainedSuccessor);
       assert.equal(
         isHostedSystemMailboxModelFreeExactNotificationItem(retainedSuccessor),
         true,
       );
       assert.equal(retainedSuccessor.nextAttemptAt, successorAt);
-      const prematureAt = new Date(Date.parse(TEST_NOW) + 30_000).toISOString();
+      const prematureAt = new Date(
+        Date.parse(projectionRetryAt) + 30_000,
+      ).toISOString();
       assert.equal(
         findNextHostedSystemMailboxQueueItem({
           allowedRouteActions: null,
@@ -3475,25 +3560,62 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(beforeRetry.nextWakeReason ?? null, null);
       assert.equal(beforeRetry.immediateRecheckRequested, undefined);
       assert.equal(checkpointRequests.length, checkpointCountAfterTimeout);
-      assert.equal(currentWorkspace.nextWakeAt, retryAt);
+      assert.equal(currentWorkspace.nextWakeAt, timeoutRetryAt);
       assert.equal(currentWorkspace.nextWakeReason, "assistant");
       const beforeRetryState = await readHostedSystemMailboxState(vaultRoot);
       assert.deepEqual(beforeRetryState, stateAfterFirstTimeout);
       assert.equal(
         findNextHostedSystemMailboxQueueItem({
           allowedRouteActions: null,
-          now: retryAt,
+          now: timeoutRetryAt,
           state: beforeRetryState,
         })?.itemId,
         refreshItem.id,
       );
 
-      vi.setSystemTime(new Date(retryAt));
+      projectionShouldFail = true;
+      vi.setSystemTime(new Date(timeoutRetryAt));
+      const projectionFailedAfterTimeout = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_projection_before_timeout_retry",
+      );
+
+      assert.equal(refreshCalls, 1);
+      assert.equal(projectionReads, 3);
+      assert.equal(projectionFailedAfterTimeout.status, "scheduled");
+      assert.equal(
+        projectionFailedAfterTimeout.nextWakeAt,
+        projectionRetryAfterTimeoutAt,
+      );
+      assert.equal(projectionFailedAfterTimeout.nextWakeReason, "assistant");
+      assert.equal(projectionFailedAfterTimeout.immediateRecheckRequested, undefined);
+      assert.equal(checkpointRequests.length, checkpointCountAfterTimeout);
+      const stateAfterProjectionFailureAfterTimeout =
+        await readHostedSystemMailboxState(vaultRoot);
+      const timeoutRetryItem = stateAfterProjectionFailureAfterTimeout.pending.find(
+        (item) => item.itemId === refreshItem.id,
+      );
+      assert.ok(timeoutRetryItem);
+      assert.equal(timeoutRetryItem.status, "recording");
+      assert.equal(timeoutRetryItem.postCheckpointRecord, null);
+      assert.equal(timeoutRetryItem.lastErrorCode, null);
+      assert.equal(timeoutRetryItem.lastErrorMessage, null);
+      assert.equal(timeoutRetryItem.nextAttemptAt, projectionRetryAfterTimeoutAt);
+      assert.deepEqual(
+        stateAfterProjectionFailureAfterTimeout.pending.find(
+          (item) => item.itemId === successorItem.id,
+        ),
+        retainedSuccessor,
+      );
+      await persistHarnessVaultState("projection-before-timeout-retry");
+
+      projectionShouldFail = false;
+      vi.setSystemTime(new Date(projectionRetryAfterTimeoutAt));
       const timedOutAgain = await runSystemPass(
         "attempt_synthetic_system_mailbox_browser_vault_timeout_retry",
       );
 
       assert.equal(refreshCalls, 2);
+      assert.equal(projectionReads, 4);
       assert.equal(timedOutAgain.status, "scheduled");
       assert.equal(timedOutAgain.nextWakeAt, successorAt);
       assert.equal(timedOutAgain.nextWakeReason, "mailbox");
@@ -3502,10 +3624,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const checkpointCountAfterSecondTimeout = checkpointRequests.length;
       const secondTimeoutCheckpoint = checkpointRequests.at(-1);
       assert.equal(secondTimeoutCheckpoint?.nextWakeAt, successorAt);
-      assert.notEqual(secondTimeoutCheckpoint?.nextWakeAt, secondRetryAt);
+      assert.notEqual(secondTimeoutCheckpoint?.nextWakeAt, thirdRetryAt);
       assert.equal(secondTimeoutCheckpoint?.nextWakeReason, "mailbox");
       assert.equal(
-        checkpointRequests.some((request) => request.nextWakeAt === secondRetryAt),
+        checkpointRequests.some((request) => request.nextWakeAt === thirdRetryAt),
         false,
       );
       assert.equal(
@@ -3523,7 +3645,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(
         findNextHostedSystemMailboxQueueItem({
           allowedRouteActions: null,
-          now: retryAt,
+          now: projectionRetryAfterTimeoutAt,
           state: stateAfterSecondTimeout,
         }),
         null,
@@ -3613,7 +3735,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         "sent",
       );
 
-      vi.setSystemTime(new Date(secondRetryAt));
+      vi.setSystemTime(new Date(thirdRetryAt));
       const afterTerminalization = await runSystemPass(
         "attempt_synthetic_system_mailbox_browser_vault_timeout_after_terminalization",
       );

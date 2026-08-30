@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-29
-Updated: 2026-08-29
+Updated: 2026-08-30
 
 ## Progress
 
@@ -31,10 +31,34 @@ Updated: 2026-08-29
 - Changelog review classifies this as a priority-3 member-visible reliability
   improvement. The existing item now states the exactly-one retry and terminal
   second-timeout boundary; no visual is warranted for this content-only entry.
-- Pending: intermediate candidate commit/push, PR evidence refresh, full later
-  ReviewGPT round on the exact pushed head, exact-head required CI, Ready state,
-  merge, merge proof, and worktree retirement. Production deployment remains
-  explicitly out of scope.
+- Final ReviewGPT round 3 accepted the architecture retrospective but found one
+  merge-blocking composed-owner defect: the existing vault-share projection
+  backoff also writes `nextAttemptAt`, so a projection-only delay can be
+  mistaken for the one Browser Vault timeout retry. That mislabels the first
+  actual refresh as `retry` and can terminalize its first timeout without the
+  promised Browser Vault retry.
+- The user explicitly resumed remediation on 2026-08-30 with simplicity,
+  maintainability, and composability as the priority. The selected direction is
+  to derive timeout-retry ownership from the existing projection-failure
+  metadata plus `nextAttemptAt`, through one shared predicate used by telemetry
+  and both deferral writers. Add no persisted field, counter, enum, or owner.
+- ReviewGPT authored that correction as patch SHA-256
+  `c620d934ebd5454d36eb9b9caa79f2c75b48fa12c58eba25d5ef46e78f2d80f0`.
+  Parent review accepted the shared predicate, reuse of existing projection
+  metadata, clearing of projection metadata on the first actual timeout, and
+  preservation of timeout-retry ownership through a later projection failure.
+  The patch adds no persistent state, alternate owner, telemetry schema, or
+  unrelated behavior.
+- The first owner-level test run found one test-only expectation mismatch: the
+  existing wake owner truthfully returns `reason: "assistant"`, not `null`.
+  ReviewGPT supplied the one-assertion test-only revision with SHA-256
+  `6398da1ec5c3a60d6438f65b1050158f1b77751bdea43795bf5ec2401f133a5e`.
+- Remediation proof is green: the two focused owner/composed tests pass; the
+  five-file hosted-runtime regression set passes 184 tests; assistant-runtime
+  typecheck and staged diff checks pass.
+- Pending: docs/log guards, commit and push, exact-head final ReviewGPT review,
+  required CI, Ready state, merge, merge proof, and worktree retirement.
+  Production deployment remains explicitly out of scope.
 
 ## Goal
 
@@ -99,8 +123,10 @@ Updated: 2026-08-29
 - ReviewGPT exclusively authors production-code and telemetry changes. Apply a
   returned patch only after verifying scope, privacy, cardinality, runtime
   overhead, retry boundedness, and current-main compatibility.
-- Reuse the existing `nextAttemptAt` value as the one-retry marker rather than
-  adding an attempt counter or durable state.
+- Reuse the existing `nextAttemptAt` and projection-failure metadata together
+  to distinguish a projection-only delay from the one Browser Vault timeout
+  retry. One shared derived predicate must own both telemetry attempt labeling
+  and second-timeout terminalization; add no attempt counter or durable state.
 - Telemetry must remain metadata-only, fixed-schema, bounded-volume, and
   behavior-preserving outside the explicitly requested timeout increase.
 - Preserve foreground reply priority and every existing host-abort,
@@ -116,7 +142,11 @@ Updated: 2026-08-29
 3. [completed] Run the timeout-timeout terminal scenario, deadline/cancellation tests,
    telemetry-shape tests, focused hosted-runtime suites, typechecks, privacy/log
    guards, docs drift, and diff checks.
-4. [in progress] Update the draft PR evidence and LOC breakdown, commit with the authenticated
+4. [completed] Update the draft PR evidence and LOC breakdown, commit with the authenticated
    identity, and fast-forward the existing PR branch without force-pushing.
-5. [pending] Run the required later full ReviewGPT round and exact-head CI. Mark Ready and
-   merge only after all gates pass. Do not deploy production automatically.
+5. [completed] Have ReviewGPT implement the accepted projection-backoff ownership finding
+   using existing metadata and one shared predicate, then run the composed
+   before/between-projection-failure proof and focused regression set.
+6. [in progress] Push the corrected candidate, run the required later full ReviewGPT round and
+   exact-head CI, mark Ready, and merge only after all gates pass. Do not deploy
+   production automatically.

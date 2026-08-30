@@ -61,6 +61,7 @@ import {
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
+  deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout,
   deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
@@ -68,6 +69,7 @@ import {
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
   retainHostedSystemMailboxItemAfterForegroundPreemption,
+  resolveHostedBrowserVaultRefreshAttempt,
   resolveHostedSystemMailboxNextWakeAt,
   restoreHostedSystemMailboxCheckpointRollbackState,
 } from "../src/hosted-runtime/system-mailbox.ts";
@@ -3589,6 +3591,103 @@ describe("hosted system mailbox notification execution context", () => {
           status: "recording",
         }],
       });
+    } finally {
+      dateNow.mockRestore();
+      await workspace.cleanup();
+    }
+  });
+
+  it("keeps Browser Vault timeout-retry ownership distinct from projection backoff", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime.browser-vault-refresh-requested:projection-timeout-owner",
+      kind: "runtime.browser-vault-refresh-requested",
+      occurredAt: FIXED_NOW,
+      userId: "member_123",
+    });
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(Date.parse(FIXED_NOW));
+    const readRetained = async () => {
+      const retained = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0];
+      assert.ok(retained);
+      return retained;
+    };
+    const deferProjectionAt = async (now: string) => {
+      dateNow.mockReturnValue(Date.parse(now));
+      await deferHostedSystemMailboxItemAfterVaultShareProjectionFailure({
+        item: await readRetained(),
+        vaultRoot: workspace.vaultRoot,
+      });
+      return await readRetained();
+    };
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedRuntimeControlItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_item_browser_vault_projection_timeout_owner",
+          kind: wake.kind,
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+        pending: state.pending.map((item) => ({
+          ...item,
+          attemptCount: 1,
+          lastAttemptAt: FIXED_NOW,
+          status: "recording" as const,
+        })),
+      }));
+
+      let retained = await readRetained();
+      assert.equal(resolveHostedBrowserVaultRefreshAttempt(retained), "initial");
+
+      retained = await deferProjectionAt(FIXED_NOW);
+      assert.equal(retained.nextAttemptAt, "2026-04-27T00:01:00.000Z");
+      assert.equal(
+        retained.lastErrorCode,
+        "HOSTED_VAULT_SHARE_PROJECTION_FAILED",
+      );
+      assert.equal(resolveHostedBrowserVaultRefreshAttempt(retained), "initial");
+
+      retained = await deferProjectionAt("2026-04-27T00:01:00.000Z");
+      assert.equal(retained.nextAttemptAt, "2026-04-27T00:02:00.000Z");
+      assert.equal(resolveHostedBrowserVaultRefreshAttempt(retained), "initial");
+
+      dateNow.mockReturnValue(Date.parse("2026-04-27T00:02:00.000Z"));
+      await expect(
+        deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout({
+          item: retained,
+          vaultRoot: workspace.vaultRoot,
+        }),
+      ).resolves.toEqual({
+        at: "2026-04-27T00:03:00.000Z",
+        reason: "assistant",
+      });
+      retained = await readRetained();
+      assert.equal(retained.lastErrorCode, null);
+      assert.equal(retained.lastErrorMessage, null);
+      assert.equal(resolveHostedBrowserVaultRefreshAttempt(retained), "retry");
+
+      retained = await deferProjectionAt("2026-04-27T00:03:00.000Z");
+      assert.equal(retained.nextAttemptAt, "2026-04-27T00:04:00.000Z");
+      assert.equal(retained.lastErrorCode, null);
+      assert.equal(retained.lastErrorMessage, null);
+      assert.equal(resolveHostedBrowserVaultRefreshAttempt(retained), "retry");
+
+      retained = await deferProjectionAt("2026-04-27T00:04:00.000Z");
+      assert.equal(retained.nextAttemptAt, "2026-04-27T00:05:00.000Z");
+      assert.equal(retained.lastErrorCode, null);
+      assert.equal(retained.lastErrorMessage, null);
+      assert.equal(resolveHostedBrowserVaultRefreshAttempt(retained), "retry");
+      dateNow.mockReturnValue(Date.parse("2026-04-27T00:05:00.000Z"));
+      await expect(
+        deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout({
+          item: retained,
+          vaultRoot: workspace.vaultRoot,
+        }),
+      ).resolves.toBeNull();
+      assert.deepEqual(await readRetained(), retained);
     } finally {
       dateNow.mockRestore();
       await workspace.cleanup();
