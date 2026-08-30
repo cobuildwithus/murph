@@ -239,6 +239,17 @@ describe("pinned Codex OpenAI egress conformance", () => {
     expect(discovered).toContain("/v1/future_route/items");
   });
 
+  it("trims the Linux linker suffix from the reviewed turn-cost route", () => {
+    const discovered = discoverCodexBinaryRouteCandidates(Buffer.from([
+      ...Buffer.from(
+        "prefix/v1/analytics/codex/turn-costsbundle_idsstruct",
+      ),
+      0,
+    ]));
+
+    expect(discovered).toEqual(["/v1/analytics/codex/turn-costs"]);
+  });
+
   it.each(["future", "future/items"])(
     "retains unknown provider-anchored base-relative route %s as a scanner candidate",
     (relativeRoute) => {
