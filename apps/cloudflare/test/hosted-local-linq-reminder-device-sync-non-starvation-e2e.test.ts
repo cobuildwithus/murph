@@ -233,10 +233,12 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         userId,
         { timeoutMs: 420_000 },
       );
-      expect(["started", "woken"]).toContain(wakeResult.wakeResult.action);
-      expect(wakeResult.wakeResult).toMatchObject({
-        kind: "runtime_processing_accepted",
-      });
+      const acceptedWake = wakeResult.wakeResult;
+      expect(acceptedWake.kind).toBe("runtime_processing_accepted");
+      if (acceptedWake.kind !== "runtime_processing_accepted") {
+        throw new Error("Device-sync wake was not accepted for runtime processing.");
+      }
+      expect(["started", "woken"]).toContain(acceptedWake.action);
 
       await waitForShutdownCheckpointPublicationBarrier(schedule.dueAtIso);
       const firstPass = await waitForDeviceSyncPassFinished({
