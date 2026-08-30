@@ -63,7 +63,7 @@ const groupBacklogReply = "I caught up with the whole group in one reply.";
 const handoffGroupBootstrapText = "Start a synthetic group conversation.";
 const handoffGroupBootstrapReply = "The synthetic group conversation is ready.";
 const privateHandoffRequestText = "Please share a short update with my joined group.";
-const privateHandoffAcknowledgment = "I shared the update with your group.";
+const privateHandoffAcknowledgment = "I queued the update for your group.";
 const handoffContext = `COMPOSED_HANDOFF_CONTEXT_${runId}`;
 const handoffGroupMessage = "The weekly check-in is ready for the group.";
 const blockedGroupFollowUpText = `BLOCKED_GROUP_FOLLOW_UP_${runId}`;
@@ -90,6 +90,22 @@ afterAll(async () => {
 describe("hosted local usage-limit ambiguous send e2e", () => {
   beforeAll(async () => {
     linqStub = await startHostedLocalLinqStub({
+      canonicalChats: [{
+        chatId: handoffGroupChatId,
+        handles: [
+          {
+            handle: buildLinqHomePhoneNumber(handoffOwnerUserId),
+            isMe: true,
+            status: "active",
+          },
+          {
+            handle: handoffOwnerPhone,
+            isMe: false,
+            status: "active",
+          },
+        ],
+        isGroup: true,
+      }],
       expectedAuthorizationToken: linqApiToken,
     });
     scenario = await startHostedLocalFullStackScenario({
@@ -742,7 +758,6 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
   }, 600_000);
 
   it("composes a plain-text private handoff through settlement and the next-call fence", async () => {
-    requireLinqStub().setChatIsGroup(handoffGroupChatId, true);
     const groupReplyPath =
       `/chats/${encodeURIComponent(handoffGroupChatId)}/messages`;
     const bootstrapReplyMatcher = (request: ObservedLinqRequest): boolean =>
@@ -819,7 +834,12 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
         context: handoffContext,
         membershipId: requireSingleMembershipId(input),
       })),
-      privateHandoffAcknowledgment,
+      {
+        deriveResponse(input) {
+          requireQueuedGroupHandoff(input);
+          return privateHandoffAcknowledgment;
+        },
+      },
     ], {
       matchInputContains: privateHandoffRequestText,
     });
@@ -1086,6 +1106,33 @@ function requireSingleMembershipId(
     throw new Error("Expected exactly one opaque membership id from group inventory.");
   }
   return [...membershipIds][0]!;
+}
+
+function requireQueuedGroupHandoff(
+  input: HostedLocalAssistantProviderRequestContext,
+): void {
+  const outputs = readHostedLocalAssistantProviderToolOutputs({
+    body: input.requestBody,
+    method: "POST",
+    url: "/v1/responses",
+  });
+  const queued = outputs.some((output) =>
+    /\\?"action\\?"\s*:\s*\\?"handoff\\?"/u.test(output)
+    && /\\?"status\\?"\s*:\s*\\?"queued\\?"/u.test(output)
+  );
+  if (queued) {
+    return;
+  }
+  const unavailableReason = outputs.flatMap((output) =>
+    [...output.matchAll(
+      /\\?"unavailableReason\\?"\s*:\s*\\?"([a-z_]+)\\?"/gu,
+    )].flatMap((match) => match[1] ? [match[1]] : [])
+  )[0];
+  throw new Error(
+    unavailableReason
+      ? `Expected the group handoff to be queued; unavailableReason=${unavailableReason}.`
+      : "Expected the group handoff to be queued.",
+  );
 }
 
 function readConversationMailboxLane(
