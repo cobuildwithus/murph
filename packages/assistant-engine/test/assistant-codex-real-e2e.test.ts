@@ -1077,6 +1077,13 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
+      const progressUpdates: string[] = []
+      const progressDelivery = {
+        async send(text: string) {
+          progressUpdates.push(text)
+          return { kind: 'sent', source: 'model' } as const
+        },
+      } satisfies NonNullable<CodexAppServerTurnInput['progressDelivery']>
 
       try {
         const workingDirectory = await prepareRealCodexOnboardingDirectory()
@@ -1185,9 +1192,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
           hostedToolContext,
+          progressDelivery,
           prompt: "I use Oura, but I'd rather connect it later.",
           scenario: 'wearable_connection_deferred',
         })
@@ -1198,7 +1206,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         )
         const reply = result.finalMessage.trim()
         process.stdout.write(
-          `[onboarding-wearable-defer-e2e] ${JSON.stringify({ reply })}\n`,
+          `[onboarding-wearable-defer-e2e] ${JSON.stringify({
+            progressUpdateCount: progressUpdates.length,
+            reply,
+          })}\n`,
         )
 
         expect(deviceWriteActions).toHaveLength(0)
@@ -1227,9 +1238,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
           hostedToolContext,
+          progressDelivery,
           prompt: 'I use Oura. Send me the connection link now.',
           scenario: 'wearable_connection_offer',
         })
@@ -1255,8 +1267,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           hostedToolContext,
+          progressDelivery,
           prompt: "I'll do that later.",
           resumeSessionId: linkOffer.sessionId,
           scenario: 'wearable_connection_deferred',
@@ -1268,7 +1281,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             .filter((request) => request.action !== 'list_accounts'),
           'later-turn connection writes',
         ).toHaveLength(0)
-        expect(laterReply).toMatch(/later|wait|whenever|when you(?:'re| are) ready/iu)
+        expect(
+          hasWearableConnectionDeferralMeaning(laterReply),
+          laterReply,
+        ).toBe(true)
         expect(laterReply).toMatch(
           /voice memo|movement|move|training|supplements|meds|conditions|allergies|medical/iu,
         )
@@ -1315,8 +1331,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           hostedToolContext,
+          progressDelivery,
           prompt: "That's everything for the foundation. What's next?",
           resumeSessionId: laterDeferral.sessionId,
           scenario: 'wearable_connection_deferred_return',
@@ -1348,9 +1365,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             ].join('\n'),
             supportedProviders,
           ),
-          dynamicTools: [MURPH_DEVICE_TOOL],
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           excludeResumeTurns: true,
           hostedToolContext,
+          progressDelivery,
           prompt: "Let's pause onboarding until next week.",
           scenario: 'wearable_connection_deferred',
         })
@@ -1365,6 +1383,18 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           /voice memo|supplements|meds|conditions|allergies|blood tests|labs/iu,
         )
         expect(onboardingPause.finalMessage.match(/\?/gu) ?? []).toHaveLength(0)
+        const progressCalls = [
+          result,
+          linkOffer,
+          laterDeferral,
+          contextualReturn,
+          onboardingPause,
+        ].flatMap((turn) => turn.actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        ))
+        expect(progressUpdates).toEqual([])
+        expect(progressCalls).toEqual([])
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)
       }
@@ -21340,7 +21370,7 @@ function hasJoinedGroupCapabilityMeaning(message: string): boolean {
 }
 
 function hasWearableConnectionDeferralMeaning(message: string): boolean {
-  return /\b(?:later|wait|whenever|when you(?:'re| are) ready|once you (?:connect|link)(?: it)?)\b/iu
+  return /\b(?:later|wait|whenever|when you(?:'re| are) ready|(?:once|when) you (?:connect|link)(?: it)?)\b/iu
     .test(message)
 }
 

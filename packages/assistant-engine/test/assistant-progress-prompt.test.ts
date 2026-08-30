@@ -23,16 +23,19 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Send one early update only before direct reply-critical work that requires three or more distinct substantive checks or tool actions beyond routine turn setup',
+      'Send one early update only for direct reply-critical work that requires three or more distinct substantive checks or tool actions beyond routine turn setup',
     )
     expect(prompt).toContain(
-      'Never count skill or policy reads, onboarding resume/status/context reads, device-availability checks, or state saves toward that threshold',
+      'When it applies, send it before the first qualifying check or action, then continue immediately',
     )
     expect(prompt).toContain(
-      'Routine onboarding and setup stay silent through the final answer, including goal capture, context gathering, connection choices, and the next setup question',
+      'Routine onboarding and setup steps do not count toward that threshold by themselves',
     )
     expect(prompt).toContain(
-      'only separate user-requested long research or external action can trigger the ordinary threshold',
+      'this includes goal capture, skill or policy reads, resume/status/context reads, device-availability checks, state saves, connection choices, and the next setup question',
+    )
+    expect(prompt).toContain(
+      'Keep those turns silent when that is all they require; if the remaining reply-critical work still requires slow inspection or three substantive evidence checks or actions, apply the ordinary threshold',
     )
     expect(prompt).toContain(
       'Also skip progress for ordinary conversation, choosing a straightforward next step, and quick resume checks',
@@ -77,6 +80,7 @@ describe('assistant progress prompt contract', () => {
     expect(prompt).not.toContain('before the first non-progress tool call')
     expect(prompt).not.toContain('orient the member even when each lookup is routine')
     expect(prompt).not.toContain('Source count alone does not trigger it')
+    expect(prompt).not.toContain('only separate user-requested long research or external action')
   })
 
   it('does not instruct routes without progress delivery to call the tool', () => {
