@@ -1,0 +1,69 @@
+diff --git a/dist/thread-cli.mjs b/dist/thread-cli.mjs
+index 02756c3b59..a0646f8830 100644
+--- a/dist/thread-cli.mjs
++++ b/dist/thread-cli.mjs
+@@ -11,0 +12,6 @@ const cliEntryPath = fileURLToPath(new URL('./bin.mjs', import.meta.url));
++const DETACHED_WAKE_ENV = 'REVIEW_GPT_DETACHED_WAKE';
++export function shouldReturnWakeToCallingSession(input) {
++    const currentSessionId = String(input.currentSessionId ?? '').trim();
++    const sessionId = String(input.sessionId ?? '').trim();
++    return !input.detachedWake && currentSessionId.length > 0 && currentSessionId === sessionId;
++}
+@@ -423 +429,4 @@ export function createThreadCli() {
+-                    env: process.env,
++                    env: {
++                        ...process.env,
++                        [DETACHED_WAKE_ENV]: '1',
++                    },
+@@ -439,0 +449,10 @@ export function createThreadCli() {
++            const detachedWake = process.env[DETACHED_WAKE_ENV] === '1';
++            delete process.env[DETACHED_WAKE_ENV];
++            const returnToCallingSession = shouldReturnWakeToCallingSession({
++                currentSessionId: process.env.CODEX_THREAD_ID,
++                detachedWake,
++                sessionId,
++            });
++            if (returnToCallingSession) {
++                process.stderr.write('Exact calling Codex session will receive the recovered wake result; nested child launch skipped.\n');
++            }
+@@ -459 +478 @@ export function createThreadCli() {
+-                skipResume: c.options.skipResume,
++                skipResume: c.options.skipResume || returnToCallingSession,
+diff --git a/src/thread-cli.mts b/src/thread-cli.mts
+index 0159d95b31..eef6a99ab3 100644
+--- a/src/thread-cli.mts
++++ b/src/thread-cli.mts
+@@ -21,0 +22,11 @@ const cliEntryPath = fileURLToPath(new URL('./bin.mjs', import.meta.url));
++const DETACHED_WAKE_ENV = 'REVIEW_GPT_DETACHED_WAKE';
++
++export function shouldReturnWakeToCallingSession(input: {
++  currentSessionId?: string;
++  detachedWake?: boolean;
++  sessionId?: string;
++}): boolean {
++  const currentSessionId = String(input.currentSessionId ?? '').trim();
++  const sessionId = String(input.sessionId ?? '').trim();
++  return !input.detachedWake && currentSessionId.length > 0 && currentSessionId === sessionId;
++}
+@@ -485 +496,4 @@ export function createThreadCli() {
+-          env: process.env,
++          env: {
++            ...process.env,
++            [DETACHED_WAKE_ENV]: '1',
++          },
+@@ -502,0 +517,12 @@ export function createThreadCli() {
++      const detachedWake = process.env[DETACHED_WAKE_ENV] === '1';
++      delete process.env[DETACHED_WAKE_ENV];
++      const returnToCallingSession = shouldReturnWakeToCallingSession({
++        currentSessionId: process.env.CODEX_THREAD_ID,
++        detachedWake,
++        sessionId,
++      });
++      if (returnToCallingSession) {
++        process.stderr.write(
++          'Exact calling Codex session will receive the recovered wake result; nested child launch skipped.\n',
++        );
++      }
+@@ -522 +548 @@ export function createThreadCli() {
+-        skipResume: c.options.skipResume,
++        skipResume: c.options.skipResume || returnToCallingSession,
