@@ -191,7 +191,9 @@ Hosted runtime env/config helpers that Cloudflare needs at the app boundary expo
 membership is owned by `@murphai/hosted-execution/assistant-capabilities`, so
 runtime launch/profile contracts do not re-export lower owner packages through
 legacy shims. Concrete Codex app-server process lifecycle hooks remain owned by
-`@murphai/assistant-engine/codex-lifecycle`.
+`@murphai/assistant-engine/codex-lifecycle`. Workspace restore invokes that
+owner before any path validates, replaces, clears, or sanitizes Codex home, so
+one process never spans two filesystem lifecycles.
 Hosted Codex keeps WebSockets enabled for the first provider attempt and sets
 `stream_max_retries = 0`, so a retryable stream failure activates Codex's native
 HTTPS fallback instead of spending another full stream-idle window on the same

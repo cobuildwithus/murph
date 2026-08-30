@@ -377,7 +377,11 @@ Last verified: 2026-08-30
 - `packages/assistant-engine` owns one resident Codex App Server process and one
   memoized readiness promise on that process. Readiness covers spawn plus the
   App Server initialization handshake; it does not reserve the process for a
-  turn. Matching preparation callers join that same promise, while a matching
+  turn. Its warmth is scoped to one restored workspace: before any hosted
+  restore path validates, replaces, clears, or sanitizes Codex home,
+  `packages/assistant-runtime` synchronously stops the exact engine-owned
+  process so the replacement rebuilds private indexes against the restored
+  home. Matching preparation callers join that same promise, while a matching
   foreground turn synchronously reserves the exact process before joining its
   readiness. Hosted preparation is a one-shot decision from the first fresh
   auto-reply-enabled pre-pass conversation candidate: Linq or Telegram may admit
