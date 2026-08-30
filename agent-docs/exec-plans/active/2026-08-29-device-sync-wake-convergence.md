@@ -54,9 +54,9 @@ Updated: 2026-08-29
 ## Product UX walkthrough
 
 - Person and path: an existing member whose connected wearable sends a replayed activity payload while scheduled provider work fills the local pass budget.
-- Expected experience: the payload is retained, admitted on the next pass, terminally acknowledged, and the existing downstream automation proceeds without repeated runtime starts.
-- Recovery: provider cadence stays Web-owned and is published after the existing completion fence; no data, connection, or retry authority is dropped.
-- Result: Ready for candidate review; merge remains gated on the hosted Junction end-to-end proof.
+- Expected experience: retained payload pages drain through bounded continuation passes without provider cadence refilling the local queue ahead of each page, then reach terminal acknowledgement and the existing downstream automation.
+- Recovery: provider cadence stays Web-owned and resumes after retained imports drain and the existing completion fence publishes it; one or more bounded continuation passes can run first. No data, connection, or retry authority is dropped.
+- Result: Hold until the hosted Junction end-to-end proof reaches terminal acknowledgement.
 
 ## Verification
 
