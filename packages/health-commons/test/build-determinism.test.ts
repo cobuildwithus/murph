@@ -308,13 +308,11 @@ describe("@murphai/health-commons build determinism", () => {
     }
   });
 
-  it("rejects a concurrent generated tree with different contents", async () => {
+  it("rejects a changed non-hash tree and preserves the concurrent winner", async () => {
     const testRoot = await pathFromTempDir("health-commons-mismatched-generated-");
     const generatedRoot = path.join(testRoot, "generated");
-    buildHealthCommonsCatalogMock
-      .mockResolvedValueOnce(createCatalog("sha256:original"))
-      .mockResolvedValueOnce(createCatalog("sha256:first"))
-      .mockResolvedValueOnce(createCatalog("sha256:second"));
+    buildHealthCommonsCatalogMock.mockResolvedValue(createCatalog("sha256:first"));
+    let winningTree: Map<string, RawGeneratedTreeEntry> | null = null;
 
     try {
       await writeHealthCommonsGeneratedArtifacts({
@@ -325,6 +323,12 @@ describe("@murphai/health-commons build determinism", () => {
 
       generatedRootRenameControl.delayFirstTargetMove = true;
       generatedRootRenameControl.targetRoot = generatedRoot;
+      generatedRootRenameControl.beforeReleaseDelayedTargetMove = async () => {
+        await writeFile(path.join(generatedRoot, "protocol-index.json"), "{\"winner\":true}\n", "utf8");
+        await mkdir(path.join(generatedRoot, "winner-only"), { recursive: true });
+        await writeFile(path.join(generatedRoot, "winner-only", "artifact.bin"), Buffer.from([0x00, 0xff]));
+        winningTree = await readRawGeneratedTree(generatedRoot);
+      };
 
       const outcomes = await Promise.allSettled([
         writeHealthCommonsGeneratedArtifacts({
@@ -341,6 +345,10 @@ describe("@murphai/health-commons build determinism", () => {
 
       expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
       expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+      if (!winningTree) {
+        throw new Error("Concurrent winner was not captured.");
+      }
+      await expect(readRawGeneratedTree(generatedRoot)).resolves.toEqual(winningTree);
       await expect(readdir(testRoot)).resolves.toEqual(["generated"]);
     } finally {
       await rm(testRoot, { recursive: true, force: true });
@@ -663,4 +671,36 @@ describe("@murphai/health-commons build determinism", () => {
 
 async function pathFromTempDir(prefix: string): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+type RawGeneratedTreeEntry =
+  | { kind: "directory" }
+  | { bytes: Buffer; kind: "file" };
+
+async function readRawGeneratedTree(root: string): Promise<Map<string, RawGeneratedTreeEntry>> {
+  const entries = new Map<string, RawGeneratedTreeEntry>();
+
+  async function collect(relativeDir: string): Promise<void> {
+    const children = await readdir(path.join(root, relativeDir), { withFileTypes: true });
+    children.sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const child of children) {
+      const relativePath = relativeDir ? path.posix.join(relativeDir, child.name) : child.name;
+      if (child.isDirectory()) {
+        entries.set(relativePath, { kind: "directory" });
+        await collect(relativePath);
+        continue;
+      }
+      if (!child.isFile()) {
+        throw new Error("Unsupported entry in generated test tree.");
+      }
+      entries.set(relativePath, {
+        bytes: await readFile(path.join(root, relativePath)),
+        kind: "file",
+      });
+    }
+  }
+
+  await collect("");
+  return entries;
 }
