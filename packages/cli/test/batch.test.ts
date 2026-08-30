@@ -496,6 +496,161 @@ test('batch preserves query-source recovery fields without echoing private sourc
   }
 })
 
+test('batch compact mode retains requested child failure envelopes', async () => {
+  const privateVault = './private-vault-path'
+  const invalidKind = 'not-a-kind'
+  const raw = await runCli([
+    'batch',
+    '--compact',
+    '--vault',
+    privateVault,
+    '--command',
+    JSON.stringify([
+      'event',
+      'list',
+      '--kind',
+      invalidKind,
+      '--full-output',
+      '--format',
+      'json',
+    ]),
+    '--command',
+    '["memory","show"]',
+    '--stopOnError',
+    '--format',
+    'json',
+  ])
+  const result = vaultCliBatchResultSchema.parse(JSON.parse(raw))
+  const command = result.commands[0]
+
+  assert.equal(result.requested, 2)
+  assert.equal(result.executed, 1)
+  assert.equal(result.count, 1)
+  assert.equal(result.succeeded, 0)
+  assert.equal(result.failed, 1)
+  assert.equal(result.stoppedEarly, true)
+  assert.equal(command?.ok, false)
+  assert.equal(command?.error?.code, 'VALIDATION_ERROR')
+  assert.equal(command?.error?.retryable, false)
+  assert.equal(command?.error?.stage, 'validation')
+  assert.equal(command?.error?.fieldErrors?.[0]?.path, 'kind')
+  assert.ok((command?.stdout.length ?? 0) > 0)
+  assert.equal(
+    command?.outputBytes,
+    Buffer.byteLength(command?.stdout ?? '', 'utf8'),
+  )
+  assert.equal(command?.outputChars, command?.stdout.length)
+
+  const childEnvelope = JSON.parse(command?.stdout ?? '') as {
+    error?: {
+      code?: string
+      fieldErrors?: Array<{ message?: string }>
+    }
+    meta?: {
+      command?: string
+      duration?: string
+    }
+    ok?: boolean
+  }
+  assert.equal(childEnvelope.ok, false)
+  assert.equal(childEnvelope.error?.code, 'VALIDATION_ERROR')
+  assert.ok((childEnvelope.error?.fieldErrors?.[0]?.message?.length ?? 0) > 240)
+  assert.equal(childEnvelope.meta?.command, 'event list')
+  assert.match(childEnvelope.meta?.duration ?? '', /^\d+ms$/u)
+
+  const safeFailureOutput = JSON.stringify({
+    error: command?.error,
+    stdout: command?.stdout,
+  })
+  assert.equal(safeFailureOutput.includes(invalidKind), false)
+  assert.equal(safeFailureOutput.includes(privateVault), false)
+})
+
+test('batch normalizes native validation fields in compact and noncompact output', async () => {
+  const oversizedQuery = 'q'.repeat(257)
+  const invalidKind = 'private-invalid-kind'
+  const scenarios = [
+    {
+      argv: ['food', 'search-labels-batch', '--query', oversizedQuery],
+      fieldCode: 'too_big',
+      fieldPath: 'query.0',
+      hasLongNativeFieldMessage: false,
+    },
+    {
+      argv: ['event', 'list', '--kind', invalidKind],
+      fieldCode: 'invalid_value',
+      fieldPath: 'kind',
+      hasLongNativeFieldMessage: true,
+    },
+  ] as const
+
+  for (const compact of [false, true]) {
+    const raw = await runCli([
+      'batch',
+      ...(compact ? ['--compact'] : []),
+      '--vault',
+      './vault',
+      ...scenarios.flatMap((scenario) => [
+        '--command',
+        JSON.stringify(scenario.argv),
+      ]),
+      '--format',
+      'json',
+    ])
+    const result = vaultCliBatchResultSchema.parse(JSON.parse(raw))
+
+    assert.equal(result.failed, scenarios.length)
+    for (const [index, scenario] of scenarios.entries()) {
+      const command = result.commands[index]
+      const expectedError = {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid command option.',
+        retryable: false,
+        stage: 'validation',
+        fieldErrors: [
+          {
+            code: scenario.fieldCode,
+            message: 'Invalid value for this option.',
+            missing: false,
+            path: scenario.fieldPath,
+            received: 'invalid',
+          },
+        ],
+      }
+
+      assert.equal(command?.ok, false)
+      assert.deepEqual(command?.error, expectedError)
+      assert.equal(JSON.stringify(command?.error).includes(oversizedQuery), false)
+      assert.equal(JSON.stringify(command?.error).includes(invalidKind), false)
+      assert.ok((command?.outputBytes ?? 0) > 0)
+
+      if (compact) {
+        assert.equal(command?.stdout, '')
+        continue
+      }
+
+      const nativeError = JSON.parse(command?.stdout ?? '') as {
+        code?: string
+        fieldErrors?: Array<{
+          message?: string
+          received?: string
+        }>
+        message?: string
+      }
+      assert.equal(nativeError.code, 'VALIDATION_ERROR')
+      assert.equal(nativeError.fieldErrors?.[0]?.received, '')
+      assert.equal(
+        (nativeError.message?.length ?? 0) > 640,
+        scenario.hasLongNativeFieldMessage,
+      )
+      assert.equal(
+        (nativeError.fieldErrors?.[0]?.message?.length ?? 0) > 240,
+        scenario.hasLongNativeFieldMessage,
+      )
+    }
+  }
+})
+
 test('batch lifts typed child failures through explicit non-JSON formats', async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-formatted-failure-'))
   const vault = path.join(parent, 'vault')

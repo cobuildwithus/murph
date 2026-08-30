@@ -23,6 +23,7 @@ export const batchRunResultSchema = vaultCliBatchResultEnvelopeSchema
 type BatchCommandResult = z.output<
   typeof vaultCliBatchCommandResultEnvelopeSchema
 >
+type BatchCommandError = z.output<typeof vaultCliBatchCommandErrorSchema>
 type BatchChildRenderedFormat = 'md' | 'toon' | 'yaml'
 
 export function registerBatchCommands(cli: Cli.Cli) {
@@ -204,7 +205,7 @@ async function runBatchCommand(input: {
       : internalOutput
     const parsedOutput = parseJsonOutput(output)
     const parsedChildError = parseChildCommandError(internalOutput)
-    const childError = parsedChildError ?? projectBatchCommandError(error)
+    const childError = parsedChildError?.error ?? projectBatchCommandError(error)
     return {
       index: input.index,
       argv,
@@ -213,7 +214,7 @@ async function runBatchCommand(input: {
       outputBytes: Buffer.byteLength(output, 'utf8'),
       outputChars: output.length,
       stdout:
-        input.compact && parsedOutput.ok && parsedChildError !== null
+        input.compact && parsedOutput.ok && parsedChildError?.direct === true
           ? ''
           : output,
       error: childError,
@@ -306,20 +307,120 @@ function formatBatchChildOutput(
 
 function parseChildCommandError(
   stdout: string,
-): z.output<typeof vaultCliBatchCommandErrorSchema> | null {
+): { direct: boolean; error: BatchCommandError } | null {
   const parsedOutput = parseJsonOutput(stdout)
   if (!parsedOutput.ok || !parsedOutput.data || typeof parsedOutput.data !== 'object') {
     return null
   }
 
   const record = parsedOutput.data as Record<string, unknown>
-  const parsedError = vaultCliBatchCommandErrorSchema.safeParse(record.error ?? record)
-  return parsedError.success ? parsedError.data : null
+  const childError = record.error ?? record
+  const nativeValidationError = projectNativeValidationError(childError)
+  if (nativeValidationError !== null) {
+    return {
+      direct: childError === record,
+      error: nativeValidationError,
+    }
+  }
+
+  const parsedError = vaultCliBatchCommandErrorSchema.safeParse(childError)
+  return parsedError.success
+    ? {
+        direct: childError === record,
+        error: parsedError.data,
+      }
+    : null
+}
+
+function projectNativeValidationError(
+  value: unknown,
+): BatchCommandError | null {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('code' in value) ||
+    value.code !== 'VALIDATION_ERROR' ||
+    !('fieldErrors' in value) ||
+    !Array.isArray(value.fieldErrors)
+  ) {
+    return null
+  }
+
+  const fieldErrors = value.fieldErrors
+    .flatMap(normalizeNativeValidationFieldError)
+    .slice(0, 12)
+  const omittedFieldCount = value.fieldErrors.length - fieldErrors.length
+  if (omittedFieldCount > 0) {
+    fieldErrors.push({
+      code: 'issues_omitted',
+      message: `${omittedFieldCount} additional validation ${omittedFieldCount === 1 ? 'issue was' : 'issues were'} omitted.`,
+      missing: false,
+      path: '$',
+      received: 'invalid',
+    })
+  }
+
+  const projected = vaultCliBatchCommandErrorSchema.safeParse({
+    code: 'VALIDATION_ERROR',
+    message: 'Invalid command option.',
+    retryable: false,
+    stage: 'validation',
+    ...(fieldErrors.length === 0 ? {} : { fieldErrors }),
+  })
+  return projected.success ? projected.data : null
+}
+
+function normalizeNativeValidationFieldError(
+  value: unknown,
+): Array<{
+  code?: string
+  expected?: string
+  message: string
+  missing: boolean
+  path: string
+  received: 'invalid' | 'missing'
+}> {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('path' in value) ||
+    typeof value.path !== 'string' ||
+    value.path.length === 0 ||
+    value.path.length > 160 ||
+    !/^(?:\$|(?:[A-Za-z_][A-Za-z0-9_-]*|\d+)(?:\.(?:[A-Za-z_][A-Za-z0-9_-]*|\d+))*)$/u.test(value.path)
+  ) {
+    return []
+  }
+
+  const code =
+    'code' in value &&
+    typeof value.code === 'string' &&
+    /^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u.test(value.code)
+      ? value.code
+      : undefined
+  const expected =
+    'expected' in value &&
+    typeof value.expected === 'string' &&
+    /^(?:array|boolean|null|number|object|string|undefined)$/u.test(value.expected)
+      ? value.expected
+      : undefined
+  const missing = 'missing' in value && value.missing === true
+
+  return [{
+    ...(code === undefined ? {} : { code }),
+    ...(expected === undefined ? {} : { expected }),
+    message: missing
+      ? 'Required command option is missing.'
+      : 'Invalid value for this option.',
+    missing,
+    path: value.path,
+    received: missing ? 'missing' : 'invalid',
+  }]
 }
 
 function projectBatchCommandError(
   error: unknown,
-): z.output<typeof vaultCliBatchCommandErrorSchema> {
+): BatchCommandError {
   const projected = vaultCliBatchCommandErrorSchema.safeParse(projectVaultCliError(error))
   return projected.success
     ? projected.data
