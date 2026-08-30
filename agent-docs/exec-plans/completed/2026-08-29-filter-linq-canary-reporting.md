@@ -1,6 +1,6 @@
 # Exclude Linq production canary from user reporting
 
-Status: active
+Status: completed
 Created: 2026-08-29
 Updated: 2026-08-30
 
@@ -57,3 +57,7 @@ Updated: 2026-08-30
 - Scoped ESLint across the changed TypeScript files — passed.
 - `pnpm --dir apps/web typecheck` — passed.
 - Product UX replay: the configured canary still completes the unchanged messaging journey, operators no longer see its member or message activity in new snapshots and emails, ordinary members on the shared sender line remain visible, and unconfigured environments retain the prior behavior.
+- ReviewGPT round 1 identified and the parent accepted the sender-line attribution defect; the correction now filters by the canonical current and pending Linq chat lookup keys.
+- ReviewGPT substantive round 2 reviewed the full corrected snapshot at `2b8906a688611f7921c00640c94082db5ae01ff6` and returned `ROUND_OUTCOME: PASS`; the parent final review found no unresolved issue.
+- Current-base merge-tree proof completed cleanly for the corrected candidate.
+Completed: 2026-08-30
