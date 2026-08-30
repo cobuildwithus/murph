@@ -16,8 +16,8 @@ import type { MetricPoint } from "../src/index.ts";
 test("browser-vault exposes metric-key rows and selections without legacy domains", () => {
   const points: MetricPoint[] = [
     point("2026-04-28", "resting-heart-rate", "biomarker:resting-heart-rate", 58, "bpm"),
-    point("2026-04-29", "resting-heart-rate", "biomarker:resting-heart-rate", 57, "bpm"),
     point("2026-04-29", "hrv-rmssd", "biomarker:hrv-rmssd", 72, "ms"),
+    point("2026-04-29", "resting-heart-rate", "biomarker:resting-heart-rate", 57, "bpm"),
     point("2026-04-29", "deep-sleep-minutes", "biomarker:deep-sleep-minutes", 81, "minutes"),
     point("2026-04-29", "rem-sleep-minutes", "biomarker:rem-sleep-minutes", 94, "minutes"),
   ];
@@ -35,7 +35,7 @@ test("browser-vault exposes metric-key rows and selections without legacy domain
   });
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplica({ metricRows, metricSelectionRows })));
 
-  assert.deepEqual(metricRows.map((row) => row.metricKey).sort(), [
+  assert.deepEqual(metricRows.map((row) => row.metricKey), [
     "deep-sleep-minutes",
     "hrv-rmssd",
     "rem-sleep-minutes",
@@ -72,6 +72,29 @@ test("browser-vault biomarker selection prefers the primary metric when secondar
 
   assert.equal(client.metricSelections.getByBiomarker("biomarker:blood-oxygen-spo2")?.metricKey, "spo2");
   assert.equal(client.metricSelections.get("lowest-spo2")?.value, 91.2);
+});
+
+test("browser-vault metric indexing preserves biomarker-specific selections for one metric key", () => {
+  const points: MetricPoint[] = [
+    point("2026-04-29", "shared-marker", "biomarker:shared-beta", 20, "score"),
+    point("2026-04-28", "shared-marker", "biomarker:shared-alpha", 10, "score"),
+  ];
+  const selections = createBrowserVaultMetricSelectionRows({
+    generatedAt: "2026-04-30T12:00:00.000Z",
+    metricPoints: points,
+    requestedMetrics: [
+      { biomarkerKey: "biomarker:shared-beta", metricKey: "shared-marker" },
+      { biomarkerKey: "biomarker:shared-alpha", metricKey: "shared-marker" },
+    ],
+  });
+
+  assert.deepEqual(
+    selections.map((selection) => [selection.biomarkerKey, selection.value]),
+    [
+      ["biomarker:shared-alpha", 10],
+      ["biomarker:shared-beta", 20],
+    ],
+  );
 });
 
 test("browser-vault selection uses recorded order for comparable non-sleep facts", () => {
