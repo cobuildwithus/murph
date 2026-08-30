@@ -7,15 +7,18 @@ import { test } from "vitest";
 import {
   QUERY_DB_RELATIVE_PATH,
   openSqliteRuntimeDatabase,
+  readSqliteRuntimeUserVersion,
 } from "@murphai/runtime-state/node";
 
 import {
+  getQueryProjectionStatus,
   readVaultRawTolerant,
   rebuildQueryProjection,
   summarizeWearableActivityRuntime,
   summarizeWearableSleepRuntime,
   summarizeWearableSourceHealthRuntime,
 } from "../src/index.ts";
+import { QUERY_PROJECTION_SQLITE_VERSION } from "../src/projection/schema.ts";
 import {
   normalizeWearableProviders,
   wearableProviderRowKey,
@@ -72,6 +75,110 @@ test("automatic and manual projection rebuilds tolerate valid multiline activity
       );
       assert.equal(runtime.steps.selection.title, "Garmin Steps");
     }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("first provider-filtered read rebuilds carried v25 underscore provider rows", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-provider-v25-upgrade-"));
+  const date = "2026-08-30";
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl");
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const legacyBuiltAt = "2026-08-30T08:00:00.000Z";
+
+  try {
+    await mkdir(path.dirname(eventLedgerPath), { recursive: true });
+    await writeFile(
+      eventLedgerPath,
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_future_ring_v25_steps",
+        kind: "observation",
+        occurredAt: `${date}T07:00:00.000Z`,
+        recordedAt: `${date}T07:01:00.000Z`,
+        dayKey: date,
+        source: "device",
+        title: "Future ring steps",
+        metric: "steps",
+        value: 4_321,
+        unit: "count",
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "future_ring",
+          sourceType: "ring",
+          version: 1,
+        },
+        externalRef: {
+          system: "junction",
+          resourceType: "daily-activity",
+          resourceId: "future-ring-v25-daily-activity",
+          facet: "steps",
+        },
+      })}\n`,
+      "utf8",
+    );
+    await rebuildQueryProjection(vaultRoot);
+
+    const legacyDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      const update = legacyDatabase.prepare(`
+        UPDATE query_wearable_summaries
+        SET
+          provider_scope_key = REPLACE(provider_scope_key, 'future-ring', 'future_ring'),
+          provider_scope_json = REPLACE(provider_scope_json, 'future-ring', 'future_ring'),
+          summary_json = REPLACE(summary_json, 'future-ring', 'future_ring')
+        WHERE provider_scope_key = 'providers:future-ring'
+      `).run();
+      assert.ok(update.changes > 0);
+      legacyDatabase.prepare(`
+        UPDATE query_meta SET value = ? WHERE key = 'built_at'
+      `).run(legacyBuiltAt);
+      legacyDatabase.exec("PRAGMA user_version = 25;");
+    } finally {
+      legacyDatabase.close();
+    }
+
+    const staleStatus = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(staleStatus.exists, true);
+    assert.equal(staleStatus.builtAt, legacyBuiltAt);
+    assert.equal(staleStatus.fresh, false);
+
+    const activity = await summarizeWearableActivityRuntime(vaultRoot, {
+      date,
+      providers: ["future_ring"],
+    });
+    assert.equal(activity.length, 1);
+    assert.equal(activity[0]?.steps.selection.provider, "future-ring");
+    assert.equal(activity[0]?.steps.selection.value, 4_321);
+
+    const rebuiltDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+    try {
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 26);
+      assert.equal(
+        readSqliteRuntimeUserVersion(rebuiltDatabase),
+        QUERY_PROJECTION_SQLITE_VERSION,
+      );
+      const providerRows = rebuiltDatabase.prepare(`
+        SELECT provider_scope_key AS providerScopeKey
+        FROM query_wearable_summaries
+        WHERE provider_scope_key IN ('providers:future-ring', 'providers:future_ring')
+      `).all() as Array<{ providerScopeKey: string }>;
+      assert.ok(providerRows.length > 0);
+      assert.equal(
+        providerRows.every((row) => row.providerScopeKey === "providers:future-ring"),
+        true,
+      );
+    } finally {
+      rebuiltDatabase.close();
+    }
+
+    const currentStatus = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(currentStatus.fresh, true);
+    assert.notEqual(currentStatus.builtAt, legacyBuiltAt);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
