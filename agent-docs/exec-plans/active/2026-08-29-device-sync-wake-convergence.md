@@ -43,6 +43,20 @@ Updated: 2026-08-29
 
 - Treat the runtime-authored dirty-remainder wake as continuation work, not a new provider-cadence signal.
 
+## Product UX
+
+- Effort: Patch.
+- Outcome: existing connected-device imports finish and can produce their already-promised downstream result instead of waiting behind repeated cadence work.
+- Reaches: the existing provider-webhook journey when the account's bounded local queue was full on the first dirty-state pass.
+- Proof: the scheduler-admission regression changed from failing to passing; the hosted Junction integration remains the final end-to-end gate.
+
+## Product UX walkthrough
+
+- Person and path: an existing member whose connected wearable sends a replayed activity payload while scheduled provider work fills the local pass budget.
+- Expected experience: the payload is retained, admitted on the next pass, terminally acknowledged, and the existing downstream automation proceeds without repeated runtime starts.
+- Recovery: provider cadence stays Web-owned and is published after the existing completion fence; no data, connection, or retry authority is dropped.
+- Result: Ready for candidate review; merge remains gated on the hosted Junction end-to-end proof.
+
 ## Verification
 
 - Passed: focused assistant-runtime test (118 tests), assistant-runtime typecheck, assistant-runtime build, docs drift, and docs gardening.
