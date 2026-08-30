@@ -882,7 +882,11 @@ export function resolveHostedDeviceSyncSchedulerAccountId(input: {
   wake: HostedRuntimeEvent;
 }): string | null {
   const localAccountId = resolveHostedDeviceSyncWakeLocalAccountId(input);
-  if (!localAccountId || input.wake.kind !== "device-sync.wake") {
+  if (
+    !localAccountId
+    || input.wake.kind !== "device-sync.wake"
+    || input.wake.reason === "webhook_hint"
+  ) {
     return null;
   }
   const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);

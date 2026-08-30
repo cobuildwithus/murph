@@ -11906,6 +11906,17 @@ describe("hosted device-sync runtime", () => {
       wake: buildDeviceSyncWake({
         connectionId: "hosted_conn_scheduler",
         hint: {
+          reason: "webhook_dirty_transition",
+        },
+        occurredAt,
+        reason: "webhook_hint",
+      }),
+    }), null);
+    assert.equal(resolveHostedDeviceSyncSchedulerAccountId({
+      state,
+      wake: buildDeviceSyncWake({
+        connectionId: "hosted_conn_scheduler",
+        hint: {
           jobs: [{ dedupeKey: "retained", kind: "reconcile" }],
         },
         occurredAt,

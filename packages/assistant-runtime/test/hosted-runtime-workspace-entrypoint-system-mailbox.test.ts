@@ -1047,6 +1047,133 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
+  test("system mailbox webhook dirty work reaches quiescence without starting provider cadence", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const connectionId = "device_sync_connection_webhook_dirty";
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:webhook-dirty",
+      id: "mailbox_item_system_mailbox_device_webhook_dirty",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const baseDeviceSyncPort = createSnapshotDeviceSyncPort({
+      connectionId,
+      nextReconcileAt: TEST_NOW,
+    });
+    let fetchDirtyStatesCalls = 0;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...baseDeviceSyncPort,
+      async fetchDirtyStates() {
+        fetchDirtyStatesCalls += 1;
+        return {
+          hasMore: false,
+          items: [],
+          nextWakeAt: null,
+          userId: TEST_USER_ID,
+        };
+      },
+    };
+    const providerFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ records: [] }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      })
+    );
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.stubGlobal("fetch", providerFetch);
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncSystemMailboxItem(deviceItem),
+        vaultRoot,
+        wake: {
+          connectionId,
+          eventId: deviceItem.dedupeKey,
+          expectedConnectedAt: TEST_NOW,
+          hint: {
+            occurredAt: TEST_NOW,
+            reason: "webhook_dirty_transition",
+          },
+          kind: "device-sync.wake",
+          occurredAt: TEST_NOW,
+          provider: "whoop",
+          reason: "webhook_hint",
+          userId: TEST_USER_ID,
+        },
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_webhook_dirty",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox device-sync must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(fetchDirtyStatesCalls, 1);
+      assert.equal(providerFetch.mock.calls.length, 0);
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.nextWakeReason ?? null, null);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("system mailbox mode applies Environment answers without a model and refreshes the browser replica", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
