@@ -110,6 +110,7 @@ export async function readAssistantCliLlmsManifest(input: {
 export async function readAssistantCliLlmsFullManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
+  preferBuiltWorkspaceCli?: boolean
   timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
@@ -118,6 +119,7 @@ export async function readAssistantCliLlmsFullManifest(input: {
     cliEnv: input.cliEnv,
     executionContext: input.executionContext,
     maxOutputChars: assistantCliFullManifestMaxOutputChars,
+    preferBuiltWorkspaceCli: input.preferBuiltWorkspaceCli,
     timeoutMs: input.timeoutMs,
     workingDirectory: input.workingDirectory,
   })
@@ -157,6 +159,7 @@ async function executeAssistantCliManifestCommand(input: {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
   maxOutputChars?: number
+  preferBuiltWorkspaceCli?: boolean
   timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<{
@@ -179,7 +182,10 @@ async function executeAssistantCliManifestCommand(input: {
   const env = buildAssistantCliProcessEnv({
     cliEnv: input.cliEnv,
   })
-  const launcher = await resolveAssistantCliLauncher(env)
+  const launcher = await resolveAssistantCliLauncher(
+    env,
+    input.preferBuiltWorkspaceCli ?? false,
+  )
 
   return await new Promise((resolve, reject) => {
     const child = spawn(launcher.command, [...launcher.argvPrefix, ...argv], {
@@ -330,7 +336,20 @@ function copyAllowedAssistantCliManifestEnvEntries(
 
 async function resolveAssistantCliLauncher(
   cliProcessEnv: NodeJS.ProcessEnv,
+  preferBuiltWorkspaceCli: boolean,
 ): Promise<AssistantCliLauncher> {
+  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
+  if (
+    preferBuiltWorkspaceCli &&
+    localBuiltCliBinPath &&
+    await pathExists(localBuiltCliBinPath)
+  ) {
+    return {
+      argvPrefix: [localBuiltCliBinPath],
+      command: process.execPath,
+    }
+  }
+
   const localWorkspaceCliSourceLauncher =
     await resolveLocalWorkspaceCliSourceLauncher(cliProcessEnv)
   if (localWorkspaceCliSourceLauncher) {
@@ -349,7 +368,6 @@ async function resolveAssistantCliLauncher(
     }
   }
 
-  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
   if (localBuiltCliBinPath && await pathExists(localBuiltCliBinPath)) {
     return {
       argvPrefix: [localBuiltCliBinPath],
