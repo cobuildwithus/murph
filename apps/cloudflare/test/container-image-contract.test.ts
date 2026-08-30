@@ -141,9 +141,18 @@ describe("hosted runner container image contract", () => {
     expect(workspaceArtifactsScript).toContain(
       "const sortedPackageNames = await topologicallySortWorkspacePackageNames(",
     );
-    expect(workspaceArtifactsScript).toContain(
-      "buildHostedRunnerWorkspaceBuildArgs(sortedPackageNames)",
+    const workspaceBuildPlanIndex = workspaceArtifactsScript.indexOf(
+      "const plan = buildHostedRunnerWorkspaceArtifactPlan(sortedPackageNames, {",
     );
+    const workspaceBuildIndex = workspaceArtifactsScript.indexOf(
+      "await runPnpmCommand(plan.buildArgs, {",
+    );
+    const assistantCliSurfaceGenerationIndex = workspaceArtifactsScript.indexOf(
+      "await runNodeCommand(plan.assistantCliSurfaceGenerationArgs, {",
+    );
+    expect(workspaceBuildPlanIndex).toBeGreaterThanOrEqual(0);
+    expect(workspaceBuildIndex).toBeGreaterThan(workspaceBuildPlanIndex);
+    expect(assistantCliSurfaceGenerationIndex).toBeGreaterThan(workspaceBuildIndex);
     expect(workspaceArtifactsScript).toContain(
       "`--workspace-concurrency=${resolvePositiveIntegerEnv(",
     );
