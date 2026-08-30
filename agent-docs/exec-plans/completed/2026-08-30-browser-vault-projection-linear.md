@@ -1,6 +1,6 @@
 # Linear Browser Vault metric projection
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -100,3 +100,4 @@ Updated: 2026-08-30
   - One metric grouping pass feeds request-local selection work; the neutral
     20,000-point/100-request fixture falls from a 2.32-second median to a
     0.87-second median, and all checks pass.
+Completed: 2026-08-30
