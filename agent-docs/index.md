@@ -422,9 +422,10 @@ then drains older containers immediately. This contract is jointly specified by
 `agent-docs/references/hosted-runtime-protocol.md`.
 
 Hosted Codex process warmth is scoped to one restored workspace. Before a
-restore path validates, replaces, clears, or sanitizes Codex home, the runtime
-stops the exact resident process; the next process rebuilds private indexes
-from portable rollout state. This contract is jointly specified by
+restore path validates, replaces, clears, or sanitizes Codex home, the
+Cloudflare container invocation boundary stops the exact resident process; the
+next process rebuilds private indexes from portable rollout state. This
+contract is jointly specified by
 `ARCHITECTURE.md`, `docs/contracts/00-invariants.md`,
 `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.

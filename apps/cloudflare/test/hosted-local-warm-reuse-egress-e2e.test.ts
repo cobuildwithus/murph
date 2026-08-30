@@ -30,7 +30,7 @@ type RuntimeWakeObservation = Pick<
 
 let egress: HostedLocalEgressScenario | null = null;
 
-describe("hosted local warm-reuse egress e2e", () => {
+describe("hosted local resident-container egress e2e", () => {
   beforeAll(async () => {
     egress = await startHostedLocalLinqEgressScenario({
       additionalEnv: {
@@ -53,7 +53,7 @@ describe("hosted local warm-reuse egress e2e", () => {
     egress = null;
   }, 120_000);
 
-  it("keeps warm OpenAI egress authorized and hands a saved provider change to a fresh invocation", async () => {
+  it("keeps OpenAI egress authorized and hands a saved provider change to a fresh invocation", async () => {
     const harness = requireEgress();
     await harness.seedActiveMemberAndChat();
     const baselineResponses = harness.countProviderRequests("/v1/responses");
@@ -141,10 +141,10 @@ describe("hosted local warm-reuse egress e2e", () => {
         && entry.redactedJson?.providerTraceKind === "codex.app_server_timing"
       );
     expect(codexTimingLogs.map((entry) => entry.redactedJson?.codexTimingStage))
-      .toContain("warm-reused");
+      .not.toContain("warm-reused");
     expect(codexTimingLogs.map((entry) =>
       entry.redactedJson?.codexTimingColdStartReason
-    )).toContain("previous-launch-identity-change");
+    )).toContain("previous-explicit-stop");
     expect(harness.countProviderRequests("/v1/responses")).toBe(
       providerRequestsBeforeSwitch + 1,
     );

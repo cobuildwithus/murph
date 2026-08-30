@@ -6,6 +6,11 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  listHostedRuntimeLogsForTest,
+  readHostedIngressLatencyTraceForTest,
+  readHostedMailboxItemForTest,
+} from "#hosted-web-testing";
+import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
@@ -54,6 +59,8 @@ const firstUserText = "codex container continuity first input";
 const secondUserText = "codex container continuity second input";
 const firstReplyText = "First Codex continuity reply.";
 const secondReplyText = "Second Codex continuity reply.";
+const secondEventId = `evt_codex_container_continuity_second_${runId}`;
+const runtimeLogLimit = 2_000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -79,7 +86,7 @@ describe("hosted local Codex container continuity e2e", () => {
     await startScenario();
   }, 300_000);
 
-  it("resumes the same real Codex session after idle-shutdown checkpoint cleanup", async () => {
+  it("restarts real Codex before a resident workspace restore and resumes the same session", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
@@ -91,6 +98,13 @@ describe("hosted local Codex container continuity e2e", () => {
     });
     await requireScenario().runWake(buildActivationWake(userId), userId);
     await requireScenario().waitForHostedCompletion(userId);
+    const activationCheckpoint = await waitForCheckpointedStatus({
+      label: "activation",
+    });
+    const activationSnapshotHash = requireBaseSnapshotHash(
+      activationCheckpoint,
+      "activation",
+    );
     await requireScenario().bindActiveHostedLinqHomeChat({
       chatId,
       memberId: userId,
@@ -139,33 +153,23 @@ describe("hosted local Codex container continuity e2e", () => {
 
     const firstCompletionStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
-    const firstCompletionBaseSnapshotHash = readHostedExecutionSnapshotBaseRef(
-      firstCompletionStatus.workspace?.snapshotRef ?? null,
-    )?.hash ?? null;
-    // Baseline after first completion so the activation wake's own idle
-    // destroy cannot pre-satisfy the destroy-count condition.
-    const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
-
-    const idleShutdownStatus = await waitForIdleShutdownCheckpoint({
-      baselineBaseSnapshotHash: firstCompletionBaseSnapshotHash,
-      baselineCleanupCount: baselineIdleShutdownCleanupCount,
+    const firstCheckpoint = await waitForCheckpointedStatus({
+      label: "first",
+      previousBaseSnapshotHash: activationSnapshotHash,
     });
-    expect(idleShutdownStatus.workspace).not.toBeNull();
-    expect(readHostedExecutionSnapshotHotRef(idleShutdownStatus.workspace?.snapshotRef ?? null))
-      .toBeNull();
-    expect(idleShutdownStatus.inFlight).toBe(false);
-    expect(idleShutdownStatus.lastErrorCode ?? null).toBeNull();
-    const idleSession = await readCodexSessionFromStatus(idleShutdownStatus, "idle");
-    expect(idleSession.codexThreadId).toMatch(
+    const firstSnapshotHash = requireBaseSnapshotHash(firstCheckpoint, "first");
+    const firstSession = await readCodexSessionFromStatus(firstCheckpoint, "first");
+    expect(firstSession.codexThreadId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
     );
-    expect(idleSession.codexRolloutRelativePath).toContain(idleSession.codexThreadId);
-    expect(idleSession.rolloutText.length).toBeGreaterThan(0);
+    expect(firstSession.codexRolloutRelativePath).toContain(firstSession.codexThreadId);
+    expect(firstSession.rolloutText.length).toBeGreaterThan(0);
 
+    const secondTurnStartedAt = new Date();
     const providerRequestCountBeforeSecondTurn = countAssistantProviderResponsesApiRequests();
     const secondWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
-        eventId: `evt_codex_container_continuity_second_${runId}`,
+        eventId: secondEventId,
         messageId: `msg_codex_container_continuity_second_${runId}`,
         text: secondUserText,
       }),
@@ -185,14 +189,28 @@ describe("hosted local Codex container continuity e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(secondReply)).toBe(secondReplyText);
 
-    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    const secondCompletionStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(secondCompletionStatus.lastErrorCode ?? null).toBeNull();
+    expect(secondCompletionStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
-    const secondSession = await readCodexSessionFromStatus(finalStatus, "second");
-    expect(secondSession.codexThreadId).toBe(idleSession.codexThreadId);
-    expect(secondSession.codexRolloutRelativePath).toBe(idleSession.codexRolloutRelativePath);
-    expect(secondSession.rolloutText.length).toBeGreaterThanOrEqual(idleSession.rolloutText.length);
+    const secondTurnEvidence = await waitForResidentCodexRestoreEvidence({
+      dedupeKey: secondEventId,
+      fromAt: secondTurnStartedAt,
+    });
+    expect(secondTurnEvidence.runtimeLogs.length).toBeGreaterThan(0);
+    expect(secondTurnEvidence.totalRuntimeLogCount).toBeLessThan(runtimeLogLimit);
+    expect(secondTurnEvidence.runtimeLogs.some((entry) =>
+      entry.redactedJson?.providerTraceKind === "codex.resume_failure"
+    )).toBe(false);
+
+    const secondCheckpoint = await waitForCheckpointedStatus({
+      label: "second",
+      previousBaseSnapshotHash: firstSnapshotHash,
+    });
+    const secondSession = await readCodexSessionFromStatus(secondCheckpoint, "second");
+    expect(secondSession.codexThreadId).toBe(firstSession.codexThreadId);
+    expect(secondSession.codexRolloutRelativePath).toBe(firstSession.codexRolloutRelativePath);
+    expect(secondSession.rolloutText.length).toBeGreaterThanOrEqual(firstSession.rolloutText.length);
 
     const firstTurnProviderRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
@@ -217,7 +235,7 @@ async function startScenario(): Promise<void> {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -279,94 +297,123 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
   return `sha256=${signature}`;
 }
 
-async function waitForIdleShutdownCheckpoint(input: {
-  baselineBaseSnapshotHash: string | null;
-  baselineCleanupCount: number;
-}): Promise<HostedRunnerStatusResponse> {
+async function waitForResidentCodexRestoreEvidence(input: {
+  dedupeKey: string;
+  fromAt: Date;
+}): Promise<{
+  runtimeLogs: Awaited<ReturnType<typeof listHostedRuntimeLogsForTest>>;
+  totalRuntimeLogCount: number;
+}> {
   const startedAt = Date.now();
-  let lastActivityExpiryError: unknown = null;
-  let lastStatus: HostedRunnerStatusResponse | null = null;
+  let lastRuntimeLogs: Awaited<ReturnType<typeof listHostedRuntimeLogsForTest>> = [];
+  let lastError: unknown = null;
 
-  while (Date.now() - startedAt < 120_000) {
-    const status = await requireScenario().harness.readUserStatus(userId);
-    lastStatus = status;
-    const hotRef = status.workspace
-      ? readHostedExecutionSnapshotHotRef(status.workspace.snapshotRef)
-      : null;
-    const deltaRef = status.workspace
-      ? readHostedExecutionSnapshotDeltaRef(status.workspace.snapshotRef)
-      : null;
-    const baseRef = status.workspace
-      ? readHostedExecutionSnapshotBaseRef(status.workspace.snapshotRef)
-      : null;
-
-    if (
-      status.workspace
-      && baseRef
-      && baseRef.hash !== input.baselineBaseSnapshotHash
-      && hotRef === null
-      && deltaRef === null
-      && !status.inFlight
-      && !status.lastErrorCode
-      && countActivityExpiredDestroyRequestLogs() > input.baselineCleanupCount
-    ) {
-      return status;
-    }
-
+  while (Date.now() - startedAt < 30_000) {
     try {
-      await requireScenario().harness.expireRunnerActivityForTest(userId);
-      lastActivityExpiryError = null;
+      const mailboxItem = await readHostedMailboxItemForTest({
+        dedupeKey: input.dedupeKey,
+        environment: requireScenario().runtimeEnv,
+        userId,
+      });
+      const trace = await readHostedIngressLatencyTraceForTest({
+        environment: requireScenario().runtimeEnv,
+        mailboxItemId: mailboxItem.id,
+        userId,
+      });
+      if (
+        trace.phaseBreakdown?.boot?.restoreWasCold !== false
+        || !trace.runtimeAttemptId
+        || !trace.workspaceRestoreDoneAt
+      ) {
+        await sleep(100);
+        continue;
+      }
+
+      lastRuntimeLogs = await listHostedRuntimeLogsForTest({
+        environment: requireScenario().runtimeEnv,
+        fromAt: input.fromAt,
+        limit: runtimeLogLimit,
+        userId,
+      });
+      if (lastRuntimeLogs.length >= runtimeLogLimit) {
+        throw new Error("Second-turn runtime-log query saturated its bounded result.");
+      }
+      const attemptRuntimeLogs = lastRuntimeLogs.filter((entry) =>
+        entry.attemptId === trace.runtimeAttemptId
+      );
+      const freshCodexInitialized = attemptRuntimeLogs.some((entry) =>
+        entry.eventCode === "assistant.automation_detail"
+        && entry.redactedJson?.providerTraceKind === "codex.app_server_timing"
+        && (
+          entry.redactedJson.codexTimingStage === "initialized"
+          || entry.redactedJson.codexTimingStage === "preinitialized"
+        )
+        && entry.redactedJson.codexTimingColdStartReason === "previous-explicit-stop"
+      );
+      const threadResumed = attemptRuntimeLogs.some((entry) =>
+        entry.eventCode === "assistant.automation_detail"
+        && entry.redactedJson?.providerTraceKind === "codex.app_server_timing"
+        && entry.redactedJson.codexTimingStage === "thread-resumed"
+      );
+      if (freshCodexInitialized && threadResumed) {
+        return {
+          runtimeLogs: attemptRuntimeLogs,
+          totalRuntimeLogCount: lastRuntimeLogs.length,
+        };
+      }
     } catch (error) {
-      lastActivityExpiryError = error;
+      lastError = error;
     }
-    await sleep(250);
+    await sleep(100);
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for hosted idle-shutdown checkpoint.",
-    ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
-    ...(lastActivityExpiryError
-      ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
-      : []),
+    "Timed out waiting for the resident restore and fresh Codex initialization.",
+    `last evidence error: ${String(lastError)}`,
+    `second-turn runtime logs: ${JSON.stringify(lastRuntimeLogs)}`,
   ]));
 }
 
-function countActivityExpiredDestroyRequestLogs(): number {
-  const output = [
-    requireScenario().harness.stdoutTail(1_000_000),
-    requireScenario().harness.stderrTail(1_000_000),
-  ].join("\n");
+async function waitForCheckpointedStatus(input: {
+  label: string;
+  previousBaseSnapshotHash?: string;
+}): Promise<HostedRunnerStatusResponse> {
+  const startedAt = Date.now();
+  let lastStatus: HostedRunnerStatusResponse | null = null;
 
-  return output
-    .split(/\r?\n/u)
-    .filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-        return false;
-      }
+  while (Date.now() - startedAt < 120_000) {
+    lastStatus = await requireScenario().harness.readUserStatus(userId);
+    const baseSnapshotHash = readHostedExecutionSnapshotBaseRef(
+      lastStatus.workspace?.snapshotRef ?? null,
+    )?.hash;
+    if (
+      baseSnapshotHash
+      && baseSnapshotHash !== input.previousBaseSnapshotHash
+      && !lastStatus.inFlight
+      && !lastStatus.lastErrorCode
+    ) {
+      return lastStatus;
+    }
+    await sleep(100);
+  }
 
-      let record: unknown;
-      try {
-        record = JSON.parse(trimmed);
-      } catch {
-        return false;
-      }
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    `Timed out waiting for the ${input.label} workspace checkpoint.`,
+    `last status: ${JSON.stringify(lastStatus)}`,
+  ]));
+}
 
-      if (!record || typeof record !== "object") {
-        return false;
-      }
-
-      const candidate = record as {
-        details?: { destroyRequestReason?: unknown };
-        message?: unknown;
-      };
-      // Only the idle-path destroy proves the checkpointed container was
-      // cleaned up; smoke/readiness/recycle destroys must not satisfy the
-      // wait. Destroy logs carry no user id because the invocation context
-      // is already cleared, so the reason filter is the narrowing.
-      return candidate.message === "Hosted execution container destroy requested."
-        && candidate.details?.destroyRequestReason === "activity-expired";
-    }).length;
+function requireBaseSnapshotHash(
+  status: HostedRunnerStatusResponse,
+  label: string,
+): string {
+  const hash = readHostedExecutionSnapshotBaseRef(
+    status.workspace?.snapshotRef ?? null,
+  )?.hash;
+  if (!hash) {
+    throw new Error(`Hosted status ${label} did not include a base snapshot bundle.`);
+  }
+  return hash;
 }
 
 async function readCodexSessionFromStatus(
@@ -546,10 +593,6 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function readOptionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function formatErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 async function sleep(ms: number): Promise<void> {

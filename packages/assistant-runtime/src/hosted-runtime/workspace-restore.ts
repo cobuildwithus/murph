@@ -8,9 +8,6 @@ import {
   type AssistantContextSnapshotDirtyDomain,
 } from "@murphai/assistant-engine";
 import {
-  stopWarmCodexAppServer,
-} from "@murphai/assistant-engine/codex-lifecycle";
-import {
   applyHostedCanonicalWriteReceipt,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   type HostedCanonicalWriteReceiptAction,
@@ -156,10 +153,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
   const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
   const materializerBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>> = [];
-
-  // Codex owns process-local databases under its home. End that process before
-  // any restore path replaces or sanitizes the home it was launched against.
-  await stopWarmCodexAppServer("hosted-workspace-restore");
 
   const restoreLastKnownGoodAfterReceiptFailure = async (
     error: unknown,

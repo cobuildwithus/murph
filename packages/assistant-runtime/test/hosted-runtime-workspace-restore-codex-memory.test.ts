@@ -16,16 +16,7 @@ import type {
 import {
   resolveAssistantStatePaths,
 } from "@murphai/runtime-state/node";
-import { beforeEach, test, vi } from "vitest";
-
-const lifecycleMocks = vi.hoisted(() => ({
-  stopWarmCodexAppServer: vi.fn(async (_reason?: string) => undefined),
-}));
-
-vi.mock("@murphai/assistant-engine/codex-lifecycle", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@murphai/assistant-engine/codex-lifecycle")>(),
-  stopWarmCodexAppServer: lifecycleMocks.stopWarmCodexAppServer,
-}));
+import { test } from "vitest";
 
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
@@ -34,11 +25,6 @@ import {
 import type {
   HostedRuntimePlatform,
 } from "../src/hosted-runtime-contracts.ts";
-
-beforeEach(() => {
-  lifecycleMocks.stopWarmCodexAppServer.mockReset();
-  lifecycleMocks.stopWarmCodexAppServer.mockResolvedValue(undefined);
-});
 
 test("warm-clean v2 reuse keeps only bounded Codex memory read artifacts", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-codex-memory-warm-"));
@@ -66,11 +52,6 @@ test("warm-clean v2 reuse keeps only bounded Codex memory read artifacts", async
       "live sqlite sidecar\n",
       "utf8",
     );
-    const sqliteSidecarPath = path.join(
-      operatorHomeRoot,
-      ".codex-hosted",
-      "memories_1.sqlite-shm",
-    );
     assert.equal(
       await writeHostedWorkspaceCleanCheckpointMarkerBestEffort({
         vaultRoot,
@@ -78,11 +59,6 @@ test("warm-clean v2 reuse keeps only bounded Codex memory read artifacts", async
       }),
       true,
     );
-
-    lifecycleMocks.stopWarmCodexAppServer.mockImplementationOnce(async (reason) => {
-      assert.equal(reason, "hosted-workspace-restore");
-      assert.equal(await readFile(sqliteSidecarPath, "utf8"), "live sqlite sidecar\n");
-    });
 
     let coldRestoreCount = 0;
     const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
@@ -98,7 +74,6 @@ test("warm-clean v2 reuse keeps only bounded Codex memory read artifacts", async
 
     assert.equal(restored.restoreWasCold, false);
     assert.equal(coldRestoreCount, 0);
-    assert.equal(lifecycleMocks.stopWarmCodexAppServer.mock.calls.length, 1);
     assert.equal(await readFile(path.join(memoryRoot, "raw_memories.md"), "utf8"), "warm memory\n");
     await assert.rejects(
       readFile(
@@ -123,11 +98,6 @@ test("cold v2 restore keeps bounded memory read artifacts and removes other stat
     const vaultRoot = path.join(workspaceRoot, "durable", "vault");
     const operatorHomeRoot = path.join(workspaceRoot, "durable", "home");
     const memoryRoot = path.join(operatorHomeRoot, ".codex-hosted", "memories");
-    const preRestoreStateDbPath = path.join(
-      operatorHomeRoot,
-      ".codex-hosted",
-      "state_5.sqlite",
-    );
     const snapshotRef = createWorkspaceSnapshotV2Ref();
     const restoredMemoryFiles = [
       ["raw_memories.md", "cold raw memory\n"],
@@ -151,19 +121,9 @@ test("cold v2 restore keeps bounded memory read artifacts and removes other stat
       [".netrc", "network credential\n"],
     ] as const;
 
-    await mkdir(path.dirname(preRestoreStateDbPath), { recursive: true });
-    await writeFile(preRestoreStateDbPath, "old process state\n", "utf8");
-    const lifecycleEvents: string[] = [];
-    lifecycleMocks.stopWarmCodexAppServer.mockImplementationOnce(async (reason) => {
-      assert.equal(reason, "hosted-workspace-restore");
-      assert.equal(await readFile(preRestoreStateDbPath, "utf8"), "old process state\n");
-      lifecycleEvents.push("stop");
-    });
-
     const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
       platform: createRestorePlatform({
         async restoreWorkspaceSnapshot(request) {
-          lifecycleEvents.push("restore");
           await rm(request.durableRoot, { force: true, recursive: true });
           const restoredVaultRoot = path.join(request.durableRoot, "vault");
           const restoredCodexHome = path.join(request.durableRoot, "home", ".codex-hosted");
@@ -207,7 +167,6 @@ test("cold v2 restore keeps bounded memory read artifacts and removes other stat
     });
 
     assert.equal(restored.restoreWasCold, true);
-    assert.deepEqual(lifecycleEvents, ["stop", "restore"]);
     for (const [relativePath, contents] of restoredMemoryFiles) {
       assert.equal(await readFile(path.join(memoryRoot, relativePath), "utf8"), contents);
     }
@@ -243,40 +202,6 @@ test("cold v2 restore keeps bounded memory read artifacts and removes other stat
       ),
       { code: "ENOENT" },
     );
-  } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
-  }
-});
-
-test("workspace restore leaves existing roots untouched when Codex cannot stop", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-codex-stop-failure-"));
-
-  try {
-    const vaultRoot = path.join(workspaceRoot, "durable", "vault");
-    const existingFilePath = path.join(vaultRoot, "existing.md");
-    await mkdir(vaultRoot, { recursive: true });
-    await writeFile(existingFilePath, "existing workspace\n", "utf8");
-
-    lifecycleMocks.stopWarmCodexAppServer.mockRejectedValueOnce(
-      new Error("synthetic Codex stop failure"),
-    );
-    let restoreCount = 0;
-
-    await assert.rejects(
-      restoreHostedWorkspaceRuntimeJobWorkspace({
-        platform: createRestorePlatform({
-          async restoreWorkspaceSnapshot() {
-            restoreCount += 1;
-          },
-        }),
-        vaultRoot,
-        workspace: createWorkspaceState(createWorkspaceSnapshotV2Ref()),
-      }),
-      /synthetic Codex stop failure/u,
-    );
-
-    assert.equal(restoreCount, 0);
-    assert.equal(await readFile(existingFilePath, "utf8"), "existing workspace\n");
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }

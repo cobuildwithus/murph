@@ -38,7 +38,7 @@ Updated: 2026-08-30
 ## Tasks
 
 1. Complete root-cause proof from production lifecycle evidence and production-image A/B runs.
-2. Add the smallest engine-owned teardown call at the single restore entry boundary.
+2. Add the smallest teardown call at the Cloudflare container invocation boundary before it delegates to workspace restore.
 3. Add deterministic boundary coverage and a pinned-Codex cold-restore journey.
 4. Update owning lifecycle documentation and the public outcome changelog.
 5. Run focused tests, typecheck, candidate review, ReviewGPT, and required CI.
@@ -48,6 +48,7 @@ Updated: 2026-08-30
 
 - Codex SQLite remains rebuildable machine-local state and is not added to hosted snapshots.
 - No stale-resume retry or legacy-history override is added; both would treat a symptom instead of correcting lifecycle ownership.
+- The Cloudflare container owns restore sequencing and calls the existing engine lifecycle hook; assistant-runtime remains independent of the concrete assistant-engine lifecycle.
 
 ## Verification
 
