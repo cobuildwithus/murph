@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Cli } from 'incur'
 
 const execFileAsync = promisify(execFile)
+const INCUR_GENERATION_TIMEOUT_MS = 5 * 60_000
 
 export const packageDir = fileURLToPath(new URL('../', import.meta.url))
 const repoDir = fileURLToPath(new URL('../../../', import.meta.url))
@@ -29,7 +30,17 @@ interface GeneratedIncurOutputs {
 }
 
 interface IncurGenerationOptions {
+  onStage?: (message: string) => void
   rebuildCli?: boolean
+}
+
+interface IncurGeneratorCommandOptions {
+  cwd: string
+  entryPath: string
+  generatorPath: string
+  outputPath: string
+  repoDir: string
+  timeoutMs: number
 }
 
 interface GeneratedIncurArtifacts {
@@ -73,6 +84,7 @@ async function withGeneratedIncurArtifacts<T>(
   }
 
   if ((options.rebuildCli ?? true) || !existsSync(distEntryPath)) {
+    options.onStage?.('Building the CLI package.')
     await execFileAsync('pnpm', ['build'], {
       cwd: packageDir,
       env: process.env,
@@ -85,27 +97,17 @@ async function withGeneratedIncurArtifacts<T>(
     const generatedTypesPath = path.join(tempDir, 'incur.generated.ts')
     const generatedConfigSchemaPath = path.join(tempDir, 'config.schema.json')
 
-    await execFileAsync(
-      process.execPath,
-      [
-        incurBinPath,
-        'gen',
-        '--dir',
-        repoDir,
-        '--entry',
-        distEntryPath,
-        '--output',
-        generatedTypesPath,
-      ],
-      {
-        cwd: packageDir,
-        env: {
-          ...process.env,
-          NODE_NO_WARNINGS: '1',
-        },
-      },
-    )
+    options.onStage?.('Generating Incur types and config schema (timeout: 5 minutes).')
+    await runIncurGeneratorCommand({
+      cwd: packageDir,
+      entryPath: distEntryPath,
+      generatorPath: incurBinPath,
+      outputPath: generatedTypesPath,
+      repoDir,
+      timeoutMs: INCUR_GENERATION_TIMEOUT_MS,
+    })
 
+    options.onStage?.('Finalizing generated artifacts and CLI skill hash.')
     return await run({
       generatedTypesPath,
       generatedConfigSchemaPath,
@@ -113,6 +115,55 @@ async function withGeneratedIncurArtifacts<T>(
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
+}
+
+export async function runIncurGeneratorCommand(
+  options: IncurGeneratorCommandOptions,
+): Promise<void> {
+  try {
+    await execFileAsync(
+      process.execPath,
+      [
+        options.generatorPath,
+        'gen',
+        '--dir',
+        options.repoDir,
+        '--entry',
+        options.entryPath,
+        '--output',
+        options.outputPath,
+      ],
+      {
+        cwd: options.cwd,
+        env: {
+          ...process.env,
+          NODE_NO_WARNINGS: '1',
+        },
+        killSignal: 'SIGTERM',
+        timeout: options.timeoutMs,
+      },
+    )
+  } catch (error) {
+    if (isTimedOutExecFileError(error)) {
+      const timeoutSeconds = Math.max(1, Math.ceil(options.timeoutMs / 1_000))
+      const unit = timeoutSeconds === 1 ? 'second' : 'seconds'
+      throw new Error(
+        `Incur CLI artifact generation timed out after ${timeoutSeconds} ${unit} while importing the built CLI. ` +
+          'Re-run `pnpm --dir packages/cli gen:config-schema` on a prepared workspace; if it repeats, inspect the package build and CLI import graph.',
+      )
+    }
+    throw error
+  }
+}
+
+function isTimedOutExecFileError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'killed' in error &&
+    error.killed === true &&
+    'signal' in error &&
+    error.signal === 'SIGTERM'
+  )
 }
 
 function quoteInvalidTypePropertyNames(types: string): string {
