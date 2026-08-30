@@ -9,6 +9,6 @@
     "summary": "Murph now answers ordinary onboarding and setup questions directly, reserving early progress notes for work with several substantive checks or a longer wait.",
     "details": "Routine context reads and one or two quick calls stay in the main reply, while longer research, document inspection, and other substantial work can still receive one useful update.",
     "relevanceTags": ["assistant", "messaging", "onboarding"],
-    "sourcePullRequests": [2553, 2571]
+    "sourcePullRequests": [2553, 2571, 2577]
   }
 }
