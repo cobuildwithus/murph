@@ -222,7 +222,7 @@ declare module 'incur' {
       'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
       'memory forget': { args: { memoryId: string }; options: {} }
       'memory set-name': { args: { displayName: string }; options: {} }
-      'memory show': { args: { memoryId?: string }; options: {} }
+      'memory show': { args: { memoryId?: string }; options: { compact?: boolean } }
       'memory update': { args: { memoryId: string; text: string }; options: { section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; modelProvider?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }

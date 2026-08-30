@@ -4367,7 +4367,19 @@
               "properties": {
                 "show": {
                   "type": "object",
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "compact": {
+                          "description": "Return only document existence plus each record's id, section, and text.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 },
                 "set-name": {
                   "type": "object",

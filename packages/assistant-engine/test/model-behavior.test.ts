@@ -1291,19 +1291,22 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Send one early update only for reply-critical work needing 3+ substantive checks/actions beyond routine setup',
+      'Default to no progress update',
     )
     expect(prompt).toContain(
-      'Routine onboarding/setup does not count by itself',
+      'Send one only when the member is likely to wait noticeably',
     )
     expect(prompt).toContain(
-      'Also skip ordinary conversation, a straightforward next step, and quick resume checks.',
+      'Routine onboarding/setup never qualifies by itself, even when it uses tools or the runtime is slow',
     )
     expect(prompt).toContain(
-      'Send a child-wait update after spawning.',
+      'one or two quick calls, and the next setup question go straight to the final reply',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill requires a receipt or start acknowledgement.',
+      'send a required child-start acknowledgement after spawning.',
+    )
+    expect(prompt).toContain(
+      'Background work does not trigger progress by itself.',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update.',
@@ -1613,7 +1616,13 @@ describe('assistant local PDF evidence guidance', () => {
       'When several bounded `vault-cli` commands are needed for the same vault, prefer one `vault-cli batch --compact --format json` call',
     )
     expect(prompt).toContain(
-      'vault-cli batch --compact --format json --command \'["memory","show"]\' --command \'["goal","list"]\'',
+      'vault-cli batch --compact --format json --command \'["memory","show","--compact"]\' --command \'["goal","list"]\'',
+    )
+    expect(prompt).toContain(
+      'For the user\'s saved current-state context, prefer `vault-cli memory show --compact --format json`',
+    )
+    expect(prompt).not.toContain(
+      '--command \'["memory","show"]\'',
     )
     expect(prompt).toContain(
       'do not use batch for interactive, server, or long-running assistant commands',

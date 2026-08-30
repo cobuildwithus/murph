@@ -1360,10 +1360,14 @@ describe('monorepo release flow coverage audit', () => {
         .map((line) => line.trim()),
     ).toEqual(
       [
+        "'@cobuild/review-gpt@0.5.139': patches/@cobuild__review-gpt@0.5.139.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
       ],
     )
+    expect(
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.139.patch')),
+    ).toBe(true)
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.103.patch')),
     ).toBe(false)

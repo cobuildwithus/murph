@@ -27,9 +27,10 @@ protected path are specified by `agent-docs/SECURITY.md`.
 
 The fixed-identity production iMessage canary verifies the exact deployed Web
 revision before resetting its private test identity and exercising the fast
-first reply plus ordinary hosted-runtime continuation. Its fixed-target reset,
-serialization, latency, privacy, and provider-transit contracts are specified
-by `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
+first reply plus ordinary hosted-runtime continuation. Its configured identity
+is omitted from internal signup notification and operator Growth reporting.
+Its fixed-target reset, serialization, twenty-second latency, privacy, and provider-transit
+contracts are specified by `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/imessage-deliverability.md`, and
 `agent-docs/references/testing-ci-map.md`.
 

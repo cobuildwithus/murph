@@ -90,7 +90,7 @@ describe("production conversation canary runner", () => {
       .mockReturnValueOnce(1_000)
       .mockReturnValueOnce(2_000)
       .mockReturnValueOnce(3_000);
-    mocks.now = [0, 100, 200, 300, 400, 500];
+    mocks.now = [0, 15_000, 15_000, 30_000, 30_000, 45_000];
     mocks.sendResults = [true, true, true];
     mocks.messages = [
       inboundMessage({ text: "An older reply.", timestampMs: 999 }),
@@ -109,9 +109,9 @@ describe("production conversation canary runner", () => {
         deliveryClaimCount: 1,
       },
       turns: [
-        { latencyMs: 100, turn: 1 },
-        { latencyMs: 100, turn: 2 },
-        { latencyMs: 100, turn: 3 },
+        { latencyMs: 15_000, turn: 1 },
+        { latencyMs: 15_000, turn: 2 },
+        { latencyMs: 15_000, turn: 3 },
       ],
     });
     expect(mocks.messages).toEqual([]);
@@ -133,7 +133,7 @@ describe("production conversation canary runner", () => {
   });
 
   it("rejects a reply at the exact latency boundary and still stops", async () => {
-    mocks.now = [0, 10_000];
+    mocks.now = [0, 20_000];
     mocks.sendResults = [true];
     mocks.messages = [
       inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),

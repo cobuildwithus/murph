@@ -22,9 +22,15 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
     },
   },
+  readHostedLinqProductionCanaryMemberId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberSignupNotificationContext: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
+  readHostedLinqProductionCanaryMemberId:
+    mocks.readHostedLinqProductionCanaryMemberId,
 }));
 
 vi.mock("@/src/lib/prisma", async () => {
@@ -65,6 +71,7 @@ describe("hosted signup notification email", () => {
       suspendedAt: null,
       threadContainer: null,
     });
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: "active",
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -178,6 +185,36 @@ describe("hosted signup notification email", () => {
       memberId: "member_123",
       prisma: mocks.prisma,
     });
+  });
+
+  it("skips the configured production canary before claiming or sending", async () => {
+    const fetchMock: typeof fetch = async () => {
+      throw new Error("fetch should not be called");
+    };
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue("member_123");
+    const env = {
+      HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER: "+15551234567",
+      HOSTED_SIGNUP_NOTIFICATION_EMAILS: "founder@example.com",
+      HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph <welcome@example.com>",
+      RESEND_API_KEY: "re_test",
+    };
+
+    await expect(sendHostedSignupNotificationEmailForMember({
+      env,
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      reason: "production_canary",
+      status: "skipped",
+    });
+
+    expect(mocks.readHostedLinqProductionCanaryMemberId).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
+      source: env,
+    });
+    expect(mocks.prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).not.toHaveBeenCalled();
   });
 
   it("dedupes repeated recipient emails", async () => {
