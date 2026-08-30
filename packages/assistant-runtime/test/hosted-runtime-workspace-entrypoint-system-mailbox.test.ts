@@ -5869,10 +5869,35 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode preserves successful dirty-ack follow-up wake", async () => {
+  test.each([
+    {
+      dueAssistantWakePending: false,
+      runtimeWakeStage: null,
+      scenario: "without a foreground handoff",
+    },
+    {
+      dueAssistantWakePending: false,
+      runtimeWakeStage: "scope_resolution" as const,
+      scenario: "with a redundant runtime wake during scope resolution",
+    },
+    {
+      dueAssistantWakePending: false,
+      runtimeWakeStage: "prepare_checkpoint" as const,
+      scenario: "with a redundant runtime wake after its preparation checkpoint",
+    },
+    {
+      dueAssistantWakePending: true,
+      runtimeWakeStage: null,
+      scenario: "with assistant work already due",
+    },
+  ])("system mailbox mode preserves successful dirty-ack follow-up wake $scenario", async ({
+    dueAssistantWakePending,
+    runtimeWakeStage,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:dirty-ack-follow-up",
       id: "mailbox_item_system_mailbox_device_dirty_ack_follow_up",
@@ -5885,6 +5910,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     let dirtyAckCalls = 0;
     let browserPublishCalls = 0;
     let browserWriteCalls = 0;
+    let runtimeWakeSent = false;
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       ...baseDeviceSyncPort,
       async ackDirtyStateProcessed(request) {
@@ -5916,6 +5942,26 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.prepareHostedCodexAssistantProcess.mockClear();
       mocks.cancelPendingWarmCodexPreinitialization.mockClear();
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      if (dueAssistantWakePending) {
+        await upsertAutomation({
+          automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41XZ",
+          continuityPolicy: "fresh",
+          instructions: "Send one synthetic due reminder.",
+          now: new Date(Date.parse(TEST_NOW) - 60_000),
+          route: {
+            channel: "linq",
+            deliveryTarget: "synthetic_direct_chat",
+            identityId: null,
+            participantId: null,
+            threadId: "synthetic_direct_chat",
+            threadIsDirect: true,
+          },
+          schedule: { at: TEST_NOW, kind: "at" },
+          status: "active",
+          title: "Synthetic due reminder",
+          vaultRoot,
+        });
+      }
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
         vaultRoot,
@@ -5925,12 +5971,21 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           item.itemId === deviceItem.id
             ? {
                 ...item,
-                postCheckpointRecord: {
-                  connectionId: "device_sync_connection_synthetic",
-                  kind: "device-sync.dirty-processed" as const,
-                  processedDirtyPayloadIds: ["dirty_payload_synthetic"],
-                  processedRevision: "7",
-                },
+                postCheckpointRecord: runtimeWakeStage === "prepare_checkpoint"
+                  ? {
+                      kind: "device-sync.dirty-processed-batch" as const,
+                      records: [{
+                        connectionId: "device_sync_connection_synthetic",
+                        processedDirtyPayloadIds: ["dirty_payload_synthetic"],
+                        processedRevision: "7",
+                      }],
+                    }
+                  : {
+                      connectionId: "device_sync_connection_synthetic",
+                      kind: "device-sync.dirty-processed" as const,
+                      processedDirtyPayloadIds: ["dirty_payload_synthetic"],
+                      processedRevision: "7",
+                    },
                 status: "recording" as const,
               }
             : item
@@ -5943,7 +5998,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         key: "users/bundles/member-synthetic/system-mailbox-device-dirty-ack-follow-up-before.bundle.json",
         vaultRoot,
       });
-
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -5990,6 +6044,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
               async listActiveProjectionScopes() {
+                if (runtimeWakeStage === "scope_resolution" && !runtimeWakeSent) {
+                  runtimeWakeSent = true;
+                  runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+                }
                 return {
                   generationTokensByProjectionScopeKey: {
                     "sleep-times.v0": "a".repeat(43),
@@ -6003,23 +6061,51 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 return { status: "delivered" };
               },
             },
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({
-                snapshotRef: restoredWorkspace.snapshotRef,
-                version: "0",
-              }),
-            }),
+            workspacePort: (() => {
+              const workspacePort = createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  snapshotRef: restoredWorkspace.snapshotRef,
+                  version: "0",
+                }),
+              });
+              return {
+                ...workspacePort,
+                async checkpoint(request: HostedWorkspaceCheckpointRequest) {
+                  const response = await workspacePort.checkpoint!(request);
+                  if (
+                    runtimeWakeStage === "prepare_checkpoint"
+                    && !runtimeWakeSent
+                  ) {
+                    runtimeWakeSent = true;
+                    runtimeWakeSignal.notify({
+                      requestedProcessingMode: "system_mailbox",
+                    });
+                  }
+                  return response;
+                },
+              };
+            })(),
           }),
           async runAssistantPhase() {
             throw new Error("Successful dirty ack must not enter assistant phase.");
           },
+          runtimeWakeSignal,
           vaultRoot,
         },
       );
 
-      assert.equal(dirtyAckCalls, 1);
+      assert.equal(
+        dirtyAckCalls,
+        1,
+        JSON.stringify({
+          checkpointRequests,
+          events,
+          mailboxState: await readHostedSystemMailboxState(vaultRoot),
+          result,
+        }),
+      );
       assert.equal(browserWriteCalls, 1);
       assert.equal(browserPublishCalls, 1);
       assert.ok(events.includes("vault-share.deliver"), JSON.stringify(events));
@@ -6039,26 +6125,41 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         JSON.stringify(events),
       );
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, followUpWakeAt);
-      assert.equal(result.nextWakeReason, "device-sync.reconcile");
-      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, followUpWakeAt);
-      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.nextWakeAt, dueAssistantWakePending ? TEST_NOW : followUpWakeAt);
+      assert.equal(
+        result.nextWakeReason,
+        dueAssistantWakePending ? "assistant" : "device-sync.reconcile",
+      );
+      assert.equal(
+        result.immediateRecheckRequested,
+        dueAssistantWakePending ? true : undefined,
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.nextWakeAt,
+        dueAssistantWakePending ? TEST_NOW : followUpWakeAt,
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.nextWakeReason,
+        dueAssistantWakePending ? "assistant" : "device-sync.reconcile",
+      );
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "1",
       );
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
-      const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
-        request.nextWakeAt === followUpWakeAt
-        && request.nextWakeReason === "device-sync.reconcile"
-      );
-      assert.ok(followUpCheckpointIndex >= 0);
-      assert.equal(
-        checkpointRequests.slice(followUpCheckpointIndex + 1).some((request) =>
-          request.nextWakeAt === null && request.nextWakeReason === null
-        ),
-        false,
-      );
+      if (!dueAssistantWakePending) {
+        const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
+          request.nextWakeAt === followUpWakeAt
+          && request.nextWakeReason === "device-sync.reconcile"
+        );
+        assert.ok(followUpCheckpointIndex >= 0);
+        assert.equal(
+          checkpointRequests.slice(followUpCheckpointIndex + 1).some((request) =>
+            request.nextWakeAt === null && request.nextWakeReason === null
+          ),
+          false,
+        );
+      }
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
