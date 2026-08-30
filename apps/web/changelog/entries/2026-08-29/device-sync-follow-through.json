@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-29",
+  "order": 100,
+  "item": {
+    "id": "device-sync-follow-through",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected data keeps moving",
+    "summary": "Murph now finishes retained wearable imports before starting another scheduled sync pass, helping connected activity and health data reach follow-up work without repeated delay.",
+    "details": "Provider timing and retry handling remain intact, and data is not marked processed until its existing import work reaches a terminal result.",
+    "relevanceTags": ["wearables", "assistant", "reliability"],
+    "sourcePullRequests": [2568]
+  }
+}

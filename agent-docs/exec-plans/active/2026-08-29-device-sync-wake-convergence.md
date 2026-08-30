@@ -37,7 +37,8 @@ Updated: 2026-08-29
 1. Completed: added a failing scheduler-admission regression for the retained dirty-remainder wake.
 2. Completed: corrected the scheduler gate at the hosted runtime owner.
 3. Completed locally: ran focused tests, package typecheck, build, and documentation checks.
-4. Remaining: exact-head PR review, merge, deploy, and hosted runtime convergence proof.
+4. Completed: added the public member-facing recovery note.
+5. Remaining: exact-head PR review, merge, deploy, and hosted runtime convergence proof.
 
 ## Decisions
 
