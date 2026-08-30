@@ -27,6 +27,7 @@ import {
   buildHostedWebTurbopackConfig,
   buildHostedWebContentSecurityPolicy,
   buildHostedWebSecurityHeaders,
+  configureHostedWebWebpack,
   configureHostedWebWorkflowLocalDataDir,
   resolveHostedPrivyOrigin,
   resolveHostedPrivyOrigins,
@@ -358,9 +359,9 @@ test("hosted web dev filesystem cache defaults off and allows explicit opt-in", 
   );
 });
 
-test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {
+test("next.config keeps both bundlers focused without custom workspace rewrite rules", () => {
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
-  assert.equal(productionNextConfig.webpack, undefined);
+  assert.equal(productionNextConfig.webpack, configureHostedWebWebpack);
   assert.deepEqual(productionNextConfig.typescript, {
     ignoreBuildErrors: false,
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
@@ -544,6 +545,33 @@ test("buildHostedWebTurbopackConfig always points Turbopack at the repo root", (
   } else {
     assert.deepEqual(resolveAlias, {
       "@farcaster/mini-app-solana": "./src/lib/empty-module.ts",
+    });
+  }
+});
+
+test("configureHostedWebWebpack aliases Privy's missing optional Farcaster peer", () => {
+  const webpackConfig = {
+    resolve: {
+      alias: {
+        existing: "/existing-module.ts",
+      },
+    },
+  };
+  const configured = configureHostedWebWebpack(webpackConfig);
+  const hasOptionalModule = resolveHostedOptionalModule();
+
+  assert.equal(configured, webpackConfig);
+  if (hasOptionalModule) {
+    assert.deepEqual(configured.resolve.alias, {
+      existing: "/existing-module.ts",
+    });
+  } else {
+    assert.deepEqual(configured.resolve.alias, {
+      existing: "/existing-module.ts",
+      "@farcaster/mini-app-solana": path.join(
+        repoRoot,
+        "apps/web/src/lib/empty-module.ts",
+      ),
     });
   }
 });
