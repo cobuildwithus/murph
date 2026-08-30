@@ -3243,7 +3243,7 @@ describe("HostedUserRunner execution coordination", () => {
     const { invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       runnerContainerStubForName(_name, stub) {
-        vi.setSystemTime(new Date("2026-04-27T00:00:05.000Z"));
+        vi.setSystemTime(new Date("2026-04-27T00:01:05.000Z"));
         return stub;
       },
       workspace: createWorkspaceState({ version: "5" }),
@@ -3256,7 +3256,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:15.000Z",
+      retryAt: "2026-04-27T00:01:15.000Z",
     });
 
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
@@ -3283,7 +3283,7 @@ describe("HostedUserRunner execution coordination", () => {
       "Hosted runner runtime processing startup confirmation failed.",
     )).toMatchObject({
       runtimeProcessingRetryReason: "command_budget_exhausted",
-      runtimeStartupFailureElapsedMs: 5_000,
+      runtimeStartupFailureElapsedMs: 60_000,
       runtimeStartupFailureStage: "caller_deadline",
       transportFailureFenceCleared: true,
     });

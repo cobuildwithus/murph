@@ -1962,6 +1962,13 @@ describe("RunnerContainer", () => {
     );
     expect(healthCalls).toHaveLength(1);
     expect(executeCalls).toHaveLength(0);
+    expect(
+      mocks.emitHostedExecutionStructuredLog.mock.calls.filter(
+        ([observation]) =>
+          observation.message
+            === "Hosted execution container startup confirmation failed.",
+      ),
+    ).toHaveLength(0);
   });
 
   it("keeps cold readiness compatible with health responses that omit startup timestamps", async () => {
@@ -3017,6 +3024,10 @@ describe("RunnerContainer", () => {
 
       await expect(readiness).resolves.toEqual({ kind: "cleanup_unsettled" });
       expect(destroy).toHaveBeenCalledOnce();
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "warm_health_or_cleanup",
+      });
     } finally {
       timeout.mockRestore();
     }
@@ -3157,6 +3168,10 @@ describe("RunnerContainer", () => {
       });
       expect(destroy).toHaveBeenCalledTimes(2);
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "cold_start_or_ports",
+      });
     } finally {
       timeout.mockRestore();
       vi.useRealTimers();
