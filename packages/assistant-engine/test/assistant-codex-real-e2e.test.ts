@@ -1084,6 +1084,109 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   )
 
   it(
+    'reports terminal canonical memory repair without a mutation or retry loop during onboarding resume',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const temporaryPaths = [...config.temporaryPaths]
+
+      try {
+        const workingDirectory = await prepareRealCodexOnboardingDirectory()
+        temporaryPaths.unshift(workingDirectory)
+        const resumeContextPath = path.join(
+          workingDirectory,
+          'onboarding-resume-context.json',
+        )
+        const resumeContext = assistantOnboardingResumeContextResultSchema.parse({
+          ...buildRealCodexOnboardingResumeContext('ordinary_records'),
+          memory: {
+            status: 'error',
+            code: 'memory_document_invalid',
+            message: 'Canonical memory could not be read while resuming onboarding.',
+            retryable: false,
+            hint: 'Repair bank/memory.md:18 by fixing the invalid id field before continuing onboarding.',
+          },
+        })
+        await writeFile(
+          resumeContextPath,
+          `${JSON.stringify(resumeContext)}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        await writeFile(
+          path.join(workingDirectory, 'memory-command-result.json'),
+          `${JSON.stringify({
+            ok: false,
+            error: {
+              code: 'memory_document_invalid',
+              fieldErrors: [{
+                code: 'custom',
+                expected: '',
+                message: 'This field is invalid.',
+                path: 'id',
+                received: 'invalid',
+              }],
+              message: 'Canonical memory document bank/memory.md:18 could not be read.',
+              retryable: false,
+              stage: 'read',
+            },
+            meta: {
+              command: 'memory show',
+              duration: '1ms',
+            },
+          })}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        const resumeContextBefore = await readFile(resumeContextPath, 'utf8')
+        const turnInput = buildRealCodexOnboardingTurnInput({
+          config,
+          workingDirectory,
+        })
+        const result = await executeRealCodexAppServerTurn({
+          ...turnInput,
+          excludeResumeTurns: true,
+          prompt: [
+            "I'd like to continue setting up Murph.",
+            'Please pick up from the saved onboarding context without repeating earlier questions.',
+          ].join(' '),
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const resumeContexts = readSuccessfulOnboardingResumeContexts(actions)
+        const memoryCommands = actions.filter((action) =>
+          action.kind === 'command'
+          && /(?:^|\s)(?:\.\/)?vault-cli\s+memory\s+/u.test(action.command)
+        )
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(
+          `[onboarding-memory-repair-e2e] ${JSON.stringify({
+            memoryCommandCount: memoryCommands.length,
+            providerActionCount: result.providerActionCount,
+            reply,
+            resumeContextCount: resumeContexts.length,
+          })}\n`,
+        )
+
+        expect(resumeContexts).toHaveLength(1)
+        expect(resumeContexts[0]?.memory).toMatchObject({
+          status: 'error',
+          code: 'memory_document_invalid',
+          retryable: false,
+        })
+        expect(memoryCommands).toEqual([])
+        expect(await readFile(resumeContextPath, 'utf8')).toBe(
+          resumeContextBefore,
+        )
+        expect(reply).toMatch(/bank\/memory\.md:18/iu)
+        expect(reply).toMatch(/\bid\b/iu)
+        expect(reply).toMatch(/(?:fix|repair|correct)/iu)
+        expect(reply).not.toMatch(/what should i call you|how old|gender/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it(
     'continues foundation after a member defers an optional wearable connection',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -22045,6 +22148,10 @@ if [ "$*" = "assistant onboarding resume-context --format json" ]; then
   exit 0
 fi
 if [ "$1" = "memory" ]; then
+  if [ -f "$(dirname "$0")/memory-command-result.json" ]; then
+    cat "$(dirname "$0")/memory-command-result.json"
+    exit 1
+  fi
   printf '%s\n' '{"status":"ok"}'
   exit 0
 fi

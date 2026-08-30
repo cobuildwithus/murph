@@ -527,6 +527,7 @@ type AssistantVaultServices = VaultServices &
   AssistantOnboardingDeviceAccountServices
 
 const assistantOnboardingResumeContextDefaultLimit = 3
+const assistantOnboardingMemoryDocumentPath = 'bank/memory.md'
 
 function normalizeAssistantOnboardingResumeContextLimit(limit: number): number {
   return Math.min(Math.max(limit, 1), 50)
@@ -579,6 +580,72 @@ function buildAssistantOnboardingResumeContextErrorSurface(
       ? 'Check that the vault is initialized and the expected records exist.'
       : 'Retry the context read; use the individual vault command if it continues to fail.',
   }
+}
+
+function buildAssistantOnboardingResumeContextMemoryErrorSurface(
+  error: unknown,
+): AssistantOnboardingResumeContextFailureSurface {
+  const repair = readAssistantOnboardingMemoryDocumentRepair(error)
+  if (!repair) {
+    return buildAssistantOnboardingResumeContextErrorSurface(error)
+  }
+
+  const location = repair.lineNumber === undefined
+    ? assistantOnboardingMemoryDocumentPath
+    : `${assistantOnboardingMemoryDocumentPath}:${repair.lineNumber}`
+  const hint = repair.field === undefined
+    ? `Repair ${location} before continuing onboarding.`
+    : `Repair ${location} by fixing the invalid ${repair.field} field before continuing onboarding.`
+
+  return {
+    status: 'error',
+    code: 'memory_document_invalid',
+    message: 'Canonical memory could not be read while resuming onboarding.',
+    retryable: false,
+    hint,
+  }
+}
+
+function readAssistantOnboardingMemoryDocumentRepair(
+  error: unknown,
+): {
+  field?: string
+  lineNumber?: number
+} | null {
+  if (
+    !isAssistantOnboardingErrorRecord(error)
+    || error.name !== 'MemoryDocumentParseError'
+    || error.code !== 'MEMORY_DOCUMENT_INVALID'
+    || !isAssistantOnboardingErrorRecord(error.details)
+    || error.details.sourcePath !== assistantOnboardingMemoryDocumentPath
+    || typeof error.details.issue !== 'string'
+    || !/^(?:frontmatter_contract_invalid|frontmatter_invalid|memory_section_invalid|record_invalid|record_metadata_invalid|record_metadata_missing)$/u.test(
+      error.details.issue,
+    )
+  ) {
+    return null
+  }
+
+  const lineNumber = Number.isSafeInteger(error.details.lineNumber)
+    && typeof error.details.lineNumber === 'number'
+    && error.details.lineNumber > 0
+    ? error.details.lineNumber
+    : undefined
+  const field = typeof error.details.field === 'string'
+    && /^[A-Za-z_][A-Za-z0-9_.-]{0,79}$/u.test(error.details.field)
+    ? error.details.field
+    : undefined
+
+  return {
+    ...(field === undefined ? {} : { field }),
+    ...(lineNumber === undefined ? {} : { lineNumber }),
+  }
+}
+
+function isAssistantOnboardingErrorRecord(
+  value: unknown,
+): value is Record<PropertyKey, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 function buildAssistantOnboardingResumeContextUnavailableSurface():
@@ -658,7 +725,7 @@ async function readAssistantOnboardingResumeContextMemory(input: {
       updatedAt: result.document.updatedAt,
     }
   } catch (error) {
-    return buildAssistantOnboardingResumeContextErrorSurface(error)
+    return buildAssistantOnboardingResumeContextMemoryErrorSurface(error)
   }
 }
 
