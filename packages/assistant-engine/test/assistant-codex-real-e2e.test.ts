@@ -18317,6 +18317,282 @@ describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
   })
 })
 
+describeRealCodex('real Codex strict meal import recovery e2e', () => {
+  it('recovers one strict meal import typo without duplicate write', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-strict-meal-import-recovery-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'meal-commands.jsonl')
+      const eventLogPath = path.join(workingDirectory, 'meal-events.jsonl')
+      const importPath = path.join(workingDirectory, 'meal-import.json')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const stateFile = path.join(workingDirectory, 'meal-write-count.txt')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeStrictMealImportVaultCli({
+          binDirectory,
+          commandLogPath,
+          eventLogPath,
+          stateFile,
+        }),
+        writeFile(commandLogPath, '', 'utf8'),
+        writeFile(eventLogPath, '', 'utf8'),
+        writeFile(stateFile, '0\n', 'utf8'),
+        writeFile(
+          importPath,
+          `${JSON.stringify({
+            ingredientz: ['synthetic duplicate field'],
+            ingredients: ['tofu', 'brown rice', 'broccoli'],
+            note: 'Tofu bowl with brown rice and broccoli.',
+            nutrition: {
+              micros: {
+                vitaminCMG: 48,
+              },
+              provenance: {
+                confidence: 'high',
+                source: 'label',
+                sourceDetail: 'Synthetic package label.',
+              },
+              totals: {
+                calories: 540,
+                carbsGrams: 72,
+                fatGrams: 18,
+                fiberGrams: 11,
+                proteinGrams: 27,
+              },
+            },
+            occurredAt: '2026-08-30T19:00:00-04:00',
+            source: 'manual',
+          }, null, 2)}\n`,
+          'utf8',
+        ),
+      ])
+
+      const inheritedPath = normalizeEnvString(config.env.PATH)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-30',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: inheritedPath
+            ? `${binDirectory}${path.delimiter}${inheritedPath}`
+            : binDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Log the structured dinner in meal-import.json.',
+          'Run the import as-is first so the CLI owns validation.',
+          'If it rejects the payload, apply only the reported field corrections and retry once.',
+          'Do not add a replacement meal or create a duplicate. Reply only with the final outcome.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      const importEvents = (await readFile(eventLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as {
+          correctMicronutrient: boolean
+          nestedTypo: boolean
+          result: 'rejected' | 'saved'
+          rootUnknown: boolean
+        })
+      const writeCount = Number.parseInt(
+        (await readFile(stateFile, 'utf8')).trim(),
+        10,
+      )
+      const reply = result.finalMessage.trim()
+
+      process.stdout.write(
+        `[strict-meal-import-recovery-e2e] ${JSON.stringify({
+          importAttempts: importEvents.length,
+          reply,
+          writes: writeCount,
+        })}\n`,
+      )
+      expect(importEvents).toEqual([
+        {
+          correctMicronutrient: false,
+          nestedTypo: true,
+          result: 'rejected',
+          rootUnknown: true,
+        },
+        {
+          correctMicronutrient: true,
+          nestedTypo: false,
+          result: 'saved',
+          rootUnknown: false,
+        },
+      ])
+      expect(writeCount).toBe(1)
+      expect(reply).toMatch(/\b(?:imported|logged|recorded|saved|added)\b/iu)
+      expect(reply).not.toMatch(
+        /\b(?:CLI|command|corrected|error|invalid|retry|schema|typo)\b/iu,
+      )
+      expect(reply).not.toMatch(/\?/u)
+      expect(reply.split(/\s+/u).length).toBeLessThanOrEqual(30)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
+async function materializeStrictMealImportVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+  eventLogPath: string
+  stateFile: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const savedMeal = {
+    eventId: 'event_01SYNTHETICSTRICTIMPORT0001',
+    ingredients: ['tofu', 'brown rice', 'broccoli'],
+    mealId: 'meal_01SYNTHETICSTRICTIMPORT00001',
+    note: 'Tofu bowl with brown rice and broccoli.',
+    nutrition: {
+      micros: { vitaminCMg: 48 },
+      provenance: {
+        confidence: 'high',
+        source: 'label',
+        sourceDetail: 'Synthetic package label.',
+      },
+      totals: {
+        calories: 540,
+        carbsGrams: 72,
+        fatGrams: 18,
+        fiberGrams: 11,
+        proteinGrams: 27,
+      },
+    },
+    occurredAt: '2026-08-30T19:00:00-04:00',
+    source: 'manual',
+  }
+  const supportedRootKeys = [
+    'audio',
+    'audioPath',
+    'ingredients',
+    'note',
+    'nutrition',
+    'occurredAt',
+    'photo',
+    'photoPath',
+    'source',
+  ]
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs')",
+      "const path = require('node:path')",
+      `const commandLogPath = ${JSON.stringify(input.commandLogPath)}`,
+      `const eventLogPath = ${JSON.stringify(input.eventLogPath)}`,
+      `const stateFile = ${JSON.stringify(input.stateFile)}`,
+      `const savedMeal = ${JSON.stringify(savedMeal)}`,
+      `const supportedRootKeys = ${JSON.stringify(supportedRootKeys)}`,
+      'const args = process.argv.slice(2)',
+      "fs.appendFileSync(commandLogPath, `${JSON.stringify(args)}\\n`, 'utf8')",
+      'function emit(value) { process.stdout.write(`${JSON.stringify(value)}\\n`) }',
+      'function fail(message) { emit({ error: { code: "invalid_payload", message }, ok: false }); process.exitCode = 1 }',
+      'if (args[0] === "meal" && args[1] === "import-json" && args.includes("--help")) {',
+      '  process.stdout.write("Usage: vault-cli meal import-json --input @meal.json --format json\\n")',
+      '} else if (args[0] === "meal" && args[1] === "import-json") {',
+      '  const inputIndex = args.indexOf("--input")',
+      '  const inputArg = inputIndex >= 0 ? args[inputIndex + 1] : undefined',
+      '  if (!inputArg || !inputArg.startsWith("@")) {',
+      '    fail("--input requires @file.json for this structured meal.")',
+      '  } else {',
+      '    const payloadPath = path.resolve(process.cwd(), inputArg.slice(1))',
+      '    const payload = JSON.parse(fs.readFileSync(payloadPath, "utf8"))',
+      '    const micros = payload.nutrition && payload.nutrition.micros && typeof payload.nutrition.micros === "object" ? payload.nutrition.micros : {}',
+      '    const rootUnknown = Object.keys(payload).some((key) => !supportedRootKeys.includes(key))',
+      '    const nestedTypo = Object.prototype.hasOwnProperty.call(micros, "vitaminCMG")',
+      '    const correctMicronutrient = Object.prototype.hasOwnProperty.call(micros, "vitaminCMg")',
+      '    if (rootUnknown || nestedTypo) {',
+      '      fs.appendFileSync(eventLogPath, `${JSON.stringify({ correctMicronutrient, nestedTypo, result: "rejected", rootUnknown })}\\n`, "utf8")',
+      '      fail([',
+      '        "Meal payload is not valid.",',
+      '        "nutrition.micros: Unrecognized key: \\"vitaminCMG\\";",',
+      '        "value: contains an unsupported field.",',
+      '        "Structured payload object keys: `ingredients`, `note`, `nutrition`, `occurredAt`, and `source`.",',
+      '      ].join(" "))',
+      '    } else if (!correctMicronutrient) {',
+      '      fail("Meal payload is not valid. nutrition.micros: vitaminCMg is required by this synthetic fixture.")',
+      '    } else {',
+      '      const writeCount = Number.parseInt(fs.readFileSync(stateFile, "utf8").trim(), 10)',
+      '      if (writeCount !== 0) {',
+      '        process.stderr.write("duplicate meal write rejected\\n")',
+      '        process.exitCode = 65',
+      '      } else {',
+      '        fs.writeFileSync(stateFile, "1\\n", "utf8")',
+      '        fs.appendFileSync(eventLogPath, `${JSON.stringify({ correctMicronutrient, nestedTypo, result: "saved", rootUnknown })}\\n`, "utf8")',
+      '        emit(savedMeal)',
+      '      }',
+      '    }',
+      '  }',
+      '} else if (args[0] === "meal" && args[1] === "show") {',
+      '  emit({ entity: savedMeal })',
+      '} else if (args[0] === "meal" && args[1] === "list") {',
+      '  const writeCount = Number.parseInt(fs.readFileSync(stateFile, "utf8").trim(), 10)',
+      '  emit({ count: writeCount, items: writeCount === 1 ? [savedMeal] : [], nextCursor: null })',
+      '} else if (args[0] === "meal" && args[1] === "totals") {',
+      '  emit({ mealCount: 1, totals: { calories: { mealCount: 1, total: 540 }, carbsGrams: { mealCount: 1, total: 72 }, fatGrams: { mealCount: 1, total: 18 }, fiberGrams: { mealCount: 1, total: 11 }, proteinGrams: { mealCount: 1, total: 27 } } })',
+      '} else if (args[0] === "goal" && args[1] === "list") {',
+      '  emit({ count: 0, items: [], nextCursor: null })',
+      '} else if (args[0] === "memory" && args[1] === "show") {',
+      '  emit({ document: { records: [] }, memory: null })',
+      '} else {',
+      '  process.stderr.write(`unsupported strict meal import fixture command: ${args.join(" ")}\\n`)',
+      '  process.exitCode = 64',
+      '}',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
   it('resolves an exact menu label before saving a restaurant meal', {
     timeout: 900_000,

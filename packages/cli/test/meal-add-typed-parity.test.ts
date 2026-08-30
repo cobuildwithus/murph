@@ -628,7 +628,7 @@ test.sequential(
 )
 
 test.sequential(
-  'meal import-json rejects unknown fields without echoing or writing a meal',
+  'meal import-json keeps nested corrections while sanitizing root unknown fields and writing no meal',
   async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-cli-meal-unknown-field-',
@@ -639,12 +639,18 @@ test.sequential(
       const cli = createMealCli()
       const unknownField = 'ingredientz'
       const unknownValue = 'synthetic private value'
+      const nestedMicronutrientTypo = 'vitaminCM'
       const payloadPath = path.join(parentRoot, 'meal.json')
       await writeFile(
         payloadPath,
         `${JSON.stringify({
           note: 'A valid meal note',
           [unknownField]: unknownValue,
+          nutrition: {
+            micros: {
+              [nestedMicronutrientTypo]: 12,
+            },
+          },
         })}\n`,
         'utf8',
       )
@@ -662,8 +668,22 @@ test.sequential(
       assert.equal(result.envelope.ok, false)
       if (!result.envelope.ok) {
         assert.equal(result.envelope.error.code, 'invalid_payload')
+        assert.equal(result.envelope.error.stage, 'validation')
         assert.match(result.envelope.error.message ?? '', /unsupported field/u)
         assert.match(result.envelope.error.message ?? '', /ingredients/u)
+        assert.match(
+          result.envelope.error.message ?? '',
+          new RegExp(
+            `nutrition\\.micros: Unrecognized key: "${nestedMicronutrientTypo}"`,
+            'u',
+          ),
+        )
+        assert.deepEqual(
+          result.envelope.error.fieldErrors
+            ?.map((fieldError) => fieldError.path)
+            .sort(),
+          ['$', 'nutrition.micros'],
+        )
       }
 
       const serializedError = JSON.stringify(result.envelope)
@@ -682,6 +702,127 @@ test.sequential(
       assert.equal(listed.exitCode, null)
       assert.equal(requireData(listed.envelope).count, 0)
       assert.deepEqual(requireData(listed.envelope).items, [])
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true })
+    }
+  },
+)
+
+test.sequential(
+  'meal import-json rejects differing media aliases before writing and accepts equal aliases',
+  async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-cli-meal-media-alias-conflict-',
+    )
+
+    try {
+      await initializeVault({ vaultRoot })
+      const cli = createMealCli()
+      const conflictScenarios = [
+        {
+          aliasField: 'photoPath',
+          canonicalField: 'photo',
+          firstValue: path.join(parentRoot, 'private-photo-a.jpg'),
+          secondValue: path.join(parentRoot, 'private-photo-b.jpg'),
+        },
+        {
+          aliasField: 'audioPath',
+          canonicalField: 'audio',
+          firstValue: path.join(parentRoot, 'private-audio-a.m4a'),
+          secondValue: path.join(parentRoot, 'private-audio-b.m4a'),
+        },
+      ] as const
+
+      for (const [index, scenario] of conflictScenarios.entries()) {
+        const payloadPath = path.join(parentRoot, `conflict-${index}.json`)
+        await writeFile(
+          payloadPath,
+          `${JSON.stringify({
+            [scenario.aliasField]: scenario.secondValue,
+            [scenario.canonicalField]: scenario.firstValue,
+            note: 'Synthetic meal with conflicting media aliases.',
+          })}\n`,
+          'utf8',
+        )
+
+        const result = await runInProcessJsonCli<MealAddResult>(cli, [
+          'meal',
+          'import-json',
+          '--input',
+          `@${payloadPath}`,
+          '--vault',
+          vaultRoot,
+        ])
+
+        assert.equal(result.exitCode, 1)
+        assert.equal(result.envelope.ok, false)
+        if (!result.envelope.ok) {
+          assert.equal(result.envelope.error.code, 'invalid_payload')
+          assert.equal(result.envelope.error.stage, 'validation')
+          assert.match(
+            result.envelope.error.message ?? '',
+            new RegExp(
+              `${scenario.canonicalField} and ${scenario.aliasField} must match`,
+              'u',
+            ),
+          )
+          assert.deepEqual(
+            result.envelope.error.fieldErrors
+              ?.map((fieldError) => fieldError.path)
+              .sort(),
+            [scenario.aliasField, scenario.canonicalField].sort(),
+          )
+          assert.match(result.envelope.error.hint ?? '', /same path/u)
+          assert.match(result.envelope.error.hint ?? '', /No meal was written/u)
+        }
+
+        const serializedError = JSON.stringify(result.envelope)
+        assert.equal(serializedError.includes(scenario.firstValue), false)
+        assert.equal(serializedError.includes(scenario.secondValue), false)
+        assert.equal(serializedError.includes(payloadPath), false)
+      }
+
+      const afterConflicts = await runInProcessJsonCli<MealListResult>(cli, [
+        'meal',
+        'list',
+        '--limit',
+        '10',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(afterConflicts.exitCode, null)
+      assert.equal(requireData(afterConflicts.envelope).count, 0)
+
+      const equalPhotoPath = path.join(parentRoot, 'equal-photo.jpg')
+      const equalAudioPath = path.join(parentRoot, 'equal-audio.m4a')
+      const equalPayloadPath = path.join(parentRoot, 'equal-aliases.json')
+      await Promise.all([
+        writeFile(equalPhotoPath, 'synthetic photo bytes', 'utf8'),
+        writeFile(equalAudioPath, 'synthetic audio bytes', 'utf8'),
+        writeFile(
+          equalPayloadPath,
+          `${JSON.stringify({
+            audio: equalAudioPath,
+            audioPath: equalAudioPath,
+            note: 'Synthetic meal with matching media aliases.',
+            photo: equalPhotoPath,
+            photoPath: equalPhotoPath,
+          })}\n`,
+          'utf8',
+        ),
+      ])
+
+      const equalAliases = await runInProcessJsonCli<MealAddResult>(cli, [
+        'meal',
+        'import-json',
+        '--input',
+        `@${equalPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(equalAliases.exitCode, null)
+      assert.ok(requireData(equalAliases.envelope).photoPath)
+      assert.ok(requireData(equalAliases.envelope).audioPath)
     } finally {
       await rm(parentRoot, { force: true, recursive: true })
     }
