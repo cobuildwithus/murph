@@ -625,12 +625,38 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
         'The synthetic verification phrase is amber lighthouse.',
         'Reply with that two-word phrase.',
       ].join(' ')
+      const parserResultPath =
+        'derived/inbox/capture-voice-evidence/attachments/attachment-voice-evidence/attempts/0001/result.json'
 
       try {
         await initializeVault({
           timezone: 'America/New_York',
           vaultRoot: workingDirectory,
         })
+        const parserResultAbsolutePath = path.join(
+          workingDirectory,
+          parserResultPath,
+        )
+        await mkdir(path.dirname(parserResultAbsolutePath), { recursive: true })
+        await writeFile(parserResultAbsolutePath, JSON.stringify({
+          artifact: {
+            attachmentId: 'attachment-voice-evidence',
+            captureId: 'capture-voice-evidence',
+            fileName: 'voice-note.m4a',
+            kind: 'audio',
+            mime: 'audio/mp4',
+            storedPath:
+              'raw/inbox/capture-voice-evidence/attachments/voice-note.m4a',
+          },
+          blocks: [],
+          createdAt: '2026-08-26T20:00:01.000Z',
+          markdown: transcript,
+          metadata: {},
+          providerId: 'synthetic-transcription',
+          schema: 'murph.parser-output.v1',
+          tables: [],
+          text: transcript,
+        }))
         const promptInput: AssistantAutoReplyPromptInput = {
           actorIsSelf: false,
           attachmentDescriptors: [{
@@ -643,7 +669,11 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
           attachmentEvidence: {
             attachments: [{
               byteSize: 1_024,
-              derived: null,
+              derived: {
+                allowedRoot: path.posix.dirname(parserResultPath),
+                kind: 'parser-result',
+                resultPath: parserResultPath,
+              },
               descriptorAttachmentId: 'attachment-voice-evidence',
               fileName: 'voice-note.m4a',
               inlineFragments: [{
@@ -700,6 +730,7 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
           throw new Error(`Expected a ready voice memo prompt, received ${prepared.kind}.`)
         }
         expect(prepared.prompt).toContain(transcript)
+        expect(prepared.prompt.split(transcript)).toHaveLength(2)
 
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
