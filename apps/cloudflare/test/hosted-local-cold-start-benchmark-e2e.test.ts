@@ -75,16 +75,29 @@ const sampleCount = readTrialCount(
 const totalTrialCount = warmupCount + sampleCount;
 const benchmarkRunToken = readBenchmarkRunToken();
 const benchmarkTarget = readBenchmarkTarget();
-const trialUserIds = Array.from(
+const queryRebuildProofEnabled = readQueryRebuildProofEnabled();
+const benchmarkTrialUserIds = Array.from(
   { length: totalTrialCount },
   (_, index) => `member_local_cold_start_benchmark_${benchmarkRunToken}_${index + 1}`,
 );
+const queryFailureProofUserId = queryRebuildProofEnabled
+  ? `member_local_cold_start_benchmark_${benchmarkRunToken}_query_failure`
+  : null;
+const trialUserIds = [
+  ...benchmarkTrialUserIds,
+  ...(queryFailureProofUserId ? [queryFailureProofUserId] : []),
+];
 const linqApiToken = "linq-local-cold-start-benchmark-token";
 const linqWebhookSecret = "linq-local-cold-start-benchmark-secret";
 const assistantModel = "gpt-5.6-terra";
 const replyText = "Cold-start benchmark reply.";
+const queryFailureReplyText =
+  "I couldn't rebuild your saved-history index, so I didn't use an empty result. Please try again shortly.";
 const setupReplyText = "Cold-start benchmark setup complete.";
 const productionMedianPayloadBytes = 14_000_000;
+const representativeJournalDayCount = 730;
+const queryProofMarker = "established-history-query-proof-marker";
+const maxQueryProofProviderToDeliveryMs = 120_000;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const execFileAsync = promisify(execFile);
 
@@ -110,6 +123,7 @@ interface ColdStartSample {
   preparedRestore?: boolean;
   presignGetMs?: number;
   providerPreProviderSetupMs?: number;
+  providerToDeliveryMs: number;
   runnerAcceptedToRestoreDoneMs?: number;
   runtimeInvocationPreparationMs?: number;
   sizeGuardMs?: number;
@@ -175,8 +189,10 @@ describe("hosted local cold-start benchmark e2e", () => {
   it("measures independent cold hosted executions", async () => {
     const measuredSamples: ColdStartSample[] = [];
 
-    for (const [index, userId] of trialUserIds.entries()) {
-      const sample = await runColdStartTrial(userId, index + 1);
+    for (const [index, userId] of benchmarkTrialUserIds.entries()) {
+      const sample = await runColdStartTrial(userId, index + 1, {
+        queryProof: queryRebuildProofEnabled ? "success" : null,
+      });
       const isWarmup = index < warmupCount;
       if (!isWarmup) {
         measuredSamples.push(sample);
@@ -225,7 +241,33 @@ describe("hosted local cold-start benchmark e2e", () => {
         0.9,
       ),
     });
-  }, Math.max(300_000, totalTrialCount * 300_000));
+
+    if (queryFailureProofUserId) {
+      const failureSample = await runColdStartTrial(
+        queryFailureProofUserId,
+        totalTrialCount + 1,
+        { queryProof: "failure" },
+      );
+      expect(failureSample.providerToDeliveryMs).toBeLessThanOrEqual(
+        maxQueryProofProviderToDeliveryMs,
+      );
+      printBenchmarkRecord({
+        ...failureSample,
+        cold: true,
+        delivery: true,
+        explicitFailureReply: true,
+        failureRoute: true,
+        mailbox: true,
+        provider: true,
+        sameAttempt: true,
+        summary: false,
+        target: benchmarkTarget,
+      });
+    }
+  }, Math.max(
+    300_000,
+    (totalTrialCount + (queryRebuildProofEnabled ? 1 : 0)) * 300_000,
+  ));
 });
 
 async function startBenchmarkScenario(input: {
@@ -271,6 +313,9 @@ async function startBenchmarkScenario(input: {
 async function runColdStartTrial(
   userId: string,
   ordinal: number,
+  options: {
+    queryProof: "failure" | "success" | null;
+  },
 ): Promise<ColdStartSample> {
   const setupScenario = requireScenario();
   const activeLinqStub = requireLinqStub();
@@ -278,8 +323,11 @@ async function runColdStartTrial(
   const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
   const inboundText = `Cold-start benchmark request ${ordinal}.`;
   const eventId = `evt_local_cold_start_benchmark_${benchmarkRunToken}_${ordinal}`;
+  const expectedReplyText = options.queryProof === "failure"
+    ? queryFailureReplyText
+    : replyText;
   const replyMatcher = (request: ObservedLinqRequest): boolean =>
-    activeLinqStub.readObservedMessageText(request) === replyText;
+    activeLinqStub.readObservedMessageText(request) === expectedReplyText;
 
   await setupScenario.seedActiveHostedLinqMember({
     homePhone: buildLinqHomePhoneNumber(userId),
@@ -308,7 +356,16 @@ async function runColdStartTrial(
     replyPath,
     replyMatcher,
   );
-  activeScenario.queueAssistantResponses([replyText], {
+  activeScenario.queueAssistantResponses([
+    ...(options.queryProof
+      ? [buildAssistantProviderShellCommandCall(
+          options.queryProof === "success"
+            ? buildSuccessfulQueryRebuildProofCommand()
+            : buildFailedQueryRebuildProofCommand(),
+        )]
+      : []),
+    expectedReplyText,
+  ], {
     matchInputContains: inboundText,
   });
 
@@ -355,14 +412,17 @@ async function runColdStartTrial(
   );
 
   const responsesApiRequests = listResponsesApiRequests();
+  const expectedProviderRequestCount = options.queryProof ? 2 : 1;
   expect(activeScenario.assistantProviderRequests).toHaveLength(
-    totalProviderRequestBaseline + 1,
+    totalProviderRequestBaseline + expectedProviderRequestCount,
   );
-  expect(responsesApiRequests).toHaveLength(providerRequestBaseline + 1);
+  expect(responsesApiRequests).toHaveLength(
+    providerRequestBaseline + expectedProviderRequestCount,
+  );
   const providerRequestsForTrial = responsesApiRequests
     .slice(providerRequestBaseline)
     .filter((request) => readAssistantProviderRequestText(request).includes(inboundText));
-  expect(providerRequestsForTrial).toHaveLength(1);
+  expect(providerRequestsForTrial).toHaveLength(expectedProviderRequestCount);
   const providerRequest = providerRequestsForTrial[0];
   if (!providerRequest) {
     throw new Error("Expected one benchmark provider request.");
@@ -371,6 +431,23 @@ async function runColdStartTrial(
   const deliveryObservedAtEpochMs = requireObservedTimestamp(acceptedReply);
   expect(providerObservedAtEpochMs).toBeGreaterThanOrEqual(webhookStartedAtEpochMs);
   expect(deliveryObservedAtEpochMs).toBeGreaterThanOrEqual(providerObservedAtEpochMs);
+  const providerToDeliveryMs = deliveryObservedAtEpochMs - providerObservedAtEpochMs;
+  if (options.queryProof) {
+    expect(providerToDeliveryMs).toBeLessThanOrEqual(
+      maxQueryProofProviderToDeliveryMs,
+    );
+    const continuationText = providerRequestsForTrial
+      .slice(1)
+      .map(readAssistantProviderRequestText)
+      .join("\n");
+    if (options.queryProof === "success") {
+      expect(continuationText).toContain("query-projection-absent-before-read");
+      expect(continuationText).toContain(queryProofMarker);
+      expect(continuationText).toContain("query-projection-fresh-after-read");
+    } else {
+      expect(continuationText).toContain("query-rebuild-failed-explicitly");
+    }
+  }
 
   const mailboxItem = await readHostedMailboxItemForTest({
     dedupeKey: eventId,
@@ -438,6 +515,7 @@ async function runColdStartTrial(
   }));
 
   const baseSample: ColdStartSample = {
+    providerToDeliveryMs,
     webhookToDeliveryMs: deliveryObservedAtEpochMs - webhookStartedAtEpochMs,
     webhookToProviderMs: providerObservedAtEpochMs - webhookStartedAtEpochMs,
   };
@@ -578,7 +656,7 @@ async function prepareEstablishedWorkspaceTrial(input: {
   );
   activeScenario.queueAssistantResponses([
     buildAssistantProviderShellCommandCall(
-      `mkdir -p bank/hosted-e2e && head -c ${productionMedianPayloadBytes} /dev/urandom > bank/hosted-e2e/cold-start-payload.bin`,
+      buildEstablishedWorkspaceSetupCommand(),
     ),
     setupReplyText,
   ], {
@@ -652,6 +730,62 @@ async function prepareEstablishedWorkspaceTrial(input: {
   await assertHostedLocalSnapshotObject(restartedSnapshotRef);
   await seedHostedLocalR2LocatorMarker(restartedSnapshotRef);
   return restartedSnapshotRef;
+}
+
+function buildEstablishedWorkspaceSetupCommand(): string {
+  const commands = [
+    "mkdir -p bank/hosted-e2e",
+    `head -c ${productionMedianPayloadBytes} /dev/urandom > bank/hosted-e2e/cold-start-payload.bin`,
+  ];
+  if (queryRebuildProofEnabled) {
+    commands.push(
+      buildRepresentativeJournalHistoryCommand(),
+      "vault-cli query projection rebuild --format json",
+      "test -f .runtime/projections/query.sqlite",
+    );
+  }
+  return commands.join(" && ");
+}
+
+function buildRepresentativeJournalHistoryCommand(): string {
+  const source = [
+    'const fs=require("node:fs");',
+    `for(let index=0;index<${representativeJournalDayCount};index+=1){`,
+    'const day=new Date(Date.UTC(2024,0,1+index)).toISOString().slice(0,10);',
+    'const year=day.slice(0,4);',
+    'const directory="journal/"+year;',
+    'fs.mkdirSync(directory,{recursive:true});',
+    'const markdown=["---","schemaVersion: murph.frontmatter.journal-day.v1","docType: journal_day","dayKey: "+day,"---","# Established history "+day,"","'
+      + queryProofMarker
+      + ' "+day+".",""].join("\\n");',
+    'fs.writeFileSync(directory+"/"+day+".md",markdown);',
+    '}',
+  ].join("");
+  return `node -e '${source}'`;
+}
+
+function buildSuccessfulQueryRebuildProofCommand(): string {
+  return [
+    "test ! -e .runtime/projections/query.sqlite",
+    "printf '%s\\n' 'query-projection-absent-before-read'",
+    `query_output="$(vault-cli search query ${queryProofMarker} --kind journal_day --limit 1 --format json)"`,
+    "printf '%s\\n' \"$query_output\"",
+    `printf '%s\\n' \"$query_output\" | grep -q '${queryProofMarker}'`,
+    "test -f .runtime/projections/query.sqlite",
+    'status_output="$(vault-cli query projection status --format json)"',
+    "printf '%s\\n' \"$status_output\"",
+    `printf '%s\\n' \"$status_output\" | grep -Eq '\"fresh\"[[:space:]]*:[[:space:]]*true'`,
+    "printf '%s\\n' 'query-projection-fresh-after-read'",
+  ].join(" && ");
+}
+
+function buildFailedQueryRebuildProofCommand(): string {
+  return [
+    "test ! -e .runtime/projections",
+    "mkdir -p .runtime",
+    "printf '%s\\n' 'blocked' > .runtime/projections",
+    `if vault-cli search query ${queryProofMarker} --kind journal_day --limit 1 --format json; then printf '%s\\n' 'unexpected-query-success'; exit 91; else printf '%s\\n' 'query-rebuild-failed-explicitly'; exit 97; fi`,
+  ].join(" && ");
 }
 
 async function waitForEstablishedSnapshot(input: {
@@ -987,6 +1121,7 @@ function buildSamplePercentileRecord(
     "objectFetchMs",
     "presignGetMs",
     "providerPreProviderSetupMs",
+    "providerToDeliveryMs",
     "runnerAcceptedToRestoreDoneMs",
     "runtimeInvocationPreparationMs",
     "sizeGuardMs",
@@ -1101,6 +1236,24 @@ function readBenchmarkTarget(): ColdStartBenchmarkTarget {
   throw new RangeError(
     "MURPH_E2E_COLD_START_TARGET must be first-contact or established-v2-r2.",
   );
+}
+
+function readQueryRebuildProofEnabled(): boolean {
+  const value = process.env.MURPH_E2E_COLD_START_QUERY_REBUILD_PROOF?.trim();
+  if (!value || value === "0") {
+    return false;
+  }
+  if (value !== "1") {
+    throw new RangeError(
+      "MURPH_E2E_COLD_START_QUERY_REBUILD_PROOF must be 0 or 1.",
+    );
+  }
+  if (benchmarkTarget !== "established-v2-r2") {
+    throw new RangeError(
+      "MURPH_E2E_COLD_START_QUERY_REBUILD_PROOF requires established-v2-r2.",
+    );
+  }
+  return true;
 }
 
 function readBenchmarkRunToken(): string {

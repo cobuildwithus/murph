@@ -1,6 +1,6 @@
 # Omit query projection from hosted snapshots
 
-Status: active
+Status: completed
 Created: 2026-08-29
 Updated: 2026-08-29
 
@@ -63,4 +63,9 @@ Updated: 2026-08-29
   - `pnpm exec vitest run --config packages/query/vitest.config.ts --no-coverage packages/query/test/query-projection-concurrency.test.ts`: 2 tests passed.
   - `pnpm --dir packages/runtime-state typecheck` and `pnpm --dir apps/cloudflare typecheck`: passed.
   - `git diff --check`: passed.
-- Remaining: exact-head preliminary specialist review, final ReviewGPT round, required PR checks, parent final review, and plan closure.
+  - `MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR=../murph-cloud/packages/hosted-orchestrator-temporal MURPH_E2E_COLD_START_TARGET=established-v2-r2 MURPH_E2E_COLD_START_WARMUP_COUNT=0 MURPH_E2E_COLD_START_SAMPLE_COUNT=1 MURPH_E2E_COLD_START_QUERY_REBUILD_PROOF=1 pnpm hosted-local e2e cold-start-benchmark --profile e2e:stub --no-bundle`: passed. The isolated direct-R2 fixture restored a 14.1 MB encrypted snapshot containing 730 canonical journal days but no query projection. Its first query rebuilt 731 entities, returned the matching canonical result, and delivered in 6,742 ms from first provider admission. The isolated forced-rebuild failure delivered the explicit degraded reply in 3,423 ms with no empty-result reply or hang.
+  - Preliminary completion-specialist review found one Product UX evidence gap: the initial tiny cold fixture did not exercise established history or the rebuild-failure route. Accepted and resolved with the opt-in hosted-local benchmark proof above; production source and runtime contracts did not change during remediation.
+  - Final ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` with no findings on the production candidate.
+  - Required GitHub checks passed on the first reviewed head.
+- Remaining: final exact-head typecheck and diff review, scoped plan-closing commit, push, required PR checks, and parent final review.
+Completed: 2026-08-29
