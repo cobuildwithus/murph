@@ -1005,6 +1005,73 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   )
 
   it(
+    'answers a simple onboarding next-step turn without a progress update',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const temporaryPaths = [...config.temporaryPaths]
+      const progressUpdates: string[] = []
+
+      try {
+        const workingDirectory = await prepareRealCodexOnboardingDirectory()
+        temporaryPaths.unshift(workingDirectory)
+        await writeRealCodexOnboardingResumeContext(workingDirectory, 'later')
+        const turnInput = buildRealCodexOnboardingTurnInput({
+          config,
+          workingDirectory,
+        })
+        const result = await executeRealCodexAppServerTurn({
+          ...turnInput,
+          dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          excludeResumeTurns: true,
+          progressDelivery: {
+            async send(text) {
+              progressUpdates.push(text)
+              return { kind: 'sent', source: 'model' }
+            },
+          },
+          prompt: [
+            "Let's continue onboarding and pick up the health goal we parked earlier.",
+            "Use whatever saved onboarding context is available; I don't want to repeat it.",
+          ].join(' '),
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const progressCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        )
+        const resumeContexts = readSuccessfulOnboardingResumeContexts(actions)
+        const policyFiles = await readOnboardingPolicyFiles(
+          actions,
+          path.join(workingDirectory, 'skills'),
+        )
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(
+          `[onboarding-simple-next-step-e2e] ${JSON.stringify({
+            policyFiles,
+            progressUpdateCount: progressUpdates.length,
+            reply,
+            resumeContextCount: resumeContexts.length,
+          })}\n`,
+        )
+
+        expect(progressUpdates).toEqual([])
+        expect(progressCalls).toEqual([])
+        expect(resumeContexts).toHaveLength(1)
+        expect(policyFiles).toContain('return-launch-completion.md')
+        expect(reply).toMatch(/sleep|bed|wake|wind[- ]down|routine/iu)
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).not.toMatch(
+          /checking a few things|pulling your data|while i work|sit tight/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it(
     'continues foundation after a member defers an optional wearable connection',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -16158,6 +16225,7 @@ describeRealCodex('real Codex Kernel browser continuation e2e', () => {
         body: Record<string, unknown>
         url: string
       }> = []
+      const progressUpdates: string[] = []
 
       try {
         await materializeAssistantSkill({
@@ -16229,6 +16297,12 @@ describeRealCodex('real Codex Kernel browser continuation e2e', () => {
           hostedToolContext: createRealCodexComputerHostedToolContext(),
           model: config.model,
           modelProvider: config.modelProvider,
+          progressDelivery: {
+            async send(text) {
+              progressUpdates.push(text)
+              return { kind: 'sent', source: 'model' }
+            },
+          },
           prompt: [
             'Open https://portal.example.test/setup and tell me whether account setup is ready.',
             'Do not enter or submit personal or payment information.',
@@ -16271,8 +16345,14 @@ describeRealCodex('real Codex Kernel browser continuation e2e', () => {
           action.kind === 'dynamic'
           && prohibitedToolNames.has(action.tool)
         )
+        const progressCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
+        )
 
         expect(skillRead, 'computer-use skill read').toBeDefined()
+        expect(progressUpdates).toEqual([])
+        expect(progressCalls).toEqual([])
         expect(openCalls).toHaveLength(1)
         expect(finishCalls).toHaveLength(1)
         expect(prohibitedCalls).toHaveLength(0)

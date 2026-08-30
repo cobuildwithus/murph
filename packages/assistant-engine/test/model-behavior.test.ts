@@ -1291,19 +1291,19 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Send one early update before direct reply-critical work spanning multiple sources or several substantive tool steps, including cross-owner evidence, long research, parsing/scans, or content inspection.',
+      'Send one early update before direct reply-critical work that requires three or more distinct substantive checks or tool actions',
     )
     expect(prompt).toContain(
-      'Before the first read, orient the member even when each lookup is routine',
+      'Source count alone does not trigger it: routine context reads, especially during onboarding or setup, and one or two quick calls stay silent and answer directly.',
     )
     expect(prompt).toContain(
-      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
+      'Also skip progress for ordinary conversation, choosing a straightforward next step, and quick resume checks.',
+    )
+    expect(prompt).toContain(
+      'Send a child-wait update after spawning.',
     )
     expect(prompt).toContain(
       'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
-    )
-    expect(prompt).toContain(
-      'Reconsider this on each follow-up or resumed turn; earlier updates do not count.',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update.',
@@ -1344,6 +1344,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
+    expect(prompt).not.toContain(
+      'orient the member even when each lookup is routine',
+    )
   })
 
   it('allows only sparing native text styles on Linq and Telegram messaging routes', () => {
