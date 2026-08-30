@@ -1,7 +1,11 @@
 import { Cli, z } from "incur";
 import {
-  HEALTH_COMMONS_PAGE_STATUSES,
+  HEALTH_COMMONS_GOAL_CATEGORIES,
+} from "@murphai/contracts";
+import {
   HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
+  HEALTH_COMMONS_PAGE_STATUSES,
+  getGeneratedHealthCommonsWebGoalIndex,
   getGeneratedHealthCommonsProtocolFamilyGraphReader,
   getGeneratedHealthCommonsProtocolIndexReader,
   getGeneratedHealthCommonsProtocolRunSpecReader,
@@ -32,6 +36,57 @@ const revisionSchema = z.object({
   pageRevisionId: z.string().min(1),
   recipeHash: z.string().min(1).nullable(),
   runSpecRevisionId: z.string().min(1).nullable(),
+});
+
+const goalRevisionSchema = z.object({
+  pageRevisionId: z.string().min(1),
+  workflowSpecRevisionId: z.string().min(1),
+});
+
+const commonsGoalSummarySchema = z.object({
+  aliases: z.array(z.string().min(1)),
+  category: z.enum(HEALTH_COMMONS_GOAL_CATEGORIES),
+  evidenceSourceKeys: z.array(z.string().min(1)).min(1),
+  goalPhrase: z.string().min(1),
+  indexable: z.literal(true),
+  key: z.string().min(1),
+  outcomeKind: z.string().min(1),
+  parentGoalKey: z.string().min(1).nullable(),
+  quality: z.string().min(1),
+  revision: goalRevisionSchema,
+  routeId: z.string().min(1),
+  safetyTier: z.string().min(1),
+  slug: z.string().min(1),
+  startPrompt: z.string().min(1),
+  status: z.string().min(1),
+  successSignals: z.array(z.object({
+    id: z.string().min(1),
+    kind: z.string().min(1),
+    label: z.string().min(1),
+  })),
+  summary: z.string().min(1),
+  title: z.string().min(1),
+  workflow: z.object({
+    kind: z.string().min(1),
+    ownerSkillIds: z.array(z.string().min(1)).min(1),
+  }),
+});
+
+export const commonsGoalListResultSchema = z.object({
+  catalogHash: z.string().min(1),
+  filters: z.object({
+    query: z.string().min(1).nullable(),
+    categories: z.array(z.enum(HEALTH_COMMONS_GOAL_CATEGORIES)),
+    limit: z.number().int().positive().max(500),
+  }),
+  total: z.number().int().nonnegative(),
+  goals: z.array(commonsGoalSummarySchema),
+});
+
+export const commonsGoalShowResultSchema = z.object({
+  catalogHash: z.string().min(1),
+  lookup: z.string().min(1),
+  goal: commonsGoalSummarySchema,
 });
 
 const commonsEntitySummarySchema = z.object({
@@ -142,7 +197,12 @@ export const commonsKnowledgeSearchResultSchema = z.object({
 export function registerCommonsCommands(cli: Cli.Cli) {
   const commons = Cli.create("commons", {
     description:
-      "Read-only Health Commons commands for public protocol variants and protocol-family exploration.",
+      "Read-only Health Commons commands for public goals, protocol variants, and evidence.",
+  });
+
+  const goal = Cli.create("goal", {
+    description:
+      "Find public outcome guides. Private member goals stay under the top-level goal command.",
   });
 
   const protocol = Cli.create("protocol", {
@@ -153,6 +213,122 @@ export function registerCommonsCommands(cli: Cli.Cli) {
   const knowledge = Cli.create("knowledge", {
     description:
       "Search bounded source-backed Health Commons knowledge without starting an experiment.",
+  });
+
+  goal.command("list", {
+    description:
+      "List public Health Commons outcome guides with optional text and category filters.",
+    args: emptyArgsSchema,
+    options: z.object({
+      query: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe("Optional text filter over title, goal phrase, summary, aliases, and category."),
+      category: z
+        .array(z.enum(HEALTH_COMMONS_GOAL_CATEGORIES))
+        .optional()
+        .describe("Optional goal category. Repeat --category for multiple values."),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(500)
+        .default(10)
+        .describe("Maximum number of public goal guides to return."),
+    }),
+    examples: [{
+      description: "Find goals related to resting heart rate.",
+      options: {
+        query: "resting heart rate",
+        limit: 5,
+      },
+    }],
+    output: commonsGoalListResultSchema,
+    run({ options }) {
+      let index: ReturnType<typeof getGeneratedHealthCommonsWebGoalIndex>;
+      try {
+        index = getGeneratedHealthCommonsWebGoalIndex();
+      } catch {
+        throw new VaultCliError(
+          "commons_goal_artifact_unavailable",
+          "Health Commons goal guides are unavailable; regenerate the packaged Health Commons artifacts and retry.",
+        );
+      }
+
+      const query = options.query?.trim() || null;
+      const normalizedQuery = query?.toLocaleLowerCase() ?? null;
+      const categories = options.category ?? [];
+      const goals = index.goals
+        .filter((entry) => categories.length === 0 || categories.includes(entry.category))
+        .filter((entry) => {
+          if (!normalizedQuery) {
+            return true;
+          }
+          return [
+            entry.title,
+            entry.goalPhrase,
+            entry.summary,
+            entry.category,
+            ...entry.aliases,
+          ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+        });
+
+      return {
+        catalogHash: index.catalogHash,
+        filters: {
+          query,
+          categories,
+          limit: options.limit,
+        },
+        total: goals.length,
+        goals: goals.slice(0, options.limit).map(toGoalSummary),
+      };
+    },
+  });
+
+  goal.command("show", {
+    description:
+      "Show one compact public Health Commons outcome guide by key, slug, route id, or alias, including exact revision ids.",
+    args: z.object({
+      key: z.string().trim().min(1).describe("Health Commons goal key, slug, route id, or alias."),
+    }),
+    options: z.object({}),
+    examples: [{
+      description: "Show the public resting-heart-rate goal guide.",
+      args: { key: "lower-resting-heart-rate" },
+    }],
+    output: commonsGoalShowResultSchema,
+    run({ args }) {
+      let index: ReturnType<typeof getGeneratedHealthCommonsWebGoalIndex>;
+      try {
+        index = getGeneratedHealthCommonsWebGoalIndex();
+      } catch {
+        throw new VaultCliError(
+          "commons_goal_artifact_unavailable",
+          "Health Commons goal guides are unavailable; regenerate the packaged Health Commons artifacts and retry.",
+        );
+      }
+
+      const normalizedLookup = args.key.toLocaleLowerCase();
+      const match = index.goals.find((entry) =>
+        [entry.key, entry.slug, entry.routeId, ...entry.aliases]
+          .some((value) => value.toLocaleLowerCase() === normalizedLookup)
+      );
+      if (!match) {
+        throw new VaultCliError(
+          "commons_goal_not_found",
+          `No public Health Commons goal guide matched "${args.key}".`,
+        );
+      }
+
+      return {
+        catalogHash: index.catalogHash,
+        lookup: args.key,
+        goal: toGoalSummary(match),
+      };
+    },
   });
 
   knowledge.command("search", {
@@ -366,9 +542,39 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     },
   });
 
+  commons.command(goal);
   commons.command(protocol);
   commons.command(knowledge);
   cli.command(commons);
+}
+
+function toGoalSummary(
+  entry: ReturnType<typeof getGeneratedHealthCommonsWebGoalIndex>["goals"][number],
+) {
+  return {
+    aliases: entry.aliases,
+    category: entry.category,
+    evidenceSourceKeys: entry.evidenceSourceKeys,
+    goalPhrase: entry.goalPhrase,
+    indexable: true as const,
+    key: entry.key,
+    outcomeKind: entry.outcomeKind,
+    parentGoalKey: entry.parentGoalKey,
+    quality: entry.quality,
+    revision: {
+      pageRevisionId: entry.revision.pageRevisionId,
+      workflowSpecRevisionId: entry.revision.workflowSpecRevisionId,
+    },
+    routeId: entry.routeId,
+    safetyTier: entry.safetyTier,
+    slug: entry.slug,
+    startPrompt: entry.startPrompt,
+    status: entry.status,
+    successSignals: entry.successSignals,
+    summary: entry.summary,
+    title: entry.title,
+    workflow: entry.workflow,
+  };
 }
 
 function toEntitySummary(entity: CommonsProtocolEntity) {

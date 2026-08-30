@@ -2425,7 +2425,7 @@ describe('assistant system prompt cache stability', () => {
     expect(openStablePrefix).toEqual(closedStablePrefix)
     expect(openStablePrefix).toContain('Murph skill router:')
     expect(openStablePrefix).toContain(
-      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
+      'Setup: murph-onboarding, goal-setup, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
     )
     expect(openStablePrefix).toContain(
       'When the private longitudinal default in turn priority applies, read self-management-experiments.',
@@ -2804,7 +2804,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Do not preload skills or call a discovery CLI just to route.',
     )
-    expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.')
+    expect(prompt).toContain('Setup: murph-onboarding, goal-setup, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
     expect(prompt).toContain(
@@ -2965,7 +2965,7 @@ describe('assistant Murph onboarding guidance', () => {
     }))
 
     expect(prompt).toContain(
-      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
+      'Setup: murph-onboarding, goal-setup, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
     )
     expect(prompt).toContain('Murph skill router:')
     expect(prompt).not.toContain('Murph onboarding:')

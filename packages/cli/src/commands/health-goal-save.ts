@@ -1,8 +1,13 @@
 import { Cli, z } from "incur";
-import { GOAL_HORIZONS, GOAL_STATUSES } from "@murphai/contracts";
+import {
+  GOAL_HORIZONS,
+  GOAL_STATUSES,
+  commonsGoalRefSchema,
+} from "@murphai/contracts";
 import type { upsertGoal } from "@murphai/core";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   normalizeRepeatableFlagOption,
   type VaultServices,
@@ -44,7 +49,43 @@ function buildGoalWindow(input: {
   };
 }
 
+function buildCommonsGoalRef(input: {
+  key?: string;
+  pageRevisionId?: string;
+  workflowSpecRevisionId?: string;
+}): Parameters<typeof upsertGoal>[0]["commonsGoalRef"] {
+  const values = [input.key, input.pageRevisionId, input.workflowSpecRevisionId];
+  const suppliedCount = values.filter((value) => value !== undefined).length;
+
+  if (suppliedCount === 0) {
+    return undefined;
+  }
+  if (suppliedCount !== values.length) {
+    throw new VaultCliError(
+      "invalid_option",
+      "--commons-goal-key, --commons-page-revision-id, and --commons-workflow-revision-id must be provided together.",
+    );
+  }
+
+  const parsed = commonsGoalRefSchema.safeParse({
+    key: input.key,
+    pageRevisionId: input.pageRevisionId,
+    workflowSpecRevisionId: input.workflowSpecRevisionId,
+  });
+  if (!parsed.success) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Health Commons goal lineage must use a goal_template key and exact sha256 revision ids.",
+    );
+  }
+
+  return parsed.data;
+}
+
 function buildGoalSaveInput(input: {
+  commonsGoalKey?: string;
+  commonsPageRevisionId?: string;
+  commonsWorkflowRevisionId?: string;
   domain?: string[];
   goalId?: string;
   horizon?: z.infer<typeof goalHorizonSchema>;
@@ -77,6 +118,11 @@ function buildGoalSaveInput(input: {
       input.relatedExperimentId,
       "related-experiment-id",
     ),
+    commonsGoalRef: buildCommonsGoalRef({
+      key: input.commonsGoalKey,
+      pageRevisionId: input.commonsPageRevisionId,
+      workflowSpecRevisionId: input.commonsWorkflowRevisionId,
+    }),
     domains: normalizeRepeatableFlagOption(input.domain, "domain"),
   };
 }
@@ -156,6 +202,21 @@ export function registerGoalCommands(
       relatedExperimentId: repeatedRelationOptionSchema(
         "Optional related experiment id. Repeat --related-experiment-id for multiple values.",
       ),
+      commonsGoalKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Public Health Commons goal_template key used to create this private goal."),
+      commonsPageRevisionId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Exact Health Commons goal page sha256 revision id."),
+      commonsWorkflowRevisionId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Exact Health Commons goal workflow sha256 revision id."),
       domain: repeatedRelationOptionSchema(
         "Optional goal domain. Repeat --domain for multiple values.",
       ),
@@ -176,6 +237,9 @@ export function registerGoalCommands(
           parentGoalId: context.options.parentGoalId,
           relatedGoalId: context.options.relatedGoalId,
           relatedExperimentId: context.options.relatedExperimentId,
+          commonsGoalKey: context.options.commonsGoalKey,
+          commonsPageRevisionId: context.options.commonsPageRevisionId,
+          commonsWorkflowRevisionId: context.options.commonsWorkflowRevisionId,
           domain: context.options.domain,
           vault: context.options.vault,
         }),

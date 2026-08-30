@@ -23,6 +23,7 @@ const temporaryDirectories: string[] = [];
 const finnishDrySaunaProtocolKey = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const healthCommonsRuntimeArtifactNames = [
   "biomarker-desired-directions.json",
+  "web/browse/goals.json",
   "knowledge.sqlite",
   "protocol-index.json",
   "protocol-run-specs.json",
@@ -463,8 +464,10 @@ describe("runner bundle runtime artifact staging", () => {
     expect(entries).not.toContain("package/generated/catalog.json");
     expect(entries).toContain("package/package.json");
     expect(
-      entries.some((entry) => entry.startsWith("package/generated/web/")),
-    ).toBe(false);
+      entries.filter((entry) =>
+        entry.startsWith("package/generated/web/") && !entry.endsWith("/")
+      ),
+    ).toEqual(["package/generated/web/browse/goals.json"]);
     expect(entries.some((entry) => entry.startsWith("package/content/"))).toBe(false);
 
     const extractDir = path.join(tarballsDir, "health-commons-extract");
@@ -478,6 +481,7 @@ describe("runner bundle runtime artifact staging", () => {
       "package/generated/protocol-run-specs.json",
       "package/generated/protocol-family-graph.json",
       "package/generated/biomarker-desired-directions.json",
+      "package/generated/web/browse/goals.json",
     ]);
     const protocolIndexRaw = await readFile(
       path.join(extractDir, "package", "generated", "protocol-index.json"),
@@ -500,12 +504,35 @@ describe("runner bundle runtime artifact staging", () => {
       ),
       "utf8",
     );
+    const goalIndexRaw = await readFile(
+      path.join(
+        extractDir,
+        "package",
+        "generated",
+        "web",
+        "browse",
+        "goals.json",
+      ),
+      "utf8",
+    );
     const protocolIndex: unknown = JSON.parse(protocolIndexRaw);
     const protocolRunSpecs: unknown = JSON.parse(protocolRunSpecsRaw);
     const protocolFamilyGraph: unknown = JSON.parse(protocolFamilyGraphRaw);
     const biomarkerDesiredDirections: unknown = JSON.parse(
       biomarkerDesiredDirectionsRaw,
     );
+    const goalIndex: unknown = JSON.parse(goalIndexRaw);
+
+    expect(findGoalArtifactEntry(goalIndex, "goal_template:improve-deep-sleep"))
+      .toMatchObject({
+        evidenceSourceKeys: expect.any(Array),
+        revision: {
+          pageRevisionId: expect.stringMatching(/^sha256:/u),
+          workflowSpecRevisionId: expect.stringMatching(/^sha256:/u),
+        },
+        routeId: "improve-deep-sleep",
+        startPrompt: "Hey Murph, help me improve my deep sleep.",
+      });
 
     expect(findProtocolArtifactEntry(protocolIndex, finnishDrySaunaProtocolKey)).toMatchObject({
       entityType: "protocol_variant",
@@ -852,6 +879,7 @@ async function readOptionalText(filePath: string): Promise<string> {
 
 async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): Promise<void> {
   await mkdir(generatedDir, { recursive: true });
+  await mkdir(path.join(generatedDir, "web", "browse"), { recursive: true });
   await writeFile(
     path.join(generatedDir, "knowledge.sqlite"),
     Buffer.from("SQLite format 3\0fixture"),
@@ -862,6 +890,15 @@ async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): 
       biomarkers: [],
       catalogHash: "sha256:test",
       schemaVersion: "murph.commons.biomarker-desired-directions.v1",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(generatedDir, "web", "browse", "goals.json"),
+    `${JSON.stringify({
+      catalogHash: "sha256:test",
+      goals: [],
+      schemaVersion: "murph.commons.web.goal-index.v1",
     })}\n`,
     "utf8",
   );
@@ -904,6 +941,16 @@ function findProtocolArtifactEntry(artifact: unknown, key: string): Record<strin
   return artifact.protocols.find((entity) =>
     isRecord(entity) &&
       entity.key === key
+  ) ?? null;
+}
+
+function findGoalArtifactEntry(artifact: unknown, key: string): Record<string, unknown> | null {
+  if (!isRecord(artifact) || !Array.isArray(artifact.goals)) {
+    return null;
+  }
+
+  return artifact.goals.find((entity) =>
+    isRecord(entity) && entity.key === key
   ) ?? null;
 }
 

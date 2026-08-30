@@ -343,6 +343,14 @@ export function buildHostedWebNextConfig(
         "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
         "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
       ],
+      "/goals": [
+        "../../packages/health-commons/generated/web/browse/goals.json",
+      ],
+      "/goals/[goalId]": [
+        "../../packages/health-commons/generated/web/browse/goals.json",
+        "../../packages/health-commons/generated/web/routes/index.json",
+        "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+      ],
       "/biomarkers": [
         "../../packages/health-commons/generated/web/browse/biomarkers.json",
         "../../packages/health-commons/generated/web/routes/index.json",

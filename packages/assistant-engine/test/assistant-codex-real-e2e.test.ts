@@ -11784,6 +11784,250 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
   )
 })
 
+describeRealCodex('real Codex public goal setup e2e', () => {
+  it(
+    'resolves an exact plain-language goal and previews support without writing',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-public-goal-setup-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'goal-commands.log')
+
+      try {
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'goal-setup' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'sleep-improvement' }),
+          materializePublicGoalSetupVaultCli({
+            binDirectory,
+            commandLogPath,
+          }),
+        ])
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'Use vault-cli for canonical member data.',
+              '- `commons goal list`: options --query=string, --category=repeatable, --limit=integer, --format=json.',
+              '- `commons goal show`: args <key-or-slug>; options --format=json.',
+              '- `goal list`: options optional --status=string, --limit=integer, --format=json.',
+              '- `goal show`: args <goal-id>; options --format=json.',
+              '- `goal save`: canonical Goal mutation; do not call before acceptance.',
+              '- `memory show`: options --compact, --format=json.',
+              '- `wearables sleep pattern`: options --format=json.',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-30',
+            currentTimeZone: 'America/New_York',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            ordinaryInboundTurn: true,
+            turnTrigger: null,
+          }),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Hey Murph, help me improve my deep sleep.',
+            'My watch has shown low deep sleep for two weeks, I average about six hours total sleep, and I wake tired.',
+            'I do not snore, gasp, have morning headaches, or have dangerous daytime sleepiness.',
+            'Show me a simple plan before anything is saved or scheduled.',
+          ].join(' '),
+          reasoningEffort: 'medium',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const commandLog = (await readFile(commandLogPath, 'utf8'))
+          .split('\n')
+          .map((command) => command.trim())
+          .filter(Boolean)
+        const reply = result.finalMessage.trim()
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'improve-deep-sleep-preview',
+          })}\n`,
+        )
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('goal-setup/SKILL.md')
+          && action.output.includes('# Goal setup')
+        )
+        const domainRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('sleep-improvement/SKILL.md')
+          && action.output.includes('# Sleep Improvement')
+        )
+
+        expect(skillRead, 'goal-setup skill read').toBeDefined()
+        expect(domainRead, 'sleep domain skill read').toBeDefined()
+        expect(commandLog.some((command) =>
+          command.startsWith('commons goal list --query ')
+        )).toBe(true)
+        expect(commandLog.some((command) =>
+          command === 'commons goal show goal_template:improve-deep-sleep --format json'
+          || command === 'commons goal show improve-deep-sleep --format json'
+        )).toBe(true)
+        expect(commandLog.some((command) =>
+          /^goal list (?:--status active )?--limit 200 --format json$/u
+            .test(command)
+        )).toBe(true)
+        expect(commandLog).toContain('memory show --compact --format json')
+        expect(commandLog.some((command) =>
+          /^(?:goal (?:save|import-json)|experiment start|automation )/u
+            .test(command)
+        )).toBe(false)
+
+        expect(reply).toMatch(/deep[-\s]sleep/iu)
+        expect(reply).toMatch(/six|6|total sleep|sleep opportunity/iu)
+        expect(reply).toMatch(/review|week|night/iu)
+        expect(reply).toMatch(/want me to|would you like me to|save (?:this|that)/iu)
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).not.toContain('goal_template:')
+        expect(reply).not.toContain('sha256:')
+        expect(reply).not.toMatch(/experiment/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
+async function materializePublicGoalSetupVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const publicGoal = {
+    aliases: ['Improve deep sleep'],
+    category: 'sleep',
+    evidenceSourceKeys: ['source_artifact:synthetic-sleep-guidance'],
+    goalPhrase: 'Improve my deep sleep',
+    indexable: true,
+    key: 'goal_template:improve-deep-sleep',
+    outcomeKind: 'biomarker',
+    parentGoalKey: null,
+    quality: 'reviewed',
+    revision: {
+      pageRevisionId: 'sha256:synthetic-goal-page-revision',
+      workflowSpecRevisionId: 'sha256:synthetic-goal-workflow-revision',
+    },
+    routeId: 'improve-deep-sleep',
+    safetyTier: 'low',
+    slug: 'improve-deep-sleep',
+    startPrompt: 'Hey Murph, help me improve my deep sleep.',
+    status: 'reviewed',
+    successSignals: [
+      { id: 'total-sleep', kind: 'biomarker', label: 'Total sleep time' },
+      { id: 'rested', kind: 'symptom', label: 'Wake feeling rested' },
+    ],
+    summary: 'A synthetic guide for improving sleep depth and restfulness.',
+    title: 'Improve my deep sleep',
+    workflow: {
+      kind: 'habit_plan',
+      ownerSkillIds: ['sleep-improvement'],
+    },
+  }
+  const emptyGoals = {
+    count: 0,
+    items: [],
+    nextCursor: null,
+    vault: 'synthetic-vault',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      `  commons\\ goal\\ list\\ --query*) ${emit({
+        catalogHash: 'sha256:synthetic-goal-catalog',
+        filters: {
+          categories: [],
+          limit: 10,
+          query: 'improve my deep sleep',
+        },
+        goals: [publicGoal],
+        total: 1,
+      })} ;;`,
+      `  "commons goal show goal_template:improve-deep-sleep --format json") ${emit({
+        catalogHash: 'sha256:synthetic-goal-catalog',
+        goal: publicGoal,
+        lookup: 'goal_template:improve-deep-sleep',
+      })} ;;`,
+      `  "commons goal show improve-deep-sleep --format json") ${emit({
+        catalogHash: 'sha256:synthetic-goal-catalog',
+        goal: publicGoal,
+        lookup: 'improve-deep-sleep',
+      })} ;;`,
+      `  "goal list --status active --limit 200 --format json") ${emit(emptyGoals)} ;;`,
+      `  "goal list --limit 200 --format json") ${emit(emptyGoals)} ;;`,
+      `  "memory show --compact --format json") ${emit({
+        document: {
+          exists: true,
+          records: [
+            { id: 'memory-adult', section: 'Identity', text: 'Adult.' },
+            {
+              id: 'memory-sleep-context',
+              section: 'Context',
+              text: 'No known sleep-disordered-breathing or dangerous daytime-sleepiness warning signs.',
+            },
+          ],
+        },
+        memory: null,
+      })} ;;`,
+      `  "wearables sleep pattern --format json") ${emit({
+        nights: 14,
+        summary: {
+          averageSleepMinutes: 361,
+          notes: ['Consumer sleep stages are estimates.'],
+        },
+      })} ;;`,
+      '  goal\\ save*|goal\\ import-json*|experiment\\ start*|automation\\ *) printf \'%s\\n\' \'Mutation forbidden before acceptance\' >&2; exit 17 ;;',
+      '  *) printf \'unsupported public goal setup fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+  await writeFile(input.commandLogPath, '', 'utf8')
+}
+
 describeRealCodex('real Codex experiment onboarding e2e', () => {
   it(
     'reconciles exact experiment support from compact inventory without an automation detail read',

@@ -40,6 +40,9 @@ interface RawCliResult {
   output: string;
 }
 
+const commonsPageRevisionId = `sha256:${"a".repeat(64)}`;
+const commonsWorkflowRevisionId = `sha256:${"b".repeat(64)}`;
+
 function createGoalCli() {
   const cli = Cli.create("vault-cli", {
     description: "goal typed save test cli",
@@ -156,6 +159,9 @@ test("goal save schema exposes typed fields while goal import-json remains the J
     "parentGoalId",
     "relatedGoalId",
     "relatedExperimentId",
+    "commonsGoalKey",
+    "commonsPageRevisionId",
+    "commonsWorkflowRevisionId",
     "domain",
   ]) {
     assert.equal(field in goalSave.options.properties, true, field);
@@ -222,6 +228,12 @@ test("goal save persists typed fields and repeated relationships", async () => {
       requireData(relatedGoal.envelope).goalId,
       "--related-experiment-id",
       "exp_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      "--commons-goal-key",
+      "goal_template:sleep-better",
+      "--commons-page-revision-id",
+      commonsPageRevisionId,
+      "--commons-workflow-revision-id",
+      commonsWorkflowRevisionId,
       "--domain",
       "sleep",
       "--domain",
@@ -258,6 +270,11 @@ test("goal save persists typed fields and repeated relationships", async () => {
     assert.deepEqual(document.attributes.relatedExperimentIds, [
       "exp_01JNY0B2W4VG5C2A0G9S8M7R6S",
     ]);
+    assert.deepEqual(document.attributes.commonsGoalRef, {
+      key: "goal_template:sleep-better",
+      pageRevisionId: commonsPageRevisionId,
+      workflowSpecRevisionId: commonsWorkflowRevisionId,
+    });
     assert.deepEqual(document.attributes.domains, ["recovery", "sleep"]);
 
     const updated = await runInProcessJsonCli<GoalSaveResult>(cli, [
@@ -318,6 +335,39 @@ test("goal save rejects comma-delimited repeatable fields", async () => {
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, "invalid_option");
       assert.match(result.envelope.error.message ?? "", /--domain/u);
+    }
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("goal save requires a complete Health Commons lineage tuple", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-goal-lineage-",
+  );
+
+  try {
+    const cli = createGoalCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "Sleep better",
+      "--commons-goal-key",
+      "goal_template:sleep-better",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.match(result.envelope.error.message ?? "", /must be provided together/u);
     }
   } finally {
     await rm(parentRoot, {

@@ -288,6 +288,97 @@ test("commons protocol commands fail closed when their artifacts are invalid", a
   }
 });
 
+test("commons goal commands fail closed when their compact index is unavailable", async () => {
+  const previousRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+  const missingRoot = path.join(tmpdir(), `missing-health-commons-goals-${process.pid}`);
+  process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = missingRoot;
+  try {
+    for (const args of [
+      ["commons", "goal", "list"],
+      ["commons", "goal", "show", "private-goal-lookup"],
+    ] as const) {
+      const result = await runInProcessJsonCli(createCommonsSliceCli(), [...args]);
+
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.envelope.ok, false);
+      if (result.envelope.ok) {
+        throw new Error("Expected compact goal index failure.");
+      }
+      assert.equal(result.envelope.error.code, "commons_goal_artifact_unavailable");
+      assert.equal("data" in result.envelope, false);
+      assert.doesNotMatch(JSON.stringify(result.envelope), /private-goal-lookup/u);
+      assert.doesNotMatch(JSON.stringify(result.envelope), new RegExp(missingRoot, "u"));
+    }
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+    } else {
+      process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = previousRoot;
+    }
+  }
+});
+
+test("commons goal list and show expose an outcome guide with exact lineage", async () => {
+  const cli = createCommonsSliceCli();
+  const listResult = await runInProcessJsonCli<{
+    goals: Array<{
+      category: string;
+      evidenceSourceKeys: string[];
+      key: string;
+      revision: {
+        pageRevisionId: string;
+        workflowSpecRevisionId: string;
+      };
+      startPrompt: string;
+    }>;
+    total: number;
+  }>(cli, [
+    "commons",
+    "goal",
+    "list",
+    "--query",
+    "deep sleep",
+    "--category",
+    "sleep",
+    "--limit",
+    "5",
+  ]);
+
+  assert.equal(listResult.envelope.ok, true);
+  const list = requireData(listResult.envelope);
+  assert.ok(list.total > 0);
+  const summary = list.goals.find((goal) =>
+    goal.key === "goal_template:improve-deep-sleep"
+  );
+  assert.equal(summary?.category, "sleep");
+  assert.match(summary?.revision.pageRevisionId ?? "", /^sha256:/u);
+  assert.match(summary?.revision.workflowSpecRevisionId ?? "", /^sha256:/u);
+  assert.equal(summary?.startPrompt, "Hey Murph, help me improve my deep sleep.");
+
+  const showResult = await runInProcessJsonCli<{
+    goal: {
+      evidenceSourceKeys: string[];
+      indexable: true;
+      key: string;
+      revision: {
+        pageRevisionId: string;
+        workflowSpecRevisionId: string;
+      };
+      safetyTier: string;
+    };
+  }>(cli, ["commons", "goal", "show", "improve-deep-sleep"]);
+
+  assert.equal(showResult.envelope.ok, true);
+  const shown = requireData(showResult.envelope).goal;
+  assert.equal(shown.key, "goal_template:improve-deep-sleep");
+  assert.equal(shown.indexable, true);
+  assert.ok(shown.evidenceSourceKeys.length > 0);
+  assert.ok(shown.safetyTier.length > 0);
+  assert.deepEqual(shown.revision, summary?.revision);
+  assert.equal(Object.hasOwn(shown, "body"), false);
+  assert.equal(Object.hasOwn(shown, "sourceSnippets"), false);
+});
+
 test("commons protocol list and show expose protocol revisions distinctly from private protocol commands", async () => {
   const cli = createCommonsSliceCli();
 

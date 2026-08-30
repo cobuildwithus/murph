@@ -9,6 +9,7 @@ import {
   FRONTMATTER_DOC_TYPES,
   GOAL_HORIZONS as CONTRACT_GOAL_HORIZONS,
   GOAL_STATUSES as CONTRACT_GOAL_STATUSES,
+  type CommonsGoalRef,
   type GoalFrontmatter,
   type FoodNutrition,
   REGIMEN_KINDS as CONTRACT_REGIMEN_KINDS,
@@ -325,6 +326,7 @@ export interface GoalEntity {
   relatedGoalIds?: string[];
   relatedExperimentIds?: string[];
   metricTargets?: GoalMetricTarget[];
+  commonsGoalRef?: CommonsGoalRef;
   domains?: string[];
   links: GoalLink[];
 }
@@ -348,6 +350,7 @@ export interface UpsertGoalInput {
   relatedExperimentIds?: string[];
   links?: GoalLink[] | null;
   metricTargets?: GoalMetricTarget[];
+  commonsGoalRef?: CommonsGoalRef;
   domains?: string[];
 }
 

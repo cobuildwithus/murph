@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 200,
+  "item": {
+    "id": "health-goal-guides",
+    "kind": "feature",
+    "priority": 4,
+    "title": "253 health goals you can act on",
+    "summary": "Browse practical, research-backed guides for outcomes like sleeping better, lowering resting heart rate, building strength, and training for an event.",
+    "details": "Every guide works on its own. If you want help carrying it out, the Murph action opens an editable draft in your messaging app; nothing is sent or saved until you choose to send and later approve a plan.",
+    "relevanceTags": ["goals", "health", "assistant"],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Browse health goals",
+      "href": "/goals"
+    }
+  }
+}

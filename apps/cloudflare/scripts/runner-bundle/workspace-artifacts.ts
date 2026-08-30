@@ -18,6 +18,7 @@ const ASSISTANT_CLI_SURFACE_GENERATION_MODE_ENV =
   "MURPH_ASSISTANT_CLI_SURFACE_GENERATION";
 const HEALTH_COMMONS_RUNTIME_GENERATED_FILES = [
   "generated/biomarker-desired-directions.json",
+  "generated/web/browse/goals.json",
   "generated/knowledge.sqlite",
   "generated/protocol-index.json",
   "generated/protocol-run-specs.json",

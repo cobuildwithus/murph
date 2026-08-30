@@ -337,6 +337,36 @@ test("goal upserts preserve metric targets in canonical frontmatter", async () =
   assert.match(read.document.markdown, /targetId: fasting-glucose-under-90/);
 });
 
+test("goal upserts preserve Health Commons goal lineage", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-commons-lineage");
+  await initializeVault({ vaultRoot });
+  const commonsGoalRef = {
+    key: "goal_template:lower-resting-heart-rate",
+    pageRevisionId: `sha256:${"a".repeat(64)}`,
+    workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+  } as const;
+
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Lower my resting heart rate",
+    commonsGoalRef,
+  });
+  const updated = await upsertGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+    priority: 7,
+  });
+  const read = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+
+  assert.deepEqual(updated.record.entity.commonsGoalRef, commonsGoalRef);
+  assert.deepEqual(read.entity.commonsGoalRef, commonsGoalRef);
+  assert.match(read.document.markdown, /commonsGoalRef:/);
+  assert.match(read.document.markdown, /goal_template:lower-resting-heart-rate/);
+});
+
 test("goal upserts merge concurrent partial updates with the latest record", async () => {
   const vaultRoot = await makeTempDirectory("murph-goal-concurrent-upsert");
   await initializeVault({ vaultRoot });

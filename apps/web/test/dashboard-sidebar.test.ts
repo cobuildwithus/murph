@@ -223,6 +223,18 @@ test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {
   );
 });
 
+test("Sidebar renders an active Goals tab for public goal guides", () => {
+  mocks.usePathname.mockReturnValue("/goals/lower-resting-heart-rate");
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.match(markup, /href="\/goals"/);
+  assert.match(
+    markup,
+    /data-active="true">\s*<a[^>]*href="\/goals"[^>]*>[\s\S]*Goals<\/a>/,
+  );
+});
+
 test("Sidebar does not render research-only Age navigation", () => {
   mocks.usePathname.mockReturnValue("/home");
 

@@ -13,12 +13,15 @@ const sourceFiles: readonly string[] = [
   "apps/web/src/lib/health-commons/experiment-projections.ts",
   "apps/web/src/lib/health-commons/biomarker-projections.ts",
   "apps/web/src/lib/health-commons/measurement-method-detail.ts",
+  "apps/web/src/lib/health-commons/goal-projections.ts",
   "apps/web/app/(dashboard)/experiments/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/research/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/results/page.tsx",
   "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
+  "apps/web/app/goals/page.tsx",
+  "apps/web/app/goals/[goalId]/page.tsx",
   "apps/web/app/measurement-methods/[measurementMethodId]/page.tsx",
 ] as const;
 

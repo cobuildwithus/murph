@@ -22,17 +22,16 @@ export function SidebarChatWithMurphContactDialog({
     <SidebarMenuItem>
       <MurphContactDialog
         options={options}
-        trigger={(open) => (
+        trigger={
           <SidebarMenuButton
             size="lg"
             className={SIDEBAR_NAV_ITEM_CLASS}
             aria-label="Chat with Murph"
-            onClick={open}
           >
             <MessageCircle className={SIDEBAR_NAV_ICON_CLASS} />
             Chat with Murph
           </SidebarMenuButton>
-        )}
+        }
       />
     </SidebarMenuItem>
   );

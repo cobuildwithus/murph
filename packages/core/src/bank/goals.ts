@@ -319,6 +319,7 @@ function parseGoalStoredDocument(
     window: normalizeGoalWindow(parsed.window, "window"),
     ...relations,
     metricTargets: parsed.metricTargets,
+    commonsGoalRef: parsed.commonsGoalRef,
     domains: normalizeDomainList(parsed.domains, "domains"),
   }) as GoalEntity;
 
@@ -352,6 +353,7 @@ function buildAttributes(record: GoalEntity): FrontmatterObject {
     relatedExperimentIds: relations.relatedExperimentIds,
     links: frontmatterLinkObjects(relations.links),
     metricTargets: record.metricTargets,
+    commonsGoalRef: record.commonsGoalRef,
     domains: record.domains,
   }) as FrontmatterObject;
 }
@@ -479,6 +481,11 @@ async function upsertGoalWithLatestRecord(input: UpsertGoalInput): Promise<Upser
             input.metricTargets,
             existingEntity?.metricTargets,
             (value) => normalizeGoalMetricTargets(value, "metricTargets"),
+          ),
+          commonsGoalRef: resolveOptionalUpsertValue(
+            input.commonsGoalRef,
+            existingEntity?.commonsGoalRef,
+            (value) => value,
           ),
           domains: resolveOptionalUpsertValue(input.domains, existingEntity?.domains, (value) =>
             normalizeDomainList(value, "domains"),
