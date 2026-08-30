@@ -5,7 +5,7 @@ import {
   type DeviceDataOrigin,
 } from "@murphai/contracts";
 import {
-  canonicalizeWearableProviderSlug,
+  normalizeWearableQueryProviderSlug,
   normalizeWearableMetricValue,
 } from "@murphai/health-metrics";
 
@@ -110,9 +110,8 @@ export function collectWearableDataset(
   const providerSet = filters.providers
     ? new Set(
         filters.providers
-          .map((provider) => provider.trim().toLowerCase())
-          .filter(Boolean)
-          .map((provider) => canonicalizeWearableProviderSlug(provider)),
+          .map((provider) => normalizeWearableQueryProviderSlug(provider))
+          .filter((provider): provider is string => provider !== null),
       )
     : null;
 

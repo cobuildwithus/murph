@@ -796,12 +796,23 @@ test("whoop provider filter resolves Junction whoop_v2 evidence to the whoop sco
 
 test("projection provider scope canonicalizes whoop aliases for both write and read keys", () => {
   assert.deepEqual(
-    normalizeWearableProviders(["whoop", " WHOOP_V2 ", "whoop-v2", "oura"]),
-    ["oura", "whoop"],
+    normalizeWearableProviders([
+      "whoop",
+      " WHOOP_V2 ",
+      "whoop-v2",
+      "oura",
+      "google_health",
+      "apple_healthkit",
+      "withings",
+    ]),
+    ["apple-health-kit", "google-health", "oura", "whoop", "withings"],
   );
   assert.equal(wearableProviderRowKey("whoop_v2"), "providers:whoop");
   assert.equal(wearableProviderRowKey("whoop-v2"), "providers:whoop");
   assert.equal(wearableProviderRowKey("whoop"), "providers:whoop");
+  assert.equal(wearableProviderRowKey("google_health"), "providers:google-health");
+  assert.equal(wearableProviderRowKey("apple_healthkit"), "providers:apple-health-kit");
+  assert.throws(() => wearableProviderRowKey("junction"), /require a provider/u);
 });
 
 test("multi-provider projected sleep reads do not invent sleep windows from total sleep metrics", async () => {

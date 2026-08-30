@@ -611,7 +611,55 @@ test('wearables metric latest preserves explicit activity heart-rate aliases', a
   assert.equal(showWearableMetricLatest.mock.calls[0]?.[0].metric, 'activity-average-heart-rate')
 })
 
-test('wearables commands still reject providers that do not canonicalize to a supported value', async () => {
+test('wearables commands normalize public provider identities without a preference allowlist', async () => {
+  const { cli, services } = createWearablesCliAndServices()
+  const showWearableDay = vi.fn(async (input: {
+    date: string
+    providers: string[]
+    vault: string
+  }) => ({
+    date: input.date,
+    filters: { providers: input.providers },
+    summary: null,
+    vault: input.vault,
+  }))
+  Object.defineProperty(services.query, 'showWearableDay', {
+    configurable: true,
+    value: showWearableDay,
+    writable: true,
+  })
+
+  for (const [provider, canonical] of [
+    ['fitbit', 'fitbit'],
+    ['withings', 'withings'],
+    ['polar', 'polar'],
+    ['google_health', 'google-health'],
+    ['apple_health', 'apple-health'],
+    ['apple_health_kit', 'apple-health-kit'],
+    ['apple_healthkit', 'apple-health-kit'],
+    ['whoop_v2', 'whoop'],
+    ['future-ring', 'future-ring'],
+  ] as const) {
+    const result = await runInProcessJsonCli<{
+      filters: { providers: string[] }
+    }>(cli, [
+      'wearables',
+      'day',
+      '2026-04-05',
+      '--vault',
+      '/tmp/wearables-additive-vault',
+      '--provider',
+      provider,
+    ])
+
+    assert.equal(result.exitCode, null)
+    assert.deepEqual(requireData(result.envelope).filters.providers, [canonical])
+  }
+
+  assert.equal(showWearableDay.mock.calls.length, 9)
+})
+
+test('wearables commands reject internal and malformed provider filters before querying', async () => {
   const { cli, services } = createWearablesCliAndServices()
   const showWearableDay = vi.fn()
   Object.defineProperty(services.query, 'showWearableDay', {
@@ -620,7 +668,14 @@ test('wearables commands still reject providers that do not canonicalize to a su
     writable: true,
   })
 
-  for (const provider of ['fitbit', 'junction']) {
+  for (const provider of [
+    '',
+    'junction',
+    'bad provider',
+    'bad/provider',
+    'bad\u0000provider',
+    'a'.repeat(81),
+  ]) {
     const result = await runInProcessJsonCli(cli, [
       'wearables',
       'day',
@@ -631,12 +686,16 @@ test('wearables commands still reject providers that do not canonicalize to a su
       provider,
     ])
 
-    const envelope = result.envelope
-    if (envelope.ok) {
-      throw new Error(`expected an error envelope for --provider ${provider}`)
+    if (result.envelope.ok) {
+      throw new Error('expected an invalid provider error envelope')
     }
-    assert.equal(envelope.error.code, 'invalid_option')
-    assert.match(envelope.error.message ?? '', new RegExp(`"${provider}"`, 'u'))
+    assert.equal(result.envelope.error.code, 'invalid_option')
+    assert.equal(
+      result.envelope.error.message,
+      'Invalid wearable --provider. Use a public provider slug; internal transport names and malformed values are not accepted.',
+    )
+    assert.match(result.envelope.error.hint ?? '', /wearables sources list/u)
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'provider')
   }
 
   assert.equal(showWearableDay.mock.calls.length, 0)
