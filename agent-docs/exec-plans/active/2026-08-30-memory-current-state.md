@@ -155,6 +155,45 @@ Updated: 2026-08-30
     in the existing notification recovery owner, with focused regression proof.
 - Rejected findings: None.
 - Corrected-diff Product UX verdict: Ready.
+- Corrected-diff code review: Zero findings.
+
+## Provider-input impact
+
+- Method: Captured the complete first provider-visible request from the pinned
+  real Codex App Server against a deterministic local Responses stub, using
+  identical synthetic base/head fixtures, `gpt-5.6-terra`, low reasoning, and
+  `gpt-tokenizer` 3.4.0 with `o200k_harmony`. Present request fields were
+  serialized in fixed order; only generated input ids and the temporary
+  workspace path were normalized. Transport, model-selection, reasoning,
+  streaming, storage, cache, service-tier, account, and HTTP metadata were
+  excluded identically.
+- The base request was reconstructed in the same harness from the exact
+  `origin/main` direct-memory line and absence of the new projection; the
+  normalized group request did not enter either changed branch and was
+  byte-identical. No reusable repository capture command exists.
+- Private direct, with one synthetic saved preference:
+  - Base: 27,516 tokens / 126,541 UTF-8 bytes.
+  - Head: 27,704 tokens / 127,458 UTF-8 bytes.
+  - Delta: +188 tokens (+0.6832%) / +917 bytes (+0.7247%).
+  - Attribution: entirely assembled instructions from the revised memory-read
+    policy and one bounded CurrentState record. Tool, schema, and generated
+    guidance were byte-identical.
+- Group:
+  - Base and head: 23,769 tokens / 109,332 UTF-8 bytes.
+  - Delta: 0 tokens (+0.0000%) / 0 bytes (+0.0000%).
+  - Normalized complete requests were byte-identical because the projection and
+    direct-memory guidance are private-direct-only. The changed member-memory
+    schema is maintenance-only and absent from ordinary direct/group requests.
+
+## Changelog
+
+- Updated the existing grouped item `2026-08-30 ·
+  saved-context-answers-stay-focused` for PRs 2578 and 2621.
+- Kept priority 2 and used prose only; this is not priority 5 or
+  interaction-heavy, and a visual would not explain the behavior better.
+- Passed the focused changelog page test (9 tests) and Web typecheck.
+- Review proof: `https://www.withmurph.ai/screenshots/ops#changelog-archive`,
+  direct JSON review, and the unchanged archive renderer.
 
 ## Verification
 
@@ -167,6 +206,13 @@ Updated: 2026-08-30
   `update`, no unrelated tools, silent completion).
 - Passed: real-Codex private current-state journey (natural relevant reply, no
   memory read or other action, no internal-memory wording).
+- Passed: corrected notification-recovery regression for successful maintenance
+  forget classification.
+- Passed: corrected focused suite (230 tests total across core and assistant
+  owners), both package typechecks, and both package builds.
+- Passed: changelog page tests (9 tests) and Web typecheck.
 - Passed: `git diff --check` and task-file privacy scan.
-- Pending: independent candidate review, provider-input measurement, PR gates,
-  ReviewGPT, and CI on the exact pushed head.
+- Passed: Product UX Ready and corrected-diff candidate review with zero
+  findings.
+- Pending: ReviewGPT, CI, final parent review, and plan closure on the exact
+  pushed head.
