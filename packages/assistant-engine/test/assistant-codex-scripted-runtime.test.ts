@@ -7963,7 +7963,7 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('cold-resumes a skipped 99,999-token group thread with its task context', {
+  it('cold-resumes a skipped 49,999-token group thread with its task context', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -7987,7 +7987,7 @@ text(JSON.stringify(result));
 
     scenario.stub.queue({
       text: 'SKIP_STANDARD_OK',
-      usageInputTokens: 99_999,
+      usageInputTokens: 49_999,
     })
     const standard = await executeCodexAppServerTurn({
       ...scenario.turnInput,
@@ -8009,7 +8009,7 @@ text(JSON.stringify(result));
     // turn's tokenUsage events, not a placeholder.
     scenario.stub.markRequestBaseline()
     const skipped = await compactWarmCodexThread({
-      groupMinThreadTokens: 100_000,
+      groupMinThreadTokens: 50_000,
       minThreadTokens: 90_000,
       timeoutMs: 30_000,
     })
@@ -8019,7 +8019,7 @@ text(JSON.stringify(result));
     })
     expect(
       skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
-        && skipped.threadContextTokensBefore === 99_999,
+        && skipped.threadContextTokensBefore === 49_999,
     ).toBe(true)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
 
@@ -8041,7 +8041,7 @@ text(JSON.stringify(result));
     expect(resumedAfterSkip.threadId).toBe(seeded.threadId)
   })
 
-  it('compacts a 100k group warm thread off-turn and keeps its task resumable', {
+  it('compacts a 50k group warm thread off-turn and keeps its task resumable', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -8071,7 +8071,7 @@ text(JSON.stringify(result));
 
     scenario.stub.queue({
       text: 'COMPACT_STANDARD_OK',
-      usageInputTokens: 100_000,
+      usageInputTokens: 50_000,
     })
     const standard = await executeCodexAppServerTurn({
       ...scenario.turnInput,
@@ -8092,7 +8092,7 @@ text(JSON.stringify(result));
     // served by the stub and the thread reports compacted.
     scenario.stub.queue({ text: compactedSummary })
     const compacted = await compactWarmCodexThread({
-      groupMinThreadTokens: 100_000,
+      groupMinThreadTokens: 50_000,
       minThreadTokens: 90_000,
       timeoutMs: 60_000,
     })
