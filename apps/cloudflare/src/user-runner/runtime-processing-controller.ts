@@ -34,6 +34,19 @@ import {
   resolveHostedExecutionRunnerContainerName,
 } from "../hosted-runner-container-identity.js";
 import {
+  HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
+  HOSTED_STANDBY_LOCATION_HINT,
+  HOSTED_STANDBY_REGION,
+  createHostedStandbyClaimId,
+  isHostedStandbySlotName,
+  readHostedStandbyMode,
+  readHostedStandbyReleaseId,
+  readHostedStandbySlotReleaseId,
+  resolveHostedStandbyCoordinatorName,
+  type HostedStandbyCoordinatorNamespaceLike,
+  type HostedStandbyRunnerContainerNamespaceLike,
+} from "../standby-runner-contract.js";
+import {
   buildHostedRunnerMetadataOnlyErrorDetails,
   buildRunnerRecordTimingLogDetails,
   classifyRuntimeStartFailureRetryReason,
@@ -124,6 +137,21 @@ type FreshRuntimeStartPreparation =
       runtimePreparationWaitAfterContainerReadyMs: number;
       startupOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
       shellPrewarmOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
+    }
+  | {
+      kind: "retry";
+      response: HostedRuntimeEnsureProcessingResponse;
+    };
+
+type FreshRunnerContainerResolution =
+  | {
+      kind: "ready";
+      runnerContainerName: string;
+      standbyAllocationOutcome:
+        | "claimed"
+        | "disabled"
+        | "fallback"
+        | "retained";
     }
   | {
       kind: "retry";
@@ -254,6 +282,8 @@ export class RuntimeProcessingController {
       } | null>;
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
       runtimeRetryAnalytics?: WorkerAnalyticsEngineDatasetLike | null;
+      standbyContainerNamespace?: HostedStandbyRunnerContainerNamespaceLike | null;
+      standbyCoordinatorNamespace?: HostedStandbyCoordinatorNamespaceLike | null;
       stateStore: RunnerStateStore;
     },
   ) {}
@@ -968,10 +998,262 @@ export class RuntimeProcessingController {
     if (!activeContainerName) {
       return null;
     }
+    if (isHostedStandbySlotName(activeContainerName)) {
+      return readHostedStandbyReleaseId(this.input.runnerRuntimeEnvSource)
+        !== readHostedStandbySlotReleaseId(activeContainerName);
+    }
     return activeContainerName !== resolveHostedExecutionRunnerContainerName({
       source: this.input.runnerRuntimeEnvSource,
       userId: input.record.userId,
     });
+  }
+
+  private async resolveFreshRunnerContainer(input: {
+    exactRunnerContainerName: string;
+    initialRecord: RunnerStateRecord;
+    input: RuntimeProcessingInput;
+  }): Promise<FreshRunnerContainerResolution> {
+    const userId = input.input.userId;
+    const pendingRunnerContainerName = input.initialRecord.pendingRunnerContainerName;
+    if (pendingRunnerContainerName) {
+      if (isHostedStandbySlotName(pendingRunnerContainerName)) {
+        const retained = await this.resolveRetainedStandbyContainer({
+          runnerContainerName: pendingRunnerContainerName,
+          userId,
+        });
+        if (retained === "ready") {
+          return {
+            kind: "ready",
+            runnerContainerName: pendingRunnerContainerName,
+            standbyAllocationOutcome: "retained",
+          };
+        }
+        if (retained === "retry") {
+          return this.createStandbyRetryResolution(input.input);
+        }
+      } else if (pendingRunnerContainerName === input.exactRunnerContainerName) {
+        return {
+          kind: "ready",
+          runnerContainerName: input.exactRunnerContainerName,
+          standbyAllocationOutcome: "disabled",
+        };
+      } else if (!await this.destroyAndClearPendingRunnerContainer({
+        runnerContainerName: pendingRunnerContainerName,
+        userId,
+      })) {
+        return this.createStandbyRetryResolution(input.input);
+      }
+    }
+
+    if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate") {
+      return {
+        kind: "ready",
+        runnerContainerName: input.exactRunnerContainerName,
+        standbyAllocationOutcome: "disabled",
+      };
+    }
+    const releaseId = readHostedStandbyReleaseId(this.input.runnerRuntimeEnvSource);
+    const coordinatorNamespace = this.input.standbyCoordinatorNamespace;
+    const standbyContainerNamespace = this.input.standbyContainerNamespace;
+    if (!releaseId || !coordinatorNamespace || !standbyContainerNamespace) {
+      return {
+        kind: "ready",
+        runnerContainerName: input.exactRunnerContainerName,
+        standbyAllocationOutcome: "fallback",
+      };
+    }
+
+    const deadlineAtEpochMs = Date.now() + HOSTED_STANDBY_CLAIM_TIMEOUT_MS;
+    const claimId = createHostedStandbyClaimId();
+    const coordinator = coordinatorNamespace.getByName(
+      resolveHostedStandbyCoordinatorName({
+        releaseId,
+        region: HOSTED_STANDBY_REGION,
+      }),
+      { locationHint: HOSTED_STANDBY_LOCATION_HINT },
+    );
+    const claim = await settleStandbyOperationBeforeDeadline(
+      coordinator.claimReadyStandby({
+        claimId,
+        deadlineAtEpochMs,
+        releaseId,
+        region: HOSTED_STANDBY_REGION,
+      }),
+      deadlineAtEpochMs,
+    );
+    if (claim.kind !== "completed" || claim.value.outcome !== "claimed") {
+      return {
+        kind: "ready",
+        runnerContainerName: input.exactRunnerContainerName,
+        standbyAllocationOutcome: "fallback",
+      };
+    }
+
+    const slotName = claim.value.slotName;
+    const reserved = await this.input.stateStore.reserveRunnerContainerStopTarget({
+      runnerContainerName: slotName,
+      userId,
+    });
+    if (!reserved) {
+      return this.createStandbyRetryResolution(input.input);
+    }
+    const slot = standbyContainerNamespace.getByName(slotName, {
+      locationHint: HOSTED_STANDBY_LOCATION_HINT,
+    });
+    const bind = await settleStandbyOperationBeforeDeadline(
+      slot.bindStandbySlot({
+        claimId,
+        releaseId,
+        region: HOSTED_STANDBY_REGION,
+        slotName,
+        userId,
+      }),
+      deadlineAtEpochMs,
+    );
+    if (
+      bind.kind === "completed"
+      && bind.value.bound
+      && bind.value.claimId === claimId
+      && bind.value.slotName === slotName
+      && bind.value.userId === userId
+    ) {
+      return {
+        kind: "ready",
+        runnerContainerName: slotName,
+        standbyAllocationOutcome: "claimed",
+      };
+    }
+    if (bind.kind === "timed_out") {
+      return this.createStandbyRetryResolution(input.input);
+    }
+
+    const resolved = await settleStandbyOperationBeforeDeadline(
+      slot.readStandbySlotBinding(),
+      deadlineAtEpochMs,
+    );
+    if (resolved.kind !== "completed") {
+      return this.createStandbyRetryResolution(input.input);
+    }
+    const binding = resolved.value;
+    if (
+      binding.state === "bound"
+      && binding.userId === userId
+      && binding.releaseId === releaseId
+      && binding.slotName === slotName
+    ) {
+      return {
+        kind: "ready",
+        runnerContainerName: slotName,
+        standbyAllocationOutcome: "claimed",
+      };
+    }
+    if (binding.state === "unbound") {
+      const retired = await settleStandbyOperationBeforeDeadline(
+        slot.retireStandbySlot({}),
+        deadlineAtEpochMs,
+      );
+      if (retired.kind !== "completed") {
+        return this.createStandbyRetryResolution(input.input);
+      }
+    }
+    const cleared = await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
+      runnerContainerName: slotName,
+      userId,
+    });
+    if (!cleared) {
+      return this.createStandbyRetryResolution(input.input);
+    }
+    return {
+      kind: "ready",
+      runnerContainerName: input.exactRunnerContainerName,
+      standbyAllocationOutcome: "fallback",
+    };
+  }
+
+  private async resolveRetainedStandbyContainer(input: {
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<"cleared" | "ready" | "retry"> {
+    const namespace = this.input.standbyContainerNamespace;
+    const releaseId = readHostedStandbyReleaseId(this.input.runnerRuntimeEnvSource);
+    if (!namespace || !releaseId) {
+      return "retry";
+    }
+    const slot = namespace.getByName(input.runnerContainerName, {
+      locationHint: HOSTED_STANDBY_LOCATION_HINT,
+    });
+    let binding;
+    try {
+      binding = await slot.readStandbySlotBinding();
+    } catch {
+      return "retry";
+    }
+    if (
+      binding.state === "bound"
+      && binding.userId === input.userId
+      && binding.releaseId === releaseId
+      && binding.slotName === input.runnerContainerName
+    ) {
+      return "ready";
+    }
+    if (binding.state === "retiring") {
+      try {
+        if (binding.claimId === null) {
+          await slot.retireStandbySlot({});
+        } else if (binding.userId === input.userId) {
+          await slot.retireStandbySlot({ claimId: binding.claimId });
+        }
+      } catch {
+        return "retry";
+      }
+    }
+    if (binding.state === "unbound") {
+      try {
+        await slot.retireStandbySlot({});
+      } catch {
+        return "retry";
+      }
+    } else if (binding.state === "bound" && binding.userId === input.userId) {
+      const destroyed = await destroyHostedExecutionContainer({
+        runnerContainerName: input.runnerContainerName,
+        runnerContainerNamespace: this.input.runnerContainerNamespace,
+        userId: input.userId,
+      });
+      if (!destroyed.ok) {
+        return "retry";
+      }
+    }
+    const cleared = await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
+      runnerContainerName: input.runnerContainerName,
+      userId: input.userId,
+    });
+    return cleared ? "cleared" : "retry";
+  }
+
+  private async destroyAndClearPendingRunnerContainer(input: {
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<boolean> {
+    const destroyed = await destroyHostedExecutionContainer({
+      runnerContainerName: input.runnerContainerName,
+      runnerContainerNamespace: this.input.runnerContainerNamespace,
+      userId: input.userId,
+    });
+    return destroyed.ok
+      && await this.input.stateStore.clearStoppedRunnerContainerForUserControl(input);
+  }
+
+  private createStandbyRetryResolution(
+    input: RuntimeProcessingInput,
+  ): Extract<FreshRunnerContainerResolution, { kind: "retry" }> {
+    return {
+      kind: "retry",
+      response: this.createRetryLater({
+        orchestrationAttemptId: input.orchestrationAttemptId,
+        reason: "container_rpc_error",
+        userId: input.userId,
+      }),
+    };
   }
 
   private async startRuntimeProcessing(input: {
@@ -1013,38 +1295,24 @@ export class RuntimeProcessingController {
     if (!runnerContainerIdentity || runnerContainerIdentity.userId !== processingInput.userId) {
       throw new Error("Hosted runner container identity did not match the runtime start user.");
     }
-    const runnerContainerName = runnerContainerIdentity.runnerContainerName;
-    const pendingRunnerContainerName = initialRecord.pendingRunnerContainerName;
-    if (
-      pendingRunnerContainerName
-      && pendingRunnerContainerName !== runnerContainerName
-    ) {
-      const destroyed = await destroyHostedExecutionContainer({
-        runnerContainerName: pendingRunnerContainerName,
-        runnerContainerNamespace: this.input.runnerContainerNamespace,
-        userId: processingInput.userId,
-      });
-      if (!destroyed.ok) {
-        return this.createRetryLater({
-          orchestrationAttemptId: processingInput.orchestrationAttemptId,
-          reason: "container_rpc_error",
-          userId: processingInput.userId,
-        });
-      }
-      const cleared =
-        await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
-          runnerContainerName: pendingRunnerContainerName,
-          userId: processingInput.userId,
-        });
-      if (!cleared) {
-        return this.createRetryLater({
-          orchestrationAttemptId: processingInput.orchestrationAttemptId,
-          reason: "container_busy",
-          stage: "stopped_container_record_pending",
-          userId: processingInput.userId,
-        });
-      }
+    const resolution = await this.resolveFreshRunnerContainer({
+      exactRunnerContainerName: runnerContainerIdentity.runnerContainerName,
+      initialRecord,
+      input: processingInput,
+    });
+    if (resolution.kind === "retry") {
+      return resolution.response;
     }
+    const runnerContainerName = resolution.runnerContainerName;
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        standbyAllocationOutcome: resolution.standbyAllocationOutcome,
+      },
+      message: "Hosted runner selected a fresh container target.",
+      phase: "runtime.starting",
+      userId: processingInput.userId,
+    });
     let token: RunnerWriteFenceToken;
     try {
       token = await this.input.stateStore.beginWriteFence({
@@ -1593,6 +1861,39 @@ export class RuntimeProcessingController {
     const ageMs = Date.now() - heartbeatAtMs;
     return ageMs >= 0
       && ageMs < HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS;
+  }
+}
+
+type StandbyOperationSettlement<T> =
+  | { kind: "completed"; value: T }
+  | { error: unknown; kind: "failed" }
+  | { kind: "timed_out" };
+
+async function settleStandbyOperationBeforeDeadline<T>(
+  operation: Promise<T>,
+  deadlineAtEpochMs: number,
+): Promise<StandbyOperationSettlement<T>> {
+  const remainingMs = deadlineAtEpochMs - Date.now();
+  if (remainingMs <= 0) {
+    void operation.catch(() => undefined);
+    return { kind: "timed_out" };
+  }
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<StandbyOperationSettlement<T>>((resolve) => {
+    timeoutId = setTimeout(() => resolve({ kind: "timed_out" }), remainingMs);
+  });
+  try {
+    return await Promise.race([
+      operation.then<StandbyOperationSettlement<T>, StandbyOperationSettlement<T>>(
+        (value) => ({ kind: "completed", value }),
+        (error: unknown) => ({ error, kind: "failed" }),
+      ),
+      timeout,
+    ]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
   }
 }
 

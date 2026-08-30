@@ -66,6 +66,29 @@ describe("RunnerStateStore write-fence state", () => {
     });
   });
 
+  it("retains a claimed standby target after successful completion for the same member", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { store } = createHarness();
+    const runnerContainerName =
+      "standby--v-release_1--0123456789abcdef0123456789abcdef";
+    const token = await store.beginWriteFence({
+      runnerContainerName,
+      userId: "member_123",
+    });
+
+    const completed = await store.clearWriteFenceAfterCompletion({
+      finishedAt: NOW,
+      token,
+    });
+
+    expect(completed.completed).toBe(true);
+    expect(completed.record).toMatchObject({
+      pendingRunnerContainerName: runnerContainerName,
+      writeFence: null,
+    });
+  });
+
   it("keeps the persisted processing mode while the write fence is live and clears it after completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));

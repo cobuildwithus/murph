@@ -1,6 +1,7 @@
 import {
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
+import { isHostedStandbySlotName } from "../standby-runner-contract.js";
 
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
@@ -182,6 +183,13 @@ export class RunnerStateStore {
     runnerContainerName: string;
     userId: string;
   }): Promise<boolean> {
+    return await this.reserveRunnerContainerStopTarget(input);
+  }
+
+  async reserveRunnerContainerStopTarget(input: {
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<boolean> {
     await this.bindUser(input.userId);
     const meta = this.requireMetaRowSync();
     if (meta.active_attempt_id) {
@@ -307,7 +315,11 @@ export class RunnerStateStore {
     record: RunnerStateRecord;
   }> {
     const meta = this.requireMetaRowSync();
-    if (!this.clearWriteFenceTokenSync(meta, input.token)) {
+    if (!this.clearWriteFenceTokenSync(meta, input.token, {
+      preserveRunnerContainerName: isHostedStandbySlotName(
+        input.token.runnerContainerName,
+      ),
+    })) {
       return {
         completed: false,
         record: this.readStateFromMetaSync(meta),
@@ -346,7 +358,11 @@ export class RunnerStateStore {
       };
     }
 
-    this.clearActiveRunMetaSync(meta);
+    this.clearActiveRunMetaSync(meta, {
+      preserveRunnerContainerName: isHostedStandbySlotName(
+        meta.active_runner_container_name,
+      ),
+    });
     meta.last_invocation_at = input.finishedAt ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
     return {
@@ -788,23 +804,29 @@ export class RunnerStateStore {
   private clearWriteFenceTokenSync(
     meta: RunnerMetaRow,
     token: RunnerWriteFenceToken,
+    options: { preserveRunnerContainerName?: boolean } = {},
   ): boolean {
     if (!this.hasWriteFenceTokenSync(meta, token)) {
       return false;
     }
 
-    this.clearActiveRunMetaSync(meta);
+    this.clearActiveRunMetaSync(meta, options);
     return true;
   }
 
-  private clearActiveRunMetaSync(meta: RunnerMetaRow): void {
+  private clearActiveRunMetaSync(
+    meta: RunnerMetaRow,
+    options: { preserveRunnerContainerName?: boolean } = {},
+  ): void {
     meta.active_attempt_id = null;
     meta.active_kind = null;
     meta.active_provider_egress_token_hash = null;
     meta.active_custom_inference_envelope = null;
     meta.active_platform_ai_allowed = null;
     meta.active_reason = null;
-    meta.active_runner_container_name = null;
+    if (!options.preserveRunnerContainerName) {
+      meta.active_runner_container_name = null;
+    }
     meta.active_started_at = null;
     meta.active_workspace_version = null;
   }

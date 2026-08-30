@@ -1432,6 +1432,17 @@ locally readable.
   isolation flag enabled until the configured compatibility date provides the
   same boundary by default. Use structured logs, Durable Object status,
   Container inventory, and managed deploy smoke as the diagnostic boundary.
+- The ENAM runner standby must remain content-free and memberless until an
+  exact `UserRunner` claim. Its coordinator may persist only release/region,
+  opaque slot names, and opaque claim tombstones; it must never receive a
+  member id, workspace reference, provider credential, or canonical product
+  fact. The slot's immutable binding is the sole opaque-name-to-member mapping.
+  Before provider credential minting, invocation, wake, or cleanup, the
+  per-member owner must re-read that binding and require the exact member,
+  release, region, and slot. A claimed slot is never reusable across members;
+  terminal retirement destroys the container and scrubs claim/member identity.
+  Codex standby preflight uses a disposable content-free home and must not make
+  a provider request or retain a resident member-configured App Server.
 - The same protected-main Cloudflare workflow may attach the GitHub `Preview`
   Environment only for the explicit `preview` target. That environment must
   contain staging-only credentials and must not duplicate production database,
