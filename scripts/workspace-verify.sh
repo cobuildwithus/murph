@@ -682,6 +682,15 @@ run_typecheck_packages() {
     run_diff_contracts_build_with_workspace_artifact_lock || return $?
   fi
 
+  for package_dir in "${package_dirs[@]}"; do
+    if [[ "$package_dir" == "apps/cloudflare" ]]; then
+      run_command_with_retry \
+        "Hosted web Prisma client" \
+        pnpm --dir "apps/web" prisma:generate || return $?
+      break
+    fi
+  done
+
   if [[ "$typecheck_workspace_concurrency" -le 1 ]]; then
     for package_dir in "${package_dirs[@]}"; do
       [[ -n "$package_dir" ]] || continue
@@ -703,7 +712,7 @@ run_typecheck_packages() {
 
   # The package/app typecheck scripts are no-emit: they read sibling sources or
   # already-built dist and produce nothing another package's typecheck consumes.
-  # The one real prerequisite (the contracts build) is sequenced explicitly
+  # The contracts build and Web-owned Prisma client are sequenced explicitly
   # before this fanout, so topological ordering would only serialize the lane.
   run_command_with_retry \
     "Workspace package typecheck" \

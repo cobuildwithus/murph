@@ -219,6 +219,98 @@ describe("hosted orchestration control contracts", () => {
     });
   });
 
+  it("parses the optional reconciliation system progress projection atomically", () => {
+    const mailboxLag = createMailboxLag();
+    const workspace = createWorkspaceProjection();
+    const activeProjection = {
+      nextDefaultProcessingWakeAt: "2026-05-20T12:01:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant",
+      systemMailboxProgressGeneration: "12",
+    };
+
+    expect(parseHostedRuntimeReconciliationFacts({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        ...workspace,
+        ...activeProjection,
+      },
+    })).toEqual({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        ...workspace,
+        ...activeProjection,
+      },
+    });
+    expect(parseHostedRuntimeReconciliationFacts({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        ...workspace,
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+        systemMailboxProgressGeneration: "0",
+      },
+    })).toEqual({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        ...workspace,
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+        systemMailboxProgressGeneration: "0",
+      },
+    });
+
+    const partialProjections = [
+      { nextDefaultProcessingWakeAt: activeProjection.nextDefaultProcessingWakeAt },
+      { nextDefaultProcessingWakeReason: activeProjection.nextDefaultProcessingWakeReason },
+      { systemMailboxProgressGeneration: activeProjection.systemMailboxProgressGeneration },
+      {
+        nextDefaultProcessingWakeAt: activeProjection.nextDefaultProcessingWakeAt,
+        nextDefaultProcessingWakeReason: activeProjection.nextDefaultProcessingWakeReason,
+      },
+      {
+        nextDefaultProcessingWakeAt: activeProjection.nextDefaultProcessingWakeAt,
+        systemMailboxProgressGeneration: activeProjection.systemMailboxProgressGeneration,
+      },
+      {
+        nextDefaultProcessingWakeReason: activeProjection.nextDefaultProcessingWakeReason,
+        systemMailboxProgressGeneration: activeProjection.systemMailboxProgressGeneration,
+      },
+    ];
+    for (const partialProjection of partialProjections) {
+      expect(() => parseHostedRuntimeReconciliationFacts({
+        blocked: null,
+        mailboxLag,
+        workspace: {
+          ...workspace,
+          ...partialProjection,
+        },
+      })).toThrow(/system progress projection must include generation, wake, and reason together/u);
+    }
+
+    expect(() => parseHostedRuntimeReconciliationFacts({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        ...workspace,
+        ...activeProjection,
+        nextDefaultProcessingWakeAt: "not-a-date",
+      },
+    })).toThrow(/nextDefaultProcessingWakeAt must be a valid ISO-8601 timestamp/u);
+    expect(() => parseHostedRuntimeReconciliationFacts({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        ...workspace,
+        ...activeProjection,
+        systemMailboxProgressGeneration: "-1",
+      },
+    })).toThrow(/systemMailboxProgressGeneration must be a non-negative/u);
+  });
+
   it("classifies the generic first system-mailbox frontier", () => {
     expect(classifyHostedSystemMailboxExecutionClass({
       dedupeKey: "environment-interview.completed:completion",

@@ -666,6 +666,7 @@ test("device sync service records privacy-safe job phase timings", async () => {
       async importDeviceProviderSnapshot() {
         advanceClock(2_000);
         return {
+          applied: true,
           deviceProviderSnapshotImportTiming: {
             canonicalCoreElapsedMs: 1_600,
             canonicalWriteElapsedMs: 200,
@@ -709,6 +710,7 @@ test("device sync service records privacy-safe job phase timings", async () => {
     assert.deepEqual(service.listJobTimingDiagnostics(), [{
       at: "2026-08-25T10:00:05.700Z",
       attempts: 1,
+      canonicalProgressCommitted: true,
       connectionSourceReadCount: 1,
       connectionSourceReadElapsedMs: 1_000,
       credentialRefreshCount: 1,
@@ -7344,6 +7346,7 @@ test("device sync service aborts and releases provider jobs when foreground work
     async importDeviceProviderSnapshot(input) {
       imports.push(input);
       return {
+        applied: false,
         ok: true,
       };
     },
@@ -7451,6 +7454,89 @@ test("device sync service aborts and releases provider jobs when foreground work
         },
       ],
     );
+    const completedDiagnostic = service.listJobTimingDiagnostics()[1];
+    assert(completedDiagnostic);
+    assert.equal(completedDiagnostic.durableProgressCommitted, true);
+    assert.equal(Object.hasOwn(completedDiagnostic, "canonicalProgressCommitted"), false);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service yields between sequential snapshot imports", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-sequential-import-yield");
+  const imports: unknown[] = [];
+  let executionCount = 0;
+  let yieldRequested = false;
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input.snapshot);
+      if (executionCount === 1 && imports.length === 1) {
+        yieldRequested = true;
+      }
+      return {
+        applied: true,
+        ok: true,
+      };
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          executionCount += 1;
+          await context.importSnapshot({
+            ordinal: 1,
+          });
+          await context.importSnapshot({
+            ordinal: 2,
+          });
+          return {};
+        },
+      }),
+    ],
+    importer,
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "sequential-import-yield",
+    });
+
+    const yieldedJob = await service.runWorkerOnce();
+
+    assert.equal(executionCount, 1);
+    assert.deepEqual(imports, [{ ordinal: 1 }]);
+    assert.equal(store.getJobById(yieldedJob!.id)?.status, "queued");
+    assert.equal(store.getJobById(yieldedJob!.id)?.attempts, 0);
+    assert.deepEqual(service.listJobFailureDiagnostics(), []);
+    assert.equal(
+      service.listJobTimingDiagnostics()[0]?.canonicalProgressCommitted,
+      true,
+    );
+
+    yieldRequested = false;
+    const completedJob = await service.runWorkerOnce();
+
+    assert.equal(completedJob?.id, yieldedJob?.id);
+    assert.equal(executionCount, 2);
+    assert.equal(imports.length, 3);
+    assert.deepEqual(imports.slice(1), [
+      { ordinal: 1 },
+      { ordinal: 2 },
+    ]);
+    assert.equal(store.getJobById(completedJob!.id)?.status, "succeeded");
+    assert.deepEqual(service.listJobFailureDiagnostics(), []);
   } finally {
     close();
   }

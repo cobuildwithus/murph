@@ -33,6 +33,10 @@ export const hostedLocalCrossRepoCiRequirements = [
     scenario: "linq-scheduled-reminder",
   },
   {
+    reason: "Proves device-sync background admission stays bounded without starving a recurring reminder.",
+    scenario: "linq-reminder-device-sync-non-starvation",
+  },
+  {
     reason: "Proves a scheduled skill-authored recipe reaches generic authorized group email fanout.",
     scenario: "group-email-newsletter",
   },

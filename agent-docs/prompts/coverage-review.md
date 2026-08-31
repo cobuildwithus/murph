@@ -1,10 +1,10 @@
 ---
-description: Executable-proof lens for the preliminary unified ReviewGPT completion pass
-action: preliminary specialist proof review
+description: On-demand review guidance for executable proof
+action: on-demand proof review
 ---
 
-Use this review-only lens inside the preliminary `completion-specialists`
-ReviewGPT pass when either:
+Use this review-only guidance when the user explicitly requests proof review or
+when the parent wants a checklist for its own final review and either:
 
 - tests, fixtures, or direct-proof infrastructure are a primary PR outcome; or
 - the changed behavior makes a material proof claim that ordinary focused
@@ -15,7 +15,7 @@ configuration, or proof scaffolding changed. The final ReviewGPT gate, when it
 applies, owns ordinary correctness and test adequacy.
 
 Outcome:
-Determine whether the pushed implementation has truthful executable proof at
+Determine whether the candidate implementation has truthful executable proof at
 the highest stable boundary. Report only missing proof that could conceal a
 broken changed outcome or hard invariant.
 
@@ -31,11 +31,10 @@ Success criteria:
 
 Mode:
 
-- Review the exact pushed-head patch and its existing proof; do not mutate the
+- Review the complete candidate patch and its existing proof; do not mutate the
   checkout, create artifacts, create commits, push, or claim that suggested
   changes landed.
-- Follow the unified ReviewGPT preset's evidence, finding, output, and stop
-  contract.
+- Follow the invoking review's evidence, finding, output, and stop contract.
 
 Review priorities:
 
@@ -72,7 +71,7 @@ Finding constraints:
 
 Output:
 
-- Return findings through the unified ReviewGPT preset, ordered by severity.
+- Return findings ordered by severity.
 - For each finding name the missing behavior proof, current evidence, stable
   test boundary, smallest correction, and exact verification command.
 - State explicitly when current proof is sufficient.

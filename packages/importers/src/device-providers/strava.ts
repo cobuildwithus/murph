@@ -46,6 +46,17 @@ function parseStravaSnapshot(snapshot: unknown): StravaSnapshotInput {
   return snapshot as StravaSnapshotInput;
 }
 
+function sanitizeStravaRawSnapshot(snapshot: StravaSnapshotInput): unknown {
+  const source = asPlainObject(snapshot);
+  if (!source) {
+    return source;
+  }
+
+  const sanitized: PlainObject = { ...source };
+  delete sanitized.importedAt;
+  return sanitized;
+}
+
 function assertOptionalObjectCollection(value: unknown, fieldName: string): void {
   if (value === undefined) {
     return;
@@ -330,4 +341,5 @@ export const stravaProviderAdapter: DeviceProviderAdapter<StravaSnapshotInput> =
   ...STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   parseSnapshot: parseStravaSnapshot,
   normalizeSnapshot: normalizeStravaSnapshot,
+  sanitizeRawSnapshot: sanitizeStravaRawSnapshot,
 };
