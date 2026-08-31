@@ -330,7 +330,9 @@ Every PR includes:
   unrelated PR. Required CI compares GitHub's exact synthetic merge candidate
   with that merge commit's first parent, so an event-payload base race cannot
   widen or invalidate the comparison. The pull-request evidence guard validates
-  this section.
+  this section. Automated PR-body owners must supply the same fields; a
+  metadata-only producer such as the Frog reconciliation footer uses concrete
+  not-applicable values instead of bypassing the universal evidence check.
 - **Hot reply path impact.** State whether the PR changes the `Foreground Reply
   Critical Path` defined in `docs/contracts/00-invariants.md`: durable
   acceptance of a current conversation message through provider start and
