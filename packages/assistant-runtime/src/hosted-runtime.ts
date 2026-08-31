@@ -2686,9 +2686,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let currentRedactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,
       );
+      const restoredSystemMailboxProgressNeedsCheckpoint =
+        await hasRestoredSystemMailboxProgressAheadOfWorkspace({
+          importedSeq: initialMailboxImport.state.watermarks.system,
+          redactedStatus: activeWorkspace?.redactedStatus ?? null,
+          vaultRoot: restored.vaultRoot,
+        });
       let importOrStartupCheckpointPending =
         initialMailboxImport.checkpointDeferred && initialMailboxImport.stateChanged
-        || hostedVaultStartupPreparation.mutated;
+        || hostedVaultStartupPreparation.mutated
+        || restoredSystemMailboxProgressNeedsCheckpoint;
       let checkpointed = false;
       let foregroundWakeObserved = false;
       let checkpointReportedConversationInputAhead = false;
@@ -2972,6 +2979,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               checkpointWake.nextDefaultProcessingWakeAt !== null,
             nextWakeAtPresent: checkpointWake.nextWakeAt !== null,
             nextWakeReasonPresent: checkpointWake.nextWakeReason !== null,
+            ...(restoredSystemMailboxProgressNeedsCheckpoint && !checkpointed
+              ? { restoredSystemMailboxProgressAheadAtCheckpoint: true }
+              : {}),
             systemMailboxProgressedSinceCheckpoint,
             systemMailboxCheckpointStage,
           },
@@ -3005,6 +3015,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           details: {
             checkpointed: checkpoint.checkpointed,
             checkpointWorkspaceVersion: checkpoint.workspace.version,
+            ...(restoredSystemMailboxProgressNeedsCheckpoint && !checkpointed
+              ? { restoredSystemMailboxProgressAheadAtCheckpoint: true }
+              : {}),
             systemMailboxCheckpointStage,
           },
           input,
@@ -8391,6 +8404,36 @@ function readHostedConversationConsumedSeqFromStatus(
     : null;
 }
 
+async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
+  importedSeq: string;
+  redactedStatus: HostedRuntimeRedactedJson | null;
+  vaultRoot: string;
+}): Promise<boolean> {
+  const canonicalImportedSeq = parseHostedMailboxSeqOrNull(
+    input.redactedStatus?.hostedMailboxSystemImportedSeq,
+  );
+  const canonicalHandledThroughSeq = parseHostedMailboxSeqOrNull(
+    input.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+  );
+  if (canonicalImportedSeq === null || canonicalHandledThroughSeq === null) {
+    return false;
+  }
+
+  const localImportedSeq = BigInt(input.importedSeq);
+  const localHandledThroughSeq = BigInt(
+    await readHostedSystemMailboxHandledThroughSeq({
+      importedSeq: input.importedSeq,
+      vaultRoot: input.vaultRoot,
+    }),
+  );
+  return localImportedSeq >= canonicalImportedSeq
+    && localHandledThroughSeq >= canonicalHandledThroughSeq
+    && (
+      localImportedSeq > canonicalImportedSeq
+      || localHandledThroughSeq > canonicalHandledThroughSeq
+    );
+}
+
 async function withHostedMailboxProgressStatus(input: {
   redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
   vaultRoot: string;
@@ -8804,9 +8847,8 @@ function shouldCheckpointHostedReplayBudgetProgressBeforeForeground(input: {
     && nextConversationSeq <= consumedConversationSeq;
 }
 
-function parseHostedMailboxSeqOrNull(value: string | null | undefined): bigint | null {
-  return value !== undefined
-    && value !== null
+function parseHostedMailboxSeqOrNull(value: unknown): bigint | null {
+  return typeof value === "string"
     && /^(?:0|[1-9][0-9]*)$/u.test(value)
     ? BigInt(value)
     : null;

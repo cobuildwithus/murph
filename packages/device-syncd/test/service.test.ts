@@ -474,7 +474,8 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
       provider: "demo",
       displayName: "Demo",
       transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
-      oauth: {
+      connection: {
+        kind: "oauth2",
         callbackPath: "/oauth/demo/callback",
         defaultScopes: ["offline", "read:data"],
       },
@@ -2457,8 +2458,8 @@ test("device sync service supplies the vault timezone to Junction jobs", async (
     descriptor: {
       ...demoDescriptor,
       provider: "junction",
-      oauth: demoDescriptor.oauth
-        ? { ...demoDescriptor.oauth, callbackPath: "/oauth/junction/callback" }
+      connection: demoDescriptor.connection
+        ? { ...demoDescriptor.connection, callbackPath: "/oauth/junction/callback" }
         : undefined,
     },
     async exchangeAuthorizationCode() {
@@ -4460,7 +4461,8 @@ test("device sync service keeps connection-established webhook admin upkeep best
           ...baseProvider.descriptor,
           provider: "oura",
           displayName: "Oura",
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/oura/callback",
             defaultScopes: ["offline", "read:data"],
           },
@@ -4543,7 +4545,8 @@ test("device sync service does not run connection-established webhook admin upke
           ...baseProvider.descriptor,
           provider: "strava",
           displayName: "Strava",
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/strava/callback",
             defaultScopes: ["offline", "activity:read_all"],
           },
@@ -4835,7 +4838,8 @@ test("device sync service scheduler can scope cadence admission to one due accou
           ...createFakeProvider().descriptor,
           provider: "scheduled",
           displayName: "Scheduled",
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/scheduled/callback",
             defaultScopes: ["offline"],
           },
@@ -4860,7 +4864,8 @@ test("device sync service scheduler can scope cadence admission to one due accou
           ...createFakeProvider().descriptor,
           provider: "unsupported",
           displayName: "Unsupported",
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/unsupported/callback",
             defaultScopes: ["offline"],
           },
@@ -5169,7 +5174,8 @@ test("device sync service scheduler logs failures once and skips reentrant ticks
           ...createFakeProvider().descriptor,
           provider: "broken",
           displayName: "Broken",
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/broken/callback",
             defaultScopes: ["offline"],
           },
@@ -8444,7 +8450,8 @@ test("device sync service records granted callback scopes and describes polling-
           provider: "polling",
           displayName: "Polling",
           transportModes: ["oauth_callback", "scheduled_poll"],
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/polling/callback",
             defaultScopes: ["personal", "daily"],
           },

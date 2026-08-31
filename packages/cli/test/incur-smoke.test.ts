@@ -1676,7 +1676,7 @@ test('food search-labels schema exposes hosted label lookup inputs', async () =>
     await runSourceCliRaw(['food', 'search-labels', '--schema', '--format', 'json']),
   ) as {
     args: {
-      properties: Record<string, { description?: string }>
+      properties: Record<string, { description?: string; maxLength?: number }>
       required?: string[]
     }
     options: {
@@ -1685,6 +1685,7 @@ test('food search-labels schema exposes hosted label lookup inputs', async () =>
   }
 
   assert.deepEqual(schema.args.required, ['query'])
+  assert.equal(schema.args.properties.query?.maxLength, 256)
   assert.match(
     String(schema.args.properties.query?.description ?? ''),
     /Food product, brand, USDA FDC id, UPC, or generic ingredient/u,
@@ -1729,7 +1730,10 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   const queryDescription = String(
     schema.options.properties.query?.description ?? '',
   )
-  assert.match(queryDescription, /Food product, brand, or generic ingredient/u)
+  assert.match(
+    queryDescription,
+    /Food product, brand, USDA FDC id, UPC, or generic ingredient/u,
+  )
   assert.match(queryDescription, /Repeat --query/u)
   assert.match(
     String(schema.options.properties.generic?.description ?? ''),
@@ -1739,7 +1743,6 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
     String(schema.options.properties.fullLabel?.description ?? ''),
     /complete source labels when a requested fact is absent from compact/u,
   )
-  assert.doesNotMatch(queryDescription, /USDA FDC id|UPC/u)
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
     /Maximum label matches to return per query\. Defaults to 1/u,
@@ -1748,7 +1751,7 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   const help = await runSourceCliRaw(['food', 'search-labels-batch', '--help'])
   assert.match(
     help,
-    /For USDA FDC ids or UPCs, use `food search-labels` with one query/u,
+    /Each query may be food search text, a USDA FDC id, or a UPC/u,
   )
 })
 
