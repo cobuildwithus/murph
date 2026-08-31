@@ -53,6 +53,14 @@ Updated: 2026-08-30
 - Keep the historical `inbox_media_retention` orchestration mode so this storage cleanup adds no scheduler or runtime state.
 - Admit promoted documents through the existing retention batch limits and verify all admitted byte receipts from one transient audit/event ledger snapshot. This removes repeated vault-wide reads without adding a cache, cursor, index, or persisted state.
 
+## Review round 3 retrospective
+
+- Trigger: round 3 verified both prior corrections but required the mandatory later-round retrospective. The immutable first-reviewed head changed 13 files and 1,133 lines, including 442 authored-source churn lines; the current reviewed head changes 20 files and 2,498 lines, including 1,074 authored-source churn lines.
+- Growth attribution: round 1 deleted document budget bypasses and per-candidate ledger scans in favor of the existing admission budget and one grouped Core proof. Round 2 deleted identity reconstructed from expiring capture text and added one stable IDs-only correlation at the existing default-promotion boundary. Remaining growth is conflict handling, package integration, and focused or production-path proof for those independent root causes.
+- Product decision: cleanup is prospective for correlation-bearing default promotions. Historical promotions without the stable correlation remain fail-closed because deleted or truncated capture text cannot support a safe backfill. No metadata inference, hash-wide authorization, migration, repair pass, or reconciler is approved.
+- Architecture decision: continue with one indivisible existing-owner design. Inbox Services owns the promotion-boundary write, Core's audit ledger owns the durable correlation and grouped exact proof, and Inboxd's existing retention owner alone admits and deletes. Splitting changes rollout timing without removing a concept; redesigning away from the promotion boundary recreates the expiring-metadata defect.
+- Owner budget: the two narrow Core correlation functions remain public only because sibling packages must use public entrypoints. Further work may delete, reorder, or tighten these owners but may not add another owner, file family, state machine, queue, cache, cursor, index, migration, backfill, repair pass, or reconciliation loop without new production evidence.
+
 ## Verification
 
 - Passed: contracts full package tests and artifact verification (42 files, 347 tests).
