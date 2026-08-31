@@ -334,10 +334,6 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         timeoutMs: observationTimeoutMs,
       });
       expect(finalStatus.lastErrorCode ?? null).toBeNull();
-      const recurringWake = await waitForFutureRecurringWake(
-        schedule.nextDueAtIso,
-      );
-      expect(recurringWake.reason).toBe("assistant");
 
       expect(countReminderProviderRequestsSince(providerRequestBaseline)).toBe(1);
       expect(activeLinqStub.countObservedSends(
@@ -445,7 +441,6 @@ function buildRecurringReminderSaveResponses(input: {
 function resolveRecurringReminderSchedule(now = new Date()): {
   cronExpression: string;
   dueAtIso: string;
-  nextDueAtIso: string;
 } {
   const dueAtMs = Math.ceil(
     (now.getTime() + scheduledReminderLeadMs) / 60_000,
@@ -456,7 +451,6 @@ function resolveRecurringReminderSchedule(now = new Date()): {
   return {
     cronExpression,
     dueAtIso: dueAt.toISOString(),
-    nextDueAtIso: new Date(dueAtMs + 24 * 60 * 60 * 1_000).toISOString(),
   };
 }
 
@@ -749,30 +743,6 @@ async function expectPendingDirtyResourceCount(
     "Timed out waiting for the authoritative Junction dirty-resource count.",
     `expected count: ${expectedCount}`,
     `last count: ${lastCount ?? "unread"}`,
-  ]));
-}
-
-async function waitForFutureRecurringWake(expectedAt: string): Promise<{
-  at: string;
-  reason: string | null;
-}> {
-  const deadline = Date.now() + observationTimeoutMs;
-  let lastAt: string | null = null;
-  let lastReason: string | null = null;
-  while (Date.now() < deadline) {
-    const status = await requireScenario().harness.readUserStatus(userId);
-    lastAt = status.workspace?.nextDefaultProcessingWakeAt ?? null;
-    lastReason = status.workspace?.nextDefaultProcessingWakeReason ?? null;
-    if (lastAt === expectedAt) {
-      return { at: lastAt, reason: lastReason };
-    }
-    await sleep(250);
-  }
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the recurring reminder's next daily occurrence.",
-    `expected wake: ${expectedAt}`,
-    `last wake: ${lastAt ?? "null"}`,
-    `last reason: ${lastReason ?? "null"}`,
   ]));
 }
 

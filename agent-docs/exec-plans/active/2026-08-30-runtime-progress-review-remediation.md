@@ -53,7 +53,7 @@ Updated: 2026-08-30
 - Product UX effort is Patch. Outcome: a requested recurring reminder arrives
   at its due time during device backlog. Reaches: the existing scheduled
   message journey. Proof: provider entry, exactly-once Linq delivery, unfinished
-  13-job backlog at delivery, two bounded device passes, and next recurrence.
+  13-job backlog at delivery, two bounded device passes, and no failed jobs.
 - Keep both PRs draft until focused proof, parent review, exact-head specialist
   and final gates, and required CI are complete.
 
@@ -112,6 +112,16 @@ Updated: 2026-08-30
   arm when reconciliation reschedules or removes the wake, consume it once at
   maturity, and let the accepted or unsuccessful result re-arm the ordinary
   backoff.
+- Treat integration attempt four's final non-starvation timeout as an invalid
+  test assertion, not a runtime failure. The aggregate default-processing wake
+  is the earliest of all assistant-owned work, so a same-day managed health
+  automation may correctly outrank the tested reminder's next-day occurrence.
+  Keep recurrence semantics in automation-specific tests instead of weakening
+  the aggregate comparison.
+- Reconcile the public branch with current `main` so the exact-head journey uses
+  the already-merged provider-egress and group-handoff fixture corrections.
+- Serialize the newsletter scenario's only concurrent hosted-member seed call
+  site because the test helper temporarily owns process-wide environment state.
 
 ## Verification
 
@@ -128,5 +138,4 @@ Updated: 2026-08-30
 - No unchanged system probe begins before its retained retry deadline.
 - One default pass survives a facts-only signal and continue-as-new pressure.
 - The reminder enters the provider once, delivers once while 13 device jobs
-  remain, the backlog drains in 100+13 jobs, and the next recurrence is
-  projected.
+  remain, and the backlog drains in 100+13 jobs without a failed device job.
