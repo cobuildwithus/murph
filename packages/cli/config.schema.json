@@ -1825,6 +1825,11 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "compact": {
+                          "default": false,
+                          "description": "Return identifiers and basic lifecycle and schedule state only; use automation show for complete details.",
+                          "type": "boolean"
+                        },
                         "limit": {
                           "default": 10,
                           "type": "integer",
@@ -3173,9 +3178,12 @@
                           "minLength": 1
                         },
                         "status": {
-                          "description": "Optional audit status filter such as success, warning, or error.",
+                          "description": "Optional audit status filter: success or failure.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "success",
+                            "failure"
+                          ]
                         },
                         "from": {
                           "description": "Inclusive lower occurredAt date bound in YYYY-MM-DD form.",
@@ -4359,7 +4367,19 @@
               "properties": {
                 "show": {
                   "type": "object",
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "compact": {
+                          "description": "Return only document existence plus each record's id, section, and text.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 },
                 "set-name": {
                   "type": "object",
@@ -6333,19 +6353,19 @@
                           "maxLength": 240
                         },
                         "duration": {
-                          "description": "Optional duration override in minutes when the note is missing or ambiguous.",
+                          "description": "Typed duration in minutes. Required unless an applicable saved default or workout timestamps supply it.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1440
                         },
                         "type": {
-                          "description": "Optional workout type override such as \"run\" or \"strength training\".",
+                          "description": "Typed workout type such as \"run\" or \"strength training\".",
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 120
                         },
                         "distanceKm": {
-                          "description": "Optional workout distance override in kilometers.",
+                          "description": "Typed workout distance in kilometers.",
                           "type": "number",
                           "exclusiveMinimum": 0,
                           "maximum": 1000
@@ -6485,7 +6505,7 @@
                           "maxLength": 240
                         },
                         "duration": {
-                          "description": "Optional duration override in minutes when the payload is missing or ambiguous.",
+                          "description": "Optional typed duration in minutes when the payload omits it.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1440
@@ -6843,6 +6863,70 @@
                     }
                   }
                 },
+                "defaults": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "show": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "set": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "duration": {
+                                  "description": "Default duration in minutes when a reported workout omits it.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1440
+                                },
+                                "clearDuration": {
+                                  "description": "Clear the saved workout duration default.",
+                                  "type": "boolean"
+                                },
+                                "recordedAt": {
+                                  "description": "Optional preferences update timestamp override in ISO 8601 form.",
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "units": {
                   "type": "object",
                   "additionalProperties": false,
@@ -7119,19 +7203,19 @@
                                   }
                                 },
                                 "duration": {
-                                  "description": "Optional default duration override in minutes when the saved note is missing or ambiguous.",
+                                  "description": "Typed default duration in minutes.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 1440
                                 },
                                 "type": {
-                                  "description": "Optional default workout type override such as \"run\" or \"strength training\".",
+                                  "description": "Typed default workout type such as \"run\" or \"strength training\".",
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 120
                                 },
                                 "distanceKm": {
-                                  "description": "Optional default workout distance override in kilometers.",
+                                  "description": "Typed default workout distance in kilometers.",
                                   "type": "number",
                                   "exclusiveMinimum": 0,
                                   "maximum": 1000
@@ -9058,7 +9142,29 @@
                         "kind": {
                           "description": "Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "adverse_effect",
+                            "body_measurement",
+                            "clinical_assertion",
+                            "document",
+                            "encounter",
+                            "exposure",
+                            "meal",
+                            "measurement",
+                            "symptom",
+                            "note",
+                            "observation",
+                            "experiment_event",
+                            "experiment_context",
+                            "immunization",
+                            "medication_intake",
+                            "procedure",
+                            "supplement_intake",
+                            "test",
+                            "activity_session",
+                            "sleep_session",
+                            "intervention_session"
+                          ]
                         },
                         "from": {
                           "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
@@ -10547,7 +10653,16 @@
                         },
                         "stream": {
                           "type": "string",
-                          "minLength": 1,
+                          "enum": [
+                            "heart_rate",
+                            "spo2",
+                            "hrv",
+                            "steps",
+                            "sleep_stage",
+                            "respiratory_rate",
+                            "temperature",
+                            "glucose"
+                          ],
                           "description": "Sample stream to summarize, such as spo2 or heart_rate."
                         },
                         "from": {
@@ -10619,7 +10734,16 @@
                         },
                         "stream": {
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "heart_rate",
+                            "spo2",
+                            "hrv",
+                            "steps",
+                            "sleep_stage",
+                            "respiratory_rate",
+                            "temperature",
+                            "glucose"
+                          ]
                         },
                         "from": {
                           "type": "string",
@@ -10687,7 +10811,16 @@
                                 },
                                 "stream": {
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "heart_rate",
+                                    "spo2",
+                                    "hrv",
+                                    "steps",
+                                    "sleep_stage",
+                                    "respiratory_rate",
+                                    "temperature",
+                                    "glucose"
+                                  ]
                                 },
                                 "from": {
                                   "type": "string",
@@ -15406,7 +15539,12 @@
                         "status": {
                           "description": "Optional supplement status to filter by.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "active",
+                            "paused",
+                            "completed",
+                            "stopped"
+                          ]
                         }
                       }
                     }
@@ -15668,7 +15806,12 @@
                                 "status": {
                                   "description": "Optional supplement status to filter by. Defaults to active for compound rollups.",
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "active",
+                                    "paused",
+                                    "completed",
+                                    "stopped"
+                                  ]
                                 }
                               }
                             }
@@ -15691,7 +15834,12 @@
                                 "status": {
                                   "description": "Optional supplement status to filter by. Defaults to active for compound rollups.",
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "active",
+                                    "paused",
+                                    "completed",
+                                    "stopped"
+                                  ]
                                 }
                               }
                             }
@@ -15748,7 +15896,12 @@
                         "status": {
                           "description": "Optional regimen status to filter by.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "active",
+                            "paused",
+                            "completed",
+                            "stopped"
+                          ]
                         },
                         "limit": {
                           "default": 10,
@@ -16042,7 +16195,10 @@
                         "status": {
                           "description": "Optional private protocol status to filter by.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "available",
+                            "archived"
+                          ]
                         },
                         "commonsProtocol": {
                           "description": "Optional public Health Commons protocol key, slug, or route id to filter by.",

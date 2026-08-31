@@ -1,15 +1,20 @@
 ---
 name: automatic-meal-capture
-description: Use for Murph iPhone automatic meal capture setup, Photos permissions, background behavior, the on-device Meals review page, missing or delayed imports, the automatic 9pm closeout, retained-photo cleanup, and calorie-aware enrichment of automatically captured meal photos.
+description: Use in a private direct conversation when someone asks how to start recurring meal tracking or how Murph can track meals, and whenever someone explicitly asks about Murph iPhone automatic meal capture setup, Photos permissions, background behavior, the on-device Meals review page, missing or delayed imports, the automatic 9pm closeout, retained-photo cleanup, or calorie-aware enrichment of automatically captured meal photos.
 ---
 
 # Automatic meal capture
 
 ## Own the automatic-capture boundary
 
-Use this skill when a member asks how automatic meal capture works, needs the
-iPhone app, is setting it up, says a photo did not arrive, asks what Murph can
-see, or wants device-captured meal photos included in calorie or macro tracking.
+In a private direct conversation, load this skill when a member asks how to
+start recurring meal tracking or how Murph can track meals, even when they do
+not say "automatic." In any conversation, also use it when a member explicitly
+asks how automatic meal capture works, needs the iPhone app for that feature,
+is setting it up, says a photo did not arrive, asks what Murph can see, or wants
+device-captured meal photos included in calorie or macro tracking. Do not treat
+a generic group request, a request to continue an established manual workflow,
+or already-completed setup as a fresh app-install request.
 
 Automatic capture already creates a canonical photo-only meal. This skill owns
 the iPhone setup and arrival-verification workflow; it does not create a second
@@ -17,9 +22,42 @@ meal store or a duplicate meal record. Read
 `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md` before estimating nutrition
 or interpreting meal patterns. A successful automatic import ensures one
 private 9pm managed closeout for that member; there is no separate automation
-opt-in. Load this skill alongside `food-journal` on every eligible interactive
-meal turn and check recent unresolved device meals. Use `nutrition-strategy` for
-forward-looking decisions about what to eat.
+opt-in. Load this skill alongside `food-journal` on eligible interactive
+automatic-capture turns and check recent unresolved device meals. Use
+`nutrition-strategy` for forward-looking decisions about what to eat.
+
+## Answer a general recurring meal-tracking request
+
+For a private direct request about starting recurring meal tracking, use known
+context before choosing the first option:
+
+- When device compatibility is unknown or a compatible iPhone is established,
+  no manual-only preference is established, and setup is not already complete,
+  lead with automatic capture as the lowest-friction supported option. Briefly
+  explain that the member can download or open the Murph iPhone app, enable Meal
+  capture, and have eligible new food photos picked up without messaging each
+  meal. Include the canonical App Store listing and the shortest relevant setup
+  steps below in the first answer.
+- When known context establishes Android or another incompatible device, or the
+  member prefers manual capture, lead with the food-journal skill's manual text,
+  voice-note, and user-sent-photo options. Do not push the iPhone app or repeat
+  automatic setup unless the member asks about it.
+- When automatic meal capture is already enabled, explain the current capture,
+  review, or recovery path that answers the question. Do not tell the member to
+  download the app again or repeat completed setup steps.
+
+When automatic capture leads, keep manual text, voice-note, and user-sent-photo
+logging available as an alternative in the same answer. Do not assume the
+member has a compatible iPhone, make the app a prerequisite for all meal
+tracking, or promise that iOS background work will capture every meal. If
+device compatibility is unknown, state the compatible-iPhone condition rather
+than delaying the useful handoff with a question.
+
+In a group, do not introduce the app or personalized automatic-capture setup for
+a generic meal-tracking request. Share the canonical public App Store listing
+only when someone explicitly asks how to get, download, or install the app, and
+keep sign-in, permissions, and personalized health setup in the person's
+private Murph conversation or in the app.
 
 ## Set up the iPhone app
 

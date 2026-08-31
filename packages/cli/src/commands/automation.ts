@@ -135,7 +135,20 @@ export const automationListItemSchema = automationRecordSchema
   })
   .strict();
 
-export const automationListResultSchema = z.object({
+export const automationCompactListItemSchema = automationRecordSchema
+  .pick({
+    automationId: true,
+    slug: true,
+    title: true,
+    status: true,
+    summary: true,
+    activeUntil: true,
+    schedule: true,
+    supportKind: true,
+  })
+  .strict();
+
+const automationListResultFields = {
   vault: pathSchema,
   filters: z.object({
     status: z.array(z.enum(automationStatusValues)).nullable(),
@@ -147,8 +160,23 @@ export const automationListResultSchema = z.object({
   count: z.number().int().nonnegative(),
   totalCount: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
+};
+
+export const automationCompactListResultSchema = z.object({
+  ...automationListResultFields,
+  compact: z.literal(true),
+  items: z.array(automationCompactListItemSchema),
+});
+
+export const automationFullListResultSchema = z.object({
+  ...automationListResultFields,
   items: z.array(automationListItemSchema),
 });
+
+export const automationListResultSchema = z.union([
+  automationCompactListResultSchema,
+  automationFullListResultSchema,
+]);
 
 export const automationShowResultSchema = z.object({
   vault: pathSchema,
@@ -194,6 +222,21 @@ function automationListItem(
   void instructions;
   void markdown;
   return item;
+}
+
+function automationCompactListItem(
+  record: z.infer<typeof automationRecordSchema>,
+): z.infer<typeof automationCompactListItemSchema> {
+  return {
+    automationId: record.automationId,
+    slug: record.slug,
+    title: record.title,
+    status: record.status,
+    summary: record.summary,
+    activeUntil: record.activeUntil,
+    schedule: record.schedule,
+    supportKind: record.supportKind,
+  };
 }
 
 function invalidAutomationOption(
@@ -344,7 +387,10 @@ function requireNumberOption(
 
 function resolveAutomationTriggerKind(options: AutomationScheduleOptions): AutomationScheduleKind {
   if (options.triggerKind && options.scheduleKind && options.triggerKind !== options.scheduleKind) {
-    return invalidAutomationOption("--trigger-kind and --schedule-kind must match when both are provided.");
+    return invalidAutomationOption(
+      "--trigger-kind and --schedule-kind must match when both are provided.",
+      ["schedule", "kind"],
+    );
   }
 
   return options.triggerKind ?? options.scheduleKind ?? invalidAutomationOption(
@@ -378,15 +424,92 @@ function resolveAutomationTimeZone(
   return timeZone;
 }
 
+function assertAutomationScheduleValueOptionsMatchKind(
+  options: AutomationScheduleOptions,
+  kind: AutomationScheduleKind,
+): void {
+  const fields = [
+    {
+      canonicalName: "trigger-at",
+      canonicalValue: options.triggerAt,
+      kind: "at",
+      legacyName: "schedule-at",
+      legacyValue: options.scheduleAt,
+      publicField: "at",
+    },
+    {
+      canonicalName: "trigger-every-ms",
+      canonicalValue: options.triggerEveryMs,
+      kind: "every",
+      legacyName: "schedule-every-ms",
+      legacyValue: options.scheduleEveryMs,
+      publicField: "everyMs",
+    },
+    {
+      canonicalName: "trigger-cron",
+      canonicalValue: options.triggerCron,
+      kind: "cron",
+      legacyName: "schedule-cron",
+      legacyValue: options.scheduleCron,
+      publicField: "expression",
+    },
+    {
+      canonicalName: "trigger-local-time",
+      canonicalValue: options.triggerLocalTime,
+      kind: "dailyLocal",
+      legacyName: "schedule-local-time",
+      legacyValue: options.scheduleLocalTime,
+      publicField: "localTime",
+    },
+  ] as const;
+
+  for (const field of fields) {
+    const canonicalProvided = field.canonicalValue !== undefined;
+    const legacyProvided = field.legacyValue !== undefined;
+    if (!canonicalProvided && !legacyProvided) continue;
+
+    const publicPath = ["schedule", field.publicField] as const;
+    if (field.kind !== kind) {
+      const providedOptions = [
+        ...(canonicalProvided ? [`--${field.canonicalName}`] : []),
+        ...(legacyProvided ? [`--${field.legacyName}`] : []),
+      ];
+      return invalidAutomationOption(
+        `${providedOptions.join(" and ")} can only be used with --trigger-kind=${field.kind}.`,
+        publicPath,
+      );
+    }
+
+    if (
+      canonicalProvided &&
+      legacyProvided &&
+      field.canonicalValue !== field.legacyValue
+    ) {
+      return invalidAutomationOption(
+        `--${field.canonicalName} and --${field.legacyName} must match when both are provided.`,
+        publicPath,
+      );
+    }
+  }
+}
+
 function buildAutomationScheduleFromOptions(
   options: AutomationScheduleOptions,
   defaults: { now: string },
 ): AutomationSchedule {
   const kind = resolveAutomationTriggerKind(options);
   const timeZone = resolveAutomationTimeZone(options, kind);
-  if (kind !== "deviceActivity" && (options.deviceSource || options.activityKind)) {
+  assertAutomationScheduleValueOptionsMatchKind(options, kind);
+  if (kind !== "deviceActivity" && options.deviceSource !== undefined) {
     return invalidAutomationOption(
-      "--device-source and --activity-kind can only be used with --trigger-kind=deviceActivity.",
+      "--device-source can only be used with --trigger-kind=deviceActivity.",
+      ["schedule", "source"],
+    );
+  }
+  if (kind !== "deviceActivity" && options.activityKind !== undefined) {
+    return invalidAutomationOption(
+      "--activity-kind can only be used with --trigger-kind=deviceActivity.",
+      ["schedule", "activityKind"],
     );
   }
 
@@ -923,7 +1046,19 @@ const automationEditOptionSchemas = {
     .describe("Clear the stored assistant target override."),
 };
 
-export function registerAutomationCommands(cli: Cli.Cli) {
+interface AutomationCommandDependencies {
+  listAutomationPage?: typeof listAutomationPage;
+  showAutomation?: typeof showAutomation;
+}
+
+export function registerAutomationCommands(
+  cli: Cli.Cli,
+  dependencies: AutomationCommandDependencies = {},
+) {
+  const listAutomationPageForCommand =
+    dependencies.listAutomationPage ?? listAutomationPage;
+  const showAutomationForCommand =
+    dependencies.showAutomation ?? showAutomation;
   const automation = Cli.create("automation", {
     description: "Canonical automation registry commands.",
   });
@@ -1065,7 +1200,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     output: automationSaveResultSchema,
     async run(context) {
       const now = new Date().toISOString();
-      const existing = await showAutomation(context.options.vault, context.args.lookup);
+      const existing = await showAutomationForCommand(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
           "automation_not_found",
@@ -1172,7 +1307,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     async run(context) {
       return {
         vault: context.options.vault,
-        automation: await showAutomation(context.options.vault, context.args.lookup),
+        automation: await showAutomationForCommand(context.options.vault, context.args.lookup),
       };
     },
   });
@@ -1187,7 +1322,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      const existing = await showAutomation(context.options.vault, context.args.lookup);
+      const existing = await showAutomationForCommand(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
           "automation_not_found",
@@ -1237,10 +1372,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe("Continue an exact support-series listing after this automation id."),
+      compact: z.boolean().default(false).describe(
+        "Return identifiers and basic lifecycle and schedule state only; use automation show for complete details.",
+      ),
       limit: z.number().int().positive().max(200).default(10),
     }),
     output: automationListResultSchema,
-    async run(context) {
+    async run(context): Promise<z.infer<typeof automationListResultSchema>> {
       if (context.options.cursor !== undefined && context.options.supportSeriesId === undefined) {
         return invalidAutomationOption(
           "--cursor requires --support-series-id so pagination uses immutable automation ids.",
@@ -1250,7 +1388,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       const exactTag = supportSeriesId === undefined
         ? undefined
         : requireAutomationSupportSeriesTagFromId(supportSeriesId);
-      const page = await listAutomationPage(context.options.vault, {
+      const page = await listAutomationPageForCommand(context.options.vault, {
         cursor: context.options.cursor,
         exactTag,
         limit: context.options.limit,
@@ -1258,7 +1396,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         text: context.options.text,
       });
 
-      return {
+      const result = {
         vault: context.options.vault,
         filters: {
           status: context.options.status ?? null,
@@ -1270,6 +1408,18 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         count: page.items.length,
         totalCount: page.totalCount,
         nextCursor: page.nextCursor,
+      };
+
+      if (context.options.compact) {
+        return {
+          ...result,
+          compact: true,
+          items: page.items.map((item) => automationCompactListItem(item)),
+        };
+      }
+
+      return {
+        ...result,
         items: page.items.map((item) => automationListItem(item)),
       };
     },

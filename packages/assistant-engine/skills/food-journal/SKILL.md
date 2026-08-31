@@ -13,6 +13,15 @@ This skill is a policy layer over existing Murph surfaces. Do not create a new f
 
 Use `nutrition-strategy` for forward-looking decisions about what to eat or change; keep this skill focused on capture and retrospective observation. Use `behavior-followthrough` only when repeated support or missed logs become central. Use `experiment-onboarding` only after the user chooses a change to test.
 
+In a private direct conversation, when the member asks how to start recurring
+meal tracking or how Murph can track meals, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md` even when they do
+not say "automatic." That skill owns whether the compatible-iPhone path or this
+skill's manual text, voice-note, and user-sent-photo path should lead based on
+known device, preference, and setup context. For a generic group request, keep
+the response on group-safe manual capture unless someone explicitly asks for
+the public app listing; keep personalized app setup private.
+
 ## Choose the user's focus
 
 Infer the focus from the conversation:

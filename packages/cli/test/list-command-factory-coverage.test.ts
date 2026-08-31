@@ -6,6 +6,8 @@ import { Cli } from 'incur'
 import { afterEach } from 'vitest'
 
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { localDateSchema } from '@murphai/operator-config/vault-cli-contracts'
 
 import {
   createTempVaultContext,
@@ -18,6 +20,7 @@ import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
+import { assertOrderedDateRange } from '../src/commands/command-factory-primitives.js'
 
 const cleanupPaths: string[] = []
 
@@ -119,6 +122,10 @@ test('capture, measurement, and workout list commands keep their filters and dat
     'workout',
     'add',
     'Went for a 30-minute run.',
+    '--duration',
+    '30',
+    '--type',
+    'running',
     '--vault',
     vaultRoot,
     '--occurred-at',
@@ -183,4 +190,17 @@ test('capture, measurement, and workout list commands keep their filters and dat
     '1',
   ])
   assert.equal(requireData(workoutListResult.envelope).items.length, 1)
+})
+
+test('common list commands reject impossible and reversed date ranges', async () => {
+  assert.equal(localDateSchema.safeParse('2026-02-30').success, false)
+  assert.equal(localDateSchema.safeParse('2024-02-29').success, true)
+  assert.throws(
+    () => assertOrderedDateRange('2026-03-13', '2026-03-12'),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'invalid_option'
+      && error.context?.stage === 'validation'
+      && JSON.stringify(error.context).includes('"publicPath":["from"]'),
+  )
 })

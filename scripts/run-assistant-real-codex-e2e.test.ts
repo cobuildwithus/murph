@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ASSISTANT_REAL_CODEX_COMMAND,
   buildAssistantRealCodexListArgs,
   buildAssistantRealCodexLoginEnv,
   buildAssistantRealCodexRunEnv,
@@ -83,6 +84,7 @@ describe('assistant real Codex local runner', () => {
       },
     })).toEqual({
       MURPH_REAL_CODEX_AUTH: 'subscription',
+      MURPH_REAL_CODEX_COMMAND: ASSISTANT_REAL_CODEX_COMMAND,
       MURPH_RUN_REAL_CODEX_E2E: '1',
       OPENAI_API_KEY: 'provider-value',
       PATH: '/usr/bin:/bin',
@@ -233,7 +235,7 @@ describe('assistant real Codex local runner', () => {
     expect(status).toBe(0)
     expect(requests.map(({ command, stdio }) => ({ command, stdio }))).toEqual([
       { command: 'pnpm', stdio: 'capture' },
-      { command: 'codex', stdio: 'ignore' },
+      { command: ASSISTANT_REAL_CODEX_COMMAND, stdio: 'ignore' },
       { command: 'pnpm', stdio: 'inherit' },
     ])
     expect(requests[0]?.env).toMatchObject({
@@ -248,6 +250,7 @@ describe('assistant real Codex local runner', () => {
     expect(requests[1]?.env.MURPH_REAL_CODEX_HOME).toBeUndefined()
     expect(requests[2]?.env).toMatchObject({
       HOME: '/normal-home',
+      MURPH_REAL_CODEX_COMMAND: ASSISTANT_REAL_CODEX_COMMAND,
       MURPH_REAL_CODEX_HOME: '/selected-codex-home',
     })
     expect(requests[2]?.env.CODEX_HOME).toBeUndefined()

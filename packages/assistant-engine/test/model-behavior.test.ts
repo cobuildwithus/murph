@@ -1291,22 +1291,22 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection.',
+      'Default to no progress update',
     )
     expect(prompt).toContain(
-      'Before the first read in that pass, orient the member even when each lookup is routine',
+      'Send one only when the member is likely to wait noticeably',
     )
     expect(prompt).toContain(
-      'Do not wait until the work is done or the member asks about the delay.',
+      'Routine onboarding/setup never qualifies by itself, even when it uses tools or the runtime is slow',
     )
     expect(prompt).toContain(
-      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
+      'one or two quick calls, and the next setup question go straight to the final reply',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
+      'send a required child-start acknowledgement after spawning.',
     )
     expect(prompt).toContain(
-      'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.',
+      'Background work does not trigger progress by itself.',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update.',
@@ -1330,11 +1330,6 @@ describe('assistant execution prompt contract', () => {
     ).toHaveLength(1)
     expect(
       prompt.match(
-        /Linq\/iMessage quota is not a reason to withhold a useful update\./g,
-      ) ?? [],
-    ).toHaveLength(1)
-    expect(
-      prompt.match(
         /Do not narrate individual tool loops, searches, reads, clicks, or status churn/g,
       ) ?? [],
     ).toHaveLength(1)
@@ -1352,6 +1347,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
+    expect(prompt).not.toContain(
+      'orient the member even when each lookup is routine',
+    )
   })
 
   it('allows only sparing native text styles on Linq and Telegram messaging routes', () => {
@@ -1433,6 +1431,20 @@ describe('assistant execution prompt contract', () => {
     )
     expect(computerSection).not.toContain('vault-cli memory upsert')
     expect(computerSection).not.toContain('book another dentist appointment')
+  })
+
+  it('keeps workout capture route duration out of typed duration', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'recover route distance/elevation, never route duration',
+    )
+    expect(prompt).toContain(
+      'call `vault-cli workout add` before asking for an omitted duration',
+    )
+    expect(prompt).not.toContain(
+      'estimated distance, duration, or elevation are often useful fields to recover',
+    )
   })
 
   it('guides automation continuity policy by task size', () => {
@@ -1604,7 +1616,13 @@ describe('assistant local PDF evidence guidance', () => {
       'When several bounded `vault-cli` commands are needed for the same vault, prefer one `vault-cli batch --compact --format json` call',
     )
     expect(prompt).toContain(
-      'vault-cli batch --compact --format json --command \'["memory","show"]\' --command \'["goal","list"]\'',
+      'vault-cli batch --compact --format json --command \'["memory","show","--compact"]\' --command \'["goal","list"]\'',
+    )
+    expect(prompt).toContain(
+      'For the user\'s saved current-state context, prefer `vault-cli memory show --compact --format json`',
+    )
+    expect(prompt).not.toContain(
+      '--command \'["memory","show"]\'',
     )
     expect(prompt).toContain(
       'do not use batch for interactive, server, or long-running assistant commands',
@@ -2289,8 +2307,11 @@ describe('assistant system prompt cache stability', () => {
         assistantContextSnapshotPrompt:
           'Vault overview for user A.\n\nActive experiment context for user A.',
         channel: 'telegram',
-        currentLocalDate: '2026-04-15',
-        currentTimeZone: 'Asia/Kuala_Lumpur',
+        currentInstant: '2027-02-14T07:17:05.678Z',
+        currentLocalDate: '2027-02-13',
+        currentTimeZone: 'America/Los_Angeles',
+        conversationScope: 'direct',
+        hostedRuntime: true,
         murphProductBaseUrl: 'http://localhost:3000',
       }),
       cacheInput,
@@ -2300,8 +2321,11 @@ describe('assistant system prompt cache stability', () => {
         assistantContextSnapshotPrompt:
           'Vault overview for user B.\n\nActive experiment context for user B.',
         channel: 'sms',
-        currentLocalDate: '2026-04-16',
+        currentInstant: '2027-07-02T03:04:05.678Z',
+        currentLocalDate: '2027-07-01',
         currentTimeZone: 'America/Los_Angeles',
+        conversationScope: 'direct',
+        hostedRuntime: true,
         murphProductBaseUrl: 'https://withmurph.ai',
       }),
       cacheInput,
@@ -2332,13 +2356,20 @@ describe('assistant system prompt cache stability', () => {
       promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
     )
 
-    expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
-    expect(stablePrefix).not.toContain('2026-04-15')
+    expect(stablePrefix).not.toContain('America/Los_Angeles')
+    expect(stablePrefix).not.toContain('2027-02-13')
+    expect(stablePrefix).not.toContain('2027-02-14T07:17:05.678Z')
     expect(stablePrefix).not.toContain('http://localhost:3000')
     expect(stablePrefix).not.toContain('Vault overview for user A.')
     expect(stablePrefix).not.toContain('Active experiment context for user A.')
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
-    expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
+    expect(dynamicSuffix).toContain('America/Los_Angeles')
+    expect(dynamicSuffix).toContain(
+      'Current local clock for the user (America/Los_Angeles): 2027-02-13 23:17:05 [UTC 2027-02-14T07:17:05.678Z].',
+    )
+    expect(promptB.layers.dynamicTurnContextPrompt).toContain(
+      'Current local clock for the user (America/Los_Angeles): 2027-07-01 20:04:05 [UTC 2027-07-02T03:04:05.678Z].',
+    )
     expect(dynamicSuffix).toContain('Vault overview for user A.')
     expect(promptB.prompt).toContain('Vault overview for user B.')
     expect(promptB.prompt).toContain('Active experiment context for user B.')

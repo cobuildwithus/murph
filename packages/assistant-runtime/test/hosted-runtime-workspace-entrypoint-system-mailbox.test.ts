@@ -26,6 +26,7 @@ import {
   enqueueEnvironmentInterviewSystemMailboxItemForTest,
   enqueuePendingEffectsSystemMailboxItemForTest,
   mocks,
+  readCapturedRuntimePhaseLogs,
   readCheckpointConversationWatermark,
   removeTempRoot,
   requireEventIndex,
@@ -172,6 +173,7 @@ import {
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   findNextHostedSystemMailboxQueueItem,
+  isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -1025,6 +1027,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.equal(checkpointRequests.at(-1)?.nextWakeAt, null);
       assert.equal(checkpointRequests.at(-1)?.nextWakeReason, null);
+      assert.ok(checkpointRequests.length > 0);
+      assert.equal(
+        checkpointRequests.every((request) =>
+          request.systemMailboxProgressGeneration === "0"
+        ),
+        true,
+      );
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "1",
@@ -1042,6 +1051,133 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
     } finally {
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("system mailbox webhook dirty work reaches quiescence without starting provider cadence", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const connectionId = "device_sync_connection_webhook_dirty";
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:webhook-dirty",
+      id: "mailbox_item_system_mailbox_device_webhook_dirty",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const baseDeviceSyncPort = createSnapshotDeviceSyncPort({
+      connectionId,
+      nextReconcileAt: TEST_NOW,
+    });
+    let fetchDirtyStatesCalls = 0;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...baseDeviceSyncPort,
+      async fetchDirtyStates() {
+        fetchDirtyStatesCalls += 1;
+        return {
+          hasMore: false,
+          items: [],
+          nextWakeAt: null,
+          userId: TEST_USER_ID,
+        };
+      },
+    };
+    const providerFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ records: [] }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      })
+    );
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.stubGlobal("fetch", providerFetch);
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncSystemMailboxItem(deviceItem),
+        vaultRoot,
+        wake: {
+          connectionId,
+          eventId: deviceItem.dedupeKey,
+          expectedConnectedAt: TEST_NOW,
+          hint: {
+            occurredAt: TEST_NOW,
+            reason: "webhook_dirty_transition",
+          },
+          kind: "device-sync.wake",
+          occurredAt: TEST_NOW,
+          provider: "whoop",
+          reason: "webhook_hint",
+          userId: TEST_USER_ID,
+        },
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_webhook_dirty",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox device-sync must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(fetchDirtyStatesCalls, 1);
+      assert.equal(providerFetch.mock.calls.length, 0);
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.nextWakeReason ?? null, null);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+    } finally {
+      vi.unstubAllGlobals();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
@@ -1412,9 +1548,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           mailboxLaneSeq: "2",
         }],
       );
-      assert.equal(completedResult.status, "idle", JSON.stringify(completedResult));
-      assert.equal(completedResult.nextWakeAt, null);
-      assert.equal(completedResult.nextWakeReason ?? null, null);
+      assert.equal(completedResult.status, "scheduled", JSON.stringify(completedResult));
+      assert.equal(completedResult.nextWakeAt, TEST_NOW);
+      assert.equal(completedResult.nextWakeReason, "assistant");
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -1795,6 +1931,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                           workspace: createWorkspaceState({
                             inboxMediaRetentionWakeAt:
                               request.inboxMediaRetentionWakeAt ?? null,
+                            ...(request.systemMailboxProgressGeneration === undefined
+                              ? {}
+                              : {
+                                  nextDefaultProcessingWakeAt:
+                                    request.nextDefaultProcessingWakeAt ?? null,
+                                  nextDefaultProcessingWakeReason:
+                                    request.nextDefaultProcessingWakeReason ?? null,
+                                  systemMailboxProgressGeneration:
+                                    request.systemMailboxProgressGeneration,
+                                }),
                             nextWakeAt: request.nextWakeAt ?? null,
                             nextWakeReason: request.nextWakeReason ?? null,
                             redactedStatus: request.redactedStatus ?? null,
@@ -2029,7 +2175,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(result.immediateRecheckRequested, true);
         assert.equal(result.status, "scheduled");
         assert.equal(result.nextWakeAt, TEST_NOW);
-        assert.equal(result.nextWakeReason, "mailbox");
+        assert.equal(result.nextWakeReason, "assistant");
       } else {
         assert.equal(result.status, "idle");
         assert.equal(result.nextWakeAt, null);
@@ -2633,7 +2779,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode immediately rechecks when browser refresh defers to a runtime wake", async () => {
+  test("system mailbox mode schedules retained model-free work when browser refresh defers to a runtime wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -2725,7 +2871,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         },
       );
 
-      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.immediateRecheckRequested, undefined);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
@@ -2738,6 +2887,1041 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(retained?.status, "recording");
       assert.equal(retained?.postCheckpointRecord, null);
     } finally {
+      const restoreRefreshImplementation =
+        refreshImplementation
+        ?? mocks.actualRefreshHostedBrowserVaultReplicaFromRuntime;
+      if (restoreRefreshImplementation) {
+        mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
+          restoreRefreshImplementation,
+        );
+      }
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("default foreground hands a timed-out browser refresh to the model-free system owner", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_default_browser_vault_foreground",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+    });
+    const refreshItem = createMailboxItem({
+      dedupeKey: "runtime.browser-vault-refresh-requested:default-timeout-retry",
+      id: "mailbox_item_default_browser_vault_timeout_retry",
+      kind: "runtime.browser-vault-refresh-requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const refreshWake = buildHostedExecutionRuntimeControlWake({
+      eventId: refreshItem.dedupeKey,
+      kind: "runtime.browser-vault-refresh-requested",
+      occurredAt: refreshItem.occurredAt,
+      userId: TEST_USER_ID,
+    });
+    const refreshImplementation =
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
+    const automationImplementation =
+      mocks.runAssistantAutomationPass.getMockImplementation();
+    const foregroundAssistantInputIds: string[] = [];
+    const importedRefreshRecords: Array<
+      Awaited<ReturnType<typeof readHostedSystemMailboxState>>["pending"][number]
+    > = [];
+    let importedForegroundAssistantInputId: string | null = null;
+    let forcedRefreshCalls = 0;
+    let snapshotIndex = 0;
+
+    mocks.runAssistantAutomationPass.mockImplementation(
+      async (automationInput: RunAssistantAutomationPassInput) => {
+        const candidates = await automationInput.inputSource?.listInputCandidates({
+          afterCursor: null,
+          limit: 10,
+          sourceId: "linq",
+        });
+        const inputIds = candidates?.inputs.map((candidate) => candidate.event.inputId) ?? [];
+        if (inputIds.length === 0) {
+          return {
+            currentTurnDeliveryIntentIds: [],
+            nextWakeAt: null,
+            progressed: false,
+          };
+        }
+
+        events.push("foreground.default-work");
+        foregroundAssistantInputIds.push(...inputIds);
+        for (const inputId of inputIds) {
+          await writeSyntheticAssistantAutoReplyTerminalEvidence({
+            inputId,
+            vaultRoot,
+          });
+        }
+        return {
+          currentTurnDeliveryIntentIds: [],
+          nextWakeAt: null,
+          progressed: true,
+        };
+      },
+    );
+    mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(async (input) => {
+      if (input.force !== true) {
+        return { status: "skipped_no_port" };
+      }
+      forcedRefreshCalls += 1;
+      events.push(`browser-vault.refresh:${forcedRefreshCalls}`);
+      if (forcedRefreshCalls === 1) {
+        assert.equal(input.attempt, "initial");
+        return {
+          attempt: "initial",
+          configuredTimeoutMs: 30_000,
+          currentStepElapsedMs: 8_000,
+          refreshElapsedMs: 30_000,
+          refreshStage: "replica_serialization",
+          refreshStep: "replica_serialization",
+          source: { fileCount: 2, totalBytes: 1_024 },
+          status: "deferred_timeout",
+        };
+      }
+      if (forcedRefreshCalls === 2) {
+        assert.equal(input.attempt, "retry");
+        const publishedReplicaRef = createBrowserVaultReplicaRef({
+          generatedAt: new Date().toISOString(),
+          generation: 1,
+          source: {
+            dataVersion: "browser-vault-default-timeout-retry",
+            sourceBundleHash: "e".repeat(64),
+          },
+        });
+        return {
+          byteLength: publishedReplicaRef.byteLength,
+          content: {
+            entities: 0,
+            hasPrivateContent: false,
+            labResultRows: 0,
+            metricGoalProgressRows: 0,
+            metricRows: 0,
+            metricSelectionRows: 0,
+            searchRows: 0,
+            sourceHealthRows: 0,
+            timelineRows: 0,
+            weeklySampleSummaries: 0,
+          },
+          freshness: {
+            freshness: "stale",
+            reason: "missing",
+            shouldRefresh: true,
+          },
+          replicaRef: publishedReplicaRef,
+          source: { fileCount: 2, totalBytes: 1_024 },
+          status: "published",
+        };
+      }
+      throw new Error("A terminal Browser Vault refresh must not retry again.");
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/default-browser-vault-timeout-retry-before.bundle.json",
+        vaultRoot,
+      });
+      artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
+      let currentWorkspace = createWorkspaceState({
+        nextWakeAt: TEST_NOW,
+        nextWakeReason: "assistant",
+        redactedStatus: {
+          hostedMailboxBlockedCount: 0,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 0,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        snapshotRef: restoredWorkspace.snapshotRef,
+        version: "0",
+      });
+      const workspacePort: HostedRuntimeWorkspacePort = {
+        async checkpoint(request) {
+          events.push("workspace.checkpoint");
+          checkpointRequests.push(request);
+          currentWorkspace = createWorkspaceState({
+            browserVaultReplicaRef: currentWorkspace.browserVaultReplicaRef ?? null,
+            inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+            ...(request.systemMailboxProgressGeneration === undefined
+              ? {}
+              : {
+                  nextDefaultProcessingWakeAt:
+                    request.nextDefaultProcessingWakeAt ?? null,
+                  nextDefaultProcessingWakeReason:
+                    request.nextDefaultProcessingWakeReason ?? null,
+                  systemMailboxProgressGeneration:
+                    request.systemMailboxProgressGeneration,
+                }),
+            nextWakeAt: request.nextWakeAt ?? null,
+            nextWakeReason: request.nextWakeReason ?? null,
+            redactedStatus: request.redactedStatus ?? null,
+            snapshotRef: request.snapshotRef,
+            version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+          });
+          return {
+            checkpointed: true,
+            workspace: currentWorkspace,
+          };
+        },
+        async read() {
+          events.push("workspace.read");
+          return {
+            fetchedAt: new Date().toISOString(),
+            workspace: currentWorkspace,
+          };
+        },
+      };
+      const platform = createPlatform({
+        artifactBytesByHash,
+        mailboxPort: createMailboxPort({
+          events,
+          items: [conversationItem, refreshItem],
+        }),
+        workspacePort,
+      });
+      const runWorkspacePass = async (
+        attemptId: string,
+        processingMode: "default" | "system_mailbox" = "default",
+      ) =>
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              ...(processingMode === "system_mailbox"
+                ? {
+                    assistantExecutionBlocked: true as const,
+                    processingMode,
+                  }
+                : {}),
+              attemptId,
+              workspaceVersion: currentWorkspace.version,
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              snapshotIndex += 1;
+              const snapshot = await createVaultSnapshotBundle({
+                key: `users/bundles/member-synthetic/default-browser-vault-timeout-retry-${snapshotIndex}.bundle.json`,
+                vaultRoot,
+              });
+              artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+              return { snapshotRef: snapshot.snapshotRef };
+            },
+            async importItem(item, context) {
+              if (item.item.id === refreshItem.id) {
+                const outcome = await enqueueHostedSystemMailboxItem({
+                  item,
+                  vaultRoot,
+                  wake: refreshWake,
+                });
+                const importedRefreshRecord =
+                  (await readHostedSystemMailboxState(vaultRoot)).pending.find(
+                    (pendingItem) => pendingItem.itemId === refreshItem.id,
+                  );
+                assert.equal(importedRefreshRecord?.status, "pending");
+                assert.ok(importedRefreshRecord);
+                importedRefreshRecords.push(structuredClone(importedRefreshRecord));
+                return outcome;
+              }
+              assert.equal(item.item.id, conversationItem.id);
+              context?.onConversationInputStaged?.("linq");
+              importedForegroundAssistantInputId =
+                await stageAssistantInputEventForMailboxItem({
+                  item: item.item,
+                  vaultRoot,
+                });
+              return {
+                assistantInputId: importedForegroundAssistantInputId,
+                status: "imported",
+              };
+            },
+            platform,
+            async runAssistantPhase(input) {
+              assert.equal(processingMode, "default");
+              events.push("assistant.phase");
+              return await runHostedWorkspaceAssistantPhase(input);
+            },
+            vaultRoot,
+          },
+        );
+
+      const foreground = await runWorkspacePass(
+        "attempt_synthetic_default_browser_vault_foreground",
+      );
+
+      assert.equal(forcedRefreshCalls, 0);
+      assert.equal(foreground.status, "scheduled");
+      assert.equal(foreground.immediateRecheckRequested, true);
+      assert.equal(foreground.nextWakeReason, "assistant");
+      const foregroundRecheckAt = foreground.nextWakeAt;
+      assert.ok(foregroundRecheckAt);
+      assert.ok(importedForegroundAssistantInputId);
+      assert.deepEqual(foregroundAssistantInputIds, [importedForegroundAssistantInputId]);
+      const importedRefreshRecord = importedRefreshRecords[0];
+      assert.ok(importedRefreshRecord);
+      const foregroundState = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(foregroundState.pending.length, 1);
+      const pending = foregroundState.pending[0];
+      assert.equal(pending?.itemId, importedRefreshRecord.itemId);
+      assert.equal(
+        pending?.mailboxDedupeKey,
+        importedRefreshRecord.mailboxDedupeKey,
+      );
+      assert.equal(pending?.mailboxLaneSeq, importedRefreshRecord.mailboxLaneSeq);
+      assert.equal(pending?.occurredAt, importedRefreshRecord.occurredAt);
+      assert.equal(pending?.requestId, importedRefreshRecord.requestId);
+      assert.deepEqual(pending?.wake, importedRefreshRecord.wake);
+      assert.equal(pending?.status, "pending");
+      assert.equal(pending?.postCheckpointRecord, null);
+      assert.equal(pending?.nextAttemptAt, null);
+      const checkpointCountAfterForeground = checkpointRequests.length;
+      vi.setSystemTime(new Date(foregroundRecheckAt));
+      const timeoutInvocationAt = new Date().toISOString();
+      const retryAt = new Date(Date.now() + 60_000).toISOString();
+
+      const timedOut = await runWorkspacePass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout",
+        "system_mailbox",
+      );
+
+      assert.equal(forcedRefreshCalls, 1);
+      assert.equal(timedOut.status, "scheduled");
+      assert.equal(timedOut.nextWakeAt, retryAt);
+      assert.equal(timedOut.nextWakeReason, "assistant");
+      assert.equal(timedOut.immediateRecheckRequested, undefined);
+      assert.ok(
+        requireEventIndex(events, "foreground.default-work")
+          < requireEventIndex(events, "browser-vault.refresh:1"),
+      );
+      const checkpointCountAfterTimeout = checkpointRequests.length;
+      assert.ok(checkpointCountAfterTimeout > checkpointCountAfterForeground);
+      const timeoutCheckpoint = checkpointRequests.at(-1);
+      assert.equal(timeoutCheckpoint?.nextWakeAt, retryAt);
+      assert.equal(timeoutCheckpoint?.nextWakeReason, "assistant");
+      assert.equal(
+        timeoutCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "0",
+      );
+      const timeoutState = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(timeoutState.pending.length, 1);
+      const retained = timeoutState.pending[0];
+      assert.equal(retained?.itemId, importedRefreshRecord.itemId);
+      assert.equal(
+        retained?.mailboxDedupeKey,
+        importedRefreshRecord.mailboxDedupeKey,
+      );
+      assert.equal(retained?.mailboxLaneSeq, importedRefreshRecord.mailboxLaneSeq);
+      assert.equal(retained?.occurredAt, importedRefreshRecord.occurredAt);
+      assert.equal(retained?.requestId, importedRefreshRecord.requestId);
+      assert.deepEqual(retained?.wake, importedRefreshRecord.wake);
+      assert.equal(retained?.status, "recording");
+      assert.equal(retained?.postCheckpointRecord, null);
+      assert.equal(retained?.nextAttemptAt, retryAt);
+
+      vi.setSystemTime(new Date(Date.parse(timeoutInvocationAt) + 30_000));
+      const beforeRetry = await runWorkspacePass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_before_retry",
+        "system_mailbox",
+      );
+
+      assert.equal(forcedRefreshCalls, 1);
+      assert.equal(beforeRetry.status, "scheduled");
+      const deferredDefaultOwnerWakeAt = beforeRetry.nextWakeAt;
+      assert.ok(deferredDefaultOwnerWakeAt);
+      assert.notEqual(deferredDefaultOwnerWakeAt, retryAt);
+      assert.ok(Date.parse(deferredDefaultOwnerWakeAt) > Date.parse(retryAt));
+      assert.equal(beforeRetry.nextWakeReason, "assistant");
+      assert.equal(beforeRetry.immediateRecheckRequested, undefined);
+      assert.equal(checkpointRequests.length, checkpointCountAfterTimeout);
+      assert.equal(currentWorkspace.nextWakeAt, retryAt);
+      assert.equal(currentWorkspace.nextWakeReason, "assistant");
+      const beforeRetryRecord = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+      assert.deepEqual(beforeRetryRecord, retained);
+
+      vi.setSystemTime(new Date(retryAt));
+      const published = await runWorkspacePass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_published",
+        "system_mailbox",
+      );
+
+      const publicationCheckpoint = checkpointRequests.at(-1);
+      const expectedRetentionWakeAt = new Date(
+        Date.parse(conversationItem.createdAt) + 14 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      assert.equal(forcedRefreshCalls, 2);
+      assert.equal(published.status, "scheduled");
+      assert.equal(published.immediateRecheckRequested, undefined);
+      assert.equal(published.nextWakeAt, deferredDefaultOwnerWakeAt);
+      assert.equal(published.nextWakeReason, "assistant");
+      assert.ok(
+        Date.parse(deferredDefaultOwnerWakeAt)
+          < Date.parse(expectedRetentionWakeAt),
+      );
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(publicationCheckpoint?.nextWakeAt, deferredDefaultOwnerWakeAt);
+      assert.equal(publicationCheckpoint?.nextWakeReason, "assistant");
+      assert.equal(
+        publicationCheckpoint?.inboxMediaRetentionWakeAt,
+        expectedRetentionWakeAt,
+      );
+      assert.equal(
+        publicationCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+    } finally {
+      if (automationImplementation) {
+        mocks.runAssistantAutomationPass.mockImplementation(automationImplementation);
+      }
+      const restoreRefreshImplementation =
+        refreshImplementation
+        ?? mocks.actualRefreshHostedBrowserVaultReplicaFromRuntime;
+      if (restoreRefreshImplementation) {
+        mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
+          restoreRefreshImplementation,
+        );
+      }
+      mocks.runAssistantAutomationPass.mockClear();
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("system mailbox mode preserves one browser timeout retry across projection backoff and exposes its successor", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const events: string[] = [];
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    const refreshItem = createMailboxItem({
+      dedupeKey: "runtime.browser-vault-refresh-requested:timeout-retry",
+      id: "mailbox_item_system_mailbox_browser_vault_timeout_retry",
+      kind: "runtime.browser-vault-refresh-requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const refreshWake = buildHostedExecutionRuntimeControlWake({
+      eventId: refreshItem.dedupeKey,
+      kind: "runtime.browser-vault-refresh-requested",
+      occurredAt: refreshItem.occurredAt,
+      userId: TEST_USER_ID,
+    });
+    const successorText = "Synthetic Browser Vault successor completed.";
+    const successorDeliveryKey = "group-join:browser-vault-timeout-successor";
+    const successorDedupeKey =
+      `assistant.notification.requested:${successorDeliveryKey}`;
+    const successorItem = createMailboxItem({
+      dedupeKey: successorDedupeKey,
+      id: "mailbox_item_system_mailbox_browser_vault_timeout_successor",
+      kind: "assistant.notification.requested",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const successorTarget = "synthetic_browser_vault_timeout_successor";
+    const successorIdentityId = "hbidx:phone:v1:browser-vault-timeout-successor";
+    const successorThreadId = "hbidx:thread:v1:browser-vault-timeout-successor";
+    const successorWake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: successorDedupeKey,
+      memberId: TEST_USER_ID,
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: successorDeliveryKey,
+        deliveryIdempotencyKey: successorDeliveryKey,
+        instructions: "Send the exact synthetic completion text.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: successorText,
+        },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: successorTarget,
+          },
+          identityId: successorIdentityId,
+          threadId: successorThreadId,
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: TEST_NOW,
+    });
+    const refreshImplementation =
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
+    const projectionRetryAt = new Date(
+      Date.parse(TEST_NOW) + 60_000,
+    ).toISOString();
+    const timeoutRetryAt = new Date(
+      Date.parse(projectionRetryAt) + 60_000,
+    ).toISOString();
+    const projectionRetryAfterTimeoutAt = new Date(
+      Date.parse(timeoutRetryAt) + 60_000,
+    ).toISOString();
+    const successorAt = new Date(
+      Date.parse(projectionRetryAfterTimeoutAt) + 30_000,
+    ).toISOString();
+    const thirdRetryAt = new Date(
+      Date.parse(projectionRetryAfterTimeoutAt) + 60_000,
+    ).toISOString();
+    let projectionReads = 0;
+    let projectionShouldFail = true;
+    let refreshCalls = 0;
+    let snapshotIndex = 0;
+
+    mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(async (input) => {
+      assert.equal(input.force, true);
+      refreshCalls += 1;
+      if (refreshCalls === 1) {
+        assert.equal(input.attempt, "initial");
+        return {
+          attempt: "initial",
+          configuredTimeoutMs: 30_000,
+          currentStepElapsedMs: 9_000,
+          refreshElapsedMs: 30_000,
+          refreshStage: "replica_construction",
+          refreshStep: "replica_construction_experiment_outcome_read",
+          source: { fileCount: 2, totalBytes: 1_024 },
+          status: "deferred_timeout",
+        };
+      }
+      if (refreshCalls === 2) {
+        assert.equal(input.attempt, "retry");
+        return {
+          attempt: "retry",
+          configuredTimeoutMs: 30_000,
+          currentStepElapsedMs: 18_000,
+          refreshElapsedMs: 30_000,
+          refreshStage: "replica_construction",
+          refreshStep: "replica_construction_projection",
+          source: { fileCount: 2, totalBytes: 1_024 },
+          status: "deferred_timeout",
+        };
+      }
+      throw new Error("A second Browser Vault timeout must terminalize without a third refresh.");
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedRuntimeControlSystemMailboxItem(refreshItem),
+        vaultRoot,
+        wake: refreshWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: {
+          item: successorItem,
+          payload: {
+            payloadCiphertext: "ciphertext",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            requestId: `request_${successorItem.id}`,
+            source: "inline",
+            status: "resolved",
+          },
+          route: {
+            action: "dispatch-assistant-notification",
+            advanceProgress: true,
+            itemRef: {
+              id: successorItem.id,
+              kind: successorItem.kind,
+              lane: successorItem.lane,
+              laneSeq: successorItem.laneSeq,
+            },
+            state: "route",
+          },
+        },
+        vaultRoot,
+        wake: successorWake,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === refreshItem.id
+            ? {
+                ...item,
+                attemptCount: 1,
+                lastAttemptAt: "2026-04-26T23:59:00.000Z",
+                postCheckpointRecord: null,
+                status: "recording" as const,
+              }
+            : item.itemId === successorItem.id
+              ? {
+                  ...item,
+                  attemptCount: 1,
+                  lastAttemptAt: TEST_NOW,
+                  nextAttemptAt: successorAt,
+                  status: "recording" as const,
+                }
+              : item
+        ),
+      }));
+      const successorIntent = await createAssistantOutboxIntent({
+        channel: "linq",
+        createdAt: TEST_NOW,
+        dedupeToken: successorDeliveryKey,
+        deliveryIdempotencyKey: successorDeliveryKey,
+        deliveryTransportIdempotent: true,
+        explicitTarget: successorTarget,
+        identityId: successorIdentityId,
+        message: successorText,
+        sessionId: "session_browser_vault_timeout_successor",
+        threadId: successorThreadId,
+        threadIsDirect: true,
+        turnId: "turn_browser_vault_timeout_successor",
+        vault: vaultRoot,
+      });
+      const sentSuccessorIntent = await markAssistantOutboxIntentSentById({
+        delivery: {
+          channel: "linq",
+          idempotencyKey: successorDeliveryKey,
+          messageLength: successorText.length,
+          providerMessageId: "provider_browser_vault_timeout_successor",
+          providerThreadId: successorTarget,
+          sentAt: TEST_NOW,
+          target: successorTarget,
+          targetKind: "explicit",
+        },
+        intentId: successorIntent.intentId,
+        vault: vaultRoot,
+      });
+      assert.equal(sentSuccessorIntent?.status, "sent");
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "2";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-browser-vault-timeout-retry-before.bundle.json",
+        vaultRoot,
+      });
+      artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
+      let currentWorkspace = createWorkspaceState({
+        nextWakeAt: TEST_NOW,
+        nextWakeReason: "assistant",
+        redactedStatus: {
+          hostedMailboxBlockedCount: 0,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 0,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "0",
+          hostedMailboxSystemImportedSeq: "2",
+        },
+        snapshotRef: restoredWorkspace.snapshotRef,
+        version: "0",
+      });
+      const workspacePort: HostedRuntimeWorkspacePort = {
+        async checkpoint(request) {
+          events.push("workspace.checkpoint");
+          checkpointRequests.push(request);
+          currentWorkspace = createWorkspaceState({
+            browserVaultReplicaRef: currentWorkspace.browserVaultReplicaRef ?? null,
+            inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+            ...(request.systemMailboxProgressGeneration === undefined
+              ? {}
+              : {
+                  nextDefaultProcessingWakeAt:
+                    request.nextDefaultProcessingWakeAt ?? null,
+                  nextDefaultProcessingWakeReason:
+                    request.nextDefaultProcessingWakeReason ?? null,
+                  systemMailboxProgressGeneration:
+                    request.systemMailboxProgressGeneration,
+                }),
+            nextWakeAt: request.nextWakeAt ?? null,
+            nextWakeReason: request.nextWakeReason ?? null,
+            redactedStatus: request.redactedStatus ?? null,
+            snapshotRef: request.snapshotRef,
+            version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+          });
+          return {
+            checkpointed: true,
+            workspace: currentWorkspace,
+          };
+        },
+        async read() {
+          events.push("workspace.read");
+          return {
+            fetchedAt: new Date().toISOString(),
+            workspace: currentWorkspace,
+          };
+        },
+      };
+      const persistHarnessVaultState = async (label: string) => {
+        snapshotIndex += 1;
+        const snapshot = await createVaultSnapshotBundle({
+          key: `users/bundles/member-synthetic/system-mailbox-browser-vault-${label}-${snapshotIndex}.bundle.json`,
+          vaultRoot,
+        });
+        artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+        currentWorkspace = {
+          ...currentWorkspace,
+          snapshotRef: snapshot.snapshotRef,
+        };
+      };
+      const platform = createPlatform({
+        artifactBytesByHash,
+        mailboxPort: createMailboxPort({ events, items: [] }),
+        vaultSharePort: {
+          async listActiveProjectionScopes() {
+            projectionReads += 1;
+            if (projectionShouldFail) {
+              throw new Error("Synthetic Browser Vault projection failure.");
+            }
+            return {
+              projectionKinds: [],
+              projectionScopes: [],
+            };
+          },
+          async deliver() {
+            throw new Error("No Browser Vault projection should be delivered.");
+          },
+        },
+        workspacePort,
+      });
+      const runSystemPass = async (attemptId: string) =>
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              assistantExecutionBlocked: true,
+              attemptId,
+              processingMode: "system_mailbox",
+              workspaceVersion: currentWorkspace.version,
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              snapshotIndex += 1;
+              const snapshot = await createVaultSnapshotBundle({
+                key: `users/bundles/member-synthetic/system-mailbox-browser-vault-timeout-retry-${snapshotIndex}.bundle.json`,
+                vaultRoot,
+              });
+              artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+              return { snapshotRef: snapshot.snapshotRef };
+            },
+            async importItem() {
+              throw new Error("Already-imported Browser Vault refresh work must not import a new row.");
+            },
+            platform,
+            async runAssistantPhase() {
+              throw new Error("System mailbox Browser Vault refresh must not enter assistant phase.");
+            },
+            vaultRoot,
+          },
+        );
+
+      const projectionFailedBeforeRefresh = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_projection_before_timeout",
+      );
+
+      assert.equal(refreshCalls, 0);
+      assert.equal(projectionReads, 1);
+      assert.equal(projectionFailedBeforeRefresh.status, "scheduled");
+      assert.equal(projectionFailedBeforeRefresh.nextWakeAt, projectionRetryAt);
+      assert.equal(projectionFailedBeforeRefresh.nextWakeReason, "assistant");
+      assert.equal(projectionFailedBeforeRefresh.immediateRecheckRequested, undefined);
+      assert.equal(checkpointRequests.length, 0);
+      const stateAfterProjectionFailure =
+        await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(stateAfterProjectionFailure.pending.length, 2);
+      const projectionBackoffItem = stateAfterProjectionFailure.pending.find(
+        (item) => item.itemId === refreshItem.id,
+      );
+      assert.ok(projectionBackoffItem);
+      assert.equal(projectionBackoffItem.status, "recording");
+      assert.equal(projectionBackoffItem.postCheckpointRecord, null);
+      assert.equal(projectionBackoffItem.nextAttemptAt, projectionRetryAt);
+      assert.equal(
+        projectionBackoffItem.lastErrorCode,
+        "HOSTED_VAULT_SHARE_PROJECTION_FAILED",
+      );
+      assert.equal(
+        projectionBackoffItem.lastErrorMessage,
+        "Vault-share projection failed before device-sync acknowledgement.",
+      );
+      await persistHarnessVaultState("projection-before-timeout");
+
+      projectionShouldFail = false;
+      vi.setSystemTime(new Date(projectionRetryAt));
+      const timedOut = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout",
+      );
+
+      assert.equal(refreshCalls, 1);
+      assert.equal(projectionReads, 2);
+      assert.equal(timedOut.status, "scheduled");
+      assert.equal(timedOut.nextWakeAt, timeoutRetryAt);
+      assert.equal(timedOut.nextWakeReason, "assistant");
+      assert.equal(timedOut.immediateRecheckRequested, undefined);
+      const checkpointCountAfterTimeout = checkpointRequests.length;
+      assert.equal(checkpointCountAfterTimeout, 1);
+      const timeoutCheckpoint = checkpointRequests.at(-1);
+      assert.equal(timeoutCheckpoint?.nextWakeAt, timeoutRetryAt);
+      assert.equal(timeoutCheckpoint?.nextWakeReason, "assistant");
+      assert.equal(
+        checkpointRequests.filter((request) =>
+          request.nextWakeAt === timeoutRetryAt
+          && request.nextWakeReason === "assistant"
+        ).length,
+        1,
+      );
+      assert.equal(
+        timeoutCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "0",
+      );
+      const stateAfterFirstTimeout = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(stateAfterFirstTimeout.pending.length, 2);
+      const retained = stateAfterFirstTimeout.pending.find(
+        (item) => item.itemId === refreshItem.id,
+      );
+      const retainedSuccessor = stateAfterFirstTimeout.pending.find(
+        (item) => item.itemId === successorItem.id,
+      );
+      assert.equal(retained?.itemId, refreshItem.id);
+      assert.equal(retained?.mailboxDedupeKey, refreshItem.dedupeKey);
+      assert.equal(retained?.mailboxLaneSeq, refreshItem.laneSeq);
+      assert.equal(retained?.occurredAt, refreshItem.occurredAt);
+      assert.deepEqual(retained?.wake, refreshWake);
+      assert.equal(retained?.status, "recording");
+      assert.equal(retained?.postCheckpointRecord, null);
+      assert.equal(retained?.lastErrorCode, null);
+      assert.equal(retained?.lastErrorMessage, null);
+      assert.equal(retained?.nextAttemptAt, timeoutRetryAt);
+      assert.ok(retainedSuccessor);
+      assert.equal(
+        isHostedSystemMailboxModelFreeExactNotificationItem(retainedSuccessor),
+        true,
+      );
+      assert.equal(retainedSuccessor.nextAttemptAt, successorAt);
+      const prematureAt = new Date(
+        Date.parse(projectionRetryAt) + 30_000,
+      ).toISOString();
+      assert.equal(
+        findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: prematureAt,
+          state: stateAfterFirstTimeout,
+        }),
+        null,
+      );
+
+      vi.setSystemTime(new Date(prematureAt));
+      const beforeRetry = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_before_retry",
+      );
+
+      assert.equal(refreshCalls, 1);
+      assert.equal(beforeRetry.status, "idle");
+      assert.equal(beforeRetry.nextWakeAt, null);
+      assert.equal(beforeRetry.nextWakeReason ?? null, null);
+      assert.equal(beforeRetry.immediateRecheckRequested, undefined);
+      assert.equal(checkpointRequests.length, checkpointCountAfterTimeout);
+      assert.equal(currentWorkspace.nextWakeAt, timeoutRetryAt);
+      assert.equal(currentWorkspace.nextWakeReason, "assistant");
+      const beforeRetryState = await readHostedSystemMailboxState(vaultRoot);
+      assert.deepEqual(beforeRetryState, stateAfterFirstTimeout);
+      assert.equal(
+        findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: timeoutRetryAt,
+          state: beforeRetryState,
+        })?.itemId,
+        refreshItem.id,
+      );
+
+      projectionShouldFail = true;
+      vi.setSystemTime(new Date(timeoutRetryAt));
+      const projectionFailedAfterTimeout = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_projection_before_timeout_retry",
+      );
+
+      assert.equal(refreshCalls, 1);
+      assert.equal(projectionReads, 3);
+      assert.equal(projectionFailedAfterTimeout.status, "scheduled");
+      assert.equal(
+        projectionFailedAfterTimeout.nextWakeAt,
+        projectionRetryAfterTimeoutAt,
+      );
+      assert.equal(projectionFailedAfterTimeout.nextWakeReason, "assistant");
+      assert.equal(projectionFailedAfterTimeout.immediateRecheckRequested, undefined);
+      assert.equal(checkpointRequests.length, checkpointCountAfterTimeout);
+      const stateAfterProjectionFailureAfterTimeout =
+        await readHostedSystemMailboxState(vaultRoot);
+      const timeoutRetryItem = stateAfterProjectionFailureAfterTimeout.pending.find(
+        (item) => item.itemId === refreshItem.id,
+      );
+      assert.ok(timeoutRetryItem);
+      assert.equal(timeoutRetryItem.status, "recording");
+      assert.equal(timeoutRetryItem.postCheckpointRecord, null);
+      assert.equal(timeoutRetryItem.lastErrorCode, null);
+      assert.equal(timeoutRetryItem.lastErrorMessage, null);
+      assert.equal(timeoutRetryItem.nextAttemptAt, projectionRetryAfterTimeoutAt);
+      assert.deepEqual(
+        stateAfterProjectionFailureAfterTimeout.pending.find(
+          (item) => item.itemId === successorItem.id,
+        ),
+        retainedSuccessor,
+      );
+      await persistHarnessVaultState("projection-before-timeout-retry");
+
+      projectionShouldFail = false;
+      vi.setSystemTime(new Date(projectionRetryAfterTimeoutAt));
+      const timedOutAgain = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_retry",
+      );
+
+      assert.equal(refreshCalls, 2);
+      assert.equal(projectionReads, 4);
+      assert.equal(timedOutAgain.status, "scheduled");
+      assert.equal(timedOutAgain.nextWakeAt, successorAt);
+      assert.equal(timedOutAgain.nextWakeReason, "mailbox");
+      assert.equal(timedOutAgain.immediateRecheckRequested, undefined);
+      assert.equal(
+        checkpointRequests.length,
+        checkpointCountAfterTimeout + 1,
+      );
+      const checkpointCountAfterSecondTimeout = checkpointRequests.length;
+      const secondTimeoutCheckpoint = checkpointRequests.at(-1);
+      assert.equal(secondTimeoutCheckpoint?.nextWakeAt, successorAt);
+      assert.notEqual(secondTimeoutCheckpoint?.nextWakeAt, thirdRetryAt);
+      assert.equal(secondTimeoutCheckpoint?.nextWakeReason, "mailbox");
+      assert.equal(
+        checkpointRequests.some((request) => request.nextWakeAt === thirdRetryAt),
+        false,
+      );
+      assert.equal(
+        secondTimeoutCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+      const stateAfterSecondTimeout = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(stateAfterSecondTimeout.pending.length, 1);
+      assert.equal(stateAfterSecondTimeout.pending[0]?.itemId, successorItem.id);
+      assert.equal(stateAfterSecondTimeout.pending[0]?.nextAttemptAt, successorAt);
+      assert.equal(
+        stateAfterSecondTimeout.pending.some((item) => item.itemId === refreshItem.id),
+        false,
+      );
+      assert.equal(
+        findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: projectionRetryAfterTimeoutAt,
+          state: stateAfterSecondTimeout,
+        }),
+        null,
+      );
+      assert.equal(
+        findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: successorAt,
+          state: stateAfterSecondTimeout,
+        })?.itemId,
+        successorItem.id,
+      );
+
+      const initialTimeoutLog = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_system_mailbox_browser_vault_timeout",
+        spy: consoleInfo,
+      }).find((entry) =>
+        entry.details.runtimePhase === "browser_vault.refresh"
+        && entry.details.runtimePhaseStatus === "done"
+        && entry.details.browserVaultRefreshStatus === "deferred_timeout"
+      );
+      assert.ok(initialTimeoutLog);
+      expect(Object.fromEntries(
+        Object.entries(initialTimeoutLog.details).filter(([key]) =>
+          key.startsWith("browserVault")
+        ),
+      )).toEqual({
+        browserVaultRefreshAttempt: "initial",
+        browserVaultRefreshConfiguredTimeoutMs: 30_000,
+        browserVaultRefreshCurrentStepElapsedMs: 9_000,
+        browserVaultRefreshElapsedMs: 30_000,
+        browserVaultRefreshStage: "replica_construction",
+        browserVaultRefreshStatus: "deferred_timeout",
+        browserVaultRefreshStep:
+          "replica_construction_experiment_outcome_read",
+        browserVaultReplicaSourceFileCount: 2,
+        browserVaultReplicaSourceTotalBytes: 1_024,
+      });
+      const retryTimeoutLog = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_system_mailbox_browser_vault_timeout_retry",
+        spy: consoleInfo,
+      }).find((entry) =>
+        entry.details.runtimePhase === "browser_vault.refresh"
+        && entry.details.runtimePhaseStatus === "done"
+        && entry.details.browserVaultRefreshStatus === "deferred_timeout"
+      );
+      assert.ok(retryTimeoutLog);
+      expect(Object.fromEntries(
+        Object.entries(retryTimeoutLog.details).filter(([key]) =>
+          key.startsWith("browserVault")
+        ),
+      )).toEqual({
+        browserVaultRefreshAttempt: "retry",
+        browserVaultRefreshConfiguredTimeoutMs: 30_000,
+        browserVaultRefreshCurrentStepElapsedMs: 18_000,
+        browserVaultRefreshElapsedMs: 30_000,
+        browserVaultRefreshStage: "replica_construction",
+        browserVaultRefreshStatus: "deferred_timeout",
+        browserVaultRefreshStep: "replica_construction_projection",
+        browserVaultReplicaSourceFileCount: 2,
+        browserVaultReplicaSourceTotalBytes: 1_024,
+      });
+
+      vi.setSystemTime(new Date(successorAt));
+      const successorProcessed = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_successor",
+      );
+
+      assert.equal(refreshCalls, 2);
+      assert.equal(successorProcessed.status, "idle");
+      assert.equal(successorProcessed.nextWakeAt, null);
+      assert.equal(successorProcessed.nextWakeReason ?? null, null);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(checkpointRequests.length, checkpointCountAfterSecondTimeout + 2);
+      const checkpointCountAfterSuccessor = checkpointRequests.length;
+      const successorCheckpoint = checkpointRequests.at(-1);
+      assert.equal(successorCheckpoint?.nextWakeAt, null);
+      assert.equal(successorCheckpoint?.nextWakeReason, null);
+      assert.equal(
+        successorCheckpoint?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "2",
+      );
+      const outboxAfterSuccessor = await listAssistantOutboxIntents(vaultRoot);
+      assert.equal(
+        outboxAfterSuccessor.find((intent) => intent.intentId === successorIntent.intentId)
+          ?.status,
+        "sent",
+      );
+
+      vi.setSystemTime(new Date(thirdRetryAt));
+      const afterTerminalization = await runSystemPass(
+        "attempt_synthetic_system_mailbox_browser_vault_timeout_after_terminalization",
+      );
+
+      assert.equal(refreshCalls, 2);
+      assert.equal(afterTerminalization.status, "idle");
+      assert.equal(afterTerminalization.nextWakeAt, null);
+      assert.equal(afterTerminalization.nextWakeReason ?? null, null);
+      assert.equal(checkpointRequests.length, checkpointCountAfterSuccessor);
+    } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleInfo.mockRestore();
       const restoreRefreshImplementation =
         refreshImplementation
         ?? mocks.actualRefreshHostedBrowserVaultReplicaFromRuntime;
@@ -3339,6 +4523,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       currentWorkspace = createWorkspaceState({
         checkpointedAt,
         inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+        ...(request.systemMailboxProgressGeneration === undefined
+          ? {}
+          : {
+              nextDefaultProcessingWakeAt:
+                request.nextDefaultProcessingWakeAt ?? null,
+              nextDefaultProcessingWakeReason:
+                request.nextDefaultProcessingWakeReason ?? null,
+              systemMailboxProgressGeneration:
+                request.systemMailboxProgressGeneration,
+            }),
         nextWakeAt: request.nextWakeAt ?? null,
         nextWakeReason: request.nextWakeReason ?? null,
         redactedStatus: request.redactedStatus ?? null,
@@ -3572,7 +4766,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const requestClass = `${method} ${new URL(url).pathname}`;
       providerRequestClasses.push(requestClass);
       events.push(`provider.request:${requestClass}`);
-      return new Response(JSON.stringify({ records: [] }), {
+      const records = requestClass === "GET /developer/v2/activity/sleep"
+        ? [{
+            end: "2026-04-26T07:30:00.000Z",
+            id: "sleep-device-sync-closed-loop",
+            nap: false,
+            start: "2026-04-26T00:30:00.000Z",
+            updated_at: "2026-04-26T08:00:00.000Z",
+          }]
+        : [];
+      return new Response(JSON.stringify({ records }), {
         headers: { "content-type": "application/json" },
         status: 200,
       });
@@ -3735,8 +4938,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
         ["1", "2", "3"],
       );
+      assert.deepEqual(
+        checkpointRequests.map((request) =>
+          request.systemMailboxProgressGeneration
+        ),
+        ["0", "1", "1"],
+      );
       assert.ok(currentWorkspace);
       assert.equal(currentWorkspace.version, "3");
+      assert.equal(currentWorkspace.systemMailboxProgressGeneration, "1");
       const initialProviderRequestClasses = providerRequestClasses.slice();
       assert.deepEqual(initialProviderRequestClasses, expectedWhoopRequestClasses);
       assert.deepEqual(cadencePublications, []);
@@ -3829,19 +5039,20 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(canonicalNextReconcileAt, dueAt);
       assert.equal(recovered.nextWakeReason, "device-sync.reconcile");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "7");
-      assert.equal(checkpointAttempt, 7);
-      assert.equal(checkpointRequests.length, 7);
+      assert.equal(currentWorkspace.version, "6");
+      assert.equal(currentWorkspace.systemMailboxProgressGeneration, "1");
+      assert.equal(checkpointAttempt, 6);
+      assert.equal(checkpointRequests.length, 6);
       assert.deepEqual(
-        checkpointRequests.slice(3, 7).map((request) =>
+        checkpointRequests.slice(3, 6).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["3", "4", "5", "6"],
+        ["3", "4", "5"],
       );
       const recoveryCheckpointCommitIndexes = events.flatMap((event, index) =>
         event.startsWith(`checkpoint.commit:${recoveryAttemptId}:`) ? [index] : []
       );
-      assert.equal(recoveryCheckpointCommitIndexes.length, 4);
+      assert.equal(recoveryCheckpointCommitIndexes.length, 3);
       const durableRecoveryCompletionCheckpointIndex =
         recoveryCheckpointCommitIndexes[recoveryCheckpointCommitIndexes.length - 1];
       assert.notEqual(durableRecoveryCompletionCheckpointIndex, undefined);
@@ -3892,17 +5103,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(settled.nextWakeAt, "2026-04-27T06:05:00.000Z");
       assert.equal(settled.nextWakeReason, "device-sync.reconcile");
       assert.deepEqual(
-        checkpointRequests.slice(7, 10).map((request) =>
+        checkpointRequests.slice(6, 9).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["7", "8", "9"],
+        ["6", "7", "8"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "10");
+      assert.equal(currentWorkspace.version, "9");
 
       const checkpointAttemptsAfterSettlement = checkpointAttempt;
-      assert.equal(checkpointAttemptsAfterSettlement, 10);
-      assert.equal(checkpointRequests.length, 10);
+      assert.equal(checkpointAttemptsAfterSettlement, 9);
+      assert.equal(checkpointRequests.length, 9);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.fail:")).length,
         1,
@@ -3924,9 +5135,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(converged.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeConvergence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence + 1);
-      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "10");
+      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "9");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "11");
+      assert.equal(currentWorkspace.version, "10");
 
       const quiescentBucketAt = "2026-04-27T00:15:00.000Z";
       const quiescentAttemptId =
@@ -3944,17 +5155,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(providerRequestClasses.length, providerRequestsBeforeQuiescence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeQuiescence);
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "11");
+      assert.equal(currentWorkspace.version, "10");
       assert.equal(
         providerRequestClasses.length,
         providerRequestClassesAfterSettlement,
       );
       assert.equal(checkpointAttempt, checkpointAttemptsAfterSettlement + 1);
-      assert.equal(checkpointAttempt, 11);
+      assert.equal(checkpointAttempt, 10);
       assert.equal(checkpointAttempt, checkpointRequests.length);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.commit:")).length,
-        10,
+        9,
       );
       assert.deepEqual([...observedScheduleEventIds], [scheduleEventId]);
       assert.deepEqual([...observedMailboxItemIds], [mailboxItemId]);
@@ -5615,7 +6826,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.notEqual(checkpointRequests.at(-1)?.nextWakeAt, staleAssistantWakeAt);
       assert.equal(result.nextWakeReason, "assistant");
       assert.notEqual(result.nextWakeAt, staleAssistantWakeAt);
-      assert.equal(result.immediateRecheckRequested, undefined);
+      assert.equal(result.immediateRecheckRequested, true);
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
     } finally {
       vi.useRealTimers();
@@ -5742,10 +6953,52 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode preserves successful dirty-ack follow-up wake", async () => {
+  test.each([
+    {
+      defaultOwnedSystemMailboxWakeAt: null,
+      dueAssistantWakePending: false,
+      runtimeWakeStage: null,
+      scenario: "without a foreground handoff",
+    },
+    {
+      defaultOwnedSystemMailboxWakeAt: null,
+      dueAssistantWakePending: false,
+      runtimeWakeStage: "scope_resolution" as const,
+      scenario: "with a redundant runtime wake during scope resolution",
+    },
+    {
+      defaultOwnedSystemMailboxWakeAt: null,
+      dueAssistantWakePending: false,
+      runtimeWakeStage: "prepare_checkpoint" as const,
+      scenario: "with a redundant runtime wake after its preparation checkpoint",
+    },
+    {
+      defaultOwnedSystemMailboxWakeAt: null,
+      dueAssistantWakePending: true,
+      runtimeWakeStage: null,
+      scenario: "with assistant work already due",
+    },
+    {
+      defaultOwnedSystemMailboxWakeAt: TEST_NOW,
+      dueAssistantWakePending: false,
+      runtimeWakeStage: null,
+      scenario: "with a ready default-owned mailbox wake behind the device wake",
+    },
+    {
+      defaultOwnedSystemMailboxWakeAt: "2026-04-27T00:06:00.000Z",
+      dueAssistantWakePending: false,
+      runtimeWakeStage: null,
+      scenario: "with a future default-owned mailbox retry behind the device wake",
+    },
+  ])("system mailbox mode preserves successful dirty-ack follow-up wake $scenario", async ({
+    defaultOwnedSystemMailboxWakeAt,
+    dueAssistantWakePending,
+    runtimeWakeStage,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:dirty-ack-follow-up",
       id: "mailbox_item_system_mailbox_device_dirty_ack_follow_up",
@@ -5754,10 +7007,30 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       laneSeq: "1",
     });
     const followUpWakeAt = "2026-04-27T00:03:00.000Z";
+    const defaultAssistantWakeAt = dueAssistantWakePending
+      ? TEST_NOW
+      : "2026-04-27T00:08:00.000Z";
+    const projectedDefaultWakeAt = defaultOwnedSystemMailboxWakeAt
+      ?? defaultAssistantWakeAt;
+    const defaultOwnerHandoffExpected =
+      dueAssistantWakePending
+      || (
+        defaultOwnedSystemMailboxWakeAt !== null
+        && Date.parse(defaultOwnedSystemMailboxWakeAt) <= Date.parse(TEST_NOW)
+      );
+    const defaultOwnedItem = createMailboxItem({
+      dedupeKey: "assistant.ask.requested:dirty-ack-follow-up",
+      expiresAt: "2026-04-27T00:10:00.000Z",
+      id: "mailbox_item_system_mailbox_default_owned_dirty_ack_follow_up",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "2",
+    });
     const baseDeviceSyncPort = createEmptyDeviceSyncPort();
     let dirtyAckCalls = 0;
     let browserPublishCalls = 0;
     let browserWriteCalls = 0;
+    let runtimeWakeSent = false;
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       ...baseDeviceSyncPort,
       async ackDirtyStateProcessed(request) {
@@ -5789,34 +7062,83 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.prepareHostedCodexAssistantProcess.mockClear();
       mocks.cancelPendingWarmCodexPreinitialization.mockClear();
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41XZ",
+        continuityPolicy: "fresh",
+        instructions: "Send one synthetic scheduled reminder.",
+        now: new Date(Date.parse(TEST_NOW) - 60_000),
+        route: {
+          channel: "linq",
+          deliveryTarget: "synthetic_direct_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "synthetic_direct_chat",
+          threadIsDirect: true,
+        },
+        schedule: { at: defaultAssistantWakeAt, kind: "at" },
+        status: "active",
+        title: "Synthetic scheduled reminder",
+        vaultRoot,
+      });
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
         vaultRoot,
       });
+      if (defaultOwnedSystemMailboxWakeAt !== null) {
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedAssistantAskSystemMailboxItem(defaultOwnedItem),
+          vaultRoot,
+          wake: createConsentedMemberAssistantAskRequestedWake({
+            eventId: defaultOwnedItem.dedupeKey,
+          }),
+        });
+      }
       await updateHostedSystemMailboxState(vaultRoot, (state) => ({
-        pending: state.pending.map((item) =>
-          item.itemId === deviceItem.id
-            ? {
+        pending: state.pending.map((item) => {
+          if (item.itemId === deviceItem.id) {
+            return {
                 ...item,
-                postCheckpointRecord: {
-                  connectionId: "device_sync_connection_synthetic",
-                  kind: "device-sync.dirty-processed" as const,
-                  processedDirtyPayloadIds: ["dirty_payload_synthetic"],
-                  processedRevision: "7",
-                },
+                postCheckpointRecord: runtimeWakeStage === "prepare_checkpoint"
+                  ? {
+                      kind: "device-sync.dirty-processed-batch" as const,
+                      records: [{
+                        connectionId: "device_sync_connection_synthetic",
+                        processedDirtyPayloadIds: ["dirty_payload_synthetic"],
+                        processedRevision: "7",
+                      }],
+                    }
+                  : {
+                      connectionId: "device_sync_connection_synthetic",
+                      kind: "device-sync.dirty-processed" as const,
+                      processedDirtyPayloadIds: ["dirty_payload_synthetic"],
+                      processedRevision: "7",
+                  },
                 status: "recording" as const,
-              }
-            : item
-        ),
+              };
+          }
+          if (
+            item.itemId === defaultOwnedItem.id
+            && defaultOwnedSystemMailboxWakeAt !== null
+          ) {
+            return {
+              ...item,
+              nextAttemptAt: defaultOwnedSystemMailboxWakeAt === TEST_NOW
+                ? null
+                : defaultOwnedSystemMailboxWakeAt,
+            };
+          }
+          return item;
+        }),
       }));
       const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "1";
+      importState.watermarks.system = defaultOwnedSystemMailboxWakeAt === null
+        ? "1"
+        : "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
         key: "users/bundles/member-synthetic/system-mailbox-device-dirty-ack-follow-up-before.bundle.json",
         vaultRoot,
       });
-
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -5863,6 +7185,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
               async listActiveProjectionScopes() {
+                if (runtimeWakeStage === "scope_resolution" && !runtimeWakeSent) {
+                  runtimeWakeSent = true;
+                  runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+                }
                 return {
                   generationTokensByProjectionScopeKey: {
                     "sleep-times.v0": "a".repeat(43),
@@ -5876,23 +7202,51 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 return { status: "delivered" };
               },
             },
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({
-                snapshotRef: restoredWorkspace.snapshotRef,
-                version: "0",
-              }),
-            }),
+            workspacePort: (() => {
+              const workspacePort = createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  snapshotRef: restoredWorkspace.snapshotRef,
+                  version: "0",
+                }),
+              });
+              return {
+                ...workspacePort,
+                async checkpoint(request: HostedWorkspaceCheckpointRequest) {
+                  const response = await workspacePort.checkpoint!(request);
+                  if (
+                    runtimeWakeStage === "prepare_checkpoint"
+                    && !runtimeWakeSent
+                  ) {
+                    runtimeWakeSent = true;
+                    runtimeWakeSignal.notify({
+                      requestedProcessingMode: "system_mailbox",
+                    });
+                  }
+                  return response;
+                },
+              };
+            })(),
           }),
           async runAssistantPhase() {
             throw new Error("Successful dirty ack must not enter assistant phase.");
           },
+          runtimeWakeSignal,
           vaultRoot,
         },
       );
 
-      assert.equal(dirtyAckCalls, 1);
+      assert.equal(
+        dirtyAckCalls,
+        1,
+        JSON.stringify({
+          checkpointRequests,
+          events,
+          mailboxState: await readHostedSystemMailboxState(vaultRoot),
+          result,
+        }),
+      );
       assert.equal(browserWriteCalls, 1);
       assert.equal(browserPublishCalls, 1);
       assert.ok(events.includes("vault-share.deliver"), JSON.stringify(events));
@@ -5912,26 +7266,55 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         JSON.stringify(events),
       );
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, followUpWakeAt);
-      assert.equal(result.nextWakeReason, "device-sync.reconcile");
-      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, followUpWakeAt);
-      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(
+        result.nextWakeAt,
+        defaultOwnerHandoffExpected ? TEST_NOW : followUpWakeAt,
+      );
+      assert.equal(
+        result.nextWakeReason,
+        defaultOwnerHandoffExpected ? "assistant" : "device-sync.reconcile",
+      );
+      assert.equal(
+        result.immediateRecheckRequested,
+        defaultOwnerHandoffExpected ? true : undefined,
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.nextWakeAt,
+        defaultOwnerHandoffExpected ? TEST_NOW : followUpWakeAt,
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.nextWakeReason,
+        defaultOwnerHandoffExpected ? "assistant" : "device-sync.reconcile",
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.nextDefaultProcessingWakeAt,
+        projectedDefaultWakeAt,
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.nextDefaultProcessingWakeReason,
+        "assistant",
+      );
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "1",
       );
-      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
-      const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
-        request.nextWakeAt === followUpWakeAt
-        && request.nextWakeReason === "device-sync.reconcile"
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId),
+        defaultOwnedSystemMailboxWakeAt === null ? [] : [defaultOwnedItem.id],
       );
-      assert.ok(followUpCheckpointIndex >= 0);
-      assert.equal(
-        checkpointRequests.slice(followUpCheckpointIndex + 1).some((request) =>
-          request.nextWakeAt === null && request.nextWakeReason === null
-        ),
-        false,
-      );
+      if (!defaultOwnerHandoffExpected) {
+        const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
+          request.nextWakeAt === followUpWakeAt
+          && request.nextWakeReason === "device-sync.reconcile"
+        );
+        assert.ok(followUpCheckpointIndex >= 0);
+        assert.equal(
+          checkpointRequests.slice(followUpCheckpointIndex + 1).some((request) =>
+            request.nextWakeAt === null && request.nextWakeReason === null
+          ),
+          false,
+        );
+      }
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

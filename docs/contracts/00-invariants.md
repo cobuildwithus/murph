@@ -58,15 +58,18 @@ it has been explicitly elevated to a cross-cutting invariant.
   abort; privacy; canonical writes; provider credential and delivery authority;
   and irreversible effects. Warm reuse is an optimization, never authority.
 - One Codex App Server belongs to the warm container or Node process and stays
-  warm across ordinary turns for that owner's lifetime. Starting or completing
-  an ordinary turn, closing an ordinary invocation, rotating
-  invocation-scoped credentials, or starting a later turn must not replace it.
-  Process replacement is limited to owner shutdown, App Server exit or proven
-  unhealthy/poisoned state, explicit operator shutdown, explicit workspace
-  invocation abort/preemption, or a genuine process-level configuration change
-  that Codex cannot accept through thread or turn RPC. Workspace invocation
-  abort/preemption must synchronously stop the exact owned App Server before
-  the invocation slot can be reused.
+  warm across ordinary turns while the same restored workspace remains active.
+  Starting or completing an ordinary turn, closing an ordinary invocation, or
+  rotating invocation-scoped credentials does not itself replace it. Before a
+  hosted workspace restore validates, replaces, clears, or sanitizes Codex
+  home, the restore owner must synchronously stop the exact App Server; a fresh
+  process then owns the restored home and rebuilds its process-local indexes.
+  Other process replacement is limited to owner shutdown, App Server exit or
+  proven unhealthy/poisoned state, explicit operator shutdown, explicit
+  workspace invocation abort/preemption, or a genuine process-level
+  configuration change that Codex cannot accept through thread or turn RPC.
+  Workspace invocation abort/preemption must synchronously stop the exact owned
+  App Server before the invocation slot can be reused.
 - `packages/assistant-engine` is the sole resident App Server process owner.
   Process readiness is a memoized property of that exact process and is
   separate from turn reservation: after the first fresh auto-reply-enabled
@@ -90,9 +93,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   publish, clear, reserve, or replace a newer process.
   Speculative preparation never evicts a healthy claimable resident with another
   launch identity; only authoritative foreground acquisition may replace it.
-- Prompts, session/thread/turn ids, delivery routes, and invocation-scoped
-  automation or device authority are request facts, not App Server launch
-  identity or ambient child-process authority. Expose invocation-scoped
+- Prompts, session/thread/turn ids, working directories, thread capability
+  configuration, delivery routes, and invocation-scoped automation or device
+  authority are request facts, not App Server launch identity or ambient
+  child-process authority. Apply thread capability configuration on both start
+  and resume. Expose invocation-scoped
   authority only through narrow typed tools on the current root turn; keep it
   out of the App Server and descendant shell environments.
 - No user-promised work may be owned only by App Server or descendant process

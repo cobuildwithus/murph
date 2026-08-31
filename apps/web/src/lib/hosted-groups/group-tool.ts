@@ -98,7 +98,7 @@ import {
 } from "./group-private-attribution-policy";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
-  readHostedGroupMembershipParticipantRosters,
+  readHostedGroupMembershipInventory,
 } from "./group-membership-participants";
 import {
   requestHostedGroupAssistantAsk,
@@ -318,6 +318,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 >;
 
 export async function handleHostedRuntimeGroupTool(input: {
+  includeMembershipAvailability?: boolean;
   includeParticipantRosters?: boolean;
   logger?: Pick<Console, "warn">;
   memberId: string;
@@ -434,6 +435,8 @@ export async function handleHostedRuntimeGroupTool(input: {
     return handleHostedRuntimeGroupListMemberships({
       cursor: input.request.cursor ?? null,
       disclosureGrantCursor: input.request.disclosureGrantCursor ?? null,
+      includeMembershipAvailability:
+        input.includeMembershipAvailability ?? true,
       includeParticipantRosters: input.includeParticipantRosters ?? true,
       memberId: input.memberId,
     });
@@ -860,6 +863,7 @@ async function handleHostedRuntimeGroupLeaveMembership(input: {
 async function handleHostedRuntimeGroupListMemberships(input: {
   cursor: string | null;
   disclosureGrantCursor: string | null;
+  includeMembershipAvailability: boolean;
   includeParticipantRosters: boolean;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
@@ -918,25 +922,44 @@ async function handleHostedRuntimeGroupListMemberships(input: {
       },
     };
   }
-  let participantRosters: Awaited<
-    ReturnType<typeof readHostedGroupMembershipParticipantRosters>
-  > = new Map();
-  if (input.includeParticipantRosters) {
+  let membershipInventory: Awaited<
+    ReturnType<typeof readHostedGroupMembershipInventory>
+  > = {
+    availabilityByMembershipId: new Map(),
+    participantRosterByMembershipId: new Map(),
+  };
+  if (
+    input.includeMembershipAvailability
+    || input.includeParticipantRosters
+  ) {
     try {
-      participantRosters = await readHostedGroupMembershipParticipantRosters({
+      membershipInventory = await readHostedGroupMembershipInventory({
         memberId: input.memberId,
         memberships,
         now: new Date(),
         prisma: access.prisma,
       });
     } catch {
-      participantRosters = new Map(memberships.map(({ membershipId }) => [
-        membershipId,
-        {
-          status: "unavailable" as const,
-          unavailableReason: "participant_roster_unavailable",
-        },
-      ]));
+      membershipInventory = {
+        availabilityByMembershipId: new Map(
+          memberships.map(({ membershipId }) => [
+            membershipId,
+            {
+              status: "unavailable" as const,
+              unavailableReason: "group_route_unavailable",
+            },
+          ]),
+        ),
+        participantRosterByMembershipId: new Map(
+          memberships.map(({ membershipId }) => [
+            membershipId,
+            {
+              status: "unavailable" as const,
+              unavailableReason: "participant_roster_unavailable",
+            },
+          ]),
+        ),
+      };
     }
   }
   const publicBaseUrl = resolveHostedPublicBaseUrl();
@@ -959,12 +982,26 @@ async function handleHostedRuntimeGroupListMemberships(input: {
       }) => ({
         ...membership,
         membershipId,
+        ...(input.includeMembershipAvailability
+          ? {
+              availability:
+                membershipInventory.availabilityByMembershipId.get(
+                  membershipId,
+                ) ?? {
+                  status: "unavailable" as const,
+                  unavailableReason: "membership_unavailable",
+                },
+            }
+          : {}),
         ...(input.includeParticipantRosters
           ? {
-              participantRoster: participantRosters.get(membershipId) ?? {
-                status: "unavailable" as const,
-                unavailableReason: "participant_roster_unavailable",
-              },
+              participantRoster:
+                membershipInventory.participantRosterByMembershipId.get(
+                  membershipId,
+                ) ?? {
+                  status: "unavailable" as const,
+                  unavailableReason: "participant_roster_unavailable",
+                },
             }
           : {}),
         permissionsUrl: ownerJoinCode

@@ -8,9 +8,12 @@ import {
 import {
   addMeal as addMealInternal,
   dedupeDeviceEventsByExternalRef as dedupeDeviceEventsByExternalRefInternal,
+  listInboxDocumentDefaultPromotionCorrelations as listInboxDocumentDefaultPromotionCorrelationsInternal,
+  listLiveExactDocumentImportEvidence as listLiveExactDocumentImportEvidenceInternal,
   importDeviceBatch as importDeviceBatchInternal,
   importEventBatch as importEventBatchInternal,
   importDocument as importDocumentInternal,
+  recordInboxDocumentDefaultPromotion as recordInboxDocumentDefaultPromotionInternal,
   importSamples as importSamplesInternal,
   validateSampleImport as validateSampleImportInternal,
   resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal,
@@ -84,6 +87,7 @@ import {
 import {
   updateAssistantPreferences as updateAssistantPreferencesInternal,
   updateWearablePreferences as updateWearablePreferencesInternal,
+  updateWorkoutCapturePreferences as updateWorkoutCapturePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
 } from "./preferences.ts";
 import { commitAuditedCanonicalWrite, type CanonicalMutationAuditInput } from "./audited-write.ts";
@@ -104,6 +108,18 @@ export {
   removeAutomaticMealPhotoInternal as removeAutomaticMealPhoto,
   upsertEventInternal as upsertEvent,
 };
+
+export async function listLiveExactDocumentImportEvidence(
+  input: Parameters<typeof listLiveExactDocumentImportEvidenceInternal>[0],
+): ReturnType<typeof listLiveExactDocumentImportEvidenceInternal> {
+  return listLiveExactDocumentImportEvidenceInternal(input);
+}
+
+export async function listInboxDocumentDefaultPromotionCorrelations(
+  input: Parameters<typeof listInboxDocumentDefaultPromotionCorrelationsInternal>[0],
+): ReturnType<typeof listInboxDocumentDefaultPromotionCorrelationsInternal> {
+  return listInboxDocumentDefaultPromotionCorrelationsInternal(input);
+}
 
 export interface CanonicalTextWriteInput {
   relativePath: string;
@@ -513,6 +529,12 @@ export async function importDocument(
     : importDocumentInternal(input);
 }
 
+export async function recordInboxDocumentDefaultPromotion(
+  input: Parameters<typeof recordInboxDocumentDefaultPromotionInternal>[0],
+): ReturnType<typeof recordInboxDocumentDefaultPromotionInternal> {
+  return withCanonicalInputWriteLock(input, recordInboxDocumentDefaultPromotionInternal);
+}
+
 export async function resolveWorkoutSourceImportStatus(
   input: Parameters<typeof resolveWorkoutSourceImportStatusInternal>[0],
 ): ReturnType<typeof resolveWorkoutSourceImportStatusInternal> {
@@ -662,6 +684,12 @@ export async function updateWorkoutUnitPreferences(
   input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
 ): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
   return updateWorkoutUnitPreferencesInternal(input);
+}
+
+export async function updateWorkoutCapturePreferences(
+  input: Parameters<typeof updateWorkoutCapturePreferencesInternal>[0],
+): ReturnType<typeof updateWorkoutCapturePreferencesInternal> {
+  return updateWorkoutCapturePreferencesInternal(input);
 }
 
 export async function updateWearablePreferences(

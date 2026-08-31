@@ -141,9 +141,18 @@ describe("hosted runner container image contract", () => {
     expect(workspaceArtifactsScript).toContain(
       "const sortedPackageNames = await topologicallySortWorkspacePackageNames(",
     );
-    expect(workspaceArtifactsScript).toContain(
-      "buildHostedRunnerWorkspaceBuildArgs(sortedPackageNames)",
+    const workspaceBuildPlanIndex = workspaceArtifactsScript.indexOf(
+      "const plan = buildHostedRunnerWorkspaceArtifactPlan(sortedPackageNames, {",
     );
+    const workspaceBuildIndex = workspaceArtifactsScript.indexOf(
+      "await runPnpmCommand(plan.buildArgs, {",
+    );
+    const assistantCliSurfaceGenerationIndex = workspaceArtifactsScript.indexOf(
+      "await runNodeCommand(plan.assistantCliSurfaceGenerationArgs, {",
+    );
+    expect(workspaceBuildPlanIndex).toBeGreaterThanOrEqual(0);
+    expect(workspaceBuildIndex).toBeGreaterThan(workspaceBuildPlanIndex);
+    expect(assistantCliSurfaceGenerationIndex).toBeGreaterThan(workspaceBuildIndex);
     expect(workspaceArtifactsScript).toContain(
       "`--workspace-concurrency=${resolvePositiveIntegerEnv(",
     );
@@ -426,7 +435,7 @@ describe("hosted runner container image contract", () => {
     }
   });
 
-  it("pins native and Codex CLI provisioning in the base image and keeps the final image app-only", async () => {
+  it("pins native Codex provisioning and promotes only its runtime hot set into the final image", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -444,7 +453,7 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.149.1");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.151.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -533,9 +542,14 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain(
       "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions",
     );
-    const finalStageIndex = finalDockerfile.indexOf(
+    expect(finalDockerfile).toContain(
+      "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-codex-hotset",
+    );
+    const finalStageIndex = finalDockerfile.lastIndexOf(
       "FROM ${HOSTED_RUNNER_BASE_IMAGE}",
-      finalDockerfile.indexOf("FROM ${HOSTED_RUNNER_BASE_IMAGE}") + 1,
+    );
+    const codexHotStageIndex = finalDockerfile.indexOf(
+      "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-codex-hotset",
     );
     const permissionStageBundleCopyIndex = finalDockerfile.indexOf(
       "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
@@ -557,6 +571,9 @@ describe("hosted runner container image contract", () => {
     const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
       "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",
     );
+    const finalCodexHotCopyIndex = finalDockerfile.indexOf(
+      "COPY --from=runner-codex-hotset --chown=root:root /opt/murph-codex-hot/ /",
+    );
     const finalRunnerUserIndex = finalDockerfile.indexOf("USER runner");
     const finalLocalBuildIdArgIndex = finalDockerfile.indexOf(
       "ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local",
@@ -574,12 +591,15 @@ describe("hosted runner container image contract", () => {
     expect(finalRunnerBundleDirArgIndex).toBeGreaterThan(permissionStageRootUserIndex);
     expect(permissionStageBundleCopyIndex).toBeGreaterThan(finalRunnerBundleDirArgIndex);
     expect(permissionStageChmodIndex).toBeGreaterThan(permissionStageBundleCopyIndex);
+    expect(codexHotStageIndex).toBeGreaterThan(permissionStageChmodIndex);
     expect(finalStageIndex).toBeGreaterThan(permissionStageChmodIndex);
+    expect(finalStageIndex).toBeGreaterThan(codexHotStageIndex);
     expect(finalRootUserIndex).toBeGreaterThan(finalStageIndex);
     expect(finalCodexCatalogEnvIndex).toBeGreaterThan(finalRootUserIndex);
     expect(finalCodexCatalogPatchIndex).toBeGreaterThan(finalCodexCatalogEnvIndex);
     expect(finalRunnerBundleCopyIndex).toBeGreaterThan(finalCodexCatalogPatchIndex);
-    expect(finalRunnerUserIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
+    expect(finalCodexHotCopyIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
+    expect(finalRunnerUserIndex).toBeGreaterThan(finalCodexHotCopyIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerUserIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
     expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
@@ -605,6 +625,28 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain(
       "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",
     );
+    expect(finalDockerfile).toContain(
+      'native_codex="$(readlink -f "$(command -v codex)")"',
+    );
+    expect(finalDockerfile).toContain(
+      'native_root="$(dirname "$(dirname "${native_codex}")")"',
+    );
+    expect(finalDockerfile).toContain(
+      'test -x "${native_root}/bin/codex"',
+    );
+    expect(finalDockerfile).toContain(
+      'test -x "${native_root}/codex-resources/bwrap"',
+    );
+    expect(finalDockerfile).toContain(
+      'cp -a "${native_root}/." /opt/murph-codex-hot/usr/local/lib/murph-codex/',
+    );
+    expect(finalDockerfile).toContain(
+      "ln -s ../lib/murph-codex/bin/codex /opt/murph-codex-hot/usr/local/bin/codex",
+    );
+    expect(finalDockerfile).toContain("rm -f /usr/local/bin/codex");
+    expect(finalDockerfile).toContain(
+      'test "$(readlink -f /usr/local/bin/codex)" = "/usr/local/lib/murph-codex/bin/codex"',
+    );
     expect(finalDockerfile).toContain("RUN chmod -R a-w /app");
     expect(finalDockerfile).toContain("  && chmod -R a+rX /app");
     expect(finalDockerfile.slice(finalStageIndex)).not.toContain(
@@ -617,7 +659,12 @@ describe("hosted runner container image contract", () => {
     // no speedup), so the image intentionally ships no compile-cache warm step.
     expect(finalDockerfile).not.toContain("NODE_COMPILE_CACHE");
     expect(readLastDockerUser(baseDockerfile)).toBe("runner");
-    expect(readDockerUsers(finalDockerfile)).toEqual(["root", "root", "runner"]);
+    expect(readDockerUsers(finalDockerfile)).toEqual([
+      "root",
+      "root",
+      "root",
+      "runner",
+    ]);
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
     // The CMD runs the esbuild-bundled entrypoint: boot evaluates ~27 chunk
     // files instead of the unbundled graph's ~960 module files, which was the

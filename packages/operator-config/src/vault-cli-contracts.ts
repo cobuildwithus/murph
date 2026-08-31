@@ -24,6 +24,14 @@ export const isoTimestampSchema = z
 export const localDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a calendar date in YYYY-MM-DD form.')
+  .refine(
+    (value) => {
+      const parsed = new Date(`${value}T00:00:00.000Z`)
+      return Number.isFinite(parsed.getTime())
+        && parsed.toISOString().slice(0, 10) === value
+    },
+    'Expected a real calendar date in YYYY-MM-DD form.',
+  )
   .describe('Calendar date in YYYY-MM-DD form.')
 
 export const occurredAtOptionSchema = z
@@ -471,7 +479,7 @@ export const workoutAddResultSchema = z.object({
   durationMinutes: z.number().int().positive(),
   distanceKm: z.number().nonnegative().nullable(),
   workout: workoutSessionResultSchema.nullable(),
-  note: z.string().min(1),
+  note: z.string().min(1).nullable(),
 })
 
 export const captureResultItemSchema = z.object({
@@ -522,6 +530,16 @@ export const workoutUnitPreferencesResultSchema = z.object({
   updated: z.boolean(),
   recordedAt: isoTimestampSchema.nullable(),
   unitPreferences: workoutUnitPreferenceValuesResultSchema,
+})
+
+export const workoutCapturePreferencesResultSchema = z.object({
+  vault: pathSchema,
+  preferencesPath: pathSchema,
+  updated: z.boolean(),
+  recordedAt: isoTimestampSchema.nullable(),
+  captureDefaults: z.object({
+    durationMinutes: z.number().int().positive().max(24 * 60).nullable(),
+  }),
 })
 
 export const workoutImportInspectResultSchema = z.object({

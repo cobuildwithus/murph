@@ -25,8 +25,10 @@ import {
   readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
 import {
+  archiveClosedEventLedgerShards,
   archiveClosedIntegrationIngestShards,
   runGeneratedImageCaptureRetention,
+  type ArchiveClosedEventLedgerShardsResult,
   type ArchiveClosedIntegrationIngestShardsResult,
   type RunGeneratedImageCaptureRetentionResult,
 } from "@murphai/core";
@@ -42,9 +44,9 @@ import {
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 import {
   HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS,
+  HOSTED_IDLE_ARCHIVE_TIMEOUT_MS,
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
-  HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS,
 } from "./idle-maintenance-limits.ts";
 import {
   runHostedPendingAssistantInputContentRetention,
@@ -52,9 +54,9 @@ import {
 
 export {
   HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS,
+  HOSTED_IDLE_ARCHIVE_TIMEOUT_MS,
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
-  HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS,
 } from "./idle-maintenance-limits.ts";
 
 // Personal threads keep the measured post-compaction floor (~40k tokens).
@@ -85,7 +87,7 @@ export type HostedIdleMaintenanceOutcome =
     } & HostedIdleMaintenanceWake);
 
 // One idle-checkpoint maintenance step: bounded media retention, abortable
-// integration-ingest archiving, and opportunistic fail-open thread compaction.
+// canonical archive work, and opportunistic fail-open thread compaction.
 // Runs only on TTL idle shutdown (never deploy evacuation). A pending wake
 // aborts it immediately; the engine kills the warm process before returning,
 // so the idle checkpoint that snapshots the Codex home never captures a rollout
@@ -93,6 +95,7 @@ export type HostedIdleMaintenanceOutcome =
 // statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
+  generatedImageRetentionMaxCaptures?: number;
   materializeRetentionCandidatePaths?: ((
     storedPaths: readonly string[]
   ) => Promise<InboxMediaRetentionMaterializeResult | void>) | null;
@@ -172,28 +175,43 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           retentionWake,
           resolveInboxMediaRetentionWake(retentionResult),
         );
-        const retireGeneratedImages = () => runGeneratedImageCaptureRetention({
-          materializeCandidatePaths:
-            input.materializeRetentionCandidatePaths ?? undefined,
-          ...(input.pendingWork ? { maxCaptures: 1 } : {}),
-          protectedCaptureIds: input.protectedCaptureIds,
-          protectedStoredPaths: input.protectedStoredPaths,
-          signal: abortController.signal,
-          vaultRoot,
-        });
-        const generatedImageRetention = input.persistGeneratedImageRetention
-          ? await input.persistGeneratedImageRetention(retireGeneratedImages)
-          : await retireGeneratedImages();
-        if (generatedImageRetention.blockedCaptureCount > 0) {
-          emitGeneratedImageRetentionBlockedLog({
-            memberId: input.memberId,
-            result: generatedImageRetention,
+        const generatedImageRetentionMaxCaptures =
+          input.generatedImageRetentionMaxCaptures === undefined
+            ? input.pendingWork ? 1 : undefined
+            : input.pendingWork
+              ? Math.min(input.generatedImageRetentionMaxCaptures, 1)
+              : input.generatedImageRetentionMaxCaptures;
+        if (generatedImageRetentionMaxCaptures === 0) {
+          retentionWake = mergeInboxRetentionWakes(
+            retentionWake,
+            resolveInboxMediaRetentionImmediateWake(),
+          );
+        } else {
+          const retireGeneratedImages = () => runGeneratedImageCaptureRetention({
+            materializeCandidatePaths:
+              input.materializeRetentionCandidatePaths ?? undefined,
+            ...(generatedImageRetentionMaxCaptures === undefined
+              ? {}
+              : { maxCaptures: generatedImageRetentionMaxCaptures }),
+            protectedCaptureIds: input.protectedCaptureIds,
+            protectedStoredPaths: input.protectedStoredPaths,
+            signal: abortController.signal,
+            vaultRoot,
           });
+          const generatedImageRetention = input.persistGeneratedImageRetention
+            ? await input.persistGeneratedImageRetention(retireGeneratedImages)
+            : await retireGeneratedImages();
+          if (generatedImageRetention.blockedCaptureCount > 0) {
+            emitGeneratedImageRetentionBlockedLog({
+              memberId: input.memberId,
+              result: generatedImageRetention,
+            });
+          }
+          retentionWake = mergeInboxRetentionWakes(
+            retentionWake,
+            resolveGeneratedImageRetentionWake(generatedImageRetention),
+          );
         }
-        retentionWake = mergeInboxRetentionWakes(
-          retentionWake,
-          resolveGeneratedImageRetentionWake(generatedImageRetention),
-        );
         const envelopeMigration = await runInboxEnvelopeMigration({
           apply: true,
           ...(input.pendingWork ? { maxFiles: 1 } : {}),
@@ -258,10 +276,10 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     if (input.vaultRoot) {
       const archiveSignal = AbortSignal.any([
         abortController.signal,
-        AbortSignal.timeout(HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS),
+        AbortSignal.timeout(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS),
       ]);
       try {
-        const archiveResult = await archiveClosedIntegrationIngestShards({
+        const archiveResult = await archiveClosedEventLedgerShards({
           signal: archiveSignal,
           vaultRoot: input.vaultRoot,
         });
@@ -270,7 +288,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           || archiveResult.repairedShardCount > 0
           || archiveResult.blockedShardCount > 0
         ) {
-          emitIntegrationIngestArchiveLog({
+          emitEventLedgerArchiveLog({
             memberId: input.memberId,
             result: archiveResult,
           });
@@ -284,10 +302,41 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             wakeInterrupted,
           });
         }
-        emitIntegrationIngestArchiveFailureLog({
+        emitEventLedgerArchiveFailureLog({
           error,
           memberId: input.memberId,
         });
+      }
+      if (!archiveSignal.aborted) {
+        try {
+          const archiveResult = await archiveClosedIntegrationIngestShards({
+            signal: archiveSignal,
+            vaultRoot: input.vaultRoot,
+          });
+          if (
+            archiveResult.archivedShardCount > 0
+            || archiveResult.repairedShardCount > 0
+            || archiveResult.blockedShardCount > 0
+          ) {
+            emitIntegrationIngestArchiveLog({
+              memberId: input.memberId,
+              result: archiveResult,
+            });
+          }
+        } catch (error) {
+          if (abortController.signal.aborted) {
+            return buildInterruptedMaintenanceOutcome({
+              retentionWake,
+              shutdownSignal: input.shutdownSignal,
+              vaultRoot: input.vaultRoot,
+              wakeInterrupted,
+            });
+          }
+          emitIntegrationIngestArchiveFailureLog({
+            error,
+            memberId: input.memberId,
+          });
+        }
       }
     }
     if (abortController.signal.aborted) {
@@ -449,6 +498,62 @@ function emitIntegrationIngestArchiveLog(input: {
     message: blocked
       ? "Hosted idle maintenance archived eligible integration ingest shards, but one or more shards require repair."
       : "Hosted idle maintenance archived eligible integration ingest shards.",
+    phase: "checkpoint",
+    userId: input.memberId,
+  });
+}
+
+function emitEventLedgerArchiveLog(input: {
+  memberId: string;
+  result: ArchiveClosedEventLedgerShardsResult;
+}): void {
+  const blocked = input.result.blockedShardCount > 0;
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      eventLedgerArchiveBytes: input.result.archivedByteCount,
+      eventLedgerArchiveRepairedShards: input.result.repairedShardCount,
+      eventLedgerArchiveSourceBytes: input.result.sourceByteCount,
+      eventLedgerArchivedShards: input.result.archivedShardCount,
+      eventLedgerBlockedShards: input.result.blockedShardCount,
+      eventLedgerScannedShards: input.result.scannedShardCount,
+    },
+    level: blocked ? "warn" : "info",
+    message: blocked
+      ? "Hosted idle maintenance archived eligible event ledger shards, but one or more shards require repair."
+      : "Hosted idle maintenance archived eligible event ledger shards.",
+    phase: "checkpoint",
+    userId: input.memberId,
+  });
+}
+
+function emitEventLedgerArchiveFailureLog(input: {
+  error: unknown;
+  memberId: string;
+}): void {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      failureCode: "event_ledger_archive_failed",
+      ...(typeof diagnostics?.errorCode === "string"
+        ? { failureErrorCode: diagnostics.errorCode }
+        : {}),
+      ...(typeof diagnostics?.errorName === "string"
+        ? { failureErrorName: diagnostics.errorName }
+        : {}),
+      failureErrorDetailPresent: typeof diagnostics?.errorDetail === "string",
+      ...(typeof diagnostics?.errorStatus === "number"
+        ? { failureErrorStatus: diagnostics.errorStatus }
+        : {}),
+      failureMessagePresent:
+        input.error instanceof Error && input.error.message.trim().length > 0,
+      failureName: readHostedExecutionSafeErrorName(input.error) ?? null,
+    },
+    error: input.error,
+    level: "warn",
+    message:
+      "Hosted idle maintenance could not archive closed event ledger shards; checkpointing will continue.",
     phase: "checkpoint",
     userId: input.memberId,
   });

@@ -52,9 +52,15 @@ import {
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { HostedUserRunnerWithTestControls } from "../src/user-runner/hosted-user-runner-test.ts";
 import {
+  HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
+} from "../src/runner-outbound/headers.ts";
+import {
   HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
 } from "../src/user-runner/runtime-processing-responses.ts";
-import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
+import {
+  RunnerStateStore,
+  type RunnerWriteFenceToken,
+} from "../src/user-runner/runner-state-store.ts";
 import type {
   DurableObjectStateLike,
   DurableObjectStorageLike,
@@ -122,12 +128,188 @@ const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
   OPENAI_API_KEY: "test-openai-key",
 } as const;
 
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readStructuredLogDetails(message: string): Record<string, unknown> {
+  const matchingLogs = mocks.emitHostedExecutionStructuredLog.mock.calls
+    .map(([input]) => input)
+    .filter((input) => input.message === message);
+  expect(matchingLogs).toHaveLength(1);
+  const details = matchingLogs[0]?.details;
+  if (!isUnknownRecord(details)) {
+    throw new Error(`Expected structured details for ${message}`);
+  }
+  return details;
+}
+
 describe("HostedUserRunner execution coordination", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
     mocks.emitHostedExecutionStructuredLog.mockReset();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
+  });
+
+  it("classifies a hosted workspace failure without changing the plain caller error", async () => {
+    const privateDetail = "private workspace failure detail";
+    const responseBody: {
+      controller?: ReadableStreamDefaultController<Uint8Array>;
+    } = {};
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        responseBody.controller = controller;
+      },
+    }), {
+      headers: {
+        [HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER]: "1",
+      },
+      status: 400,
+    });
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      workspaceResponse: () => response,
+    });
+
+    let caught: unknown;
+    try {
+      await runner.readHostedWorkspaceFromWebForTest({
+        timeoutMs: 321,
+        userId: TEST_USER_ID,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    if (!(caught instanceof Error)) {
+      throw new TypeError("Expected hosted workspace read to throw Error.");
+    }
+    expect(Object.getPrototypeOf(caught)).toBe(Error.prototype);
+    expect(caught.message).toBe("Hosted workspace read failed with HTTP 400.");
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        boundUserId: TEST_USER_ID,
+        path: HOSTED_RUNTIME_WORKSPACE_PATH,
+        timeoutMs: 321,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
+
+    const responseBodyController = responseBody.controller;
+    if (!responseBodyController) {
+      throw new TypeError("Expected hosted workspace response body controller.");
+    }
+    responseBodyController.enqueue(new TextEncoder().encode(JSON.stringify({
+      error: {
+        code: "HOSTED_EXECUTION_USER_ID_REQUIRED",
+        message: privateDetail,
+        retryable: false,
+      },
+    })));
+    responseBodyController.close();
+
+    await flushWaitUntil();
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "hosted.runner",
+      details: {
+        workspaceReadFailureCode: "HOSTED_EXECUTION_USER_ID_REQUIRED",
+        workspaceReadFailureEnvelopeOutcome: "classified",
+        workspaceReadFailureForwardedFromWeb: true,
+        workspaceReadFailureRetryable: false,
+        workspaceReadFailureStatus: 400,
+      },
+      level: "warn",
+      message: "Hosted workspace read failure classified.",
+      phase: "runtime.starting",
+    });
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain(privateDetail);
+  });
+
+  it("buckets an unrecognized hosted workspace error code without logging it", async () => {
+    const privateCode = "PRIVATE_DYNAMIC_WORKSPACE_CODE";
+    const privateDetail = "private dynamic workspace detail";
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      workspaceResponse: () => createWorkspaceFailureResponse({
+        code: privateCode,
+        message: privateDetail,
+        retryable: true,
+        status: 400,
+      }),
+    });
+
+    await expect(runner.readHostedWorkspaceFromWebForTest({
+      userId: TEST_USER_ID,
+    })).rejects.toThrow("Hosted workspace read failed with HTTP 400.");
+    await flushWaitUntil();
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          workspaceReadFailureCode: "unknown",
+          workspaceReadFailureEnvelopeOutcome: "code_unknown",
+          workspaceReadFailureForwardedFromWeb: false,
+          workspaceReadFailureRetryable: true,
+          workspaceReadFailureStatus: 400,
+        },
+        message: "Hosted workspace read failure classified.",
+      }),
+    );
+    const emitted = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(emitted).not.toContain(privateCode);
+    expect(emitted).not.toContain(privateDetail);
+  });
+
+  it("classifies malformed and oversized workspace failure bodies without logging them", async () => {
+    const malformedDetail = "private malformed workspace detail";
+    const oversizedDetail = "private oversized workspace detail";
+    let responseIndex = 0;
+    const responses = [
+      new Response(`{"error":{"message":"${malformedDetail}"`, {
+        status: 400,
+      }),
+      new Response(oversizedDetail, {
+        headers: {
+          "content-length": "4097",
+        },
+        status: 400,
+      }),
+    ];
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      workspaceResponse: () => responses[responseIndex++]!,
+    });
+
+    await expect(runner.readHostedWorkspaceFromWebForTest({
+      userId: TEST_USER_ID,
+    })).rejects.toThrow("Hosted workspace read failed with HTTP 400.");
+    await expect(runner.readHostedWorkspaceFromWebForTest({
+      userId: TEST_USER_ID,
+    })).rejects.toThrow("Hosted workspace read failed with HTTP 400.");
+    await flushWaitUntil();
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          workspaceReadFailureCode: "unknown",
+          workspaceReadFailureEnvelopeOutcome: "invalid_envelope",
+        }),
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          workspaceReadFailureCode: "unknown",
+          workspaceReadFailureEnvelopeOutcome: "body_too_large",
+        }),
+      }),
+    );
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(2);
+    const emitted = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(emitted).not.toContain(malformedDetail);
+    expect(emitted).not.toContain(oversizedDetail);
   });
 
   it("denies runtime processing when the authoritative consent read is revoked", async () => {
@@ -190,19 +372,34 @@ describe("HostedUserRunner execution coordination", () => {
 
     await runner.prewarmRuntimeShellForUser(
       TEST_USER_ID,
-      "linq-typing-started",
+      "linq-message-routing",
+      {
+        shellPrewarmOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+      },
     );
 
     expect(prewarmShell).toHaveBeenCalledWith({
-      source: "linq-typing-started",
+      orchestration: {
+        shellPrewarmAdmissionReadFinishedAtEpochMs: expect.any(Number),
+        shellPrewarmAdmissionReadStartedAtEpochMs: expect.any(Number),
+        shellPrewarmConsentLockAcquiredAtEpochMs: expect.any(Number),
+        shellPrewarmOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+      },
+      source: "linq-message-routing",
       timeoutMs: 20_000,
       userId: TEST_USER_ID,
     });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: {
+          orchestrationAttemptId:
+            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
           shellPrewarmAdmissionOutcome: "scheduled",
-          shellPrewarmSource: "linq-typing-started",
+          shellPrewarmSource: "linq-message-routing",
         },
       }),
     );
@@ -1905,6 +2102,19 @@ describe("HostedUserRunner execution coordination", () => {
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
     >(async () => ({
+      coldStartTiming: {
+        healthCheckFinishedAtEpochMs: 1_777_000_000_092,
+        healthCheckStartedAtEpochMs: 1_777_000_000_091,
+        lifecycleLockAcquiredAtEpochMs: 1_777_000_000_041,
+        onStartAtEpochMs: 1_777_000_000_080,
+        portsReadyAtEpochMs: 1_777_000_000_090,
+        processStartedAtEpochMs: 1_777_000_000_044,
+        readinessRequestedAtEpochMs: 1_777_000_000_040,
+        readyObservedAtEpochMs: 1_777_000_000_093,
+        serverListeningAtEpochMs: 1_777_000_000_070,
+        startIssuedAtEpochMs: 1_777_000_000_043,
+        stateReadFinishedAtEpochMs: 1_777_000_000_042,
+      },
       kind: "ready",
       shellPrewarmObservation: {
         firstHintAtEpochMs: 1_777_000_000_010,
@@ -1986,7 +2196,18 @@ describe("HostedUserRunner execution coordination", () => {
     )).toHaveLength(1);
     const invocationOrchestration = invoke.mock.calls[0]?.[0].orchestration;
     expect(invocationOrchestration).toMatchObject({
+      freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_092,
+      freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_091,
+      freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_041,
+      freshStartContainerListeningAtEpochMs: 1_777_000_000_070,
+      freshStartContainerOnStartAtEpochMs: 1_777_000_000_080,
+      freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_090,
+      freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_044,
+      freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_040,
       freshStartContainerReadyAtEpochMs: expect.any(Number),
+      freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_093,
+      freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_043,
+      freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_042,
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
       runtimeStoreEnsureElapsedMs: 250,
@@ -3009,6 +3230,14 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup confirmation failed.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeStartupFailureElapsedMs: 0,
+      runtimeStartupFailureStage: "rpc_unattributed",
+      transportFailureFenceCleared: true,
+    });
   });
 
   it("settles 15-second readiness cleanup before the 21-second controller guard", async () => {
@@ -3109,6 +3338,15 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup cleanup did not settle.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeStartupCleanupUnsettled: true,
+      runtimeStartupFailureElapsedMs: 0,
+      runtimeStartupFailureStage: "rpc_unattributed",
+      runtimeStartupWriteFencePreserved: true,
+    });
   });
 
   it("preserves the fresh fence when only the outer startup guard settles", async () => {
@@ -3164,6 +3402,14 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup confirmation guard elapsed.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeStartupFailureElapsedMs: 8_950,
+      runtimeStartupFailureStage: "caller_deadline",
+      runtimeStartupWriteFencePreserved: true,
+    });
   });
 
   it("clears a fresh fence when the command budget expires before readiness dispatch", async () => {
@@ -3175,7 +3421,7 @@ describe("HostedUserRunner execution coordination", () => {
     const { invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       runnerContainerStubForName(_name, stub) {
-        vi.setSystemTime(new Date("2026-04-27T00:00:05.000Z"));
+        vi.setSystemTime(new Date("2026-04-27T00:01:05.000Z"));
         return stub;
       },
       workspace: createWorkspaceState({ version: "5" }),
@@ -3188,7 +3434,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:15.000Z",
+      retryAt: "2026-04-27T00:01:15.000Z",
     });
 
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
@@ -3211,6 +3457,14 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup confirmation failed.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "command_budget_exhausted",
+      runtimeStartupFailureElapsedMs: 60_000,
+      runtimeStartupFailureStage: "caller_deadline",
+      transportFailureFenceCleared: true,
+    });
   });
 
   it("invokes startup readiness directly on the container stub", async () => {
@@ -3315,6 +3569,14 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+    expect(readStructuredLogDetails(
+      "Hosted runner runtime processing startup confirmation failed.",
+    )).toMatchObject({
+      runtimeProcessingRetryReason: "container_rpc_error",
+      runtimeStartupFailureElapsedMs: 0,
+      runtimeStartupFailureStage: "rpc_unattributed",
+      transportFailureFenceCleared: true,
+    });
   });
 
   it("sends activation diagnostics behind an active write fence without starting another container run", async () => {
@@ -6330,10 +6592,9 @@ describe("HostedUserRunner execution coordination", () => {
       const status = await runner.runnerStatus() as Awaited<
         ReturnType<HostedUserRunner["runnerStatus"]>
       > & {
-        activeWriteFence: { expiresAt: string | null } | null;
+        activeWriteFence: RunnerWriteFenceToken | null;
       };
 
-      expect(status.activeWriteFence?.expiresAt).toBe(status.nextAlarmAt);
       expect(status).toMatchObject({
         activeWriteFence: {
           attemptId: activeAttemptId,
@@ -6344,6 +6605,8 @@ describe("HostedUserRunner execution coordination", () => {
         nextAlarmAt: null,
         userId: TEST_USER_ID,
       });
+      expect(status.activeWriteFence).not.toHaveProperty("expiresAt");
+      expect(status.activeWriteFence).not.toHaveProperty("leaseGeneration");
       expect(status.activeWriteFence).not.toHaveProperty("reason");
 
       invocationResult.resolve({
@@ -8141,6 +8404,7 @@ function createRunnerHarness(input: {
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onStoragePut?: (input: { key: string; value: unknown }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
+  workspaceResponse?: () => Promise<Response> | Response;
   platformAiUsageAllowed?: boolean | (() => boolean);
   prewarmShell?: HostedExecutionContainerStubLike["prewarmShell"];
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
@@ -8313,6 +8577,7 @@ function createRunnerHarness(input: {
     platformAiUsageAllowed: input.platformAiUsageAllowed,
     runtimeLogResponse: input.runtimeLogResponse,
     ownerReleaseResponse: input.ownerReleaseResponse,
+    workspaceResponse: input.workspaceResponse,
   });
 
   const bucket = input.bucket ?? new MemoryEncryptedR2Bucket();
@@ -8513,6 +8778,7 @@ function installWebControlResponses(
       | "revoked"
       | Promise<"granted" | "missing" | "revoked">;
     onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
+    workspaceResponse?: () => Promise<Response> | Response;
     onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
     onStatusRead?: () => Promise<void> | void;
     readMailboxLag?: () => HostedRuntimeWebStatusResponse["mailboxLag"];
@@ -8529,6 +8795,9 @@ function installWebControlResponses(
     }) => {
       if (input.path === HOSTED_RUNTIME_WORKSPACE_PATH) {
         await hooks.onWorkspaceRead?.({ timeoutMs: input.timeoutMs });
+        if (hooks.workspaceResponse) {
+          return await hooks.workspaceResponse();
+        }
         return jsonResponse({
           fetchedAt: FIXED_NOW,
           ...(hooks.platformAiUsageAllowed === undefined
@@ -8598,6 +8867,27 @@ function jsonResponse(value: unknown): Response {
       "content-type": "application/json; charset=utf-8",
     },
     status: 200,
+  });
+}
+
+function createWorkspaceFailureResponse(input: {
+  code: string;
+  forwardedFromWeb?: boolean;
+  message: string;
+  retryable: boolean;
+  status: number;
+}): Response {
+  return Response.json({
+    error: {
+      code: input.code,
+      message: input.message,
+      retryable: input.retryable,
+    },
+  }, {
+    headers: input.forwardedFromWeb
+      ? { [HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER]: "1" }
+      : undefined,
+    status: input.status,
   });
 }
 

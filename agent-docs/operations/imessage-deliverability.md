@@ -63,6 +63,25 @@ Read and apply this guide when touching any of these surfaces:
    - Do not send to purchased, scraped, or otherwise untrusted contact lists.
    - Only message people with a clear user/product relationship and an expected reason to hear from Murph.
 
+## Production conversation canary
+
+The postdeploy Linq canary uses one explicitly configured Photon identity that
+exists only to contact Murph. It is a reciprocal three-turn private
+conversation, not a source of new-recipient outreach: Photon sends one greeting,
+waits for Murph, and sends each later turn only after Murph replies. Runs are
+serialized and never canceled in flight, and every run starts by resetting only
+that exact identity through the fixed-target production route.
+
+The canary must not log phone numbers, message text, chat or message ids, SDK
+errors, or provider bodies. It reports only bounded reset counts and per-turn
+latency. A successful first turn must equal Murph's package-owned welcome; later
+turns must be non-empty and must not repeat it. All three replies must arrive in
+under twenty seconds. The existing deterministic hosted-local full-stack journey
+owns onboarding follow-up behavior. Do not hold this shared live identity open
+for the multi-day follow-up window or add a second reset lifecycle to the
+postdeploy canary; a separately authorized live follow-up proof must be run in a
+serialized maintenance window.
+
 ## Assistant response media
 
 Linq's messaging contract allows up to 100 total parts and up to 40 public-URL

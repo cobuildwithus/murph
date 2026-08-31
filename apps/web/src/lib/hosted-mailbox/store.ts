@@ -85,6 +85,9 @@ export {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 };
 
+export const HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION =
+  "assistant_ask.current_sender_pending";
+
 export type HostedMailboxStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedMailboxMutationTx = Prisma.TransactionClient;
 
@@ -119,6 +122,9 @@ export interface HostedMailboxPayloadRow {
 }
 
 export type HostedMailboxItemRecord = HostedMailboxItem;
+export type HostedMailboxItemRecordWithRetention = HostedMailboxItemRecord & {
+  contentRetiredAt: string | null;
+};
 export type HostedMailboxPayloadRecord = HostedMailboxPayload;
 
 export interface HostedMailboxItemCheckpointRecord {
@@ -2537,7 +2543,7 @@ export async function readHostedMailboxItemCheckpointById(input: {
 export async function readHostedMailboxItemById(input: {
   mailboxItemId: string;
   prisma?: HostedMailboxStoreClient;
-}): Promise<HostedMailboxItemRecord | null> {
+}): Promise<HostedMailboxItemRecordWithRetention | null> {
   const prisma = input.prisma ?? getPrisma();
   const mailboxItemId = requireNonEmptyString(
     input.mailboxItemId,
@@ -2550,7 +2556,12 @@ export async function readHostedMailboxItemById(input: {
     },
   });
 
-  return record ? projectHostedMailboxItem(record) : null;
+  return record
+    ? {
+        ...projectHostedMailboxItem(record),
+        contentRetiredAt: record.contentRetiredAt?.toISOString() ?? null,
+      }
+    : null;
 }
 
 export async function readHostedMailboxLiveItemById(input: {

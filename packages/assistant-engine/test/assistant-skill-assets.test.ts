@@ -192,6 +192,20 @@ describe('assistant skill assets', () => {
     )
   })
 
+  it('keeps every registered whole-memory read on the compact projection', async () => {
+    const registeredSkillText = (
+      await Promise.all(ASSISTANT_SKILLS.map(readSkillFile))
+    ).join('\n')
+    const memoryReadCommands = [
+      ...registeredSkillText.matchAll(/vault-cli memory show[^\n`]*/gu),
+    ].map((match) => match[0])
+
+    expect(memoryReadCommands.length).toBeGreaterThan(0)
+    for (const command of memoryReadCommands) {
+      expect(command).toContain('--compact')
+    }
+  })
+
   it('uses unique safe skill slugs and names', () => {
     const slugs = new Set<string>()
     const names = new Set<string>()
@@ -1055,7 +1069,7 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/refresh the\s+current page as a last resort/)
     expect(raw).toContain('references/health-browser-playbook.md')
     expect(raw).toContain('reordering supplements or products')
-    expect(raw).toContain('vault-cli memory show --vault "$VAULT" --format json')
+    expect(raw).toContain('vault-cli memory show --compact --vault "$VAULT" --format json')
     expect(raw).toContain('vault-cli memory upsert')
     expect(raw).toContain('Do not create a memory record for routine success')
     expect(raw).toContain('Finite-supply replenishment check-ins')
@@ -1802,6 +1816,9 @@ describe('assistant skill assets', () => {
     expect(root).toContain(
       'vault-cli assistant onboarding resume-context --format json',
     )
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'A non-retryable `memory_document_invalid` memory surface is terminal: do not read, write, or advance. Reply with its hint, keeping file, line, and field; stop until repaired.',
+    )
     expect(root).toContain('## The immediate need wins')
     expect(root).toContain('## Relationship promise')
     expect(root).toContain('### 2. Minimal identity')
@@ -2033,7 +2050,7 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'Make one targeted owning read only when the checkpoint needed now is omitted, truncated, or errored in the snapshot.',
     )
-    expect(raw).toContain('vault-cli memory show --format json')
+    expect(raw).toContain('vault-cli memory show --compact --format json')
     expect(compact).toContain(
       'Save optional demographic context to the existing best-fit Identity or Context memory.',
     )
@@ -2616,13 +2633,13 @@ How old are you and what's your gender?
       'First make one bounded evidence pass across the foundation, relevant canonical records, connected data, and any confirmed enrichment that could materially change the choice.',
     )
     expect(compact).toContain(
-      'When that pass spans more than one source or owner, immediately call `murph.send_progress_update` once before the first read.',
+      'This bounded pass does not trigger an update merely because it spans multiple sources or owners',
     )
     expect(compact).toContain(
-      'name the few user-facing areas you are checking and why they matter to the chosen next step',
+      'routine context reads and a straightforward first-step question stay silent and answer directly.',
     )
-    expect(compact).toContain(
-      'This update is required even when each individual read is routine, and it is not needed for one targeted read.',
+    expect(compact).not.toContain(
+      'This update is required even when each individual read is routine',
     )
     expect(compact).toContain(
       'Before asking baseline, obstacle, prior-attempt, or support questions, ask which thread—if any—the user actually wants to work on now.',

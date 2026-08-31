@@ -68,6 +68,38 @@ function staticBootClosureBytesMetafile(staticClosureBytes: number): Metafile {
   };
 }
 
+function staticBootChunkCountMetafile(staticChunkCount: number): Metafile {
+  if (staticChunkCount < 1) {
+    throw new Error("static chunk count must include the entry chunk");
+  }
+
+  const outputs: Metafile["outputs"] = {};
+  for (let index = 0; index < staticChunkCount; index += 1) {
+    const outputPath = index === 0
+      ? "dist-bundled/container-entrypoint.js"
+      : `dist-bundled/static-${index}.js`;
+    const nextOutputPath = index + 1 < staticChunkCount
+      ? `./static-${index + 1}.js`
+      : null;
+    outputs[outputPath] = {
+      bytes: 1,
+      entryPoint: index === 0 ? "dist/container-entrypoint.js" : undefined,
+      exports: [],
+      imports: nextOutputPath
+        ? [{ kind: "import-statement", path: nextOutputPath }]
+        : [],
+      inputs: {},
+    };
+  }
+
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 1, imports: [] },
+    },
+    outputs,
+  };
+}
+
 function staticBootClosureMetafile(inputPath: string): Metafile {
   return {
     inputs: {
@@ -159,6 +191,7 @@ const temporaryDirectories: string[] = [];
 const ROOMY_TEST_BUDGETS = {
   entryBytes: 10_000,
   staticClosureBytes: 10_000,
+  staticChunkCount: 10,
   totalBytes: 10_000,
 };
 const RUNNER_TREE_SHAKE_REQUIRED_PACKAGE_MANIFESTS = [
@@ -303,6 +336,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       assertRunnerEntrypointBundleWithinBudgets(metafile, {
         entryBytes: 1_000,
         staticClosureBytes: 10_000,
+        staticChunkCount: 10,
         totalBytes: 3_000,
       }),
     ).toThrow(
@@ -314,6 +348,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 2_000,
       staticClosureBytes: 2_000,
+      staticChunkCount: 1,
       totalBytes: 6_000,
     });
   });
@@ -512,6 +547,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 2_000,
       staticClosureBytes: 2_000,
+      staticChunkCount: 1,
       totalBytes: 6_000,
     });
   });
@@ -529,6 +565,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 2_000,
       staticClosureBytes: 2_000,
+      staticChunkCount: 1,
       totalBytes: 6_000,
     });
   });
@@ -607,9 +644,10 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 1_739_005 + 48_000,
-      staticClosureBytes: 8_683_649 + 96_000,
-      totalBytes: 11_457_689 + 32_768,
+      entryBytes: 64_257 + 12_000,
+      staticClosureBytes: 1_950_662 + 96_000,
+      staticChunkCount: 24,
+      totalBytes: 11_592_493 + 32_768,
     });
   });
 
@@ -622,6 +660,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes,
       staticClosureBytes: entryBytes,
+      staticChunkCount: 1,
       totalBytes: entryBytes,
     });
 
@@ -643,6 +682,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 1_000,
       staticClosureBytes,
+      staticChunkCount: 2,
       totalBytes: staticClosureBytes,
     });
 
@@ -651,6 +691,22 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         staticBootClosureBytesMetafile(staticClosureBytes + 1),
       ),
     ).toThrow(/static boot closure .* exceeds budget/);
+  });
+
+  it("gates the static boot chunk count at the production ratchet boundary", () => {
+    const { staticChunkCount } = resolveRunnerEntrypointBundleBudgets();
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        staticBootChunkCountMetafile(staticChunkCount),
+      ),
+    ).toMatchObject({ staticChunkCount });
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(
+        staticBootChunkCountMetafile(staticChunkCount + 1),
+      ),
+    ).toThrow(/static boot closure chunk count .* exceeds budget/);
   });
 
   it("gates total output at the production ratchet boundary", () => {
@@ -664,6 +720,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 1_000,
       staticClosureBytes: 1_000,
+      staticChunkCount: 1,
       totalBytes,
     });
 
@@ -686,6 +743,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 1_000,
       staticClosureBytes: 1_000,
+      staticChunkCount: 1,
       totalBytes: dynamicChunkBytes + 1_000,
     });
   });

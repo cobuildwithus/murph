@@ -1,3 +1,7 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import {
@@ -29,9 +33,12 @@ vi.mock("../src/hosted-runtime/pending-input-index.ts", () => ({
     runHostedPendingAssistantInputContentRetention(input),
 }));
 const archiveClosedIntegrationIngestShards = vi.fn();
+const archiveClosedEventLedgerShards = vi.fn();
 const runGeneratedImageCaptureRetention = vi.fn();
 vi.mock("@murphai/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@murphai/core")>()),
+  archiveClosedEventLedgerShards: (input: unknown) =>
+    archiveClosedEventLedgerShards(input),
   archiveClosedIntegrationIngestShards: (input: unknown) =>
     archiveClosedIntegrationIngestShards(input),
   runGeneratedImageCaptureRetention: (input: unknown) =>
@@ -39,14 +46,38 @@ vi.mock("@murphai/core", async (importOriginal) => ({
 }));
 
 import {
+  initializeVault,
+  readEventLedgerShardRecords,
+  upsertEvent,
+} from "@murphai/core";
+
+import {
   HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS,
+  HOSTED_IDLE_ARCHIVE_TIMEOUT_MS,
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
-  HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS,
   HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
   runHostedIdleCheckpointMaintenance,
 } from "../src/hosted-runtime/idle-maintenance.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
+
+async function waitForAtomicArchiveTempFile(
+  directoryPath: string,
+  archiveFileName: string,
+): Promise<string> {
+  const prefix = `.${archiveFileName}.`;
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const match = (await fs.readdir(directoryPath)).find(
+      (entry) => entry.startsWith(prefix) && entry.endsWith(".tmp"),
+    );
+    if (match) {
+      return match;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error("Timed out waiting for the event archive temporary file.");
+}
 
 beforeEach(() => {
   compactWarmCodexThread.mockReset();
@@ -105,6 +136,15 @@ beforeEach(() => {
     scannedShardCount: 0,
     sourceByteCount: 0,
   });
+  archiveClosedEventLedgerShards.mockReset();
+  archiveClosedEventLedgerShards.mockResolvedValue({
+    archivedByteCount: 0,
+    archivedShardCount: 0,
+    blockedShardCount: 0,
+    repairedShardCount: 0,
+    scannedShardCount: 0,
+    sourceByteCount: 0,
+  });
   runGeneratedImageCaptureRetention.mockReset();
   runGeneratedImageCaptureRetention.mockResolvedValue({
     blockedCaptureCount: 0,
@@ -122,7 +162,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(90_000);
     expect(HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS).toBeLessThan(132_000);
     expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBeLessThan(132_000);
-    expect(HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS).toBe(30_000);
+    expect(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS).toBe(30_000);
   });
 
   it("skips on shutdown, missing model, and missing provider without touching the engine", async () => {
@@ -479,6 +519,67 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       nextWakeAt: "2026-07-10T00:00:00.000Z",
       nextWakeReason: "inbox_media_retention",
     });
+  });
+
+  it("bounds generated-image cleanup by the remaining canonical receipt capacity", async () => {
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      generatedImageRetentionMaxCaptures: 7,
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      pendingWork: false,
+      providerName: "hosted-openai",
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runGeneratedImageCaptureRetention).toHaveBeenCalledWith(
+      expect.objectContaining({ maxCaptures: 7 }),
+    );
+  });
+
+  it("defers generated-image cleanup when no canonical receipt admission remains", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+    const persistGeneratedImageRetention = vi.fn();
+
+    try {
+      await expect(runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        generatedImageRetentionMaxCaptures: 0,
+        memberId: "member_1",
+        model: "gpt-5.6-terra",
+        pendingWork: false,
+        persistGeneratedImageRetention,
+        providerName: "hosted-openai",
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/vault",
+        wakeSignal: null,
+      })).resolves.toMatchObject({
+        nextWakeAt: "2026-07-05T00:00:00.000Z",
+        nextWakeReason: "inbox_media_retention",
+      });
+      expect(runGeneratedImageCaptureRetention).not.toHaveBeenCalled();
+      expect(persistGeneratedImageRetention).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("runs inbox text retention and wakes at the earlier of the two retention passes", async () => {
@@ -1052,10 +1153,11 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       }),
     ).toEqual({ kind: "skipped", reason: "pending_work", threadContextTokensBefore: null });
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    expect(archiveClosedEventLedgerShards).not.toHaveBeenCalled();
     expect(archiveClosedIntegrationIngestShards).not.toHaveBeenCalled();
   });
 
-  it("archives closed integration ingest shards only on a true idle checkpoint", async () => {
+  it("archives closed event and integration shards only on a true idle checkpoint", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "skipped",
       reason: "below_threshold",
@@ -1075,11 +1177,186 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       wakeSignal: null,
     });
 
-    expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
-    expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledWith({
+    expect(archiveClosedEventLedgerShards).toHaveBeenCalledOnce();
+    expect(archiveClosedEventLedgerShards).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
       vaultRoot: "/vault",
     });
+    expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
+    const eventSignal = archiveClosedEventLedgerShards.mock.calls[0]?.[0]?.signal;
+    const integrationSignal = archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.signal;
+    expect(integrationSignal).toBe(eventSignal);
+  });
+
+  it("archives later healthy history after a long malformed event shard", async () => {
+    const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-idle-event-archive-"));
+    try {
+      await initializeVault({ vaultRoot, createdAt: "2020-01-01T00:00:00.000Z" });
+      const malformed = await upsertEvent({
+        vaultRoot,
+        payload: {
+          kind: "note",
+          occurredAt: "2020-01-12T09:00:00.000Z",
+          note: "This older shard will remain available for repair.",
+          title: "Malformed historical event",
+        },
+      });
+      const historical = await upsertEvent({
+        vaultRoot,
+        payload: {
+          kind: "note",
+          occurredAt: "2020-02-12T09:00:00.000Z",
+          note: "idle checkpoint compression ".repeat(80),
+          title: "Historical event",
+        },
+      });
+      const malformedRawAbsolutePath = path.join(vaultRoot, malformed.ledgerFile);
+      await fs.appendFile(malformedRawAbsolutePath, `${"x".repeat(2 * 1024 * 1024)}\n`);
+      const rawAbsolutePath = path.join(vaultRoot, historical.ledgerFile);
+      const sourceBytes = await fs.readFile(rawAbsolutePath);
+      const actualCore = await vi.importActual<typeof import("@murphai/core")>(
+        "@murphai/core",
+      );
+      archiveClosedEventLedgerShards.mockImplementation(
+        actualCore.archiveClosedEventLedgerShards,
+      );
+
+      compactWarmCodexThread.mockResolvedValue({
+        kind: "skipped",
+        reason: "below_threshold",
+        threadContextTokensBefore: 20_000,
+      });
+
+      await expect(runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_event_archive",
+        model: "gpt-5.6-terra",
+        pendingWork: false,
+        providerName: "hosted-openai",
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot,
+        wakeSignal: null,
+      })).resolves.toEqual({
+        kind: "skipped",
+        reason: "below_threshold",
+        threadContextTokensBefore: 20_000,
+      });
+
+      await expect(fs.access(malformedRawAbsolutePath)).resolves.toBeUndefined();
+      await expect(fs.access(`${malformedRawAbsolutePath}.gz`)).rejects.toThrow();
+      await expect(fs.access(rawAbsolutePath)).rejects.toThrow();
+      const archiveBytes = await fs.readFile(`${rawAbsolutePath}.gz`);
+      expect(archiveBytes.byteLength).toBeLessThan(sourceBytes.byteLength);
+      expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
+      expect(
+        archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.signal?.aborted,
+      ).toBe(false);
+      await expect(readEventLedgerShardRecords({
+        relativePath: historical.ledgerFile,
+        vaultRoot,
+      })).resolves.toEqual([
+        expect.objectContaining({ title: "Historical event" }),
+      ]);
+    } finally {
+      await fs.rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("aborts a real in-progress event archive when foreground work wakes", async () => {
+    const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-idle-event-wake-"));
+    try {
+      await initializeVault({ vaultRoot, createdAt: "2020-01-01T00:00:00.000Z" });
+      const historical = await upsertEvent({
+        vaultRoot,
+        payload: {
+          kind: "note",
+          occurredAt: "2020-01-12T09:00:00.000Z",
+          note: "preserve this event when foreground work wakes",
+          title: "Interrupted historical event",
+        },
+      });
+      const rawAbsolutePath = path.join(vaultRoot, historical.ledgerFile);
+      const eventLine = await fs.readFile(rawAbsolutePath, "utf8");
+      const repeatedByteCount = 16 * 1024 * 1024;
+      await fs.writeFile(
+        rawAbsolutePath,
+        eventLine.repeat(Math.ceil(repeatedByteCount / Buffer.byteLength(eventLine))),
+        "utf8",
+      );
+      const actualCore = await vi.importActual<typeof import("@murphai/core")>(
+        "@murphai/core",
+      );
+      archiveClosedEventLedgerShards.mockImplementation(
+        actualCore.archiveClosedEventLedgerShards,
+      );
+      const wakeSignal = createCoalescingRuntimeWakeSignal();
+      const wakeAt = Date.now();
+      const archiveFileName = `${path.basename(rawAbsolutePath)}.gz`;
+      const shardDirectory = path.dirname(rawAbsolutePath);
+
+      const maintenance = runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_event_archive_wake",
+        model: "gpt-5.6-terra",
+        pendingWork: false,
+        providerName: "hosted-openai",
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot,
+        wakeSignal,
+      });
+      await waitForAtomicArchiveTempFile(shardDirectory, archiveFileName);
+      wakeSignal.notify(wakeAt);
+
+      await expect(maintenance).resolves.toEqual({
+        kind: "skipped",
+        reason: "pending_work",
+        threadContextTokensBefore: null,
+      });
+      await expect(fs.access(rawAbsolutePath)).resolves.toBeUndefined();
+      await expect(fs.access(`${rawAbsolutePath}.gz`)).rejects.toThrow();
+      expect((await fs.readdir(shardDirectory)).filter(
+        (entry) => entry.startsWith(`.${archiveFileName}.`) && entry.endsWith(".tmp"),
+      )).toEqual([]);
+      expect(archiveClosedIntegrationIngestShards).not.toHaveBeenCalled();
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+      expect(wakeSignal.consumePending()).toEqual({ notifiedAtEpochMs: wakeAt });
+    } finally {
+      await fs.rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps idle checkpoint maintenance fail-open when event archiving fails", async () => {
+    archiveClosedEventLedgerShards.mockRejectedValue(
+      new Error("synthetic event archive failure"),
+    );
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    await expect(runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      pendingWork: false,
+      providerName: "hosted-openai",
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    })).resolves.toEqual({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+    expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
+    expect(compactWarmCodexThread).toHaveBeenCalledOnce();
   });
 
   it("keeps idle checkpoint maintenance fail-open when ingest archiving fails", async () => {
@@ -1139,6 +1416,38 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       reason: "pending_work",
       threadContextTokensBefore: null,
     });
+    expect(compactWarmCodexThread).not.toHaveBeenCalled();
+  });
+
+  it("aborts event archiving before later maintenance when a member-visible wake arrives", async () => {
+    const wakeSignal = createCoalescingRuntimeWakeSignal();
+    archiveClosedEventLedgerShards.mockImplementation(
+      async (input: { signal: AbortSignal }) =>
+        await new Promise((_resolve, reject) => {
+          input.signal.addEventListener("abort", () => reject(input.signal.reason), {
+            once: true,
+          });
+          wakeSignal.notify(Date.now());
+        }),
+    );
+
+    await expect(runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      pendingWork: false,
+      providerName: "hosted-openai",
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal,
+    })).resolves.toEqual({
+      kind: "skipped",
+      reason: "pending_work",
+      threadContextTokensBefore: null,
+    });
+    expect(archiveClosedIntegrationIngestShards).not.toHaveBeenCalled();
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 

@@ -453,7 +453,7 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION =
-  "venice-api-pricing-2026-08-04-gpt-5.6-standard";
+  "venice-api-pricing-2026-08-30-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
@@ -624,11 +624,12 @@ const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Record<
     inputUsdMicrosPerMillionTokens: 3_130_000n,
     outputUsdMicrosPerMillionTokens: 18_750_000n,
   },
+  // The hosted provider maps Luna to regular openai-gpt-56-luna, not Luna Pro.
   "gpt-5.6-luna": {
-    cachedInputUsdMicrosPerMillionTokens: 130_000n,
-    cacheWriteUsdMicrosPerMillionTokens: 1_560_000n,
-    inputUsdMicrosPerMillionTokens: 1_250_000n,
-    outputUsdMicrosPerMillionTokens: 7_500_000n,
+    cachedInputUsdMicrosPerMillionTokens: 30_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 330_000n,
+    inputUsdMicrosPerMillionTokens: 270_000n,
+    outputUsdMicrosPerMillionTokens: 1_600_000n,
   },
 };
 

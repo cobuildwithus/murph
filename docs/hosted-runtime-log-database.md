@@ -101,6 +101,75 @@ conversation and turn-scoped automation overrides resolve and is the normalized
 value passed to the Codex provider attempt. Raw provider configuration, prompts,
 messages, credentials, and paths remain excluded.
 
+### Assistant-notification validation attribution
+
+An existing `mailbox.system_processed` warning with
+`error_code = 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE'` may include the
+optional `redacted_json.assistantNotificationValidationFailureReason` field.
+The field is a closed validation-boundary vocabulary:
+
+- `decision_json_unparseable`: no parseable JSON decision object was present.
+- `decision_schema_invalid`: a parsed JSON object failed the notification
+  decision schema.
+- `runtime_presentation_non_send_decision`: a runtime-owned presentation was
+  paired with a decision other than `send_message`.
+- `creative_response_media_invalid`: creative-response media was not exactly
+  one generated voice memo.
+
+Only those four literal values pass the existing assistant-notification
+structured-redaction allowlist. Provider output, response text, prompts,
+messages, payloads, route values, identifiers, paths, stacks, and free-form
+errors are not copied into this field. The value is pass-local observability:
+it is not written into system-mailbox state and does not alter validation,
+retryability, attempt counts, wake selection, delivery, or canonical state.
+
+This is a zero-volume-change extension. It adds no event, success-path log,
+metric, database write, request, queue, timer, await, or fanout. For a retrying
+validation failure, a new runner attaches the field to the already-emitted
+warning; older runners and unrelated warnings remain schema-compatible because
+the field is optional.
+
+For post-deploy verification, choose one fixed observation end timestamp and
+run the query below separately for the latest four-hour window, its immediately
+preceding four-hour window, the rolling 24-hour window, and the rolling
+seven-day window. Supply fixed `:window_start` and `:window_end` values for each
+run so the windows do not move while results are compared. A `NULL` reason is
+the unattributed mixed-version bucket:
+
+```sql
+SELECT
+  redacted_json->>'assistantNotificationValidationFailureReason'
+    AS assistant_notification_validation_failure_reason,
+  redacted_json->>'status' AS status,
+  redacted_json->>'wakeKind' AS wake_kind,
+  redacted_json->>'routeAction' AS route_action,
+  COUNT(*) AS event_count,
+  COUNT(DISTINCT subject_key) AS distinct_subject_count,
+  MIN((redacted_json->>'attemptCount')::bigint) AS min_attempt_count,
+  MAX((redacted_json->>'attemptCount')::bigint) AS max_attempt_count,
+  MIN(at) AS first_at,
+  MAX(at) AS last_at
+FROM hosted_runtime_log
+WHERE at >= :window_start
+  AND at < :window_end
+  AND event_code = 'mailbox.system_processed'
+  AND error_code = 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE'
+GROUP BY
+  redacted_json->>'assistantNotificationValidationFailureReason',
+  redacted_json->>'status',
+  redacted_json->>'wakeKind',
+  redacted_json->>'routeAction'
+ORDER BY
+  assistant_notification_validation_failure_reason,
+  status,
+  wake_kind,
+  route_action;
+```
+
+Return only those aggregates. Never return `subject_key` values or raw JSON.
+If natural traffic produces no recurrence, report zero events; do not generate
+production traffic to exercise the telemetry.
+
 ## Append and deletion serialization
 
 Every append runs in one short transaction:
@@ -213,12 +282,13 @@ The dedicated store keeps the existing policy:
 - warn/error: 14 days
 - ordered batches of 5,000, at most four batches per hourly cleanup
 
-The normal retention cron first removes strictly expired callback nonces from
-the primary control database under the shared 5,000-row and four-batch ceilings.
-Each statement orders candidates by expiry and nonce hash, locks only that
-bounded set with `FOR UPDATE SKIP LOCKED`, and deletes those exact rows. It then
-runs isolated runtime-log cleanup serially through the diagnostic pool after the
-primary control-database cleanup completes.
+The dedicated runtime-maintenance cron runs at minute 50 of each hour. It
+performs bounded runtime-signal fan-out before cleaning this isolated database
+serially through the diagnostic pool. A diagnostic-database failure is logged
+and contained. Callback and browser assertion
+nonces belong to a separate primary-database nonce cron at minute 5; its
+callback statements retain the 5,000-row statement cap and use a dedicated
+400-batch catch-up ceiling.
 
 ## Configuration
 

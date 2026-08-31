@@ -798,10 +798,7 @@ async function readInboxAttachmentRetentionIndex(
         inboxAttachmentRetentionRecordSchema,
         record,
       );
-      if (
-        result.success &&
-        result.data.reason === "inbox_media_retention"
-      ) {
+      if (result.success) {
         const key = buildInboxAttachmentRetentionIndexKey({
           attachmentId: result.data.attachmentId,
           captureId: result.data.captureId,

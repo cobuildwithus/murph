@@ -1698,7 +1698,7 @@ describe("hosted runtime internal web routes", () => {
         revision: 3,
         supportsImages: false,
         verificationProfile:
-          "murph-codex-0.149.1-portable-responses-v1",
+          "murph-codex-0.151.0-portable-responses-v1",
       },
       hostedAssistantModelOverride: "gpt-5.6-sol",
       hostedAssistantProviderOverride: "venice",
@@ -1744,7 +1744,7 @@ describe("hosted runtime internal web routes", () => {
         revision: 3,
         supportsImages: false,
         verificationProfile:
-          "murph-codex-0.149.1-portable-responses-v1",
+          "murph-codex-0.151.0-portable-responses-v1",
       },
       model: "gpt-5.6-terra",
       solAvailable: false,
@@ -1775,7 +1775,7 @@ describe("hosted runtime internal web routes", () => {
         revision: 3,
         supportsImages: false,
         verificationProfile:
-          "murph-codex-0.149.1-portable-responses-v1",
+          "murph-codex-0.151.0-portable-responses-v1",
       },
       model: "gpt-5.6-terra",
       solAvailable: false,
@@ -1797,7 +1797,14 @@ describe("hosted runtime internal web routes", () => {
 
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextDefaultProcessingWakeAt: "2026-04-26T00:08:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-04-26T00:05:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "6",
+      version: "4",
+    }));
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
       hostedAssistantModelOverride: "gpt-5.6-sol",
       hostedAssistantProviderOverride: "venice",
@@ -1812,10 +1819,13 @@ describe("hosted runtime internal web routes", () => {
         status: "updated",
         workspace: buildWorkspaceRecord({
           checkpointedAt: "2026-04-26T00:01:00.000Z",
+          nextDefaultProcessingWakeAt: "2026-04-26T00:09:00.000Z",
+          nextDefaultProcessingWakeReason: "assistant_due",
           redactedStatusJson: {
             conversationImportedSeq: "12",
             state: "idle",
           },
+          systemMailboxProgressGeneration: "7",
           version: "5",
         }),
       })
@@ -1839,8 +1849,13 @@ describe("hosted runtime internal web routes", () => {
         hostedAssistantProviderOverride: "venice",
         hostedAssistantReasoningEffortOverride: "high",
         workspace: {
-        userId: "member_routes_1",
-        version: "4",
+          nextDefaultProcessingWakeAt: "2026-04-26T00:08:00.000Z",
+          nextDefaultProcessingWakeReason: "assistant_due",
+          nextWakeAt: "2026-04-26T00:05:00.000Z",
+          nextWakeReason: "device-sync.reconcile",
+          systemMailboxProgressGeneration: "6",
+          userId: "member_routes_1",
+          version: "4",
         },
       });
     expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
@@ -1856,8 +1871,10 @@ describe("hosted runtime internal web routes", () => {
         handledConversationMailboxItemIds: ["item_terminal_12"],
         inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
         leaseGeneration: "2",
+        nextDefaultProcessingWakeAt: "2026-04-26T00:09:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant_due",
         nextWakeAt: "2026-04-26T00:05:00.000Z",
-        nextWakeReason: "mailbox",
+        nextWakeReason: "device-sync.reconcile",
         reason: "import",
         redactedStatus: {
           conversationImportedSeq: "12",
@@ -1865,6 +1882,7 @@ describe("hosted runtime internal web routes", () => {
         },
         browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_2_hash"),
         snapshotRef: createBundleRef("snapshot_2"),
+        systemMailboxProgressGeneration: "7",
       },
     ));
     const checkpointPayload = parseHostedWorkspaceCheckpointResponse(
@@ -1875,6 +1893,9 @@ describe("hosted runtime internal web routes", () => {
       checkpointed: true,
       replacedSnapshotRef: createBundleRef("snapshot_1"),
       workspace: {
+        nextDefaultProcessingWakeAt: "2026-04-26T00:09:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant_due",
+        systemMailboxProgressGeneration: "7",
         version: "5",
       },
     });
@@ -1882,14 +1903,17 @@ describe("hosted runtime internal web routes", () => {
       expectedVersion: "4",
       handledConversationMailboxItemIds: ["item_terminal_12"],
       inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
+      nextDefaultProcessingWakeAt: "2026-04-26T00:09:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
       nextWakeAt: "2026-04-26T00:05:00.000Z",
-      nextWakeReason: "mailbox",
+      nextWakeReason: "device-sync.reconcile",
       reason: "import",
       redactedStatusJson: {
         conversationImportedSeq: "12",
         state: "idle",
       },
       snapshotRef: createBundleRef("snapshot_2"),
+      systemMailboxProgressGeneration: "7",
       userId: "member_routes_1",
     });
 
@@ -1957,11 +1981,14 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
       expectedVersion: "4",
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
       reason: "idle_shutdown",
       redactedStatusJson: {
         hostedMailboxConversationImportedSeq: "1",
       },
       snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+      systemMailboxProgressGeneration: null,
       userId: "member_routes_1",
     });
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
@@ -2006,12 +2033,15 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
       expectedVersion: "4",
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
       reason: "idle_shutdown",
       redactedStatusJson: {
         hostedMailboxConversationImportedSeq: "1",
         state: "idle",
       },
       snapshotRef: createBundleRef("snapshot_idle_shutdown"),
+      systemMailboxProgressGeneration: null,
       userId: "member_routes_1",
     });
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
@@ -2272,7 +2302,7 @@ describe("hosted runtime internal web routes", () => {
       });
   });
 
-  it("accepts old runner checkpoint payloads without browser-vault replica refs", async () => {
+  it("clears the system progress projection for an old runner checkpoint payload", async () => {
     mocks.checkpointHostedWorkspace.mockResolvedValue({
       status: "updated",
       workspace: buildWorkspaceRecord({
@@ -2299,14 +2329,20 @@ describe("hosted runtime internal web routes", () => {
       checkpointed: true,
       workspace: {
         browserVaultReplicaRef: null,
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
         snapshotRef: createBundleRef("snapshot_2"),
+        systemMailboxProgressGeneration: null,
         version: "5",
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
       expectedVersion: "4",
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
       reason: "import",
       snapshotRef: createBundleRef("snapshot_2"),
+      systemMailboxProgressGeneration: null,
       userId: "member_routes_1",
     });
   });
@@ -2711,6 +2747,43 @@ describe("hosted runtime internal web routes", () => {
       source: "linq",
     });
 
+    for (const milestone of [
+      "pending_reply_admitted",
+      "foreground_input_selected",
+      "assistant_input_accepted_for_execution",
+    ] as const) {
+      const response = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            assistantInputIds: ["input_1", "input_2"],
+            at: FIXED_NOW,
+            milestone,
+            runtimeAttemptId: "attempt_routes_1",
+            source: "linq",
+            type: "assistant_milestone",
+          },
+        },
+        runtimeWriteFenceHeaders(),
+      ));
+
+      expect(response.status).toBe(200);
+      expect(parseHostedRuntimeLatencyTraceResponse(await response.json())).toEqual({
+        matchedCount: 2,
+        recorded: true,
+        unmatchedCount: 0,
+      });
+      expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledWith({
+        assistantInputIds: ["input_1", "input_2"],
+        at: FIXED_NOW,
+        authenticatedUserId: "member_routes_1",
+        milestone,
+        runtimeAttemptId: "attempt_routes_1",
+        runtimeLeaseGeneration: "9",
+        source: "linq",
+      });
+    }
+
     const milestoneResponse = await runtimeLatencyRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/latency",
       {
@@ -2792,7 +2865,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(unsafeResponse.status).toBe(400);
     expect(mocks.recordHostedIngressAssistantInputStaged).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledTimes(4);
     expect(mocks.recordHostedIngressProviderStarted).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedIngressRuntimeMilestone).toHaveBeenCalledTimes(1);
   });
@@ -3443,10 +3516,13 @@ function buildWorkspaceRecord(
     checkpointedAt: string | null;
     createdAt: string;
     inboxMediaRetentionWakeAt: string | null;
+    nextDefaultProcessingWakeAt: string | null;
+    nextDefaultProcessingWakeReason: string | null;
     nextWakeAt: string | null;
     nextWakeReason: string | null;
     redactedStatusJson: Record<string, unknown> | null;
     snapshotRef: Record<string, unknown> | null;
+    systemMailboxProgressGeneration: string | null;
     updatedAt: string;
     userId: string;
     version: string;
@@ -3457,10 +3533,13 @@ function buildWorkspaceRecord(
     checkpointedAt: null,
     createdAt: FIXED_NOW,
     inboxMediaRetentionWakeAt: null,
+    nextDefaultProcessingWakeAt: null,
+    nextDefaultProcessingWakeReason: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: null,
     snapshotRef: createBundleRef("snapshot_1"),
+    systemMailboxProgressGeneration: null,
     updatedAt: FIXED_NOW,
     userId: "member_routes_1",
     version: "4",

@@ -80,6 +80,7 @@ import {
   assertHostedRunNoProviderEgressAuthFailures,
   buildHostedLocalRuntimeLogDatabaseNameForTest,
   buildHostedLocalFullStackWebProcessEnvOverrides,
+  shouldReuseExplicitHostedLocalScenarioDatabaseUrl,
 } from "./hosted-local-full-stack-scenario.js";
 
 afterEach(() => {
@@ -117,6 +118,20 @@ it("bounds the derived runtime-log database name to PostgreSQL's identifier limi
 
   expect(runtimeLogDatabaseName).toBe(`${"p".repeat(50)}_runtime_logs`);
   expect(runtimeLogDatabaseName).toHaveLength(63);
+});
+
+describe("hosted local database reuse authority", () => {
+  it("does not treat generic CI mode as database reuse authority", () => {
+    expect(shouldReuseExplicitHostedLocalScenarioDatabaseUrl({
+      CI: "true",
+    })).toBe(false);
+  });
+
+  it("requires the dedicated database reuse control", () => {
+    expect(shouldReuseExplicitHostedLocalScenarioDatabaseUrl({
+      MURPH_HOSTED_LOCAL_E2E_REUSE_DATABASE_URL: "1",
+    })).toBe(true);
+  });
 });
 
 it("fails the negative runtime-log oracle when no evidence was persisted", async () => {
@@ -356,6 +371,7 @@ function createScenarioHarness(input: {
 
   return {
     assertNoInterventions: vi.fn(input.assertNoInterventions ?? (() => {})),
+    cloudflareStdoutTail: vi.fn(() => ""),
     readUserStatus: vi.fn(async () => fallbackStatus),
     runtimeEnv: {},
     stderrTail: vi.fn(() => ""),

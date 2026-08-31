@@ -718,6 +718,39 @@ function appendRequiredVaultFileApprovalUrls(
   ].filter((part): part is string => part !== null).join('\n\n')
 }
 
+const MODEL_AUTHORED_CALENDAR_LINK_PATTERN =
+  /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/gu
+
+function appendRequiredFinalResponseSuffix(
+  message: string,
+  suffix: string | null,
+  fallback: string | null,
+): string
+function appendRequiredFinalResponseSuffix(
+  message: string | null,
+  suffix: string | null,
+  fallback: string | null,
+): string | null
+function appendRequiredFinalResponseSuffix(
+  message: string | null,
+  suffix: string | null,
+  fallback: string | null,
+): string | null {
+  const normalizedSuffix = normalizeNullableString(suffix)
+  if (normalizedSuffix === null) {
+    return message
+  }
+  const messageWithoutModelAuthoredCalendarLink = normalizeNullableString(
+    message?.replace(MODEL_AUTHORED_CALENDAR_LINK_PATTERN, '') ?? null,
+  )
+  return [
+    messageWithoutModelAuthoredCalendarLink ?? normalizeNullableString(fallback),
+    normalizedSuffix,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n')
+}
+
 interface RequiredAutomationLocalAtClarification {
   code: 'local_at_fold' | 'local_at_gap'
   resolvedLocalDate: string
@@ -957,7 +990,6 @@ async function prepareCodexAppServerProcessInput(
     args,
     codexCommand,
     env,
-    workingDirectory,
   })
   return {
     args,
@@ -973,13 +1005,11 @@ function buildCodexAppServerLaunchKey(input: {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
-  workingDirectory: string
 }): string {
   return hashCodexRawString(JSON.stringify({
     args: input.args,
     codexCommand: input.codexCommand,
     env: stableCodexProcessEnv(input.env),
-    workingDirectory: input.workingDirectory,
   }))
 }
 
@@ -1028,6 +1058,7 @@ class CodexAppServerProcess {
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
+  private boundTurnId: string | null = null
   private cleanupProcessExitListener: () => void
   private completedTurn = false
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -1045,13 +1076,14 @@ class CodexAppServerProcess {
   // admitted since the last workspace boundary so checkpointing waits for and
   // scans all of them, including children that completed before their parent
   // reply.
-  private readonly detachedChildThreadIds = new Set<string>()
+  private readonly detachedChildParentTurnIds = new Map<string, string>()
   private readonly detachedCompletedChildThreadIds = new Set<string>()
   private readonly detachedChildMessageHandlers = new Map<
     string,
     NonNullable<CodexAppServerActiveTurnBinding['onSubagentMessage']>
   >()
   private detachedChildViolation: string | null = null
+  private readonly detachedRootThreadIdsByTurnId = new Map<string, string>()
   private readonly detachedRootThreadIds = new Set<string>()
   private readonly pendingDetachedUsageReports = new Set<Promise<void>>()
   private stopCompleted = false
@@ -1070,11 +1102,10 @@ class CodexAppServerProcess {
     this.launchKey = input.launchKey
 
     const useProcessGroup = process.platform !== 'win32'
-    // The warm app-server outlives hosted workspace restores, which delete and
-    // recreate the workspace path between invocations. A process anchored to
-    // that directory keeps a dead cwd inode, and Codex config loading then
-    // fails with ENOENT on the next thread/start. Threads receive the real
-    // workspace via the explicit per-thread `cwd` param instead.
+    // Keep the process cwd outside the restorable workspace. Hosted restore
+    // stops this process before replacing or sanitizing Codex home, while
+    // threads receive the restored workspace through the explicit per-thread
+    // `cwd` param.
     this.child = spawn(input.codexCommand, [...input.args], {
       cwd: tmpdir(),
       detached: useProcessGroup,
@@ -1425,7 +1456,7 @@ class CodexAppServerProcess {
   }
 
   private hasPendingDetachedChildren(): boolean {
-    for (const threadId of this.detachedChildThreadIds) {
+    for (const threadId of this.detachedChildParentTurnIds.keys()) {
       if (!this.detachedCompletedChildThreadIds.has(threadId)) {
         return true
       }
@@ -1492,7 +1523,7 @@ class CodexAppServerProcess {
   ): Promise<void> {
     const threadIds = new Set([
       ...this.detachedRootThreadIds,
-      ...this.detachedChildThreadIds,
+      ...this.detachedChildParentTurnIds.keys(),
     ])
     for (const threadId of threadIds) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
@@ -1518,10 +1549,12 @@ class CodexAppServerProcess {
   }
 
   private clearDetachedChildBoundary(): void {
-    this.detachedChildThreadIds.clear()
+    this.boundTurnId = null
+    this.detachedChildParentTurnIds.clear()
     this.detachedCompletedChildThreadIds.clear()
     this.detachedChildMessageHandlers.clear()
     this.detachedChildViolation = null
+    this.detachedRootThreadIdsByTurnId.clear()
     this.detachedRootThreadIds.clear()
   }
 
@@ -1529,25 +1562,86 @@ class CodexAppServerProcess {
     this.detachedChildViolation ??= message
   }
 
+  private admitDetachedChild(input: {
+    parentThreadId: string
+    parentTurnId: string
+    threadId: string
+  }): void {
+    if (
+      this.detachedRootThreadIdsByTurnId.get(input.parentTurnId)
+      !== input.parentThreadId
+    ) {
+      this.recordDetachedChildViolation(
+        'Codex emitted a detached child outside the active root turn.',
+      )
+      return
+    }
+
+    const existingParentTurnId = this.detachedChildParentTurnIds.get(
+      input.threadId,
+    )
+    if (
+      existingParentTurnId !== undefined
+      && existingParentTurnId !== input.parentTurnId
+    ) {
+      this.recordDetachedChildViolation(
+        'Codex reused a detached child across root turns.',
+      )
+      return
+    }
+    this.detachedChildParentTurnIds.set(input.threadId, input.parentTurnId)
+  }
+
   private observeDetachedChildLifecycle(message: CodexRpcMessage): void {
     const activity = readCodexSubagentActivity(message)
     if (activity) {
       const senderThreadId = extractCodexThreadIdFromMessage(message)
-      if (activity.kind === 'malformed' || !activity.agentThreadId) {
+      if (
+        activity.kind === 'malformed'
+        || !activity.agentThreadId
+        || !activity.turnId
+      ) {
         this.recordDetachedChildViolation(
           'Codex emitted a malformed detached-child lifecycle.',
         )
       } else if (activity.kind === 'started') {
-        if (!senderThreadId || !this.detachedRootThreadIds.has(senderThreadId)) {
+        if (
+          !senderThreadId
+          || this.detachedRootThreadIdsByTurnId.get(activity.turnId)
+            !== senderThreadId
+        ) {
           this.recordDetachedChildViolation(
             'Detached Codex children may not spawn nested children.',
           )
         } else {
-          this.detachedChildThreadIds.add(activity.agentThreadId)
+          this.admitDetachedChild({
+            parentThreadId: senderThreadId,
+            parentTurnId: activity.turnId,
+            threadId: activity.agentThreadId,
+          })
           if (this.activeTurn?.onSubagentMessage) {
             this.detachedChildMessageHandlers.set(
               activity.agentThreadId,
               this.activeTurn.onSubagentMessage,
+            )
+          }
+        }
+      } else if (activity.kind === 'completed') {
+        const currentParentThreadId = this.detachedRootThreadIdsByTurnId.get(
+          activity.turnId,
+        )
+        // A prior turn is absent after its boundary clears, so its delayed
+        // acknowledgement is inert. A current turn must name an admitted child.
+        if (currentParentThreadId !== undefined) {
+          if (
+            senderThreadId === currentParentThreadId
+            && this.detachedChildParentTurnIds.get(activity.agentThreadId)
+              === activity.turnId
+          ) {
+            this.detachedCompletedChildThreadIds.add(activity.agentThreadId)
+          } else {
+            this.recordDetachedChildViolation(
+              'Codex emitted an untracked detached-child completion.',
             )
           }
         }
@@ -1756,7 +1850,7 @@ class CodexAppServerProcess {
 
   get hasUncheckpointedDetachedWork(): boolean {
     return (
-      this.detachedChildThreadIds.size > 0 ||
+      this.detachedChildParentTurnIds.size > 0 ||
       this.detachedChildViolation !== null
     )
   }
@@ -1807,6 +1901,13 @@ class CodexAppServerProcess {
       this.boundThreadId = threadId
       this.detachedRootThreadIds.add(threadId)
     }
+  }
+
+  noteBoundTurn(threadId: string, turnId: string): void {
+    this.boundThreadId = threadId
+    this.boundTurnId = turnId
+    this.detachedRootThreadIds.add(threadId)
+    this.detachedRootThreadIdsByTurnId.set(turnId, threadId)
   }
 
   noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
@@ -1871,8 +1972,21 @@ class CodexAppServerProcess {
       return false
     }
 
-    if (isCodexTurnStartedMethod(readCodexEventMethod(message))) {
-      this.detachedChildThreadIds.add(threadId)
+    if (
+      isCodexTurnStartedMethod(readCodexEventMethod(message))
+      && !this.detachedChildParentTurnIds.has(threadId)
+    ) {
+      if (this.boundThreadId && this.boundTurnId) {
+        this.admitDetachedChild({
+          parentThreadId: this.boundThreadId,
+          parentTurnId: this.boundTurnId,
+          threadId,
+        })
+      } else {
+        this.recordDetachedChildViolation(
+          'Codex emitted a detached child outside the active root turn.',
+        )
+      }
     }
     handler(message)
     return true
@@ -2029,7 +2143,8 @@ function readCodexBackgroundTerminalPresence(value: unknown): boolean {
 
 function readCodexSubagentActivity(message: CodexRpcMessage): {
   agentThreadId: string | null
-  kind: 'interacted' | 'interrupted' | 'malformed' | 'started'
+  kind: 'completed' | 'interacted' | 'interrupted' | 'malformed' | 'started'
+  turnId: string | null
 } | null {
   const method = typeof message.method === 'string' ? message.method : null
   if (method !== 'item/completed') {
@@ -2041,10 +2156,23 @@ function readCodexSubagentActivity(message: CodexRpcMessage): {
   }
   const agentThreadId = asCodexString(item?.agentThreadId)
   const kind = asCodexString(item?.kind)
-  if (!agentThreadId || (kind !== 'started' && kind !== 'interacted' && kind !== 'interrupted')) {
-    return { agentThreadId: agentThreadId ?? null, kind: 'malformed' }
+  const turnId = asCodexString(asCodexRecord(message.params)?.turnId)
+  if (
+    !agentThreadId
+    || (
+      kind !== 'completed'
+      && kind !== 'started'
+      && kind !== 'interacted'
+      && kind !== 'interrupted'
+    )
+  ) {
+    return {
+      agentThreadId: agentThreadId ?? null,
+      kind: 'malformed',
+      turnId: turnId ?? null,
+    }
   }
-  return { agentThreadId, kind }
+  return { agentThreadId, kind, turnId: turnId ?? null }
 }
 
 function throwIfCodexBackgroundWorkWaitAborted(
@@ -2472,7 +2600,6 @@ export async function executeCodexManagedAccountOperation(
     args,
     codexCommand,
     env,
-    workingDirectory,
   })
 
   await stopWarmCodexAppServer('managed-account-operation')
@@ -3037,6 +3164,12 @@ function hashCodexRawString(value: string): string {
     .digest('hex')
 }
 
+function buildCodexTurnCorrelation(turnId: string): number {
+  // Keep the opaque provider id out of logs while preserving a safe-integer
+  // join key shared by this turn's timing and action diagnostics.
+  return Number.parseInt(hashCodexRawString(turnId).slice(0, 12), 16)
+}
+
 function readCodexEventMethod(message: CodexRpcMessage): string | null {
   return typeof message.method === 'string' ? message.method : null
 }
@@ -3370,6 +3503,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
+  let requiredFinalResponseSuffix: string | null = null
   let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
@@ -3481,6 +3615,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
+    requiredFinalResponseSuffix !== null ||
     requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
@@ -3491,15 +3626,29 @@ async function runCodexAppServerTurnOnProcess(
     }
     noReplySettlementStarted = true
     for (const deliveryContextOrdinal of listNoReplyFinalActionPatchOrdinals()) {
+      const precedingReplyDeliveryContextOrdinal = Math.max(
+        -1,
+        ...precedingAgentMessageSegments
+          .map((segment) => segment.deliveryContextOrdinal)
+          .filter((ordinal) => ordinal < deliveryContextOrdinal),
+        trailingSteerCandidate !== null &&
+            trailingSteerCandidate.deliveryContextOrdinal < deliveryContextOrdinal
+          ? trailingSteerCandidate.deliveryContextOrdinal
+          : -1,
+      )
       await input.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal,
         // The accepted event settles the cumulative accepted-turn prefix
-        // through this ordinal, so a reaction recorded for any covered
-        // earlier context must keep terminal suppression evidence deferred
-        // until reaction delivery settles.
+        // only when no earlier reply owns part of that prefix. A reaction
+        // recorded for any covered earlier context must keep terminal
+        // suppression evidence deferred until reaction delivery settles.
         messageReactionPending: reactionPatches.some(
           (entry) => entry.deliveryContextOrdinal <= deliveryContextOrdinal,
         ),
+        precedingReplyDeliveryContextOrdinal:
+          precedingReplyDeliveryContextOrdinal < 0
+            ? null
+            : precedingReplyDeliveryContextOrdinal,
       })
       acceptedNoReplyDeliveryContextOrdinals.push(deliveryContextOrdinal)
       await input.onFinishWithoutReplyRecorded?.({
@@ -3622,6 +3771,9 @@ async function runCodexAppServerTurnOnProcess(
                 ...(typeof input.providerRequestOrdinal === 'number'
                   ? { codexTimingProviderRequestOrdinal: input.providerRequestOrdinal }
                   : {}),
+                ...(turnId === null
+                  ? {}
+                  : { codexTimingTurnCorrelation: buildCodexTurnCorrelation(turnId) }),
                 // This ends when the completion trace is emitted after local
                 // dynamic-tool/progress drains. The outer provider-result
                 // boundary is recorded separately by assistant.turn.timing.
@@ -4069,6 +4221,12 @@ async function runCodexAppServerTurnOnProcess(
     },
     deliveryContextOrdinal: number,
   ): void => {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_CONTEXT_ADVANCED',
+        'Response media cannot attach after accepted input advances the response context.',
+      )
+    }
     if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY',
@@ -4082,18 +4240,6 @@ async function runCodexAppServerTurnOnProcess(
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_MEDIA_LIMIT_EXCEEDED',
         `Assistant responses may attach at most ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} media items.`,
-      )
-    }
-    if (responseCard !== null && nextMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response media cannot be combined with a response card.',
-      )
-    }
-    if (responseCardTextFallback !== null && nextMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response media cannot be combined with response card text recovery.',
       )
     }
     responseMedia = nextMedia
@@ -4113,24 +4259,6 @@ async function runCodexAppServerTurnOnProcess(
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_AFTER_NO_REPLY',
         'A response card cannot be attached after finish_without_reply.',
-      )
-    }
-    if (responseCard !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card may be attached to a final response.',
-      )
-    }
-    if (responseCardTextFallback !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card outcome may be attached to a final response.',
-      )
-    }
-    if (responseMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'A response card cannot be combined with response media.',
       )
     }
     if (requiredVaultFileApprovalUrls.length > 0) {
@@ -4158,18 +4286,6 @@ async function runCodexAppServerTurnOnProcess(
         'Response card text recovery cannot attach after finish_without_reply.',
       )
     }
-    if (responseCard !== null || responseCardTextFallback !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card outcome may be attached to a final response.',
-      )
-    }
-    if (responseMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response card text recovery cannot be combined with response media.',
-      )
-    }
     if (requiredVaultFileApprovalUrls.length > 0) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_VAULT_FILE_CONFLICT',
@@ -4180,17 +4296,9 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
-    const trailingSteerCandidateOrdinal =
-      trailingSteerCandidate?.deliveryContextOrdinal
     if (
       externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
       hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
-    ) {
-      return false
-    }
-    if (
-      typeof trailingSteerCandidateOrdinal === 'number' &&
-      trailingSteerCandidateOrdinal < deliveryContextOrdinal
     ) {
       return false
     }
@@ -4201,13 +4309,6 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     if (responseCardTextFallback !== null) {
-      return false
-    }
-    if (
-      precedingAgentMessageSegments.some((segment) =>
-        segment.deliveryContextOrdinal < deliveryContextOrdinal
-      )
-    ) {
       return false
     }
     return true
@@ -4856,13 +4957,17 @@ async function runCodexAppServerTurnOnProcess(
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
-      if (dynamicToolRequest.kind === 'analyze-video') {
-        const analyzeVideoFallback = normalizeNullableString(
-          result.requiredFinalResponseFallback,
-        )
-        if (analyzeVideoFallback !== null) {
-          requiredFinalResponseFallback = analyzeVideoFallback
-        }
+      const finalResponseFallback = normalizeNullableString(
+        result.requiredFinalResponseFallback,
+      )
+      if (finalResponseFallback !== null) {
+        requiredFinalResponseFallback = finalResponseFallback
+      }
+      const finalResponseSuffix = normalizeNullableString(
+        result.requiredFinalResponseSuffix,
+      )
+      if (finalResponseSuffix !== null) {
+        requiredFinalResponseSuffix = finalResponseSuffix
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -4957,7 +5062,10 @@ async function runCodexAppServerTurnOnProcess(
           const text = error instanceof VaultCliError &&
             error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
             ? 'response media unavailable after finish_without_reply'
-            : 'response media limit reached'
+            : error instanceof VaultCliError &&
+                error.code === 'ASSISTANT_RESPONSE_MEDIA_CONTEXT_ADVANCED'
+              ? 'response media unavailable for this final response'
+              : 'response media limit reached'
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -5096,6 +5204,7 @@ async function runCodexAppServerTurnOnProcess(
     method: string | null,
   ): void => {
     acceptJsonEvent(message)
+    const observedAtMs = Date.now()
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
@@ -5116,7 +5225,6 @@ async function runCodexAppServerTurnOnProcess(
       (shouldCaptureTurnStartedNotification ||
         shouldCaptureTurnCompletedNotification)
     ) {
-      const observedAtMs = Date.now()
       if (shouldCaptureTurnStartedNotification) {
         codexTimingTurnStartedNotificationElapsedMs = Math.max(
           0,
@@ -5145,6 +5253,7 @@ async function runCodexAppServerTurnOnProcess(
     actionDiagnostics?.recordEvent({
       activeTurnId: turnId,
       normalizedEvent,
+      observedAtMs,
       rawEvent: message,
     })
     const transportDiagnosticsTraceEvent = input.onTraceEvent
@@ -5278,8 +5387,8 @@ async function runCodexAppServerTurnOnProcess(
         completedFinalAgentMessage = null
         assistantStreams.clear()
         assistantStreamOrder.length = 0
-        responseMedia = []
       }
+      responseMedia = []
       responseCard = null
       responseCardTextFallback = null
       completedUserMessageOrdinal += 1
@@ -5447,15 +5556,13 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
-  const acceptTurnStartResultTurnId = (resultTurnId: string | null): void => {
-    if (resultTurnId === null) {
+  const acceptTurnId = (candidateTurnId: string | null): void => {
+    if (candidateTurnId === null) {
       return
     }
     if (turnId === null) {
-      turnId = resultTurnId
-      return
-    }
-    if (turnId !== resultTurnId) {
+      turnId = candidateTurnId
+    } else if (turnId !== candidateTurnId) {
       rejectOnce(
         new VaultCliError(
           'ASSISTANT_CODEX_APP_SERVER_TURN_ID_MISMATCH',
@@ -5465,6 +5572,10 @@ async function runCodexAppServerTurnOnProcess(
           },
         ),
       )
+      return
+    }
+    if (codexThreadId) {
+      codexProcess.noteBoundTurn(codexThreadId, candidateTurnId)
     }
   }
 
@@ -5496,7 +5607,7 @@ async function runCodexAppServerTurnOnProcess(
           )
         }
         const resultTurnId = extractCodexTurnIdFromResult(message.result)
-        acceptTurnStartResultTurnId(resultTurnId)
+        acceptTurnId(resultTurnId)
       }
       return
     }
@@ -5510,7 +5621,7 @@ async function runCodexAppServerTurnOnProcess(
         // active turn. A server request must never authenticate itself by
         // supplying the first turn id seen on the process.
         if (isCodexTurnStartedMethod(method)) {
-          turnId = messageTurnId
+          acceptTurnId(messageTurnId)
         } else {
           if (requestId !== null) {
             rejectPreStartParentTurnRequest(requestId)
@@ -5578,6 +5689,9 @@ async function runCodexAppServerTurnOnProcess(
     const rawEvent = actionDiagnostics.buildTraceEvent({
       codexThreadId,
       providerActionCount,
+      providerStartedAtMs: codexProviderRequestStartedAtMs,
+      turnCorrelation:
+        turnId === null ? null : buildCodexTurnCorrelation(turnId),
       turnId,
     })
     if (!rawEvent) {
@@ -5887,7 +6001,7 @@ async function runCodexAppServerTurnOnProcess(
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       'turn/start',
     )
-    acceptTurnStartResultTurnId(extractCodexTurnIdFromResult(turnResult))
+    acceptTurnId(extractCodexTurnIdFromResult(turnResult))
     lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
 
@@ -6083,12 +6197,16 @@ async function runCodexAppServerTurnOnProcess(
     requiredAutomationLocalAtClarificationsInOrder.length === 0
       ? finalResponseCard
       : null
-  const finalMessage = appendRequiredVaultFileApprovalUrls(
-    appendRequiredAutomationLocalAtClarification(
-      requiredSemanticFinalMessage,
-      requiredAutomationLocalAtClarificationsInOrder,
+  const finalMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredVaultFileApprovalUrls(
+      appendRequiredAutomationLocalAtClarification(
+        requiredSemanticFinalMessage,
+        requiredAutomationLocalAtClarificationsInOrder,
+      ),
+      requiredVaultFileApprovalUrls,
     ),
-    requiredVaultFileApprovalUrls,
+    requiredFinalResponseSuffix,
+    requiredFinalResponseFallback,
   )
   const semanticTranscriptMessage = finalResponseCard
     ? requiredAutomationLocalAtClarificationsInOrder.length === 0
@@ -6100,11 +6218,15 @@ async function runCodexAppServerTurnOnProcess(
         )
       : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null)
-  const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    normalizeNullableString(semanticTranscriptMessage) ??
+  const transcriptMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredAutomationLocalAtClarification(
+      normalizeNullableString(semanticTranscriptMessage) ??
       requiredFinalResponseFallback ??
       semanticTranscriptMessage,
-    requiredAutomationLocalAtClarificationsInOrder,
+      requiredAutomationLocalAtClarificationsInOrder,
+    ),
+    requiredFinalResponseSuffix,
+    requiredFinalResponseFallback,
   )
   if (
     noReplySelected &&

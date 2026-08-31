@@ -9,6 +9,7 @@ import {
   openSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +33,8 @@ const SSH_VERIFICATION_ENTRYPOINT =
 const STATIC_GIT_SNAPSHOT_DIRECTORY = ".murph-static-git-snapshot";
 const SNAPSHOT_ORIGIN = "https://github.com/cobuildwithus/murph.git";
 const WORKSPACE_ARTIFACT_LOCK = "scripts/run-with-workspace-artifact-lock.mjs";
+const CRABBOX_FAILURE_ARTIFACT_RELATIVE_PATH =
+  ".artifacts/verification/crabbox-last-failure";
 const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "HOME",
   "LANG",
@@ -311,9 +314,21 @@ export async function runVerification(argv, env = process.env) {
     `[verification-dispatch] candidate-tree=${candidate.tree}\n`,
   );
   try {
+    const failureArtifact = resolution.executor === "crabbox"
+      ? {
+          absoluteDirectory: path.join(
+            repoRoot,
+            ...CRABBOX_FAILURE_ARTIFACT_RELATIVE_PATH.split("/"),
+          ),
+          displayPath: CRABBOX_FAILURE_ARTIFACT_RELATIVE_PATH,
+          runMetadata:
+            `command-argv-json=${JSON.stringify([request.verificationCommand, ...request.commandArgs])}\nexecutor=crabbox\ncandidate-tree=${candidate.tree}\n`,
+        }
+      : null;
     return await runChild(
       { ...invocation, cwd: candidate.root },
       childEnvironment,
+      { failureArtifact },
     );
   } finally {
     candidate.dispose();
@@ -1151,15 +1166,182 @@ function readBooleanFlag(value, name) {
   throw new Error(`${name} must be 0 or 1.`);
 }
 
-function runChild(invocation, env) {
+function runChild(invocation, env, { failureArtifact = null } = {}) {
   return new Promise((resolve, reject) => {
     const useDetachedProcessGroup = process.platform !== "win32";
+    let failureArtifactStdoutDescriptor = null;
+    let failureArtifactStderrDescriptor = null;
+    let failureArtifactWriteFailed = false;
+    let outputRelayWriteFailed = false;
+    let settled = false;
+
+    if (failureArtifact) {
+      try {
+        rmSync(failureArtifact.absoluteDirectory, {
+          force: true,
+          recursive: true,
+        });
+        mkdirSync(failureArtifact.absoluteDirectory, {
+          mode: 0o700,
+          recursive: true,
+        });
+        writeFileSync(
+          path.join(failureArtifact.absoluteDirectory, "run.txt"),
+          failureArtifact.runMetadata,
+          { encoding: "utf8", mode: 0o600 },
+        );
+        failureArtifactStdoutDescriptor = openSync(
+          path.join(failureArtifact.absoluteDirectory, "stdout.log"),
+          "w",
+          0o600,
+        );
+        failureArtifactStderrDescriptor = openSync(
+          path.join(failureArtifact.absoluteDirectory, "stderr.log"),
+          "w",
+          0o600,
+        );
+      } catch {
+        if (failureArtifactStdoutDescriptor !== null) {
+          closeSync(failureArtifactStdoutDescriptor);
+        }
+        if (failureArtifactStderrDescriptor !== null) {
+          closeSync(failureArtifactStderrDescriptor);
+        }
+        rmSync(failureArtifact.absoluteDirectory, {
+          force: true,
+          recursive: true,
+        });
+        throw new Error(
+          "Unable to initialize delegated Testbox failure evidence.",
+        );
+      }
+    }
+
     const child = spawn(invocation.command, invocation.args, {
       cwd: invocation.cwd,
       detached: useDetachedProcessGroup,
       env,
-      stdio: "inherit",
+      stdio: failureArtifact ? ["inherit", "pipe", "pipe"] : "inherit",
     });
+
+    const relayOutput = (source, destination, artifactDescriptor) => {
+      if (!source) {
+        return null;
+      }
+      let destinationOpen = !destination.destroyed;
+      let destinationErrorObserved = false;
+      let waitingForDrain = false;
+      const pendingWrites = new Set();
+      const resumeSource = () => {
+        waitingForDrain = false;
+        source.resume();
+      };
+      const stopRelaying = () => {
+        destinationOpen = false;
+        if (waitingForDrain) {
+          destination.off("drain", resumeSource);
+          resumeSource();
+        }
+      };
+      const onDestinationError = (error) => {
+        destinationErrorObserved = true;
+        stopRelaying();
+        if (!isOutputDestinationClosure(error) && !outputRelayWriteFailed) {
+          outputRelayWriteFailed = true;
+          if (!settled) {
+            signalChild(child, useDetachedProcessGroup, "SIGTERM");
+          }
+        }
+        for (const pendingWrite of pendingWrites) {
+          if (pendingWrite.callbackError) {
+            pendingWrite.settle(false);
+          }
+        }
+      };
+      const writeDestination = (chunk) => {
+        if (!destinationOpen) {
+          return Promise.resolve(false);
+        }
+        let resolveCompletion;
+        const completion = new Promise((resolve) => {
+          resolveCompletion = resolve;
+        });
+        const pendingWrite = {
+          callbackError: false,
+          completion,
+          settle(delivered) {
+            if (!pendingWrites.delete(pendingWrite)) {
+              return;
+            }
+            resolveCompletion(delivered);
+          },
+        };
+        pendingWrites.add(pendingWrite);
+        try {
+          const hasCapacity = destination.write(chunk, (error) => {
+            if (!error) {
+              pendingWrite.settle(true);
+              return;
+            }
+            pendingWrite.callbackError = true;
+            if (destinationErrorObserved || !destinationOpen) {
+              pendingWrite.settle(false);
+            }
+          });
+          if (!hasCapacity && !waitingForDrain) {
+            waitingForDrain = true;
+            source.pause();
+            destination.once("drain", resumeSource);
+          }
+        } catch (error) {
+          onDestinationError(error);
+          pendingWrite.settle(false);
+        }
+        return completion;
+      };
+      destination.on("close", stopRelaying);
+      destination.on("error", onDestinationError);
+      const onData = (chunk) => {
+        if (artifactDescriptor !== null && !failureArtifactWriteFailed) {
+          try {
+            writeSync(artifactDescriptor, chunk);
+          } catch {
+            failureArtifactWriteFailed = true;
+            if (!settled) {
+              signalChild(child, useDetachedProcessGroup, "SIGTERM");
+            }
+          }
+        }
+        void writeDestination(chunk);
+      };
+      source.on("data", onData);
+      return {
+        cleanup() {
+          stopRelaying();
+          source.off("data", onData);
+          destination.off("close", stopRelaying);
+          destination.off("error", onDestinationError);
+        },
+        async settle() {
+          while (pendingWrites.size > 0) {
+            await Promise.all(
+              [...pendingWrites].map((pendingWrite) => pendingWrite.completion),
+            );
+          }
+        },
+        write: writeDestination,
+      };
+    };
+    const stdoutRelay = relayOutput(
+      child.stdout,
+      process.stdout,
+      failureArtifactStdoutDescriptor,
+    );
+    const stderrRelay = relayOutput(
+      child.stderr,
+      process.stderr,
+      failureArtifactStderrDescriptor,
+    );
 
     const onSigint = () => {
       signalChild(child, useDetachedProcessGroup, "SIGINT");
@@ -1174,33 +1356,121 @@ function runChild(invocation, env) {
     process.once("SIGTERM", onSigterm);
     process.once("SIGHUP", onSighup);
 
-    const cleanup = () => {
+    const cleanupChildOwnership = () => {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
       process.off("SIGHUP", onSighup);
+      if (failureArtifactStdoutDescriptor !== null) {
+        closeSync(failureArtifactStdoutDescriptor);
+        failureArtifactStdoutDescriptor = null;
+      }
+      if (failureArtifactStderrDescriptor !== null) {
+        closeSync(failureArtifactStderrDescriptor);
+        failureArtifactStderrDescriptor = null;
+      }
+    };
+    const cleanupRelays = () => {
+      stdoutRelay?.cleanup();
+      stderrRelay?.cleanup();
+    };
+    const settleRelays = async () => {
+      await Promise.all([
+        stdoutRelay?.settle() ?? Promise.resolve(),
+        stderrRelay?.settle() ?? Promise.resolve(),
+      ]);
+    };
+    const reportFailureArtifact = async () => {
+      if (!failureArtifact) {
+        return false;
+      }
+      const message =
+        `[verification-dispatch] failure-artifact=${failureArtifact.displayPath}\n`;
+      if (await (stderrRelay?.write(message) ?? Promise.resolve(false))) {
+        return true;
+      }
+      return await (stdoutRelay?.write(message) ?? Promise.resolve(false));
     };
 
     child.once("error", (error) => {
-      cleanup();
-      reject(error);
+      if (settled) {
+        return;
+      }
+      settled = true;
+      void (async () => {
+        cleanupChildOwnership();
+        await settleRelays();
+        await reportFailureArtifact();
+        cleanupRelays();
+        reject(error);
+      })().catch((settlementError) => {
+        cleanupRelays();
+        reject(settlementError);
+      });
     });
-    child.once("exit", (code, signal) => {
-      cleanup();
-      if (signal === "SIGINT") {
-        resolve(130);
+    child.once("close", (code, signal) => {
+      if (settled) {
         return;
       }
-      if (signal === "SIGHUP") {
-        resolve(129);
-        return;
-      }
-      if (signal) {
-        resolve(143);
-        return;
-      }
-      resolve(code ?? 1);
+      settled = true;
+      void (async () => {
+        cleanupChildOwnership();
+        await settleRelays();
+        if (failureArtifactWriteFailed) {
+          await reportFailureArtifact();
+          cleanupRelays();
+          reject(new Error("Unable to persist delegated Testbox failure evidence."));
+          return;
+        }
+        if (outputRelayWriteFailed) {
+          await reportFailureArtifact();
+          cleanupRelays();
+          reject(new Error("Unable to relay delegated Testbox output."));
+          return;
+        }
+        if (failureArtifact && code === 0 && signal === null) {
+          rmSync(failureArtifact.absoluteDirectory, {
+            force: true,
+            recursive: true,
+          });
+        } else if (failureArtifact) {
+          await reportFailureArtifact();
+        }
+        if (outputRelayWriteFailed) {
+          cleanupRelays();
+          reject(new Error("Unable to relay delegated Testbox output."));
+          return;
+        }
+        cleanupRelays();
+        if (signal === "SIGINT") {
+          resolve(130);
+          return;
+        }
+        if (signal === "SIGHUP") {
+          resolve(129);
+          return;
+        }
+        if (signal) {
+          resolve(143);
+          return;
+        }
+        resolve(code ?? 1);
+      })().catch((settlementError) => {
+        cleanupRelays();
+        reject(settlementError);
+      });
     });
   });
+}
+
+function isOutputDestinationClosure(error) {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      ["EPIPE", "ERR_STREAM_DESTROYED", "ERR_STREAM_WRITE_AFTER_END"].includes(
+        error.code,
+      ),
+  );
 }
 
 function signalChild(child, useDetachedProcessGroup, signal) {

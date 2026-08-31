@@ -2555,10 +2555,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       input: expect.objectContaining({
-        codexConfigOverrides: [
-          'memories.use_memories=false',
-          'memories.generate_memories=false',
-        ],
         maintenanceProfile: 'member-memory',
         prompt: expect.stringContaining(
           '## Conversation evidence (engine-supplied, bounded, last 7 days)',
@@ -3873,6 +3869,12 @@ test('sendAssistantNotificationLocal rejects an append-only clarification after 
     vault: '/vaults/scheduled-local-time-clarification-skip',
   })).rejects.toMatchObject({
     code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    context: {
+      assistantNotificationValidationFailureReason:
+        'runtime_presentation_non_send_decision',
+    },
+    message:
+      'A runtime-owned notification presentation requires a send_message decision.',
   })
 
   expect(deliverMessage).not.toHaveBeenCalled()
@@ -4146,9 +4148,14 @@ test('sendAssistantNotificationLocal rejects a selected song without generated m
     vault: '/vaults/group-sponsorship-text',
   })).rejects.toMatchObject({
     code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    context: {
+      assistantNotificationValidationFailureReason:
+        'creative_response_media_invalid',
+    },
     details: expect.objectContaining({
       assistantNotificationProviderNonReplayableWork: false,
     }),
+    message: 'A song notification requires exactly one generated song attachment.',
   })
 
   expect(observedProviderInputs[0]).toMatchObject({
@@ -5478,31 +5485,63 @@ describe('parseAssistantNotificationDecision', () => {
     const { parseAssistantNotificationDecision } = await import(
       '../src/assistant/notification-turn.ts'
     )
+    const captureDecisionError = (value: string): unknown => {
+      try {
+        parseAssistantNotificationDecision(value)
+      } catch (error) {
+        return error
+      }
+      throw new Error('Expected assistant notification decision parsing to fail.')
+    }
+    const hostilePrivateResponse =
+      'HOSTILE_PRIVATE_PROVIDER_RESPONSE_DO_NOT_EMIT_7f3b2f'
 
-    expect(() => parseAssistantNotificationDecision('not json at all')).toThrowError(
-      new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    const unparseableError = captureDecisionError(hostilePrivateResponse)
+    expect(unparseableError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_json_unparseable',
+      },
+      message:
         'Assistant notification turn must return a single valid JSON decision object.',
-      ),
+    })
+    expect(JSON.stringify(unparseableError)).not.toContain(hostilePrivateResponse)
+
+    const malformedJsonError = captureDecisionError(
+      `{"kind":"send_message","text":${hostilePrivateResponse}}`,
     )
-    expect(() =>
-      parseAssistantNotificationDecision('{"kind":"send_message","privateSummary":"brief"}'),
-    ).toThrowError(
-      new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
-        'Assistant notification turn returned an invalid decision object.',
-      ),
-    )
-    expect(() =>
-      parseAssistantNotificationDecision(
-        '{"kind":"skip","unexpected":"value","privateSummary":"No action"}',
-      ),
-    ).toThrowError(
-      new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
-        'Assistant notification turn returned an invalid decision object.',
-      ),
-    )
+    expect(malformedJsonError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_json_unparseable',
+      },
+      message: 'Assistant notification turn returned an invalid decision object.',
+    })
+    expect(JSON.stringify(malformedJsonError)).not.toContain(hostilePrivateResponse)
+
+    const schemaPrivateResponse =
+      'PRIVATE_SCHEMA_RESPONSE_DO_NOT_EMIT_902c45'
+    const schemaError = captureDecisionError(JSON.stringify({
+      kind: 'send_message',
+      privateSummary: schemaPrivateResponse,
+    }))
+    expect(schemaError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_schema_invalid',
+      },
+      message: 'Assistant notification turn returned an invalid decision object.',
+    })
+    expect(JSON.stringify(schemaError)).not.toContain(schemaPrivateResponse)
+    expect(captureDecisionError(
+      '{"kind":"skip","unexpected":"value","privateSummary":"No action"}',
+    )).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_schema_invalid',
+      },
+      message: 'Assistant notification turn returned an invalid decision object.',
+    })
   })
 })
 

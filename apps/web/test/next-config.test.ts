@@ -27,6 +27,7 @@ import {
   buildHostedWebTurbopackConfig,
   buildHostedWebContentSecurityPolicy,
   buildHostedWebSecurityHeaders,
+  configureHostedWebWebpack,
   configureHostedWebWorkflowLocalDataDir,
   resolveHostedPrivyOrigin,
   resolveHostedPrivyOrigins,
@@ -358,9 +359,9 @@ test("hosted web dev filesystem cache defaults off and allows explicit opt-in", 
   );
 });
 
-test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {
+test("next.config keeps both bundlers focused without custom workspace rewrite rules", () => {
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
-  assert.equal(productionNextConfig.webpack, undefined);
+  assert.equal(productionNextConfig.webpack, configureHostedWebWebpack);
   assert.deepEqual(productionNextConfig.typescript, {
     ignoreBuildErrors: false,
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
@@ -397,10 +398,10 @@ test("next.config leaves agent guidance under repository ownership", () => {
   assert.equal(productionNextConfig.agentRules, false);
 });
 
-test("production build config keeps Webpack compilation in the Next process", () => {
+test("production build config isolates Webpack compilation from static generation", () => {
   assert.equal(productionNextConfig.experimental?.turbopackFileSystemCacheForBuild, false);
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
-  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, undefined);
+  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, true);
   assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, true);
 });
 
@@ -497,6 +498,16 @@ test("next.config traces bundled image assets for the iMessage nutrition route",
   );
 });
 
+test("next.config traces every selectable contact-card avatar into its route", () => {
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/api/murph-contact-card"],
+    [
+      "public/brand-logos/murph-logo-avatar-*.png",
+      "public/murph-headshots/*-sm.png",
+    ],
+  );
+});
+
 test("next.config disables the Turbopack dev filesystem cache by default and honors explicit opt-in", () => {
   const previousValue = process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
 
@@ -534,6 +545,33 @@ test("buildHostedWebTurbopackConfig always points Turbopack at the repo root", (
   } else {
     assert.deepEqual(resolveAlias, {
       "@farcaster/mini-app-solana": "./src/lib/empty-module.ts",
+    });
+  }
+});
+
+test("configureHostedWebWebpack aliases Privy's missing optional Farcaster peer", () => {
+  const webpackConfig = {
+    resolve: {
+      alias: {
+        existing: "/existing-module.ts",
+      },
+    },
+  };
+  const configured = configureHostedWebWebpack(webpackConfig);
+  const hasOptionalModule = resolveHostedOptionalModule();
+
+  assert.equal(configured, webpackConfig);
+  if (hasOptionalModule) {
+    assert.deepEqual(configured.resolve.alias, {
+      existing: "/existing-module.ts",
+    });
+  } else {
+    assert.deepEqual(configured.resolve.alias, {
+      existing: "/existing-module.ts",
+      "@farcaster/mini-app-solana": path.join(
+        repoRoot,
+        "apps/web/src/lib/empty-module.ts",
+      ),
     });
   }
 });

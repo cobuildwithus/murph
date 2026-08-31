@@ -151,6 +151,7 @@ const mocks = vi.hoisted(() => {
     })),
     logHostedOnboardingDiagnostic: vi.fn(),
     logHostedOnboardingWarning: vi.fn(),
+    maybeHandoffHostedExecutionWebhookWake: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     createHostedLinqChat: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
@@ -407,6 +408,20 @@ vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", async ()
       mocks.ensureHostedLinqInstantStartStarterUsageEnrollment,
     runHostedLinqInstantStartDeferredActivationWakeBestEffort:
       mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-service-wake", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/webhook-service-wake")
+  >("@/src/lib/hosted-onboarding/webhook-service-wake");
+  mocks.maybeHandoffHostedExecutionWebhookWake.mockImplementation(
+    actual.maybeHandoffHostedExecutionWebhookWake,
+  );
+  return {
+    ...actual,
+    maybeHandoffHostedExecutionWebhookWake:
+      mocks.maybeHandoffHostedExecutionWebhookWake,
   };
 });
 
@@ -1333,10 +1348,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       prisma: expect.any(Object),
     });
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith({
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
+      requestStartedAtEpochMs: expect.any(Number),
       source: "linq-typing-started",
       userId: "member_typing",
-    });
+    }));
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
@@ -3445,6 +3462,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("signals Temporal after an active-member mailbox append", async () => {
+    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId
+      .mockResolvedValueOnce("member_123");
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
+      prewarmRuntimeShell,
+    });
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -3482,6 +3506,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expectHostedLinqPointerSignalAccepted("evt_required_nudge_failed");
+    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
+      requestStartedAtEpochMs: expect.any(Number),
+      source: "linq-message-routing",
+      userId: "member_123",
+    }));
     expectHostedLinqReadReceiptSent();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4603,6 +4634,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("re-prepares once when the direct mailbox ingress root changes under lock", async () => {
     mocks.enforceDirectMailboxPreparation = true;
+    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
+      prewarmRuntimeShell,
+    });
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
     );
@@ -4733,6 +4769,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
     )).toHaveLength(4);
+    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      source: "linq-message-routing",
+      userId: "member_123",
+    }));
+    expect(
+      prewarmRuntimeShell.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(prepareHostedCryptoDomainRootCandidates).mock
+        .invocationCallOrder[0]
+        ?? Number.NEGATIVE_INFINITY,
+    );
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
@@ -6081,7 +6129,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         expect(providerDomainsAfterTransactionStart).toEqual([]);
         expect(prisma.$transaction).toHaveBeenCalledTimes(1);
         expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
-        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
         expect(prisma.$executeRaw.mock.calls[0]?.[1]).toBe(
           "phone:+15551234567",
         );
@@ -8105,7 +8153,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     const ensureRuntimeProcessing = vi.fn();
-    const prewarmRuntimeShell = vi.fn(() => {
+    const prewarmRuntimeShell = vi.fn<
+      (request: {
+        source: "linq-instant-start" | "linq-message-routing" | "linq-typing-started";
+      }) => Promise<{ accepted: true }>
+    >(() => {
       callOrder.push("shell-prewarm");
       return new Promise<{ accepted: true }>(() => undefined);
     });
@@ -8211,10 +8263,21 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(shellPrewarmIndex).toBeGreaterThanOrEqual(0);
     expect(shellPrewarmIndex).toBeLessThan(enrollmentIndex);
     expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith({
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
+      requestStartedAtEpochMs: expect.any(Number),
       source: "linq-instant-start",
       userId: memberId,
-    });
+    }));
+    expect(prewarmRuntimeShell.mock.calls.map(([request]) => request.source))
+      .toEqual(["linq-instant-start"]);
+    expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
+      expect.objectContaining({
+        wakeHandoff: expect.not.objectContaining({
+          runtimeShellPrewarmOrchestrationAttemptId: expect.any(String),
+        }),
+      }),
+    );
     expect(ensureRuntimeProcessing).toHaveBeenCalledOnce();
     expect(ensureRuntimeProcessing).toHaveBeenCalledWith(expect.objectContaining({
       userId: memberId,
@@ -8415,10 +8478,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith({
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
+      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
+      requestStartedAtEpochMs: expect.any(Number),
       source: "linq-instant-start",
       userId: memberId,
-    });
+    }));
     expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {
@@ -13215,7 +13280,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("ignores email-only first contact when fallback delivery has no member phone", async () => {
+  it("delivers verified-email first contact from the selected fallback line", async () => {
     const fallbackLinePhone = "+15550100001";
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const prismaMocks = {
@@ -13232,10 +13297,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn(),
+        create: vi.fn().mockResolvedValue({
+          id: "invite_email",
+          inviteCode: "code_email",
+        }),
         findFirst: vi.fn().mockResolvedValue(null),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          id: "invite_email",
+          inviteCode: "code_email",
+        }),
+        update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqLine: buildHostedLinqLinePoolFixture({
@@ -13292,14 +13363,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(response).toMatchObject({
-      ignored: true,
+      inviteCode: "code_email",
       ok: true,
-      reason: "unassignable-home-line",
+      reason: "sent-signup-link",
     });
-    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledOnce();
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledWith(expect.objectContaining({
+      from: fallbackLinePhone,
+      to: ["buddy@example.test"],
+    }));
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -15526,6 +15599,9 @@ function buildHostedLinqLinePoolFixture(input: {
   const rows = input.lines.map((line) => ({
     activeMemberLimit: line.activeMemberLimit ?? null,
     assignmentWeight: 1,
+    configuredAt: new Date("2026-03-26T00:00:00.000Z"),
+    egressPolicy: "enabled",
+    healthStatus: "healthy",
     maxNewConversationsPerDay: line.maxNewConversationsPerDay ?? null,
     phoneNumber: line.phoneNumber,
     phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(line.phoneNumber),
@@ -15533,6 +15609,8 @@ function buildHostedLinqLinePoolFixture(input: {
     phoneNumberLookupKey: createHostedPhoneLookupKey(line.phoneNumber),
     proactiveConversationCount: line.proactiveConversationCount ?? null,
     proactiveConversationDayUtc: line.proactiveConversationDayUtc ?? null,
+    providerReputationStatus: "HEALTHY",
+    providerServiceStatus: "ACTIVE",
   }));
 
   return {
@@ -15549,12 +15627,17 @@ function buildHostedLinqLinePoolFixture(input: {
       return matchingRows.map((row) => ({
         activeMemberLimit: row.activeMemberLimit,
         assignmentWeight: row.assignmentWeight,
+        configuredAt: row.configuredAt,
+        egressPolicy: row.egressPolicy,
+        healthStatus: row.healthStatus,
         maxNewConversationsPerDay: row.maxNewConversationsPerDay,
         phoneNumberEncrypted: row.phoneNumberEncrypted,
         phoneNumberHint: row.phoneNumberHint,
         phoneNumberLookupKey: row.phoneNumberLookupKey,
         proactiveConversationCount: row.proactiveConversationCount,
         proactiveConversationDayUtc: row.proactiveConversationDayUtc,
+        providerReputationStatus: row.providerReputationStatus,
+        providerServiceStatus: row.providerServiceStatus,
       }));
     }),
     findUnique: vi.fn().mockResolvedValue(null),

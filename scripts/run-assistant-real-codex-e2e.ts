@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { isAbsolute } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export type AssistantRealCodexAuthMode = 'provider' | 'subscription'
 
@@ -42,6 +42,14 @@ const DEFAULT_OPTIONS: AssistantRealCodexRunOptions = {
   testPattern: null,
 }
 const REAL_CODEX_E2E_TAG = 'real-codex-live'
+export const ASSISTANT_REAL_CODEX_COMMAND = fileURLToPath(
+  new URL(
+    `../packages/assistant-engine/node_modules/.bin/${
+      process.platform === 'win32' ? 'codex.cmd' : 'codex'
+    }`,
+    import.meta.url,
+  ),
+)
 
 const USAGE = [
   'Usage: pnpm test:assistant:live -- --test <name-pattern> [options]',
@@ -126,13 +134,13 @@ export function buildAssistantRealCodexRunEnv(input: {
 
   if (input.options.authMode === 'subscription') {
     env.MURPH_REAL_CODEX_AUTH = 'subscription'
-    delete env.MURPH_REAL_CODEX_COMMAND
     delete env.MURPH_REAL_CODEX_MODEL_PROVIDER
     delete env.MURPH_REAL_CODEX_PROVIDER_ENV_KEY
   } else {
     delete env.MURPH_REAL_CODEX_AUTH
     delete env.MURPH_REAL_CODEX_HOME
   }
+  env.MURPH_REAL_CODEX_COMMAND = ASSISTANT_REAL_CODEX_COMMAND
 
   if (input.options.model) {
     env.MURPH_REAL_CODEX_MODEL = input.options.model
@@ -268,7 +276,7 @@ export function executeAssistantRealCodexRun(
   if (options.authMode === 'subscription') {
     const loginStatus = dependencies.runCommand({
       args: ['login', 'status'],
-      command: 'codex',
+      command: ASSISTANT_REAL_CODEX_COMMAND,
       env: buildAssistantRealCodexLoginEnv(
         dependencies.sourceEnv,
         options.codexHome,

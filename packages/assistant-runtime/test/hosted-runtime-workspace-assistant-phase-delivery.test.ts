@@ -2,6 +2,7 @@ import {
   createCodexAuthSystemMailboxItem,
   createDeliveryEffect,
   createDueAssistantWorkspace,
+  createExternalCompletionSystemMailboxItem,
   createFailedDeliveryOutcome,
   createMemberActivationSignupWelcomeSystemMailboxItem,
   createPhaseInput,
@@ -10,6 +11,7 @@ import {
   createSystemMailboxItem,
   createTerminalFailureOutboxIntent,
   expectAssistantLaneCallWithoutDeviceSyncOptions,
+  loadHostedSystemMailboxRealImplementation,
   mocks,
   resolveHostedPendingAssistantInputWakeAtWithRealImplementation,
   seedDirectLinqAssistantInputRoute,
@@ -54,6 +56,9 @@ import {
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
+  executeCodexAppServerTurn,
+} from "@murphai/assistant-engine/assistant-codex";
+import {
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
@@ -63,6 +68,13 @@ import {
   readExistingHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
+
+vi.mock("@murphai/assistant-engine/assistant-codex", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@murphai/assistant-engine/assistant-codex")
+  >()),
+  executeCodexAppServerTurn: vi.fn(),
+}));
 
 describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes foreground delivery finished timing after deferred delivery drains", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -4154,41 +4166,127 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
   });
 
-  it("does not record a retryable mailbox item during an unrelated checkpoint", async () => {
+  it("composes invalid assistant notification responses through the mailbox retry log", async () => {
+    const now = "2026-04-27T00:02:00.000Z";
+    const nextWakeAt = new Date(Date.parse(now) + 60_000).toISOString();
+    const hostileResponseMarker =
+      "HOSTILE_PRIVATE_PROVIDER_RESPONSE_DO_NOT_EMIT_a4158c";
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
-      nextWakeAt: null,
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), "hosted-notification-validation-"),
+    );
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    const systemMailbox = await loadHostedSystemMailboxRealImplementation();
+    const baseMailboxItem = createExternalCompletionSystemMailboxItem({
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:validation-reason",
     });
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
-      attemptCount: 2,
-      errorCode: "system_mailbox.retryable",
-      errorMessage: "redacted",
-      itemId: "system_mailbox_item_retryable",
-      legacyUsageReferralAuthorityClassification: null,
-      nextWakeAt: "2026-04-27T00:10:00.000Z",
-      routeAction: "dispatch-assistant-notification",
-      status: "retryable_failed",
-      wakeKind: "assistant.notification.requested",
+    const mailboxItem = {
+      ...baseMailboxItem,
+      attemptCount: 0,
+      wake: {
+        ...baseMailboxItem.wake,
+        notification: {
+          ...baseMailboxItem.wake.notification,
+          responsePolicy: { kind: "require_send" as const },
+        },
+      },
+    };
+
+    vi.mocked(executeCodexAppServerTurn).mockResolvedValueOnce({
+      acceptedNoReplyDeliveryContextOrdinals: [],
+      additionalUsages: [],
+      finalAction: null,
+      finalActionExplicit: false,
+      finalMessage: hostileResponseMarker,
+      jsonEvents: [],
+      precedingAgentMessageSegments: [],
+      providerActionCount: 0,
+      reactions: [],
+      responseCard: null,
+      responseDeliveryContextOrdinal: 0,
+      responseMedia: [],
+      rolloutRelativePath: null,
+      runtimeIssueInputs: [],
+      sessionId: "codex-thread-notification-validation",
+      stderr: "",
+      stdout: "",
+      targetInputId: null,
+      threadId: "codex-thread-notification-validation",
+      transcriptMessage: hostileResponseMarker,
+      turnId: "codex-turn-notification-validation",
     });
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      logRequests,
-      now: () => "2026-04-27T00:00:00.000Z",
-    }));
-    await result.afterCheckpoint?.();
+    try {
+      await initializeVault({ createdAt: now, vaultRoot });
+      await mkdir(operatorHomeRoot, { recursive: true });
+      await systemMailbox.restoreHostedSystemMailboxCheckpointRollbackState({
+        state: {
+          pending: [mailboxItem],
+        },
+        vaultRoot,
+      });
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+        (request) =>
+          systemMailbox.prepareHostedSystemMailboxItemForCheckpoint({
+            ...request,
+            now: () => now,
+          }),
+      );
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        logRequests,
+        now: () => now,
+        operatorHomeRoot,
+        vaultRoot,
+      }));
+      await result.afterCheckpoint?.();
 
-    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
-    expect(
-      logRequests.flatMap((request) => request.entries).filter((entry) =>
-        entry.eventCode === "mailbox.system_processed"
-      ),
-    ).toEqual([
-      expect.objectContaining({
-        redactedJson: expect.objectContaining({
-          status: "retryable_failed",
+      expect(executeCodexAppServerTurn).toHaveBeenCalledTimes(1);
+      expect(result.nextWakeAt).toBe(nextWakeAt);
+      expect(
+        mocks.recordHostedSystemMailboxItemAfterCheckpoint,
+      ).not.toHaveBeenCalled();
+      const parsedLogRequests = logRequests.map((request) =>
+        parseHostedRuntimeLogRequest(request),
+      );
+      expect(
+        parsedLogRequests.flatMap((request) => request.entries).filter((entry) =>
+          entry.eventCode === "mailbox.system_processed"
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          level: "warn",
+          redactedJson: expect.objectContaining({
+            assistantNotificationValidationFailureReason:
+              "decision_json_unparseable",
+            errorCode: "ASSISTANT_NOTIFICATION_INVALID_RESPONSE",
+            routeAction: "dispatch-assistant-notification",
+            status: "retryable_failed",
+            wakeKind: "assistant.notification.requested",
+          }),
         }),
-      }),
-    ]);
+      ]);
+
+      const mailboxState =
+        await systemMailbox.readHostedSystemMailboxCheckpointRollbackState({
+          vaultRoot,
+        });
+      expect(mailboxState.pending).toEqual([
+        expect.objectContaining({
+          attemptCount: 1,
+          lastErrorCode: "ASSISTANT_NOTIFICATION_INVALID_RESPONSE",
+          nextAttemptAt: nextWakeAt,
+        }),
+      ]);
+      expect(mailboxState.pending[0]).not.toHaveProperty(
+        "assistantNotificationValidationFailureReason",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(hostileResponseMarker);
+      expect(JSON.stringify(mailboxState)).not.toContain(hostileResponseMarker);
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
   });
 
   it("preserves a device-sync mailbox follow-up wake after recording the mailbox item", async () => {

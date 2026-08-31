@@ -88,6 +88,10 @@ function createPreCommitHarness() {
     `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$@" > "\${MURPH_TEST_PNPM_CAPTURE:?}"
+if [[ "\${MURPH_TEST_GENERATOR_FAIL:-0}" == '1' ]]; then
+  printf '%s\\n' "\${MURPH_TEST_GENERATOR_DIAGNOSTIC:-synthetic generator failure}" >&2
+  exit 1
+fi
 if [[ "\${MURPH_TEST_WRITE_GENERATED:-0}" == '1' ]]; then
   cli_dir="$2"
   case "\${MURPH_TEST_GENERATOR_MUTATION:-}" in
@@ -436,6 +440,30 @@ describe("pre-commit CLI schema generation", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(harness.capture, "utf8")).toContain("gen:config-schema");
+  });
+
+  it("surfaces generator diagnostics and the canonical recovery commands", () => {
+    const harness = createPreCommitHarness();
+    writeFileSync(
+      path.join(harness.repository, "packages", "cli", "src", "input.ts"),
+      "staged\n",
+    );
+    runGit(harness.repository, ["add", "packages/cli/src/input.ts"]);
+    const hookRepoRoot = runGit(harness.repository, ["rev-parse", "--show-toplevel"]);
+    const diagnostic = `${hookRepoRoot}/packages/core/dist/index.d.ts: synthetic stale declaration`;
+
+    const result = runPreCommit(harness, {
+      MURPH_TEST_GENERATOR_DIAGNOSTIC: diagnostic,
+      MURPH_TEST_GENERATOR_FAIL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain(
+      "<repo>/packages/core/dist/index.d.ts: synthetic stale declaration",
+    );
+    expect(result.stderr).not.toContain(hookRepoRoot);
+    expect(result.stderr).toContain("pnpm --dir packages/cli verify:prepared-runtime");
+    expect(result.stderr).toContain("pnpm --dir packages/cli gen:config-schema");
   });
 
   it("fails before generation when a tracked CLI input has unstaged changes", () => {

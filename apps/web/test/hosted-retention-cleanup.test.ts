@@ -1,19 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const accountDeletionCleanupMocks = vi.hoisted(() => ({
-  drainHostedAccountDeletionCleanupBatch: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
-  drainHostedAccountDeletionCleanupBatch:
-    accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch,
-}));
-
 import * as hostedRuntimeSignals from "@/src/lib/hosted-orchestration/signal-runtime";
 import { HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS } from "@/src/lib/connected-apps/connect-intent-ownership";
 import {
   CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
   DEVICE_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+  HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES,
   HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
   HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES,
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
@@ -26,17 +18,13 @@ import {
   HOSTED_RETENTION_BATCH_SIZE,
   HOSTED_RETENTION_MAX_BATCHES,
   HOSTED_WEB_SESSION_RETENTION_MS,
-  runHostedRetentionCleanup,
+  deleteExpiredHostedCallbackRequestNonces,
+  runHostedControlPlaneRetentionCleanup,
+  runHostedRuntimeSignalRetentionCleanup,
 } from "@/src/lib/hosted-retention/cleanup";
 
 beforeEach(() => {
-  accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch.mockReset();
-  accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch.mockResolvedValue({
-    completed: 0,
-    failed: 0,
-    pending: 0,
-    selected: 0,
-  });
+  vi.clearAllMocks();
 });
 
 afterEach(() => {
@@ -95,15 +83,10 @@ describe("hosted retention cleanup", () => {
       workflowId: "hosted-user-runtime:member_inactive",
     });
     const queryRaw = vi.fn()
-      .mockResolvedValueOnce([{
-        policyNonReplies: 0n,
-        retired: 0n,
-        tombstonesDeleted: 0n,
-      }])
       .mockResolvedValueOnce([{ userId: "member_inactive" }]);
     const prisma = createRetentionPrisma({ queryRaw });
 
-    await expect(runHostedRetentionCleanup({
+    await expect(runHostedRuntimeSignalRetentionCleanup({
       now,
       prisma: prisma as never,
     })).resolves.toMatchObject({
@@ -116,7 +99,7 @@ describe("hosted retention cleanup", () => {
     });
   });
 
-  it("prunes every high-volume diagnostic table before signaling runtimes", async () => {
+  it("prunes every ordinary control-plane retention table serially", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const countsByStatement = new Map<string, number>([
       ['DELETE FROM "hosted_connected_app_connect_intent"', 1],
@@ -126,7 +109,6 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "device_oauth_session"', 4],
       ['DELETE FROM "clinical_record_connect_intent"', 5],
       ['DELETE FROM "clinical_record_oauth_session"', 6],
-      ['DELETE FROM "hosted_web_internal_request_nonce"', 6],
       ['DELETE FROM "hosted_ingress_latency_trace"', 1],
       ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
       ['DELETE FROM "hosted_group_current_sender_clarification"', 3],
@@ -143,41 +125,24 @@ describe("hosted retention cleanup", () => {
       return [...countsByStatement]
         .find(([fragment]) => sql.includes(fragment))?.[1] ?? 0;
     });
-    const queryRaw = vi.fn()
-      .mockResolvedValueOnce([{
-        policyNonReplies: 0n,
-        retired: 7n,
-        tombstonesDeleted: 3n,
-      }])
-      .mockResolvedValueOnce([
-        { userId: "member_due_1" },
-        { userId: "member_due_2" },
-      ]);
-    const signalRuntimeRecheck = vi.fn()
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("Temporal unavailable"));
+    const queryRaw = vi.fn().mockResolvedValueOnce([{
+      policyNonReplies: 0n,
+      retired: 7n,
+      tombstonesDeleted: 3n,
+    }]);
     const prisma = createRetentionPrisma({
       executeRaw,
       queryRaw,
     });
 
-    await expect(runHostedRetentionCleanup({
+    await expect(runHostedControlPlaneRetentionCleanup({
       now,
       prisma: prisma as never,
-      signalRuntimeRecheck,
     })).resolves.toEqual({
-      accountDeletionCleanup: {
-        completed: 0,
-        failed: 0,
-        pending: 0,
-        selected: 0,
-      },
       compactedLinqProviderEventDiagnostics: 5,
       expiredAssistantRuntimeIssuesDeleted: 2,
-      expiredCallbackRequestNoncesDeleted: 6,
       expiredClinicalRecordConnectIntentsDeleted: 5,
       expiredClinicalRecordOauthSessionsDeleted: 6,
-      expiredComputerRunsCleanedUp: 0,
       expiredConnectedAppConnectIntentsDeleted: 1,
       expiredConversationPolicyNonRepliesRecorded: 0,
       expiredDeviceConnectIntentsDeleted: 3,
@@ -191,18 +156,8 @@ describe("hosted retention cleanup", () => {
       expiredMailboxTombstonesDeleted: 3,
       expiredSensitiveActionChallengesDeleted: 2,
       expiredSignupNotificationContextsRetired: 3,
-      inboxMediaRetentionRuntimeSignalFailures: 1,
-      inboxMediaRetentionRuntimeSignalsSent: 1,
-      oldRuntimeLogsDeleted: 0,
       staleWebSessionsDeleted: 9,
     });
-    expect(
-      accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch,
-    ).toHaveBeenCalledWith({ now, prisma });
-    expect(
-      accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch
-        .mock.invocationCallOrder[0],
-    ).toBeLessThan(executeRaw.mock.invocationCallOrder[0]!);
 
     const signupContextRetentionCall = findRetentionCall(
       executeRaw,
@@ -244,6 +199,7 @@ describe("hosted retention cleanup", () => {
     expect(mailboxDeleteSql.match(/FOR UPDATE SKIP LOCKED/g)).toHaveLength(2);
     expect(queryRaw.mock.calls[0]?.slice(1)).toEqual([
       now,
+      "assistant_ask.current_sender_pending",
       new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS),
       HOSTED_RETENTION_BATCH_SIZE,
       now,
@@ -255,7 +211,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(17);
+    expect(executeRaw).toHaveBeenCalledTimes(16);
 
     const groupParticipantObservationCall = findRetentionCall(
       executeRaw,
@@ -279,39 +235,6 @@ describe("hosted retention cleanup", () => {
     expect(sqlOf(deviceOauthCall)).toContain(
       'oauth_session."consumed_at" IS NULL',
     );
-
-    const callbackNonceCall = findRetentionCall(
-      executeRaw,
-      'DELETE FROM "hosted_web_internal_request_nonce"',
-    );
-    expect(sqlOf(callbackNonceCall)).toContain(
-      "WITH database_clock AS MATERIALIZED",
-    );
-    expect(sqlOf(callbackNonceCall)).toContain("doomed AS MATERIALIZED");
-    expect(sqlOf(callbackNonceCall)).toContain("date_trunc(");
-    expect(sqlOf(callbackNonceCall)).toContain("'milliseconds'");
-    expect(sqlOf(callbackNonceCall)).toContain(
-      "clock_timestamp() AT TIME ZONE 'UTC'",
-    );
-    expect(sqlOf(callbackNonceCall)).toContain(
-      'WHERE request_nonce."expires_at" < database_clock."now"',
-    );
-    expect(sqlOf(callbackNonceCall)).toContain(
-      'request_nonce."expires_at" ASC',
-    );
-    expect(sqlOf(callbackNonceCall)).toContain(
-      'request_nonce."nonce_hash" ASC',
-    );
-    expect(sqlOf(callbackNonceCall)).toContain("LIMIT ?");
-    expect(sqlOf(callbackNonceCall)).toContain(
-      "FOR UPDATE OF request_nonce SKIP LOCKED",
-    );
-    expect(sqlOf(callbackNonceCall)).toContain(
-      'WHERE request_nonce."nonce_hash" = doomed."nonce_hash"',
-    );
-    expect(callbackNonceCall.slice(1)).toEqual([
-      HOSTED_RETENTION_BATCH_SIZE,
-    ]);
 
     const latencyTraceCall = findRetentionCall(
       executeRaw,
@@ -373,63 +296,7 @@ describe("hosted retention cleanup", () => {
         HOSTED_RETENTION_BATCH_SIZE,
       ]);
     }
-    // Call 0 retires mailbox content; call 1 claims due workspaces.
-    expect(queryRaw).toHaveBeenCalledTimes(2);
-    const dueSql = String(queryRaw.mock.calls[1]?.[0].join("?"));
-    expect(dueSql).toContain("WITH due AS");
-    expect(dueSql).toContain('FROM "hosted_workspace"');
-    expect(dueSql).toContain('"inbox_media_retention_wake_at" <=');
-    expect(dueSql).toContain('"inbox_media_retention_signal_attempted_at" ASC NULLS FIRST');
-    expect(dueSql).toContain('UPDATE "hosted_workspace"');
-    expect(dueSql).toContain(
-      'SET "inbox_media_retention_signal_attempted_at" = ?',
-    );
-    expect(dueSql).toContain('RETURNING "hosted_workspace"."user_id" AS "userId"');
-    expect(dueSql).toContain(`LIMIT ?`);
-    expect(dueSql).not.toContain("FOR UPDATE");
-    expect(queryRaw.mock.calls[1]?.slice(1)).toEqual([
-      now,
-      HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
-      now,
-    ]);
-    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      queryRaw.mock.invocationCallOrder[1],
-    );
-    // Every delete finishes before the runtime signals start, so cleanup work
-    // never runs concurrently with the signal fan-out.
-    expect(executeRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
-      queryRaw.mock.invocationCallOrder[1]!,
-    );
-    expect(
-      prisma.hostedComputerRun.findMany.mock.invocationCallOrder[0],
-    ).toBeLessThan(queryRaw.mock.invocationCallOrder[1]!);
-    expect(signalRuntimeRecheck).toHaveBeenCalledTimes(2);
-    expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(1, {
-      abortSignal: expect.anything(),
-      userId: "member_due_1",
-    });
-    expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(2, {
-      abortSignal: expect.anything(),
-      userId: "member_due_2",
-    });
-    expect(prisma.hostedComputerRun.findMany).toHaveBeenCalledWith({
-      orderBy: {
-        updatedAt: "asc",
-      },
-      take: 25,
-      where: {
-        OR: [
-          {
-            expiresAt: { lte: now },
-            status: { in: ["running", "awaiting_user", "cleanup_pending"] },
-          },
-          {
-            kernelSessionId: { not: null },
-            status: { in: ["completed", "failed", "expired", "canceled"] },
-          },
-        ],
-      },
-    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it("keeps started connect intents through one bounded provider-continuation grace", async () => {
@@ -437,10 +304,9 @@ describe("hosted retention cleanup", () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const prisma = createRetentionPrisma({ executeRaw });
 
-    await runHostedRetentionCleanup({
+    await runHostedControlPlaneRetentionCleanup({
       now,
       prisma: prisma as never,
-      signalRuntimeRecheck: vi.fn(),
     });
 
     for (const fragment of [
@@ -502,10 +368,9 @@ describe("hosted retention cleanup", () => {
       }])
       .mockResolvedValueOnce([]);
     const prisma = createRetentionPrisma({ queryRaw });
-    await expect(runHostedRetentionCleanup({
+    await expect(runHostedControlPlaneRetentionCleanup({
       now,
       prisma: prisma as never,
-      signalRuntimeRecheck: vi.fn(),
     })).resolves.toMatchObject({
       expiredConversationPolicyNonRepliesRecorded: 1,
       expiredMailboxContentRetired: 3,
@@ -534,7 +399,7 @@ describe("hosted retention cleanup", () => {
     });
     const prisma = createRetentionPrisma({ queryRaw });
 
-    await expect(runHostedRetentionCleanup({
+    await expect(runHostedControlPlaneRetentionCleanup({
       now: "2026-04-25T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
@@ -554,7 +419,7 @@ describe("hosted retention cleanup", () => {
     }
   });
 
-  it("stops each category at its per-run batch ceiling", async () => {
+  it("gives callback nonces a catch-up ceiling without widening other categories", async () => {
     // A backlog that keeps returning full batches must not turn one hourly run
     // into an unbounded delete loop.
     let nonceBatches = 0;
@@ -573,17 +438,49 @@ describe("hosted retention cleanup", () => {
     });
     const prisma = createRetentionPrisma({ executeRaw });
 
-    await expect(runHostedRetentionCleanup({
+    await expect(deleteExpiredHostedCallbackRequestNonces({
+      prisma: prisma as never,
+    })).resolves.toBe(
+      HOSTED_RETENTION_BATCH_SIZE
+      * HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES,
+    );
+    await expect(runHostedControlPlaneRetentionCleanup({
       now: "2026-04-25T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      expiredCallbackRequestNoncesDeleted:
-        HOSTED_RETENTION_BATCH_SIZE * HOSTED_RETENTION_MAX_BATCHES,
       expiredIngressLatencyTracesDeleted:
         HOSTED_RETENTION_BATCH_SIZE * HOSTED_RETENTION_MAX_BATCHES,
     });
-    expect(nonceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
+    expect(nonceBatches).toBe(
+      HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES,
+    );
     expect(traceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
+
+    const callbackNonceCall = findRetentionCall(
+      executeRaw,
+      'DELETE FROM "hosted_web_internal_request_nonce"',
+    );
+    const callbackNonceSql = sqlOf(callbackNonceCall);
+    expect(callbackNonceSql).toContain("WITH database_clock AS MATERIALIZED");
+    expect(callbackNonceSql).toContain("doomed AS MATERIALIZED");
+    expect(callbackNonceSql).toContain("date_trunc(");
+    expect(callbackNonceSql).toContain("'milliseconds'");
+    expect(callbackNonceSql).toContain(
+      "clock_timestamp() AT TIME ZONE 'UTC'",
+    );
+    expect(callbackNonceSql).toContain(
+      'WHERE request_nonce."expires_at" < database_clock."now"',
+    );
+    expect(callbackNonceSql).toContain('request_nonce."expires_at" ASC');
+    expect(callbackNonceSql).toContain('request_nonce."nonce_hash" ASC');
+    expect(callbackNonceSql).toContain("LIMIT ?");
+    expect(callbackNonceSql).toContain(
+      "FOR UPDATE OF request_nonce SKIP LOCKED",
+    );
+    expect(callbackNonceSql).toContain(
+      'WHERE request_nonce."nonce_hash" = doomed."nonce_hash"',
+    );
+    expect(callbackNonceCall.slice(1)).toEqual([HOSTED_RETENTION_BATCH_SIZE]);
   });
 
   it("caps aggregate short-lived control-artifact work across all seven owners", async () => {
@@ -604,7 +501,7 @@ describe("hosted retention cleanup", () => {
     });
     const prisma = createRetentionPrisma({ executeRaw });
 
-    const result = await runHostedRetentionCleanup({
+    const result = await runHostedControlPlaneRetentionCleanup({
       now: "2026-04-25T12:00:00.000Z",
       prisma: prisma as never,
     });
@@ -658,7 +555,7 @@ describe("hosted retention cleanup", () => {
     });
     const prisma = createRetentionPrisma({ executeRaw });
 
-    const cleanup = runHostedRetentionCleanup({
+    const cleanup = runHostedControlPlaneRetentionCleanup({
       now: "2026-04-25T12:00:00.000Z",
       prisma: prisma as never,
     });
@@ -672,17 +569,11 @@ describe("hosted retention cleanup", () => {
     expect(startedStatements).toBeGreaterThan(1);
   });
 
-  it("finishes database cleanup before timing out stuck media-retention signals", async () => {
+  it("times out a stuck media-retention signal", async () => {
     vi.useFakeTimers();
     try {
       const now = new Date("2026-04-25T12:00:00.000Z");
-      const executeRaw = vi.fn().mockResolvedValue(1);
       const queryRaw = vi.fn()
-        .mockResolvedValueOnce([{
-          policyNonReplies: 0n,
-          retired: 1n,
-          tombstonesDeleted: 0n,
-        }])
         .mockResolvedValueOnce([{ userId: "member_due_stuck" }]);
       const observedAbortSignals: AbortSignal[] = [];
       const signalRuntimeRecheck = vi.fn((input: {
@@ -694,62 +585,23 @@ describe("hosted retention cleanup", () => {
         }
         return new Promise(() => undefined);
       });
-      const prisma = createRetentionPrisma({
-        executeRaw,
-        queryRaw,
-      });
+      const prisma = createRetentionPrisma({ queryRaw });
 
-      const cleanup = runHostedRetentionCleanup({
+      const cleanup = runHostedRuntimeSignalRetentionCleanup({
         now,
         prisma: prisma as never,
         signalRuntimeRecheck,
       });
 
-      for (let index = 0; index < 200 && queryRaw.mock.calls.length < 2; index += 1) {
+      for (let index = 0; index < 200 && queryRaw.mock.calls.length < 1; index += 1) {
         await Promise.resolve();
       }
-      expect(queryRaw).toHaveBeenCalledTimes(2);
+      expect(queryRaw).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS);
       await expect(cleanup).resolves.toEqual({
-        accountDeletionCleanup: {
-          completed: 0,
-          failed: 0,
-          pending: 0,
-          selected: 0,
-        },
-        compactedLinqProviderEventDiagnostics: 1,
-        expiredAssistantRuntimeIssuesDeleted: 1,
-        expiredCallbackRequestNoncesDeleted: 1,
-        expiredClinicalRecordConnectIntentsDeleted: 1,
-        expiredClinicalRecordOauthSessionsDeleted: 1,
-        expiredComputerRunsCleanedUp: 0,
-        expiredConnectedAppConnectIntentsDeleted: 1,
-        expiredConversationPolicyNonRepliesRecorded: 0,
-        expiredDeviceConnectIntentsDeleted: 1,
-        expiredDeviceOauthSessionsDeleted: 1,
-        expiredDeviceWebhookTracesDeleted: 1,
-        expiredEmailPublicBootstrapAttemptsDeleted: 1,
-        expiredGroupParticipantObservationsDeleted: 1,
-        expiredGroupCurrentSenderClarificationsDeleted: 1,
-        expiredIngressLatencyTracesDeleted: 1,
-        expiredMailboxContentRetired: 1,
-        expiredMailboxTombstonesDeleted: 0,
-        expiredSensitiveActionChallengesDeleted: 1,
-        expiredSignupNotificationContextsRetired: 1,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
-        oldRuntimeLogsDeleted: 0,
-        staleWebSessionsDeleted: 2,
       });
-      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-        queryRaw.mock.invocationCallOrder[1],
-      );
-      expect(executeRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
-        queryRaw.mock.invocationCallOrder[1]!,
-      );
-      expect(
-        prisma.hostedComputerRun.findMany.mock.invocationCallOrder[0],
-      ).toBeLessThan(queryRaw.mock.invocationCallOrder[1]!);
       expect(signalRuntimeRecheck).toHaveBeenCalledWith({
         abortSignal: expect.anything(),
         userId: "member_due_stuck",
@@ -766,13 +618,7 @@ describe("hosted retention cleanup", () => {
       { length: HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE },
       (_, index) => ({ userId: `member_due_${index + 1}` }),
     );
-    const queryRaw = vi.fn()
-      .mockResolvedValueOnce([{
-        policyNonReplies: 0n,
-        retired: 0n,
-        tombstonesDeleted: 0n,
-      }])
-      .mockResolvedValueOnce(workspaces);
+    const queryRaw = vi.fn().mockResolvedValueOnce(workspaces);
     let releaseSignals: () => void = () => undefined;
     const signalGate = new Promise<void>((resolve) => {
       releaseSignals = resolve;
@@ -788,7 +634,7 @@ describe("hosted retention cleanup", () => {
     });
     const prisma = createRetentionPrisma({ queryRaw });
 
-    const cleanup = runHostedRetentionCleanup({
+    const cleanup = runHostedRuntimeSignalRetentionCleanup({
       now,
       prisma: prisma as never,
       signalRuntimeRecheck,
@@ -835,15 +681,7 @@ describe("hosted retention cleanup", () => {
       limit: number,
       attemptedAt: Date,
     ) => {
-      // The mailbox delete shares $queryRaw with the due-workspace claim, so
-      // branch on the statement rather than on call order.
-      if (sql.join("?").includes('UPDATE "hosted_mailbox_item"')) {
-        return [{
-          policyNonReplies: 0n,
-          retired: 0n,
-          tombstonesDeleted: 0n,
-        }];
-      }
+      void sql;
       const selected = workspaces
         .filter((workspace) => workspace.wakeAt <= dueAt)
         .sort((left, right) => {
@@ -869,7 +707,7 @@ describe("hosted retention cleanup", () => {
     });
     const prisma = createRetentionPrisma({ queryRaw });
 
-    await expect(runHostedRetentionCleanup({
+    await expect(runHostedRuntimeSignalRetentionCleanup({
       now,
       prisma: prisma as never,
       signalRuntimeRecheck,
@@ -877,7 +715,7 @@ describe("hosted retention cleanup", () => {
       inboxMediaRetentionRuntimeSignalFailures: HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
       inboxMediaRetentionRuntimeSignalsSent: 0,
     });
-    await expect(runHostedRetentionCleanup({
+    await expect(runHostedRuntimeSignalRetentionCleanup({
       now: nextHour,
       prisma: prisma as never,
       signalRuntimeRecheck,
@@ -897,6 +735,6 @@ describe("hosted retention cleanup", () => {
         .padStart(2, "0")}`;
     expect(firstRunUserIds).not.toContain(deferredUserId);
     expect(secondRunUserIds).toContain(deferredUserId);
-    expect(queryRaw).toHaveBeenCalledTimes(4);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
   });
 });

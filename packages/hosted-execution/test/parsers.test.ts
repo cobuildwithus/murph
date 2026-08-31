@@ -1445,6 +1445,7 @@ describe("parseHostedRuntimeGroupTool", () => {
         }],
         disclosureGrantsTruncated: true,
         memberships: [{
+          availability: { status: "available" },
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
             { projectionKind: "profile-name.v0" },
@@ -1487,6 +1488,44 @@ describe("parseHostedRuntimeGroupTool", () => {
     };
 
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const {
+      availability: _omittedAvailability,
+      ...legacyMembershipWithoutAvailability
+    } = response.result.memberships[0];
+    void _omittedAvailability;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [legacyMembershipWithoutAvailability],
+        status: "ok",
+        truncated: false,
+      },
+    })).not.toHaveProperty("result.memberships.0.availability");
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          availability: {
+            status: "unavailable",
+            unavailableReason: "   ",
+          },
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/availability unavailableReason must not be blank/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          availability: { status: "unknown" },
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/availability status is invalid/u);
     const {
       participantRoster: _omittedParticipantRoster,
       ...legacyMembershipWithoutRoster

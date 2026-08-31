@@ -973,6 +973,10 @@ describe("selectHostedAssistantInputIds", () => {
       conversationActivity: "observed",
       currentInputId: fresh.inputId,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [{
+        assistantInputIds: [completion.inputId, fresh.inputId],
+        source: "linq",
+      }],
     });
   });
 
@@ -1146,6 +1150,14 @@ describe("selectHostedAssistantInputIds", () => {
       conversationActivity: "observed",
       currentInputId: newestFresh.inputId,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [{
+        assistantInputIds: [
+          completion.inputId,
+          fresh.inputId,
+          newestFresh.inputId,
+        ],
+        source: "linq",
+      }],
     });
   });
 
@@ -1615,14 +1627,19 @@ describe("selectHostedAssistantInputIds", () => {
 
     expect(selection.inputIds).toEqual(inputIds.slice(0, 50));
     expect(selection.inputIds).not.toContain(inputIds[50]);
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+    const acceptedContext = await resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: inputIds,
       vaultRoot,
-    })).resolves.toEqual({
+    });
+    expect(acceptedContext).toMatchObject({
       conversationActivity: "observed",
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
     });
+    expect(acceptedContext.latencyTraceInputGroups).toEqual([{
+      assistantInputIds: inputIds,
+      source: "linq",
+    }]);
   });
 
   it("does not select mismatched pending input during fresh foreground selection", async () => {
@@ -1969,6 +1986,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       conversationActivity: "not_observed",
       currentInputId: null,
       foregroundPriorityInputAccepted: false,
+      latencyTraceInputGroups: [],
     });
   });
 
@@ -2002,6 +2020,10 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       conversationActivity: "observed",
       currentInputId: second.inputId,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [{
+        assistantInputIds: [second.inputId, first.inputId],
+        source: "linq",
+      }],
     });
   });
 
@@ -2035,6 +2057,10 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       conversationActivity: "observed",
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [{
+        assistantInputIds: [first.inputId, afterGap.inputId],
+        source: "linq",
+      }],
     });
   });
 
@@ -2048,7 +2074,39 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       conversationActivity: "uncertain",
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [],
     });
+  });
+
+  it("groups supported trace sources without exposing or suppressing mixed input", async () => {
+    const vaultRoot = await createTempVault();
+    const [linq, unsupported, telegram] = await Promise.all(
+      (["linq", "email", "telegram"] as const).map((source) =>
+        upsertAssistantInputEvent({
+          vault: vaultRoot,
+          event: createAssistantInputEvent({
+            dedupeKey: `dedupe_trace_group_${source}`,
+            eventId: `event_trace_group_${source}`,
+            itemId: `item_trace_group_${source}`,
+            source,
+            text: `private ${source} trace grouping text`,
+          }),
+        })
+      ),
+    );
+
+    const acceptedContext = await resolveHostedCurrentInputIdForAcceptedInputs({
+      assistantInputIds: [unsupported.inputId, telegram.inputId, linq.inputId],
+      vaultRoot,
+    });
+
+    expect(acceptedContext.latencyTraceInputGroups).toEqual([
+      { assistantInputIds: [telegram.inputId], source: "telegram" },
+      { assistantInputIds: [linq.inputId], source: "linq" },
+    ]);
+    expect(JSON.stringify(acceptedContext.latencyTraceInputGroups)).not.toContain(
+      "private",
+    );
   });
 
   it("does not treat recovered system-lane input as conversation activity", async () => {

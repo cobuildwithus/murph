@@ -122,8 +122,12 @@ describe("json input helpers", () => {
       });
 
       await expect(loadTextInput(`@${missingPath}`, "payload")).rejects.toMatchObject({
-        code: "command_failed",
+        code: "not_found",
         message: "Failed to read payload file.",
+        context: {
+          retryable: false,
+          stage: "filesystem",
+        },
       });
     });
   });
@@ -151,10 +155,12 @@ describe("json input helpers", () => {
         stdinHint: "pipe real text",
       }),
     ).rejects.toMatchObject({
-      code: "command_failed",
+      code: "invalid_payload",
       message: "No payload was piped to stdin.",
       context: {
         hint: "pipe real text",
+        retryable: false,
+        stage: "validation",
       },
     });
 
@@ -163,10 +169,12 @@ describe("json input helpers", () => {
       chunks: ["   \n"],
     });
     await expect(loadTextInput("-", "payload")).rejects.toMatchObject({
-      code: "command_failed",
+      code: "invalid_payload",
       message: "No payload was piped to stdin.",
       context: {
         hint: "Pass --input @file or pipe text to --input -.",
+        retryable: false,
+        stage: "validation",
       },
     });
 
@@ -175,12 +183,16 @@ describe("json input helpers", () => {
       error: new Error("stdin blew up"),
     });
     await expect(loadTextInput("-", "payload")).rejects.toMatchObject({
-      code: "command_failed",
+      code: "stdin_read_failed",
       message: "Failed to read payload from stdin.",
       context: {
-        cause: "stdin blew up",
+        retryable: false,
+        stage: "read",
       },
     });
+    await expect(loadTextInput("-", "payload")).rejects.not.toHaveProperty(
+      "context.cause",
+    );
   });
 });
 

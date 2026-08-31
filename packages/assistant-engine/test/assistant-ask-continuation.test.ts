@@ -64,7 +64,7 @@ describe('assistant ask continuation', () => {
     })
     expect(message.sandbox).toBeUndefined()
     expect(message.acceptedTurnInput).toBeUndefined()
-    expect(message.codexConfigOverrides).toBeUndefined()
+    expect(message).not.toHaveProperty('codexConfigOverrides')
   })
 
   it('loads the exact propagated origin session despite more than 512 unrelated receipts', async () => {

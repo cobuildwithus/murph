@@ -7,7 +7,7 @@
 -- Prisma DateTime columns are stored as UTC-naive TIMESTAMP(3) values.
 -- This aggregate report intentionally compares them with a UTC-naive cutoff
 -- and never returns member, mailbox, trace, or attempt identifiers.
-\echo 'Typing shell-prewarm cohorts (milliseconds)'
+\echo 'Causal shell-prewarm cohorts (milliseconds)'
 WITH direct_candidates AS (
   SELECT
     trace.accepted_at,
@@ -52,6 +52,18 @@ WITH direct_candidates AS (
           EXTRACT(EPOCH FROM (trace.accepted_at - TIMESTAMP '1970-01-01')) * 1000
       )
       OR (
+        trace.phase_breakdown_json #>> '{orchestration,shellPrewarmSource}' = 'linq-message-routing'
+        AND trace.phase_breakdown_json #>> '{orchestration,shellPrewarmOutcome}' IN (
+          'cold_start_observed',
+          'failed',
+          'start_issued_warm',
+          'superseded'
+        )
+        AND trace.phase_breakdown_json #>> '{orchestration,shellPrewarmOrchestrationAttemptId}' =
+          trace.phase_breakdown_json #>> '{orchestration,shellPrewarmExpectedOrchestrationAttemptId}'
+        AND trace.phase_breakdown_json #> '{orchestration,shellPrewarmOrchestrationAttemptId}' IS NOT NULL
+      )
+      OR (
         trace.phase_breakdown_json #> '{orchestration,shellPrewarmSource}' IS NULL
         AND trace.phase_breakdown_json #> '{orchestration,shellPrewarmOutcome}' IS NULL
         AND trace.phase_breakdown_json #> '{orchestration,shellPrewarmFirstHintAtEpochMs}' IS NULL
@@ -66,7 +78,9 @@ WITH direct_candidates AS (
     orchestration,
     CASE
       WHEN orchestration ->> 'shellPrewarmSource' = 'linq-typing-started'
-        THEN 'prewarm_' || (orchestration ->> 'shellPrewarmOutcome')
+        THEN 'prewarm_typing_' || (orchestration ->> 'shellPrewarmOutcome')
+      WHEN orchestration ->> 'shellPrewarmSource' = 'linq-message-routing'
+        THEN 'prewarm_message_routing_' || (orchestration ->> 'shellPrewarmOutcome')
       ELSE 'no_observed_prewarm'
     END AS cohort
   FROM direct_candidates
@@ -80,7 +94,7 @@ WITH direct_candidates AS (
   CROSS JOIN LATERAL (
     VALUES
       (
-        'Causal typing hint -> ingress accepted',
+        'Causal shell-prewarm hint -> ingress accepted',
         EXTRACT(EPOCH FROM (accepted_at - TIMESTAMP '1970-01-01')) * 1000
           - (orchestration ->> 'shellPrewarmFirstHintAtEpochMs')::double precision
       ),
@@ -250,6 +264,19 @@ WITH direct_rows AS (
     accepted_ms,
     EXTRACT(EPOCH FROM (runner_job_accepted_at - TIMESTAMP '1970-01-01')) * 1000 AS runner_job_accepted_ms,
     route_received_ms,
+    (orchestration ->> 'shellPrewarmRequestStartedAtEpochMs')::double precision AS prewarm_request_started_ms,
+    (orchestration ->> 'shellPrewarmRuntimeControlAuthStartedAtEpochMs')::double precision AS prewarm_auth_started_ms,
+    (orchestration ->> 'shellPrewarmRuntimeControlAuthFinishedAtEpochMs')::double precision AS prewarm_auth_finished_ms,
+    (orchestration ->> 'shellPrewarmCloudflareRouteReceivedAtEpochMs')::double precision AS prewarm_route_received_ms,
+    (orchestration ->> 'shellPrewarmUserRunnerConstructorStartedAtEpochMs')::double precision AS prewarm_runner_constructor_started_ms,
+    (orchestration ->> 'shellPrewarmUserRunnerConstructorFinishedAtEpochMs')::double precision AS prewarm_runner_constructor_finished_ms,
+    (orchestration ->> 'shellPrewarmUserRunnerRpcStartedAtEpochMs')::double precision AS prewarm_runner_rpc_started_ms,
+    (orchestration ->> 'shellPrewarmConsentLockAcquiredAtEpochMs')::double precision AS prewarm_consent_lock_acquired_ms,
+    (orchestration ->> 'shellPrewarmAdmissionReadStartedAtEpochMs')::double precision AS prewarm_admission_started_ms,
+    (orchestration ->> 'shellPrewarmAdmissionReadFinishedAtEpochMs')::double precision AS prewarm_admission_finished_ms,
+    (orchestration ->> 'shellPrewarmFirstHintAtEpochMs')::double precision AS prewarm_container_hint_ms,
+    orchestration ->> 'shellPrewarmExpectedOrchestrationAttemptId' AS prewarm_expected_orchestration_attempt_id,
+    orchestration ->> 'shellPrewarmOrchestrationAttemptId' AS prewarm_orchestration_attempt_id,
     (orchestration ->> 'userRunnerConstructorStartedAtEpochMs')::double precision AS runner_constructor_started_ms,
     (orchestration ->> 'userRunnerConstructorFinishedAtEpochMs')::double precision AS runner_constructor_finished_ms,
     (orchestration ->> 'userRunnerFirstEnsureRuntimeProcessingAtEpochMs')::double precision AS runner_first_ensure_ms,
@@ -264,6 +291,17 @@ WITH direct_rows AS (
     (orchestration ->> 'runnerStateReadFinishedAtEpochMs')::double precision AS state_read_finished_ms,
     (orchestration ->> 'freshStartRequestedAtEpochMs')::double precision AS fresh_start_requested_ms,
     (orchestration ->> 'freshStartFenceBoundAtEpochMs')::double precision AS fresh_start_fence_bound_ms,
+    (orchestration ->> 'freshStartContainerReadinessRequestedAtEpochMs')::double precision AS container_readiness_requested_ms,
+    (orchestration ->> 'freshStartContainerLifecycleLockAcquiredAtEpochMs')::double precision AS container_lifecycle_lock_acquired_ms,
+    (orchestration ->> 'freshStartContainerStateReadFinishedAtEpochMs')::double precision AS container_state_read_finished_ms,
+    (orchestration ->> 'freshStartContainerStartIssuedAtEpochMs')::double precision AS container_start_issued_ms,
+    (orchestration ->> 'freshStartContainerOnStartAtEpochMs')::double precision AS container_on_start_ms,
+    (orchestration ->> 'freshStartContainerPortsReadyAtEpochMs')::double precision AS container_ports_ready_ms,
+    (orchestration ->> 'freshStartContainerHealthStartedAtEpochMs')::double precision AS container_health_started_ms,
+    (orchestration ->> 'freshStartContainerHealthFinishedAtEpochMs')::double precision AS container_health_finished_ms,
+    (orchestration ->> 'freshStartContainerProcessStartedAtEpochMs')::double precision AS container_process_started_ms,
+    (orchestration ->> 'freshStartContainerListeningAtEpochMs')::double precision AS container_listening_ms,
+    (orchestration ->> 'freshStartContainerReadyObservedAtEpochMs')::double precision AS container_ready_observed_ms,
     (orchestration ->> 'freshStartContainerReadyAtEpochMs')::double precision AS fresh_start_container_ready_ms,
     (orchestration ->> 'freshStartInvocationPreparedAtEpochMs')::double precision AS fresh_start_invocation_prepared_ms,
     (orchestration ->> 'freshStartInvocationAcceptedAtEpochMs')::double precision AS fresh_start_invocation_accepted_ms
@@ -279,7 +317,13 @@ WITH direct_rows AS (
         AND runner_first_ensure_ms = runner_rpc_started_ms
       THEN true
       ELSE false
-    END AS activation_matches_current_request
+    END AS activation_matches_current_request,
+    CASE
+      WHEN prewarm_expected_orchestration_attempt_id = prewarm_orchestration_attempt_id
+        AND prewarm_expected_orchestration_attempt_id IS NOT NULL
+      THEN true
+      ELSE false
+    END AS prewarm_matches_current_request
   FROM stamps
 ), phase_samples AS (
   SELECT
@@ -288,6 +332,59 @@ WITH direct_rows AS (
   FROM activation_stamps
   CROSS JOIN LATERAL (
     VALUES
+      ('Prewarm request -> auth', CASE
+        WHEN prewarm_matches_current_request
+        THEN prewarm_auth_started_ms - prewarm_request_started_ms
+      END),
+      ('Prewarm auth', CASE
+        WHEN prewarm_matches_current_request
+        THEN prewarm_auth_finished_ms - prewarm_auth_started_ms
+      END),
+      ('Prewarm auth -> Cloudflare route', CASE
+        WHEN prewarm_matches_current_request
+        THEN prewarm_route_received_ms - prewarm_auth_finished_ms
+      END),
+      ('Prewarm route -> UserRunner constructor start', CASE
+        WHEN prewarm_matches_current_request
+          AND prewarm_route_received_ms <= prewarm_runner_constructor_started_ms
+          AND prewarm_runner_constructor_started_ms <= prewarm_runner_constructor_finished_ms
+          AND prewarm_runner_constructor_finished_ms <= prewarm_runner_rpc_started_ms
+        THEN prewarm_runner_constructor_started_ms - prewarm_route_received_ms
+      END),
+      ('Prewarm UserRunner constructor', CASE
+        WHEN prewarm_matches_current_request
+          AND prewarm_route_received_ms <= prewarm_runner_constructor_started_ms
+          AND prewarm_runner_constructor_started_ms <= prewarm_runner_constructor_finished_ms
+          AND prewarm_runner_constructor_finished_ms <= prewarm_runner_rpc_started_ms
+        THEN prewarm_runner_constructor_finished_ms - prewarm_runner_constructor_started_ms
+      END),
+      ('Prewarm constructor -> RPC', CASE
+        WHEN prewarm_matches_current_request
+          AND prewarm_route_received_ms <= prewarm_runner_constructor_started_ms
+          AND prewarm_runner_constructor_started_ms <= prewarm_runner_constructor_finished_ms
+          AND prewarm_runner_constructor_finished_ms <= prewarm_runner_rpc_started_ms
+        THEN prewarm_runner_rpc_started_ms - prewarm_runner_constructor_finished_ms
+      END),
+      ('Prewarm RPC -> consent lock', CASE
+        WHEN prewarm_matches_current_request
+        THEN prewarm_consent_lock_acquired_ms - prewarm_runner_rpc_started_ms
+      END),
+      ('Prewarm health-data admission', CASE
+        WHEN prewarm_matches_current_request
+        THEN prewarm_admission_finished_ms - prewarm_admission_started_ms
+      END),
+      ('Prewarm admission -> container hint', CASE
+        WHEN prewarm_matches_current_request
+        THEN prewarm_container_hint_ms - prewarm_admission_finished_ms
+      END),
+      ('Prewarm request -> container hint', CASE
+        WHEN prewarm_matches_current_request
+        THEN prewarm_container_hint_ms - prewarm_request_started_ms
+      END),
+      ('Prewarm container hint -> direct ensure route', CASE
+        WHEN prewarm_matches_current_request
+        THEN route_received_ms - prewarm_container_hint_ms
+      END),
       ('Accepted -> Cloudflare route', route_received_ms - accepted_ms),
       ('Cloudflare route -> UserRunner constructor start', CASE
         WHEN activation_matches_current_request
@@ -310,6 +407,20 @@ WITH direct_rows AS (
       ('State ready -> fresh start request', fresh_start_requested_ms - state_read_finished_ms),
       ('Fresh start request -> fence bound', fresh_start_fence_bound_ms - fresh_start_requested_ms),
       ('Fence bound -> container ready', fresh_start_container_ready_ms - fresh_start_fence_bound_ms),
+      ('Fence bound -> readiness RPC', container_readiness_requested_ms - fresh_start_fence_bound_ms),
+      ('Container lifecycle lock wait', container_lifecycle_lock_acquired_ms - container_readiness_requested_ms),
+      ('Container state read', container_state_read_finished_ms - container_lifecycle_lock_acquired_ms),
+      ('Container state read -> start issued', container_start_issued_ms - container_state_read_finished_ms),
+      ('Container start issued -> onStart', container_on_start_ms - container_start_issued_ms),
+      ('Container start issued -> ports ready', container_ports_ready_ms - container_start_issued_ms),
+      ('Container onStart -> ports ready', container_ports_ready_ms - container_on_start_ms),
+      ('Container start issued -> process start', container_process_started_ms - container_start_issued_ms),
+      ('Container process -> TCP listen', container_listening_ms - container_process_started_ms),
+      ('Container TCP listen -> ports ready', container_ports_ready_ms - container_listening_ms),
+      ('Container ports ready -> health check', container_health_started_ms - container_ports_ready_ms),
+      ('Container health check', container_health_finished_ms - container_health_started_ms),
+      ('Container health -> ready observation', container_ready_observed_ms - container_health_finished_ms),
+      ('Container ready observation -> RPC return', fresh_start_container_ready_ms - container_ready_observed_ms),
       ('Fence bound -> invocation prepared', fresh_start_invocation_prepared_ms - fresh_start_fence_bound_ms),
       ('Fresh-start parallel preparation', GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms) - fresh_start_fence_bound_ms),
       ('Parallel preparation -> invocation launched', fresh_start_invocation_accepted_ms - GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms)),
@@ -329,24 +440,49 @@ FROM phase_samples
 GROUP BY name
 ORDER BY min(
   CASE name
-    WHEN 'Accepted -> Cloudflare route' THEN 1
-    WHEN 'Cloudflare route -> UserRunner constructor start' THEN 2
-    WHEN 'UserRunner constructor start -> finish' THEN 3
-    WHEN 'UserRunner constructor finish -> first ensure instruction' THEN 4
-    WHEN 'Cloudflare route -> UserRunner RPC' THEN 5
-    WHEN 'UserRunner RPC -> consent lock' THEN 6
-    WHEN 'Health-data admission callback' THEN 7
-    WHEN 'Admission complete -> controller' THEN 8
-    WHEN 'Runner state bind' THEN 9
-    WHEN 'Runner state read' THEN 10
-    WHEN 'State ready -> fresh start request' THEN 11
-    WHEN 'Fresh start request -> fence bound' THEN 12
-    WHEN 'Fence bound -> container ready' THEN 13
-    WHEN 'Fence bound -> invocation prepared' THEN 14
-    WHEN 'Fresh-start parallel preparation' THEN 15
-    WHEN 'Parallel preparation -> invocation launched' THEN 16
-    WHEN 'Invocation launched -> runner job accepted' THEN 17
-    WHEN 'Cloudflare route -> fresh start request' THEN 18
-    ELSE 19
+    WHEN 'Prewarm request -> auth' THEN 1
+    WHEN 'Prewarm auth' THEN 2
+    WHEN 'Prewarm auth -> Cloudflare route' THEN 3
+    WHEN 'Prewarm route -> UserRunner constructor start' THEN 4
+    WHEN 'Prewarm UserRunner constructor' THEN 5
+    WHEN 'Prewarm constructor -> RPC' THEN 6
+    WHEN 'Prewarm RPC -> consent lock' THEN 7
+    WHEN 'Prewarm health-data admission' THEN 8
+    WHEN 'Prewarm admission -> container hint' THEN 9
+    WHEN 'Prewarm request -> container hint' THEN 10
+    WHEN 'Prewarm container hint -> direct ensure route' THEN 11
+    WHEN 'Accepted -> Cloudflare route' THEN 12
+    WHEN 'Cloudflare route -> UserRunner constructor start' THEN 13
+    WHEN 'UserRunner constructor start -> finish' THEN 14
+    WHEN 'UserRunner constructor finish -> first ensure instruction' THEN 15
+    WHEN 'Cloudflare route -> UserRunner RPC' THEN 16
+    WHEN 'UserRunner RPC -> consent lock' THEN 17
+    WHEN 'Health-data admission callback' THEN 18
+    WHEN 'Admission complete -> controller' THEN 19
+    WHEN 'Runner state bind' THEN 20
+    WHEN 'Runner state read' THEN 21
+    WHEN 'State ready -> fresh start request' THEN 22
+    WHEN 'Fresh start request -> fence bound' THEN 23
+    WHEN 'Fence bound -> container ready' THEN 24
+    WHEN 'Fence bound -> readiness RPC' THEN 25
+    WHEN 'Container lifecycle lock wait' THEN 26
+    WHEN 'Container state read' THEN 27
+    WHEN 'Container state read -> start issued' THEN 28
+    WHEN 'Container start issued -> onStart' THEN 29
+    WHEN 'Container start issued -> ports ready' THEN 30
+    WHEN 'Container onStart -> ports ready' THEN 31
+    WHEN 'Container start issued -> process start' THEN 32
+    WHEN 'Container process -> TCP listen' THEN 33
+    WHEN 'Container TCP listen -> ports ready' THEN 34
+    WHEN 'Container ports ready -> health check' THEN 35
+    WHEN 'Container health check' THEN 36
+    WHEN 'Container health -> ready observation' THEN 37
+    WHEN 'Container ready observation -> RPC return' THEN 38
+    WHEN 'Fence bound -> invocation prepared' THEN 39
+    WHEN 'Fresh-start parallel preparation' THEN 40
+    WHEN 'Parallel preparation -> invocation launched' THEN 41
+    WHEN 'Invocation launched -> runner job accepted' THEN 42
+    WHEN 'Cloudflare route -> fresh start request' THEN 43
+    ELSE 44
   END
 );

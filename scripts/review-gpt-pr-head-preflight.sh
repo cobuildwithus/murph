@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+review_gpt_toolchain_install_lock_wait_seconds=300
 
 usage() {
   cat >&2 <<'EOF'
@@ -34,6 +35,92 @@ review_gpt_fetch_pr_base_under_lock() {
   if ! git fetch --quiet origin "$base_ref"; then
     echo "Error: could not fetch PR base branch '$base_ref' for ReviewGPT." >&2
     return 1
+  fi
+}
+
+review_gpt_local_toolchain_is_ready() {
+  [[ -d "$ROOT_DIR/node_modules" ]] \
+    && [[ ! -L "$ROOT_DIR/node_modules" ]] \
+    && [[ -x "$ROOT_DIR/node_modules/.bin/cobuild-review-gpt" ]] \
+    && [[ -x "$ROOT_DIR/node_modules/.bin/tsx" ]] \
+    && [[ -f "$ROOT_DIR/node_modules/@cobuild/repo-tools/src/consumer-shell.sh" ]]
+}
+
+review_gpt_redact_local_paths() {
+  REVIEW_GPT_REDACT_HOME="${HOME:-}" REVIEW_GPT_REDACT_ROOT="$ROOT_DIR" \
+    node -e '
+      let input = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => { input += chunk; });
+      process.stdin.on("end", () => {
+        const root = process.env.REVIEW_GPT_REDACT_ROOT || "";
+        const home = process.env.REVIEW_GPT_REDACT_HOME || "";
+        if (root) input = input.replaceAll(root, "<repo>");
+        if (home) input = input.replaceAll(home, "<home>");
+        process.stdout.write(input);
+      });
+    '
+}
+
+review_gpt_prepare_local_toolchain_under_lock() {
+  local install_output
+  local install_status
+
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "Error: pnpm is required to prepare the repository ReviewGPT toolchain." >&2
+    return 127
+  fi
+
+  echo "Reconciling the frozen root workspace importer for ReviewGPT." >&2
+  if install_output="$(
+    pnpm install --frozen-lockfile --filter . --ignore-scripts 2>&1
+  )"; then
+    :
+  else
+    install_status=$?
+    printf '%s\n' "$install_output" | review_gpt_redact_local_paths >&2
+    return "$install_status"
+  fi
+
+  if ! review_gpt_local_toolchain_is_ready; then
+    echo "Error: the frozen root workspace importer did not provide the complete ReviewGPT toolchain." >&2
+    return 1
+  fi
+}
+
+review_gpt_prepare_local_toolchain() {
+  local git_dir
+  local lock_dir
+  local lock_file
+  local lock_status=0
+  local script_path="$ROOT_DIR/scripts/review-gpt-pr-head-preflight.sh"
+
+  if ! git_dir="$(
+    git -C "$ROOT_DIR" rev-parse --path-format=absolute --git-dir 2>/dev/null
+  )" || [[ -z "$git_dir" ]]; then
+    echo "Error: could not resolve the current worktree Git directory for ReviewGPT setup." >&2
+    return 1
+  fi
+
+  lock_dir="$git_dir/murph-locks"
+  lock_file="$lock_dir/review-gpt-toolchain-install.lock"
+  mkdir -p "$lock_dir"
+  if command -v flock >/dev/null 2>&1; then
+    flock -w "$review_gpt_toolchain_install_lock_wait_seconds" "$lock_file" \
+      bash "$script_path" --prepare-toolchain-under-lock \
+      || lock_status=$?
+  elif command -v lockf >/dev/null 2>&1; then
+    lockf -t "$review_gpt_toolchain_install_lock_wait_seconds" "$lock_file" \
+      bash "$script_path" --prepare-toolchain-under-lock \
+      || lock_status=$?
+  else
+    echo "Error: flock or lockf is required for ReviewGPT toolchain setup." >&2
+    return 1
+  fi
+
+  if (( lock_status != 0 )); then
+    echo "Error: serialized ReviewGPT toolchain setup failed or timed out." >&2
+    return "$lock_status"
   fi
 }
 
@@ -291,6 +378,11 @@ review_gpt_run() {
       echo "Error: could not resolve a PR for the current branch." >&2
       exit 1
     fi
+  fi
+
+  review_gpt_prepare_local_toolchain
+
+  if [[ -n "$detected_phase" ]]; then
     review_gpt_require_pr_head "$pr_ref"
     export REVIEW_GPT_PR_URL="$pr_ref"
     export REVIEW_GPT_REVIEW_PHASE="$detected_phase"
@@ -324,6 +416,14 @@ review_gpt_main() {
       fi
       shift
       review_gpt_fetch_pr_base_under_lock "$@"
+      return
+      ;;
+    --prepare-toolchain-under-lock)
+      if [[ "$#" -ne 1 ]]; then
+        echo "Error: --prepare-toolchain-under-lock accepts no arguments." >&2
+        exit 64
+      fi
+      review_gpt_prepare_local_toolchain_under_lock
       return
       ;;
   esac

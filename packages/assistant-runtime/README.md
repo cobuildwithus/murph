@@ -130,6 +130,12 @@ The checkpoint response's `conversationInputAhead` field is transient
 coordination, not durable runtime state. Web has already committed the valid
 workspace snapshot, redacted watermarks, and requested wake projection as one
 workspace-version CAS prefix.
+After device-sync provider work stages an exact single or batch dirty-processed
+record, a coalesced runtime wake is revalidated against canonical conversation
+and system-mailbox high waters before it can defer that record. A complete,
+caught-up prefetch lets the staged record finish; newer conversation or system
+work, an incomplete or failed prefetch, and a wake during exact dirty
+acknowledgement retain their existing preemption behavior.
 If shutdown has begun, this package leaves the newer mailbox row to the durable
 web/Temporal reconciliation path instead of consuming a local wake and creating
 a second metadata-only snapshot. If input was already imported and staged before
@@ -185,7 +191,10 @@ Hosted runtime env/config helpers that Cloudflare needs at the app boundary expo
 membership is owned by `@murphai/hosted-execution/assistant-capabilities`, so
 runtime launch/profile contracts do not re-export lower owner packages through
 legacy shims. Concrete Codex app-server process lifecycle hooks remain owned by
-`@murphai/assistant-engine/codex-lifecycle`.
+`@murphai/assistant-engine/codex-lifecycle`. The Cloudflare container invokes
+that owner before delegating to production workspace restore, so its restore
+cannot validate, replace, clear, or sanitize Codex home while the prior process
+is alive.
 Hosted Codex keeps WebSockets enabled for the first provider attempt and sets
 `stream_max_retries = 0`, so a retryable stream failure activates Codex's native
 HTTPS fallback instead of spending another full stream-idle window on the same

@@ -41,6 +41,10 @@ import {
 import {
   ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION,
 } from "./group-shared-freshness.js";
+import {
+  formatAssistantPromptInstant,
+  formatAssistantPromptUtcInstant,
+} from "./prompt-time.js";
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
@@ -67,6 +71,7 @@ export interface AssistantSystemPromptInput {
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   canonicalTimeZoneAvailable?: boolean;
+  currentInstant?: string;
   currentLocalDate: string;
   currentTimeZone: string;
   conversationScope?: AssistantConversationScope;
@@ -695,8 +700,8 @@ function buildAssistantHostedGroupGuidanceText(
     "Hosted groups:",
     ...(conversationScope === "direct" && fullToolSurface
       ? [
-          "- From this private conversation, joined-group consultation is available only for groups Murph has already joined; it cannot access an unjoined device chat. State that distinction for capability questions, and search/load deferred `murph.group_consult` via `tool_search` or code-mode `ALL_TOOLS` before redirecting or denying. Before `murph.group_consult action=\"ask\"` or `action=\"handoff\"`, call `murph.group_membership action=\"list_memberships\"`; do not claim this build cannot access or message a joined group before using that inventory. Exhaust the membership cursor chain before choosing or asking the final clarification: while `nextCursor` is nonnull, call `list_memberships` again with that exact cursor. Select only an exact opaque `membershipId` returned in this conversation, and use the member's ordinary cue naturally against the complete inventory's titles and available participant rosters. Never treat `truncated` or one entry's unavailable participant roster as global unavailability. Never expose, quote, edit, infer, or ask the member for a membershipId.",
-          "- A participant cue is inclusive: every inventory entry containing that safe label remains a candidate even when its roster contains additional people. Do not treat people the member omitted as exclusions unless they explicitly say only; when several entries remain, ask one concise natural clarification using only their safe titles, other safe participant labels, and `participantRoster.participantCount`, which is the real chat participant count. Never use `memberCount` for this clarification because it counts only Murph members. Do not mention unavailable internals. When visible titles collide, give every candidate its own real participant count or other safe label instead of calling one \"the other\". With no memberships, offer the paste-or-screenshot fallback. If participant details are unavailable for one entry, its safe title can still distinguish it, but never guess among unresolved entries or fan out. For handoff, send only identity-neutral factual context; the host supplies any group-safe attribution.",
+          "- From this private conversation, joined-group consultation is available only for groups Murph has already joined; it cannot access an unjoined device chat. State that distinction for capability questions, and search/load deferred `murph.group_consult` via `tool_search` or code-mode `ALL_TOOLS` before redirecting or denying. Before `murph.group_consult action=\"ask\"` or `action=\"handoff\"`, call `murph.group_membership action=\"list_memberships\"`; do not claim this build cannot access or message a joined group before using that inventory. Exhaust the membership cursor chain before choosing or asking the final clarification: while `nextCursor` is nonnull, call `list_memberships` again with that exact cursor. Resolve the member's ordinary cue against every inventory entry's title and available participant roster before applying `availability`: availability controls whether the resolved destination can be used, never whether it is a semantic match. An omitted availability field is a legacy entry and remains usable. Never remove an unavailable match and thereby select another group. Never treat `truncated`, one unavailable entry, or one entry's unavailable participant roster as global unavailability. Select only an exact opaque `membershipId` returned in this conversation. Never expose, quote, edit, infer, or ask the member for it.",
+          "- A participant cue is inclusive: every inventory entry containing that safe label remains a candidate even when its roster contains additional people. Do not treat people the member omitted as exclusions unless they explicitly say only; when several entries remain, ask one concise natural clarification using only their safe titles, other safe participant labels, and `participantRoster.participantCount`, which is the real chat participant count. Never use `memberCount` for this clarification because it counts only Murph members. You may naturally note that a candidate is not available right now, but never mention unavailable internals. When visible titles collide, give every candidate its own real participant count or other safe label instead of calling one \"the other\". After the destination is resolved, use it only when available. If the selected entry is unavailable, or a selected Ask or handoff returns unavailable, always name the safe title, say explicitly that the chat cannot be used right now and nothing was queued, offer the paste-or-screenshot fallback, and never select an unrelated group or expose identifiers, provider details, or the internal reason. With no usable memberships, offer the same fallback. If participant details are unavailable for one entry, its safe title can still distinguish it, but never guess among unresolved entries or fan out. For handoff, send only identity-neutral factual context; the host supplies any group-safe attribution.",
         ]
       : []),
     fullToolSurface
@@ -949,6 +954,13 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
     timeZone: input.currentTimeZone,
   });
   return joinPromptSections(
+    buildAssistantCurrentTimeLineText({
+      canonicalTimeZoneAvailable: input.canonicalTimeZoneAvailable !== false,
+      conversationScope,
+      currentInstant: input.currentInstant ?? null,
+      currentTimeZone: input.currentTimeZone,
+      hostedRuntime: input.hostedRuntime === true,
+    }),
     buildAssistantCurrentDateLineText(
       input.currentLocalDate,
       input.canonicalTimeZoneAvailable !== false,
@@ -1088,6 +1100,28 @@ function buildAssistantCurrentDateLineText(
   return canonicalTimeZoneAvailable
     ? `Today's date for the user is ${formattedDate}.`
     : `The current UTC date is ${formattedDate}; the member-local date is unknown for this turn.`;
+}
+
+function buildAssistantCurrentTimeLineText(input: {
+  canonicalTimeZoneAvailable: boolean;
+  conversationScope: AssistantConversationScope;
+  currentInstant: string | null;
+  currentTimeZone: string;
+  hostedRuntime: boolean;
+}): string | null {
+  if (
+    !input.currentInstant
+    || !input.hostedRuntime
+    || input.conversationScope !== "direct"
+  ) {
+    return null;
+  }
+
+  if (!input.canonicalTimeZoneAvailable) {
+    return `Current time authority: ${formatAssistantPromptUtcInstant(input.currentInstant)} (UTC only). The member-local clock is unknown; do not infer or relabel a local clock from the runtime environment.`;
+  }
+
+  return `Current local clock for the user (${input.currentTimeZone}): ${formatAssistantPromptInstant(input.currentInstant, input.currentTimeZone)}. This host-rendered value is the authority for current member-local time; do not use or relabel the runtime UTC clock as local.`;
 }
 
 function buildAssistantProductBaseUrlLineText(
@@ -1454,10 +1488,10 @@ function buildAssistantVaultNavigationText(input: {
   return `Vault and tool usage:
 ${hostedDeviceConnectLine}- Use \`vault-cli\` directly as the canonical Murph runtime surface in this privileged local route.
 - Python is available for small local scripts when it makes the task easier, but prefer canonical \`vault-cli ... --format json\` commands for Murph reads and writes.
-- When several bounded \`vault-cli\` commands are needed for the same vault, prefer one \`vault-cli batch --compact --format json\` call with repeated \`--command\` JSON argv arrays, for example \`vault-cli batch --compact --format json --command '["memory","show"]' --command '["goal","list"]'\`; \`--compact\` removes duplicate raw JSON bytes while keeping the result shape; do not use batch for interactive, server, or long-running assistant commands, and fall back to individual commands if batch is unavailable.
-- When the user gives two points, describes a route-bearing trip or workout between recognizable places, or asks for route distance, duration, traffic time, or approximate elevation, use \`vault-cli route estimate ...\` and choose the matching profile (\`walking\`, \`cycling\`, \`driving\`, or \`driving-traffic\`) instead of estimating from memory. For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them. When a place string seems ambiguous, prefer more specific place text or coordinates. More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct.
+- When several bounded \`vault-cli\` commands are needed for the same vault, prefer one \`vault-cli batch --compact --format json\` call with repeated \`--command\` JSON argv arrays, for example \`vault-cli batch --compact --format json --command '["memory","show","--compact"]' --command '["goal","list"]'\`; \`--compact\` removes duplicate raw JSON bytes while keeping the result shape; do not use batch for interactive, server, or long-running assistant commands, and fall back to individual commands if batch is unavailable.
+- When the user gives two points, describes a route-bearing trip or workout between recognizable places, or asks for route distance, duration, traffic time, or elevation, use \`vault-cli route estimate ...\` with the matching walking, cycling, driving, or driving-traffic profile. For workout capture, recover route distance/elevation, never route duration; call \`vault-cli workout add\` before asking for an omitted duration. When place text is ambiguous, use more specific text or coordinates; the provider may still return a broader label even when the routed point is correct.
 - Use canonical query surfaces first for health data: \`vault-cli show\` for an exact record, \`vault-cli list\` for filtered recent records, \`vault-cli search query\` for fuzzy recall, and \`vault-cli timeline\` for change-over-time or cross-record questions.
-- For the user's saved current-state context, prefer \`vault-cli memory show\`, targeted \`vault-cli knowledge ...\` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.
+- For the user's saved current-state context, prefer \`vault-cli memory show --compact --format json\`, targeted \`vault-cli knowledge ...\` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.
 - For common wearable questions, prefer the normalized first reads first: \`vault-cli wearables latest\` for recent nightly summaries, \`vault-cli wearables metric latest <metric>\` for one metric's freshest reading, \`vault-cli wearables metric trend <metric>\` for recent direction, and \`vault-cli wearables drift\` for "what changed?" explanations. Use \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command when the question is date-specific or you need one summary family in more detail. Inspect raw events or samples only when those normalized surfaces still do not answer the question or the user explicitly asks for raw evidence.
 - Connected observations include body composition, respiratory, metabolic, alerts, accessibility, environment, and ECG/workout summaries. Read with bounded \`vault-cli measurement entry list\`, not \`wearables metric\`; missing is unavailable, not zero or proof. Raw ECG voltage/workout points are not stored. Burned calories are expenditure; carbs can be partial intake evidence, not proof of a complete meal or eaten-calorie total; read \`food-journal\`.
 - Connected insulin records are \`intervention_session\` events; read \`cardiometabolic-health\`.
@@ -1528,6 +1562,7 @@ function buildAssistantSkillRouteHintText(
   ];
   if (conversationScope === "direct") {
     routeLines.push(
+      "- In a private direct conversation, when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal even when they do not say \"automatic.\"",
       "- When the private longitudinal default in turn priority applies, read self-management-experiments. For any multi-day or repeated comparison, also read experiment-onboarding; add behavior-followthrough only when recurring support matters.",
     );
   }

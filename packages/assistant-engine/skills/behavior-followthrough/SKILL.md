@@ -433,7 +433,7 @@ remain its off-ramp. Do not add a finite check-in or review lifecycle merely
 because the reminder recurs. Never use silence to stop clinical or
 safety-critical support.
 
-When support is replaced or repaired, keep only the intended active automation ids through the current shared automation action surface: in a hosted turn use `murph.automation` action `reconcile` with `supportSeriesId: "habit:<regimenId>"` and exact `desiredAutomationIds`; use `vault-cli automation reconcile-support-series` only in a privileged local route. Use the read-only `vault-cli automation list --support-series-id habit:<regimenId>` when the plan does not already store the ids needed to reconcile safely. Never infer membership from text or a title.
+When support is replaced or repaired, keep only the intended active automation ids through the current shared automation action surface: in a hosted turn use `murph.automation` action `reconcile` with `supportSeriesId: "habit:<regimenId>"` and exact `desiredAutomationIds`; use `vault-cli automation reconcile-support-series` only in a privileged local route. Use the read-only `vault-cli automation list --support-series-id habit:<regimenId> --compact` when the plan does not already store the ids needed to reconcile safely. Use `vault-cli automation show <automationId>` only when a fact needed for the reconciliation decision is absent from that compact inventory. Never infer membership from text or a title.
 
 Ordinary recurring reminder instructions should include only:
 - the concise cue or durable target

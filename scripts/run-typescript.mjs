@@ -48,6 +48,7 @@ export function parseTypeScriptRunnerArgs(argv) {
  *     mode: "checkers" | "single-threaded";
  *     checkers: number | null;
  *     builders: number | null;
+ *     packageBoundary: "unchecked" | null;
  *   };
  * }}
  */
@@ -127,7 +128,17 @@ export function buildTypeScriptInvocation(lane, callerArgs, env = {}) {
 
   return {
     args,
-    budget: { lane, profile, mode, checkers, builders },
+    budget: {
+      lane,
+      profile,
+      mode,
+      checkers,
+      builders,
+      packageBoundary:
+        lane === "package" && isSourceResolvedPackageTypecheck(callerArgs)
+          ? "unchecked"
+          : null,
+    },
   };
 }
 
@@ -138,6 +149,7 @@ export function buildTypeScriptInvocation(lane, callerArgs, env = {}) {
  *   mode: "checkers" | "single-threaded";
  *   checkers: number | null;
  *   builders: number | null;
+ *   packageBoundary: "unchecked" | null;
  * }} budget
  */
 export function formatTypeScriptBudget(budget) {
@@ -153,7 +165,18 @@ export function formatTypeScriptBudget(budget) {
     parts.push(`builders=${budget.builders ?? "default"}`);
   }
 
+  if (budget.packageBoundary === "unchecked") {
+    parts.push(`package-boundary=${budget.packageBoundary}`);
+  }
+
   return parts.join(" ");
+}
+
+/** @param {string[]} args */
+export function isSourceResolvedPackageTypecheck(args) {
+  return args.some((arg) =>
+    /(?:^|[\\/])tsconfig\.typecheck\.json$/u.test(arg),
+  );
 }
 
 /**

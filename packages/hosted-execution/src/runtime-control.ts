@@ -1023,7 +1023,9 @@ export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER =
 export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE = "v3";
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM =
   "membershipInventoryProtocol";
-export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE = "v2";
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE =
+  "v2";
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE = "v3";
 
 export function isHostedRuntimeAssistantAskDiagnosticCode(
   value: unknown,
@@ -1049,6 +1051,7 @@ export type HostedRuntimeAssistantAskControlRequest =
     };
 
 export type HostedRuntimeAssistantAskTerminalReason =
+  | "content_expired"
   | "expired"
   | "unavailable";
 
@@ -1216,7 +1219,16 @@ export type HostedRuntimeGroupParticipantRoster =
       unavailableReason: string;
     };
 
+export type HostedRuntimeGroupMembershipAvailability =
+  | { status: "available" }
+  | {
+      status: "unavailable";
+      unavailableReason: string;
+    };
+
 export interface HostedRuntimeGroupMembershipSummary {
+  /** Omitted by Web deployments or callers from before inventory v3. */
+  availability?: HostedRuntimeGroupMembershipAvailability;
   displayName: string | null;
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
@@ -2293,6 +2305,10 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
 ] as const;
 
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
+  "pending_reply_admitted",
+  // Web input compatibility only; current runners do not emit this.
+  "foreground_input_selected",
+  "assistant_input_accepted_for_execution",
   "linq_typing_request_started",
   "linq_typing_accepted",
   "progress_update_accepted",
@@ -2329,6 +2345,18 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
       | "retry_later";
     directEnsureAction?: "started" | "replaced" | "woken" | "already_running";
     directEnsureRuntimeAttemptId?: string;
+    shellPrewarmExpectedOrchestrationAttemptId?: string;
+    shellPrewarmOrchestrationAttemptId?: string;
+    shellPrewarmRequestStartedAtEpochMs?: number;
+    shellPrewarmRuntimeControlAuthStartedAtEpochMs?: number;
+    shellPrewarmRuntimeControlAuthFinishedAtEpochMs?: number;
+    shellPrewarmCloudflareRouteReceivedAtEpochMs?: number;
+    shellPrewarmUserRunnerConstructorStartedAtEpochMs?: number;
+    shellPrewarmUserRunnerConstructorFinishedAtEpochMs?: number;
+    shellPrewarmUserRunnerRpcStartedAtEpochMs?: number;
+    shellPrewarmConsentLockAcquiredAtEpochMs?: number;
+    shellPrewarmAdmissionReadStartedAtEpochMs?: number;
+    shellPrewarmAdmissionReadFinishedAtEpochMs?: number;
     runtimeControlAuthStartedAtEpochMs?: number;
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
@@ -2359,6 +2387,17 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     replacedStaleFence?: boolean;
     freshStartRequestedAtEpochMs?: number;
     freshStartFenceBoundAtEpochMs?: number;
+    freshStartContainerReadinessRequestedAtEpochMs?: number;
+    freshStartContainerLifecycleLockAcquiredAtEpochMs?: number;
+    freshStartContainerStateReadFinishedAtEpochMs?: number;
+    freshStartContainerStartIssuedAtEpochMs?: number;
+    freshStartContainerOnStartAtEpochMs?: number;
+    freshStartContainerPortsReadyAtEpochMs?: number;
+    freshStartContainerHealthStartedAtEpochMs?: number;
+    freshStartContainerHealthFinishedAtEpochMs?: number;
+    freshStartContainerProcessStartedAtEpochMs?: number;
+    freshStartContainerListeningAtEpochMs?: number;
+    freshStartContainerReadyObservedAtEpochMs?: number;
     freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
@@ -2373,6 +2412,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
       | "superseded";
     shellPrewarmSource?:
       | "linq-instant-start"
+      | "linq-message-routing"
       | "linq-typing-started"
       | "unknown";
     workspaceReadElapsedMs?: number;
@@ -2477,6 +2517,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // visible channel activity and local Codex output from an upstream provider
   // request or token boundary that the runtime cannot observe.
   assistant?: {
+    pendingReplyAdmittedAtEpochMs?: number;
+    foregroundInputSelectedAtEpochMs?: number;
+    assistantInputAcceptedForExecutionAtEpochMs?: number;
     linqTypingRequestStartedAtEpochMs?: number;
     linqTypingAcceptedAtEpochMs?: number;
     progressUpdateAcceptedAtEpochMs?: number;
@@ -2712,6 +2755,18 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "directEnsureResultKind",
     "directEnsureAction",
     "directEnsureRuntimeAttemptId",
+    "shellPrewarmExpectedOrchestrationAttemptId",
+    "shellPrewarmOrchestrationAttemptId",
+    "shellPrewarmRequestStartedAtEpochMs",
+    "shellPrewarmRuntimeControlAuthStartedAtEpochMs",
+    "shellPrewarmRuntimeControlAuthFinishedAtEpochMs",
+    "shellPrewarmCloudflareRouteReceivedAtEpochMs",
+    "shellPrewarmUserRunnerConstructorStartedAtEpochMs",
+    "shellPrewarmUserRunnerConstructorFinishedAtEpochMs",
+    "shellPrewarmUserRunnerRpcStartedAtEpochMs",
+    "shellPrewarmConsentLockAcquiredAtEpochMs",
+    "shellPrewarmAdmissionReadStartedAtEpochMs",
+    "shellPrewarmAdmissionReadFinishedAtEpochMs",
     "runtimeControlAuthStartedAtEpochMs",
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
@@ -2742,6 +2797,17 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "replacedStaleFence",
     "freshStartRequestedAtEpochMs",
     "freshStartFenceBoundAtEpochMs",
+    "freshStartContainerReadinessRequestedAtEpochMs",
+    "freshStartContainerLifecycleLockAcquiredAtEpochMs",
+    "freshStartContainerStateReadFinishedAtEpochMs",
+    "freshStartContainerStartIssuedAtEpochMs",
+    "freshStartContainerOnStartAtEpochMs",
+    "freshStartContainerPortsReadyAtEpochMs",
+    "freshStartContainerHealthStartedAtEpochMs",
+    "freshStartContainerHealthFinishedAtEpochMs",
+    "freshStartContainerProcessStartedAtEpochMs",
+    "freshStartContainerListeningAtEpochMs",
+    "freshStartContainerReadyObservedAtEpochMs",
     "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",
@@ -2826,6 +2892,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "receiptScanPerformed",
   ],
   assistant: [
+    "pendingReplyAdmittedAtEpochMs",
+    "foregroundInputSelectedAtEpochMs",
+    "assistantInputAcceptedForExecutionAtEpochMs",
     "linqTypingRequestStartedAtEpochMs",
     "linqTypingAcceptedAtEpochMs",
     "progressUpdateAcceptedAtEpochMs",
@@ -2876,6 +2945,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
     ],
     "orchestration.shellPrewarmSource": [
       "linq-instant-start",
+      "linq-message-routing",
       "linq-typing-started",
       "unknown",
     ],
@@ -2897,6 +2967,7 @@ export type HostedRuntimeLatencyPhaseBreakdownLeafRule =
   | { kind: "enum_string"; values: readonly string[] }
   | { kind: "lease_generation" }
   | { kind: "orchestration_attempt_id" }
+  | { kind: "shell_prewarm_attempt_id" }
   | { kind: "opaque_identifier" }
   | { kind: "safe_integer" };
 
@@ -2945,6 +3016,15 @@ function readHostedRuntimeLatencyPhaseBreakdownLeafRule(
   }
   if (
     phase === "orchestration"
+    && (
+      leafKey === "shellPrewarmExpectedOrchestrationAttemptId"
+      || leafKey === "shellPrewarmOrchestrationAttemptId"
+    )
+  ) {
+    return { kind: "shell_prewarm_attempt_id" };
+  }
+  if (
+    phase === "orchestration"
     && leafKey === "directEnsureRuntimeAttemptId"
   ) {
     return { kind: "opaque_identifier" };
@@ -2970,6 +3050,25 @@ function readHostedRuntimeLatencyPhaseBreakdownLeafRule(
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
+>;
+
+export const HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS = [
+  "shellPrewarmOrchestrationAttemptId",
+  "shellPrewarmRequestStartedAtEpochMs",
+  "shellPrewarmRuntimeControlAuthStartedAtEpochMs",
+  "shellPrewarmRuntimeControlAuthFinishedAtEpochMs",
+  "shellPrewarmCloudflareRouteReceivedAtEpochMs",
+  "shellPrewarmUserRunnerConstructorStartedAtEpochMs",
+  "shellPrewarmUserRunnerConstructorFinishedAtEpochMs",
+  "shellPrewarmUserRunnerRpcStartedAtEpochMs",
+  "shellPrewarmConsentLockAcquiredAtEpochMs",
+  "shellPrewarmAdmissionReadStartedAtEpochMs",
+  "shellPrewarmAdmissionReadFinishedAtEpochMs",
+] as const;
+
+export type HostedRuntimeShellPrewarmOrchestrationDiagnostics = Pick<
+  HostedRuntimeOrchestrationLatencyDiagnostics,
+  (typeof HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS)[number]
 >;
 
 export const HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER =
@@ -3028,11 +3127,38 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
     : null;
 }
 
+export function sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
+  value: unknown,
+): HostedRuntimeShellPrewarmOrchestrationDiagnostics | null {
+  const orchestration = sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(value);
+  if (!orchestration) {
+    return null;
+  }
+  const diagnostics = Object.fromEntries(
+    HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS.flatMap(
+      (key) => orchestration[key] === undefined
+        ? []
+        : [[key, orchestration[key]]],
+    ),
+  ) as Partial<HostedRuntimeShellPrewarmOrchestrationDiagnostics>;
+  return Object.keys(diagnostics).length > 0
+    ? diagnostics as HostedRuntimeShellPrewarmOrchestrationDiagnostics
+    : null;
+}
+
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale
-// stored leaves are dropped before the next write. Accepted progress is the one
-// repeated milestone: retain its earliest timestamp when callbacks arrive out
-// of order.
+// stored leaves are dropped before the next write. Admission, legacy selection,
+// execution acceptance, and accepted progress can be observed more than once
+// across retries: retain their earliest timestamps when callbacks arrive out of
+// order.
+const HOSTED_RUNTIME_ASSISTANT_EARLIEST_TIMESTAMP_LEAF_KEYS = new Set([
+  "pendingReplyAdmittedAtEpochMs",
+  "foregroundInputSelectedAtEpochMs",
+  "assistantInputAcceptedForExecutionAtEpochMs",
+  "progressUpdateAcceptedAtEpochMs",
+]);
+
 export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
   existing: unknown;
   incoming: HostedRuntimeLatencyPhaseBreakdown;
@@ -3073,7 +3199,7 @@ export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
     for (const [leafKey, leaf] of Object.entries(incomingPhase)) {
       if (
         phase === "assistant"
-        && leafKey === "progressUpdateAcceptedAtEpochMs"
+        && HOSTED_RUNTIME_ASSISTANT_EARLIEST_TIMESTAMP_LEAF_KEYS.has(leafKey)
         && typeof leaf === "number"
         && typeof mergedPhase[leafKey] === "number"
       ) {
@@ -3256,6 +3382,8 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
         && /^(?:0|[1-9]\d*)$/u.test(value);
     case "orchestration_attempt_id":
       return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+    case "shell_prewarm_attempt_id":
+      return isHostedRuntimeShellPrewarmOrchestrationAttemptId(value);
     case "opaque_identifier":
       return isHostedRuntimeLatencyOpaqueIdentifier(value);
     case "safe_integer":
@@ -3270,6 +3398,13 @@ export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(
 ): value is string {
   return typeof value === "string"
     && /^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
+}
+
+export function isHostedRuntimeShellPrewarmOrchestrationAttemptId(
+  value: unknown,
+): value is string {
+  return typeof value === "string"
+    && /^web-prewarm-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
 }
 
 function isHostedRuntimeLatencyOpaqueIdentifier(value: unknown): value is string {
@@ -3350,10 +3485,13 @@ export interface HostedWorkspaceState {
   checkpointedAt?: string | null;
   createdAt: string;
   inboxMediaRetentionWakeAt?: string | null;
+  nextDefaultProcessingWakeAt?: string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   snapshotRef: HostedExecutionSnapshotRefState;
+  systemMailboxProgressGeneration?: string | null;
   updatedAt: string;
   userId: string;
   version: string;
@@ -3414,12 +3552,15 @@ export interface HostedWorkspaceCheckpointRequest {
   idleCheckpointTrigger?: HostedIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
+  nextDefaultProcessingWakeAt?: string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   runtimeWakePendingAtCheckpoint?: boolean;
   snapshotRef: HostedExecutionSnapshotRefState;
+  systemMailboxProgressGeneration?: string;
 }
 
 export interface HostedWorkspaceCheckpointResponse {
@@ -3656,6 +3797,8 @@ export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
 ] as const;
 
 export type HostedWorkspaceInvocationStatus = (typeof HOSTED_WORKSPACE_INVOCATION_STATUSES)[number];
+
+export const HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS = 100;
 
 export interface HostedWorkspaceInvocationBudget {
   maxMailboxItems?: number | null;

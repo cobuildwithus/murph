@@ -60,6 +60,23 @@ empty `mailbox.imported` attempts with `runtime.invocation_finished` attempts
 and confirm the Web ingest-rejection aggregate remains zero. Keep the proof
 deidentified: report only aggregate counts, not attempt IDs or row payloads.
 
+## Container Readiness Telemetry Rollout
+
+Deploy Web's shared hosted-execution reader first because its strict phase-
+breakdown parser must accept the additive cold-container orchestration leaves
+before a new Worker can return them. Then deploy the Worker and runner bundle
+together through the protected Murph Cloud workflow with
+`container_rollout=immediate`, and require managed-container smoke to report the
+new bundle fingerprint. The new Worker accepts an old warm container health
+response that omits process-start and TCP-listen timestamps; the fields are
+diagnostic-only and readiness behavior is unchanged during skew.
+
+Roll back the Worker writer first; the additive Web reader is safe to retain.
+After deployment, use the bounded cold-start report to confirm new direct cold
+traces carry the lifecycle-lock, state-read, start/`onStart`, port-wait, health,
+and process-to-listen subdivisions. Keep the proof aggregate or deidentified;
+do not publish trace, attempt, mailbox, or member identifiers.
+
 ## Gemini Video Analysis Rollout
 
 Deploy Web's Gemini usage-record acceptance and date-bound Gemini 3.7 Flash
@@ -370,6 +387,41 @@ After the two-recipient Worker has admitted a pending page, do not roll back to
 the former single-recipient implementation: it can clear that page after only
 the primary provider operation. The two-recipient Worker is the rollback floor
 until alerts are disabled or the pending page has cleared.
+
+## OpenAI Authorization Alert Rollout
+
+Deploy this change on Cloudflare only; no Vercel tandem deploy or compatibility
+window is needed, and successful OpenAI egress is unchanged. The Worker artifact
+and production config must land together with the
+`OpenAiAuthorizationAlertDurableObject` export, the
+`OPENAI_AUTHORIZATION_ALERT_MONITOR` binding, and append-only SQLite migration
+`v6`. Do not alter the existing `*/5 * * * *` cron: this owner uses native
+Durable Object alarms. It adds no secret or recipient and reuses the existing
+`LINQ_API_TOKEN`, `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`, and
+`HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`.
+
+The trigger is limited to an authorized OpenAI upstream HTTP 401 or 403 after
+Worker key injection, and the singleton RPC contains only `{ status,
+observedAtMs }`. The owner persists and coalesces the first page, retries the
+exact pending bytes and idempotency key after five minutes, admits at most one
+hourly reminder on a fresh failure, and closes after 15 quiet minutes without a
+recovery message. Reporting failure never changes the upstream response. It is
+scheduled with `waitUntil` when available; when the Containers outbound context
+cannot own the promise, only the failed 401/403 path awaits the short Durable
+Object admission.
+
+For a safe rollback, deploy a Cloudflare-only compatibility build that disables
+the egress call site while retaining the class export, binding, and append-only
+`v6` migration so an already-armed retry or quiet alarm can finish. Do not delete,
+renumber, or reuse the namespace or migration. No Vercel rollback is required.
+For read-only post-deploy proof, compare the active Worker binding metadata with
+the generated config, verify checked-in/generated class, binding, and `v6`
+migration parity, confirm the cron remains unchanged, and inspect Workers
+Observability for the fixed `openai_authorization_alert_report_failed` code. Do
+not invoke `reportFailure`, manufacture an OpenAI 401/403, or send a Linq message
+for smoke;
+the fake-provider integration and Durable Object suites own trigger and delivery
+proof.
 
 ## Device-Sync Wake Epoch Rollout
 
@@ -1166,7 +1218,7 @@ traffic paused during the Web/Worker skew window and finish the Worker deploy
 immediately after the hosted web deploy.
 Normal deploy smoke targets the public Worker banner and health endpoints after deploy, then runs managed-container smoke for both gradual and immediate rollouts: `deploy:smoke` signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, verifies the deployed assistant CLI surface contract still includes detailed hot-path schemas for onboarding saves and device setup, and compares the reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest. When the workflow runs with `container_rollout=immediate`, managed-container smoke also runs the direct-R2 upload check.
 
-The Worker also enforces that fingerprint contract on the normal user path. Before a warm or newly started runner receives a workspace invocation, its `/health` response must report the bundle and source fingerprints embedded in the generated Worker config. A stale warm shell is destroyed and restarted; a cold shell that still mismatches fails closed without receiving user work. Post-deploy smoke remains the rollout proof, while per-invocation admission prevents the window between a direct Worker deploy and that smoke from serving work through an old runner.
+The Worker also enforces that fingerprint contract on the normal user path. Before a warm or newly started runner receives a workspace invocation, its `/health` response must report the bundle and source fingerprints embedded in the generated Worker config. A stale warm shell is destroyed and restarted. Direct cold readiness may destroy and replace one stale bundle/source image inside the same lifecycle operation, using only the original caller deadline; the replacement must pass the exact architecture and fingerprint checks. A second mismatch, any other readiness failure, unsettled cleanup, an expired deadline, or changed container ownership still fails closed without receiving user work. Post-deploy smoke remains the rollout proof, while per-invocation admission prevents the window between a direct Worker deploy and that smoke from serving work through an old runner.
 
 The production smoke also runs one real `gpt-5.6-terra` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.6-terra` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one bounded model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.
 
@@ -1845,7 +1897,7 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.149.1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.151.0`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
@@ -2110,6 +2162,8 @@ request.
 
 Archived integration-ingest amendment receipts are a runner-bundle restore format change. The first production deploy that can emit `allowArchivedIntegrationIngestAmendment` hosted canonical write receipts must deploy Cloudflare/runner with `container_rollout=immediate`; Vercel/web has no ordering dependency for that change. Gradual container rollout is unsafe for the first deploy because warm old runner bundles can still restore a workspace checkpoint that carries a legacy or interrupted receipt-log ref without preserving the archived-amendment flag. New idle checkpoints snapshot the canonical vault state and omit pending receipt-log refs from committed workspace status, so the rollback floor only applies if a production workspace already has a committed archived-amendment receipt-log ref. After deployed managed-container smoke reports the new runner-bundle fingerprint, later ordinary deploys may return to gradual rollout. Post-deploy checks: run managed-container smoke and inspect hosted runtime restore logs for archived-ingest append-base mismatch or `INTEGRATION_INGEST_SHARD_ARCHIVED` errors.
 
+Automatic event-ledger archive creation is a runner-only activation of the already-deployed dual-format reader contract. Deploy Cloudflare/runner only after every active reader bundle is at or above the gzip-capable release, and use `container_rollout=immediate` for the first writer activation so no older warm runner can restore a newly compressed workspace. Vercel/web has no ordering dependency. Once production contains any event `.jsonl.gz`, keep that reader release as the rollback floor; a below-floor rollback requires a compatible lossless conversion back to plain JSONL or a forward fix. The pass is reversible before raw removal, aborts on foreground wake, and converges on later idle checkpoints from the remaining plain months. Post-deploy, prove the deployed runner fingerprint, inspect aggregate event-archive counts and `event_ledger_archive_failed` warnings, and confirm one naturally idle workspace publishes a smaller valid snapshot without delaying a new inbound wake.
+
 Before the private production deploy job attaches the GitHub environment, protected-main-only Blacksmith predeploy gates run the hosted-local E2E checks against one immutable public Murph revision and the private worker. Worker deploy runs also run a Blacksmith runner smoke gate, which assembles the runner bundle from that revision, prepares the stable base image, then runs the focused Cloudflare checks in parallel with `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base`. That smoke builds the app smoke image, overlays test entrypoints into an isolated `.deploy/runner-smoke-bundle/`, and executes the hosted runner inside Docker without production secrets.
 The private workflow's explicit immediate path may skip the slower E2E and runner smoke gates only while retaining the protected-main hosted Codex auth regression with `MURPH_RUN_HOSTED_CODEX_AUTH_E2E=1`; normal production dispatches keep the full gates.
 The Blacksmith production deploy job verifies both protected-main checkouts, assembles and validates `.deploy/runner-bundle/`, and prepares the stable native base image in the same job for every Worker deploy. Build steps do not receive production secrets. The job then renders env-specific deploy config and Worker secrets, dry-runs the generated Wrangler deploy bundle, deploys directly with Wrangler, and runs deployed endpoint smoke. Render-only workflow runs skip the runner build while still executing focused Cloudflare checks in the deploy job.
@@ -2146,6 +2200,22 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS` to bound that wait by wall clock (default 20 minutes). The Node smoke client disables its dispatcher's implicit response-header and response-body timers for this long-running request and applies this wall-clock budget as the explicit abort deadline. Keep it under the deploy job timeout: the attempt ceiling alone can outlast the job, which makes a non-converging rollout surface as a cancelled job with no reason instead of a named smoke failure. Each attempt addresses its own smoke Durable Object, so retries get a fresh container instead of re-reading one pre-rollout container for the whole run.
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
+
+## Linq message shell-prewarm rollout
+
+This additive telemetry cutover is Web-first. Deploy Web with the expanded
+latency parser and the best-effort message-routing producer, then deploy the
+Cloudflare Worker/runner reader. During that short window the old Worker may
+reject the new optional request shape; the authoritative post-Temporal ensure
+and message path are unchanged. After Cloudflare converges, verify a synthetic
+established-direct-message trace has matching expected/observed prewarm attempt
+ids and the request, auth, UserRunner, admission, and container-hint phase stamps.
+
+There is no persisted-state rollback floor. Rolling Web back first stops the
+new producer; rolling Cloudflare back first merely makes remaining hints fail
+best-effort. A Web version without the expanded parser may drop only the
+optional phase breakdown from a newer Worker, never the core latency milestones
+or runtime work.
 
 ## Container Operator Access
 

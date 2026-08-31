@@ -47,7 +47,7 @@ const mocks = vi.hoisted(() => ({
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
-  readHostedGroupMembershipParticipantRosters: vi.fn(),
+  readHostedGroupMembershipInventory: vi.fn(),
   readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId: vi.fn(),
@@ -137,8 +137,8 @@ vi.mock("@/src/lib/hosted-groups/participant-member", async () => {
 });
 
 vi.mock("@/src/lib/hosted-groups/group-membership-participants", () => ({
-  readHostedGroupMembershipParticipantRosters:
-    mocks.readHostedGroupMembershipParticipantRosters,
+  readHostedGroupMembershipInventory:
+    mocks.readHostedGroupMembershipInventory,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
@@ -577,16 +577,20 @@ describe("handleHostedRuntimeGroupTool", () => {
       nextCursor: null,
       truncated: false,
     });
-    mocks.readHostedGroupMembershipParticipantRosters.mockResolvedValue(
-      new Map([["membership_runners", {
-        participantCount: 3,
-        participantLabels: [
-          { displayName: "Taylor" },
-          { phoneHint: { areaCode: "415", lastFour: "9876" } },
-        ],
-        status: "available",
-      }]]),
-    );
+    mocks.readHostedGroupMembershipInventory.mockResolvedValue({
+      availabilityByMembershipId: new Map([[
+        "membership_runners",
+        { status: "available" },
+      ]]),
+      participantRosterByMembershipId: new Map([["membership_runners", {
+          participantCount: 3,
+          participantLabels: [
+            { displayName: "Taylor" },
+            { phoneHint: { areaCode: "415", lastFour: "9876" } },
+          ],
+          status: "available",
+        }]]),
+    });
     mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
@@ -1350,6 +1354,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         }],
         disclosureGrantsTruncated: true,
         memberships: [{
+          availability: { status: "available" },
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
             { projectionKind: "profile-name.v0" },
@@ -1395,6 +1400,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
 
     const response = await handleHostedRuntimeGroupTool({
+      includeMembershipAvailability: false,
       includeParticipantRosters: false,
       memberId: "member_self",
       request: { action: "list_memberships" },
@@ -1413,7 +1419,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(response.result.memberships[0]).not.toHaveProperty(
       "participantRoster",
     );
-    expect(mocks.readHostedGroupMembershipParticipantRosters)
+    expect(mocks.readHostedGroupMembershipInventory)
       .not.toHaveBeenCalled();
   });
 

@@ -10,6 +10,9 @@ import {
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
 } from '@murphai/hosted-execution/assistant-identifiers'
 import type {
+  HostedAssistantNotificationValidationFailureReason,
+} from '@murphai/hosted-execution'
+import type {
   HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type { AutomationScheduleKind } from '@murphai/contracts'
@@ -184,11 +187,6 @@ const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
 }
-const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-] as const
-
 export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
@@ -681,8 +679,8 @@ export async function sendAssistantNotificationLocal(
                   runtimeResponse: providerResult.response,
                 })
           if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
-            throw new VaultCliError(
-              'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+            throw createAssistantNotificationInvalidResponseError(
+              'runtime_presentation_non_send_decision',
               'A runtime-owned notification presentation requires a send_message decision.',
             )
           }
@@ -1569,8 +1567,6 @@ function buildAssistantNotificationMessageInput(
   // cannot drift across caller-specific configuration.
   const executionOverlay = maintenanceTurn
     ? {
-        codexConfigOverrides:
-          ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
     : scheduledOccurrence
@@ -2078,19 +2074,27 @@ export function parseAssistantNotificationDecision(
   } catch (error) {
     const extracted = tryExtractAssistantNotificationDecisionObject(normalized)
     if (!extracted) {
-      throw new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      throw createAssistantNotificationInvalidResponseError(
+        'decision_json_unparseable',
         'Assistant notification turn must return a single valid JSON decision object.',
       )
     }
 
+    let parsedDecision: unknown
     try {
-      return assistantNotificationDecisionSchema.parse(
-        JSON.parse(extracted),
-      )
+      parsedDecision = JSON.parse(extracted)
     } catch {
-      throw new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      throw createAssistantNotificationInvalidResponseError(
+        'decision_json_unparseable',
+        'Assistant notification turn returned an invalid decision object.',
+      )
+    }
+
+    try {
+      return assistantNotificationDecisionSchema.parse(parsedDecision)
+    } catch {
+      throw createAssistantNotificationInvalidResponseError(
+        'decision_schema_invalid',
         'Assistant notification turn returned an invalid decision object.',
       )
     }
@@ -2155,12 +2159,23 @@ function resolveAssistantNotificationResponseMedia(input: {
   }
   const media = normalizeAssistantResponseMediaList(input.responseMedia)
   if (media.length !== 1 || media[0]?.kind !== 'voice_memo') {
-    throw new VaultCliError(
-      'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    throw createAssistantNotificationInvalidResponseError(
+      'creative_response_media_invalid',
       'A song notification requires exactly one generated song attachment.',
     )
   }
   return media
+}
+
+function createAssistantNotificationInvalidResponseError(
+  reason: HostedAssistantNotificationValidationFailureReason,
+  message: string,
+): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    message,
+    { assistantNotificationValidationFailureReason: reason },
+  )
 }
 
 function normalizeAssistantNotificationDecisionJson(value: string): string {

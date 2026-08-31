@@ -1,5 +1,6 @@
 import type {
   HostedWorkspaceInvocationResult,
+  HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -96,6 +97,15 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       },
       runtimeWakeStartedAt,
       token,
+    });
+  }
+
+  async readHostedWorkspaceFromWebForTest(input: {
+    timeoutMs?: number;
+    userId: string;
+  }): Promise<HostedWorkspaceReadResponse> {
+    return await this.readHostedWorkspaceFromWeb(input.userId, {
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     });
   }
 

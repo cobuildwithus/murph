@@ -4183,6 +4183,7 @@ describe('assistant auto-reply event-first path', () => {
         acceptedInputIds: [candidate.event.inputId],
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       throw new Error('provider connection dropped after final action')
     })
@@ -6151,6 +6152,7 @@ function createInboxServices(
     showAttachmentStatus: unreachable,
     show: unreachable,
     search: unreachable,
+    preserveDocumentAttachment: unreachable,
     preserveDocumentAttachments: unreachable,
     promoteMeal: unreachable,
     promoteDocument: unreachable,

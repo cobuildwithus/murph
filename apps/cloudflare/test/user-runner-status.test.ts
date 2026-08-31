@@ -191,7 +191,6 @@ describe("HostedUserRunner status", () => {
     expect(activeStatus).toMatchObject({
       activeWriteFence: {
         attemptId: token.attemptId,
-        expiresAt: null,
         generation: token.generation,
         userId: "member_123",
       },

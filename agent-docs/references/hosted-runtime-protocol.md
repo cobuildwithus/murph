@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-27
+Last verified: 2026-08-29
 
 ## Decision
 
@@ -147,13 +147,17 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 ### Resident Codex And Detached Enrichment Boundary
 
 The container owns one resident Codex App Server and keeps it warm across
-ordinary turns and ordinary workspace invocations. Turn completion, invocation
-completion, and invocation-scoped credential rotation do not replace it. An
-explicit workspace invocation abort or preemption is different: the container
+ordinary turns while one restored workspace remains active. Turn completion,
+invocation completion, and invocation-scoped credential rotation do not by
+themselves replace it. Before any restore path validates, replaces, clears, or
+sanitizes Codex home, the runtime synchronously stops the exact process so a
+fresh process can rebuild private indexes against the restored home. An explicit
+workspace invocation abort or preemption is also a stop boundary: the container
 interrupts the active background-work boundary and synchronously stops the exact
 owned App Server before it releases the job slot for another invocation. A stop
-failure poisons the container rather than allowing a replacement invocation to
-reuse ambiguous process state.
+failure at the pre-restore boundary fails that invocation before restore starts;
+any later invocation must pass the same stop gate before it can prepare or run
+the workspace.
 
 After restore and final Codex config/auth preparation, only the first fresh
 auto-reply-enabled conversation candidate staged during the pre-pass may decide
@@ -1066,15 +1070,16 @@ older Web responses without the field normalize to an empty array. Revocation
 may select only an exact id from that private read.
 
 Inventory-v2 membership responses additionally expose a `participantRoster`
-result on each entry. Available rosters report the real human chat count,
+result on each entry. Inventory-v3 retains that roster and adds per-membership
+action availability. Available rosters report the real human chat count,
 including the requester, and safe labels for the other people. Missing routes,
-unsupported providers, incomplete rosters, and provider failures are scoped to
-one unavailable entry; optional Contacts failure falls back to masked hints.
-The query capability is an expand/contract boundary: new runners send
-`membershipInventoryProtocol=v2` and accept old Web omissions as
-`participant_roster_not_reported`; new Web omits the field for callers without
-that exact query value so old strict response parsers keep working. Deploy and
-recycle Cloudflare/runner before Web, and roll back Web before the runner.
+unsupported providers, incomplete rosters, and provider failures stay scoped
+to one entry; optional Contacts failure falls back to masked hints. The query
+capability is an expand/contract boundary: existing runners send
+`membershipInventoryProtocol=v2`, while new runners send v3. New Web accepts
+both versions and omits both expansions for callers without an exact supported
+marker so old strict response parsers keep working. Deploy Web before recycling
+Cloudflare/runner onto v3, and roll back the runner to v2 before Web.
 
 For `murph.group_consult(action="ask_member")`, trusted runtime code injects one origin:
 either the current accepted non-direct group input and signed route or one
@@ -1657,8 +1662,19 @@ therefore relinquishes the existing lifecycle boundary without leaving a stale
 hint or partially initialized start ahead of foreground work. If a Worker
 version changes before authoritative start, the `UserRunner` destroys and
 clears a different pending versioned target before binding the current fence.
-The existing Web helper carries its bounded `linq-instant-start` or
-`linq-typing-started` source through the same request and RPC. During additive
+For an ordinary established direct Linq message, pre-transaction routing
+preparation may fire that same request immediately after it resolves an active
+member, before root KMS work and transaction entry. It threads
+one UUID-shaped attempt id through Web, the authenticated route, UserRunner
+activation and admission, and the container's first coalesced observation. The
+final wake carries the same id as expected evidence; the latency report treats
+the hint as causal only when the consumed observation matches it exactly. No
+attempt id is authority, and a retry that resolves another member starts a new
+hint while the planner remains authoritative.
+
+The existing Web helper carries its bounded `linq-instant-start`,
+`linq-message-routing`, or `linq-typing-started` source through the same request
+and RPC. During additive
 rollout an empty legacy request remains accepted and is recorded as `unknown`;
 unknown is never assumed to mean typing. Cloudflare logs one bounded admission outcome (`scheduled`,
 `skipped_consent_busy`, `skipped_admission_unavailable`,
@@ -1672,8 +1688,9 @@ do not imply port or health readiness.
 
 The container also consumes its in-memory hint observation on the next
 authoritative `ensureReadyForProcessing` call. One observation belongs to one
-shell-prewarm operation and carries its triggering source, first causal hint
-timestamp, completion time and duration, coalesced hint count, and one terminal
+shell-prewarm operation and carries its triggering source, bounded
+orchestration attempt and phase timestamps, first causal hint timestamp,
+completion time and duration, coalesced hint count, and one terminal
 outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
 After that operation settles, later hints may only increment its bounded hint
 count until readiness consumes it; they cannot launch a second operation or
@@ -1682,12 +1699,12 @@ leaves into the existing orchestration latency phase breakdown; it adds no
 request, persisted state owner, awaited reporting step, or work on the
 message-ingress path. A stop, explicit destroy, or Durable Object eviction may
 erase the optional observation, so an absent observation means `no observed
-prewarm`, not proof that no typing hint occurred. The aggregate cold-start
-report includes only typing-sourced, chronology-safe, uniquely matched
-Web-direct traces whose reply belongs to the same runtime attempt. It omits
-instant-start, unknown-source, ambiguous, backlog, and attempt-handoff rows
-rather than guessing, and returns no member, mailbox, trace, delivery, or
-runtime-attempt identifiers.
+prewarm`, not proof that no hint occurred. The aggregate cold-start report
+includes chronology-safe typing hints and exact-id-matched message-routing
+hints on uniquely matched Web-direct traces whose reply belongs to the same
+runtime attempt. It omits instant-start, unknown-source, ambiguous, backlog,
+and attempt-handoff rows rather than guessing, and returns no member, mailbox,
+trace, delivery, or runtime-attempt identifiers.
 The signal
 reconciles both the foreground conversation lane and the already-durable
 activation item. Web then
@@ -1755,7 +1772,6 @@ without reaching the provider, later provider starts retain the canonical path
 but omit the subdivision so earlier group work and pass-shared history scans are
 not misattributed; the scan-nesting statement applies only to an emitted complete
 subdivision.
-
 The UserRunner Durable Object records optional constructor-start,
 constructor-finish, and first-`ensureRuntimeProcessingForUser` epoch-millisecond
 facts in the existing in-memory orchestration phase. Production runner
@@ -1770,10 +1786,16 @@ constructor-to-first-ensure slices only when
 instance's first-ensure stamp equals the current RPC-entry stamp. Warm or
 otherwise ambiguous chronology remains eligible for the existing route-to-RPC
 aggregate but emits none of the three activation-only slices.
-
-Because Web strictly parses phase-breakdown leaves, roll this telemetry out
-Web-first so its reader accepts the additive fields before a runner emits them;
-during rollback, remove the runner/Cloudflare emitter before rolling Web back.
+Because Web strictly parses phase-breakdown leaves and assistant milestone
+values, deploy Web/Vercel first so its reader accepts the additive cold-start
+fields, the already-shipped `foreground_input_selected` diagnostic event and
+`foregroundInputSelectedAtEpochMs` leaf, and the new
+`assistant_input_accepted_for_execution` event and
+`assistantInputAcceptedForExecutionAtEpochMs` leaf before a runner emits them.
+During rollout skew, a warm old runner's legacy event remains accepted and
+stored under its prior exact-attempt ownership semantics; it is not translated
+into or counted as execution acceptance. Rollback Cloudflare Worker/runner
+first, then Web/Vercel.
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
@@ -1788,6 +1810,106 @@ delivery and unresolved traces by their exact provider request, then measures
 the earliest accepted visible response across progress and final delivery. A
 progress update before the fixed 30-second boundary therefore suppresses the
 latency incident, while a late update does not hide the breached wait.
+
+Two additional metadata-only assistant milestones close the bounded observation
+gap between staging and provider execution. `pending_reply_admitted` means the
+runtime's existing pending-reply enqueue completed for a reply-eligible staged
+input that was not already durably consumed.
+`assistant_input_accepted_for_execution` means the runtime's shared
+`beforeProviderAcceptedInputs` boundary accepted stored assistant input for
+provider execution. That boundary is common to initial execution,
+background/replacement recovery, and live steering. It reuses the accepted-event
+read already required to resolve the current input and groups opaque input IDs
+by traceable supported source; it performs no second vault read. Unsupported
+sources are omitted without suppressing supported-source IDs from the same
+accepted set.
+
+Web stores the earliest observed epoch-millisecond timestamps as
+`phaseBreakdown.assistant.pendingReplyAdmittedAtEpochMs` and
+`phaseBreakdown.assistant.assistantInputAcceptedForExecutionAtEpochMs`.
+Duplicate or out-of-order emissions remain idempotent. For these two unresolved
+lifecycle milestones only, the exact owner may merge the same or a newer
+authenticated runtime lease generation; a strictly newer generation may
+transfer an unresolved trace to its accepting runtime attempt. The same
+generation from another attempt and every older generation are no-ops. Provider
+start, reply-attempt, accepted-delivery, and terminal evidence prevent that
+cross-attempt transfer, and later ordinary milestones remain fenced to the
+trace's current exact attempt. Both emissions use the existing queued
+best-effort milestone path: trace read or write failure cannot delay or alter
+admission, input selection, provider execution, retry, checkpointing, delivery,
+mailbox consumption, or device sync.
+
+These milestones carry only opaque assistant input IDs, the timestamp, the
+existing source enum, the runtime attempt ID, and the bounded milestone enum.
+They contain no message, prompt, transcript, route, phone number, email
+address, identity, health value, provider payload, credential, or scenario label. They inherit the
+existing seven-day trace retention and add no retention or state owner.
+
+For a later bounded production occurrence, verification must select only staged
+trace rows inside an explicit accepted-time window and fixed row limit where
+provider start, reply attempt, accepted delivery, terminal non-reply, and durable
+mailbox consumption are all absent. Project only the opaque trace ID, opaque
+assistant input ID, the two timestamp leaves and their presence flags, and one
+derived lifecycle state: `staged_without_pending_admission`,
+`admitted_not_accepted_for_execution`, or
+`accepted_for_execution_without_downstream_outcome`. Order by accepted time and
+opaque trace ID, or aggregate only by that typed lifecycle state. Do not project
+member, mailbox, route, provider, delivery-target, content, or arbitrary JSON
+fields. For the existing Linq trace owner, the bounded query shape is:
+
+```sql
+WITH bounded AS MATERIALIZED (
+  SELECT
+    trace.accepted_at AS sort_accepted_at,
+    trace.id AS trace_id,
+    trace.assistant_input_id,
+    trace.phase_breakdown_json #>>
+      '{assistant,pendingReplyAdmittedAtEpochMs}'
+      AS pending_reply_admitted_at_epoch_ms,
+    trace.phase_breakdown_json #>>
+      '{assistant,assistantInputAcceptedForExecutionAtEpochMs}'
+      AS assistant_input_accepted_for_execution_at_epoch_ms
+  FROM hosted_ingress_latency_trace AS trace
+  JOIN hosted_mailbox_item AS mailbox_item
+    ON mailbox_item.user_id = trace.user_id
+   AND mailbox_item.id = trace.mailbox_item_id
+  WHERE trace.source = 'linq'
+    AND trace.accepted_at >= $1::timestamp
+    AND trace.accepted_at < $2::timestamp
+    AND trace.assistant_input_staged_at IS NOT NULL
+    AND trace.assistant_input_id IS NOT NULL
+    AND trace.provider_start_at IS NULL
+    AND trace.reply_runtime_attempt_id IS NULL
+    AND trace.linq_delivery_id IS NULL
+    AND mailbox_item.consumed_at IS NULL
+    AND trace.phase_breakdown_json #>>
+      '{assistant,terminalNonReplyCommittedAtEpochMs}' IS NULL
+  ORDER BY trace.accepted_at, trace.id
+  LIMIT $3
+)
+SELECT
+  trace_id,
+  assistant_input_id,
+  pending_reply_admitted_at_epoch_ms IS NOT NULL
+    AS pending_reply_admitted,
+  pending_reply_admitted_at_epoch_ms,
+  assistant_input_accepted_for_execution_at_epoch_ms IS NOT NULL
+    AS assistant_input_accepted_for_execution,
+  assistant_input_accepted_for_execution_at_epoch_ms,
+  CASE
+    WHEN assistant_input_accepted_for_execution_at_epoch_ms IS NOT NULL
+      THEN 'accepted_for_execution_without_downstream_outcome'
+    WHEN pending_reply_admitted_at_epoch_ms IS NOT NULL
+      THEN 'admitted_not_accepted_for_execution'
+    ELSE 'staged_without_pending_admission'
+  END AS lifecycle_state
+FROM bounded
+ORDER BY sort_accepted_at, trace_id;
+```
+
+`$1` and `$2` are the approved bounded window and `$3` is the fixed row cap; do
+not broaden either during incident verification.
+
 Scheduled automation turns, including Flex-tier turns, have no user-ingress
 reply trace and stay outside this monitor. It projects
 `terminal_non_reply_committed` only from the assistant engine's existing durable
@@ -1795,9 +1917,11 @@ reply trace and stay outside this monitor. It projects
 that write succeeds or when a replay reads the completed evidence. That marker
 is an observability projection of the existing terminal owner; it is not a
 second disposition record and does not advance mailbox consumption. Web keeps
-in-flight timing milestones scoped to the exact staged runtime attempt. The
-terminal marker may converge across a later attempt because authenticated user,
-source, and assistant input ID identify the durable disposition being projected.
+downstream timing milestones scoped to the trace's exact current runtime
+attempt. The unresolved admission and execution-acceptance lifecycle milestones
+are the narrow pre-downstream exception described above. The terminal marker may
+converge across a later attempt because authenticated user, source, and assistant
+input ID identify the durable disposition being projected.
 Terminal convergence and deadline refreshes carry the authenticated runtime
 lease generation in the existing phase document. A strictly newer generation
 transfers the unresolved trace's runtime-attempt ownership, the same generation
@@ -2981,9 +3105,9 @@ or live foreground paths must not fall back to broad foreground full snapshots,
 path-scoped working deltas, legacy hot producers, Worker-body snapshot uploads,
 or artifact-sidecar v2 producers. `idle_shutdown` is the only new checkpoint
 snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
-write receipts and publishes a receipt-log ref, bounded to 64 pending entries
-and 64 KiB, through a status-only workspace checkpoint that retains the prior
-snapshot ref. Capacity, log shape, and payload lengths are validated before
+write receipts and publishes a receipt-log head ref through a status-only
+workspace checkpoint that retains the prior snapshot ref. Capacity, log shape,
+and payload lengths are validated before
 upload. The complete immutable payload, receipt, and log artifact set then
 uploads in small fixed concurrent waves; every started wave settles before a
 failure returns, and the checkpoint publishes the log ref only after the whole
@@ -3002,10 +3126,33 @@ conversation deferral. When that import performs a canonical write, the runner
 publishes its receipt and imported watermark atomically before later assistant
 or managed-automation writes can add dependent receipts. Restore can therefore
 replay the complete canonical sequence directly over the published snapshot
-without reconstructing unauthenticated local prefixes. When the restored log
-is at the hard entry bound, the runtime consolidates it through an idle
-snapshot before foreground mailbox or assistant work. That recovery snapshot
-publishes an immediate
+without reconstructing unauthenticated local prefixes. Receipt logs remain on
+the existing v1 schema so every prior reader can restore a newly written log.
+Each immutable log is at most 64 KiB and exposes at most 64 active receipt refs.
+When the active prefix is full, the current writer parses the refs in canonical
+first-occurrence order, flattens their actions into one deterministic v1
+receipt, and starts the next active prefix with that compacted receipt and the
+new receipt. The log's optional cumulative count and receipt-hash provenance
+are ignored by prior readers. After the first compaction, the physical v1
+entries array remains padded to 64 with duplicates of the first active ref and
+an optional active-prefix count identifies the meaningful leading refs. Prior
+restore already deduplicates those refs in prefix order, while a prior writer
+sees its existing full-log boundary and cannot erase the new metadata.
+
+The current reader validates the active prefix, duplicate-only barrier padding,
+cumulative count, and provenance before replay. It admits at most 512
+cumulative receipts, fetches receipt artifacts in fixed waves of eight while
+applying them in canonical order, and bounds one compaction's receipt bodies
+and flattened output to 4 MiB. That byte ceiling can stop unusually large
+receipt histories before the 512-count ceiling; canonical payload object bytes
+remain governed by their existing integrity and artifact-store contracts, not
+this log bound. Invocation requests admit at most 100 mailbox items. When a
+restored log reaches the 63-receipt background admission boundary, the runtime
+consolidates it through an idle snapshot before foreground mailbox or assistant
+work; the remaining active-prefix capacity lets one already-admitted
+background append finish before cooperative yield is observed, while
+foreground writes can compact the v1 log until the next quiescent checkpoint.
+That recovery snapshot publishes an immediate
 mailbox-continuation wake so web accepts it even when foreground conversation
 rows are already pending; immediately after that snapshot, a status-only
 checkpoint durably restores the prior wake projection before foreground work
@@ -3018,11 +3165,12 @@ The two receipt-log pointer fields and three recovery-marker fields are
 reserved outside the ordinary 96-field redacted-status budget at both
 transport parsing and workspace persistence boundaries; ordinary status
 remains capped at 96 fields.
-Later idle snapshots omit the receipt-log status. The pending-log
-limits bound replay work, not object
-retention: encrypted owner-scoped receipt, log, and payload artifacts are not
-eagerly deleted after consolidation until the artifact store has a
-reference-safe owner-scoped retention primitive.
+Later idle snapshots omit the receipt-log status. The pending-log limits bound
+log traversal and retained receipt-reference count, not receipt/payload body
+bytes or all replay work. They also do not govern object retention: encrypted
+owner-scoped receipt, log, and payload artifacts are not eagerly deleted after
+consolidation until the artifact store has a reference-safe owner-scoped
+retention primitive.
 `idle_shutdown` is the snapshot boundary for warm-runner wind-down: it maps to
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
@@ -3160,39 +3308,76 @@ refresh runs only after foreground work and checkpoint correctness are settled,
 is capped by the browser-vault replica byte limit, and races the existing runtime
 wake signal; if a wake arrives before publish, refresh retains the current work
 instead of publishing partial state.
-The default refresh deadline is 20 seconds and remains bounded by any earlier
+The default refresh deadline is 30 seconds and remains bounded by any earlier
 invocation deadline. Cancellation reaches the direct canonical reads, replica
 build checkpoints, content hashing, and size serialization; parallel source
 reads share that signal and every started child settles before the lane returns,
 so timed-out or preempted work cannot continue beside a successor attempt. A
 Browser Vault control or no-record device-sync item that already reached
 `recording` is selected read-only. A runtime wake or host abort leaves its durable
-state untouched for the next foreground-safe opportunity. Timeout, source
-change, publication conflict, generic failure, and an oversized replica
-terminally record the current item without a future retry; a later browser
-freshness request may enqueue new work after the underlying state changes.
-A timeout result also carries the closed refresh-stage vocabulary
+state untouched for the next foreground-safe opportunity. The exact Browser Vault
+control frontier is model-free: the default owner leaves it durable after higher-
+priority foreground work, and a `system_mailbox` invocation claims the recording
+item for refresh disposition. Its first timeout retains that same item, writes
+the existing 60-second `nextAttemptAt`, and checkpoints one future assistant
+wake. An invocation before `nextAttemptAt` neither refreshes nor rewrites that
+committed item or wake. The non-null `nextAttemptAt` is also the exact retained
+item owner's one-retry marker: if that delayed attempt times out again, it creates
+no further retry wake and follows the existing terminal no-record path, which
+removes the exact item, advances handled-through, and exposes the next model-free
+item. The default post-checkpoint and no-progress paths project a delayed wake
+only for refresh intent that has no durable Browser Vault item. There is no
+inline timeout retry and at most one delayed retry. Conversation work, other
+foreground wakes, host abort, shutdown, mailbox budget, checkpoint fences,
+source-change detection, publication-conflict handling, and terminal outcomes
+retain their existing priority and ownership. A successful delayed publication
+or any other existing terminal refresh outcome records and removes the item
+normally. Other system-mailbox items keep their existing timeout recording
+behavior. Source change, publication conflict, generic failure, and an oversized
+replica remain terminal without a future retry; a later browser freshness request
+may enqueue new work after the underlying state changes.
+
+A `deferred_timeout` result and the existing `browser_vault.refresh` done event
+carry one fixed diagnostic schema. `details.browserVaultRefreshAttempt` is the
+closed `initial` or `retry` value supplied by the exact retained-item owner.
+`details.browserVaultRefreshStage` keeps the closed broad-stage vocabulary
 `initial_source_hash`, `replica_construction`, `replica_serialization`,
-`second_source_hash`, `replica_write`, or `ref_publication`; the
-`replica_serialization` value covers cooperative serialization and byte
-measurement. The existing hosted phase log emits that value only as
-`details.browserVaultRefreshStage`. Once the initial source hash finishes, the
-same deferred result and log retain the existing numeric source file-count and
-byte-total summary; before then both remain zero. The closed stage is the only
-new production log value. These details never include paths, filenames, source
+`second_source_hash`, `replica_write`, or `ref_publication`.
+`details.browserVaultRefreshStep` uses the closed values
+`initial_source_hash`, `replica_construction_initialization`,
+`replica_construction_source_read`,
+`replica_construction_experiment_outcome_read`,
+`replica_construction_projection`, `replica_serialization`,
+`second_source_hash`, `replica_write`, or `ref_publication`; this separates the
+canonical source read, experiment-outcome read, and in-memory projection inside
+the broad construction stage. The same event reports bounded, finite,
+non-negative integer milliseconds as
+`details.browserVaultRefreshConfiguredTimeoutMs`,
+`details.browserVaultRefreshElapsedMs`, and
+`details.browserVaultRefreshCurrentStepElapsedMs`. Current-step elapsed time is
+capped at total refresh elapsed time. The configured value remains the requested
+refresh timeout even when an earlier invocation deadline ends the attempt sooner.
+Once the initial source hash finishes, the deferred result and
+log retain the existing numeric source file-count and byte-total summary; before
+then both remain zero.
+
+These additions reuse `Date.now()` and the existing single phase log. They add
+no database or provider call, telemetry backend, metric owner, sampling system,
+or retention change, and only update an in-memory closed step marker at the
+existing stage boundaries. The event never includes paths, filenames, source
 hashes, content, messages, prompts, transcripts, health values, member or
 workspace identifiers, credentials, provider payloads, raw errors, or
 distinctive private scenarios.
 
-A later bounded production query filters
-`details.browserVaultRefreshStatus = deferred_timeout`, aggregates only
-`details.browserVaultRefreshStage` by count and, when already available, the
-existing bounded duration bucket, then compares those counts with privacy-safe
-Web aggregates for refresh-requested state, replica-age bucket, and next-wake
-presence. Use natural traffic only; do not issue synthetic production refresh
-requests for this diagnosis. This additive field ships through the normal
-protected Cloudflare runner-bundle deployment, has no Web deployment ordering
-or persisted compatibility floor, and rolls back with the prior runner bundle.
+A later bounded post-deploy natural-traffic query filters
+`details.browserVaultRefreshStatus = deferred_timeout`, aggregates counts and
+timing distributions by `details.browserVaultRefreshStage`,
+`details.browserVaultRefreshStep`, and `details.browserVaultRefreshAttempt`, and
+then correlates only privacy-safe durable terminal/removal/publication facts.
+Do not issue synthetic production refresh requests for this diagnosis. The
+additive fixed-schema fields ship through the normal protected Cloudflare
+runner-bundle deployment, have no Web deployment ordering or persisted
+compatibility floor, and roll back with the prior runner bundle.
 
 Fresh work and recording items that own post-checkpoint effects retain their
 existing pre-effect preparation checkpoint. Missing optional publication
@@ -3523,8 +3708,10 @@ refreshing it, so the trace becomes unresolved after the last published
 expectation. The marker never pretends a reply was delivered or consumes the
 mailbox item early. Missing, expired, or chronologically invalid expectation
 data cannot hide still-unconsumed work. The terminal and publication-expectation
-leaves alone use max-timestamp merge semantics. Every other latency leaf remains
-assign-once. For slow completed replies, the monitor compares
+leaves use max-timestamp merge semantics. Pending-reply admission, foreground
+selection, and accepted progress leaves use min-timestamp merge semantics.
+Every other latency leaf remains assign-once. For slow completed replies, the
+monitor compares
 accepted-to-provider-start with provider-start-to-first-visible-response and
 reports the larger measured boundary as pre-provider path or provider/assistant
 execution. Missing, ambiguous, or impossible provider chronology remains
@@ -3619,6 +3806,82 @@ and explicit no-child results. These fields are stamped onto the existing trace
 payload with no additional I/O. Prefer the same-call elapsed scalars when direct
 and Temporal retries may have contributed independently merged epoch
 timestamps.
+An actual cold readiness RPC also carries optional numeric-only subdivisions.
+`freshStartContainerReadinessRequestedAtEpochMs` and
+`freshStartContainerLifecycleLockAcquiredAtEpochMs` bound lifecycle-lock wait;
+`freshStartContainerStateReadFinishedAtEpochMs` and
+`freshStartContainerStartIssuedAtEpochMs` expose the state/read-to-start gap;
+`freshStartContainerOnStartAtEpochMs` records Cloudflare's lifecycle hook; and
+`freshStartContainerPortsReadyAtEpochMs` records resolution of
+`startAndWaitForPorts`, after both the configured port and `onStart` are ready.
+The explicit private health fetch is bounded by
+`freshStartContainerHealthStartedAtEpochMs` and
+`freshStartContainerHealthFinishedAtEpochMs`, followed by
+`freshStartContainerReadyObservedAtEpochMs` and the existing caller-side ready
+stamp. The health payload additionally supplies
+`freshStartContainerProcessStartedAtEpochMs` and
+`freshStartContainerListeningAtEpochMs`; subtract only that same-process pair
+for the exact Node-to-listen duration. The operational report also presents
+start-issue-to-process and listen-to-platform-port-ready cross-owner epoch
+deltas as directional diagnostics, dropping a sample when clock ordering is
+invalid and retaining the start-issue-to-ports total as the authoritative
+platform wait. Old warm containers may omit the health
+timestamps, and a lifecycle generation whose hook was not observed may omit the
+`onStart` stamp. Missing diagnostic fields never fail readiness. These stamps
+add no request, polling loop, persisted state owner, or reply-path work.
+
+Failed authoritative startup confirmation has one failure-only local
+observation because Durable Object RPC does not preserve custom properties on a
+thrown error. `Hosted execution container startup confirmation failed.` carries
+only `runtimeStartupFailureStage`, `runtimeStartupFailureElapsedMs`, and
+`runtimeStartupCleanupUnsettled`; it carries no user, workspace, message,
+command, provider, path, URL, prompt, transcript, argument, payload, health
+value, credential, environment value, raw error, stack, hash, or correlation
+identifier. Elapsed time is a non-negative integer saturated at 60,000 ms. The
+four container-local stages are `lifecycle_lock_or_state_read`,
+`warm_health_or_cleanup`, `cold_start_or_ports`, and
+`cold_health_or_finalization`. The cleanup boolean overlays the stage that
+triggered cleanup instead of replacing it.
+
+A non-OK Web workspace read also retains one failure-only Worker diagnostic
+without changing its caller-visible exception or retry behavior. The Durable
+Object throws the same plain HTTP-status error immediately and schedules a
+bounded inspection of a cloned response under its existing `waitUntil` owner.
+`Hosted workspace read failure classified.` carries only HTTP status, whether
+the response had the existing forwarded-Web header, a typed retryable boolean
+when present, a closed workspace-route error-code allowlist or `unknown`, and a
+fixed envelope outcome. Inspection is capped at 4 KiB and one second. Unknown,
+missing, malformed, oversized, timed-out, or unreadable bodies collapse to
+fixed buckets; response messages, details, arbitrary codes, request or member
+identifiers, payloads, credentials, and headers other than the forwarded-Web
+boolean never enter the log. The diagnostic adds no retry, request, persisted
+state, provider interaction, or user-visible behavior.
+
+The existing UserRunner startup-confirmation warnings add the same bounded
+elapsed field and one of two caller-owned stages. `rpc_unattributed` means the
+RPC failed, timed out, was unavailable, or returned legacy cleanup-unsettled
+without a safely transported local stage; it must never be guessed into a
+container-local bucket. `caller_deadline` means the command budget or the outer
+startup guard elapsed. The generic
+`Hosted runner runtime processing startup confirmation failed.` warning also
+records its already-selected closed retry reason. Retry selection, fence
+clearing or preservation, cleanup, readiness, and exception/RPC behavior remain
+unchanged. Both observations reuse the existing structured logger and add no
+awaited I/O, timer, retry, state, queue, or telemetry backend. During skew, an
+old RunnerContainer simply lacks the local observation while a new UserRunner
+retains `rpc_unattributed`; an old UserRunner
+ignores the new local log, so either side can roll back independently.
+
+After at least two hours of natural traffic, aggregate the exact UserRunner
+warning by stage, retry reason/error code, and coarse elapsed bucket; aggregate
+the exact RunnerContainer failure-only message separately by the same stage
+enum and cleanup flag. Cloudflare-owned event metadata may be used internally
+to compare failed instances with later runtime-processing acceptance, but only
+aggregate counts leave that boundary. Confirm whether the dominant category
+still recurs on the deployed revision without synthetic production traffic.
+This instrumentation is internal-only: no Product UX review outcome or
+changelog item applies.
+
 Fence-attempt diagnostics remain one coherent bundle across replacement races.
 When a replacement compare-and-swap loses, UserRunner drops the superseded
 fence's observation, active-wake, and replacement-clear leaves before probing
@@ -3632,6 +3895,11 @@ after persistence.
 The hosted runtime also emits metadata-only phase boundary logs to stdout/stderr
 for supervisor correlation. Those phase logs carry fixed-vocabulary phase names
 and status plus bounded metadata-only correlation, count, and timing fields. The
+Codex completion-timing and action-diagnostics records share a bounded one-way
+numeric provider-turn correlation; action diagnostics also retain only progress
+call/sent counts and the first call's provider-start-relative timing. A failed
+delivery remains derivable as a completed progress call without a sent outcome.
+They retain neither a raw provider turn id nor progress text. The
 Cloudflare child supervisor treats that output as untrusted: it may summarize
 only fixed-vocabulary phase/status pairs plus a supervisor-derived last-phase
 ordinal into container failure payloads. It must not trust child-provided

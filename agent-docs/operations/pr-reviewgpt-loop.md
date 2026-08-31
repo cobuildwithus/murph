@@ -171,10 +171,7 @@ Run the loop when all of the following hold:
    or trivial copy-only.
 3. Focused local proof and the parent's candidate review are complete, and the
    exact pushed candidate is stable enough for a full-patch audit.
-4. The local specialist subagent starts against the same candidate when any of
-   its lenses apply. It may still be running; completion still requires its
-   substantive result and resolved findings.
-5. The user has not explicitly opted out of the final gate in the current task.
+4. The user has not explicitly opted out of the final gate in the current task.
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
 worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and

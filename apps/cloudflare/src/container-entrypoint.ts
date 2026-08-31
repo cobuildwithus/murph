@@ -1,30 +1,12 @@
-import { createHash } from "node:crypto";
 import {
   createServer,
-  request as httpRequest,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { request as httpsRequest } from "node:https";
-import { spawn } from "node:child_process";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  readlink,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { readdir, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
-import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
-import {
-  CURRENT_VAULT_FORMAT_VERSION,
-} from "@murphai/contracts";
 import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
@@ -35,27 +17,14 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedRunnerExecutablePath,
-  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
-  HOSTED_RUNNER_EXECUTABLE_PATH,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+  stopWarmCodexAppServer,
+  waitForWarmCodexBackgroundWork,
+} from "@murphai/assistant-engine/codex-lifecycle";
 import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   readHostedRuntimeFailurePhaseCode,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  drainHostedAssistantDeliveryControlPlaneWritesBestEffort,
-  drainHostedRuntimeLogWritesBestEffort,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-} from "@murphai/assistant-runtime/hosted-invocation";
-import {
-  stopWarmCodexAppServer,
-  waitForWarmCodexBackgroundWork,
-} from "@murphai/assistant-engine/codex-lifecycle";
-import {
-  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-} from "./runner-injected-credential.ts";
 import {
   startHostedContainerCpuWatchdog,
   type HostedContainerCpuWatchdogProcessApi,
@@ -65,29 +34,23 @@ import {
   reportHostedContainerFatalBestEffort,
   type HostedContainerFatalStage,
 } from "./container-fatal-report.ts";
+import type {
+  HostedContainerHeavyRuntime,
+  HostedContainerHeavyRuntimeCore,
+} from "./container-entrypoint-heavy-runtime.ts";
+import type {
+  HostedWorkspaceRestorePreparation,
+} from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
 import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
 import {
-  HOSTED_RUNNER_CONTAINER_CA_ENV_KEYS,
-} from "./runner-container-ca-env.ts";
-import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
 } from "./runner-container-error-codes.ts";
 import {
-  runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
-} from "./hosted-workspace-invocation.ts";
-import {
   parseHostedExecutionRunnerJobInput,
-  readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
-import {
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
-  readDeployLiveModelTurnSmokeCodexOutputText,
-} from "./deploy-smoke-live-model.ts";
 import {
   readHostedRuntimeOrchestrationLatencyHeaders,
   sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
@@ -112,20 +75,9 @@ const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH =
 const HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH =
   "/internal/workspace-invocation/abort";
 const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
-const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
-const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.6-terra";
-const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
-const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
-const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_ERROR_MESSAGE_MAX_CHARS = 512;
-const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_EXCERPT_MAX_CHARS = 220;
-const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 160;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
-const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
 const HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS = 5_000;
-const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
-  "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
-const HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY = ".codex-deploy-smoke";
 
 interface HostedContainerProcessApi {
   readFile(path: string, encoding: BufferEncoding): Promise<string>;
@@ -158,9 +110,7 @@ const defaultHostedContainerExitScheduler = () => {
 // reject new invocations during the short pre-exit window: a process Node
 // deems unrecoverable must not accept work it would hard-kill mid-flight.
 let hostedContainerProcessFatalObserved = false;
-let hostedContainerRuntimeContractsLoader:
-  | Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>
-  | null = null;
+let hostedContainerFatalRuntimeDrain: (() => Promise<void>) | null = null;
 
 interface HostedContainerStartupConfig {
   appRoot: string;
@@ -171,81 +121,33 @@ interface HostedContainerStartupConfig {
 
 interface HostedContainerRuntimeOptions {
   exitScheduler?: () => void;
-  loadRuntimeContracts?:
-    () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
+  loadHeavyRuntime?: () => Promise<HostedContainerHeavyRuntimeCore>;
+  parseRunnerJobInput?: typeof parseHostedExecutionRunnerJobInput;
+  prepareWorkspaceRestore?: (input: {
+    job: HostedExecutionRunnerJobInput;
+    signal: AbortSignal;
+  }) => Promise<HostedWorkspaceRestorePreparation>;
   processApi?: Partial<HostedContainerProcessApi>;
-  runWorkspaceInvocation?: typeof runHostedWorkspaceInvocationDirect;
-  runDirectR2PresignedPutSmoke?: (
-    options: {
-      byteLength: number;
-      presignedPutUrl: string;
-      signal: AbortSignal;
-      tlsCaCertificatePem?: string;
-    },
-  ) => Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
-  runCodexShellSmoke?: (
-    options: { signal: AbortSignal },
-  ) => Promise<HostedContainerCodexShellSmokeResult>;
-  runLiveModelTurnSmoke?: (
-    options: { model: string; signal: AbortSignal },
-  ) => Promise<HostedContainerLiveModelTurnSmokeResult>;
-  stopWarmCodex?: (reason: string) => Promise<void>;
-  waitForBackgroundAssistantWork?: (signal: AbortSignal | null) => Promise<void>;
+  runWorkspaceInvocation?: HostedContainerHeavyRuntime["runWorkspaceInvocation"];
+  runDirectR2PresignedPutSmoke?: HostedContainerHeavyRuntime["runDirectR2PresignedPutSmoke"];
+  runCodexShellSmoke?: HostedContainerHeavyRuntime["runCodexShellSmoke"];
+  runLiveModelTurnSmoke?: HostedContainerHeavyRuntime["runLiveModelTurnSmoke"];
+  shutdownDrainTimeoutMs?: number;
+  stopWarmCodex?: HostedContainerHeavyRuntime["stopWarmCodex"];
+  waitForBackgroundAssistantWork?: HostedContainerHeavyRuntime["waitForBackgroundAssistantWork"];
 }
 
 interface HostedContainerRuntimeDependencies {
   exitScheduler: () => void;
-  loadRuntimeContracts:
-    () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
+  loadHeavyRuntime: () => Promise<HostedContainerHeavyRuntime>;
+  parseRunnerJobInput: typeof parseHostedExecutionRunnerJobInput;
+  prepareWorkspaceRestore: NonNullable<
+    HostedContainerRuntimeOptions["prepareWorkspaceRestore"]
+  >;
   processApi: HostedContainerProcessApi;
-  runWorkspaceInvocation: typeof runHostedWorkspaceInvocationDirect;
+  shutdownDrainTimeoutMs: number;
   startupConfig: HostedContainerStartupConfig;
-  runDirectR2PresignedPutSmoke:
-    (options: {
-      byteLength: number;
-      presignedPutUrl: string;
-      signal: AbortSignal;
-      tlsCaCertificatePem?: string;
-    }) => Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
-  runCodexShellSmoke:
-    (options: { signal: AbortSignal }) => Promise<HostedContainerCodexShellSmokeResult>;
-  runLiveModelTurnSmoke:
-    (options: { model: string; signal: AbortSignal }) => Promise<HostedContainerLiveModelTurnSmokeResult>;
-  stopWarmCodex: (reason: string) => Promise<void>;
-  waitForBackgroundAssistantWork: (signal: AbortSignal | null) => Promise<void>;
-}
-
-interface HostedContainerCodexShellSmokeResult {
-  client: "codex-app-server";
-  cliSurfaceContractBytes: number;
-  cliSurfaceHotPathProofCount: number;
-  murphPathBytes: number;
-  noteAddBytes: number;
-  stderrBytes: number;
-  vaultCliLlmsBytes: number;
-  vaultCliPathBytes: number;
-  vaultShowBytes: number;
-}
-
-interface HostedContainerCodexCommandExecResult {
-  exitCode: number;
-  stderr: string;
-  stdout: string;
-}
-
-interface HostedContainerLiveModelTurnSmokeResult {
-  durationMs: number;
-  model: string;
-  stdoutBytes: number;
-}
-
-interface HostedContainerDirectR2PresignedPutSmokeResult {
-  byteLength: number;
-  durationMs: number;
-  ok: boolean;
-  payloadSha256: string;
-  responseBodyBytes: number;
-  status: number;
+  stopWarmCodex: HostedContainerHeavyRuntime["stopWarmCodex"];
 }
 
 interface HostedContainerDirectR2PresignedPutSmokeRequest {
@@ -323,6 +225,49 @@ export async function startHostedContainerEntrypoint(input: {
     runtime.processApi,
     runtime.startupConfig.runnerBundleManifestPath,
   );
+  let containerTerminalExitScheduled = false;
+  let hostedContainerTerminalFailureHandled = false;
+  const poisonHostedContainerAndScheduleExitOnce = (
+    error: unknown,
+    message: string,
+  ): void => {
+    hostedContainerProcessFatalObserved = true;
+    if (hostedContainerTerminalFailureHandled) {
+      return;
+    }
+    hostedContainerTerminalFailureHandled = true;
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      error,
+      level: "error",
+      message,
+      phase: "failed",
+    });
+    if (containerTerminalExitScheduled) {
+      return;
+    }
+    containerTerminalExitScheduled = true;
+    runtime.exitScheduler();
+  };
+  let heavyRuntimeHydrationPromise: Promise<HostedContainerHeavyRuntime> | null = null;
+  const hydrateHeavyRuntime = (): Promise<HostedContainerHeavyRuntime> => {
+    if (!heavyRuntimeHydrationPromise) {
+      heavyRuntimeHydrationPromise = runtime.loadHeavyRuntime();
+      void heavyRuntimeHydrationPromise.catch((error) => {
+        poisonHostedContainerAndScheduleExitOnce(
+          error,
+          "Hosted container entrypoint failed to hydrate the heavy runtime.",
+        );
+      });
+    }
+    return heavyRuntimeHydrationPromise;
+  };
+  const fatalRuntimeDrainOwner = async (): Promise<void> => {
+    const heavyRuntime = await hydrateHeavyRuntime();
+    await heavyRuntime.drainFatalRuntimeBestEffort({
+      timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
+    });
+  };
   let activeHostedRunnerJobCount = 0;
   let conversationWarmActivityCompletedAtEpochMs: number | null = null;
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
@@ -348,6 +293,7 @@ export async function startHostedContainerEntrypoint(input: {
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
   let pendingColdNodeStartupMs: number | null = null;
+  let serverListeningAtEpochMs: number | null = null;
   // During gradual deploys, active grace delays eligibility for rollout
   // replacement. Cloudflare then sends SIGTERM and allows up to 15 minutes
   // before SIGKILL.
@@ -367,6 +313,7 @@ export async function startHostedContainerEntrypoint(input: {
     let claimedRunnerSlot = false;
     let conversationActivityObservedForInvocation = false;
     let conversationActivitySettled = false;
+    let workspaceRestorePreparation: Promise<HostedWorkspaceRestorePreparation> | null = null;
     let runtimeWakeForRequest: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
@@ -399,7 +346,11 @@ export async function startHostedContainerEntrypoint(input: {
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
           ok: true,
           poisoned: hostedContainerProcessFatalObserved,
+          processStartedAtEpochMs: HOSTED_CONTAINER_PROCESS_START_MS,
           service: "cloudflare-hosted-runner-node",
+          ...(serverListeningAtEpochMs === null ? {} : {
+            serverListeningAtEpochMs,
+          }),
           ...(runnerBundle ? { runnerBundle } : {}),
         }));
         return;
@@ -684,8 +635,10 @@ export async function startHostedContainerEntrypoint(input: {
         activeHostedRunnerJobCount += 1;
         claimedRunnerSlot = true;
         discardUnreadRequestBody(request);
+        let heavyRuntime: HostedContainerHeavyRuntime | null = null;
         try {
-          const result = await runtime.runCodexShellSmoke({
+          heavyRuntime = await hydrateHeavyRuntime();
+          const result = await heavyRuntime.runCodexShellSmoke({
             signal: requestAbort.signal,
           });
           writeJsonResponse(response, 200, {
@@ -711,9 +664,11 @@ export async function startHostedContainerEntrypoint(input: {
           writeJsonResponse(response, 500, {
             error: "Hosted Codex shell smoke failed.",
             ok: false,
-            smokeErrorMessage: error instanceof Error
-              ? error.message
-              : String(error),
+            smokeErrorMessage: heavyRuntime
+              ? error instanceof Error
+                ? error.message
+                : String(error)
+              : "Hosted Codex shell smoke failed before runtime hydration.",
           });
         }
         return;
@@ -730,9 +685,11 @@ export async function startHostedContainerEntrypoint(input: {
         activeHostedRunnerJobCount += 1;
         claimedRunnerSlot = true;
         discardUnreadRequestBody(request);
+        let heavyRuntime: HostedContainerHeavyRuntime | null = null;
         try {
-          const result = await runtime.runLiveModelTurnSmoke({
-            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+          heavyRuntime = await hydrateHeavyRuntime();
+          const result = await heavyRuntime.runLiveModelTurnSmoke({
+            model: heavyRuntime.deployLiveModelTurnSmokeModel,
             signal: requestAbort.signal,
           });
           writeJsonResponse(response, 200, {
@@ -757,9 +714,11 @@ export async function startHostedContainerEntrypoint(input: {
           writeJsonResponse(response, 500, {
             error: "Hosted live model turn smoke failed.",
             ok: false,
-            smokeErrorMessage: buildHostedContainerLiveModelTurnSmokeSafeText(
-              error instanceof Error ? error.message : String(error),
-            ),
+            smokeErrorMessage: heavyRuntime
+              ? heavyRuntime.buildLiveModelTurnSmokeSafeText(
+                  error instanceof Error ? error.message : String(error),
+                )
+              : "Hosted live model turn smoke failed before runtime hydration.",
           });
         }
         return;
@@ -792,7 +751,8 @@ export async function startHostedContainerEntrypoint(input: {
           writeJsonResponse(response, classified.statusCode, classified.payload);
           return;
         }
-        const result = await runtime.runDirectR2PresignedPutSmoke({
+        const heavyRuntime = await hydrateHeavyRuntime();
+        const result = await heavyRuntime.runDirectR2PresignedPutSmoke({
           ...smokeRequest,
           signal: requestAbort.signal,
         });
@@ -821,11 +781,8 @@ export async function startHostedContainerEntrypoint(input: {
 
       try {
         const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request));
-        const parsed = await parseHostedExecutionContainerInvocationRequest(
-          requestBody,
-          runtime,
-        );
-        job = parsed.job;
+        const requestEnvelope = parseHostedExecutionContainerInvocationEnvelope(requestBody);
+        job = runtime.parseRunnerJobInput(requestEnvelope.job);
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -883,7 +840,23 @@ export async function startHostedContainerEntrypoint(input: {
         processApi: runtime.processApi,
       });
 
-      const result = await runtime.runWorkspaceInvocation(job, {
+      // Codex owns process-local databases under its home. End that process
+      // before any restore path replaces or sanitizes the home it owns.
+      await stopWarmCodexWithLifecycleLog(runtime.stopWarmCodex, {
+        reason: "hosted-workspace-restore",
+      });
+      workspaceRestorePreparation = runtime.prepareWorkspaceRestore({
+        job,
+        signal: invocationAbort.signal,
+      });
+      const heavyRuntimeHydration = hydrateHeavyRuntime();
+      const preparedWorkspaceRestore = await workspaceRestorePreparation;
+      const heavyRuntime = await raceHostedContainerInvocationAbort(
+        heavyRuntimeHydration,
+        invocationAbort.signal,
+      );
+
+      const result = await heavyRuntime.runWorkspaceInvocation(job, {
         onConversationActivityObserved() {
           conversationActivityObservedForInvocation = true;
         },
@@ -934,12 +907,13 @@ export async function startHostedContainerEntrypoint(input: {
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
         ...(orchestrationMilestones ? { orchestration: orchestrationMilestones } : {}),
+        preparedWorkspaceRestore,
         runnerJobAcceptedAt,
         releaseSha: runnerBundle?.releaseSha ?? null,
         shutdownSignal: containerShutdownController.signal,
         signal: invocationAbort.signal,
         supervisorEnv: runtime.startupConfig.supervisorEnv,
-        waitForBackgroundAssistantWork: runtime.waitForBackgroundAssistantWork,
+        waitForBackgroundAssistantWork: heavyRuntime.waitForBackgroundAssistantWork,
       });
 
       if (requestAbort.signal.aborted || response.destroyed) {
@@ -961,11 +935,33 @@ export async function startHostedContainerEntrypoint(input: {
       response.statusCode = 200;
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
-    } catch (error) {
+    } catch (caughtError) {
+      let error = caughtError;
       if (job) {
         settleConversationActivity();
       }
       const responseUnavailable = requestAbort.signal.aborted || response.destroyed;
+
+      if (
+        invocationAbort.signal.aborted
+        && error === invocationAbort.signal.reason
+        && workspaceRestorePreparation
+      ) {
+        try {
+          await (await workspaceRestorePreparation).promise;
+        } catch (restoreError) {
+          if (restoreError !== invocationAbort.signal.reason) {
+            error = restoreError;
+          }
+        }
+        if (error === invocationAbort.signal.reason) {
+          if (!responseUnavailable) {
+            response.statusCode = 204;
+            response.end();
+          }
+          return;
+        }
+      }
 
       if (!responseUnavailable) {
         emitHostedExecutionStructuredLog({
@@ -987,18 +983,6 @@ export async function startHostedContainerEntrypoint(input: {
         settleConversationActivity();
       }
       stopActiveJobDiagnostics?.();
-      if (claimedRunnerSlot && invocationAbort.signal.aborted) {
-        try {
-          await stopWarmCodexWithLifecycleLog(runtime, {
-            failureMessage:
-              "Hosted container entrypoint failed to stop warm Codex after invocation abort.",
-            reason: "workspace-invocation-abort",
-          });
-        } catch {
-          hostedContainerProcessFatalObserved = true;
-          runtime.exitScheduler();
-        }
-      }
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
         activeRuntimeWakeAttemptId = null;
@@ -1032,9 +1016,18 @@ export async function startHostedContainerEntrypoint(input: {
   });
 
   server.once("close", () => {
-    void stopWarmCodexWithLifecycleLog(runtime, {
-      failureMessage: "Hosted container entrypoint failed to stop warm Codex on server close.",
-      reason: "container-server-close",
+    if (hostedContainerFatalRuntimeDrain === fatalRuntimeDrainOwner) {
+      hostedContainerFatalRuntimeDrain = null;
+    }
+    const hydration = heavyRuntimeHydrationPromise;
+    if (!hydration) {
+      return;
+    }
+    void hydration.then(async (heavyRuntime) => {
+      await stopWarmCodexWithLifecycleLog(heavyRuntime.stopWarmCodex, {
+        failureMessage: "Hosted container entrypoint failed to stop warm Codex on server close.",
+        reason: "container-server-close",
+      });
     }).catch(() => undefined);
   });
 
@@ -1049,22 +1042,49 @@ export async function startHostedContainerEntrypoint(input: {
     }
     containerShutdownExitStarted = true;
     void (async () => {
-      await drainHostedRuntimeDeferredUsageCompletionsBestEffort({
-        timeoutMs: HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS,
+      let resolveShutdownDeadline!: () => void;
+      const shutdownDeadline = new Promise<void>((resolve) => {
+        resolveShutdownDeadline = resolve;
       });
+      const issueCleanExitOnce = (): void => {
+        if (containerTerminalExitScheduled) {
+          return;
+        }
+        containerTerminalExitScheduled = true;
+        process.exit(0);
+      };
+      const cleanExitBackstop = setTimeout(() => {
+        issueCleanExitOnce();
+        resolveShutdownDeadline();
+      }, runtime.shutdownDrainTimeoutMs);
+      cleanExitBackstop.unref();
+      const hydration = heavyRuntimeHydrationPromise;
+      const hydrationAndDrain = hydration
+        ? hydration.then(
+          async (heavyRuntime) => {
+            await heavyRuntime.drainShutdownRuntimeBestEffort({
+              timeoutMs: runtime.shutdownDrainTimeoutMs,
+            });
+          },
+          () => undefined,
+        ).catch(() => undefined)
+        : Promise.resolve();
+      await Promise.race([hydrationAndDrain, shutdownDeadline]);
+      if (hostedContainerProcessFatalObserved) {
+        server.close(() => {
+          clearTimeout(cleanExitBackstop);
+        });
+        return;
+      }
       emitHostedExecutionStructuredLog({
         component: "container",
         level: "warn",
         message: "Hosted container entrypoint drained after shutdown signal; exiting cleanly.",
         phase: "wake.running",
       });
-      const cleanExitBackstop = setTimeout(() => {
-        process.exit(0);
-      }, 5_000);
-      cleanExitBackstop.unref();
       server.close(() => {
         clearTimeout(cleanExitBackstop);
-        process.exit(0);
+        issueCleanExitOnce();
       });
     })();
   };
@@ -1096,8 +1116,13 @@ export async function startHostedContainerEntrypoint(input: {
     server.listen(input.port ?? 8080, "0.0.0.0", () => {
       // Capture node-startup latency synchronously in the listen callback, before
       // the event loop can dispatch the first request handler, so a request that
-      // races server startup still observes the cold nodeStartupMs.
-      pendingColdNodeStartupMs = Date.now() - HOSTED_CONTAINER_PROCESS_START_MS;
+      // races server startup still observes the cold nodeStartupMs. Heavy runtime
+      // hydration starts only after this measurement and never changes readiness.
+      serverListeningAtEpochMs = Date.now();
+      pendingColdNodeStartupMs =
+        serverListeningAtEpochMs - HOSTED_CONTAINER_PROCESS_START_MS;
+      hydrateHeavyRuntime();
+      hostedContainerFatalRuntimeDrain = fatalRuntimeDrainOwner;
       resolve();
     });
   }).catch((error) => {
@@ -1133,25 +1158,16 @@ export async function startHostedContainerEntrypoint(input: {
   return server;
 }
 
-async function parseHostedExecutionContainerInvocationRequest(
+function parseHostedExecutionContainerInvocationEnvelope(
   value: unknown,
-  runtime: HostedContainerRuntimeDependencies,
-): Promise<{
-  job: HostedExecutionRunnerJobInput;
-}> {
+): { job: unknown } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Hosted container runner request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
-  const assistantRuntime = await runtime.loadRuntimeContracts();
   assertHostedContainerArchitectureVersion(record.hostedRuntimeArchitectureVersion);
-
-  return {
-    job: parseHostedExecutionRunnerJobInput(record.job, {
-      parseWorkspaceJobInput: assistantRuntime.parseHostedAssistantWorkspaceRuntimeJobInput,
-    }),
-  };
+  return { job: record.job };
 }
 
 if (isHostedContainerCliEntrypoint()) {
@@ -1209,17 +1225,13 @@ function installHostedContainerProcessFatalHandlers(): void {
       setTimeout(() => {
         process.exit(1);
       }, HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS + 1_000).unref();
-      // Flush queued info-level runtime log writes alongside the fatal
-      // report so the crash tail stays durable; the backstop above bounds
-      // both. Neither promise ever rejects.
+      // Flush queued runtime writes alongside the fatal report when the heavy
+      // runtime has hydrated. Before listen there cannot be accepted assistant
+      // work to drain, so the fatal report remains the only durable owner.
+      const runtimeDrain = hostedContainerFatalRuntimeDrain;
       void Promise.allSettled([
         reportHostedContainerFatalBestEffort({ error, stage }),
-        drainHostedAssistantDeliveryControlPlaneWritesBestEffort(),
-        drainHostedRuntimeLogWritesBestEffort(),
-        drainHostedRuntimeDeferredUsageCompletionsBestEffort({
-          closeActiveCaptures: true,
-          timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
-        }),
+        ...(runtimeDrain ? [runtimeDrain()] : []),
       ]).then(() => {
         process.exitCode = 1;
         process.exit(1);
@@ -1523,6 +1535,10 @@ function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
   return typeof phase === "string" ? phase : null;
 }
 
+function readHostedExecutionRunnerJobUserId(job: HostedExecutionRunnerJobInput): string {
+  return job.request.userId;
+}
+
 function readHostedContainerWorkspaceAttemptId(
   job: HostedExecutionRunnerJobInput,
 ): string | null {
@@ -1554,30 +1570,59 @@ function resolveHostedContainerRuntimeDependencies(
 ): HostedContainerRuntimeDependencies {
   const startupConfig = createHostedContainerStartupConfig();
   return {
-    loadRuntimeContracts: createCachedHostedContainerLoader(
-      runtime?.loadRuntimeContracts ?? loadHostedContainerRuntimeContracts,
-    ),
     exitScheduler: runtime?.exitScheduler ?? defaultHostedContainerExitScheduler,
+    loadHeavyRuntime: async () =>
+      await loadConfiguredHostedContainerHeavyRuntime(runtime),
+    parseRunnerJobInput:
+      runtime?.parseRunnerJobInput ?? parseHostedExecutionRunnerJobInput,
+    prepareWorkspaceRestore:
+      runtime?.prepareWorkspaceRestore ?? prepareHostedContainerWorkspaceRestore,
     processApi: runtime?.processApi
       ? {
         ...defaultHostedContainerProcessApi,
         ...runtime.processApi,
       }
       : defaultHostedContainerProcessApi,
-    runWorkspaceInvocation: runtime?.runWorkspaceInvocation ?? runHostedWorkspaceInvocationDirect,
+    shutdownDrainTimeoutMs:
+      runtime?.shutdownDrainTimeoutMs
+      ?? HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS,
     startupConfig,
+    stopWarmCodex: runtime?.stopWarmCodex ?? stopWarmCodexAppServer,
+  };
+}
+
+async function loadConfiguredHostedContainerHeavyRuntime(
+  runtime: HostedContainerRuntimeOptions | undefined,
+): Promise<HostedContainerHeavyRuntime> {
+  const heavyRuntime = await (runtime?.loadHeavyRuntime ?? loadHostedContainerHeavyRuntime)();
+
+  return {
+    ...heavyRuntime,
+    runCodexShellSmoke: runtime?.runCodexShellSmoke ?? heavyRuntime.runCodexShellSmoke,
     runDirectR2PresignedPutSmoke:
-      runtime?.runDirectR2PresignedPutSmoke ?? runHostedContainerDirectR2PresignedPutSmoke,
-    runCodexShellSmoke:
-      runtime?.runCodexShellSmoke ?? runHostedContainerCodexShellSmoke,
+      runtime?.runDirectR2PresignedPutSmoke ?? heavyRuntime.runDirectR2PresignedPutSmoke,
     runLiveModelTurnSmoke:
-      runtime?.runLiveModelTurnSmoke ?? runHostedContainerLiveModelTurnSmoke,
-    stopWarmCodex:
-      runtime?.stopWarmCodex ?? stopWarmCodexAppServer,
+      runtime?.runLiveModelTurnSmoke ?? heavyRuntime.runLiveModelTurnSmoke,
+    runWorkspaceInvocation:
+      runtime?.runWorkspaceInvocation ?? heavyRuntime.runWorkspaceInvocation,
+    stopWarmCodex: runtime?.stopWarmCodex ?? stopWarmCodexAppServer,
     waitForBackgroundAssistantWork:
       runtime?.waitForBackgroundAssistantWork
-      ?? ((signal) => waitForWarmCodexBackgroundWork({ signal })),
+      ?? (async (signal) => await waitForWarmCodexBackgroundWork({ signal })),
   };
+}
+
+async function loadHostedContainerHeavyRuntime(): Promise<HostedContainerHeavyRuntimeCore> {
+  const module = await import("./container-entrypoint-heavy-runtime.ts");
+  return module.hostedContainerHeavyRuntime;
+}
+
+async function prepareHostedContainerWorkspaceRestore(input: {
+  job: HostedExecutionRunnerJobInput;
+  signal: AbortSignal;
+}): Promise<HostedWorkspaceRestorePreparation> {
+  const module = await import("./container-workspace-restore-preparation.ts");
+  return await module.prepareHostedContainerWorkspaceRestore(input);
 }
 
 function createHostedContainerStartupConfig(): HostedContainerStartupConfig {
@@ -1591,893 +1636,28 @@ function createHostedContainerStartupConfig(): HostedContainerStartupConfig {
   });
 }
 
-async function runHostedContainerDirectR2PresignedPutSmoke(input: {
-  byteLength: number;
-  presignedPutUrl: string;
-  signal: AbortSignal;
-  tlsCaCertificatePem?: string;
-}): Promise<HostedContainerDirectR2PresignedPutSmokeResult> {
-  const startedAt = Date.now();
-  const payload = createHostedContainerDeterministicPayloadStream(input.byteLength);
-  const response = await putHostedContainerDirectR2SmokePayload({
-    byteLength: input.byteLength,
-    payload: payload.stream,
-    presignedPutUrl: input.presignedPutUrl,
-    signal: input.signal,
-    tlsCaCertificatePem: input.tlsCaCertificatePem,
-  });
-  return {
-    byteLength: input.byteLength,
-    durationMs: Date.now() - startedAt,
-    ok: response.status >= 200 && response.status < 300,
-    payloadSha256: payload.readSha256(),
-    responseBodyBytes: response.bodyBytes,
-    status: response.status,
-  };
-}
-
-function createHostedContainerDeterministicPayloadStream(byteLength: number): {
-  readSha256: () => string;
-  stream: Readable;
-} {
-  const hash = createHash("sha256");
-  let offset = 0;
-  let digest: string | null = null;
-  const stream = new Readable({
-    read() {
-      if (offset >= byteLength) {
-        digest = hash.digest("hex");
-        this.push(null);
-        return;
-      }
-
-      const chunkLength = Math.min(
-        HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES,
-        byteLength - offset,
-      );
-      const chunk = Buffer.allocUnsafe(chunkLength);
-      for (let index = 0; index < chunkLength; index += 1) {
-        chunk[index] = (offset + index) & 0xff;
-      }
-      offset += chunkLength;
-      hash.update(chunk);
-      this.push(chunk);
-    },
-  });
-
-  return {
-    readSha256() {
-      if (digest === null) {
-        throw new Error("Direct R2 presigned PUT smoke payload digest was read before upload completed.");
-      }
-      return digest;
-    },
-    stream,
-  };
-}
-
-async function putHostedContainerDirectR2SmokePayload(input: {
-  byteLength: number;
-  payload: Readable;
-  presignedPutUrl: string;
-  signal: AbortSignal;
-  tlsCaCertificatePem?: string;
-}): Promise<{ bodyBytes: number; status: number }> {
-  const url = new URL(input.presignedPutUrl);
-  const request = url.protocol === "https:" ? httpsRequest : httpRequest;
-
-  return await new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (error?: Error, result?: { bodyBytes: number; status: number }): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      input.signal.removeEventListener("abort", abort);
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(result ?? { bodyBytes: 0, status: 0 });
-    };
-    const abort = (): void => {
-      clientRequest.destroy(new Error("Direct R2 presigned PUT smoke aborted."));
-    };
-    const clientRequest = request(url, {
-      ...(input.tlsCaCertificatePem ? { ca: input.tlsCaCertificatePem } : {}),
-      headers: {
-        "content-length": String(input.byteLength),
-        "content-type": "application/octet-stream",
-        "if-none-match": "*",
-      },
-      method: "PUT",
-      signal: input.signal,
-    }, (response) => {
-      let bodyBytes = 0;
-      response.on("data", (chunk) => {
-        bodyBytes += Buffer.byteLength(chunk);
-      });
-      response.once("error", finish);
-      response.once("end", () => {
-        finish(undefined, {
-          bodyBytes,
-          status: response.statusCode ?? 0,
-        });
-      });
-      response.resume();
-    });
-
-    input.signal.addEventListener("abort", abort, { once: true });
-    clientRequest.once("error", finish);
-    input.payload.once("error", finish);
-    input.payload.pipe(clientRequest);
-  });
-}
-
-async function runHostedContainerCodexShellSmoke(input: {
-  signal: AbortSignal;
-}): Promise<HostedContainerCodexShellSmokeResult> {
-  return await withHostedContainerCodexSmokeWorkspace(
-    HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL,
-    async (workspace) =>
-      await runHostedContainerCodexShellAppServerProbe({
-        ...workspace,
-        signal: input.signal,
-      }),
-  );
-}
-
-// The live model turn is deliberately a single non-interactive `codex exec`
-// subprocess with exit-code semantics. Codex app-server RPC plumbing is
-// already proven by the Codex shell smoke and the hosted-local E2E gates;
-// the only boundary this step closes is real OpenAI auth/quota/network for
-// one deployed model turn, so it stays as small as possible.
-//
-// The codex subprocess receives only the well-known injected-credential
-// placeholder: managed-container egress to api.openai.com is intercepted by
-// the Worker, which authorizes the deploy-smoke live-turn fence and injects
-// the real Worker-owned OPENAI_API_KEY upstream, the same egress path
-// production turns use. The raw key never enters the container.
-async function runHostedContainerLiveModelTurnSmoke(input: {
-  model: string;
-  signal: AbortSignal;
-}): Promise<HostedContainerLiveModelTurnSmokeResult> {
-  return await withHostedContainerCodexSmokeWorkspace(input.model, async (workspace) =>
-    await new Promise((resolve, reject) => {
-      const startedAtMs = Date.now();
-      let stdoutBytes = 0;
-      let stdoutTail = "";
-      let stderrBuffer = "";
-      let settled = false;
-      let timeout: NodeJS.Timeout | null = null;
-      let abort: () => void = () => {};
-      const child = spawn("codex", [
-        "exec",
-        "--json",
-        "--skip-git-repo-check",
-        "-",
-      ], {
-        cwd: workspace.smokeVaultRoot,
-        env: buildHostedContainerCodexShellSmokeProcessEnv({
-          ...workspace,
-          liveProviderEgress: true,
-        }),
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      const finish = (error: Error | null, result?: HostedContainerLiveModelTurnSmokeResult): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (timeout) {
-          clearTimeout(timeout);
-        }
-        input.signal.removeEventListener("abort", abort);
-        child.kill();
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(result ?? {
-          durationMs: Date.now() - startedAtMs,
-          model: input.model,
-          stdoutBytes,
-        });
-      };
-
-      abort = (): void => {
-        finish(new Error("Hosted live model turn smoke aborted."));
-      };
-      timeout = setTimeout(() => {
-        finish(new Error(
-          "Hosted live model turn smoke timed out after "
-            + `${HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS}ms. `
-            + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(stderrBuffer))}`,
-        ));
-      }, HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS);
-      input.signal.addEventListener("abort", abort, { once: true });
-
-      child.stdout?.on("data", (chunk) => {
-        const text = String(chunk);
-        stdoutBytes += Buffer.byteLength(text);
-        stdoutTail = `${stdoutTail}${text}`.slice(
-          -HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS,
-        );
-      });
-      child.stderr?.on("data", (chunk) => {
-        // Keep only a bounded prefix; the excerpt is re-capped on use.
-        if (stderrBuffer.length < 4_096) {
-          stderrBuffer += String(chunk);
-        }
-      });
-      child.once("error", (error) => {
-        finish(new Error(
-          `Hosted live model turn smoke failed to spawn codex exec. ${error.message}`,
-        ));
-      });
-      child.once("close", (code, signal) => {
-        if (code === 0) {
-          const outputText = readDeployLiveModelTurnSmokeCodexOutputText(stdoutTail);
-          if (outputText !== DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT) {
-            finish(new Error(
-              "Hosted live model turn smoke did not return the expected output. "
-                + `stdoutBytes=${stdoutBytes} `
-                + `outputText=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(outputText ?? ""))}`,
-            ));
-            return;
-          }
-          finish(null, {
-            durationMs: Date.now() - startedAtMs,
-            model: input.model,
-            stdoutBytes,
-          });
-          return;
-        }
-        finish(new Error(
-          `Hosted live model turn smoke codex exec exited with ${code ?? signal ?? "unknown"}. `
-            + `stdoutBytes=${stdoutBytes} `
-            + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(
-              stderrBuffer,
-              HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS,
-            ))} `
-            + `stdoutExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeStdoutSafeText(stdoutTail))}`,
-        ));
-      });
-      child.stdin?.end(DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT);
-    }));
-}
-
-// Smoke failure text may embed Codex stdout/stderr. Keep only bounded,
-// printable diagnostic text and scrub obvious credential shapes before the
-// message leaves the container.
-function buildHostedContainerLiveModelTurnSmokeSafeText(
-  value: string,
-  maxChars = HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_ERROR_MESSAGE_MAX_CHARS,
-): string {
-  return value
-    .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s"',}]+/giu, "$1<REDACTED>")
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, "Bearer <REDACTED>")
-    .replace(
-      /((?:api|auth|access|refresh|id)?[_-]?(?:token|secret|password|private[_-]?jwk|key)\s*[:=]\s*)[^\s"',}]+/giu,
-      "$1<REDACTED>",
-    )
-    .replace(/\b(?:sk|pk|rk)-(?:proj-)?[A-Za-z0-9_-]{8,}\b/gu, "<REDACTED>")
-    .replace(/\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9_]{8,}\b/gu, "<REDACTED>")
-    .replace(/\bwhsec[_-][A-Za-z0-9_-]{8,}\b/gu, "<REDACTED>")
-    .replace(/\bgh[opsru]_[A-Za-z0-9_]{16,}\b/gu, "<REDACTED>")
-    .replace(/\bxox[abprs]-[A-Za-z0-9-]{16,}\b/gu, "<REDACTED>")
-    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu, "<REDACTED>")
-    .replace(/[^\x20-\x7e]+/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, maxChars);
-}
-
-function buildHostedContainerLiveModelTurnSmokeStdoutSafeText(value: string): string {
-  const extractedText = value
-    .split(/\r?\n/gu)
-    .map((line) => {
-      try {
-        const parsed = JSON.parse(line) as unknown;
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          return "";
-        }
-        const record = parsed as Record<string, unknown>;
-        if (typeof record.message === "string") {
-          return record.message;
-        }
-        const error = record.error;
-        if (error && typeof error === "object" && !Array.isArray(error)) {
-          const errorRecord = error as Record<string, unknown>;
-          return typeof errorRecord.message === "string" ? errorRecord.message : "";
-        }
-      } catch {
-        return "";
-      }
-      return "";
-    })
-    .filter((line) => line.length > 0)
-    .join(" ");
-  return buildHostedContainerLiveModelTurnSmokeSafeText(
-    extractedText,
-    HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_EXCERPT_MAX_CHARS,
-  );
-}
-
-async function withHostedContainerCodexSmokeWorkspace<T>(
-  model: string,
-  run: (workspace: { codexHome: string; smokeVaultRoot: string }) => Promise<T>,
+function raceHostedContainerInvocationAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
 ): Promise<T> {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-shell-smoke-"));
-  let codexWorkspaceRoot: string | null = null;
-  try {
-    const codexSmokeHomeRoot = resolveHostedContainerCodexSmokeHomeRoot();
-    await mkdir(codexSmokeHomeRoot, {
-      mode: 0o700,
-      recursive: true,
-    });
-    await chmod(codexSmokeHomeRoot, 0o700);
-    codexWorkspaceRoot = await mkdtemp(path.join(
-      codexSmokeHomeRoot,
-      "hosted-codex-shell-smoke-",
-    ));
-    const codexHome = path.join(codexWorkspaceRoot, ".codex-smoke");
-    const smokeVaultRoot = path.join(workspaceRoot, "vault");
-    await mkdir(codexHome, {
-      mode: 0o700,
-      recursive: true,
-    });
-    await chmod(codexHome, 0o700);
-    await mkdir(smokeVaultRoot, {
-      mode: 0o700,
-      recursive: true,
-    });
-    await chmod(smokeVaultRoot, 0o700);
-    await writeFile(
-      path.join(smokeVaultRoot, "vault.json"),
-      `${JSON.stringify({
-        createdAt: "2026-05-22T00:00:00.000Z",
-        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
-        timezone: "UTC",
-        title: "Hosted Codex Shell Smoke",
-        vaultId: "vault_01JY0000000000000000000000",
-      }, null, 2)}\n`,
-      { mode: 0o600 },
-    );
-    await writeFile(
-      path.join(smokeVaultRoot, "CORE.md"),
-      [
-        "---",
-        "schemaVersion: hv/core@v1",
-        "vaultId: vault_01JY0000000000000000000000",
-        "title: Hosted Codex Shell Smoke",
-        "---",
-        "# Hosted Codex Shell Smoke",
-        "",
-      ].join("\n"),
-      { mode: 0o600 },
-    );
-    await writeFile(
-      path.join(codexHome, "config.toml"),
-      buildHostedContainerCodexShellSmokeConfig(model),
-      { mode: 0o600 },
-    );
-
-    return await run({
-      codexHome,
-      smokeVaultRoot,
-    });
-  } finally {
-    await Promise.all([
-      rm(workspaceRoot, {
-        force: true,
-        recursive: true,
-      }),
-      ...(codexWorkspaceRoot ? [rm(codexWorkspaceRoot, {
-        force: true,
-        recursive: true,
-      })] : []),
-    ]);
+  if (signal.aborted) {
+    return Promise.reject(signal.reason);
   }
-}
 
-export function resolveHostedContainerCodexSmokeHomeRoot(
-  source: Readonly<Record<string, string | undefined>> = process.env,
-): string {
-  const base = normalizeAbsoluteHostedContainerPath(source.HOSTED_HOME)
-    ?? normalizeAbsoluteHostedContainerPath(source.HOME)
-    ?? normalizeAbsoluteHostedContainerPath(homedir());
-  if (!base) {
-    throw new Error("Hosted Codex shell smoke requires an absolute runner home directory.");
-  }
-  const smokeHomeRoot = path.join(base, HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY);
-  if (isPathInside(smokeHomeRoot, tmpdir())) {
-    throw new Error("Hosted Codex shell smoke CODEX_HOME parent must not be under the system temporary directory.");
-  }
-  return smokeHomeRoot;
-}
-
-function normalizeAbsoluteHostedContainerPath(value: string | undefined): string | null {
-  const normalized = value?.trim();
-  if (!normalized || !path.isAbsolute(normalized)) {
-    return null;
-  }
-  return path.resolve(normalized);
-}
-
-function isPathInside(candidate: string, parent: string): boolean {
-  const relative = path.relative(path.resolve(parent), path.resolve(candidate));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function buildHostedContainerCodexShellSmokeConfig(model: string): string {
-  const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
-
-  return [
-    `model = ${JSON.stringify(model)}`,
-    ...(modelCatalogJson
-      ? [`model_catalog_json = ${JSON.stringify(modelCatalogJson)}`]
-      : []),
-    'model_provider = "hosted-shell-smoke"',
-    'model_reasoning_effort = "low"',
-    'approval_policy = "never"',
-    'sandbox_mode = "danger-full-access"',
-    "check_for_update_on_startup = false",
-    // Mirror the hosted runtime config: non-login shells so the smoke probe
-    // exercises the same PATH semantics as production turns.
-    "allow_login_shell = false",
-    "",
-    "[features]",
-    "plugins = false",
-    "multi_agent_v2 = true",
-    "",
-    '[model_providers."hosted-shell-smoke"]',
-    'name = "OpenAI"',
-    'base_url = "https://api.openai.com/v1"',
-    'env_key = "OPENAI_API_KEY"',
-    'wire_api = "responses"',
-    'requires_openai_auth = false',
-    "supports_websockets = false",
-    "request_max_retries = 4",
-    "stream_max_retries = 5",
-    "",
-    "[skills]",
-    "include_instructions = false",
-    "",
-    "[skills.bundled]",
-    "enabled = false",
-    "",
-    "[history]",
-    'persistence = "none"',
-    "",
-    "[shell_environment_policy]",
-    'inherit = "all"',
-    'include_only = ["PATH", "VAULT", "HOME", "CODEX_HOME", "TMPDIR"]',
-    "",
-    "[shell_environment_policy.set]",
-    `PATH = ${JSON.stringify(HOSTED_RUNNER_EXECUTABLE_PATH)}`,
-    "",
-  ].join("\n");
-}
-
-function readHostedCodexModelCatalogJsonPath(): string | null {
-  const value = process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
-  return value && value.length > 0 ? value : null;
-}
-
-async function runHostedContainerCodexShellAppServerProbe(input: {
-  codexHome: string;
-  signal: AbortSignal;
-  smokeVaultRoot: string;
-}): Promise<HostedContainerCodexShellSmokeResult> {
-  return await new Promise((resolve, reject) => {
-    let stdoutBuffer = "";
-    let stderrBytes = 0;
-    let settled = false;
-    let nextRequestId = 1;
-    let timeout: NodeJS.Timeout | null = null;
-    let abort: () => void = () => {};
-    const pending = new Map<number, {
-      label: string;
-      reject: (error: Error) => void;
-      resolve: (value: Record<string, unknown>) => void;
-    }>();
-    const child = spawn("codex", ["app-server"], {
-      cwd: input.smokeVaultRoot,
-      env: buildHostedContainerCodexShellSmokeProcessEnv(input),
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    const finish = (error?: Error, result?: HostedContainerCodexShellSmokeResult): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-      input.signal.removeEventListener("abort", abort);
-      for (const request of pending.values()) {
-        request.reject(error ?? new Error("Hosted Codex shell smoke stopped."));
-      }
-      pending.clear();
-      try {
-        child.stdin.end();
-      } catch {
-        // Best-effort cleanup for a diagnostic-only smoke process.
-      }
-      child.kill();
-      if (error) {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
         reject(error);
-        return;
-      }
-      resolve(result ?? {
-        client: "codex-app-server",
-        cliSurfaceContractBytes: 0,
-        cliSurfaceHotPathProofCount: 0,
-        murphPathBytes: 0,
-        noteAddBytes: 0,
-        stderrBytes,
-        vaultCliLlmsBytes: 0,
-        vaultCliPathBytes: 0,
-        vaultShowBytes: 0,
-      });
-    };
-
-    const fail = (error: Error): void => {
-      finish(error);
-    };
-
-    abort = (): void => {
-      fail(new Error("Hosted Codex shell smoke aborted."));
-    };
-    timeout = setTimeout(() => {
-      fail(new Error(`Hosted Codex shell smoke timed out. stderrBytes=${stderrBytes}`));
-    }, HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS);
-
-    input.signal.addEventListener("abort", abort, { once: true });
-    child.stderr?.on("data", (chunk) => {
-      stderrBytes += Buffer.byteLength(chunk);
-    });
-    child.stdout?.on("data", (chunk) => {
-      stdoutBuffer += String(chunk);
-      const lines = stdoutBuffer.split(/\r?\n/u);
-      stdoutBuffer = lines.pop() ?? "";
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line) {
-          continue;
-        }
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          fail(new Error("Hosted Codex shell smoke app-server emitted malformed JSON."));
-          return;
-        }
-        const message = readHostedContainerCodexRpcMessage(parsed);
-        if (typeof message.id !== "number") {
-          continue;
-        }
-        const request = pending.get(message.id);
-        if (!request) {
-          continue;
-        }
-        pending.delete(message.id);
-        if (message.error !== undefined) {
-          request.reject(new Error(
-            `Hosted Codex shell smoke request failed for ${request.label}. `
-              + `errorBytes=${Buffer.byteLength(JSON.stringify(message.error), "utf8")}`,
-          ));
-          continue;
-        }
-        request.resolve(message);
-      }
-    });
-    child.once("error", fail);
-    child.once("exit", (code, signal) => {
-      if (!settled) {
-        fail(new Error(
-          `Hosted Codex shell smoke app-server exited early with ${code ?? signal ?? "unknown"}. `
-            + `stderrBytes=${stderrBytes}`,
-        ));
-      }
-    });
-
-    const sendRequest = (
-      label: string,
-      method: string,
-      params: Record<string, unknown>,
-    ): Promise<Record<string, unknown>> => {
-      const id = nextRequestId;
-      nextRequestId += 1;
-      return new Promise((requestResolve, requestReject) => {
-        pending.set(id, {
-          label,
-          reject: requestReject,
-          resolve: requestResolve,
-        });
-        child.stdin.write(`${JSON.stringify({ id, method, params })}\n`, (error) => {
-          if (!error) {
-            return;
-          }
-          pending.delete(id);
-          requestReject(error);
-          fail(new Error(`Hosted Codex shell smoke failed to write ${label}.`));
-        });
-      });
-    };
-
-    const sendNotification = (method: string, params: Record<string, unknown>): void => {
-      child.stdin.write(`${JSON.stringify({ method, params })}\n`);
-    };
-
-    const execCommand = async (
-      label: string,
-      command: readonly string[],
-    ): Promise<HostedContainerCodexCommandExecResult> => {
-      const message = await sendRequest(label, "command/exec", {
-        command,
-        timeoutMs: 15_000,
-      });
-      const result = readHostedContainerCodexCommandExecResult(message.result);
-      if (result.exitCode !== 0) {
-        throw new Error(
-          `Hosted Codex shell smoke command failed for ${label}. `
-            + `exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} `
-            + `stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}`,
-        );
-      }
-      return result;
-    };
-
-    void (async () => {
-      await sendRequest("initialize", "initialize", {
-        clientInfo: {
-          name: "hosted-codex-shell-smoke",
-          version: "1",
-        },
-      });
-      sendNotification("initialized", {});
-      const environmentProbe = readHostedContainerCodexShellEnvironmentProbe(
-        (await execCommand("environment-probe", [
-          "node",
-          "-e",
-          buildHostedContainerCodexShellEnvironmentProbeScript(),
-          input.smokeVaultRoot,
-        ])).stdout,
-      );
-      const vaultCliLlms = await execCommand("vault-cli-llms", [
-        "vault-cli",
-        "--llms",
-        "--format",
-        "json",
-      ]);
-      const cliSurface = await runHostedContainerCliSurfaceContractSmoke();
-      const vaultShow = await execCommand("vault-show", [
-        "vault-cli",
-        "vault",
-        "show",
-        "--format",
-        "json",
-      ]);
-      const noteAdd = await execCommand("event-note-add", [
-        "vault-cli",
-        "event",
-        "note",
-        "add",
-        "--note",
-        "Hosted deploy smoke note",
-        "--format",
-        "json",
-      ]);
-      finish(undefined, {
-        client: "codex-app-server",
-        cliSurfaceContractBytes: cliSurface.contractBytes,
-        cliSurfaceHotPathProofCount: cliSurface.hotPathProofCount,
-        murphPathBytes: environmentProbe.murphPathBytes,
-        noteAddBytes: Buffer.byteLength(noteAdd.stdout, "utf8"),
-        stderrBytes,
-        vaultCliLlmsBytes: Buffer.byteLength(vaultCliLlms.stdout, "utf8"),
-        vaultCliPathBytes: environmentProbe.vaultCliPathBytes,
-        vaultShowBytes: Buffer.byteLength(vaultShow.stdout, "utf8"),
-      });
-    })().catch((error: unknown) => {
-      fail(error instanceof Error ? error : new Error("Hosted Codex shell smoke failed."));
-    });
-  });
-}
-
-async function runHostedContainerCliSurfaceContractSmoke(): Promise<{
-  contractBytes: number;
-  hotPathProofCount: number;
-}> {
-  // Deploy-smoke-only modules: loaded lazily so the cold-boot job path never
-  // pays their module-evaluation cost.
-  const [
-    { readHostedAssistantCliSurfaceBootstrapContext },
-    {
-      HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
-      countAssistantCliSurfaceHotPathProofs,
-    },
-  ] = await Promise.all([
-    import("@murphai/assistant-runtime/hosted-assistant-bootstrap"),
-    import("./hosted-runner-smoke-contract.ts"),
-  ]);
-  const contract = await readHostedAssistantCliSurfaceBootstrapContext();
-  if (!contract) {
-    throw new Error("Hosted Codex shell smoke assistant CLI surface contract was missing.");
-  }
-
-  const hotPathProofCount = countAssistantCliSurfaceHotPathProofs(contract);
-  if (hotPathProofCount < HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT) {
-    throw new Error(
-      `Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=${hotPathProofCount}`,
+      },
     );
-  }
-
-  return {
-    contractBytes: Buffer.byteLength(contract, "utf8"),
-    hotPathProofCount,
-  };
-}
-
-function buildHostedContainerCodexShellSmokeProcessEnv(input: {
-  codexHome: string;
-  liveProviderEgress?: boolean;
-  smokeVaultRoot: string;
-}): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    CODEX_HOME: input.codexHome,
-    HOME: path.dirname(input.smokeVaultRoot),
-    // The live-turn smoke sends the well-known injected-credential
-    // placeholder so the Worker egress intercept swaps in the real key,
-    // exactly like production turns. The app-server shell smoke keeps a
-    // local-only fake instead, proving no provider credential reaches its
-    // command env.
-    OPENAI_API_KEY: input.liveProviderEgress
-      ? HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL
-      : "hosted-codex-shell-smoke-secret",
-    PATH: buildHostedRunnerExecutablePath(process.env.PATH),
-    TMPDIR: path.dirname(input.smokeVaultRoot),
-    VAULT: input.smokeVaultRoot,
-  };
-
-  if (input.liveProviderEgress) {
-    // codex must trust the Cloudflare container egress-interception CA to
-    // reach api.openai.com through the Worker.
-    for (const key of HOSTED_RUNNER_CONTAINER_CA_ENV_KEYS) {
-      copyOptionalHostedContainerSmokeEnv(env, key);
-    }
-  }
-  copyOptionalHostedContainerSmokeEnv(env, "CI");
-  copyOptionalHostedContainerSmokeEnv(env, "COLORTERM");
-  copyOptionalHostedContainerSmokeEnv(env, "FORCE_COLOR");
-  copyOptionalHostedContainerSmokeEnv(env, "LANG");
-  copyOptionalHostedContainerSmokeEnv(env, "LC_ALL");
-  copyOptionalHostedContainerSmokeEnv(env, "LC_CTYPE");
-  copyOptionalHostedContainerSmokeEnv(env, "NO_COLOR");
-  copyOptionalHostedContainerSmokeEnv(env, "TERM");
-  return env;
-}
-
-function buildHostedContainerCodexShellEnvironmentProbeScript(): string {
-  return `
-const fs = require("node:fs");
-const path = require("node:path");
-const expectedVaultRoot = process.argv[1];
-function findExecutable(name) {
-  const pathValue = process.env.PATH || "";
-  for (const directory of pathValue.split(path.delimiter)) {
-    if (!directory) continue;
-    const candidate = path.join(directory, name);
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch {}
-  }
-  return "";
-}
-process.stdout.write(JSON.stringify({
-  murphPathBytes: Buffer.byteLength(findExecutable("murph"), "utf8"),
-  providerCredentialPresent: Boolean(process.env.OPENAI_API_KEY),
-  vaultCliPathBytes: Buffer.byteLength(findExecutable("vault-cli"), "utf8"),
-  vaultRootInherited: process.env.VAULT === expectedVaultRoot,
-}));
-`;
-}
-
-function readHostedContainerCodexShellEnvironmentProbe(stdout: string): {
-  murphPathBytes: number;
-  vaultCliPathBytes: number;
-} {
-  const record = readHostedContainerJsonObject(stdout, "Hosted Codex shell environment probe");
-  const murphPathBytes = readHostedContainerPositiveNumber(
-    record.murphPathBytes,
-    "Hosted Codex shell environment probe.murphPathBytes",
-  );
-  const vaultCliPathBytes = readHostedContainerPositiveNumber(
-    record.vaultCliPathBytes,
-    "Hosted Codex shell environment probe.vaultCliPathBytes",
-  );
-  if (record.vaultRootInherited !== true) {
-    throw new Error("Hosted Codex shell smoke did not inherit VAULT.");
-  }
-  if (record.providerCredentialPresent === true) {
-    throw new Error("Hosted Codex shell smoke leaked provider credentials into command env.");
-  }
-  return {
-    murphPathBytes,
-    vaultCliPathBytes,
-  };
-}
-
-function readHostedContainerCodexRpcMessage(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted Codex shell smoke RPC message must be an object.");
-  }
-  return value as Record<string, unknown>;
-}
-
-function readHostedContainerCodexCommandExecResult(
-  value: unknown,
-): HostedContainerCodexCommandExecResult {
-  const record = readHostedContainerRecord(value, "Hosted Codex command result");
-  const exitCode = record.exitCode;
-  const stdout = record.stdout;
-  const stderr = record.stderr;
-  if (typeof exitCode !== "number" || !Number.isSafeInteger(exitCode)) {
-    throw new TypeError("Hosted Codex command result.exitCode must be an integer.");
-  }
-  if (typeof stdout !== "string") {
-    throw new TypeError("Hosted Codex command result.stdout must be a string.");
-  }
-  if (typeof stderr !== "string") {
-    throw new TypeError("Hosted Codex command result.stderr must be a string.");
-  }
-  return {
-    exitCode,
-    stderr,
-    stdout,
-  };
-}
-
-function readHostedContainerJsonObject(
-  value: string,
-  label: string,
-): Record<string, unknown> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new SyntaxError(`${label} was not valid JSON.`);
-  }
-  return readHostedContainerRecord(parsed, label);
-}
-
-function readHostedContainerRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function readHostedContainerPositiveNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new TypeError(`${label} must be a positive number.`);
-  }
-  return value;
-}
-
-function copyOptionalHostedContainerSmokeEnv(
-  target: NodeJS.ProcessEnv,
-  name: string,
-): void {
-  const value = process.env[name];
-  if (typeof value === "string" && value.length > 0) {
-    target[name] = value;
-  }
+  });
 }
 
 export function createRequestAbortController(
@@ -2772,14 +1952,17 @@ async function readHostedRunnerBundleManifestSummary(
 }
 
 async function stopWarmCodexWithLifecycleLog(
-  runtime: HostedContainerRuntimeDependencies,
+  stopWarmCodex: HostedContainerHeavyRuntime["stopWarmCodex"],
   input: {
     failureMessage?: string;
-    reason: "container-server-close" | "workspace-invocation-abort";
+    reason:
+      | "container-server-close"
+      | "hosted-workspace-restore"
+      | "workspace-invocation-abort";
   },
 ): Promise<void> {
   try {
-    await runtime.stopWarmCodex(input.reason);
+    await stopWarmCodex(input.reason);
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -2905,21 +2088,4 @@ function isMissingFileError(error: unknown): boolean {
       "code" in error &&
       (error as { code?: unknown }).code === "ENOENT",
   );
-}
-
-function createCachedHostedContainerLoader<T>(load: () => Promise<T>): () => Promise<T> {
-  let loader: Promise<T> | null = null;
-
-  return async () => {
-    loader ??= load();
-    return await loader;
-  };
-}
-
-async function loadHostedContainerRuntimeContracts(): Promise<
-  typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")
-> {
-  hostedContainerRuntimeContractsLoader ??=
-    import("@murphai/assistant-runtime/hosted-runtime-contracts");
-  return await hostedContainerRuntimeContractsLoader;
 }

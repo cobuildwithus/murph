@@ -33,6 +33,7 @@ export type {
   AssistantPersonalityPreferencesUpdate,
   AssistantPreferencesUpdate,
   PreferencesDocumentSnapshot,
+  WorkoutCapturePreferencesUpdate,
 } from "./preferences.ts";
 export {
   assertPathWithinVault,
@@ -139,6 +140,8 @@ export {
   deleteProvider,
   deleteRecipe,
   ensureJournalDay,
+  listInboxDocumentDefaultPromotionCorrelations,
+  listLiveExactDocumentImportEvidence,
   importAssessmentResponse,
   importDeviceBatch,
   importDocument,
@@ -150,6 +153,7 @@ export {
   linkJournalStreams,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  recordInboxDocumentDefaultPromotion,
   removeAutomaticMealPhoto,
   repairJunctionWorkoutHeartRateZones,
   repairExperimentMedia,
@@ -161,6 +165,7 @@ export {
   unlinkJournalEventIds,
   unlinkJournalStreams,
   updateAssistantPreferences,
+  updateWorkoutCapturePreferences,
   updateWorkoutUnitPreferences,
   updateWearablePreferences,
   updateExperiment,
@@ -351,6 +356,9 @@ export {
   WORKOUT_SOURCE_IMPORT_STATUS_VALUES,
 } from "./mutations.ts";
 export type {
+  InboxDocumentDefaultPromotionCorrelation,
+  LiveExactDocumentImportEvidence,
+  LiveExactDocumentImportEvidenceGroup,
   WorkoutSourceImportStatus,
 } from "./mutations.ts";
 export type {

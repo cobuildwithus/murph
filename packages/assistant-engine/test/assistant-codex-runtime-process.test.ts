@@ -1926,7 +1926,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     })
   })
 
-  it('reuses the warm Codex app-server through provider turns with different local prompts', async () => {
+  it('reuses the warm Codex app-server when thread display configuration changes', async () => {
     const workingDirectory = await createTempDir('assistant-codex-provider-local-warm-work-')
     const codexHome = await createTempDir('assistant-codex-provider-local-warm-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -1953,6 +1953,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     await expect(
       executeCodexAssistantTurnAttempt({
         ...baseInput,
+        showThinkingTraces: true,
         userPrompt: 'First ordinary local prompt',
       }),
     ).resolves.toMatchObject({
@@ -1962,6 +1963,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     await expect(
       executeCodexAssistantTurnAttempt({
         ...baseInput,
+        showThinkingTraces: false,
         userPrompt: 'Second ordinary local prompt',
       }),
     ).resolves.toMatchObject({
@@ -1970,7 +1972,13 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
 
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
     const messages = readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null))
+    const threadStarts = messages.filter((message) => message.method === 'thread/start')
     const turnStarts = messages.filter((message) => message.method === 'turn/start')
+    expect(asRecord(threadStarts[0]?.params).config).toEqual({
+      hide_agent_reasoning: false,
+      model_reasoning_summary: 'auto',
+    })
+    expect(asRecord(threadStarts[1]?.params).config).toBeUndefined()
     expect(turnStarts).toHaveLength(2)
     expect(readTurnStartInputItems(turnStarts[0] ?? {})[0]?.text)
       .toContain('First ordinary local prompt')
@@ -2014,12 +2022,12 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     writeSubAgentActivity(
       residentChild,
       'thread-warm-identity-1-1',
+      'turn-warm-identity-1-1',
       'thread-provider-background-child',
       'started',
       {
         agentPath: '/root/provider-background-child',
         id: 'spawn-provider-background-child',
-        turnId: 'turn-warm-identity-1-1',
       },
     )
     writeStartedTurn(
@@ -2031,10 +2039,10 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     await expect(
       executeCodexAssistantTurnAttempt({
         ...baseInput,
-        codexConfigOverrides: [
-          'features.shell_tool=false',
-          'features.apps=false',
-        ],
+        codexThreadConfig: {
+          'features.apps': false,
+          'features.shell_tool': false,
+        },
         dynamicTools: [],
         processLifetime: 'one-shot',
         userPrompt: 'Format one detached system notification.',
@@ -2048,12 +2056,14 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     expect(process.kill).not.toHaveBeenCalledWith(-40_000, 'SIGTERM')
     expect(process.kill).toHaveBeenCalledWith(-40_001, 'SIGTERM')
     const oneShotArgs = codexMocks.spawn.mock.calls[1]?.[1]
-    expect(oneShotArgs).toEqual(
-      expect.arrayContaining([
-        'features.shell_tool=false',
-        'features.apps=false',
-      ]),
-    )
+    expect(oneShotArgs).not.toContain('features.shell_tool=false')
+    expect(oneShotArgs).not.toContain('features.apps=false')
+    const oneShotThreadStart = readWrittenRpcMessages(oneShotChild)
+      .find((message) => message.method === 'thread/start')
+    expect(asRecord(oneShotThreadStart?.params).config).toEqual({
+      'features.apps': false,
+      'features.shell_tool': false,
+    })
 
     await expect(
       executeCodexAssistantTurnAttempt({
@@ -2224,12 +2234,12 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
             writeSubAgentActivity(
               child,
               parentThreadId,
+              parentTurnId,
               childThreadId,
               'started',
               {
                 agentPath: '/root/group-owned-background-work',
                 id: 'spawn-group-compact-detached-child',
-                turnId: parentTurnId,
               },
             )
             writeStartedTurn(child, childThreadId, childTurnId)
@@ -2350,7 +2360,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     },
   )
 
-  it('compacts current-shape group usage and preserves pre-compaction attribution', async () => {
+  it('compacts current-shape group usage at the 50k boundary and preserves attribution', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
@@ -2504,7 +2514,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     await expect(
       compactWarmCodexThread({
         groupMinThreadTokens: 50_000,
-        minThreadTokens: 100_000,
+        minThreadTokens: 90_000,
         timeoutMs: 5_000,
       }),
     ).resolves.toMatchObject({

@@ -1,8 +1,8 @@
 {
   "contractVersion": 1,
   "ios": {
-    "privateRef": "native-ios-e2e-v3-20260819-r10",
-    "privateSha": "ca2e5323c20bb2f17d347356a6eac74b4403bd3b"
+    "privateRef": "native-ios-e2e-v3-20260829-r12",
+    "privateSha": "40e0684cdad69e157dc94c84cc5e86159c9dc839"
   },
   "android": {
     "privateRef": "native-android-e2e-v23-20260824",
