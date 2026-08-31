@@ -820,6 +820,85 @@ test("built memory mutation parse failures stay pre-write and expose a fixed saf
   assert.deepEqual(await readFile(memoryPath), bytesBefore);
 }, BUILT_MEMORY_TIMEOUT_MS);
 
+test("built memory reads and mutations reject duplicate ids without writing or echoing private data", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-memory-cli-duplicate-id-",
+  );
+  cleanupPaths.push(parentRoot);
+  const memoryPath = path.join(vaultRoot, memoryDocumentRelativePath);
+  await mkdir(path.dirname(memoryPath), { recursive: true });
+  const first = upsertMemoryRecord(
+    createEmptyMemoryDocument(new Date("2026-08-30T16:00:00.000Z")),
+    {
+      now: new Date("2026-08-30T16:00:01.000Z"),
+      section: "Context",
+      text: "private-duplicate-id-memory-one",
+    },
+  );
+  const second = upsertMemoryRecord(first.document, {
+    now: new Date("2026-08-30T16:00:02.000Z"),
+    section: "Context",
+    text: "private-duplicate-id-memory-two",
+  });
+  const duplicateMarkdown = renderMemoryDocument({
+    document: second.document,
+  }).replace(second.record.id, first.record.id);
+  const duplicateLine = duplicateMarkdown
+    .split("\n")
+    .findIndex((line) => line.includes("private-duplicate-id-memory-two")) + 1;
+  await writeFile(memoryPath, duplicateMarkdown, "utf8");
+  const bytesBefore = await readFile(memoryPath);
+
+  const commands = [
+    ["memory", "show", first.record.id, "--vault", vaultRoot],
+    [
+      "memory",
+      "update",
+      first.record.id,
+      "private-duplicate-id-update-request",
+      "--vault",
+      vaultRoot,
+    ],
+    ["memory", "forget", first.record.id, "--vault", vaultRoot],
+  ] as const;
+
+  for (const command of commands) {
+    const envelope = await runCli([...command]);
+
+    assert.equal(envelope.ok, false);
+    if (envelope.ok) {
+      throw new Error("Expected duplicate canonical memory ids to fail.");
+    }
+    assert.equal(envelope.error.code, "memory_document_invalid");
+    assert.equal(envelope.error.retryable, false);
+    assert.equal(envelope.error.stage, "read");
+    assert.deepEqual(envelope.error.fieldErrors, [
+      {
+        code: "custom",
+        expected: "",
+        message: "This field is invalid.",
+        path: "id",
+        received: "invalid",
+      },
+    ]);
+    assert.match(
+      envelope.error.message ?? "",
+      new RegExp(`bank/memory\\.md:${duplicateLine}`, "u"),
+    );
+    const serialized = JSON.stringify(envelope);
+    assert.doesNotMatch(
+      serialized,
+      /private-duplicate-id-memory|private-duplicate-id-update-request/u,
+    );
+    assert.doesNotMatch(serialized, new RegExp(first.record.id, "u"));
+    assert.doesNotMatch(
+      serialized,
+      new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+    );
+    assert.deepEqual(await readFile(memoryPath), bytesBefore);
+  }
+}, BUILT_MEMORY_TIMEOUT_MS);
+
 test("memory command module does not register a search subcommand", async () => {
   const cli = Cli.create("vault-cli", {
     description: "memory test cli",

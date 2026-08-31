@@ -7,7 +7,6 @@ import {
   isEstablishedDeviceSyncConnection,
 } from "./public-account.ts";
 import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
-import { resolvePublicProviderDefaultScopes } from "./public-provider-descriptor-shared.ts";
 import {
   normalizeConfiguredDeviceSyncJobInput,
 } from "./provider-job-definitions.ts";
@@ -570,7 +569,7 @@ export class DeviceSyncPublicIngress {
       webhookPath,
       webhookUrl: webhookPath ? joinUrl(this.publicBaseUrl, webhookPath) : null,
       supportsWebhooks: Boolean(webhookPath && resolveProviderWebhookVerifier(provider)),
-      defaultScopes: resolvePublicProviderDefaultScopes(provider.descriptor, connection),
+      defaultScopes: [...(connection.defaultScopes ?? [])],
     };
   }
 

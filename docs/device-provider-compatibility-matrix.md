@@ -17,7 +17,7 @@ Not every provider needs every row. The goal is consistent mapping, not forced f
 
 Before writing transport or normalization code, make an explicit call on these shared descriptor fields:
 - `transportModes`
-- `oauth.callbackPath` and `oauth.defaultScopes`
+- `connection.callbackPath` and `connection.defaultScopes`
 - `webhook.path` and `webhook.deliveryMode`
 - `sync.windows`, `sync.jobKinds`, `sync.supportsRemoteDisconnect`, and `sync.supportsTokenRefresh`
 - `normalization.metricFamilies`
