@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -199,6 +200,183 @@ afterEach(() => {
 })
 
 describe('assistant Codex turn planning', () => {
+  it('characterizes complete route-plan outputs across planner branch families', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const promptTimeContext = {
+      currentLocalDate: '2026-08-30',
+      currentTimeZone: 'America/New_York',
+    }
+    const route = createRoute()
+    const session = createSession()
+    const directAudience = {
+      channel: 'telegram' as const,
+      effectiveThreadIsDirect: true,
+      threadId: 'thread-characterization-direct',
+      threadIsDirect: true,
+    }
+    const groupAudience = {
+      channel: 'linq' as const,
+      effectiveThreadIsDirect: false,
+      threadId: 'thread-characterization-group',
+      threadIsDirect: false,
+    }
+    const scheduledOccurrenceAt = '2026-08-30T09:00:00.000-04:00'
+    const plans = {
+      direct: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          channel: 'telegram',
+          threadId: directAudience.threadId,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, directAudience),
+      }),
+      group: await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            memberId: 'member-characterization-group',
+            userEnvKeys: [],
+          },
+        },
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          threadId: groupAudience.threadId,
+          threadIsDirect: false,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, groupAudience),
+      }),
+      maintenance: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          maintenanceProfile: 'member-memory',
+          scheduledInvocationAuthority: {
+            automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+            occurrenceAt: scheduledOccurrenceAt,
+          },
+          scheduledOccurrenceAt,
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'maintenance',
+          threadScope: 'isolated-thread',
+          toolProfile: 'maintenance-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan(),
+      }),
+      outputOnly: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'assistant-ask-continuation',
+          threadScope: 'isolated-thread',
+          toolProfile: 'output-only-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, directAudience),
+      }),
+      scheduledEmail: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          channel: 'email',
+          scheduledInvocationAuthority: {
+            automationId: 'automation-characterization-email',
+            occurrenceAt: scheduledOccurrenceAt,
+          },
+          scheduledOccurrenceAt,
+          threadId: 'thread-characterization-email',
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, {
+          channel: 'email',
+          effectiveThreadIsDirect: true,
+          threadId: 'thread-characterization-email',
+          threadIsDirect: true,
+        }),
+      }),
+    }
+    const digestPlan = (
+      plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
+    ) => createHash('sha256').update(JSON.stringify({
+      assistantCliContract: plan.assistantCliContract,
+      assistantContractFingerprint: plan.assistantContractFingerprint,
+      assistantPreferredElevenLabsVoiceId:
+        plan.assistantPreferredElevenLabsVoiceId,
+      cliEnv: plan.cliEnv,
+      codexContinuation: plan.codexContinuation,
+      conversationHistoryMessages: plan.conversationHistoryMessages,
+      developerInstructions: plan.developerInstructions,
+      diagnosticsPolicy: plan.diagnosticsPolicy,
+      dynamicTools: plan.dynamicTools,
+      environments: plan.environments,
+      onboardingGuidanceInjected: plan.onboardingGuidanceInjected,
+      planningDiagnostics: {
+        dynamicToolCount: plan.planningDiagnostics.dynamicToolCount,
+        messageTargetDynamicToolsAvailable:
+          plan.planningDiagnostics.messageTargetDynamicToolsAvailable,
+        messageTargetingAvailable:
+          plan.planningDiagnostics.messageTargetingAvailable,
+        shouldPrepareBootstrapContext:
+          plan.planningDiagnostics.shouldPrepareBootstrapContext,
+      },
+      promptCacheMetadata: plan.promptCacheMetadata,
+      resume: plan.resume,
+      sessionContext: plan.sessionContext,
+      systemPrompt: plan.systemPrompt,
+      turnContextPrompt: plan.turnContextPrompt,
+      voiceMemoDeliveryChannel: plan.voiceMemoDeliveryChannel,
+      workingDirectory: plan.workingDirectory,
+    })).digest('hex')
+
+    expect(Object.fromEntries(
+      Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
+    )).toEqual({
+      direct: 'f637e959b26ff6db8b7cb65d95d986d4d99a2ed4e5c53c1fad039fa99f94042f',
+      group: 'a15bed8837225bcbf50db839b068fe56ce0beb6d9e185c8853389b910480e3f5',
+      maintenance: '615e371f352707b0f87af9cb7c607fdbe7585323e26837927e3dcb0a12ba3d9d',
+      outputOnly: '22bb678775ca7810731ab679a950ed62ab787b819f322a308cd4fbfb05f46bb2',
+      scheduledEmail:
+        '9c05621a18d8a82dd0cc9a2ac39802eb8e34d4187128edb50b2bb0d0ecf75c0e',
+    })
+  })
+
   it('bounds snapshot refresh inside direct provider planning and skips it for groups', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
@@ -474,13 +652,21 @@ describe('assistant Codex turn planning', () => {
   it('reuses one UTC-only time authority when the member timezone is unknown', async () => {
     const promptTimeContext = {
       canonicalTimeZoneAvailable: false,
-      currentLocalDate: '2026-08-11',
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-14',
       currentTimeZone: 'UTC',
     } as const
     const session = createSession()
     const executionPlan = await buildCodexTurnExecutionPlan({
       input: {
         ...createMessageInput(),
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: [],
+            memberId: 'member-utc-only-time-fixture',
+            userEnvKeys: [],
+          },
+        },
         promptTimeContext,
       },
       plan: createSharedPlan(),
@@ -500,7 +686,10 @@ describe('assistant Codex turn planning', () => {
       "The member's canonical timezone is unknown for this turn.",
     )
     expect(attemptPlan.routePlan.systemPrompt).toContain(
-      'The current UTC date is August 11, 2026; the member-local date is unknown for this turn.',
+      'The current UTC date is February 14, 2027; the member-local date is unknown for this turn.',
+    )
+    expect(attemptPlan.routePlan.turnContextPrompt).toContain(
+      'Current time authority: 2027-02-14T07:17:05.678Z (UTC only). The member-local clock is unknown',
     )
     expect(attemptPlan.routePlan.systemPrompt).not.toContain(
       "The user's canonical timezone for this vault is UTC.",
@@ -7909,6 +8098,7 @@ function createUnreachableInboxServices(): InboxServices {
     showAttachmentStatus: unreachable,
     show: unreachable,
     search: unreachable,
+    preserveDocumentAttachment: unreachable,
     preserveDocumentAttachments: unreachable,
     promoteMeal: unreachable,
     promoteDocument: unreachable,

@@ -86,7 +86,6 @@ export type {
 export {
   createNamedDeviceProviderRegistry,
   normalizeDeviceProviderKey,
-  requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
   resolveDeviceProviderConnectionDescriptor,
@@ -98,8 +97,9 @@ export type {
   DeviceProviderConnectionDescriptor,
   DeviceProviderDescriptor,
   DeviceProviderMetricFamily,
+  DeviceProviderNonOAuthConnectionDescriptor,
   DeviceProviderNormalizationDescriptor,
-  DeviceProviderOAuthDescriptor,
+  DeviceProviderOAuth2ConnectionDescriptor,
   DeviceProviderSnapshotParserKind,
   DeviceProviderSourcePriorityHints,
   DeviceProviderSyncDescriptor,

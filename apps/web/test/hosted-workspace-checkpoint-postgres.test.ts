@@ -261,6 +261,150 @@ describe.skipIf(!runPostgresProof)(
       await expect(readCounter(client, userId, "conversation")).resolves.toBe(10n);
     });
 
+    it("enforces system progress generation transitions atomically with checkpoint CAS", async () => {
+      const client = requirePrisma(observer);
+      const userId = await createMember(client, memberIds);
+      const initialOneUserId = await createMember(client, memberIds);
+      const initialSnapshotRef = createBundleRef("checkpoint_pg_progress_initial");
+
+      await client.hostedWorkspace.create({
+        data: {
+          snapshotRef: initialSnapshotRef,
+          userId,
+          version: 4n,
+        },
+      });
+      await client.hostedWorkspace.create({
+        data: {
+          snapshotRef: createBundleRef("checkpoint_pg_progress_initial_one"),
+          userId: initialOneUserId,
+          version: 4n,
+        },
+      });
+
+      await expect(checkpointHostedWorkspace({
+        expectedVersion: 4n,
+        nextDefaultProcessingWakeAt: "2026-04-26T08:01:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant",
+        prisma: client,
+        reason: "canonical_runtime_commit",
+        snapshotRef: createBundleRef("checkpoint_pg_progress_zero"),
+        systemMailboxProgressGeneration: 0n,
+        userId,
+      })).resolves.toMatchObject({
+        status: "updated",
+        workspace: {
+          systemMailboxProgressGeneration: "0",
+          version: "5",
+        },
+      });
+      await expect(checkpointHostedWorkspace({
+        expectedVersion: 5n,
+        nextDefaultProcessingWakeAt: "2026-04-26T08:02:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant-equal",
+        prisma: client,
+        reason: "canonical_runtime_commit",
+        snapshotRef: createBundleRef("checkpoint_pg_progress_equal"),
+        systemMailboxProgressGeneration: 0n,
+        userId,
+      })).resolves.toMatchObject({
+        status: "updated",
+        workspace: {
+          nextDefaultProcessingWakeReason: "assistant-equal",
+          systemMailboxProgressGeneration: "0",
+          version: "6",
+        },
+      });
+      await expect(checkpointHostedWorkspace({
+        expectedVersion: 6n,
+        nextDefaultProcessingWakeAt: "2026-04-26T08:03:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant-successor",
+        prisma: client,
+        reason: "canonical_runtime_commit",
+        snapshotRef: createBundleRef("checkpoint_pg_progress_successor"),
+        systemMailboxProgressGeneration: 1n,
+        userId,
+      })).resolves.toMatchObject({
+        status: "updated",
+        workspace: {
+          nextDefaultProcessingWakeReason: "assistant-successor",
+          systemMailboxProgressGeneration: "1",
+          version: "7",
+        },
+      });
+
+      const acceptedState = await client.hostedWorkspace.findUnique({
+        select: {
+          nextDefaultProcessingWakeAt: true,
+          nextDefaultProcessingWakeReason: true,
+          snapshotRef: true,
+          systemMailboxProgressGeneration: true,
+          version: true,
+        },
+        where: { userId },
+      });
+      for (const requestedGeneration of [0n, 3n]) {
+        await expect(checkpointHostedWorkspace({
+          expectedVersion: 7n,
+          nextDefaultProcessingWakeAt: "2026-04-26T09:00:00.000Z",
+          nextDefaultProcessingWakeReason: "invalid-transition",
+          prisma: client,
+          reason: "canonical_runtime_commit",
+          snapshotRef: createBundleRef(`checkpoint_pg_progress_invalid_${requestedGeneration}`),
+          systemMailboxProgressGeneration: requestedGeneration,
+          userId,
+        })).rejects.toThrow(
+          "Hosted workspace systemMailboxProgressGeneration must stay equal or advance by one.",
+        );
+        await expect(client.hostedWorkspace.findUnique({
+          select: {
+            nextDefaultProcessingWakeAt: true,
+            nextDefaultProcessingWakeReason: true,
+            snapshotRef: true,
+            systemMailboxProgressGeneration: true,
+            version: true,
+          },
+          where: { userId },
+        })).resolves.toEqual(acceptedState);
+      }
+
+      await expect(checkpointHostedWorkspace({
+        expectedVersion: 7n,
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+        prisma: client,
+        reason: "canonical_runtime_commit",
+        snapshotRef: createBundleRef("checkpoint_pg_progress_legacy_clear"),
+        systemMailboxProgressGeneration: null,
+        userId,
+      })).resolves.toMatchObject({
+        status: "updated",
+        workspace: {
+          nextDefaultProcessingWakeAt: null,
+          nextDefaultProcessingWakeReason: null,
+          systemMailboxProgressGeneration: null,
+          version: "8",
+        },
+      });
+
+      await expect(checkpointHostedWorkspace({
+        expectedVersion: 4n,
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+        prisma: client,
+        reason: "canonical_runtime_commit",
+        snapshotRef: createBundleRef("checkpoint_pg_progress_one"),
+        systemMailboxProgressGeneration: 1n,
+        userId: initialOneUserId,
+      })).resolves.toMatchObject({
+        status: "updated",
+        workspace: {
+          systemMailboxProgressGeneration: "1",
+          version: "5",
+        },
+      });
+    });
+
     it("leaves workspace, exact items, and both counters untouched after CAS loss", async () => {
       const client = requirePrisma(observer);
       const userId = await createMember(client, memberIds);

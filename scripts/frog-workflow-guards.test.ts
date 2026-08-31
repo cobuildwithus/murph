@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { validatePrComplexitySummary } from "./check-pr-complexity-summary.mjs";
 import {
   normalizeFrogPullRequestBody,
   selectFrogPullRequest,
@@ -432,6 +433,25 @@ fi
     expect(normalizedBody.match(/^## Architecture and reuse$/gmu)).toHaveLength(
       1,
     );
+    expect(normalizedBody.match(/^## Complexity impact$/gmu)).toHaveLength(1);
+    const complexityItems = /^## Complexity impact\n\n(?<items>(?:- .+\n?)+)/mu
+      .exec(normalizedBody)?.groups?.items
+      .trim()
+      .split("\n");
+    expect(complexityItems).toHaveLength(3);
+    expect(
+      validatePrComplexitySummary({
+        changedPaths: [".agents/friction-log/example.md"],
+        prBodyHtml: [
+          "<h2>Complexity impact</h2>",
+          "<ul>",
+          ...(complexityItems ?? []).map((item) =>
+            `<li>${item.replace(/^- /u, "")}</li>`
+          ),
+          "</ul>",
+        ].join("\n"),
+      }),
+    ).toEqual([]);
     expect(normalizedBody.match(/^## Hot reply path impact$/gmu)).toHaveLength(
       1,
     );

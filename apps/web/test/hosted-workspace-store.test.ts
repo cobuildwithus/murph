@@ -99,10 +99,13 @@ describe("hosted workspace store", () => {
         checkpointedAt: "2026-04-26T00:01:00.000Z",
         createdAt: FIXED_NOW.toISOString(),
         inboxMediaRetentionWakeAt: null,
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
         nextWakeAt: "2026-04-26T00:05:00.000Z",
         nextWakeReason: "mailbox",
         redactedStatusJson: { state: "idle" },
         snapshotRef: successorSnapshotRef,
+        systemMailboxProgressGeneration: null,
         updatedAt: FIXED_NOW.toISOString(),
         userId: "member_workspace_1",
         version: "5",
@@ -230,6 +233,9 @@ describe("hosted workspace store", () => {
     const assignmentSql = readPrismaSql(queryRaw.mock.calls[0]?.[0]).split("RETURNING")[0] ?? "";
     expect(assignmentSql).not.toContain("next_wake_at =");
     expect(assignmentSql).not.toContain("next_wake_reason =");
+    expect(assignmentSql).not.toContain("next_default_processing_wake_at =");
+    expect(assignmentSql).not.toContain("next_default_processing_wake_reason =");
+    expect(assignmentSql).not.toContain("system_mailbox_progress_generation =");
     expect(assignmentSql).not.toContain("inbox_media_retention_wake_at =");
     expect(assignmentSql).not.toContain("redacted_status_json =");
     expect(assignmentSql).not.toContain("browser_vault_replica_ref =");
@@ -241,6 +247,136 @@ describe("hosted workspace store", () => {
         version: "5",
       },
     });
+  });
+
+  it("clears the system progress projection when the explicit legacy group is null", async () => {
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => [
+      buildHostedWorkspaceCheckpointMutationRow({
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+        replacedSnapshotRef: createBundleRef("snapshot_current"),
+        snapshotRef: createBundleRef("snapshot_legacy"),
+        systemMailboxProgressGeneration: null,
+        version: 5n,
+      }),
+    ]);
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: queryRaw,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      reason: "canonical_runtime_commit",
+      snapshotRef: createBundleRef("snapshot_legacy"),
+      systemMailboxProgressGeneration: null,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    const assignmentSql = readPrismaSql(queryRaw.mock.calls[0]?.[0]).split("RETURNING")[0] ?? "";
+    expect(assignmentSql).toContain("next_default_processing_wake_at =");
+    expect(assignmentSql).toContain("next_default_processing_wake_reason =");
+    expect(assignmentSql).toContain("system_mailbox_progress_generation =");
+    expect(result).toMatchObject({
+      status: "updated",
+      workspace: {
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+        systemMailboxProgressGeneration: null,
+      },
+    });
+  });
+
+  it("places equal and successor progress generations inside the checkpoint CAS", async () => {
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => [
+      buildHostedWorkspaceCheckpointMutationRow({
+        nextDefaultProcessingWakeAt: new Date("2026-04-26T08:00:00.000Z"),
+        nextDefaultProcessingWakeReason: "assistant",
+        snapshotRef: createBundleRef("snapshot_progress"),
+        systemMailboxProgressGeneration: 8n,
+        version: 5n,
+      }),
+    ]);
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: queryRaw,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextDefaultProcessingWakeAt: "2026-04-26T08:00:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant",
+      reason: "canonical_runtime_commit",
+      snapshotRef: createBundleRef("snapshot_progress"),
+      systemMailboxProgressGeneration: "8",
+      tx,
+      userId: "member_workspace_1",
+    })).resolves.toMatchObject({
+      status: "updated",
+      workspace: {
+        systemMailboxProgressGeneration: "8",
+      },
+    });
+
+    const workspaceSql = readPrismaSql(queryRaw.mock.calls[0]?.[0]);
+    expect(workspaceSql).toContain("workspace.system_mailbox_progress_generation IS NULL");
+    expect(workspaceSql).toContain("IN (0, 1)");
+    expect(workspaceSql).toContain("workspace.system_mailbox_progress_generation =");
+    expect(workspaceSql).toContain("workspace.system_mailbox_progress_generation + 1 =");
+  });
+
+  it.each([
+    { label: "regression", requested: "3" },
+    { label: "jump", requested: "6" },
+  ])("rejects a system progress generation $label before classifying the checkpoint as a CAS conflict", async ({ requested }) => {
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => []);
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => buildHostedWorkspaceRow({
+        systemMailboxProgressGeneration: 4n,
+      })),
+    });
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: queryRaw,
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      reason: "canonical_runtime_commit",
+      snapshotRef: createBundleRef(`snapshot_invalid_${requested}`),
+      systemMailboxProgressGeneration: requested,
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(
+      "Hosted workspace systemMailboxProgressGeneration must stay equal or advance by one.",
+    );
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(hostedWorkspace.findUnique).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a null generation paired with a non-null default wake before SQL", async () => {
+    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => []);
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: queryRaw,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextDefaultProcessingWakeAt: "2026-04-26T08:00:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant",
+      reason: "canonical_runtime_commit",
+      snapshotRef: createBundleRef("snapshot_invalid_legacy"),
+      systemMailboxProgressGeneration: null,
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/system progress projection|systemMailboxProgressGeneration/u);
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -966,10 +1102,13 @@ function buildHostedWorkspaceRow(
     checkpointedAt: null,
     createdAt: FIXED_NOW,
     inboxMediaRetentionWakeAt: null,
+    nextDefaultProcessingWakeAt: null,
+    nextDefaultProcessingWakeReason: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: null,
     snapshotRef: null,
+    systemMailboxProgressGeneration: null,
     updatedAt: FIXED_NOW,
     userId: "member_workspace_1",
     version: 4n,

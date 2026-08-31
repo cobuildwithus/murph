@@ -2168,20 +2168,23 @@ describe("RunnerContainer", () => {
     const destroyStarted = createDeferred<void>();
     const releaseDestroy = createDeferred<void>();
     let containerRef: RunnerContainer | null = null;
+    let lastChange = Date.now();
     let status: "running" | "stopped" = "stopped";
     let healthChecks = 0;
     const startAndWaitForPorts = vi.fn(async () => {
       status = "running";
+      lastChange = Date.now();
       containerRef?.onStart();
     });
     const destroy = vi.fn(async () => {
       destroyStarted.resolve(undefined);
       await releaseDestroy.promise;
       status = "stopped";
+      lastChange = Date.now();
       containerRef?.onStop({ exitCode: 0, reason: "exit" });
     });
     const getState = vi.fn(async () => ({
-      lastChange: Date.now(),
+      lastChange,
       status,
     }));
     const { container } = createContainerDouble({

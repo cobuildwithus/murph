@@ -11,7 +11,6 @@ import {
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   normalizeDeviceProviderKey,
-  requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   resolveDeviceProviderConnectionDescriptor,
   type DeviceProviderDescriptor,
@@ -157,17 +156,17 @@ export interface DeviceSyncConfiguredProviderManifestByKey {
   >;
 }
 
-const OURA_OAUTH = requireDeviceProviderOAuthDescriptor(OURA_DEVICE_PROVIDER_DESCRIPTOR);
+const OURA_CONNECTION = OURA_DEVICE_PROVIDER_DESCRIPTOR.connection;
 const OURA_SYNC = requireDeviceProviderSyncDescriptor(OURA_DEVICE_PROVIDER_DESCRIPTOR);
-const OURA_DEFAULT_SCOPES = Object.freeze([...OURA_OAUTH.defaultScopes]);
+const OURA_DEFAULT_SCOPES = Object.freeze([...OURA_CONNECTION.defaultScopes]);
 
-const STRAVA_OAUTH = requireDeviceProviderOAuthDescriptor(STRAVA_DEVICE_PROVIDER_DESCRIPTOR);
+const STRAVA_CONNECTION = STRAVA_DEVICE_PROVIDER_DESCRIPTOR.connection;
 const STRAVA_SYNC = requireDeviceProviderSyncDescriptor(STRAVA_DEVICE_PROVIDER_DESCRIPTOR);
-const STRAVA_DEFAULT_SCOPES = Object.freeze([...STRAVA_OAUTH.defaultScopes]);
+const STRAVA_DEFAULT_SCOPES = Object.freeze([...STRAVA_CONNECTION.defaultScopes]);
 
-const WHOOP_OAUTH = requireDeviceProviderOAuthDescriptor(WHOOP_DEVICE_PROVIDER_DESCRIPTOR);
+const WHOOP_CONNECTION = WHOOP_DEVICE_PROVIDER_DESCRIPTOR.connection;
 const WHOOP_SYNC = requireDeviceProviderSyncDescriptor(WHOOP_DEVICE_PROVIDER_DESCRIPTOR);
-const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
+const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_CONNECTION.defaultScopes]);
 const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
 
 const JUNCTION_SYNC = requireDeviceProviderSyncDescriptor(
@@ -685,8 +684,8 @@ export function buildOuraDeviceSyncRuntimeDescriptor(
 
   return {
     ...getConfiguredDeviceSyncProviderDescriptor("oura"),
-    oauth: {
-      ...OURA_OAUTH,
+    connection: {
+      ...OURA_CONNECTION,
       defaultScopes: buildOuraDeviceSyncScopes(config.scopes),
     },
     sync: {
@@ -742,8 +741,8 @@ export function buildStravaDeviceSyncRuntimeDescriptor(
 
   return {
     ...getConfiguredDeviceSyncProviderDescriptor("strava"),
-    oauth: {
-      ...STRAVA_OAUTH,
+    connection: {
+      ...STRAVA_CONNECTION,
       defaultScopes: buildStravaDeviceSyncScopes(config.scopes),
     },
     sync: {
@@ -778,8 +777,8 @@ export function buildWhoopDeviceSyncRuntimeDescriptor(
 
   return {
     ...getConfiguredDeviceSyncProviderDescriptor("whoop"),
-    oauth: {
-      ...WHOOP_OAUTH,
+    connection: {
+      ...WHOOP_CONNECTION,
       defaultScopes: buildWhoopDeviceSyncScopes(config.scopes),
     },
     sync: {

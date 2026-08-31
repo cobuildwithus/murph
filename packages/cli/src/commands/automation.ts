@@ -387,7 +387,10 @@ function requireNumberOption(
 
 function resolveAutomationTriggerKind(options: AutomationScheduleOptions): AutomationScheduleKind {
   if (options.triggerKind && options.scheduleKind && options.triggerKind !== options.scheduleKind) {
-    return invalidAutomationOption("--trigger-kind and --schedule-kind must match when both are provided.");
+    return invalidAutomationOption(
+      "--trigger-kind and --schedule-kind must match when both are provided.",
+      ["schedule", "kind"],
+    );
   }
 
   return options.triggerKind ?? options.scheduleKind ?? invalidAutomationOption(
@@ -421,15 +424,92 @@ function resolveAutomationTimeZone(
   return timeZone;
 }
 
+function assertAutomationScheduleValueOptionsMatchKind(
+  options: AutomationScheduleOptions,
+  kind: AutomationScheduleKind,
+): void {
+  const fields = [
+    {
+      canonicalName: "trigger-at",
+      canonicalValue: options.triggerAt,
+      kind: "at",
+      legacyName: "schedule-at",
+      legacyValue: options.scheduleAt,
+      publicField: "at",
+    },
+    {
+      canonicalName: "trigger-every-ms",
+      canonicalValue: options.triggerEveryMs,
+      kind: "every",
+      legacyName: "schedule-every-ms",
+      legacyValue: options.scheduleEveryMs,
+      publicField: "everyMs",
+    },
+    {
+      canonicalName: "trigger-cron",
+      canonicalValue: options.triggerCron,
+      kind: "cron",
+      legacyName: "schedule-cron",
+      legacyValue: options.scheduleCron,
+      publicField: "expression",
+    },
+    {
+      canonicalName: "trigger-local-time",
+      canonicalValue: options.triggerLocalTime,
+      kind: "dailyLocal",
+      legacyName: "schedule-local-time",
+      legacyValue: options.scheduleLocalTime,
+      publicField: "localTime",
+    },
+  ] as const;
+
+  for (const field of fields) {
+    const canonicalProvided = field.canonicalValue !== undefined;
+    const legacyProvided = field.legacyValue !== undefined;
+    if (!canonicalProvided && !legacyProvided) continue;
+
+    const publicPath = ["schedule", field.publicField] as const;
+    if (field.kind !== kind) {
+      const providedOptions = [
+        ...(canonicalProvided ? [`--${field.canonicalName}`] : []),
+        ...(legacyProvided ? [`--${field.legacyName}`] : []),
+      ];
+      return invalidAutomationOption(
+        `${providedOptions.join(" and ")} can only be used with --trigger-kind=${field.kind}.`,
+        publicPath,
+      );
+    }
+
+    if (
+      canonicalProvided &&
+      legacyProvided &&
+      field.canonicalValue !== field.legacyValue
+    ) {
+      return invalidAutomationOption(
+        `--${field.canonicalName} and --${field.legacyName} must match when both are provided.`,
+        publicPath,
+      );
+    }
+  }
+}
+
 function buildAutomationScheduleFromOptions(
   options: AutomationScheduleOptions,
   defaults: { now: string },
 ): AutomationSchedule {
   const kind = resolveAutomationTriggerKind(options);
   const timeZone = resolveAutomationTimeZone(options, kind);
-  if (kind !== "deviceActivity" && (options.deviceSource || options.activityKind)) {
+  assertAutomationScheduleValueOptionsMatchKind(options, kind);
+  if (kind !== "deviceActivity" && options.deviceSource !== undefined) {
     return invalidAutomationOption(
-      "--device-source and --activity-kind can only be used with --trigger-kind=deviceActivity.",
+      "--device-source can only be used with --trigger-kind=deviceActivity.",
+      ["schedule", "source"],
+    );
+  }
+  if (kind !== "deviceActivity" && options.activityKind !== undefined) {
+    return invalidAutomationOption(
+      "--activity-kind can only be used with --trigger-kind=deviceActivity.",
+      ["schedule", "activityKind"],
     );
   }
 
