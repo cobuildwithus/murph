@@ -3110,9 +3110,9 @@ or live foreground paths must not fall back to broad foreground full snapshots,
 path-scoped working deltas, legacy hot producers, Worker-body snapshot uploads,
 or artifact-sidecar v2 producers. `idle_shutdown` is the only new checkpoint
 snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
-write receipts and publishes a receipt-log ref, bounded to 64 pending entries
-and 64 KiB, through a status-only workspace checkpoint that retains the prior
-snapshot ref. Capacity, log shape, and payload lengths are validated before
+write receipts and publishes a receipt-log head ref through a status-only
+workspace checkpoint that retains the prior snapshot ref. Capacity, log shape,
+and payload lengths are validated before
 upload. The complete immutable payload, receipt, and log artifact set then
 uploads in small fixed concurrent waves; every started wave settles before a
 failure returns, and the checkpoint publishes the log ref only after the whole
@@ -3131,10 +3131,33 @@ conversation deferral. When that import performs a canonical write, the runner
 publishes its receipt and imported watermark atomically before later assistant
 or managed-automation writes can add dependent receipts. Restore can therefore
 replay the complete canonical sequence directly over the published snapshot
-without reconstructing unauthenticated local prefixes. When the restored log
-is at the hard entry bound, the runtime consolidates it through an idle
-snapshot before foreground mailbox or assistant work. That recovery snapshot
-publishes an immediate
+without reconstructing unauthenticated local prefixes. Receipt logs remain on
+the existing v1 schema so every prior reader can restore a newly written log.
+Each immutable log is at most 64 KiB and exposes at most 64 active receipt refs.
+When the active prefix is full, the current writer parses the refs in canonical
+first-occurrence order, flattens their actions into one deterministic v1
+receipt, and starts the next active prefix with that compacted receipt and the
+new receipt. The log's optional cumulative count and receipt-hash provenance
+are ignored by prior readers. After the first compaction, the physical v1
+entries array remains padded to 64 with duplicates of the first active ref and
+an optional active-prefix count identifies the meaningful leading refs. Prior
+restore already deduplicates those refs in prefix order, while a prior writer
+sees its existing full-log boundary and cannot erase the new metadata.
+
+The current reader validates the active prefix, duplicate-only barrier padding,
+cumulative count, and provenance before replay. It admits at most 512
+cumulative receipts, fetches receipt artifacts in fixed waves of eight while
+applying them in canonical order, and bounds one compaction's receipt bodies
+and flattened output to 4 MiB. That byte ceiling can stop unusually large
+receipt histories before the 512-count ceiling; canonical payload object bytes
+remain governed by their existing integrity and artifact-store contracts, not
+this log bound. Invocation requests admit at most 100 mailbox items. When a
+restored log reaches the 63-receipt background admission boundary, the runtime
+consolidates it through an idle snapshot before foreground mailbox or assistant
+work; the remaining active-prefix capacity lets one already-admitted
+background append finish before cooperative yield is observed, while
+foreground writes can compact the v1 log until the next quiescent checkpoint.
+That recovery snapshot publishes an immediate
 mailbox-continuation wake so web accepts it even when foreground conversation
 rows are already pending; immediately after that snapshot, a status-only
 checkpoint durably restores the prior wake projection before foreground work
@@ -3147,11 +3170,12 @@ The two receipt-log pointer fields and three recovery-marker fields are
 reserved outside the ordinary 96-field redacted-status budget at both
 transport parsing and workspace persistence boundaries; ordinary status
 remains capped at 96 fields.
-Later idle snapshots omit the receipt-log status. The pending-log
-limits bound replay work, not object
-retention: encrypted owner-scoped receipt, log, and payload artifacts are not
-eagerly deleted after consolidation until the artifact store has a
-reference-safe owner-scoped retention primitive.
+Later idle snapshots omit the receipt-log status. The pending-log limits bound
+log traversal and retained receipt-reference count, not receipt/payload body
+bytes or all replay work. They also do not govern object retention: encrypted
+owner-scoped receipt, log, and payload artifacts are not eagerly deleted after
+consolidation until the artifact store has a reference-safe owner-scoped
+retention primitive.
 `idle_shutdown` is the snapshot boundary for warm-runner wind-down: it maps to
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease

@@ -150,11 +150,31 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
   assertExactKeys(record, "Hosted runtime reconciliation facts workspace", [
     "hostedMailboxSystemHandledThroughSeq",
     "inboxMediaRetentionWakeAt",
+    "nextDefaultProcessingWakeAt",
+    "nextDefaultProcessingWakeReason",
     "nextWakeAt",
     "nextWakeReason",
+    "systemMailboxProgressGeneration",
     "systemMailboxFrontier",
     "version",
   ]);
+
+  const progressProjectionKeys = [
+    "nextDefaultProcessingWakeAt",
+    "nextDefaultProcessingWakeReason",
+    "systemMailboxProgressGeneration",
+  ] as const;
+  const progressProjectionKeyCount = progressProjectionKeys.filter((key) =>
+    Object.prototype.hasOwnProperty.call(record, key)
+  ).length;
+  if (
+    progressProjectionKeyCount !== 0
+    && progressProjectionKeyCount !== progressProjectionKeys.length
+  ) {
+    throw new TypeError(
+      "Hosted runtime reconciliation facts workspace system progress projection must include generation, wake, and reason together.",
+    );
+  }
 
   return {
     ...(Object.prototype.hasOwnProperty.call(
@@ -173,6 +193,22 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
       record.inboxMediaRetentionWakeAt,
       "Hosted runtime reconciliation facts workspace inboxMediaRetentionWakeAt",
     ),
+    ...(progressProjectionKeyCount === 0
+      ? {}
+      : {
+          nextDefaultProcessingWakeAt: readRequiredNullableIsoTimestamp(
+            record.nextDefaultProcessingWakeAt,
+            "Hosted runtime reconciliation facts workspace nextDefaultProcessingWakeAt",
+          ),
+          nextDefaultProcessingWakeReason: readRequiredNullableBoundedString(
+            record.nextDefaultProcessingWakeReason,
+            "Hosted runtime reconciliation facts workspace nextDefaultProcessingWakeReason",
+          ),
+          systemMailboxProgressGeneration: requireNonNegativeBigIntString(
+            record.systemMailboxProgressGeneration,
+            "Hosted runtime reconciliation facts workspace systemMailboxProgressGeneration",
+          ),
+        }),
     nextWakeAt: readRequiredNullableIsoTimestamp(
       record.nextWakeAt,
       "Hosted runtime reconciliation facts workspace nextWakeAt",

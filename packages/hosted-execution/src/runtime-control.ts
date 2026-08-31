@@ -3485,10 +3485,13 @@ export interface HostedWorkspaceState {
   checkpointedAt?: string | null;
   createdAt: string;
   inboxMediaRetentionWakeAt?: string | null;
+  nextDefaultProcessingWakeAt?: string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   snapshotRef: HostedExecutionSnapshotRefState;
+  systemMailboxProgressGeneration?: string | null;
   updatedAt: string;
   userId: string;
   version: string;
@@ -3549,12 +3552,15 @@ export interface HostedWorkspaceCheckpointRequest {
   idleCheckpointTrigger?: HostedIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
+  nextDefaultProcessingWakeAt?: string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   runtimeWakePendingAtCheckpoint?: boolean;
   snapshotRef: HostedExecutionSnapshotRefState;
+  systemMailboxProgressGeneration?: string;
 }
 
 export interface HostedWorkspaceCheckpointResponse {
@@ -3791,6 +3797,8 @@ export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
 ] as const;
 
 export type HostedWorkspaceInvocationStatus = (typeof HOSTED_WORKSPACE_INVOCATION_STATUSES)[number];
+
+export const HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS = 100;
 
 export interface HostedWorkspaceInvocationBudget {
   maxMailboxItems?: number | null;

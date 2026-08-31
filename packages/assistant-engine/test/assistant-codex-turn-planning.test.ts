@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -199,6 +200,183 @@ afterEach(() => {
 })
 
 describe('assistant Codex turn planning', () => {
+  it('characterizes complete route-plan outputs across planner branch families', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const promptTimeContext = {
+      currentLocalDate: '2026-08-30',
+      currentTimeZone: 'America/New_York',
+    }
+    const route = createRoute()
+    const session = createSession()
+    const directAudience = {
+      channel: 'telegram' as const,
+      effectiveThreadIsDirect: true,
+      threadId: 'thread-characterization-direct',
+      threadIsDirect: true,
+    }
+    const groupAudience = {
+      channel: 'linq' as const,
+      effectiveThreadIsDirect: false,
+      threadId: 'thread-characterization-group',
+      threadIsDirect: false,
+    }
+    const scheduledOccurrenceAt = '2026-08-30T09:00:00.000-04:00'
+    const plans = {
+      direct: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          channel: 'telegram',
+          threadId: directAudience.threadId,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, directAudience),
+      }),
+      group: await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            memberId: 'member-characterization-group',
+            userEnvKeys: [],
+          },
+        },
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          threadId: groupAudience.threadId,
+          threadIsDirect: false,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, groupAudience),
+      }),
+      maintenance: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          maintenanceProfile: 'member-memory',
+          scheduledInvocationAuthority: {
+            automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+            occurrenceAt: scheduledOccurrenceAt,
+          },
+          scheduledOccurrenceAt,
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'maintenance',
+          threadScope: 'isolated-thread',
+          toolProfile: 'maintenance-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan(),
+      }),
+      outputOnly: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'assistant-ask-continuation',
+          threadScope: 'isolated-thread',
+          toolProfile: 'output-only-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, directAudience),
+      }),
+      scheduledEmail: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          channel: 'email',
+          scheduledInvocationAuthority: {
+            automationId: 'automation-characterization-email',
+            occurrenceAt: scheduledOccurrenceAt,
+          },
+          scheduledOccurrenceAt,
+          threadId: 'thread-characterization-email',
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, {
+          channel: 'email',
+          effectiveThreadIsDirect: true,
+          threadId: 'thread-characterization-email',
+          threadIsDirect: true,
+        }),
+      }),
+    }
+    const digestPlan = (
+      plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
+    ) => createHash('sha256').update(JSON.stringify({
+      assistantCliContract: plan.assistantCliContract,
+      assistantContractFingerprint: plan.assistantContractFingerprint,
+      assistantPreferredElevenLabsVoiceId:
+        plan.assistantPreferredElevenLabsVoiceId,
+      cliEnv: plan.cliEnv,
+      codexContinuation: plan.codexContinuation,
+      conversationHistoryMessages: plan.conversationHistoryMessages,
+      developerInstructions: plan.developerInstructions,
+      diagnosticsPolicy: plan.diagnosticsPolicy,
+      dynamicTools: plan.dynamicTools,
+      environments: plan.environments,
+      onboardingGuidanceInjected: plan.onboardingGuidanceInjected,
+      planningDiagnostics: {
+        dynamicToolCount: plan.planningDiagnostics.dynamicToolCount,
+        messageTargetDynamicToolsAvailable:
+          plan.planningDiagnostics.messageTargetDynamicToolsAvailable,
+        messageTargetingAvailable:
+          plan.planningDiagnostics.messageTargetingAvailable,
+        shouldPrepareBootstrapContext:
+          plan.planningDiagnostics.shouldPrepareBootstrapContext,
+      },
+      promptCacheMetadata: plan.promptCacheMetadata,
+      resume: plan.resume,
+      sessionContext: plan.sessionContext,
+      systemPrompt: plan.systemPrompt,
+      turnContextPrompt: plan.turnContextPrompt,
+      voiceMemoDeliveryChannel: plan.voiceMemoDeliveryChannel,
+      workingDirectory: plan.workingDirectory,
+    })).digest('hex')
+
+    expect(Object.fromEntries(
+      Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
+    )).toEqual({
+      direct: '0f86aa4384f98ca7a7042728345df8a9feb6d862bd925ed774c9ca37b94fda39',
+      group: 'd93eb6c480123d9958eab9840dbd14a80f217ff89012d518091bc7e9e81022d3',
+      maintenance: '615e371f352707b0f87af9cb7c607fdbe7585323e26837927e3dcb0a12ba3d9d',
+      outputOnly: '22bb678775ca7810731ab679a950ed62ab787b819f322a308cd4fbfb05f46bb2',
+      scheduledEmail:
+        '96b62133682339d8fde8be6a38db1b2c9a0985838e61ef6b91fb9b3f2dd1ab4f',
+    })
+  })
+
   it('bounds snapshot refresh inside direct provider planning and skips it for groups', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',

@@ -371,6 +371,7 @@ function createScenarioHarness(input: {
 
   return {
     assertNoInterventions: vi.fn(input.assertNoInterventions ?? (() => {})),
+    cloudflareStdoutTail: vi.fn(() => ""),
     readUserStatus: vi.fn(async () => fallbackStatus),
     runtimeEnv: {},
     stderrTail: vi.fn(() => ""),
