@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "seven-day-health-views",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Seven-day health trends at a glance",
+    "summary": "Ask Murph for a compact seven-day view of steps, sleep, resting heart rate, and method-specific HRV, with missing days kept visible.",
+    "details": "Metric selections can be saved for reuse without creating a schedule. For scheduled views, Murph distinguishes a provider send from unconfirmed handset delivery.",
+    "relevanceTags": ["assistant", "wearables", "messaging"],
+    "sourcePullRequests": [2629],
+    "tryIt": {
+      "label": "Show my health trends",
+      "prompt": "Show my steps, sleep, resting heart rate, and HRV for the last seven days."
+    }
+  }
+}
