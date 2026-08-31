@@ -111,11 +111,13 @@ export async function readAssistantCliLlmsManifest(input: {
 export async function readAssistantCliLlmsFullManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
+  timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
   return await readAssistantCliLlmsFullManifestWithLauncher({
     cliEnv: input.cliEnv,
     executionContext: input.executionContext,
+    timeoutMs: input.timeoutMs,
     workingDirectory: input.workingDirectory,
   })
 }
