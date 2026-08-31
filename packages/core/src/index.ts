@@ -355,6 +355,7 @@ export {
 } from "./mutations.ts";
 export type {
   LiveExactDocumentImportEvidence,
+  LiveExactDocumentImportEvidenceGroup,
   WorkoutSourceImportStatus,
 } from "./mutations.ts";
 export type {

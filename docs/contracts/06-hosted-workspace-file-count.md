@@ -213,8 +213,10 @@ landing; record the chosen posture here so the decision is reviewable.
   duplicate `raw/inbox/**` bytes whose source hash, default promotion metadata,
   live audit/event identity, canonical manifest, and canonical raw artifact all
   agree. Lazy restore materializes the source and canonical proof paths before
-  the locked recheck; missing or damaged proof fails closed. No new sidecar,
-  cursor, queue, index, or file family is introduced. A heavy user adding
+  the locked recheck; missing or damaged proof fails closed. Promoted documents
+  use the existing media admission bounds, and all admitted receipts reuse one
+  transient audit/event ledger snapshot per pass. No new sidecar, cursor, queue,
+  index, or file family is introduced. A heavy user adding
   roughly ten attachments per day produces about 3,650 records per year, well under one megabyte
   (~730 KB/year). This puts the family firmly in the "accepted unbounded-tiny"
   bucket: the monthly shard count is also bounded by elapsed wall-clock

@@ -50,6 +50,7 @@ Updated: 2026-08-30
 - Require the capture's default promotion metadata as a lightweight eligibility prefilter, then reuse Core's full live exact-source audit/event/manifest/artifact proof under the existing canonical lock.
 - Accept any matching live exact owner while preserving Core's deleted-source fence; same bytes alone never prove promotion.
 - Keep the historical `inbox_media_retention` orchestration mode so this storage cleanup adds no scheduler or runtime state.
+- Admit promoted documents through the existing retention batch limits and verify all admitted byte receipts from one transient audit/event ledger snapshot. This removes repeated vault-wide reads without adding a cache, cursor, index, or persisted state.
 
 ## Verification
 
@@ -59,3 +60,7 @@ Updated: 2026-08-30
 - Passed: contracts, Core, and inboxd typechecks.
 - Passed: Core and contracts builds plus regenerated contract artifacts.
 - Passed: `git diff --check` before review-candidate commit.
+- Passed: post-review Core full package suite (49 files, 835 tests) and focused batch-isolation proof.
+- Passed: post-review inboxd full package suite (21 files, 220 passed, 3 skipped) and focused one-proof-per-pass lazy materialization proof.
+- Passed: hosted lazy snapshot -> materialize -> retain -> checkpoint -> restore -> rebuild -> validate journey.
+- Passed: post-review Core, inboxd, and assistant-runtime typechecks.

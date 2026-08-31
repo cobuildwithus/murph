@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,7 @@ import {
   deleteEvent,
   importDocument,
   initializeVault,
+  listLiveExactDocumentImportEvidence,
   resolveRawAssetDirectory,
   resolveRawManifestPath,
   resolveVaultPath,
@@ -147,6 +149,39 @@ test("exact document reuse ignores member documents with manifest-like names", a
   for (const { content, rawRef } of memberArtifacts.values()) {
     assert.equal(await fs.readFile(path.join(vaultRoot, rawRef), "utf8"), content);
   }
+});
+
+test("exact document evidence batch isolates damaged receipts from valid neighbors", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-document-exact-evidence-batch");
+  const sourceRoot = await makeTempDirectory("murph-core-document-exact-evidence-batch-source");
+  await initializeVault({ vaultRoot });
+
+  const sources = await Promise.all([
+    ["valid.txt", "valid exact evidence\n"],
+    ["damaged.txt", "damaged exact evidence\n"],
+    ["absent.txt", "absent exact evidence\n"],
+  ].map(async ([fileName, content]) => {
+    const sourcePath = path.join(sourceRoot, fileName);
+    await fs.writeFile(sourcePath, content, "utf8");
+    return {
+      byteLength: Buffer.byteLength(content),
+      sha256: createHash("sha256").update(content).digest("hex"),
+      sourcePath,
+    };
+  }));
+  const valid = await importDocument({ vaultRoot, sourcePath: sources[0]!.sourcePath });
+  const damaged = await importDocument({ vaultRoot, sourcePath: sources[1]!.sourcePath });
+  await fs.unlink(path.join(vaultRoot, damaged.manifestPath));
+
+  const groups = await listLiveExactDocumentImportEvidence({
+    sources: sources.map(({ byteLength, sha256 }) => ({ byteLength, sha256 })),
+    vaultRoot,
+  });
+
+  assert.equal(groups.length, 3);
+  assert.deepEqual(groups[0]?.evidence?.map((entry) => entry.documentId), [valid.documentId]);
+  assert.equal(groups[1]?.evidence, null);
+  assert.deepEqual(groups[2]?.evidence, []);
 });
 
 test("exact document reuse fails closed after its source document is deleted", async () => {

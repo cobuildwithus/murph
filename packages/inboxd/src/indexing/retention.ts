@@ -27,6 +27,7 @@ import {
   VAULT_LAYOUT,
   withCanonicalWriteLockScope,
   walkVaultFiles,
+  type LiveExactDocumentImportEvidence,
 } from "@murphai/core";
 import { openInboxRuntime, type InboxRuntimeStore } from "../kernel/sqlite.js";
 
@@ -199,7 +200,7 @@ export async function runInboxMediaRetention(
           continue;
         }
 
-        if (!isPromotedDocument && presentCandidateCount >= maxAttachments) {
+        if (presentCandidateCount >= maxAttachments) {
           hasMoreEligibleAttachments = true;
           break captureLoop;
         }
@@ -220,13 +221,11 @@ export async function runInboxMediaRetention(
           if (alreadyRetained || !input.materializeCandidatePaths) {
             continue;
           }
-          if (!isPromotedDocument && materializeCandidateCount >= maxAttachments) {
+          if (materializeCandidateCount >= maxAttachments) {
             hasMoreEligibleAttachments = true;
             continue;
           }
-          if (!isPromotedDocument) {
-            materializeCandidateCount += 1;
-          }
+          materializeCandidateCount += 1;
         }
         if (fileState.kind === "invalid") {
           continue;
@@ -240,7 +239,7 @@ export async function runInboxMediaRetention(
           retentionWindowMs,
           storedPath,
         });
-        if (!isPromotedDocument && fileState.kind !== "missing") {
+        if (fileState.kind !== "missing") {
           presentCandidateCount += 1;
         }
       }
@@ -288,6 +287,78 @@ export async function runInboxMediaRetention(
         const alreadyRetainedStoredPaths = new Set(
           existingRetentionRecords.map((record) => record.storedPath),
         );
+        const promotedDocumentIntegrityByStoredPath = new Map<
+          string,
+          Extract<RetentionCandidateIntegrityResult, { kind: "match" }>
+        >();
+        for (const candidate of candidates) {
+          if (
+            candidate.attachment.kind !== "document"
+            || latestDurableRawInboxRefs.has(candidate.storedPath)
+            || missingAfterMaterialization.has(candidate.storedPath)
+            || candidate.canonicalDocumentMaterializationPaths.some((relativePath) =>
+              missingAfterMaterialization.has(relativePath)
+            )
+          ) {
+            continue;
+          }
+          const alreadyRetained =
+            alreadyRetainedAttachmentIds.has(candidate.attachment.attachmentId)
+            || alreadyRetainedStoredPaths.has(candidate.storedPath);
+          if (
+            !alreadyRetained
+            && (
+              protectedCaptureIds.has(candidate.capture.captureId)
+              || protectedAttachmentIds.has(candidate.attachment.attachmentId)
+              || protectedStoredPaths.has(candidate.storedPath)
+            )
+          ) {
+            continue;
+          }
+          const integrity = await safeVerifyRetentionCandidateIntegrity({
+            attachment: candidate.attachment,
+            signal: input.signal,
+            storedPath: candidate.storedPath,
+            vaultRoot: input.vaultRoot,
+          });
+          if (integrity.kind === "interrupted") {
+            throwIfRetentionAborted(input.signal);
+            continue;
+          }
+          if (integrity.kind === "match") {
+            promotedDocumentIntegrityByStoredPath.set(candidate.storedPath, integrity);
+          }
+        }
+
+        const promotedDocumentEvidenceByReceipt = new Map<
+          string,
+          readonly LiveExactDocumentImportEvidence[] | null
+        >();
+        if (promotedDocumentIntegrityByStoredPath.size > 0) {
+          try {
+            const groups = await listLiveExactDocumentImportEvidence({
+              sources: [...promotedDocumentIntegrityByStoredPath.values()].map((integrity) => ({
+                byteLength: integrity.byteSize,
+                sha256: integrity.sha256,
+              })),
+              vaultRoot: input.vaultRoot,
+            });
+            for (const group of groups) {
+              promotedDocumentEvidenceByReceipt.set(
+                buildPromotedDocumentReceiptKey(group),
+                group.evidence,
+              );
+            }
+          } catch (error) {
+            if (!isVaultError(error)) {
+              throw error;
+            }
+            // Shared ledger damage makes the whole bounded proof incomplete.
+            // Preserve every source copy so validation and later repair retain
+            // the evidence needed to diagnose it.
+          }
+        }
+
         const records: InboxAttachmentRetentionRecord[] = [];
         const storedPathsToDelete: string[] = [];
         let selectedCandidateCount = 0;
@@ -356,12 +427,15 @@ export async function runInboxMediaRetention(
             // retention_expired tombstone carrying the canonical hash, hiding
             // the corruption from vault validation. Skipping on mismatch keeps
             // the file in place so validation can surface the divergence.
-            const integrity = await safeVerifyRetentionCandidateIntegrity({
-              attachment: candidate.attachment,
-              signal: input.signal,
-              storedPath: candidate.storedPath,
-              vaultRoot: input.vaultRoot,
-            });
+            const integrity = candidate.attachment.kind === "document"
+              ? promotedDocumentIntegrityByStoredPath.get(candidate.storedPath)
+                ?? { kind: "missing" as const }
+              : await safeVerifyRetentionCandidateIntegrity({
+                  attachment: candidate.attachment,
+                  signal: input.signal,
+                  storedPath: candidate.storedPath,
+                  vaultRoot: input.vaultRoot,
+                });
             if (integrity.kind === "interrupted") {
               throwIfRetentionAborted(input.signal);
               continue;
@@ -372,11 +446,14 @@ export async function runInboxMediaRetention(
             verifiedByteSize = integrity.byteSize;
             if (
               candidate.attachment.kind === "document"
-              && !await hasMatchingLivePromotedDocument({
-                byteLength: integrity.byteSize,
+              && !hasMatchingLivePromotedDocument({
                 candidate,
-                sha256: integrity.sha256,
-                vaultRoot: input.vaultRoot,
+                evidence: promotedDocumentEvidenceByReceipt.get(
+                  buildPromotedDocumentReceiptKey({
+                    byteLength: integrity.byteSize,
+                    sha256: integrity.sha256,
+                  }),
+                ),
               })
             ) {
               continue;
@@ -728,33 +805,18 @@ function resolvePromotedDocumentMaterializationPaths(
   return [...paths].sort((left, right) => left.localeCompare(right));
 }
 
-async function hasMatchingLivePromotedDocument(input: {
-  byteLength: number;
+function hasMatchingLivePromotedDocument(input: {
   candidate: InboxAttachmentRetentionCandidate;
-  sha256: string;
-  vaultRoot: string;
-}): Promise<boolean> {
-  let evidence: Awaited<ReturnType<typeof listLiveExactDocumentImportEvidence>>;
-  try {
-    evidence = await listLiveExactDocumentImportEvidence({
-      byteLength: input.byteLength,
-      sha256: input.sha256,
-      vaultRoot: input.vaultRoot,
-    });
-  } catch (error) {
-    if (isVaultError(error)) {
-      return false;
-    }
-    throw error;
-  }
-  if (evidence.length === 0) {
+  evidence: readonly LiveExactDocumentImportEvidence[] | null | undefined;
+}): boolean {
+  if (!input.evidence || input.evidence.length === 0) {
     return false;
   }
 
   const materializedPaths = new Set(input.candidate.canonicalDocumentMaterializationPaths);
   const expectedTitle = normalizePromotionText(input.candidate.attachment.fileName ?? null);
   const expectedNote = normalizePromotionText(input.candidate.capture.text ?? null);
-  return expectedTitle !== null && evidence.some((candidate) =>
+  return expectedTitle !== null && input.evidence.some((candidate) =>
     materializedPaths.has(candidate.manifestPath)
     && materializedPaths.has(candidate.rawRef)
     && candidate.note === expectedNote
@@ -762,6 +824,13 @@ async function hasMatchingLivePromotedDocument(input: {
     && candidate.source === "import"
     && candidate.title === expectedTitle
   );
+}
+
+function buildPromotedDocumentReceiptKey(input: {
+  byteLength: number;
+  sha256: string;
+}): string {
+  return `${input.sha256}:${input.byteLength}`;
 }
 
 function buildDefaultPromotionKey(input: {
