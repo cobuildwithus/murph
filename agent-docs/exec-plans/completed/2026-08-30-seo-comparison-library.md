@@ -1,6 +1,6 @@
 # Source-backed competitor comparison library
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-31
 
@@ -243,11 +243,17 @@ Updated: 2026-08-31
     404-source/35-test totals and the rendered-evidence manifest omitted the
     already captured filtered and empty search states. Both proof defects are
     accepted for correction in the final exact-head packet.
+  - The final exact-head capture spec passed both its rendered-state and
+    no-JavaScript directory checks on commit `a87349f23956`. The evidence
+    manifest included desktop and phone heroes, directories, filtered search,
+    empty search, long-name handling, and WHOOP, BodyBuddy, and CommonHealth
+    comparison tables.
+  - The first final specialist packet was invalidated solely because the pull
+    request body still reported the pre-editorial 423-source/1,392-reference
+    totals. The pull request body was refreshed without changing the commit,
+    and the exact-head `completion-specialists` retry returned PASS with no
+    Product UX, public-agent guidance, frontend, or coverage findings.
 - Remaining external proof:
-  - Recapture the editorialized exact-head states and run one
-    exact-pushed-head `completion-specialists` ReviewGPT pass with Product UX,
-    frontend, and coverage lenses as applicable. The manifest must include
-    desktop and phone filtered and empty search captures in addition to the
-    hero, directory, and representative table states.
   - Required exact-head pull-request checks and final current-base merge-tree
-    proof.
+    proof after the plan-closure commit.
+Completed: 2026-08-31
