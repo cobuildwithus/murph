@@ -457,6 +457,28 @@ describe("createHostedLinqChat", () => {
     Reflect.deleteProperty(globalThis, "fetch");
   });
 
+  it("keeps an identity-less successful chat creation nonterminal", async () => {
+    const fetchMock = vi.fn(async () => createJsonResponse({
+      chat: {
+        id: "chat_created",
+        message: {},
+      },
+    }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createHostedLinqChat({
+      from: "+15550000000",
+      idempotencyKey: "create-123",
+      message: "Hello",
+      to: ["+15550000001"],
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      deliveryMayHaveSucceeded: true,
+      retryable: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses caller-supplied text before a rich-link follow-up", async () => {
     const requests: Array<{ body: unknown; url: RequestInfo | URL }> = [];
     const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -1451,7 +1473,7 @@ describe("sendHostedLinqChatMessage", () => {
     });
   });
 
-  it("treats an empty success body as a successful send", async () => {
+  it("keeps an identity-less successful existing-chat send nonterminal", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
@@ -1462,9 +1484,10 @@ describe("sendHostedLinqChatMessage", () => {
     await expect(sendHostedLinqChatMessage({
       chatId: "chat_123",
       message: "hello",
-    })).resolves.toEqual({
-      chatId: null,
-      messageId: null,
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      deliveryMayHaveSucceeded: true,
+      retryable: true,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);

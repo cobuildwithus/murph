@@ -87,7 +87,12 @@ export async function createHostedLinqChat(input: {
         "A new Linq chat cannot include URL text in its first message.",
       );
     }
-    return createHostedLinqChatWithPrimaryMessage(input);
+    const result = await createHostedLinqChatWithPrimaryMessage(input);
+    requireHostedLinqPrimaryMessageId({
+      messageId: result.messageId,
+      operation: "chat create",
+    });
+    return result;
   }
   if (!split.message.trim()) {
     throw new TypeError(
@@ -113,9 +118,10 @@ export async function createHostedLinqChat(input: {
       retryable: true,
     });
   }
-  const primaryMessageId = requireHostedLinqPrimaryMessageIdForRichLink({
+  const primaryMessageId = requireHostedLinqPrimaryMessageId({
     messageId: result.messageId,
     operation: "chat create",
+    richLinkFollowUp: true,
   });
 
   let linkResult: HostedLinqSendResult;
@@ -195,7 +201,12 @@ export async function sendHostedLinqChatMessage(input: {
 }): Promise<HostedLinqSendResult> {
   const split = splitTrailingHttpsLink(input.message);
   if (!split.linkUrl) {
-    return sendHostedLinqTextMessage(input);
+    const result = await sendHostedLinqTextMessage(input);
+    requireHostedLinqPrimaryMessageId({
+      messageId: result.messageId,
+      operation: "message send",
+    });
+    return result;
   }
 
   if (!split.message.trim()) {
@@ -212,9 +223,10 @@ export async function sendHostedLinqChatMessage(input: {
     message: split.message,
     timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
   });
-  const primaryMessageId = requireHostedLinqPrimaryMessageIdForRichLink({
+  const primaryMessageId = requireHostedLinqPrimaryMessageId({
     messageId: primaryResult.messageId,
     operation: "message send",
+    richLinkFollowUp: true,
   });
   let linkResult: HostedLinqSendResult;
   try {
@@ -395,9 +407,10 @@ function collectHostedLinqProviderMessageIds(
   return output;
 }
 
-function requireHostedLinqPrimaryMessageIdForRichLink(input: {
+function requireHostedLinqPrimaryMessageId(input: {
   messageId: string | null;
   operation: "chat create" | "message send";
+  richLinkFollowUp?: boolean;
 }): string {
   const messageId = normalizeNullableString(input.messageId);
   if (messageId) {
@@ -411,7 +424,9 @@ function requireHostedLinqPrimaryMessageIdForRichLink(input: {
     },
     httpStatus: 502,
     message:
-      `Linq ${input.operation} response was missing the primary message identity for a rich-link follow-up.`,
+      `Linq ${input.operation} response was missing the primary message identity${
+        input.richLinkFollowUp ? " for a rich-link follow-up" : ""
+      }.`,
     retryable: true,
   }), {
     deliveryMayHaveSucceeded: true as const,
