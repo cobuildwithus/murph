@@ -110,7 +110,7 @@ async function saveGoal(
         message: "Goal was not found.",
         details: {
           stage: "read",
-          hint: "Before replying, run goal list; this read is recovery, not a write retry. Never retry goal save with a different id unless the user confirms that exact listed goal as the target. Then stop and ask one question offering both choices: update that exact goal or create a new goal.",
+          hint: "After this error, run only goal list once. Do not write again this turn. If a listed goal matches, end with one question naming its exact goal id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.",
         },
       },
     });

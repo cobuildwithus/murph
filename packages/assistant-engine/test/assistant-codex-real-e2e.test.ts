@@ -18440,6 +18440,7 @@ describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
           reply,
         })}\n`,
       )
+      expect(commands).toHaveLength(2)
       expect(goalSaveCommands).toHaveLength(1)
       expect(goalSaveCommands[0]).toContain(staleGoalId)
       expect(goalSaveCommands[0]).not.toContain(existingGoalId)
@@ -18459,10 +18460,12 @@ describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
           (action) => action.kind === 'dynamic',
         ),
       ).toHaveLength(0)
-      expect(reply).toMatch(/not found|no longer exists|missing|stale/iu)
-      expect(reply).toMatch(/different|another|same slug/iu)
-      expect(reply).toMatch(/update/iu)
-      expect(reply).toMatch(/create (?:a )?new/iu)
+      expect(reply).toMatch(
+        /could not find|does not exist|not found|no longer exists|missing|stale/iu,
+      )
+      expect(reply).toContain(existingGoalId)
+      expect(reply).toMatch(/priority (?:to )?2/iu)
+      expect(reply).not.toMatch(/\bcreat(?:e|ed|ing)\b/iu)
       expect(reply).toMatch(/\?/u)
       expect(reply).not.toMatch(
         /\b(?:I|I've|it has|it's|the goal is) (?:updated|saved|changed|created)\b/iu,
