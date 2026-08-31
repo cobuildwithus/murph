@@ -1824,6 +1824,9 @@ describe('assistant automation scanner', () => {
     const sentInput = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
     expect(sentInput?.promptTimeContext).toEqual({
       canonicalTimeZoneAvailable: false,
+      currentInstant: expect.stringMatching(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+      ),
       currentLocalDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/u),
       currentTimeZone: 'UTC',
     })
