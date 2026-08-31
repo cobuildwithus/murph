@@ -7,7 +7,8 @@ Updated: 2026-08-31
 ## Goal
 
 - Add a fast, diff-aware cyclomatic-complexity guard that every code PR runs
-  locally during agent scope review and again in exact-head CI.
+  locally during agent scope review and again against the exact merge candidate
+  in CI.
 - Make complexity regressions actionable without forcing unrelated PRs to pay
   down all existing complexity debt.
 
@@ -36,7 +37,7 @@ Updated: 2026-08-31
 
 - Technical constraints: reuse the existing Babel parser dependency; keep the
   guard fast and read-only; handle added, deleted, renamed, and working-tree
-  files; compare immutable base/head blobs in CI.
+  files; compare immutable base/candidate blobs in CI.
 - Product/process constraints: preserve existing PR and ReviewGPT ownership;
   do not turn the metric into a proxy for correctness or require speculative
   abstractions merely to lower a number.
@@ -60,7 +61,7 @@ Updated: 2026-08-31
 
 1. Implement and test source analysis, diff discovery, and the new-code ratchet.
 2. Add the local package command and completion-workflow requirement.
-3. Add structured PR evidence validation and exact-head CI execution.
+3. Add structured PR evidence validation and exact-candidate CI execution.
 4. Run focused proof, inspect the final diff, complete review gates, and open
    the PR.
 

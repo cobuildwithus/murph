@@ -1,3 +1,10 @@
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,6 +14,11 @@ import {
   isCyclomaticSourcePath,
   parseNameStatus,
 } from "./check-cyclomatic-complexity.js";
+
+const analyzerScriptPath = fileURLToPath(
+  new URL("./check-cyclomatic-complexity.ts", import.meta.url),
+);
+const tsxCliPath = createRequire(import.meta.url).resolve("tsx/cli");
 
 function functionWithBranches(name: string, branchCount: number): string {
   return `
@@ -18,6 +30,75 @@ function functionWithBranches(name: string, branchCount: number): string {
       return value;
     }
   `;
+}
+
+function functionWithSplitBranches(
+  name: string,
+  baseBranchCount: number,
+  prBranchCount: number,
+): string {
+  return `
+    export function ${name}(value) {
+      ${Array.from(
+        { length: baseBranchCount },
+        (_, index) => `if (value === ${index}) return ${index};`,
+      ).join("\n")}
+      // Keep branch-owned edits in separate Git hunks.
+      // 01
+      // 02
+      // 03
+      // 04
+      // 05
+      // 06
+      // 07
+      // 08
+      // 09
+      // 10
+      ${Array.from(
+        { length: prBranchCount },
+        (_, index) => `if (value === ${index + 1000}) return ${index + 1000};`,
+      ).join("\n")}
+      return value;
+    }
+  `;
+}
+
+function runFixtureGit(repository: string, ...args: string[]): string {
+  const result = spawnSync(
+    "git",
+    [
+      "-c",
+      "user.name=fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "core.hooksPath=/dev/null",
+      ...args,
+    ],
+    { cwd: repository, encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    throw new Error(result.stderr || `Git failed: ${args.join(" ")}`);
+  }
+  return result.stdout.trim();
+}
+
+function runComplexityCli(repository: string, ...args: string[]) {
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  delete environment.MURPH_COMPLEXITY_BASE_SHA;
+  delete environment.MURPH_COMPLEXITY_HEAD_SHA;
+  return spawnSync(
+    process.execPath,
+    [tsxCliPath, analyzerScriptPath, ...args],
+    {
+      cwd: repository,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
 }
 
 describe("cyclomatic complexity source analysis", () => {
@@ -189,5 +270,171 @@ describe("cyclomatic complexity diff inputs and reporting", () => {
 
     expect(output).toContain("hotspot target");
     expect(output).toContain("Cyclomatic complexity guard failed");
+  });
+
+  it("prints every hotspot that requires agent judgment", () => {
+    const names = Array.from({ length: 6 }, (_, index) => `hotspot${index + 1}`);
+    const headSummary = analyzeCyclomaticComplexity(
+      "source.ts",
+      names.map((name) => functionWithBranches(name, 20)).join("\n"),
+    );
+    const comparison = compareFileComplexity(
+      { basePath: null, headPath: "source.ts", status: "A" },
+      analyzeCyclomaticComplexity("source.ts", ""),
+      headSummary,
+    );
+    const output = formatComplexityDiffReport({
+      baseRef: "a".repeat(40),
+      files: [comparison],
+      headRef: null,
+      passed: false,
+      threshold: 20,
+    });
+
+    for (const name of names) {
+      expect(output).toContain(`hotspot ${name}`);
+    }
+  });
+});
+
+describe("cyclomatic complexity CLI composition", () => {
+  it("compares the exact merge candidate and covers changed Git path shapes", async () => {
+    const repository = await mkdtemp(path.join(tmpdir(), "complexity-cli-"));
+
+    try {
+      runFixtureGit(repository, "init", "--initial-branch=main");
+      await writeFile(
+        path.join(repository, "source.ts"),
+        functionWithSplitBranches("target", 9, 0),
+      );
+      await writeFile(
+        path.join(repository, "inverse.ts"),
+        functionWithSplitBranches("inverse", 20, 0),
+      );
+      await writeFile(path.join(repository, "delete.ts"), "export const removed = true;\n");
+      await writeFile(path.join(repository, "rename.ts"), "export const renamed = true;\n");
+      runFixtureGit(repository, "add", ".");
+      runFixtureGit(repository, "commit", "-m", "initial");
+
+      runFixtureGit(repository, "switch", "-c", "feature");
+      await writeFile(
+        path.join(repository, "source.ts"),
+        functionWithSplitBranches("target", 9, 1),
+      );
+      await writeFile(
+        path.join(repository, "inverse.ts"),
+        functionWithSplitBranches("inverse", 20, 1),
+      );
+      await writeFile(path.join(repository, "added.ts"), "export const added = true;\n");
+      runFixtureGit(repository, "rm", "delete.ts");
+      runFixtureGit(repository, "mv", "rename.ts", "moved.ts");
+      runFixtureGit(repository, "add", ".");
+      runFixtureGit(repository, "commit", "-m", "feature changes");
+      const pullRequestHead = runFixtureGit(repository, "rev-parse", "HEAD");
+
+      runFixtureGit(repository, "switch", "main");
+      await writeFile(
+        path.join(repository, "source.ts"),
+        functionWithSplitBranches("target", 19, 0),
+      );
+      await writeFile(
+        path.join(repository, "inverse.ts"),
+        functionWithSplitBranches("inverse", 10, 0),
+      );
+      runFixtureGit(repository, "add", "source.ts", "inverse.ts");
+      runFixtureGit(repository, "commit", "-m", "advance base");
+      const eventBase = runFixtureGit(repository, "rev-parse", "HEAD");
+      runFixtureGit(repository, "merge", "--no-ff", "feature", "-m", "merge candidate");
+      const mergeCandidate = runFixtureGit(repository, "rev-parse", "HEAD");
+
+      const branchOnly = runComplexityCli(
+        repository,
+        "--base",
+        eventBase,
+        "--head",
+        pullRequestHead,
+        "--",
+        "source.ts",
+      );
+      expect(branchOnly.status, branchOnly.stderr).toBe(0);
+
+      const exactCandidate = runComplexityCli(
+        repository,
+        "--base",
+        eventBase,
+        "--head",
+        mergeCandidate,
+        "--",
+        "source.ts",
+      );
+      expect(exactCandidate.status, exactCandidate.stderr).toBe(1);
+      expect(exactCandidate.stdout).toContain("debt 0 -> 1");
+
+      const inverseBranchOnly = runComplexityCli(
+        repository,
+        "--base",
+        eventBase,
+        "--head",
+        pullRequestHead,
+        "--",
+        "inverse.ts",
+      );
+      expect(inverseBranchOnly.status, inverseBranchOnly.stderr).toBe(1);
+
+      const inverseCandidate = runComplexityCli(
+        repository,
+        "--base",
+        eventBase,
+        "--head",
+        mergeCandidate,
+        "--",
+        "inverse.ts",
+      );
+      expect(inverseCandidate.status, inverseCandidate.stderr).toBe(0);
+
+      const pathShapes = runComplexityCli(
+        repository,
+        "--base",
+        eventBase,
+        "--head",
+        mergeCandidate,
+        "--",
+        "added.ts",
+        "delete.ts",
+        "rename.ts",
+        "moved.ts",
+      );
+      expect(pathShapes.status, pathShapes.stderr).toBe(0);
+      for (const changedPath of ["added.ts", "delete.ts", "moved.ts"]) {
+        expect(pathShapes.stdout).toContain(changedPath);
+      }
+
+      await writeFile(
+        path.join(repository, "added.ts"),
+        functionWithBranches("trackedWorkingChange", 20),
+      );
+      await writeFile(
+        path.join(repository, "untracked.ts"),
+        functionWithBranches("untrackedWorkingChange", 20),
+      );
+      const workingTree = runComplexityCli(repository);
+      expect(workingTree.status, workingTree.stderr).toBe(1);
+      expect(workingTree.stdout).toContain("added.ts");
+      expect(workingTree.stdout).toContain("untracked.ts");
+
+      const immutableCandidate = runComplexityCli(
+        repository,
+        "--base",
+        eventBase,
+        "--head",
+        mergeCandidate,
+        "--",
+        "source.ts",
+      );
+      expect(immutableCandidate.status, immutableCandidate.stderr).toBe(1);
+      expect(immutableCandidate.stdout).toContain("debt 0 -> 1");
+    } finally {
+      await rm(repository, { force: true, recursive: true });
+    }
   });
 });

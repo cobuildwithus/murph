@@ -456,16 +456,16 @@ test("only documented lightweight PR workflows retain synchronize", async () => 
   assert.deepEqual(triggerTypes(await workflow("pr-head-change.yml")), ["synchronize"]);
 });
 
-test("complexity evidence and exact-head regression guards remain required", async () => {
+test("complexity evidence and exact-candidate regression guards remain required", async () => {
   const host = await workflow("host-support.yml");
   const build = jobBlock(host, "release-build-typecheck-linux");
   assert.match(
     build,
-    /uses: actions\/checkout@[^\n]+\n        with:\n          fetch-depth: 0\n          persist-credentials: false/u,
+    /uses: actions\/checkout@[^\n]+\n        with:\n          fetch-depth: 2\n          persist-credentials: false/u,
   );
   assert.match(
     build,
-    /- name: Guard cyclomatic complexity regressions\n        if: \$\{\{ github\.event_name == 'pull_request' \}\}\n        env:\n          MURPH_COMPLEXITY_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}\n          MURPH_COMPLEXITY_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n        run: pnpm complexity:diff/u,
+    /- name: Guard cyclomatic complexity regressions\n        if: \$\{\{ github\.event_name == 'pull_request' \}\}\n        env:\n          MURPH_COMPLEXITY_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}\n          MURPH_COMPLEXITY_HEAD_SHA: \$\{\{ github\.sha \}\}\n        run: pnpm complexity:diff/u,
   );
 
   const evidence = await workflow("pr-evidence.yml");

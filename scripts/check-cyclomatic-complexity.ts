@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
 import { parse, type ParserPlugin } from "@babel/parser";
 import traverseImport, { type NodePath } from "@babel/traverse";
@@ -16,7 +16,7 @@ const traverse: Traverse = (
     : (traverseModule as { default: Traverse }).default
 );
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = resolveRepositoryRoot();
 
 export const DEFAULT_CYCLOMATIC_COMPLEXITY_THRESHOLD = 20;
 
@@ -376,8 +376,7 @@ export function formatComplexityDiffReport(report: ComplexityDiffReport): string
       .sort((left, right) =>
         right.complexity - left.complexity ||
         left.line - right.line
-      )
-      .slice(0, 5);
+      );
     for (const hotspot of hotspots) {
       lines.push(
         `  hotspot ${hotspot.name} at ${hotspot.line}:${hotspot.column} = ${hotspot.complexity}`,
@@ -700,6 +699,18 @@ function execGit(args: readonly string[]): string {
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
+}
+
+function resolveRepositoryRoot(): string {
+  const resolvedRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  if (!resolvedRoot) {
+    throw new Error("Unable to resolve the repository root.");
+  }
+  return resolvedRoot;
 }
 
 function normalizeRepoPath(filePath: string): string {
