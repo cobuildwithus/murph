@@ -1,6 +1,6 @@
 # Cyclomatic Complexity Diff Guard
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-08-31
 
@@ -80,3 +80,17 @@ Updated: 2026-08-31
 - Expected outcomes: syntax fixtures match the expected scores; improving and
   neutral diffs pass; debt or maximum regressions fail; PR evidence rejects
   missing judgments; this PR reports no complexity regression.
+
+## Outcome
+
+- Added the diff-aware analyzer and PR evidence guard without a new dependency.
+- Required CI compares the event base with GitHub's exact synthetic merge
+  candidate, while local runs also cover tracked and untracked working-tree
+  changes.
+- Focused analyzer coverage passed 11 tests; PR evidence and workflow policy
+  passed 27 tests. The tools typecheck, documentation checks, diff check, and
+  this PR's own complexity comparison also passed.
+- Preliminary ReviewGPT findings about truncated hotspot output and composed
+  CLI proof were fixed. Final ReviewGPT found and verified the merge-candidate
+  correction, and round 2 passed with no qualifying findings.
+Completed: 2026-08-31
