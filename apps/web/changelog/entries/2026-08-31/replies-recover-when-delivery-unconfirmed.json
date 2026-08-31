@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-31",
+  "order": 100,
+  "item": {
+    "id": "replies-recover-when-delivery-unconfirmed",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Replies recover when delivery is unconfirmed",
+    "summary": "If a messaging provider cannot return the confirmation Murph needs to track a reply, Murph now keeps the reply recoverable instead of treating it as finished.",
+    "details": "Recovery reuses the original delivery key, so Murph can retry safely without creating a second reply.",
+    "relevanceTags": ["assistant", "messaging", "reliability"],
+    "sourcePullRequests": [2645]
+  }
+}

@@ -23,6 +23,23 @@ Updated: 2026-08-31
 - The exact pushed head passes repository completion review, required CI, and
   final ReviewGPT review before the ordinary bug-fix PR is handed to a human.
 
+## Product UX
+
+- Effort: `Patch`.
+- Outcome: a direct iMessage reply whose provider acknowledgement lacks the
+  identity needed for delivery confirmation stays recoverable instead of
+  appearing durably complete.
+- Reaches: the existing hosted-runtime direct-thread reply journey only;
+  identity-bearing replies, groups, rich links, and the Web onboarding client
+  preserve their current behavior.
+- Proof: the runtime-level regression proves one provider request, the existing
+  delivery key, and a retryable ambiguous result; static outbox-path inspection
+  proves that retry and reconciliation remain with the existing owner.
+- Walkthrough: `Ready`. An affected member receives the same intended reply via
+  deterministic recovery rather than a silent accepted-without-receipt state;
+  members receiving identity-bearing acknowledgements see no changed copy,
+  timing, audience, authority, or interaction.
+
 ## Scope
 
 - In scope: hosted-runtime Linq transport acknowledgement validation, focused
@@ -73,8 +90,20 @@ Updated: 2026-08-31
 ## Verification
 
 - Commands to run: focused `operator-config` Vitest for the Linq runtime
-  transport, affected package typecheck, focused ESLint, `git diff --check`,
-  repository completion audit commands, required GitHub checks, and final
-  ReviewGPT review.
+  transport, affected package typecheck, `git diff --check`, repository
+  completion audit commands, required GitHub checks, and final ReviewGPT
+  review. The package does not expose an ESLint executable or lint script;
+  exact-head CI owns the repository static-analysis lane.
 - Expected outcomes: identity-less 2xx results are ambiguous and nonterminal;
   identity-bearing sends retain current accepted behavior; all checks pass.
+- Base proof: the focused runtime regression failed with `Missing expected
+  rejection` while 73 neighboring tests passed.
+- Candidate proof: the same file passed 74/74 tests; the operator-config
+  typecheck passed; the changelog archive test passed 9/9; the Web typecheck
+  passed; and `git diff --check` passed.
+- ReviewGPT implementation: the first adjacent Web-client patch was rejected.
+  A corrected artifact from the hosted-runtime owner was hash-verified,
+  inspected for provider-call and retry ownership, and applied. One omitted
+  pre-existing Web test was restored verbatim as non-production remediation;
+  the final base-to-head diff contains no Web production or test behavior
+  change outside the authored changelog fragment.
