@@ -201,6 +201,15 @@ body supplies its short outcome, Product UX result, evidence, and applicable
 risk details. CI may still be `pending`; the preliminary pass runs concurrently
 with it.
 
+Every invocation enters the worktree-local OS setup lock and reconciles only the
+frozen root workspace importer with lifecycle scripts disabled. Existing
+ReviewGPT, TypeScript-runner, and repo-tools paths are post-install assertions,
+not cache authority: they may belong to an older importer or an install that
+failed after materializing them. After the lock returns, a PR preset re-resolves
+the exact local and pushed heads before launch, so a caller cannot overtake
+active setup and a head move during cold setup cannot mix local and exported
+sources.
+
 Do not add `ReviewGPT first-reviewed head` merely for the preliminary pass. When
 final round 1 starts concurrently, add it before launching both jobs and set it
 to their shared exact pushed head. The preliminary pass still does not consume

@@ -1,5 +1,6 @@
 import type {
   HostedWorkspaceInvocationResult,
+  HostedRuntimeShellPrewarmOrchestrationDiagnostics,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   CloudflareHostedControlRuntimeShellPrewarmSource,
@@ -141,6 +142,7 @@ export interface WorkerUserRunnerStubLike {
   prewarmRuntimeShellForUser?(
     userId: string,
     source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   ): Promise<void>;
   reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;
   publishHostedPrivateMedia?(
