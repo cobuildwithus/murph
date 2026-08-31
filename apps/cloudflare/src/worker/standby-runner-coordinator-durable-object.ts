@@ -70,15 +70,12 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     const releaseId = readHostedStandbyReleaseId(this.environment);
     const mode = readHostedStandbyMode(this.environment);
     if (mode !== "allocate") {
-      this.startBackgroundWork();
       return { outcome: "disabled" };
     }
     if (!releaseId || releaseId !== request.releaseId) {
-      this.startBackgroundWork();
       return { outcome: "stale_release" };
     }
     if (request.deadlineAtEpochMs <= Date.now()) {
-      this.startBackgroundWork();
       return { outcome: "deadline_expired" };
     }
 
@@ -89,13 +86,14 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         claimedAtMs: Date.now(),
       });
     });
+    if (!slotName) {
+      return { outcome: "no_ready_slot" };
+    }
     this.startBackgroundWork();
-    return slotName
-      ? {
-          outcome: "claimed",
-          slotName,
-        }
-      : { outcome: "no_ready_slot" };
+    return {
+      outcome: "claimed",
+      slotName,
+    };
   }
 
   ensureReadyStandby(input: {
@@ -150,13 +148,6 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       return;
     }
 
-    if (state.readySlotName) {
-      const ready = await this.reproveReadySlot(namespace, state);
-      if (!ready) {
-        await this.scheduleAlarm(HOSTED_STANDBY_RETRY_MS);
-        return;
-      }
-    }
     await this.provisionIfNeeded(namespace, state.releaseId);
     await this.scheduleAlarm(STANDBY_READY_REPROBE_MS);
   }
@@ -167,19 +158,13 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
   ): Promise<void> {
     const slotName = this.transactionSync(() => {
       const state = this.store.readState();
-      if (state.readySlotName) {
-        return null;
-      }
       if (state.provisioningSlotName) {
         return state.provisioningSlotName;
       }
-      const candidate = createHostedStandbySlotName(releaseId);
+      const candidate = state.readySlotName ?? createHostedStandbySlotName(releaseId);
       this.store.beginProvisioning(candidate);
       return candidate;
     });
-    if (!slotName) {
-      return;
-    }
 
     const slot = namespace.getByName(slotName, {
       locationHint: HOSTED_STANDBY_LOCATION_HINT,
@@ -196,30 +181,6 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       });
     } catch {
       await this.reconcileFailedOwnedSlot(slotName, slot);
-    }
-  }
-
-  private async reproveReadySlot(
-    namespace: HostedStandbyRunnerContainerNamespaceLike,
-    state: HostedStandbyCoordinatorState,
-  ): Promise<boolean> {
-    const slotName = state.readySlotName;
-    if (!slotName || !state.releaseId) {
-      return true;
-    }
-    const slot = namespace.getByName(slotName, {
-      locationHint: HOSTED_STANDBY_LOCATION_HINT,
-    });
-    try {
-      await slot.prepareStandbySlot({
-        releaseId: state.releaseId,
-        region: HOSTED_STANDBY_REGION,
-        slotName,
-        timeoutMs: HOSTED_STANDBY_READY_TIMEOUT_MS,
-      });
-      return true;
-    } catch {
-      return await this.reconcileFailedOwnedSlot(slotName, slot);
     }
   }
 
@@ -377,12 +338,16 @@ class StandbyRunnerCoordinatorStore {
   beginProvisioning(slotName: string): void {
     this.sql.exec(
       `UPDATE standby_coordinator_meta
-       SET provisioning_slot_name = ?
+       SET ready_slot_name = NULL, provisioning_slot_name = ?
        WHERE singleton = 1
-         AND ready_slot_name IS NULL
-         AND provisioning_slot_name IS NULL`,
+         AND provisioning_slot_name IS NULL
+         AND (ready_slot_name IS NULL OR ready_slot_name = ?)`,
+      slotName,
       slotName,
     );
+    if (this.readState().provisioningSlotName !== slotName) {
+      throw new Error("Hosted standby provisioning transition was superseded.");
+    }
   }
 
   finishProvisioning(slotName: string): void {

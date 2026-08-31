@@ -151,9 +151,14 @@ describe("StandbyRunnerContainer", () => {
       slotName,
       timeoutMs: 75_000,
     });
+    const prepareDuringExpiry = vi.spyOn(
+      harness.container,
+      "prepareStandbySlot",
+    );
 
     await harness.container.onActivityExpired();
 
+    expect(prepareDuringExpiry).not.toHaveBeenCalled();
     expect(harness.renewActivityTimeout).toHaveBeenCalled();
     expect(harness.destroy).not.toHaveBeenCalled();
   });
@@ -299,6 +304,67 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     expect((await slots.get(readyBeforeOff)?.readStandbySlotBinding())?.state)
       .toBe("retired");
     expect(coordinator.readStandbyCoordinatorState().readySlotName).toBeNull();
+  });
+
+  it("withdraws a ready slot from claims while re-proving it", async () => {
+    const pending: Promise<unknown>[] = [];
+    const state = createDurableObjectState(new DatabaseSync(":memory:"), pending);
+    const reproofStarted = createDeferred<void>();
+    const releaseReproof = createDeferred<void>();
+    const prepareStandbySlot = vi.fn<
+      HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]
+    >(async (input) => {
+      if (prepareStandbySlot.mock.calls.length === 2) {
+        reproofStarted.resolve(undefined);
+        await releaseReproof.promise;
+      }
+      return { prepared: true, ...input };
+    });
+    let slot: HostedStandbyRunnerContainerStubLike | null = null;
+    const getByName = vi.fn((name: string) => {
+      slot ??= {
+        ...createSlotStub(name),
+        prepareStandbySlot,
+      };
+      return slot;
+    });
+    const coordinator = new StandbyRunnerCoordinatorDurableObject(state, {
+      CF_VERSION_METADATA: { id: RELEASE_ID },
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      STANDBY_RUNNER_CONTAINER: { getByName },
+    });
+
+    coordinator.ensureReadyStandby({
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+    });
+    await flushBackgroundWork(pending);
+    const readySlotName = coordinator.readStandbyCoordinatorState().readySlotName;
+    if (!readySlotName) {
+      throw new Error("Expected an initially ready standby slot.");
+    }
+
+    coordinator.alarm();
+    await reproofStarted.promise;
+
+    expect(coordinator.readStandbyCoordinatorState()).toMatchObject({
+      provisioningSlotName: readySlotName,
+      readySlotName: null,
+    });
+    expect(coordinator.claimReadyStandby({
+      claimId: createHostedStandbyClaimId(),
+      deadlineAtEpochMs: Date.now() + 250,
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+    })).toEqual({ outcome: "no_ready_slot" });
+
+    releaseReproof.resolve(undefined);
+    await flushBackgroundWork(pending);
+    expect(coordinator.readStandbyCoordinatorState()).toMatchObject({
+      provisioningSlotName: null,
+      readySlotName,
+    });
+    expect(prepareStandbySlot).toHaveBeenCalledTimes(2);
   });
 
   it("retries the exact persisted provisioning target after preparation and cleanup fail", async () => {
@@ -553,6 +619,19 @@ async function flushBackgroundWork(pending: Promise<unknown>[]): Promise<void> {
   while (pending.length > 0) {
     await Promise.all(pending.splice(0));
   }
+}
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve = (_value: T): void => {
+    throw new Error("Deferred promise was resolved before initialization.");
+  };
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
 }
 
 function createDurableObjectState(

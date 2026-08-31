@@ -965,6 +965,7 @@ export class RuntimeInvocationService {
         }),
       ]);
     const runnerContainerName = await this.resolveInvocationRunnerContainerName({
+      commandBudget: input.commandBudget ?? null,
       runnerContainerName: input.token.runnerContainerName,
       userId: input.userId,
     });
@@ -1091,6 +1092,7 @@ export class RuntimeInvocationService {
   }
 
   private async resolveInvocationRunnerContainerName(input: {
+    commandBudget: RuntimeProcessingCommandBudget | null;
     runnerContainerName: string | null;
     userId: string;
   }): Promise<string> {
@@ -1098,18 +1100,27 @@ export class RuntimeInvocationService {
       typeof input.runnerContainerName === "string"
       && isHostedStandbySlotName(input.runnerContainerName)
     ) {
+      const runnerContainerName = input.runnerContainerName;
       const namespace = this.input.standbyContainerNamespace;
       const releaseId = readHostedStandbyReleaseId(this.input.runnerRuntimeEnvSource);
       if (!namespace || !releaseId) {
         throw new Error("Hosted standby invocation binding is unavailable.");
       }
-      const binding = await namespace.getByName(input.runnerContainerName, {
-        locationHint: HOSTED_STANDBY_LOCATION_HINT,
-      }).readStandbySlotBinding();
+      const readBinding = async () =>
+        await namespace.getByName(runnerContainerName, {
+          locationHint: HOSTED_STANDBY_LOCATION_HINT,
+        }).readStandbySlotBinding();
+      const binding = input.commandBudget
+        ? await runRuntimeProcessingCommandStep({
+            budget: input.commandBudget,
+            operation: readBinding,
+            stepTimeoutMs: this.input.env.webControlTimeoutMs,
+          })
+        : await readBinding();
       if (
         binding.state !== "bound"
         || binding.userId !== input.userId
-        || binding.slotName !== input.runnerContainerName
+        || binding.slotName !== runnerContainerName
         || binding.releaseId !== releaseId
         || binding.region !== HOSTED_STANDBY_REGION
       ) {

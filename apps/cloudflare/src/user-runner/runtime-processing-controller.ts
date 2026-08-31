@@ -1009,6 +1009,7 @@ export class RuntimeProcessingController {
   }
 
   private async resolveFreshRunnerContainer(input: {
+    commandBudget: RuntimeProcessingCommandBudget;
     exactRunnerContainerName: string;
     initialRecord: RunnerStateRecord;
     input: RuntimeProcessingInput;
@@ -1018,6 +1019,7 @@ export class RuntimeProcessingController {
     if (pendingRunnerContainerName) {
       if (isHostedStandbySlotName(pendingRunnerContainerName)) {
         const retained = await this.resolveRetainedStandbyContainer({
+          commandBudget: input.commandBudget,
           runnerContainerName: pendingRunnerContainerName,
           userId,
         });
@@ -1063,7 +1065,13 @@ export class RuntimeProcessingController {
       };
     }
 
-    const deadlineAtEpochMs = Date.now() + HOSTED_STANDBY_CLAIM_TIMEOUT_MS;
+    const standbyBudget: RuntimeProcessingCommandBudget = {
+      deadlineAtMs: Math.min(
+        input.commandBudget.deadlineAtMs,
+        Date.now() + HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
+      ),
+    };
+    const deadlineAtEpochMs = standbyBudget.deadlineAtMs;
     const claimId = createHostedStandbyClaimId();
     const coordinator = coordinatorNamespace.getByName(
       resolveHostedStandbyCoordinatorName({
@@ -1072,14 +1080,15 @@ export class RuntimeProcessingController {
       }),
       { locationHint: HOSTED_STANDBY_LOCATION_HINT },
     );
-    const claim = await settleStandbyOperationBeforeDeadline(
-      coordinator.claimReadyStandby({
+    const claim = await settleStandbyOperationWithinBudget(
+      () => coordinator.claimReadyStandby({
         claimId,
         deadlineAtEpochMs,
         releaseId,
         region: HOSTED_STANDBY_REGION,
       }),
-      deadlineAtEpochMs,
+      standbyBudget,
+      HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
     );
     if (claim.kind !== "completed" || claim.value.outcome !== "claimed") {
       return {
@@ -1100,15 +1109,16 @@ export class RuntimeProcessingController {
     const slot = standbyContainerNamespace.getByName(slotName, {
       locationHint: HOSTED_STANDBY_LOCATION_HINT,
     });
-    const bind = await settleStandbyOperationBeforeDeadline(
-      slot.bindStandbySlot({
+    const bind = await settleStandbyOperationWithinBudget(
+      () => slot.bindStandbySlot({
         claimId,
         releaseId,
         region: HOSTED_STANDBY_REGION,
         slotName,
         userId,
       }),
-      deadlineAtEpochMs,
+      standbyBudget,
+      HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
     );
     if (
       bind.kind === "completed"
@@ -1127,9 +1137,10 @@ export class RuntimeProcessingController {
       return this.createStandbyRetryResolution(input.input);
     }
 
-    const resolved = await settleStandbyOperationBeforeDeadline(
-      slot.readStandbySlotBinding(),
-      deadlineAtEpochMs,
+    const resolved = await settleStandbyOperationWithinBudget(
+      () => slot.readStandbySlotBinding(),
+      standbyBudget,
+      HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
     );
     if (resolved.kind !== "completed") {
       return this.createStandbyRetryResolution(input.input);
@@ -1148,9 +1159,10 @@ export class RuntimeProcessingController {
       };
     }
     if (binding.state === "unbound") {
-      const retired = await settleStandbyOperationBeforeDeadline(
-        slot.retireStandbySlot({}),
-        deadlineAtEpochMs,
+      const retired = await settleStandbyOperationWithinBudget(
+        () => slot.retireStandbySlot({}),
+        standbyBudget,
+        HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
       );
       if (retired.kind !== "completed") {
         return this.createStandbyRetryResolution(input.input);
@@ -1171,6 +1183,7 @@ export class RuntimeProcessingController {
   }
 
   private async resolveRetainedStandbyContainer(input: {
+    commandBudget: RuntimeProcessingCommandBudget;
     runnerContainerName: string;
     userId: string;
   }): Promise<"cleared" | "ready" | "retry"> {
@@ -1182,12 +1195,15 @@ export class RuntimeProcessingController {
     const slot = namespace.getByName(input.runnerContainerName, {
       locationHint: HOSTED_STANDBY_LOCATION_HINT,
     });
-    let binding;
-    try {
-      binding = await slot.readStandbySlotBinding();
-    } catch {
+    const bindingResult = await settleStandbyOperationWithinBudget(
+      () => slot.readStandbySlotBinding(),
+      input.commandBudget,
+      this.input.env.webControlTimeoutMs,
+    );
+    if (bindingResult.kind !== "completed") {
       return "retry";
     }
+    const binding = bindingResult.value;
     if (
       binding.state === "bound"
       && binding.userId === input.userId
@@ -1197,29 +1213,38 @@ export class RuntimeProcessingController {
       return "ready";
     }
     if (binding.state === "retiring") {
-      try {
-        if (binding.claimId === null) {
-          await slot.retireStandbySlot({});
-        } else if (binding.userId === input.userId) {
-          await slot.retireStandbySlot({ claimId: binding.claimId });
-        }
-      } catch {
+      const claimId = binding.claimId;
+      const retirement = claimId === null || binding.userId === input.userId
+        ? await settleStandbyOperationWithinBudget(
+            () => slot.retireStandbySlot(claimId === null ? {} : { claimId }),
+            input.commandBudget,
+            this.input.env.webControlTimeoutMs,
+          )
+        : null;
+      if (retirement !== null && retirement.kind !== "completed") {
         return "retry";
       }
     }
     if (binding.state === "unbound") {
-      try {
-        await slot.retireStandbySlot({});
-      } catch {
+      const retirement = await settleStandbyOperationWithinBudget(
+        () => slot.retireStandbySlot({}),
+        input.commandBudget,
+        this.input.env.webControlTimeoutMs,
+      );
+      if (retirement.kind !== "completed") {
         return "retry";
       }
     } else if (binding.state === "bound" && binding.userId === input.userId) {
-      const destroyed = await destroyHostedExecutionContainer({
-        runnerContainerName: input.runnerContainerName,
-        runnerContainerNamespace: this.input.runnerContainerNamespace,
-        userId: input.userId,
-      });
-      if (!destroyed.ok) {
+      const destroyed = await settleStandbyOperationWithinBudget(
+        async () => await destroyHostedExecutionContainer({
+          runnerContainerName: input.runnerContainerName,
+          runnerContainerNamespace: this.input.runnerContainerNamespace,
+          userId: input.userId,
+        }),
+        input.commandBudget,
+        this.input.env.webControlTimeoutMs,
+      );
+      if (destroyed.kind !== "completed" || !destroyed.value.ok) {
         return "retry";
       }
     }
@@ -1296,6 +1321,7 @@ export class RuntimeProcessingController {
       throw new Error("Hosted runner container identity did not match the runtime start user.");
     }
     const resolution = await this.resolveFreshRunnerContainer({
+      commandBudget: input.commandBudget,
       exactRunnerContainerName: runnerContainerIdentity.runnerContainerName,
       initialRecord,
       input: processingInput,
@@ -1866,34 +1892,28 @@ export class RuntimeProcessingController {
 
 type StandbyOperationSettlement<T> =
   | { kind: "completed"; value: T }
-  | { error: unknown; kind: "failed" }
+  | { kind: "failed" }
   | { kind: "timed_out" };
 
-async function settleStandbyOperationBeforeDeadline<T>(
-  operation: Promise<T>,
-  deadlineAtEpochMs: number,
+async function settleStandbyOperationWithinBudget<T>(
+  operation: () => Promise<T>,
+  commandBudget: RuntimeProcessingCommandBudget,
+  stepTimeoutMs: number,
 ): Promise<StandbyOperationSettlement<T>> {
-  const remainingMs = deadlineAtEpochMs - Date.now();
-  if (remainingMs <= 0) {
-    void operation.catch(() => undefined);
-    return { kind: "timed_out" };
-  }
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<StandbyOperationSettlement<T>>((resolve) => {
-    timeoutId = setTimeout(() => resolve({ kind: "timed_out" }), remainingMs);
-  });
   try {
-    return await Promise.race([
-      operation.then<StandbyOperationSettlement<T>, StandbyOperationSettlement<T>>(
-        (value) => ({ kind: "completed", value }),
-        (error: unknown) => ({ error, kind: "failed" }),
-      ),
-      timeout,
-    ]);
-  } finally {
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId);
+    return {
+      kind: "completed",
+      value: await runRuntimeProcessingCommandStep({
+        budget: commandBudget,
+        operation,
+        stepTimeoutMs,
+      }),
+    };
+  } catch (error) {
+    if (isRuntimeProcessingCommandBudgetTimeout(error)) {
+      return { kind: "timed_out" };
     }
+    return { kind: "failed" };
   }
 }
 

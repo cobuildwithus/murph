@@ -220,17 +220,7 @@ export class StandbyRunnerContainer extends RunnerContainer {
       await super.onActivityExpired();
       return;
     }
-    try {
-      await this.prepareStandbySlot({
-        releaseId: binding.releaseId,
-        region: binding.region,
-        slotName: binding.slotName,
-        timeoutMs: 75_000,
-      });
-      this.renewPlatformActivityTimeout("standby-unbound-ready");
-    } catch {
-      await this.retireStandbySlot({});
-    }
+    this.renewPlatformActivityTimeout("standby-unbound-ready");
   }
 
   private authorizeBoundUser(userId: string): void {
