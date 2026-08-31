@@ -272,7 +272,6 @@ import {
 } from "./hosted-runtime/wake-candidates.ts";
 import {
   consumePendingRuntimeWakeUnlessShuttingDown,
-  createHostedSystemMailboxPreemptionWakeSignal,
 } from "./hosted-runtime/runtime-wake.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -2130,20 +2129,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       vaultRoot: restored.vaultRoot,
       workspace: activeWorkspace,
     };
-    let systemMailboxPreemptingWakeObserver:
-      ((notification: RuntimeWakeNotification) => void) | null = null;
-    const processingModeRuntimeWakeSignal =
-      resolveHostedRuntimeWakeSignalForProcessingMode({
-        onPreemptingWake: (notification) => {
-          systemMailboxPreemptingWakeObserver?.(notification);
-        },
-        processingMode: input.request.processingMode,
-        runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-      });
-    const initialMailboxRunnerInput = {
-      ...baseRunnerInput,
-      runtimeWakeSignal: processingModeRuntimeWakeSignal,
-    };
     let hostedCodexRuntime: Awaited<
       ReturnType<typeof prepareHostedCodexRuntimeEnvironment>
     > | null = null;
@@ -2254,7 +2239,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ? (["system"] as const)
         : initialMailboxImportPlan.lanes;
     const initialPendingRuntimeWake = consumePendingHostedRuntimeWake(
-      initialMailboxRunnerInput.runtimeWakeSignal ?? null,
+      options.runtimeWakeSignal ?? null,
       options.shutdownSignal ?? null,
     );
     const returnSystemMailboxBeforeInitialImport =
@@ -2350,14 +2335,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         importItemContext: initialMailboxImportContext,
         lanes: initialMailboxImportLanes,
         prefetchLanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
-        runnerInput: initialMailboxRunnerInput,
+        runnerInput: baseRunnerInput,
         requestId,
       });
     } else {
       const initialMailboxFetchWakeInterruption =
         createHostedRuntimeCheckpointWakeInterruption({
           enabled: true,
-          runtimeWakeSignal: processingModeRuntimeWakeSignal,
+          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
         });
       const restoreInitialMailboxFetchWake = (
         notification: RuntimeWakeNotification | null,
@@ -2387,7 +2372,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           lanes: initialMailboxImportLanes,
           mailboxFetchSignal: initialMailboxFetchWakeInterruption.signal,
           prefetchLanes: initialMailboxImportLanes,
-          runnerInput: initialMailboxRunnerInput,
+          runnerInput: baseRunnerInput,
           requestId,
         });
       } catch (error) {
@@ -2608,7 +2593,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         initialMailboxImportPostCheckpointEffectsFinished = true;
         await finishHostedMailboxImportPostCheckpointEffects({
           importResult: initialMailboxImport,
-          runnerInput: initialMailboxRunnerInput,
+          runnerInput: baseRunnerInput,
           signal: runtimeAbortController.signal,
         });
         const checkpointReturnedNextWake = selectEarliestHostedRuntimeWake([
@@ -2727,11 +2712,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           notification.requestedProcessingMode === "default";
         return true;
       };
-      systemMailboxPreemptingWakeObserver = observeForegroundWake;
       const consumeForegroundWake = (): boolean => {
         const pendingWakeObserved = observeForegroundWake(
           consumePendingRuntimeWakeUnlessShuttingDown({
-            runtimeWakeSignal: processingModeRuntimeWakeSignal,
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
             shutdownSignal: options.shutdownSignal ?? null,
           }),
         );
@@ -2784,7 +2768,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         initialMailboxImportPostCheckpointEffectsFinished = true;
         await finishHostedMailboxImportPostCheckpointEffects({
           importResult: initialMailboxImport,
-          runnerInput: initialMailboxRunnerInput,
+          runnerInput: baseRunnerInput,
           signal: runtimeAbortController.signal,
         });
       };
@@ -2808,7 +2792,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const workSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
-        const runtimeWakeSignal = processingModeRuntimeWakeSignal;
+        const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
         const waitForOwnedProjectionStage = async <T,>(
           runStage: (signal: AbortSignal) => Promise<T>,
           preemption: "cancel_and_drain" | "retain" = "cancel_and_drain",
@@ -3113,7 +3097,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const persistedPreparation = await runHostedWorkspaceCanonicalWriteAtBoundary({
             previousRedactedStatus: currentRedactedStatus,
             runnerInput: {
-              ...initialMailboxRunnerInput,
+              ...baseRunnerInput,
               workspace: activeWorkspace,
             },
             write: async () => {
@@ -3268,7 +3252,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
           const pendingWakeBeforeExactDelivery =
             consumePendingRuntimeWakeUnlessShuttingDown({
-              runtimeWakeSignal: processingModeRuntimeWakeSignal,
+              runtimeWakeSignal: options.runtimeWakeSignal ?? null,
               shutdownSignal: options.shutdownSignal ?? null,
             });
           const foregroundWakeBeforeExactDelivery = pendingWakeBeforeExactDelivery
@@ -3316,7 +3300,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }> => {
             const recordWakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
               enabled: true,
-              runtimeWakeSignal: processingModeRuntimeWakeSignal,
+              runtimeWakeSignal: options.runtimeWakeSignal ?? null,
             });
             const recordSignal = recordWakeInterruption.signal
               ? AbortSignal.any([
@@ -3390,7 +3374,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             const persistedDelivery = await runHostedWorkspaceCanonicalWriteAtBoundary({
               previousRedactedStatus: currentRedactedStatus,
               runnerInput: {
-                ...initialMailboxRunnerInput,
+                ...baseRunnerInput,
                 workspace: activeWorkspace,
               },
               write: async () => {
@@ -3516,7 +3500,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               force: true,
               generatedAt: new Date().toISOString(),
               platform: foregroundRuntime.platform,
-              runtimeWakeSignal: processingModeRuntimeWakeSignal,
+              runtimeWakeSignal: options.runtimeWakeSignal ?? null,
               signal: hostAbortSignal
                 ? AbortSignal.any([runtimeAbortController.signal, hostAbortSignal])
                 : runtimeAbortController.signal,
@@ -7621,21 +7605,6 @@ function hostedRuntimePendingWakeMatches(
 ): boolean {
   return left.nextWakeAt === right.nextWakeAt
     && left.nextWakeReason === right.nextWakeReason;
-}
-
-function resolveHostedRuntimeWakeSignalForProcessingMode(input: {
-  onPreemptingWake: (notification: RuntimeWakeNotification) => void;
-  processingMode: HostedWorkspaceInvocationProcessingMode | null | undefined;
-  runtimeWakeSignal: RuntimeWakeSignal | null;
-}): RuntimeWakeSignal | null {
-  if (input.processingMode !== "system_mailbox") {
-    return input.runtimeWakeSignal;
-  }
-
-  return createHostedSystemMailboxPreemptionWakeSignal(
-    input.runtimeWakeSignal,
-    input.onPreemptingWake,
-  );
 }
 
 function consumePendingHostedRuntimeWake(

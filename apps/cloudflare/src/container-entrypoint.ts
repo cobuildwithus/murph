@@ -216,25 +216,6 @@ type HostedContainerRuntimeWakeNotification = {
   requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
 };
 
-function coalescePendingRuntimeWakeProcessingMode(
-  input: {
-    incomingMode: HostedWorkspaceInvocationProcessingMode | null | undefined;
-    pending: boolean;
-    pendingMode: HostedWorkspaceInvocationProcessingMode | null;
-  },
-): HostedWorkspaceInvocationProcessingMode | null {
-  if (!input.pending) {
-    return input.incomingMode ?? null;
-  }
-  if (input.pendingMode !== "system_mailbox") {
-    return input.pendingMode;
-  }
-
-  return input.incomingMode === "system_mailbox"
-    ? input.pendingMode
-    : input.incomingMode ?? null;
-}
-
 export async function startHostedContainerEntrypoint(input: {
   port?: number;
   runtime?: HostedContainerRuntimeOptions;
@@ -497,11 +478,8 @@ export async function startHostedContainerEntrypoint(input: {
               activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
             }
             activeRuntimeWakePendingRequestedProcessingMode =
-              coalescePendingRuntimeWakeProcessingMode({
-                incomingMode: wakeRequest?.requestedProcessingMode,
-                pending: activeRuntimeWakePending,
-                pendingMode: activeRuntimeWakePendingRequestedProcessingMode,
-              });
+              wakeRequest?.requestedProcessingMode
+              ?? activeRuntimeWakePendingRequestedProcessingMode;
             activeRuntimeWakePending = true;
             pending = true;
             accepted = true;

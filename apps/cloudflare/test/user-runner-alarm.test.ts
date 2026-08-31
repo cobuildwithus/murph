@@ -6,11 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
-import {
-  createCoalescingRuntimeWakeSignal,
-  createHostedSystemMailboxPreemptionWakeSignal,
-  type RuntimeWakeNotification,
-} from "@murphai/assistant-runtime/hosted-invocation-testkit";
 import type {
   HostedWorkspaceRestorePreparation,
 } from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
@@ -3841,13 +3836,13 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("routes active system-mailbox rechecks through the wake with the explicit same-owner mode", async () => {
+  it("accepts active system-mailbox rechecks without waking the running pass", async () => {
     const processingMode = "system_mailbox" as const;
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
-        action: "already_running" as const,
+        action: "woken" as const,
         kind: "accepted" as const,
       }),
     );
@@ -3882,18 +3877,8 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: token.attemptId,
     });
 
-    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
-    expect(ensureProcessing).toHaveBeenCalledOnce();
-    expect(ensureProcessing).toHaveBeenCalledWith({
-      activeRuntime: expect.objectContaining({
-        attemptId: token.attemptId,
-        leaseGeneration: String(token.generation),
-        processingMode,
-        requestedProcessingMode: processingMode,
-        userId: TEST_USER_ID,
-      }),
-      userId: TEST_USER_ID,
-    });
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(ensureProcessing).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
@@ -4199,18 +4184,10 @@ describe("HostedUserRunner execution coordination", () => {
     const releaseInvocation = createDeferred<void>();
     const runtimeDecision = createDeferred<
       | { kind: "provider_started" }
-      | { kind: "yielded"; notification: RuntimeWakeNotification }
+      | { kind: "yielded"; notification: unknown }
     >();
     const providerWorkStarted = vi.fn();
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const preemptingWakeObserved = vi.fn();
-    const systemMailboxWakeSignal = createHostedSystemMailboxPreemptionWakeSignal(
-      runtimeWakeSignal,
-      preemptingWakeObserved,
-    );
-    if (!systemMailboxWakeSignal) {
-      throw new Error("Expected the composed runtime wake signal.");
-    }
+    const runtimeWakeNotifications: unknown[] = [];
 
     const prepareWorkspaceRestore = vi.fn(async (): Promise<HostedWorkspaceRestorePreparation> => ({
       adoptRuntimeAbortGuard: vi.fn(),
@@ -4229,13 +4206,13 @@ describe("HostedUserRunner execution coordination", () => {
     ) => {
       invocationStarted.resolve(undefined);
       options?.onRuntimeWakeReady?.((notification) => {
-        runtimeWakeSignal.notify(notification ?? undefined);
+        runtimeWakeNotifications.push(structuredClone(notification ?? null));
         return true;
       });
       invocationReady.resolve(undefined);
       await allowRuntimeConsumer.promise;
 
-      const notification = systemMailboxWakeSignal.consumePending();
+      const notification = runtimeWakeNotifications[0];
       if (notification) {
         runtimeDecision.resolve({ kind: "yielded", notification });
       } else {
@@ -4260,6 +4237,14 @@ describe("HostedUserRunner execution coordination", () => {
 
     let invocationResponse: Promise<Response> | null = null;
     const requestedProcessingModes: Array<string | null> = [];
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: true,
+      attemptId,
+      leaseGeneration: String(generation),
+      userId: TEST_USER_ID,
+    }));
     try {
       const { runner, sql } = createRunnerHarness({
         ensureProcessing: async (input) => {
@@ -4294,6 +4279,7 @@ describe("HostedUserRunner execution coordination", () => {
           }
           return { action: "already_running" as const, kind: "accepted" as const };
         },
+        readActiveRuntimeUserFence,
         workspace: createWorkspaceState({ version: "7" }),
       });
       await runner.bindUser(TEST_USER_ID);
@@ -4344,10 +4330,8 @@ describe("HostedUserRunner execution coordination", () => {
         action: "already_running",
         kind: "runtime_processing_accepted",
       });
-      expect(requestedProcessingModes).toEqual([
-        "default",
-        "system_mailbox",
-      ]);
+      expect(requestedProcessingModes).toEqual(["default"]);
+      expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
 
       allowRuntimeConsumer.resolve(undefined);
       await expect(runtimeDecision.promise).resolves.toEqual({
@@ -4357,7 +4341,6 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       });
       expect(providerWorkStarted).not.toHaveBeenCalled();
-      expect(preemptingWakeObserved).not.toHaveBeenCalled();
 
       releaseInvocation.resolve(undefined);
       await expect(invocationResponse).resolves.toMatchObject({ status: 200 });

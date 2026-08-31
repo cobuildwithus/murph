@@ -1044,20 +1044,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(mocks.stopWarmCodexAppServer).toHaveBeenCalledWith("container-server-close");
   });
 
-  it.each([
-    ["default then system", "default", "system_mailbox", "default"],
-    ["media retention then system", "inbox_media_retention", "system_mailbox", "inbox_media_retention"],
-    ["unclassified then system", null, "system_mailbox", null],
-    ["system then default", "system_mailbox", "default", "default"],
-    ["system then media retention", "system_mailbox", "inbox_media_retention", "inbox_media_retention"],
-    ["system then unclassified", "system_mailbox", null, null],
-    ["system then system", "system_mailbox", "system_mailbox", "system_mailbox"],
-  ] as const)("accepts pending runtime wakes without losing foreground priority: %s", async (
-    _caseName,
-    firstRequestedProcessingMode,
-    secondRequestedProcessingMode,
-    expectedRequestedProcessingMode,
-  ) => {
+  it("accepts runtime wakes only after the active invocation reports readiness", async () => {
     const invocationStarted = createDeferred();
     const allowInvocationReady = createDeferred();
     const invocationReady = createDeferred();
@@ -1123,7 +1110,7 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
-        requestedProcessingMode: firstRequestedProcessingMode,
+        requestedProcessingMode: "default",
         userId: "u1",
       }),
       headers: {
@@ -1133,15 +1120,6 @@ describe("startHostedContainerEntrypoint", () => {
     });
     nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
     const secondPendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
-      body: JSON.stringify({
-        attemptId: "attempt_evt_runtime_wake_ready",
-        leaseGeneration: "1",
-        requestedProcessingMode: secondRequestedProcessingMode,
-        userId: "u1",
-      }),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
       method: "POST",
     });
     nowEpochMs = runtimeReadyAtEpochMs;
@@ -1180,9 +1158,7 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
-        ...(expectedRequestedProcessingMode
-          ? { requestedProcessingMode: expectedRequestedProcessingMode }
-          : {}),
+        requestedProcessingMode: "default",
       },
       { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs },
       { notifiedAtEpochMs: secondWakeAcceptedAtEpochMs },
