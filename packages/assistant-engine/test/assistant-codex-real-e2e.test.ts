@@ -11445,7 +11445,7 @@ async function upsertDirectLinqMemberMemoryEvidence(input: {
         itemId: `item:${input.eventId}`,
         kind: 'hosted-mailbox',
         lane: 'conversation',
-        laneSeq: input.eventId,
+        laneSeq: String(Date.parse(input.occurredAt)),
         payloadSchema: 'murph.hosted-execution-wake.v1',
         payloadSource: 'inline',
         source: 'hosted-mailbox',
@@ -11746,6 +11746,7 @@ describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
           evidenceKind: 'assistant' | 'member'
           memberAuthorityExpected?: boolean
           evidenceText: string
+          priorMemberEvidenceText?: string
           suffix: string
         }) => {
           const workingDirectory = await mkdtemp(
@@ -11809,6 +11810,14 @@ describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
             }],
           )
           if (input.evidenceKind === 'member') {
+            if (input.priorMemberEvidenceText) {
+              await upsertDirectLinqMemberMemoryEvidence({
+                eventId: `memory-withdrawal-${input.suffix}-prior`,
+                occurredAt: '2026-08-29T11:59:00.000Z',
+                text: input.priorMemberEvidenceText,
+                vault: workingDirectory,
+              })
+            }
             await upsertDirectLinqMemberMemoryEvidence({
               eventId: `memory-withdrawal-${input.suffix}`,
               occurredAt: '2026-08-29T12:00:00.000Z',
@@ -11901,6 +11910,11 @@ describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
         const memberWithdrawal = await runScenario({
           evidenceKind: 'member',
           evidenceText: 'Please forget this exact saved fact: "Prefers morning summaries." I explicitly withdraw it and do not want it remembered anymore.',
+          priorMemberEvidenceText: [
+            'Please forget this exact saved fact: "Prefers morning summaries."',
+            'x'.repeat(2_000),
+            'Actually, keep that preference.',
+          ].join(' '),
           suffix: 'member',
         })
         expect(memberWithdrawal.memoryActions).toHaveLength(2)
@@ -11930,6 +11944,7 @@ describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
             'x'.repeat(2_000),
             'Actually, keep that preference.',
           ].join(' '),
+          priorMemberEvidenceText: 'Please forget this exact saved fact: "Prefers morning summaries." I explicitly withdraw it and do not want it remembered anymore.',
           suffix: 'oversized-member',
         })
         expect(oversizedWithdrawal.memoryActions).toHaveLength(1)

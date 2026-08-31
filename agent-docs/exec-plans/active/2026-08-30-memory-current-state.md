@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-30
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 ## Goal
 
@@ -189,6 +189,10 @@ Updated: 2026-08-30
     complete normalized input must fit the existing 2,000-byte bound; an
     oversized withdrawal remains non-authoritative conversation context, so a
     truncated prefix cannot silently authorize update or forget.
+  - Made direct-member mutation authority a contiguous newest suffix. The first
+    eligible oversized input is a barrier to older authority, while complete
+    newer inputs remain usable, so a later reversal cannot expose an older
+    correction or withdrawal behind it.
 - Rejected findings: None.
 - Corrected-diff Product UX verdict: Ready.
 - Corrected-diff code review: PASS, including the final fail-closed channel
@@ -248,13 +252,15 @@ Updated: 2026-08-30
   memory read or other action, no internal-memory wording).
 - Passed: corrected notification-recovery regression for successful maintenance
   forget classification.
-- Passed: 72 focused assistant owner tests after the final authority fix,
-  including exact 2,000-byte multibyte admission and 2,001-byte withdrawal
-  rejection.
+- Passed: 335 focused assistant owner tests after the newest-suffix authority
+  barrier, including exact 2,000-byte multibyte admission, suppression of an
+  older correction and withdrawal behind a 2,001-byte reversal, and admission
+  of complete newer authority after an older oversized input.
 - Passed: the extended real-Codex withdrawal journey. Assistant-only evidence
-  produced `show`, a complete direct-member withdrawal produced guarded
-  `show` then `forget`, and an oversized withdrawal with a later reversal
-  produced only `show` and preserved the record.
+  produced `show`; an older oversized input followed by a complete direct-member
+  withdrawal produced guarded `show` then `forget`; and an older withdrawal
+  followed by a newer oversized reversal produced only `show` and preserved
+  the record.
 - Passed: changelog page tests (9 tests) and Web typecheck.
 - Passed: `git diff --check` and task-file privacy scan.
 - Passed: Product UX Ready, architecture simplification review, and final

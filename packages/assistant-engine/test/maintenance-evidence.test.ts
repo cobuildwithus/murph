@@ -246,7 +246,7 @@ test('labels only raw provider-attested direct member inputs as mutation authori
   )
 })
 
-test('requires the complete normalized member input to fit the mutation authority bound', async () => {
+test('uses only the complete newest suffix for member mutation authority', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-maintenance-member-authority-bound-',
   )
@@ -273,14 +273,37 @@ test('requires the complete normalized member input to fit the mutation authorit
   await Promise.all([
     upsertMemberEvidenceInput({
       channel: 'linq',
-      eventId: 'exact-boundary-linq',
-      text: exactBoundary,
+      eventId: 'older-correction-linq',
+      occurredAt: '2026-06-29T11:58:00.000Z',
+      text: 'Correct the older saved evening-walk preference.',
+      vaultRoot,
+    }),
+    upsertMemberEvidenceInput({
+      channel: 'linq',
+      eventId: 'older-withdrawal-linq',
+      occurredAt: '2026-06-29T11:59:00.000Z',
+      text: 'Forget the older saved evening-walk preference.',
       vaultRoot,
     }),
     upsertMemberEvidenceInput({
       channel: 'linq',
       eventId: 'oversized-withdrawal-linq',
+      occurredAt: '2026-06-29T12:00:00.000Z',
       text: oversizedWithdrawal,
+      vaultRoot,
+    }),
+    upsertMemberEvidenceInput({
+      channel: 'linq',
+      eventId: 'exact-boundary-linq',
+      occurredAt: '2026-06-29T12:01:00.000Z',
+      text: exactBoundary,
+      vaultRoot,
+    }),
+    upsertMemberEvidenceInput({
+      channel: 'linq',
+      eventId: 'newer-withdrawal-linq',
+      occurredAt: '2026-06-29T12:02:00.000Z',
+      text: 'Forget the newer saved evening-walk preference.',
       vaultRoot,
     }),
   ])
@@ -293,8 +316,17 @@ test('requires the complete normalized member input to fit the mutation authorit
   })
 
   expect(evidence).toContain(`member: ${exactBoundary}`)
+  expect(evidence).toContain(
+    'member: Forget the newer saved evening-walk preference.',
+  )
   expect(evidence).not.toContain(
     'member: Forget the exact saved evening-walk preference.',
+  )
+  expect(evidence).not.toContain(
+    'member: Forget the older saved evening-walk preference.',
+  )
+  expect(evidence).not.toContain(
+    'member: Correct the older saved evening-walk preference.',
   )
   expect(evidence).not.toContain('Actually, keep that preference.')
 })
@@ -703,10 +735,12 @@ async function upsertMemberEvidenceInput(input: {
   ambiguousGroupAuthority?: boolean
   channel: 'email' | 'linq' | 'telegram'
   eventId: string
+  occurredAt?: string
   text: string
   threadIsDirect?: boolean
   vaultRoot: string
 }): Promise<void> {
+  const occurredAt = input.occurredAt ?? '2026-06-29T12:00:00.000Z'
   await upsertAssistantInputEvent({
     event: {
       content: { text: input.text },
@@ -718,8 +752,8 @@ async function upsertMemberEvidenceInput(input: {
         threadId: `thread-${input.eventId}`,
         threadIsDirect: input.threadIsDirect ?? true,
       },
-      occurredAt: '2026-06-29T12:00:00.000Z',
-      receivedAt: '2026-06-29T12:00:01.000Z',
+      occurredAt,
+      receivedAt: occurredAt,
       sourceMetadata: input.channel === 'email'
         ? {
             assistantStyleSettingsAuthorized: false,
@@ -753,13 +787,14 @@ async function upsertMemberEvidenceInput(input: {
         itemId: `item:${input.eventId}`,
         kind: 'hosted-mailbox',
         lane: 'conversation',
-        laneSeq: input.eventId,
+        laneSeq: String(Date.parse(occurredAt)),
         payloadSchema: 'murph.hosted-execution-wake.v1',
         payloadSource: 'inline',
         source: 'hosted-mailbox',
         wakeSchema: 'murph.hosted-execution-wake.v1',
       },
     },
+    now: new Date(occurredAt),
     vault: input.vaultRoot,
   })
 }

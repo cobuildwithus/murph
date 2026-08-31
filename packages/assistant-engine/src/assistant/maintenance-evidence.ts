@@ -275,7 +275,8 @@ async function collectAssistantMemberMemoryMutationAuthorityEvidence(input: {
   }
 
   const messages: AssistantMaintenanceEvidenceMessage[] = []
-  for (const event of events) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!
     const occurredAt = Date.parse(event.occurredAt)
     if (
       Number.isNaN(occurredAt)
@@ -290,11 +291,11 @@ async function collectAssistantMemberMemoryMutationAuthorityEvidence(input: {
       continue
     }
     const text = rawText.replace(/\s+/gu, ' ').trim()
-    if (
-      !text
-      || assistantConversationHistoryUtf8Bytes(text) > input.maxEntryBytes
-    ) {
+    if (!text) {
       continue
+    }
+    if (assistantConversationHistoryUtf8Bytes(text) > input.maxEntryBytes) {
+      break
     }
     messages.push({
       createdAt: event.occurredAt,
@@ -302,7 +303,7 @@ async function collectAssistantMemberMemoryMutationAuthorityEvidence(input: {
       text,
     })
   }
-  return messages
+  return messages.reverse()
 }
 
 function assistantInputMayAuthorizeMemberMemoryMutation(
