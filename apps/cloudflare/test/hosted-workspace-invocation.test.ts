@@ -383,7 +383,7 @@ describe("runHostedWorkspaceInvocation", () => {
     const previewOrigin = "https://preview-worker.example.test";
     const expiresAt = "2026-07-28T00:00:00.000Z";
     const capabilityUrl = new URL(
-      `/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}`,
+      `/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png`,
       previewOrigin,
     );
     capabilityUrl.searchParams.set(
