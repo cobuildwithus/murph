@@ -587,12 +587,15 @@ describe('applyMurphManagedAutomations core integration', () => {
       '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
     )
     for (const policyFragment of [
-      'still-current, uncontradicted user-stated goal, intention, or plan',
+      'still-current, uncontradicted explicit active goal, plan, request, or member-chosen first step',
+      'parked aspiration may support concise recognition or grounded interpretation, but not a recommendation, directive, evaluation, or implied commitment to continue',
       'Start with the engine-supplied committed recent conversation, then make targeted reads of active goals',
       'conservative pacing evidence rather than delivery proof',
       'A repeated emerging behavior can clear the bar',
       'One occurrence, generic congratulations, or merely restating the log does not clear it.',
       'do not silently convert it into a goal, reminder, check-in, plan, experiment, or accountability loop',
+      'A negative-only digest clears the bar only when it addresses safety',
+      'Motivation must be earned and specific',
       'never add one solely to provoke engagement',
       'Do not create or search a separate cross-automation outreach ledger for this pacing check.',
       'prefer bounded `vault-cli wearables activity list` date ranges',
@@ -601,6 +604,12 @@ describe('applyMurphManagedAutomations core integration', () => {
     }
     expect(record?.instructions).not.toContain(
       "Tie behavioral feedback to the member's exact active goal or plan.",
+    )
+    expect(record?.instructions).not.toContain(
+      'still-current, uncontradicted user-stated goal, intention, or plan',
+    )
+    expect(record?.instructions).not.toContain(
+      'grounded interpretation, recommendation, or reason to continue',
     )
 
     const insightRecord = await showAutomation({
