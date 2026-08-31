@@ -1404,7 +1404,12 @@ necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
 checkpoint replay floor. The system lane advances that floor from its
-checkpointed handled-through status. At the conversation lane's successful
+checkpointed handled-through status. After restore, a zero-row system import
+uses the existing workspace checkpoint path once when both local system
+progress cursors are at least canonical and one is newer. Equal,
+canonical-newer, crossed, missing, or malformed progress does not trigger the
+repair, so the runtime cannot roll canonical progress backward or create a new
+wake owner. At the conversation lane's successful
 `idle_shutdown` checkpoint, the runtime instead carries up to 256 exact mailbox
 item ids whose local inputs have terminal evidence. In the same transaction as
 the accepted snapshot CAS, Web stamps `consumed_at` only on matching same-user
