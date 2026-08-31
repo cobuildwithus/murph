@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   deleteHostedPrivyUser: vi.fn(),
@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getHostedWebCryptoConfig: vi.fn(),
   kmsDecrypt: vi.fn(),
   kmsEncrypt: vi.fn(),
+  terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-crypto/env", () => ({
@@ -25,6 +26,11 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingStripe: mocks.getHostedOnboardingStripe,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
+  terminateHostedUserRuntimeWorkflowBestEffort:
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/store", () => ({
@@ -69,12 +75,23 @@ beforeEach(() => {
     makeCloudflareDeletionResult({ deleted: true }),
   );
   mocks.deleteHostedRuntimeLogDataForUsers.mockResolvedValue(0);
+  mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
+    configured: true,
+    errorCode: null,
+    notFound: false,
+    terminated: true,
+  });
   mocks.deleteHostedPrivyUser.mockResolvedValue(true);
   mocks.getHostedOnboardingStripe.mockReturnValue({
     customers: {
       del: vi.fn(async () => ({ deleted: true })),
     },
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe("hosted account deletion cleanup", () => {
@@ -96,6 +113,7 @@ describe("hosted account deletion cleanup", () => {
     });
 
     expect(cleanup.runtimeMemberIds).toEqual(["member_1", "member_group_1"]);
+    expect(cleanup.temporalNextRuntimeIndex).toBe(0);
     expect(cleanup.privyUserLookupKey).toMatch(/^hbidx:privy-user:/u);
     const encryptInput = mocks.kmsEncrypt.mock.calls[0]?.[0];
     expect(encryptInput?.keyName).toBe(KMS_KEY_NAME);
@@ -147,6 +165,9 @@ describe("hosted account deletion cleanup", () => {
     }));
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
     expect(captured.plaintext?.every((byte) => byte === 0)).toBe(true);
@@ -220,6 +241,7 @@ describe("hosted account deletion cleanup", () => {
       privyCompletedAt: now,
       runtimeLogsCompletedAt: now,
       stripeCompletedAt: now,
+      temporalCompletedAt: now,
     });
     expect(
       JSON.parse(String(mocks.kmsDecrypt.mock.calls[0]?.[0].additionalAuthenticatedData)),
@@ -244,6 +266,16 @@ describe("hosted account deletion cleanup", () => {
       timeoutMs: expect.any(Number),
       userIds: ["member_1"],
     });
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledWith({
+      reason: "account-deleted",
+      timeoutMs: expect.any(Number),
+      userId: "member_1",
+    });
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
   });
@@ -253,6 +285,12 @@ describe("hosted account deletion cleanup", () => {
     const now = new Date("2026-07-26T18:00:00.000Z");
     mocks.getHostedOnboardingStripe.mockReturnValue(null);
     mocks.deleteHostedPrivyUser.mockResolvedValue(false);
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
+      configured: false,
+      errorCode: null,
+      notFound: null,
+      terminated: false,
+    });
     const prepared = await createCleanup(store, now, {
       privyUserId: "privy_user_1",
       stripeCustomerIds: ["cus_1"],
@@ -269,7 +307,10 @@ describe("hosted account deletion cleanup", () => {
         stripeCustomer: { status: "skipped_not_configured" },
       },
     });
-    expect(store.row).not.toBeNull();
+    expect(store.row).toMatchObject({
+      lastErrorCode: "HOSTED_TEMPORAL_NOT_CONFIGURED",
+      temporalCompletedAt: null,
+    });
   });
 
   it("keeps isolated runtime-log deletion pending and retries only that target", async () => {
@@ -304,6 +345,155 @@ describe("hosted account deletion cleanup", () => {
 
     expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(2);
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(1);
+    expect(store.row).toBeNull();
+  });
+
+  it("keeps Temporal termination pending and retries only that target", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort
+      .mockResolvedValueOnce({
+        configured: true,
+        errorCode: "TemporalTransportError",
+        notFound: null,
+        terminated: false,
+      })
+      .mockResolvedValueOnce({
+        configured: true,
+        errorCode: null,
+        notFound: true,
+        terminated: true,
+      });
+    const prepared = await prepareHostedAccountDeletionCleanup({
+      now,
+      privyUserId: null,
+      runtimeMemberIds: ["member_1", "member_2", "member_1"],
+      stripeCustomerIds: [],
+    });
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: prepared,
+      prisma: store.prisma as never,
+    });
+    expect(prepared.runtimeMemberIds).toEqual(["member_1", "member_2"]);
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: true });
+    expect(store.row).toMatchObject({
+      cloudflareCompletedAt: now,
+      lastErrorCode: "TemporalTransportError",
+      runtimeLogsCompletedAt: now,
+      temporalCompletedAt: null,
+      temporalNextRuntimeIndex: 0,
+    });
+
+    const retryAt = store.row?.nextAttemptAt;
+    expect(retryAt).toBeInstanceOf(Date);
+    expect(retryAt?.getTime()).toBeGreaterThan(now.getTime());
+    expect(store.row?.attemptCount).toBe(1);
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now: retryAt,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(4);
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(2);
+    expect(store.row).toBeNull();
+  });
+
+  it("resumes Temporal cleanup at the first unconfirmed runtime", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const calls: string[] = [];
+    let failedOnce = false;
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      async ({ userId }: { userId: string }) => {
+        calls.push(userId);
+        if (userId === "member_1" && !failedOnce) {
+          failedOnce = true;
+          return {
+            configured: true,
+            errorCode: "TemporalTransportError",
+            notFound: null,
+            terminated: false,
+          };
+        }
+        return {
+          configured: true,
+          errorCode: null,
+          notFound: false,
+          terminated: true,
+        };
+      },
+    );
+    const prepared = await prepareHostedAccountDeletionCleanup({
+      now,
+      privyUserId: null,
+      runtimeMemberIds: Array.from({ length: 6 }, (_, index) => `member_${index}`),
+      stripeCustomerIds: [],
+    });
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: prepared,
+      prisma: store.prisma as never,
+    });
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: true });
+
+    expect(calls).toEqual(["member_0", "member_1", "member_2", "member_3"]);
+    expect(store.row).toMatchObject({
+      attemptCount: 0,
+      nextAttemptAt: now,
+      temporalCompletedAt: null,
+      temporalNextRuntimeIndex: 1,
+    });
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+
+    expect(calls).toEqual([
+      "member_0",
+      "member_1",
+      "member_2",
+      "member_3",
+      "member_1",
+      "member_2",
+      "member_3",
+      "member_4",
+      "member_5",
+    ]);
+    expect(store.row).toBeNull();
+  });
+
+  it("completes Temporal cleanup when the workflow is already absent", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
+      configured: true,
+      errorCode: null,
+      notFound: true,
+      terminated: true,
+    });
+    const prepared = await createCleanup(store, now);
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+
     expect(store.row).toBeNull();
   });
 
@@ -366,11 +556,13 @@ describe("hosted account deletion cleanup", () => {
     expect(store.row?.privyCompletedAt).toBeNull();
   });
 
-  it("bounds Cloudflare deletion work with a fixed worker pool", async () => {
+  it("bounds runtime deletion work with fixed worker pools", async () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");
     let active = 0;
     let maxActive = 0;
+    let temporalActive = 0;
+    let temporalMaxActive = 0;
     mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
@@ -378,6 +570,20 @@ describe("hosted account deletion cleanup", () => {
       active -= 1;
       return makeCloudflareDeletionResult({ deleted: true });
     });
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      async () => {
+        temporalActive += 1;
+        temporalMaxActive = Math.max(temporalMaxActive, temporalActive);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        temporalActive -= 1;
+        return {
+          configured: true,
+          errorCode: null,
+          notFound: false,
+          terminated: true,
+        };
+      },
+    );
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
       privyUserId: null,
@@ -397,6 +603,79 @@ describe("hosted account deletion cleanup", () => {
 
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(12);
     expect(maxActive).toBe(4);
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(12);
+    expect(temporalMaxActive).toBe(4);
+  });
+
+  it("converges maximum-cardinality Temporal cleanup across bounded attempts", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const runtimeMemberIds = Array.from(
+      { length: 1_024 },
+      (_, index) => `member_${index}`,
+    );
+    const calls: string[] = [];
+    let clockMs = now.getTime();
+    let callsThisAttempt = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => clockMs);
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      async ({ userId }: { userId: string }) => {
+        calls.push(userId);
+        callsThisAttempt += 1;
+        if (callsThisAttempt === 20) {
+          clockMs += 100;
+        }
+        return {
+          configured: true,
+          errorCode: null,
+          notFound: false,
+          terminated: true,
+        };
+      },
+    );
+    const prepared = await prepareHostedAccountDeletionCleanup({
+      now,
+      privyUserId: null,
+      runtimeMemberIds,
+      stripeCustomerIds: [],
+    });
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: prepared,
+      prisma: store.prisma as never,
+    });
+    if (!store.row) {
+      throw new Error("Expected a persisted cleanup receipt.");
+    }
+    store.row = {
+      ...store.row,
+      cloudflareCompletedAt: now,
+      runtimeLogsCompletedAt: now,
+    };
+
+    let attempts = 0;
+    let priorCursor = 0;
+    while (store.row && attempts < 60) {
+      callsThisAttempt = 0;
+      const result = await runHostedAccountDeletionCleanup({
+        attemptTimeoutMs: 100,
+        cleanupId: prepared.id,
+        now,
+        prisma: store.prisma as never,
+      });
+      attempts += 1;
+      if (result.cleanupPending) {
+        expect(store.row.temporalNextRuntimeIndex).toBeGreaterThan(priorCursor);
+        expect(store.row.nextAttemptAt).toEqual(now);
+        priorCursor = store.row.temporalNextRuntimeIndex;
+      }
+    }
+
+    expect(attempts).toBeGreaterThan(1);
+    expect(attempts).toBeLessThan(60);
+    expect(calls).toEqual(runtimeMemberIds);
+    expect(store.row).toBeNull();
   });
 
   it("does not report completion after losing the receipt lease", async () => {
@@ -449,6 +728,16 @@ describe("hosted account deletion cleanup", () => {
           deleted: false,
           errorCode: "AbortError",
         })), { once: true });
+      }),
+    );
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      ({ timeoutMs }: { timeoutMs: number }) => new Promise((resolve) => {
+        setTimeout(() => resolve({
+          configured: true,
+          errorCode: "HostedRuntimeWorkflowTerminationTimeoutError",
+          notFound: null,
+          terminated: false,
+        }), timeoutMs);
       }),
     );
     mocks.deleteHostedPrivyUser.mockImplementation(
@@ -555,6 +844,16 @@ describe("hosted account deletion cleanup", () => {
         })), { once: true });
       }),
     );
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      ({ timeoutMs }: { timeoutMs: number }) => new Promise((resolve) => {
+        setTimeout(() => resolve({
+          configured: true,
+          errorCode: "HostedRuntimeWorkflowTerminationTimeoutError",
+          notFound: null,
+          terminated: false,
+        }), timeoutMs);
+      }),
+    );
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
       privyUserId: null,
@@ -581,6 +880,10 @@ describe("hosted account deletion cleanup", () => {
       },
     });
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(4);
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(4);
+    expect(store.row?.temporalCompletedAt).toBeNull();
   });
 });
 
@@ -622,6 +925,8 @@ interface CleanupRow {
   privyUserLookupKey: string | null;
   runtimeLogsCompletedAt: Date | null;
   stripeCompletedAt: Date | null;
+  temporalCompletedAt: Date | null;
+  temporalNextRuntimeIndex: number;
   updatedAt: Date;
 }
 
@@ -634,7 +939,7 @@ type CleanupWhere = {
 };
 
 type CleanupUpdate = Partial<Omit<CleanupRow, "attemptCount">> & {
-  attemptCount?: { increment: number };
+  attemptCount?: number | { increment: number };
 };
 
 class CleanupStore {
@@ -695,15 +1000,15 @@ class CleanupStore {
         if (!this.matches(where) || !this.row) {
           return { count: 0 };
         }
-        const increment = typeof data.attemptCount === "object"
-          ? data.attemptCount.increment
-          : null;
+        const attemptCount = typeof data.attemptCount === "number"
+          ? data.attemptCount
+          : data.attemptCount
+            ? this.row.attemptCount + data.attemptCount.increment
+            : this.row.attemptCount;
         this.row = {
           ...this.row,
           ...data,
-          attemptCount: increment === null
-            ? this.row.attemptCount
-            : this.row.attemptCount + increment,
+          attemptCount,
           updatedAt: new Date(),
         } as CleanupRow;
         return { count: 1 };

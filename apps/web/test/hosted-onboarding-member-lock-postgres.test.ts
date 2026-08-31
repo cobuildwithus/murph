@@ -226,10 +226,10 @@ vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(async () => ({
-    configured: false,
+    configured: true,
     errorCode: null,
-    notFound: false,
-    terminated: false,
+    notFound: true,
+    terminated: true,
   })),
 }));
 
