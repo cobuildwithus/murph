@@ -296,7 +296,18 @@ completed source import.
 any verified exact identity is deleted, it fences the complete byte-equivalent
 set and fails with a typed conflict without writing, minting, or adopting a
 replacement raw identity. Ordinary document import without `--reuse-exact`
-retains its explicit create-new behavior.
+retains its explicit create-new behavior except for an option-free save of one
+exact current `raw/inbox/**` document attachment. That explicit save resolves
+the source argument with the importer's existing path convention (absolute as
+given, relative to the process working directory), then resolves the capture
+and attachment internally. It preserves only the selected attachment with its
+default capture metadata and records the IDs-only promotion correlation used
+by inbox retention. A matching retry resolves that stable correlation before
+expiring capture text, so it remains idempotent after text retention. A stale,
+ambiguous, non-document, symlink-escaped, damaged, or deleted-owner inbox path
+fails closed before another import; any explicit title, occurrence time, note,
+source, or `--reuse-exact` keeps the generic import behavior and does not claim
+default-promotion correlation.
 
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
@@ -494,7 +505,14 @@ instead hashes the source and reuses one prior live document only after its raw
 artifact and manifest independently verify the same bytes. A reuse returns
 `created: false` and writes no document event, raw artifact, manifest, or audit
 row. Deleted documents are never revived or reused; different bytes create a
-new document normally.
+new document normally. The sole default-create exception is an option-free
+explicit save of an exact current `raw/inbox/**` document attachment: it routes
+through the existing Inbox Services preservation owner, writes the stable
+promotion correlation, and reuses its verified live canonical owner on retry,
+including after inbox text retention. The ordinary source-path convention is
+unchanged: relative paths resolve from the process working directory. A prior
+correlation whose owner is deleted or damaged fails before creating a new
+document.
 
 ```json
 {

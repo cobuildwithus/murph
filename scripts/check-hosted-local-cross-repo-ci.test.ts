@@ -33,6 +33,7 @@ describe("hosted-local cross-repository CI coverage", () => {
           "device-connect",
           "junction-link-connect",
           "linq-first-contact",
+          "linq-reminder-device-sync-non-starvation",
         ]),
       });
   });

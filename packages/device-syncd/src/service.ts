@@ -927,6 +927,7 @@ class DeviceSyncServiceController {
     }
 
     let activeJobs: DeviceSyncJobRecord[] = [job];
+    let canonicalProgressCommitted = false;
     let connectionSourceReadCount = 0;
     let connectionSourceReadElapsedMs = 0;
     let credentialRefreshCount = 0;
@@ -954,6 +955,9 @@ class DeviceSyncServiceController {
       this.recordJobTimingDiagnostic({
         at: finishedAt,
         attempts: job.attempts,
+        ...(canonicalProgressCommitted
+          ? { canonicalProgressCommitted: true as const }
+          : {}),
         connectionSourceReadCount,
         connectionSourceReadElapsedMs,
         credentialRefreshCount,
@@ -1349,6 +1353,9 @@ class DeviceSyncServiceController {
               importStartedAt,
               currentNow(),
             );
+          }
+          if (toPlainRecord(importResult)?.applied === true) {
+            canonicalProgressCommitted = true;
           }
           const importTiming = readDeviceProviderSnapshotImportTiming(importResult);
           if (importTiming) {

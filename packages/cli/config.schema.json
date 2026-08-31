@@ -8518,7 +8518,7 @@
                             "minLength": 1,
                             "maxLength": 256
                           },
-                          "description": "Food product, brand, or generic ingredient search text. Repeat --query for multiple values."
+                          "description": "Food product, brand, USDA FDC id, UPC, or generic ingredient search text. Repeat --query for multiple values."
                         },
                         "limit": {
                           "description": "Maximum label matches to return per query. Defaults to 1.",

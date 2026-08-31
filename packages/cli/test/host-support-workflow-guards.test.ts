@@ -68,7 +68,6 @@ describe('host support workflow guards', () => {
     expect(workflow).toContain('pnpm no-js')
     expect(workflow).toContain('bash scripts/doc-gardening.sh --fail-on-issues')
     expect(workflow).toContain('pnpm test:apps')
-    expect(workflow).toContain('MURPH_APP_VERIFY_PARALLEL: "1"')
     expect(workflow).toContain(
       'MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test',
     )

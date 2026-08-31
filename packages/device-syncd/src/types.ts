@@ -193,6 +193,7 @@ export type DeviceSyncJobTimingOutcome =
 export interface DeviceSyncJobTimingDiagnostic {
   at: string;
   attempts: number;
+  canonicalProgressCommitted?: true;
   connectionSourceReadCount: number;
   connectionSourceReadElapsedMs: number;
   credentialRefreshCount: number;

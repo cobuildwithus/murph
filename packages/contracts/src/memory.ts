@@ -483,6 +483,7 @@ function parseMemoryDocumentBody(
 ): MemoryRecord[] {
   const lines = body.replace(/\r\n/gu, "\n").split("\n");
   const records: MemoryRecord[] = [];
+  const recordIds = new Set<string>();
   let activeSection: MemorySection | null = null;
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -510,6 +511,15 @@ function parseMemoryDocumentBody(
       sourcePath,
     });
     if (parsed) {
+      if (recordIds.has(parsed.id)) {
+        throw new MemoryDocumentParseError({
+          issue: "record_invalid",
+          sourcePath,
+          lineNumber: bodyStartLine + index,
+          field: "id",
+        });
+      }
+      recordIds.add(parsed.id);
       records.push(parsed);
     }
   }

@@ -1,4 +1,5 @@
 import type { Cli } from 'incur'
+import { estimateTokenCount, sliceByTokens } from 'tokenx'
 
 type CliServeOptions = Parameters<Cli.Cli['serve']>[1]
 
@@ -9,17 +10,27 @@ interface CommandManifest {
 
 interface CommandManifestEntry {
   description?: string
-  examples?: unknown[]
   name?: string
-  schema?: unknown
+}
+
+interface SchemaIndexCommand {
+  description?: string
+  name: string
 }
 
 interface SchemaIndex {
-  commands: CommandManifestEntry[]
+  commands: SchemaIndexCommand[]
   command: string | null
   kind: 'group' | 'root'
   note: string
   version: 'murph.schema-index.v1'
+}
+
+interface SchemaIndexTokenControls {
+  argv: string[]
+  count: boolean
+  limit?: number
+  offset?: number
 }
 
 const SCHEMA_INDEX_NOTE =
@@ -34,7 +45,12 @@ export function installVaultCliSchemaIndex(cli: Cli.Cli): void {
       return
     }
 
-    const originalResult = await captureServeOutput(serve, argv, options)
+    const tokenControls = extractTokenControls(argv)
+    const originalResult = await captureServeOutput(
+      serve,
+      tokenControls.argv,
+      options,
+    )
     if (originalResult.exitCode !== null || parsesAsJson(originalResult.output)) {
       replayServeResult(originalResult, options)
       return
@@ -57,7 +73,10 @@ export function installVaultCliSchemaIndex(cli: Cli.Cli): void {
       return
     }
 
-    writeStdout(options, `${JSON.stringify(buildSchemaIndex(commandPath, manifest), null, 2)}\n`)
+    writeStdout(
+      options,
+      renderSchemaIndex(buildSchemaIndex(commandPath, manifest), tokenControls),
+    )
   }
 }
 
@@ -113,28 +132,52 @@ function exitProcess(options: CliServeOptions | undefined, code: number): void {
 }
 
 function isJsonSchemaRequest(argv: readonly string[]): boolean {
-  return argv.includes('--schema') && usesJsonFormat(argv)
+  return hasFlagBeforeTerminator(argv, ['--schema']) && usesJsonFormat(argv)
 }
 
 function isHelpRequest(argv: readonly string[]): boolean {
-  return argv.includes('--help') || argv.includes('-h')
+  return hasFlagBeforeTerminator(argv, ['--help', '-h'])
 }
 
-function usesJsonFormat(argv: readonly string[]): boolean {
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index]
-    if (token === '--json') {
-      return true
+function hasFlagBeforeTerminator(
+  argv: readonly string[],
+  flags: readonly string[],
+): boolean {
+  for (const token of argv) {
+    if (token === '--') {
+      break
     }
-    if (token === '--format' && argv[index + 1] === 'json') {
-      return true
-    }
-    if (token === '--format=json') {
+    if (flags.includes(token)) {
       return true
     }
   }
 
   return false
+}
+
+function usesJsonFormat(argv: readonly string[]): boolean {
+  let format: string | null = null
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--') {
+      break
+    }
+    if (token === '--json') {
+      format = 'json'
+      continue
+    }
+    if (token === '--format') {
+      format = argv[index + 1] ?? null
+      index += 1
+      continue
+    }
+    if (token.startsWith('--format=')) {
+      format = token.slice('--format='.length)
+    }
+  }
+
+  return format === 'json'
 }
 
 function parsesAsJson(output: string): boolean {
@@ -173,7 +216,119 @@ function buildSchemaIndex(
     kind: commandPath.length === 0 ? 'root' : 'group',
     command: commandPath.length === 0 ? null : commandPath.join(' '),
     note: SCHEMA_INDEX_NOTE,
-    commands: manifest.commands ?? [],
+    commands: projectSchemaIndexCommands(manifest.commands ?? []),
+  }
+}
+
+function projectSchemaIndexCommands(
+  commands: readonly CommandManifestEntry[],
+): SchemaIndexCommand[] {
+  const projected: SchemaIndexCommand[] = []
+
+  for (const command of commands) {
+    if (typeof command.name !== 'string' || command.name.length === 0) {
+      continue
+    }
+
+    projected.push({
+      name: command.name,
+      ...(typeof command.description === 'string' && command.description.length > 0
+        ? { description: command.description }
+        : {}),
+    })
+  }
+
+  return projected
+}
+
+function renderSchemaIndex(
+  index: SchemaIndex,
+  tokenControls: SchemaIndexTokenControls,
+): string {
+  const formatted = JSON.stringify(index, null, 2)
+
+  if (tokenControls.count) {
+    return `${estimateTokenCount(formatted)}\n`
+  }
+
+  if (tokenControls.limit === undefined && tokenControls.offset === undefined) {
+    return `${formatted}\n`
+  }
+
+  const total = estimateTokenCount(formatted)
+  const offset = tokenControls.offset ?? 0
+  const end =
+    tokenControls.limit === undefined ? total : offset + tokenControls.limit
+
+  if (offset === 0 && end >= total) {
+    return `${formatted}\n`
+  }
+
+  const sliced = sliceByTokens(formatted, offset, end)
+  const actualEnd = Math.min(end, total)
+  return `${sliced}\n[truncated: showing tokens ${offset}–${actualEnd} of ${total}]\n`
+}
+
+function extractTokenControls(argv: readonly string[]): SchemaIndexTokenControls {
+  const delegateArgv: string[] = []
+  let count = false
+  let limit: number | undefined
+  let offset: number | undefined
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--') {
+      break
+    }
+    if (token === '--token-count') {
+      delegateArgv.push(token)
+      count = true
+      continue
+    }
+    if (
+      token === '--token-limit' ||
+      token === '--token-offset' ||
+      token.startsWith('--token-limit=') ||
+      token.startsWith('--token-offset=')
+    ) {
+      const isLimit =
+        token === '--token-limit' || token.startsWith('--token-limit=')
+      const isSeparated = token === '--token-limit' || token === '--token-offset'
+      const value = isSeparated
+        ? argv[index + 1]
+        : token.slice(token.indexOf('=') + 1)
+      const delegateFlag = isLimit ? '--token-limit' : '--token-offset'
+
+      delegateArgv.push(delegateFlag)
+      if (value !== undefined) {
+        delegateArgv.push(value)
+      }
+
+      const parsed = value === undefined ? Number.NaN : Number(value)
+      if (isSeparated) {
+        index += 1
+      }
+
+      if (!Number.isFinite(parsed) || value?.trim() === '') {
+        continue
+      }
+
+      if (isLimit) {
+        limit = parsed
+      } else {
+        offset = parsed
+      }
+      continue
+    }
+
+    delegateArgv.push(token)
+  }
+
+  return {
+    argv: delegateArgv,
+    count,
+    ...(limit === undefined ? {} : { limit }),
+    ...(offset === undefined ? {} : { offset }),
   }
 }
 

@@ -83,6 +83,17 @@ test('workout result contracts retain exercise-owned live tracking facts', async
 
   assert.equal(parsed.workout?.exercises[0]?.memberRepsPerSet, 9)
   assert.equal(parsed.workout?.exercises[0]?.setPlanIsFinite, true)
+  assert.equal(parsed.note, 'Eight set workout')
+
+  const noteLess = workoutAddResultSchema.parse({
+    ...parsed,
+    note: null,
+  })
+  assert.equal(noteLess.note, null)
+  assert.throws(() => workoutAddResultSchema.parse({
+    ...parsed,
+    note: undefined,
+  }))
 })
 
 test('journal results require real calendar dates', async () => {
