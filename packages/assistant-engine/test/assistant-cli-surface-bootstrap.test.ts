@@ -613,7 +613,7 @@ test('readAssistantCliLlmsManifest launches workspace CLI source with base tscon
   assert.equal(spawnCall.cwd, path.join(path.sep, 'tmp', 'murph-workspace'))
 })
 
-test('readAssistantCliLlmsFullManifest keeps adaptive source discovery and its runtime timeout', async () => {
+test('readAssistantCliLlmsFullManifest keeps adaptive source discovery and supports an owner-defined runtime timeout', async () => {
   vi.resetModules()
 
   const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
@@ -675,6 +675,7 @@ test('readAssistantCliLlmsFullManifest keeps adaptive source discovery and its r
     cliEnv: {
       PATH: path.dirname(fakeTsxBinary),
     },
+    timeoutMs: 5 * 60_000,
   })
 
   assert.equal(manifest.commands[0]?.name, 'goal save')
@@ -684,7 +685,7 @@ test('readAssistantCliLlmsFullManifest keeps adaptive source discovery and its r
   assert.ok(spawnCall)
   assert.equal(spawnCall.command, fakeTsxBinary)
   assert.deepEqual(spawnCall.args.slice(3), ['--llms-full', '--format', 'json'])
-  assert.ok(timeoutSpy.mock.calls.some(([, delay]) => delay === 60_000))
+  assert.ok(timeoutSpy.mock.calls.some(([, delay]) => delay === 5 * 60_000))
 })
 
 test('readAssistantCliLlmsFullManifestFromCliEntry requires the explicit built CLI with an owner-defined timeout', async () => {
