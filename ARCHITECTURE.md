@@ -2383,16 +2383,13 @@ projection. After canonical reconciliation accepts a positive non-renewal
 `invoice.paid` amount or fulfills a usage-credit Checkout or saved-card
 PaymentIntent, the same receipt must send one plain-text email before
 completion. This covers subscription creation, paid plan-change invoices,
-recurring usage invoices, and one-time or automatic usage purchases. Ordinary
-`subscription_cycle` renewal invoices, zero-dollar invoices, and plan changes
+recurring usage invoices, and one-time or automatic usage purchases. All
+`subscription_cycle` invoices, zero-dollar invoices, and plan changes
 that collect no money remain silent. A receipt-local sent marker
 and event-derived Resend idempotency key prevent replay after provider success;
 configuration or provider failure leaves that receipt retryable while the
 already-committed billing, entitlement, and usage-credit result remains intact.
-Stable payment categories reproduce their notification candidate on retry. The
-cycle-only transition fact is intentionally not retained, so a provider failure
-after that transition commits can leave the retry with no notification
-candidate. This accepted notification-only limitation avoids new durable state.
+Eligible payment categories reproduce their notification candidate on retry.
 The notification and the receipt's existing post-canonical effects are separate
 attempts inside that one owner: failure of runtime recheck, sponsorship,
 cleanup, or member email work cannot suppress the payment email attempt, and

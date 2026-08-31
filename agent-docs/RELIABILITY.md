@@ -969,19 +969,15 @@ Last verified: 2026-08-30
   best-effort failure-alert projection. A positive `invoice.paid` amount whose
   billing reason is not `subscription_cycle`, or a fulfilled usage-credit
   Checkout or saved-card PaymentIntent, sends once after canonical
-  reconciliation. Ordinary subscription-cycle renewals complete without a
+  reconciliation. All subscription-cycle invoices complete without a
   notification attempt. The existing receipt remains the only retry owner:
   missing configuration or provider failure leaves it claimable without
   rolling back billing, entitlement, or usage credit. A receipt-local sent
   marker is written only after provider success, while an event-derived Resend
   idempotency key covers response loss before that marker. Receipt replay after
-  the marker must skip send and finish remaining work. Stable payment categories
-  reproduce their notification candidate on retry. The transition fact for a
-  `subscription_cycle` is intentionally not retained, so a provider failure
-  after the transition commits can leave the retry with no notification
-  candidate. This accepted notification-only limitation avoids new durable
-  state. When canonical billing
-  succeeds, the notification and all existing post-canonical effects are
+  the marker must skip send and finish remaining work. Eligible payment
+  categories reproduce their notification candidate on retry. When canonical
+  billing succeeds, the notification and all existing post-canonical effects are
   attempted independently inside the same receipt owner. Both promises start
   before either is awaited, with concurrency bounded to one payment-email
   request plus the existing single post-canonical effect chain. Neither side's

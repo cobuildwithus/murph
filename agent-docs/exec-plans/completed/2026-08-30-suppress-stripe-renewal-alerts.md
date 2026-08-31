@@ -55,7 +55,8 @@ Updated: 2026-08-30
 
 ## Decisions
 
-- Treat only Stripe `billing_reason: subscription_cycle` as an ordinary renewal;
+- Treat every Stripe `billing_reason: subscription_cycle` invoice as silent
+  notification input. Do not add transition exceptions or cross-receipt state;
   keep `subscription_threshold` notifications because they represent recurring
   usage charges rather than the base subscription renewal.
 - Product UX effort: Product change. The operator receives less routine noise;
@@ -80,4 +81,5 @@ Updated: 2026-08-30
 - [x] Update the live architecture, security, reliability, and deployment docs.
 - [x] Pass 109 focused tests, hosted Web typecheck, focused ESLint, docs drift,
   and diff hygiene.
-- [ ] Complete exact-head CI and the preliminary and final ReviewGPT gates.
+- [x] Record the deletion-first anomaly retrospective and return the reduced
+  candidate to exact-head CI and the final ReviewGPT gate.
