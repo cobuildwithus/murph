@@ -237,6 +237,15 @@ test("runtime-heavy jobs skip only an affirmative trusted Markdown result", asyn
   }
 });
 
+test("release app verification stays bounded and serial across app owners", async () => {
+  const host = await workflow("host-support.yml");
+  const appVerification = jobBlock(host, "release-app-verification-linux");
+
+  assert.match(appVerification, /^    timeout-minutes: 45$/mu);
+  assert.match(appVerification, /^      MURPH_APP_VERIFY_PARALLEL: "0"$/mu);
+  assert.match(appVerification, /^      MURPH_VERIFY_STEP_PARALLEL: "1"$/mu);
+});
+
 test("Host Support runs one exact merge-candidate documentation proof", async () => {
   const source = await workflow("host-support.yml");
   const docsProof = jobBlock(source, "markdown-docs-proof");
