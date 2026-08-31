@@ -130,7 +130,7 @@ export function PersonalPatternsSection({
       ) : null}
 
       {state === "ready" ? (
-        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="-mx-2 overflow-hidden rounded-2xl border border-border bg-card sm:mx-0">
           {displayedReport &&
           displayedReport.factors.length > 0 &&
           displayedReport.outcomes.length > 0 ? (
@@ -278,83 +278,126 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
 }
 
 function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
-  const outcomeGroups = chunkOutcomeColumns(
-    buildOutcomeColumns(report.outcomes),
-    3,
-  );
+  const outcomeColumns = buildOutcomeColumns(report.outcomes);
+  const columns = `repeat(${outcomeColumns.length}, 7rem)`;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showRightFade, setShowRightFade] = useState(false);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const update = () => {
+      const remaining =
+        scroller.scrollWidth - scroller.clientWidth - scroller.scrollLeft;
+      setShowRightFade(remaining > 2);
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(scroller);
+    if (scroller.firstElementChild) {
+      observer?.observe(scroller.firstElementChild);
+    }
+    return () => {
+      scroller.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [outcomeColumns.length]);
 
   return (
-    <div className="sm:hidden" data-patterns-layout="mobile">
-      {outcomeGroups.map((outcomes, groupIndex) => {
-        const columns = `minmax(5.25rem, 1.05fr) repeat(${outcomes.length}, minmax(0, 1fr))`;
-
-        return (
+    <div
+      className="relative grid grid-cols-[5.25rem_minmax(0,1fr)] sm:hidden"
+      data-patterns-layout="mobile"
+    >
+      <div className="relative z-20 bg-[#fffcf6] dark:bg-card">
+        <div
+          className="h-[3.75rem] border-r border-border bg-muted/20"
+          aria-hidden="true"
+        />
+        {report.factors.map((factor) => (
           <div
-            key={outcomes.map((outcome) => outcome.id).join(":")}
-            className={cn(groupIndex > 0 && "border-t-4 border-border")}
-            data-pattern-outcome-group={groupIndex + 1}
+            className="flex h-[5.25rem] min-w-0 flex-col items-center justify-center border-r border-t border-border px-1 py-1.5 text-center"
+            data-pattern-factor-row={factor.id}
+            key={factor.id}
           >
-            <div
-              className="grid items-stretch bg-muted/20"
-              style={{ gridTemplateColumns: columns }}
-            >
-              <div className="border-r border-border" aria-hidden="true" />
-              {outcomes.map((outcome) => (
-                <div
-                  key={outcome.id}
-                  className="flex min-w-0 items-end justify-center px-1 py-3 text-center"
-                  data-pattern-outcome-column={outcome.id}
-                >
-                  <PatternOutcomeHeader compact outcome={outcome} />
-                </div>
-              ))}
-            </div>
+            <Image
+              src={resolvePatternFactorIcon(factor)}
+              alt=""
+              width={32}
+              height={32}
+              className="size-7 shrink-0 object-contain"
+            />
+            <p className="mt-0.5 max-w-full break-words text-[11px] font-medium leading-tight text-foreground">
+              {factor.label}
+            </p>
+            <ObservedDaysMeter
+              className="mt-1"
+              days={factor.observedDays}
+            />
+          </div>
+        ))}
+      </div>
 
-            {report.factors.map((factor) => (
+      <div
+        aria-label="Pattern results. Swipe horizontally to compare health measures."
+        className="min-w-0 overflow-x-auto overscroll-x-contain"
+        ref={scrollRef}
+        tabIndex={0}
+      >
+        <div
+          className="w-max min-w-full"
+          data-pattern-outcome-group={1}
+          style={{ minWidth: `${outcomeColumns.length * 7}rem` }}
+        >
+          <div
+            className="grid h-[3.75rem] items-stretch bg-muted/20"
+            style={{ gridTemplateColumns: columns }}
+          >
+            {outcomeColumns.map((outcome) => (
               <div
-                key={factor.id}
-                className="grid min-h-[5.25rem] items-stretch border-t border-border"
-                style={{ gridTemplateColumns: columns }}
+                key={outcome.id}
+                className="flex min-w-0 items-end justify-center px-2 py-3 text-center"
+                data-pattern-outcome-column={outcome.id}
               >
-                <div className="flex min-w-0 flex-col items-center justify-center border-r border-border px-1.5 py-2 text-center">
-                  <Image
-                    src={resolvePatternFactorIcon(factor)}
-                    alt=""
-                    width={40}
-                    height={40}
-                    className="size-9 shrink-0 object-contain"
-                  />
-                  <p className="mt-1 max-w-full break-words text-[11px] font-medium leading-tight text-foreground">
-                    {factor.label}
-                  </p>
-                  <ObservedDaysMeter
-                    className="mt-1"
-                    days={factor.observedDays}
-                  />
-                </div>
-
-                {outcomes.map((outcome) => {
-                  return (
-                    <div
-                      key={outcome.id}
-                      className="flex min-w-0 items-center justify-center px-0.5 py-2"
-                    >
-                      <PatternOutcomeColumnCell
-                        compact
-                        factorLabel={factor.label}
-                        factorObservedDays={factor.observedDays}
-                        outcomes={outcome.outcomes}
-                        report={report}
-                        factorId={factor.id}
-                      />
-                    </div>
-                  );
-                })}
+                <PatternOutcomeHeader compact outcome={outcome} />
               </div>
             ))}
           </div>
-        );
-      })}
+
+          {report.factors.map((factor) => (
+            <div
+              key={factor.id}
+              className="grid h-[5.25rem] items-stretch border-t border-border"
+              style={{ gridTemplateColumns: columns }}
+            >
+              {outcomeColumns.map((outcome) => {
+                return (
+                  <div
+                    key={outcome.id}
+                    className="flex min-w-0 items-center justify-center px-1 py-2"
+                  >
+                    <PatternOutcomeColumnCell
+                      compact
+                      factorLabel={factor.label}
+                      factorObservedDays={factor.observedDays}
+                      outcomes={outcome.outcomes}
+                      report={report}
+                      factorId={factor.id}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      {showRightFade ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 z-30 w-16 bg-gradient-to-r from-transparent to-[#fffcf6] dark:to-card"
+        />
+      ) : null}
     </div>
   );
 }
