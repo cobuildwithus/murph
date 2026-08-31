@@ -73,6 +73,12 @@ path changes are in scope.
 - Parent diff review plus the required final ReviewGPT remediation round,
   concurrent with exact-head CI.
 
+Completed evidence: 89 focused Vitest cases passed; four opt-in PostgreSQL
+concurrency/capacity cases passed against an isolated local database; Web
+typecheck, targeted lint, documentation drift, and merge-tree checks passed;
+ReviewGPT substantive round 2 returned `ROUND_OUTCOME: PASS` with no findings
+and confirmed both prior accepted findings were resolved.
+
 ## Deployment and rollback
 
 - Web-only deployment replaces one registered Vercel cron with four; no
@@ -90,5 +96,8 @@ path changes are in scope.
 - [x] Implement nonce-only capacity increase.
 - [x] Split the catch-all owner into four staggered routes.
 - [x] Run focused local and PostgreSQL proof.
-- [ ] Complete review gates and exact-head CI.
-- [ ] Close the plan and hand off the PR.
+- [x] Complete the final ReviewGPT and parent-review gates.
+- [x] Close the plan and hand the docs-only closure head to exact-head CI.
+Status: completed
+Updated: 2026-08-30
+Completed: 2026-08-30
