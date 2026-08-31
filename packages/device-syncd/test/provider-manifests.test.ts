@@ -355,7 +355,7 @@ describe("deviceSyncProviderManifests", () => {
     const providers = createConfiguredDeviceSyncProvidersFromConfigs(configs);
 
     expect(providers.map((provider) => provider.provider)).toEqual(["junction", "strava"]);
-    expect(providers[1]?.descriptor.oauth?.defaultScopes).toEqual([
+    expect(providers[1]?.descriptor.connection?.defaultScopes).toEqual([
       "activity:read",
       "profile:read_all",
     ]);
@@ -383,7 +383,7 @@ describe("deviceSyncProviderManifests", () => {
         publicDescriptors.find((descriptor) => descriptor.provider === runtimeProvider.provider),
       ).toMatchObject({
         defaultScopes: [
-          ...(runtimeProvider.descriptor.oauth?.defaultScopes ?? connection.defaultScopes ?? []),
+          ...(connection.defaultScopes ?? []),
         ],
         provider: runtimeProvider.provider,
       });
