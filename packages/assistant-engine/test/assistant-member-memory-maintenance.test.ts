@@ -308,9 +308,56 @@ describe('member-memory maintenance boundary', () => {
     })
   })
 
+  it('does not mutate canonical memory after maintenance is aborted', async () => {
+    const vaultRoot = await makeVaultRoot()
+    const added = readResult(await execute(vaultRoot, {
+      action: 'upsert',
+      section: 'Preferences',
+      text: 'Keep the saved value.',
+    }))
+    const memoryId = readMemoryId(added)
+    const expectedUpdatedAt = readMemoryUpdatedAt(added)
+    const abortSignal = AbortSignal.abort(
+      new Error('Foreground work preempted maintenance.'),
+    )
+
+    const results = await Promise.all([
+      execute(vaultRoot, {
+        action: 'upsert',
+        section: 'Context',
+        text: 'This addition must not persist.',
+      }, abortSignal),
+      execute(vaultRoot, {
+        action: 'update',
+        expectedUpdatedAt,
+        memoryId,
+        text: 'This update must not persist.',
+      }, abortSignal),
+      execute(vaultRoot, {
+        action: 'forget',
+        expectedUpdatedAt,
+        memoryId,
+      }, abortSignal),
+    ])
+
+    expect(results.map((result) => result.rpcResult.success)).toEqual([
+      false,
+      false,
+      false,
+    ])
+    await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
+      records: [{
+        id: memoryId,
+        section: 'Preferences',
+        text: 'Keep the saved value.',
+      }],
+    })
+  })
+
   it('rejects calls without exact managed-maintenance authority', async () => {
     const vaultRoot = await makeVaultRoot()
     const result = await executeMemberMemoryDynamicTool({
+      abortSignal: null,
       managedMaintenanceAuthorized: false,
       request: {
         args: {
@@ -384,8 +431,10 @@ async function execute(
     MemberMemoryDynamicToolRequest,
     { kind: 'member-memory' }
   >['args'],
+  abortSignal: AbortSignal | null = null,
 ): Promise<Awaited<ReturnType<typeof executeMemberMemoryDynamicTool>>> {
   return await executeMemberMemoryDynamicTool({
+    abortSignal,
     managedMaintenanceAuthorized: true,
     request: { args, kind: 'member-memory' },
     vaultRoot,

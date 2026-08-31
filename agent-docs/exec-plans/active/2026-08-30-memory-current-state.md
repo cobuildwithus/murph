@@ -66,7 +66,8 @@ Updated: 2026-08-31
 
 1. Risk: Background consolidation overwrites a foreground correction.
    Mitigation: Require `expectedUpdatedAt` on maintenance mutations and compare
-   it under the canonical memory lock.
+   it under the canonical memory lock. Forward foreground cancellation into
+   the memory tool and reject each canonical operation after preemption.
 2. Risk: Personal memory causes context growth or stale duplication.
    Mitigation: Select only the newest few records per section, omit oversized
    facts without changing their meaning, report omitted counts, and enforce a
@@ -165,6 +166,9 @@ Updated: 2026-08-31
 - Accepted code-review finding:
   - Classified successful maintenance `forget` calls as non-replayable writes
     in the existing notification recovery owner, with focused regression proof.
+  - Forwarded the existing turn cancellation signal through the member-memory
+    dispatcher and checked it immediately before every canonical operation, so
+    an accepted maintenance request cannot mutate after foreground preemption.
 - Accepted preliminary specialist findings:
   - Prevented assistant-authored evidence from authorizing retirement.
   - Strengthened the live CurrentState journey to prove current-input and
@@ -199,6 +203,9 @@ Updated: 2026-08-31
   provenance narrowing.
 - Architecture simplification review: PASS; no index, evidence schema,
   deduplication layer, cache, or second CurrentState owner is justified.
+- ReviewGPT round 4: accepted one High finding that the member-memory dispatcher
+  dropped the existing turn cancellation signal. The narrow signal-threading
+  remediation and its three boundary regressions await round-5 review.
 
 ## Provider-input impact
 
@@ -261,6 +268,14 @@ Updated: 2026-08-31
   withdrawal produced guarded `show` then `forget`; and an older withdrawal
   followed by a newer oversized reversal produced only `show` and preserved
   the record.
+- Passed: 231 focused assistant tests for direct cancellation admission, an
+  already accepted App Server memory request, cron preemption between `show`
+  and `forget`, and the surrounding memory/dynamic-tool/cron owners.
+- Passed: assistant-engine typecheck and package build after cancellation
+  remediation.
+- Passed: the same-home real-Codex withdrawal retry after one stochastic model
+  miss; the passing run produced `show`, `show` then exact `forget`, and `show`
+  across the three authority scenarios.
 - Passed: changelog page tests (9 tests) and Web typecheck.
 - Passed: `git diff --check` and task-file privacy scan.
 - Passed: Product UX Ready, architecture simplification review, and final

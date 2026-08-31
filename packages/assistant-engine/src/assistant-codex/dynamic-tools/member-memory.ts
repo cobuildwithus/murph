@@ -89,6 +89,7 @@ export function readMemberMemoryDynamicToolRequest(input: {
 }
 
 export async function executeMemberMemoryDynamicTool(input: {
+  abortSignal: AbortSignal | null
   managedMaintenanceAuthorized: boolean
   request: Extract<MemberMemoryDynamicToolRequest, { kind: 'member-memory' }>
   vaultRoot: string | null
@@ -113,6 +114,7 @@ export async function executeMemberMemoryDynamicTool(input: {
 
   try {
     if (input.request.args.action === 'show') {
+      input.abortSignal?.throwIfAborted()
       const document = await readMemoryDocument(input.vaultRoot)
       return memberMemoryTextResult(
         true,
@@ -132,6 +134,7 @@ export async function executeMemberMemoryDynamicTool(input: {
     }
 
     if (input.request.args.action === 'upsert') {
+      input.abortSignal?.throwIfAborted()
       const result = await upsertMemory(input.vaultRoot, {
         section: input.request.args.section,
         text: input.request.args.text,
@@ -151,6 +154,7 @@ export async function executeMemberMemoryDynamicTool(input: {
     }
 
     if (input.request.args.action === 'update') {
+      input.abortSignal?.throwIfAborted()
       const result = await updateMemory(input.vaultRoot, {
         expectedUpdatedAt: input.request.args.expectedUpdatedAt,
         recordId: input.request.args.memoryId,
@@ -171,6 +175,7 @@ export async function executeMemberMemoryDynamicTool(input: {
       )
     }
 
+    input.abortSignal?.throwIfAborted()
     const result = await forgetMemory(input.vaultRoot, {
       expectedUpdatedAt: input.request.args.expectedUpdatedAt,
       recordId: input.request.args.memoryId,
