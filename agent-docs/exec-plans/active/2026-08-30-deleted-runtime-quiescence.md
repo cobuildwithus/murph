@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-30
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 ## Goal
 
@@ -18,6 +18,8 @@ Updated: 2026-08-30
 - Existing Temporal histories replay across the behavior change.
 - Account-deletion cleanup cannot be declared complete until every captured
   runtime workflow has been terminated or confirmed absent.
+- Maximum-cardinality cleanup resumes at its durable contiguous cursor and
+  converges without repeatedly issuing an already-confirmed prefix.
 - Focused private and public tests, typechecks, required exact-head CI, and
   completion review gates pass.
 - The private worker is deployed before the public cleanup contract, and live
@@ -63,14 +65,15 @@ Updated: 2026-08-30
    Mitigation: Add a database deletion guard for the new nullable completion
    column and test old-code/new-schema behavior.
 4. Risk: A large account could exhaust the cleanup attempt window.
-   Mitigation: Bound concurrency and pass the shared remaining deadline into
-   each Temporal termination attempt.
+   Mitigation: Process deterministic batches of four under the shared deadline,
+   persist the first unconfirmed runtime index once per attempt, continue
+   immediately after progress, and back off only after no progress.
 
 ## Tasks
 
 1. Add and verify replay-safe signal-only quiescence in the private workflow.
 2. Extend the public durable cleanup receipt and runner with Temporal
-   termination completion state.
+   termination completion state and one monotonic next-runtime cursor.
 3. Add the additive migration, Prisma mapping, deletion guard, and tests.
 4. Run focused verification, typechecks, exact-head reviews, and CI.
 5. Deploy the private worker first, then the public migration/Web change, and
@@ -85,6 +88,9 @@ Updated: 2026-08-30
   can re-read canonical facts without inventing another state owner.
 - Keep deletion fail-open for the member interaction but fail-closed for
   cleanup-receipt completion.
+- Keep the encrypted cleanup receipt as the sole retry owner: one integer cursor
+  is sufficient, so no bitmap, queue, payload rewrite, or second state owner is
+  introduced.
 
 ## Verification
 
@@ -100,4 +106,5 @@ Updated: 2026-08-30
     effects or retry timers.
   - Pre-patch histories retain their original command path.
   - Incomplete Temporal cleanup remains durable and retryable through rolling
-    deployment; successful/not-found cleanup releases the receipt.
+    deployment; a 1,024-runtime receipt advances across bounded attempts, and
+    successful/not-found cleanup releases the receipt.

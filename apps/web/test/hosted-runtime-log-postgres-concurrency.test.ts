@@ -159,17 +159,23 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     await expect(postgres.query<{
       runtimeLogsCompletedAt: Date | null;
       temporalCompletedAt: Date | null;
+      temporalNextRuntimeIndex: number;
     }>(
       `
         SELECT
           runtime_logs_completed_at AS "runtimeLogsCompletedAt",
-          temporal_completed_at AS "temporalCompletedAt"
+          temporal_completed_at AS "temporalCompletedAt",
+          temporal_next_runtime_index AS "temporalNextRuntimeIndex"
         FROM hosted_account_deletion_cleanup
         WHERE id = $1
       `,
       [cleanupId],
     )).resolves.toMatchObject({
-      rows: [{ runtimeLogsCompletedAt: null, temporalCompletedAt: null }],
+      rows: [{
+        runtimeLogsCompletedAt: null,
+        temporalCompletedAt: null,
+        temporalNextRuntimeIndex: 0,
+      }],
     });
 
     await postgres.query(

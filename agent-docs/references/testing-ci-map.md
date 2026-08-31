@@ -230,8 +230,9 @@ Account-deletion cleanup coverage is split at the ownership boundary.
 before suspension and inserted in the canonical transaction before member
 removal. `hosted-account-deletion-cleanup.test.ts` proves receipt-bound
 encryption, independent per-target progress, unconfigured-target pending
-state, bounded Temporal termination across multiple captured runtime members,
-lease-loss handling, retry convergence, and batch isolation. The private
+state, contiguous Temporal cursor recovery, 1,024-runtime convergence without
+reissuing a confirmed prefix, bounded concurrency, lease-loss handling, retry
+convergence, and batch isolation. The private
 workflow machine and replay suites prove deleted canonical state waits
 signal-only while pre-patch histories retain their original Activity/timer
 ordering. Cloudflare

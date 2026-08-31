@@ -758,7 +758,10 @@ Last verified: 2026-08-30
   confirmed absence is idempotent success, completed targets are skipped, and
   unconfigured, timed-out, or ambiguous targets remain pending. Temporal is
   complete only after every captured runtime workflow is terminated or
-  confirmed absent. The deletion
+  confirmed absent. Its receipt stores the first unconfirmed runtime index in
+  the immutable encrypted identifier order, advances that cursor only through
+  contiguous successful batches of four, and applies retry backoff only when
+  the cursor does not move. The deletion
   request returns `cleanupPending` immediately after the canonical transaction
   instead of waiting on those targets. Each retention attempt has a bounded
   target deadline, and the bounded batch runs receipts concurrently so one

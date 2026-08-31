@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   deleteHostedPrivyUser: vi.fn(),
@@ -89,6 +89,11 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
 describe("hosted account deletion cleanup", () => {
   it("encrypts only the identifiers needed for cleanup with receipt-bound AAD", async () => {
     const now = new Date("2026-07-26T18:00:00.000Z");
@@ -108,6 +113,7 @@ describe("hosted account deletion cleanup", () => {
     });
 
     expect(cleanup.runtimeMemberIds).toEqual(["member_1", "member_group_1"]);
+    expect(cleanup.temporalNextRuntimeIndex).toBe(0);
     expect(cleanup.privyUserLookupKey).toMatch(/^hbidx:privy-user:/u);
     const encryptInput = mocks.kmsEncrypt.mock.calls[0]?.[0];
     expect(encryptInput?.keyName).toBe(KMS_KEY_NAME);
@@ -380,10 +386,13 @@ describe("hosted account deletion cleanup", () => {
       lastErrorCode: "TemporalTransportError",
       runtimeLogsCompletedAt: now,
       temporalCompletedAt: null,
+      temporalNextRuntimeIndex: 0,
     });
 
     const retryAt = store.row?.nextAttemptAt;
     expect(retryAt).toBeInstanceOf(Date);
+    expect(retryAt?.getTime()).toBeGreaterThan(now.getTime());
+    expect(store.row?.attemptCount).toBe(1);
     await expect(runHostedAccountDeletionCleanup({
       cleanupId: prepared.id,
       now: retryAt,
@@ -395,6 +404,76 @@ describe("hosted account deletion cleanup", () => {
     ).toHaveBeenCalledTimes(4);
     expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(2);
+    expect(store.row).toBeNull();
+  });
+
+  it("resumes Temporal cleanup at the first unconfirmed runtime", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const calls: string[] = [];
+    let failedOnce = false;
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      async ({ userId }: { userId: string }) => {
+        calls.push(userId);
+        if (userId === "member_1" && !failedOnce) {
+          failedOnce = true;
+          return {
+            configured: true,
+            errorCode: "TemporalTransportError",
+            notFound: null,
+            terminated: false,
+          };
+        }
+        return {
+          configured: true,
+          errorCode: null,
+          notFound: false,
+          terminated: true,
+        };
+      },
+    );
+    const prepared = await prepareHostedAccountDeletionCleanup({
+      now,
+      privyUserId: null,
+      runtimeMemberIds: Array.from({ length: 6 }, (_, index) => `member_${index}`),
+      stripeCustomerIds: [],
+    });
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: prepared,
+      prisma: store.prisma as never,
+    });
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: true });
+
+    expect(calls).toEqual(["member_0", "member_1", "member_2", "member_3"]);
+    expect(store.row).toMatchObject({
+      attemptCount: 0,
+      nextAttemptAt: now,
+      temporalCompletedAt: null,
+      temporalNextRuntimeIndex: 1,
+    });
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+
+    expect(calls).toEqual([
+      "member_0",
+      "member_1",
+      "member_2",
+      "member_3",
+      "member_1",
+      "member_2",
+      "member_3",
+      "member_4",
+      "member_5",
+    ]);
     expect(store.row).toBeNull();
   });
 
@@ -528,6 +607,75 @@ describe("hosted account deletion cleanup", () => {
       mocks.terminateHostedUserRuntimeWorkflowBestEffort,
     ).toHaveBeenCalledTimes(12);
     expect(temporalMaxActive).toBe(4);
+  });
+
+  it("converges maximum-cardinality Temporal cleanup across bounded attempts", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const runtimeMemberIds = Array.from(
+      { length: 1_024 },
+      (_, index) => `member_${index}`,
+    );
+    const calls: string[] = [];
+    let clockMs = now.getTime();
+    let callsThisAttempt = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => clockMs);
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      async ({ userId }: { userId: string }) => {
+        calls.push(userId);
+        callsThisAttempt += 1;
+        if (callsThisAttempt === 20) {
+          clockMs += 100;
+        }
+        return {
+          configured: true,
+          errorCode: null,
+          notFound: false,
+          terminated: true,
+        };
+      },
+    );
+    const prepared = await prepareHostedAccountDeletionCleanup({
+      now,
+      privyUserId: null,
+      runtimeMemberIds,
+      stripeCustomerIds: [],
+    });
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: prepared,
+      prisma: store.prisma as never,
+    });
+    if (!store.row) {
+      throw new Error("Expected a persisted cleanup receipt.");
+    }
+    store.row = {
+      ...store.row,
+      cloudflareCompletedAt: now,
+      runtimeLogsCompletedAt: now,
+    };
+
+    let attempts = 0;
+    let priorCursor = 0;
+    while (store.row && attempts < 60) {
+      callsThisAttempt = 0;
+      const result = await runHostedAccountDeletionCleanup({
+        attemptTimeoutMs: 100,
+        cleanupId: prepared.id,
+        now,
+        prisma: store.prisma as never,
+      });
+      attempts += 1;
+      if (result.cleanupPending) {
+        expect(store.row.temporalNextRuntimeIndex).toBeGreaterThan(priorCursor);
+        expect(store.row.nextAttemptAt).toEqual(now);
+        priorCursor = store.row.temporalNextRuntimeIndex;
+      }
+    }
+
+    expect(attempts).toBeGreaterThan(1);
+    expect(attempts).toBeLessThan(60);
+    expect(calls).toEqual(runtimeMemberIds);
+    expect(store.row).toBeNull();
   });
 
   it("does not report completion after losing the receipt lease", async () => {
@@ -778,6 +926,7 @@ interface CleanupRow {
   runtimeLogsCompletedAt: Date | null;
   stripeCompletedAt: Date | null;
   temporalCompletedAt: Date | null;
+  temporalNextRuntimeIndex: number;
   updatedAt: Date;
 }
 
@@ -790,7 +939,7 @@ type CleanupWhere = {
 };
 
 type CleanupUpdate = Partial<Omit<CleanupRow, "attemptCount">> & {
-  attemptCount?: { increment: number };
+  attemptCount?: number | { increment: number };
 };
 
 class CleanupStore {
@@ -851,15 +1000,15 @@ class CleanupStore {
         if (!this.matches(where) || !this.row) {
           return { count: 0 };
         }
-        const increment = typeof data.attemptCount === "object"
-          ? data.attemptCount.increment
-          : null;
+        const attemptCount = typeof data.attemptCount === "number"
+          ? data.attemptCount
+          : data.attemptCount
+            ? this.row.attemptCount + data.attemptCount.increment
+            : this.row.attemptCount;
         this.row = {
           ...this.row,
           ...data,
-          attemptCount: increment === null
-            ? this.row.attemptCount
-            : this.row.attemptCount + increment,
+          attemptCount,
           updatedAt: new Date(),
         } as CleanupRow;
         return { count: 1 };

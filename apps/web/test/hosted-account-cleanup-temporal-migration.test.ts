@@ -11,14 +11,17 @@ const migrationPath = path.resolve(
 );
 
 describe("hosted account cleanup Temporal migration", () => {
-  it("adds nullable retry ownership and blocks legacy receipt deletion", async () => {
+  it("adds retry ownership and blocks legacy receipt deletion", async () => {
     const migration = await readFile(migrationPath, "utf8");
 
     expect(migration).toContain(
-      'ADD COLUMN "temporal_completed_at" TIMESTAMP(3);',
+      'ADD COLUMN "temporal_completed_at" TIMESTAMP(3),',
     );
     expect(migration).not.toContain(
       'temporal_completed_at" TIMESTAMP(3) DEFAULT',
+    );
+    expect(migration).toContain(
+      'ADD COLUMN "temporal_next_runtime_index" INTEGER NOT NULL DEFAULT 0;',
     );
     expect(migration).toContain(
       'IF OLD."temporal_completed_at" IS NULL THEN',

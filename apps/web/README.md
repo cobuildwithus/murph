@@ -508,7 +508,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   workflow termination, Stripe-customer, and Privy cleanup; unconfigured or
   partial targets stay pending, completed targets are skipped, and the receipt
   is removed only after convergence. Temporal completion requires every
-  captured runtime workflow to be terminated or confirmed absent. Immediate
+  captured runtime workflow to be terminated or confirmed absent. One
+  receipt-owned cursor resumes deterministic batches of four at the first
+  unconfirmed runtime; progress is immediately eligible to continue, while
+  attempts with no progress back off. Immediate
   cleanup uses one five-second shared target deadline plus a small
   receipt-settlement margin; hourly retries use a fifteen-second shared target
   deadline and four-receipt concurrency. Cloudflare is

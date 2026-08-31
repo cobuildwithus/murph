@@ -132,6 +132,12 @@ that races account deletion may recheck Web facts but cannot turn deleted state
 into a self-retrying runtime. Inactive facts with a non-null workspace do not
 use this rule because that workspace can still own retention work.
 
+Canonical account deletion separately captures the immutable runtime-member
+order in Web's encrypted cleanup receipt. Web terminates those workflows in
+batches of four and durably advances one next-runtime cursor only through the
+contiguous confirmed prefix, so a bounded attempt resumes without skipping a
+failure or replaying earlier confirmed work.
+
 Workspace-version movement may bypass same-version no-progress backoff, but
 cannot prove that the pointed system item was handled.
 
