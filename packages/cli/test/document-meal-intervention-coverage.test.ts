@@ -6,6 +6,7 @@ import { Cli } from 'incur'
 import { afterEach, test, vi } from 'vitest'
 
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import * as vaultRuntime from '@murphai/vault-usecases/runtime'
 import type {
   ImportersFactoryRuntimeModule,
@@ -42,7 +43,7 @@ function createCoverageCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
-  registerDocumentCommands(cli, services)
+  registerDocumentCommands(cli, services, createIntegratedInboxServices())
   registerMealCommands(cli, services)
   registerInterventionCommands(cli, services)
 
@@ -58,7 +59,7 @@ function createCoverageCliAndServices() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
-  registerDocumentCommands(cli, services)
+  registerDocumentCommands(cli, services, createIntegratedInboxServices())
   registerMealCommands(cli, services)
   registerInterventionCommands(cli, services)
 

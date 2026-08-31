@@ -75,6 +75,17 @@ function parseWhoopSnapshot(snapshot: unknown): WhoopSnapshotInput {
   return whoopSnapshotSchema.parse(snapshot);
 }
 
+function sanitizeWhoopRawSnapshot(snapshot: WhoopSnapshotInput): unknown {
+  const source = asPlainObject(snapshot);
+  if (!source) {
+    return source;
+  }
+
+  const sanitized: PlainObject = { ...source };
+  delete sanitized.importedAt;
+  return sanitized;
+}
+
 function makeExternalRef(
   resourceType: string,
   resourceId: string,
@@ -872,4 +883,5 @@ export const whoopProviderAdapter: DeviceProviderAdapter<WhoopSnapshotInput> = {
   ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   parseSnapshot: parseWhoopSnapshot,
   normalizeSnapshot: normalizeWhoopSnapshot,
+  sanitizeRawSnapshot: sanitizeWhoopRawSnapshot,
 };

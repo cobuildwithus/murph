@@ -2633,6 +2633,7 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
       description: "automation test cli",
       version: "0.0.0-test",
     });
+    cli.use(incurErrorBridge);
     registerAutomationCommands(cli);
 
     const schedules = [
@@ -2752,7 +2753,11 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
     assert.equal(rejectedDeviceFlag.envelope.ok, false);
     assert.match(
       rejectedDeviceFlag.envelope.error.message ?? "",
-      /--device-source and --activity-kind/u,
+      /--device-source/u,
+    );
+    assert.equal(
+      rejectedDeviceFlag.envelope.error.fieldErrors?.[0]?.path,
+      "schedule.source",
     );
 
     const rejectedLegacyScheduleKindDeviceActivity = await runInProcessJsonCli(cli, [
@@ -2775,6 +2780,223 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
 
     assert.equal(rejectedLegacyScheduleKindDeviceActivity.exitCode, 1);
     assert.equal(rejectedLegacyScheduleKindDeviceActivity.envelope.ok, false);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("automation rejects conflicting and irrelevant schedule flags before mutation", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-schedule-flag-conflicts-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation schedule flag validation test cli",
+      version: "0.0.0-test",
+    });
+    cli.use(incurErrorBridge);
+    registerAutomationCommands(cli);
+
+    const rejectedSchedules: Array<{
+      expectedPath: string;
+      privateValues: string[];
+      scheduleArgs: string[];
+      slug: string;
+    }> = [
+      {
+        expectedPath: "schedule.kind",
+        privateValues: ["private-kind-conflict-instructions"],
+        scheduleArgs: [
+          "--trigger-kind",
+          "at",
+          "--schedule-kind",
+          "every",
+          "--trigger-at",
+          "2099-01-01T00:00:00.000Z",
+          "--schedule-every-ms",
+          "3600000",
+        ],
+        slug: "kind-conflict",
+      },
+      {
+        expectedPath: "schedule.at",
+        privateValues: [
+          "private-at-conflict-instructions",
+          "2099-01-01T00:00:00.000Z",
+          "2099-02-01T00:00:00.000Z",
+        ],
+        scheduleArgs: [
+          "--trigger-kind",
+          "at",
+          "--schedule-kind",
+          "at",
+          "--trigger-at",
+          "2099-01-01T00:00:00.000Z",
+          "--schedule-at",
+          "2099-02-01T00:00:00.000Z",
+        ],
+        slug: "at-alias-conflict",
+      },
+      {
+        expectedPath: "schedule.expression",
+        privateValues: [
+          "private-irrelevant-cron-instructions",
+          "private-irrelevant-cron-expression",
+        ],
+        scheduleArgs: [
+          "--trigger-kind",
+          "at",
+          "--trigger-at",
+          "2099-03-01T00:00:00.000Z",
+          "--trigger-cron",
+          "private-irrelevant-cron-expression",
+        ],
+        slug: "irrelevant-cron",
+      },
+    ];
+
+    for (const rejectedSchedule of rejectedSchedules) {
+      const result = await runInProcessJsonCli(cli, [
+        "automation",
+        "save",
+        rejectedSchedule.slug,
+        "--slug",
+        rejectedSchedule.slug,
+        "--instructions",
+        rejectedSchedule.privateValues[0] ?? "private-schedule-instructions",
+        "--status",
+        "paused",
+        ...rejectedSchedule.scheduleArgs,
+        "--channel",
+        "telegram",
+        "--delivery-target",
+        `telegram-thread-${rejectedSchedule.slug}`,
+        "--vault",
+        vaultRoot,
+      ]);
+
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.envelope.ok, false);
+      if (result.envelope.ok) assert.fail("invalid schedule flags must fail");
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.equal(result.envelope.error.retryable, false);
+      assert.equal(result.envelope.error.stage, "validation");
+      assert.equal(
+        result.envelope.error.fieldErrors?.[0]?.path,
+        rejectedSchedule.expectedPath,
+      );
+      for (const privateValue of rejectedSchedule.privateValues) {
+        assert.equal(JSON.stringify(result.envelope).includes(privateValue), false);
+      }
+    }
+
+    const listedAfterRejectedSaves = await runInProcessJsonCli<{
+      count: number;
+      items: unknown[];
+      totalCount: number;
+    }>(cli, [
+      "automation",
+      "list",
+      "--compact",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(listedAfterRejectedSaves.exitCode, null);
+    assert.equal(listedAfterRejectedSaves.envelope.ok, true);
+    assert.equal(listedAfterRejectedSaves.envelope.data?.count, 0);
+    assert.equal(listedAfterRejectedSaves.envelope.data?.totalCount, 0);
+    assert.deepEqual(listedAfterRejectedSaves.envelope.data?.items, []);
+
+    const cronExpression = "0 9 * * 1";
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Matching aliases",
+      "--slug",
+      "matching-aliases",
+      "--instructions",
+      "Keep the original instructions.",
+      "--status",
+      "paused",
+      "--trigger-kind",
+      "cron",
+      "--schedule-kind",
+      "cron",
+      "--trigger-cron",
+      cronExpression,
+      "--schedule-cron",
+      cronExpression,
+      "--trigger-time-zone",
+      "America/New_York",
+      "--schedule-time-zone",
+      "America/New_York",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram-thread-matching-aliases",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const rejectedEdit = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "matching-aliases",
+      "--instructions",
+      "private-edit-replacement",
+      "--trigger-kind",
+      "cron",
+      "--trigger-cron",
+      "0 10 * * 2",
+      "--trigger-at",
+      "private-irrelevant-at",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(rejectedEdit.exitCode, 1);
+    assert.equal(rejectedEdit.envelope.ok, false);
+    if (rejectedEdit.envelope.ok) assert.fail("irrelevant edit flags must fail");
+    assert.equal(rejectedEdit.envelope.error.code, "invalid_option");
+    assert.equal(rejectedEdit.envelope.error.stage, "validation");
+    assert.equal(
+      rejectedEdit.envelope.error.fieldErrors?.[0]?.path,
+      "schedule.at",
+    );
+    assert.equal(
+      JSON.stringify(rejectedEdit.envelope).includes("private-edit-replacement"),
+      false,
+    );
+    assert.equal(
+      JSON.stringify(rejectedEdit.envelope).includes("private-irrelevant-at"),
+      false,
+    );
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        instructions: string;
+        schedule: unknown;
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "matching-aliases",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(
+      shown.envelope.data?.automation?.instructions,
+      "Keep the original instructions.",
+    );
+    assert.deepEqual(shown.envelope.data?.automation?.schedule, {
+      expression: cronExpression,
+      kind: "cron",
+      timeZone: "America/New_York",
+    });
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

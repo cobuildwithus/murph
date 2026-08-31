@@ -375,17 +375,23 @@ const HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION = {
   title: 'Finish Murph onboarding follow-up',
 } as const
 
+const MURPH_PROACTIVE_HEALTH_PACING_POLICY = [
+  '- Use the engine-supplied committed recent conversation as conservative interruption-cost evidence, not as proof that a prior message was delivered or read. Do not create or search a separate cross-automation outreach ledger for this pacing check.',
+  '- If another unsolicited health note appears recently and this candidate can wait or be folded into that thread, suppress it.',
+  '- Do not stack another unsolicited corrective health message while a recent one is unanswered unless the new item is safety-relevant or clearly more valuable.',
+].join('\n')
+
 const MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY = [
   '- Proactive health outreach is not a report card. Send only when it leaves the member more informed, reassured, or capable—not merely aware that a number or behavior worsened.',
   '- Classify the candidate before sending: physiological or clinical signal, behavioral or goal progress, or tracking/system quality.',
   '- A negative physiological, symptom, or lab trend may still be worth sending when it is durable, non-obvious, decision-relevant, and stated with calibrated uncertainty.',
   '- Behavioral shortfalls have a higher bar. Do not proactively tell a member to do more or that they are getting worse when they are already working on that domain, unless the finding reveals a new lever, tradeoff, or safety issue that materially changes the plan.',
-  '- Tie behavioral feedback to the member\'s exact active goal or plan. Never substitute a convenient proxy for the real goal when other evidence shows progress.',
+  '- Tie evaluative or prescriptive behavioral feedback to a still-current, uncontradicted explicit active goal, plan, request, or member-chosen first step. A repeated behavior connected only to a broader intention or parked aspiration may support concise recognition or grounded interpretation, but not a recommendation, directive, evaluation, or implied commitment to continue. Without either kind of member-stated context, a repeated material behavior may be named only when the observation is useful on its own; never imply a target, success or failure, or that the member should do more. Never substitute a convenient proxy for the real goal when other evidence shows progress.',
   '- Persona and tone preferences may shape warmth and phrasing, and the current Push setting may change directness around an explicit member-chosen goal. None of them lowers evidence, relevance, tracking-integrity, or no-shame requirements.',
   '- Missing, stale, misclassified, or overly narrow tracking is a product/data issue, never evidence that the member failed. Repair it or suppress the message before interpreting behavior.',
   '- When a candidate involves current fatigue, sleep or recovery change, symptoms, or outdoor activity, and a city or region is already known, read the connected-apps skill, geocode that location, then call direct-only `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` without search and only as needed. Use only a returned alert about extreme heat, extreme cold, or outdoor air quality as current local context or added load, not proof of what caused the health change. Never infer an alert from raw weather, AQI, or Murph-defined thresholds.',
   '- An official weather alert alone never clears the proactive send bar. It may strengthen a health candidate only when the member\'s own evidence or plan makes the combined context decision-relevant. Do not ask for location during a scheduled run, block on a failed read, claim indoor air from an outdoor alert, or use unrelated alerts such as hurricanes or tornadoes as health context.',
-  '- Do not stack another unsolicited corrective health message while a recent one is unanswered unless the new item is safety-relevant or clearly more valuable.',
+  MURPH_PROACTIVE_HEALTH_PACING_POLICY,
 ].join('\n')
 
 export const MURPH_MANAGED_AUTOMATIONS = [
@@ -409,18 +415,29 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Proactive-health selection policy:',
       MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY,
       '',
+      'Conversation and change check:',
+      '- Start with the engine-supplied committed recent conversation, then make targeted reads of active goals and the directly relevant full regimen or experiment. Use them to establish what currently matters; treat recent assistant messages in the transcript as conservative pacing evidence rather than delivery proof, and do not invent a durable thread from weak inference or trawl old records to manufacture one.',
+      '- Look for meaningful emergence or change: a user-stated intention beginning to appear in behavior, a repeated new behavior, an existing routine becoming steady, or a change that creates one timely low-burden opportunity.',
+      '- A repeated emerging behavior can clear the bar before it produces a non-obvious body insight when connecting it to a still-current recognizable intention gives the member useful continuity plus one grounded interpretation. One occurrence, generic congratulations, or merely restating the log does not clear it.',
+      '- A behavior change with no still-current user-stated goal, intention, or plan can support a neutral observation, not an evaluation or prescription. Do not imply success or failure, and do not silently convert it into a goal, reminder, check-in, plan, experiment, or accountability loop.',
+      '- If the same thread was already acknowledged and nothing materially changed, or an unrelated urgent or sensitive conversation makes an interruption poorly timed, suppress it.',
+      '',
       'Substance check before composing:',
       '- When `murph.device` is available, use it with `action: list_accounts` to see which wearable / device accounts exist and their auth status. If it is unavailable, do not infer account or authorization state.',
       '- Read `vault-cli wearables sources list` to see per-provider freshness, `lastDate`, and `stalenessVsNewestDays`.',
       "- Skim recent user-logged substance since roughly the last digest: wearables (`vault-cli wearables latest`), and any manual logs the user typically keeps (samples, food, supplements, body, events, knowledge edits). Use the smallest CLI calls needed; do not exhaustively scan the vault.",
+      '- For a plausible behavior-change candidate, compare the current window with a recent baseline through one narrow semantic query—for activity, prefer bounded `vault-cli wearables activity list` date ranges—rather than inferring change from a latest value or raw events.',
       '',
       'Branch on what you find:',
-      '- Substance present: verified goal-congruent progress or steadiness, a week-vs-recent-baseline shift that materially changes interpretation, a link between real-life context and a signal (for example two hard yardwork days lining up with a recovery dip), trustworthy movement in an active experiment, or a scary-looking change that is probably just noise and worth defusing. New data or a decline alone is not substance. Produce the concise weekly health digest as described below.',
+      '- Substance present: a user-stated intention becoming visible in repeated behavior, verified goal-congruent progress or steadiness, a week-vs-recent-baseline shift that materially changes interpretation, a link between real-life context and a signal (for example two hard yardwork days lining up with a recovery dip), trustworthy movement in an active experiment, or a scary-looking change that is probably just noise and worth defusing. New data or a decline alone is not substance. Produce the concise weekly health digest as described below.',
       '- Wearable authorization failed: a device account exists with `status: reauthorization_required`, or a source has `status: error` with an explicit reconnect-required authentication error such as `TOKEN_REFRESH_FAILED`. Ordinary missing or stale data does not qualify and is not proof of disconnection. This branch requires a successful `murph.device` call with `action: connect` for that provider and the `connectUrl` from its result. If the tool is unavailable or the call fails, suppress instead of promising a reconnect path. Otherwise send one short, warm in-chat note acknowledging the authorization problem and inviting the user to reconnect so Murph can keep seeing their data. Do not fabricate a digest from stale data, and do not list every disconnected provider — focus on the one most likely to matter.',
       '- Suppress: If the week was ordinary — numbers inside the user\'s usual ranges, no notable context, no experiment movement — or if there are no connected device accounts, no live wearable, no recent manual logs, and no experiment movement worth mentioning, return `{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}` and suppress the scheduled message. If the reconnect branch applies, it wins over suppression. Skipping an unremarkable week is the expected outcome, not a failure. Do not send a process note or a "quiet week" message.',
       '',
-      'Frame the digest as a compass, not a report: what changed, what stayed steady, what was probably noise, the likely real-life context behind the week, at most one thing worth keeping, and at most one thing not worth reacting to.',
+      'Frame the digest as a compass, not a report. Choose one primary conversational job: recognize meaningful progress, connect context, interpret evidence, give one safe practical recommendation, or make one optional offer. Do not cram several jobs into the note.',
       '- This is the narrative of the current week, not a performance review. Lead with verified progress, steadiness, or reassuring context when that is the most goal-relevant fact, but never manufacture praise.',
+      '- Motivation must be earned and specific: name what changed or is becoming repeatable, not generic praise, cheerleading, streak pressure, or an identity claim.',
+      '- If advice materially depends on domain-specific judgment, first read the narrow owning skill after selecting the candidate. Do not research broadly to manufacture advice.',
+      '- Write as a natural continuation in the existing relationship, not as a scheduled report or automated check-in. Do not mention the weekly run, scan, schedule, or automation. A self-contained useful observation does not need a question; never add one solely to provoke engagement.',
       '- A negative-only digest clears the bar only when it addresses safety, answers a current question, prevents a harmful interpretation, or reveals a genuinely new and actionable obstacle in an explicit goal. Otherwise suppress it.',
       '- Never use steps as a proxy for all exercise. When workouts such as cycling, elliptical, rowing, swimming, lifting, or structured walking are present, steps can support only the narrower claim of less non-workout walking—and only when everyday walking or steps is itself relevant to a stated goal.',
       '- Keep the outbound digest to one compact phone-screen message, usually three to five sentences.',
@@ -629,6 +646,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ],
     instructions: [
       'On this scheduled weekly run, run a quiet weekly health research scout for the configured automation route.',
+      '',
+      'Proactive-health pacing policy:',
+      MURPH_PROACTIVE_HEALTH_PACING_POLICY,
       '',
       'Outcome:',
       "Surface 0-1 genuinely useful research-backed insight that changes how the user might think about a current health experiment, habit, symptom, lab, a trend in their own wearable data, or clinician question.",
