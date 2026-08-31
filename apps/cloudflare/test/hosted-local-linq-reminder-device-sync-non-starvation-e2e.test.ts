@@ -48,8 +48,6 @@ const reminderInstructions =
   "Send the user the hosted-local recurring break reminder.";
 const reminderText = "Time for your short break.";
 const dirtyResourceCount = 113;
-const firstPassProcessedCount = 100;
-const firstPassRemainingCount = dirtyResourceCount - firstPassProcessedCount;
 const systemMailboxFirstAdmissionWindowMs = 30_000;
 const deviceSyncReminderOverlapLeadMs = 60_000;
 const scheduledReminderLeadMs = 180_000;
@@ -134,7 +132,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
     plan = null;
   }, 120_000);
 
-  it("runs one due recurring reminder while a capped device-sync pass has durable backlog, then drains the backlog", async () => {
+  it("runs one due recurring reminder while a receipt-bounded device-sync pass has durable backlog, then drains the backlog", async () => {
     const activeScenario = requireScenario();
     const activeLinqStub = requireLinqStub();
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
@@ -280,15 +278,22 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         }),
         waitForShutdownCheckpointPublicationBarrier(schedule.dueAtIso),
       ]);
-      const firstPass = await waitForDeviceSyncPassFinished({
-        expectedProcessedJobs: firstPassProcessedCount,
+      const firstPass = await waitForPositiveDeviceSyncPassFinished({
         fromAt: runtimeLogsFrom,
       });
       expect(firstPass.redactedJson).toMatchObject({
-        outcome: "completed",
-        processedJobs: firstPassProcessedCount,
-        workerJobLimitReached: true,
+        outcome: "yielded",
+        workerJobLimitReached: false,
       });
+      const firstPassProcessedJobs = readFiniteNumber(
+        firstPass.redactedJson,
+        "processedJobs",
+      );
+      if (firstPassProcessedJobs === null) {
+        throw new Error("Receipt-bounded device-sync pass omitted its processed job count.");
+      }
+      expect(firstPassProcessedJobs).toBeGreaterThan(0);
+      expect(firstPassProcessedJobs).toBeLessThan(dirtyResourceCount);
       await expectPendingDirtyResourceCount(
         seed.connectionId,
         dirtyResourceCount,
@@ -348,13 +353,10 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         .filter((row) => row.eventCode === "device-sync.pass_finished")
         .map((row) => readFiniteNumber(row.redactedJson, "processedJobs"))
         .filter((count): count is number => count !== null && count > 0);
-      expect(positiveFinishedPassCounts).toEqual([
-        firstPassProcessedCount,
-        firstPassRemainingCount,
-      ]);
+      expect(positiveFinishedPassCounts.length).toBeGreaterThanOrEqual(2);
       expect(
         deviceSyncLogs.filter((row) => row.eventCode === "device-sync.pass_started"),
-      ).toHaveLength(2);
+      ).not.toHaveLength(0);
       expect(
         deviceSyncLogs.filter((row) => row.eventCode === "device-sync.job_failed"),
       ).toEqual([]);
@@ -606,8 +608,7 @@ async function waitForDevicePassPreDrainCheckpointBarrier(
   ]));
 }
 
-async function waitForDeviceSyncPassFinished(input: {
-  expectedProcessedJobs: number;
+async function waitForPositiveDeviceSyncPassFinished(input: {
   fromAt: Date;
 }): Promise<HostedRuntimeLogForTestRow> {
   const deadline = Date.now() + observationTimeoutMs;
@@ -616,8 +617,7 @@ async function waitForDeviceSyncPassFinished(input: {
     lastLogs = await listDeviceSyncLogs(input.fromAt);
     const matching = lastLogs.find((row) =>
       row.eventCode === "device-sync.pass_finished"
-      && readFiniteNumber(row.redactedJson, "processedJobs")
-        === input.expectedProcessedJobs
+      && (readFiniteNumber(row.redactedJson, "processedJobs") ?? 0) > 0
     );
     if (matching) {
       return matching;
@@ -625,8 +625,7 @@ async function waitForDeviceSyncPassFinished(input: {
     await sleep(250);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the capped device-sync pass to finish.",
-    `expected processed jobs: ${input.expectedProcessedJobs}`,
+    "Timed out waiting for the receipt-bounded device-sync pass to finish.",
     `observed device-sync events: ${JSON.stringify(lastLogs.map((row) => ({
       eventCode: row.eventCode,
       processedJobs: readFiniteNumber(row.redactedJson, "processedJobs"),
@@ -769,16 +768,15 @@ async function waitForCompletedDeviceSyncDrainLogs(
       .map((row) => readFiniteNumber(row.redactedJson, "processedJobs"))
       .filter((count): count is number => count !== null && count > 0);
     if (
-      positiveFinishedPassCounts.length === 2
-      && positiveFinishedPassCounts[0] === firstPassProcessedCount
-      && positiveFinishedPassCounts[1] === firstPassRemainingCount
+      positiveFinishedPassCounts.length >= 2
+      && lastLogs.every((row) => row.eventCode !== "device-sync.job_failed")
     ) {
       return lastLogs;
     }
     await sleep(250);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the two bounded device-sync pass records.",
+    "Timed out waiting for the complete bounded device-sync drain records.",
     `observed events: ${JSON.stringify(lastLogs.map((row) => ({
       eventCode: row.eventCode,
       processedJobs: readFiniteNumber(row.redactedJson, "processedJobs"),

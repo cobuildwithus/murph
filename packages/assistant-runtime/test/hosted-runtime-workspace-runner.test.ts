@@ -3629,7 +3629,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("rejects a saturated canonical receipt log before uploading payloads", async () => {
+  test("rolls a saturated legacy receipt segment before the canonical checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
       createdAt: new Date(TEST_NOW),
@@ -3637,12 +3637,26 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       title: "Hosted Workspace Runner Saturated Receipt Log Test Vault",
       vaultRoot,
     });
+    const priorReceiptBytes = new TextEncoder().encode(`${JSON.stringify({
+      actions: [],
+      committedAt: TEST_NOW,
+      createdAt: TEST_NOW,
+      occurredAt: TEST_NOW,
+      operationId: "op_saturated_receipt_log_prior",
+      operationType: "saturated_receipt_log_prior_test",
+      schema: "murph.hosted-canonical-write-receipt.v1",
+      summary: "Synthetic prior receipt for compaction.",
+      updatedAt: TEST_NOW,
+    }, null, 2)}\n`);
+    const priorReceiptSha256 = createHash("sha256")
+      .update(priorReceiptBytes)
+      .digest("hex");
     const receiptLogBytes = new TextEncoder().encode(`${JSON.stringify({
       entries: Array.from(
         { length: HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES },
         () => ({
-          byteSize: 0,
-          sha256: "a".repeat(64),
+          byteSize: priorReceiptBytes.byteLength,
+          sha256: priorReceiptSha256,
         }),
       ),
       schema: "murph.hosted-canonical-write-receipt-log.v1",
@@ -3651,6 +3665,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const artifactGetCalls: string[] = [];
     const artifactPutCalls: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let canonicalCheckpointCount = 0;
     const { mailboxPort } = createMailboxPort({ items: [] });
     const workspace = createWorkspaceState({
       redactedStatus: {
@@ -3661,10 +3676,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
 
     try {
-      await assert.rejects(
-        runHostedWorkspaceUntilIdleOrBudget({
-          async checkpointRuntimeRedactedStatus() {
-            throw new Error("Saturated receipt log must fail before checkpointing status.");
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+          async checkpointRuntimeRedactedStatus(checkpointInput) {
+            canonicalCheckpointCount += 1;
+            return {
+              checkpointed: true,
+              workspace: createWorkspaceState({
+                redactedStatus: checkpointInput.redactedStatus,
+                version: "1",
+              }),
+            };
           },
           checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
             attemptId: "attempt_synthetic_runner_saturated_receipt_log",
@@ -3681,7 +3702,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           initialMailboxImport: createDeferredMailboxImportResult(),
           limitPerLane: 10,
           platform: createPlatform({
-            artifactBytesByHash: new Map([[receiptLogSha256, receiptLogBytes]]),
+            artifactBytesByHash: new Map([
+              [priorReceiptSha256, priorReceiptBytes],
+              [receiptLogSha256, receiptLogBytes],
+            ]),
             artifactGetCalls,
             artifactPutCalls,
             mailboxPort,
@@ -3699,7 +3723,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               summary: "Exercise saturated canonical receipt log handling",
               textWrites: [
                 {
-                  content: "must roll back\n",
+                  content: "segment rollover persisted\n",
                   overwrite: true,
                   relativePath: "bank/saturated-receipt-log.md",
                 },
@@ -3714,17 +3738,24 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           vaultRoot,
           workspace,
           now: () => TEST_NOW,
-        }),
-        (error: unknown) => (
-          error instanceof RangeError
-          && error.message === "Hosted canonical write receipt log reached its pending entry limit."
-        ),
-      );
+        });
 
-      assert.deepEqual(artifactGetCalls, [receiptLogSha256]);
-      assert.deepEqual(artifactPutCalls, []);
+      assert.deepEqual(artifactGetCalls, [receiptLogSha256, priorReceiptSha256]);
+      assert.equal(artifactPutCalls.length, 5);
+      assert.equal(canonicalCheckpointCount, 1);
       assert.deepEqual(checkpointRequests, []);
-      await assert.rejects(readFile(path.join(vaultRoot, "bank", "saturated-receipt-log.md")));
+      assert.equal(
+        result.runtimeRedactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        result.latestWorkspace?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+      );
+      assert.notEqual(
+        result.runtimeRedactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        receiptLogSha256,
+      );
+      assert.equal(
+        await readFile(path.join(vaultRoot, "bank", "saturated-receipt-log.md"), "utf8"),
+        "segment rollover persisted\n",
+      );
     } finally {
       await rm(vaultRoot, {
         force: true,

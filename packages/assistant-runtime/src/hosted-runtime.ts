@@ -199,7 +199,7 @@ export {
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
 } from "./hosted-workspace-restore-preparation.ts";
 import {
-  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD,
   hostedCanonicalWriteReceiptRecoveryStatusFields,
   omitHostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
@@ -1735,7 +1735,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     });
     assertRuntimeNotAborted();
     let activeWorkspace = workspaceRead.workspace;
-    const pendingCanonicalReceiptCount = restored.canonicalWriteReceiptCount;
+    let pendingCanonicalReceiptCount = restored.canonicalWriteReceiptCount;
+    const canonicalWriteReceiptLogBlocksBackgroundMaintenance = (): boolean =>
+      pendingCanonicalReceiptCount
+        >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD;
+    const clearPendingCanonicalReceiptCount = (): void => {
+      pendingCanonicalReceiptCount = 0;
+    };
     const canonicalWriteReceiptRecoveryFailed =
       restored.canonicalWriteReceiptRecoveryFailed;
     if (activeWorkspace && canonicalWriteReceiptRecoveryFailed) {
@@ -1751,10 +1757,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     );
     if (
       pendingCanonicalReceiptRecoveryWake
-      && pendingCanonicalReceiptCount < HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES
+      && pendingCanonicalReceiptCount
+        < HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD
     ) {
       throw new Error(
-        "Hosted canonical write receipt recovery requires a saturated receipt log.",
+        "Hosted canonical write receipt recovery requires a receipt log at the background admission boundary.",
       );
     }
 
@@ -1931,8 +1938,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
     };
     if (
-      input.request.processingMode !== "inbox_media_retention"
-      && pendingCanonicalReceiptCount >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES
+      pendingCanonicalReceiptCount
+        >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD
     ) {
       const priorNextWakeAt = pendingCanonicalReceiptRecoveryWake
         ? pendingCanonicalReceiptRecoveryWake.nextWakeAt
@@ -1948,6 +1955,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         issueExportPort: runtime.platform.issueExportPort ?? null,
         nextWakeAt: new Date().toISOString(),
         nextWakeReason: "mailbox",
+        onCanonicalWriteReceiptLogCleared: clearPendingCanonicalReceiptCount,
         redactedStatus: {
           ...(activeWorkspace?.redactedStatus ?? {}),
           ...hostedCanonicalWriteReceiptRecoveryStatusFields({
@@ -1973,6 +1981,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       });
       checkpointRequestBuilder.recordCheckpoint?.(wakeResetCheckpoint);
       activeWorkspace = wakeResetCheckpoint.workspace;
+      if (
+        readHostedCanonicalWriteReceiptLogStatusFingerprint(
+          wakeResetCheckpoint.workspace.redactedStatus,
+        ) === null
+      ) {
+        clearPendingCanonicalReceiptCount();
+      }
     }
     if (input.request.processingMode === "inbox_media_retention") {
       return await runHostedInboxMediaRetentionOnlyCheckpoint({
@@ -1999,6 +2014,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         },
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
+        generatedImageRetentionMaxCaptures: Math.max(
+          0,
+          HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD
+            - pendingCanonicalReceiptCount,
+        ),
         input,
         issueExportPort: runtime.platform.issueExportPort ?? null,
         materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
@@ -2085,6 +2105,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+      onCanonicalWriteReceiptLogUpdated: (entryCount) => {
+        pendingCanonicalReceiptCount = entryCount;
+      },
       onForegroundConversationWorkObserved: () => {
         if (!ordinaryConsentedAssistantAskSelected) {
           return;
@@ -2100,6 +2123,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
       signal: runtimeAbortController.signal,
       runtimeLogContext,
+      shouldYieldBackgroundMaintenance:
+        canonicalWriteReceiptLogBlocksBackgroundMaintenance,
       withCanonicalWritePersistence,
       vaultRoot: restored.vaultRoot,
       workspace: activeWorkspace,
@@ -2548,6 +2573,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           nextWakeReason: checkpointNextWake.nextWakeReason,
           inboxMediaRetentionWakeAt: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
           issueExportPort: runtime.platform.issueExportPort ?? null,
+          onCanonicalWriteReceiptLogCleared: clearPendingCanonicalReceiptCount,
           redactedStatus,
           runtimeAbortSignal: runtimeAbortController.signal,
           vaultRoot: restored.vaultRoot,
@@ -2689,7 +2715,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         return pendingWakeObserved || foregroundWakeObserved;
       };
       const shouldYieldSystemMailboxWork = (): boolean =>
-        consumeForegroundWake()
+        canonicalWriteReceiptLogBlocksBackgroundMaintenance()
+        || consumeForegroundWake()
         || (
           assistantCronDeadlineMs !== null
           && Date.now() >= assistantCronDeadlineMs
@@ -2967,6 +2994,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             checkpointWake.nextDefaultProcessingWakeReason,
           nextWakeAt: checkpointWake.nextWakeAt,
           nextWakeReason: checkpointWake.nextWakeReason,
+          onCanonicalWriteReceiptLogCleared: clearPendingCanonicalReceiptCount,
           redactedStatus: currentRedactedStatus,
           runtimeAbortSignal: runtimeAbortController.signal,
           vaultRoot: restored.vaultRoot,
@@ -2989,7 +3017,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         importOrStartupCheckpointPending = false;
         activeWorkspace = checkpoint.workspace;
         systemMailboxProgressedSinceCheckpoint = false;
-        currentRedactedStatus = checkpoint.workspace.redactedStatus ?? currentRedactedStatus;
+        currentRedactedStatus = checkpoint.workspace.redactedStatus ?? {};
         if (checkpoint.conversationInputAhead === true) {
           checkpointReportedConversationInputAhead = true;
           foregroundWakeObserved = true;
@@ -3030,18 +3058,30 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const returnSystemMailboxModeResult = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceInvocationResult> => {
-        if (foregroundWakeObserved && importOrStartupCheckpointPending) {
+        if (
+          canonicalWriteReceiptLogBlocksBackgroundMaintenance()
+          || (foregroundWakeObserved && importOrStartupCheckpointPending)
+        ) {
           await checkpointSystemMailboxMode(
-            "system_mailbox.checkpoint.due_assistant_handoff",
+            canonicalWriteReceiptLogBlocksBackgroundMaintenance()
+              ? "system_mailbox.checkpoint.receipt_capacity"
+              : "system_mailbox.checkpoint.due_assistant_handoff",
           );
         }
         const projectedWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
+        const defaultOwnerAuthorityObserved =
+          defaultOwnerWakeObserved
+          || checkpointReportedConversationInputAhead;
         const requestedDefaultOwnerWakeAt = defaultOwnerWakeObserved
           ? new Date(Date.now()).toISOString()
           : assistantCronDeadlineMs !== null
               && Date.now() >= assistantCronDeadlineMs
             ? new Date(assistantCronDeadlineMs).toISOString()
-            : hostedRuntimeDefaultProcessingWakeIsDue(projectedWake)
+            : (
+                !assistantExecutionBlocked
+                || checkpointReportedConversationInputAhead
+              )
+                && hostedRuntimeDefaultProcessingWakeIsDue(projectedWake)
               ? projectedWake.nextDefaultProcessingWakeAt
               : null;
         const defaultOwnerDueNow =
@@ -3065,7 +3105,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               },
             ]);
         const invocationResult = {
-          ...(foregroundWakeObserved
+          ...(defaultOwnerAuthorityObserved
               || (!assistantExecutionBlocked && defaultOwnerDueNow)
             ? { immediateRecheckRequested: true as const }
             : {}),
@@ -3577,6 +3617,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
         });
       };
+
+      if (canonicalWriteReceiptLogBlocksBackgroundMaintenance()) {
+        await checkpointSystemMailboxMode(
+          "system_mailbox.checkpoint.receipt_capacity",
+        );
+      }
 
       if (consumeForegroundWake()) {
         return await returnSystemMailboxModeResult();
@@ -6308,6 +6354,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 provider: "codex-cli",
                 userEnvKeys: Object.keys(guardedRuntime.userEnv),
               }),
+              generatedImageRetentionMaxCaptures: Math.max(
+                0,
+                HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD
+                  - pendingCanonicalReceiptCount,
+              ),
               materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
               memberId: input.request.userId,
               model: idleMaintenanceModel,
@@ -6481,6 +6532,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 defaultProcessingWake.nextDefaultProcessingWakeAt,
               nextDefaultProcessingWakeReason:
                 defaultProcessingWake.nextDefaultProcessingWakeReason,
+              onCanonicalWriteReceiptLogCleared: clearPendingCanonicalReceiptCount,
               redactedStatus,
               runtimeWakePendingAtCheckpoint,
               runtimeAbortSignal: runtimeAbortController.signal,
@@ -7258,6 +7310,7 @@ function classifyHostedBrowserVaultReplicaRefresh(
 // without changing this signature.
 export async function runHostedPendingInputProtectedIdleMaintenance(input: {
   credentialSource: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["credentialSource"];
+  generatedImageRetentionMaxCaptures?: number;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
   memberId: string;
   model: string | null;
@@ -7278,6 +7331,12 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
     });
   return await runHostedIdleCheckpointMaintenance({
     credentialSource: input.credentialSource,
+    ...(input.generatedImageRetentionMaxCaptures === undefined
+      ? {}
+      : {
+          generatedImageRetentionMaxCaptures:
+            input.generatedImageRetentionMaxCaptures,
+        }),
     materializeRetentionCandidatePaths: async (storedPaths) => {
       const materialized = await input.materializeWorkspaceArtifacts(storedPaths);
       return {
@@ -7310,6 +7369,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
   canonicalWriteRunnerInput: HostedWorkspaceRunnerInput;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
   expectedUserId: string;
+  generatedImageRetentionMaxCaptures: number;
   input: HostedAssistantWorkspaceRuntimeJobInput;
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
@@ -7333,6 +7393,8 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     ? buildHostedShutdownIdleMaintenanceOutcome()
     : await runHostedPendingInputProtectedIdleMaintenance({
         credentialSource: "platform",
+        generatedImageRetentionMaxCaptures:
+          input.generatedImageRetentionMaxCaptures,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
         memberId: input.input.request.userId,
         model: null,
@@ -7379,6 +7441,9 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     issueExportPort: input.issueExportPort ?? null,
     nextWakeAt: workspace.nextWakeAt ?? null,
     nextWakeReason: workspace.nextWakeReason ?? null,
+    onCanonicalWriteReceiptLogCleared: () => {
+      input.canonicalWriteRunnerInput.onCanonicalWriteReceiptLogUpdated?.(0);
+    },
     redactedStatus: workspace.redactedStatus ?? null,
     runtimeAbortSignal: input.runtimeAbortSignal,
     vaultRoot: input.vaultRoot,
@@ -8103,6 +8168,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  onCanonicalWriteReceiptLogCleared?: (() => void) | null;
   runtimeWakePendingAtCheckpoint?: boolean;
   runtimeAbortSignal: AbortSignal;
   onCheckpointValidated?: (checkpoint: HostedWorkspaceCheckpointResponse) => Promise<void> | void;
@@ -8180,6 +8246,14 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   input.assertRuntimeNotAborted();
   assertHostedWorkspaceCheckpointAccepted(checkpoint, input.expectedUserId);
   await input.onCheckpointValidated?.(checkpoint);
+  if (
+    input.retainCanonicalWriteReceiptLogStatus !== true
+    && readHostedCanonicalWriteReceiptLogStatusFingerprint(
+      checkpoint.workspace.redactedStatus,
+    ) === null
+  ) {
+    input.onCanonicalWriteReceiptLogCleared?.();
+  }
   await flushAndExportHostedRuntimeIssuesAfterCheckpointBestEffort({
     issueExportPort: input.issueExportPort ?? null,
     runtimeAbortSignal: input.runtimeAbortSignal,

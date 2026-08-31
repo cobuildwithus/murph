@@ -720,6 +720,32 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
     );
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      budget: {
+        ...workspaceInvocationRequest.budget,
+        maxMailboxItems: 101,
+      },
+    })).toThrow(
+      "Hosted workspace invocation request budget.maxMailboxItems must not exceed 100.",
+    );
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      budget: {
+        ...workspaceInvocationRequest.budget,
+        maxMailboxItems: 100,
+      },
+    }).budget?.maxMailboxItems).toBe(100);
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      budget: {
+        maxMailboxItems: null,
+      },
+    }).budget).toEqual({ maxMailboxItems: null });
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      budget: {},
+    }).budget).toEqual({});
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       processingMode: "inbox_media_retention",

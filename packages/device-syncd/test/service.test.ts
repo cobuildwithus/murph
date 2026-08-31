@@ -7463,6 +7463,85 @@ test("device sync service aborts and releases provider jobs when foreground work
   }
 });
 
+test("device sync service yields between sequential snapshot imports", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-sequential-import-yield");
+  const imports: unknown[] = [];
+  let executionCount = 0;
+  let yieldRequested = false;
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input.snapshot);
+      if (executionCount === 1 && imports.length === 1) {
+        yieldRequested = true;
+      }
+      return {
+        applied: true,
+        ok: true,
+      };
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          executionCount += 1;
+          await context.importSnapshot({
+            ordinal: 1,
+          });
+          await context.importSnapshot({
+            ordinal: 2,
+          });
+          return {};
+        },
+      }),
+    ],
+    importer,
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "sequential-import-yield",
+    });
+
+    const yieldedJob = await service.runWorkerOnce();
+
+    assert.equal(executionCount, 1);
+    assert.deepEqual(imports, [{ ordinal: 1 }]);
+    assert.equal(store.getJobById(yieldedJob!.id)?.status, "queued");
+    assert.equal(store.getJobById(yieldedJob!.id)?.attempts, 0);
+    assert.deepEqual(service.listJobFailureDiagnostics(), []);
+    assert.equal(
+      service.listJobTimingDiagnostics()[0]?.canonicalProgressCommitted,
+      true,
+    );
+
+    yieldRequested = false;
+    const completedJob = await service.runWorkerOnce();
+
+    assert.equal(completedJob?.id, yieldedJob?.id);
+    assert.equal(executionCount, 2);
+    assert.equal(imports.length, 3);
+    assert.deepEqual(imports.slice(1), [
+      { ordinal: 1 },
+      { ordinal: 2 },
+    ]);
+    assert.equal(store.getJobById(completedJob!.id)?.status, "succeeded");
+    assert.deepEqual(service.listJobFailureDiagnostics(), []);
+  } finally {
+    close();
+  }
+});
+
 test("device sync service persists refreshed tokens before yielding provider jobs", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-refresh-yield");
   const imports: unknown[] = [];

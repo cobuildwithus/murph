@@ -553,13 +553,13 @@ gate unset and makes no paid request.
   `linq-reminder-device-sync-non-starvation` hosted-local scenario is the
   cross-owner regression gate for recurring automation fairness during a
   device-sync backlog. It admits 113 distinct valid Junction resources, holds
-  the first checkpoint at the existing publication barrier after the 100-job
-  cap, then releases that barrier only after the recurring Linq reminder is
-  due. With the reminder provider response held at provider entry, it proves
-  that exactly 13 resources remain durable while exactly one scheduled
+  the first receipt-bounded positive device pass at the existing publication
+  barrier, then releases that barrier only after the recurring Linq reminder
+  is due. With the reminder provider response held at provider entry, it proves
+  that unfinished resources remain durable while exactly one scheduled
   provider request is active. It then releases the response and passively
-  observes exactly one Linq send, the backlog draining to zero, and the next
-  daily occurrence remaining projected. The scenario issues no inbound,
+  observes exactly one Linq send, at least two positive bounded device passes,
+  no failed device job, and the backlog draining to zero. The scenario issues no inbound,
   runtime, or Temporal nudge after the reminder deadline; all waits after that
   boundary are observational. Private Murph Cloud owns its dedicated
   `Public Murph Integration` matrix leg and includes that leg in the Temporal

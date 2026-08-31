@@ -24,7 +24,8 @@ Updated: 2026-08-30
   retain their existing prompt handoff behavior.
 - Focused public and private regression tests pass, existing Temporal histories
   replay, and the exact 113-job cross-repository journey delivers exactly one
-  due reminder while 13 jobs remain before the backlog converges.
+  due reminder while receipt-bounded device backlog remains before the backlog
+  converges without failed jobs.
 - Both exact-head PRs satisfy required ReviewGPT and CI gates.
 
 ## Scope
@@ -53,7 +54,8 @@ Updated: 2026-08-30
 - Product UX effort is Patch. Outcome: a requested recurring reminder arrives
   at its due time during device backlog. Reaches: the existing scheduled
   message journey. Proof: provider entry, exactly-once Linq delivery, unfinished
-  13-job backlog at delivery, two bounded device passes, and no failed jobs.
+  durable backlog at delivery, receipt-bounded device passes, complete
+  convergence, and no failed jobs.
 - Keep both PRs draft until focused proof, parent review, exact-head specialist
   and final gates, and required CI are complete.
 
@@ -71,8 +73,8 @@ Updated: 2026-08-30
    wake versions still invalidate the accepted owner.
 4. Risk: A unit fix misses the production overlap.
    Mitigation: Re-run the pinned real Temporal/public runtime journey with 113
-   jobs, the real 100-job cap, a held provider response, and database-backed
-   runtime evidence.
+   jobs, the real worker cap plus receipt-admission boundary, a held provider
+   response, and database-backed runtime evidence.
 
 ## Tasks
 
@@ -122,6 +124,13 @@ Updated: 2026-08-30
   the already-merged provider-egress and group-handoff fixture corrections.
 - Serialize the newsletter scenario's only concurrent hosted-member seed call
   site because the test helper temporarily owns process-wide environment state.
+- Treat integration attempt five's 36 dead device jobs as a pre-existing
+  receipt-capacity invariant failure exposed by the new journey. Roll exact
+  receipts forward through backward-compatible v1 compaction instead of
+  rejecting write 65, cap mailbox admission at 100, stop background admission
+  at 63 pending receipts, consolidate restored receipt history at that
+  boundary, and resume queued jobs only after an accepted pointer-clearing
+  snapshot.
 
 ## Verification
 
@@ -137,5 +146,6 @@ Updated: 2026-08-30
 - Canonical device wake and independent future default wake coexist.
 - No unchanged system probe begins before its retained retry deadline.
 - One default pass survives a facts-only signal and continue-as-new pressure.
-- The reminder enters the provider once, delivers once while 13 device jobs
-  remain, and the backlog drains in 100+13 jobs without a failed device job.
+- The reminder enters the provider once, delivers once while durable device
+  backlog remains, and receipt-bounded passes drain all 113 jobs without a
+  failed device job.

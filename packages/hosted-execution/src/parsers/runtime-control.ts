@@ -77,6 +77,7 @@ import {
   HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+  HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
@@ -7913,14 +7914,24 @@ function parseHostedWorkspaceInvocationBudget(
   label: string,
 ): HostedWorkspaceInvocationBudget {
   const record = requireObject(value, label);
+  const maxMailboxItems = record.maxMailboxItems === undefined
+    || record.maxMailboxItems === null
+    ? record.maxMailboxItems
+    : requirePositiveInteger(record.maxMailboxItems, `${label}.maxMailboxItems`);
+  if (
+    typeof maxMailboxItems === "number"
+    && maxMailboxItems > HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS
+  ) {
+    throw new TypeError(
+      `${label}.maxMailboxItems must not exceed ${HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS}.`,
+    );
+  }
 
   return {
     ...(record.maxMailboxItems === undefined
       ? {}
       : {
-          maxMailboxItems: record.maxMailboxItems === null
-            ? null
-            : requirePositiveInteger(record.maxMailboxItems, `${label}.maxMailboxItems`),
+          maxMailboxItems: maxMailboxItems ?? null,
         }),
     ...(record.maxRuntimeMs === undefined
       ? {}

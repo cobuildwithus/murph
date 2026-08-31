@@ -3798,6 +3798,8 @@ export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
 
 export type HostedWorkspaceInvocationStatus = (typeof HOSTED_WORKSPACE_INVOCATION_STATUSES)[number];
 
+export const HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS = 100;
+
 export interface HostedWorkspaceInvocationBudget {
   maxMailboxItems?: number | null;
   maxRuntimeMs?: number | null;

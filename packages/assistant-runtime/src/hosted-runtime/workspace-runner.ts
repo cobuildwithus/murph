@@ -413,6 +413,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  onCanonicalWriteReceiptLogUpdated?: ((entryCount: number) => void) | null;
   trackDeferredUsageCapture?: ((capture: HostedWorkspaceRunnerDeferredUsageCapture) => void) | null;
   trackLocalWorkspaceMutationCompletion?: ((completion: Promise<void> | null) => void) | null;
   withCanonicalWritePersistence?: (<T>(run: () => Promise<T>) => Promise<T>) | null;
@@ -421,6 +422,7 @@ export interface HostedWorkspaceRunnerInput {
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   signal?: AbortSignal | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runAssistantPhase?: (
@@ -1110,6 +1112,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
   };
   const shouldYieldBackgroundMaintenance = (): boolean => {
+    if (input.shouldYieldBackgroundMaintenance?.() === true) {
+      return true;
+    }
+
     if (
       foregroundConversationImportsInFlight > 0
       || foregroundConversationWorkObserved
@@ -2821,6 +2827,9 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         if (input.deferRuntimeStatusCheckpoint === true) {
           input.recordRedactedStatus(receiptLogStatus);
           input.checkpointRequestBuilder.markRuntimeStateDirty();
+          input.input.onCanonicalWriteReceiptLogUpdated?.(
+            receiptLogUpdate.entryCount,
+          );
         } else {
           const checkpointRedactedStatus =
             mergeHostedRuntimeRedactedStatusValues(
@@ -2853,6 +2862,9 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           input.checkpointRequestBuilder.recordStatusCheckpoint(checkpoint);
           input.recordRedactedStatus(receiptLogStatus);
           input.checkpointRequestBuilder.markRuntimeStateDirty();
+          input.input.onCanonicalWriteReceiptLogUpdated?.(
+            receiptLogUpdate.entryCount,
+          );
         }
         await writeHostedForegroundCheckpointDeferredLog({
           checkpointPhase: "canonical_write",
