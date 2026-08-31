@@ -4856,6 +4856,33 @@ function shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(
     && wakeTimeMs <= resolveHostedAssistantPhaseNowMs(phaseInput);
 }
 
+function shouldPreflightHostedAssistantCronWakeFromDefaultProjection(
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  const workspace = phaseInput.workspace;
+  if (
+    !workspace
+    || workspace.systemMailboxProgressGeneration == null
+    || !Object.hasOwn(workspace, "nextDefaultProcessingWakeAt")
+    || !Object.hasOwn(workspace, "nextDefaultProcessingWakeReason")
+  ) {
+    return false;
+  }
+
+  const wakeAt = workspace.nextDefaultProcessingWakeAt ?? null;
+  if (!wakeAt) {
+    return false;
+  }
+  const wakeReason = workspace.nextDefaultProcessingWakeReason ?? null;
+  if (wakeReason !== HOSTED_ASSISTANT_WAKE_REASON) {
+    return false;
+  }
+
+  const wakeTimeMs = Date.parse(wakeAt);
+  return Number.isFinite(wakeTimeMs)
+    && wakeTimeMs <= resolveHostedAssistantPhaseNowMs(phaseInput);
+}
+
 async function resolveDueModelFreeSystemMailboxOwnerSelection(
   input: {
     pendingAssistantInputWakeAt: string | null;
@@ -5887,6 +5914,25 @@ async function runSystemMailboxMaintenancePhase(input: {
       pendingAssistantInputWakeAt,
       result: null,
     };
+  }
+
+  if (
+    pendingAssistantInputBlocksMaintenance
+    && !foregroundCausalAttempted
+    && !hasBackgroundSelection
+    && shouldPreflightHostedAssistantCronWakeFromDefaultProjection(phaseInput)
+  ) {
+    const preflightAssistantCronWakeState = await readAssistantCronWakeState();
+    if (preflightAssistantCronWakeState.dueNow) {
+      return {
+        backgroundMaintenanceYielded: false,
+        continueAssistantLane: true,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt: null,
+        result: null,
+      };
+    }
   }
 
   let deferSystemMailboxPreparationForDelivery = false;

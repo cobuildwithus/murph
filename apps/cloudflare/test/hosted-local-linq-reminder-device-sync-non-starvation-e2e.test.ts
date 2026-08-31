@@ -229,7 +229,6 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       reminderPath,
       (request) => activeLinqStub.readObservedMessageText(request) === reminderText,
     );
-    const runtimeLogsFrom = new Date(Date.now() - 1_000);
     let devicePassStagingObservationArmed = false;
     let checkpointBarrierArmed = false;
 
@@ -237,6 +236,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       await sleepUntil(new Date(
         Date.parse(schedule.dueAtIso) - deviceSyncReminderOverlapLeadMs,
       ).toISOString());
+      const runtimeLogsFrom = new Date(Date.now() - 1_000);
       // The pass persists its retry fence before draining jobs. Hold that
       // checkpoint acknowledgement while arming the post-pass publication gate.
       await activeScenario.harness
@@ -647,6 +647,7 @@ async function waitForDeviceSyncPassFinished(input: {
 interface RuntimeAdmissionObservation {
   acceptedAt: string;
   orchestrationAttemptId: string;
+  workspaceAttemptId: string;
 }
 
 async function countFirstSystemMailboxAdmissionWindow(input: {
@@ -660,7 +661,7 @@ async function countFirstSystemMailboxAdmissionWindow(input: {
 
   while (Date.now() < deadline) {
     for (const admission of listRuntimeAdmissionsSince(input.notBefore)) {
-      observedAdmissions.set(admission.orchestrationAttemptId, admission);
+      observedAdmissions.set(admission.workspaceAttemptId, admission);
     }
     admissions = [...observedAdmissions.values()].sort((left, right) =>
       Date.parse(left.acceptedAt) - Date.parse(right.acceptedAt)
@@ -716,12 +717,14 @@ function listRuntimeAdmissionsSince(
       || typeof parsed.details.orchestrationAttemptId !== "string"
       || parsed.details.orchestrationAttemptId.startsWith("hosted-local-wake:")
       || typeof parsed.details.runtimeProcessingAction !== "string"
+      || typeof parsed.details.workspaceAttemptId !== "string"
     ) {
       continue;
     }
-    admissions.set(parsed.details.orchestrationAttemptId, {
+    admissions.set(parsed.details.workspaceAttemptId, {
       acceptedAt: parsed.time,
       orchestrationAttemptId: parsed.details.orchestrationAttemptId,
+      workspaceAttemptId: parsed.details.workspaceAttemptId,
     });
   }
   return [...admissions.values()].sort((left, right) =>
