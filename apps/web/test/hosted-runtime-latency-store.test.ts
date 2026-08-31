@@ -14,6 +14,7 @@ import {
   type HostedIngressLatencyDashboardInput,
 } from "@/src/lib/hosted-runtime-latency/store";
 import {
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
 } from "@murphai/hosted-execution/runtime-control";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -2557,6 +2558,14 @@ describe("hosted runtime latency dashboard store", () => {
       wake: { foregroundImportStartedAtEpochMs: 1_777_000_001_011 },
     });
     const setBasedSql = prisma.readSetBasedMutationSql().join("\n");
+    const sharedRuleKinds = new Set(
+      Object.values(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES)
+        .flatMap((phaseRules) => Object.values(phaseRules))
+        .map((rule) => rule.kind),
+    );
+    for (const ruleKind of sharedRuleKinds) {
+      expect(setBasedSql).toContain(`WHEN '${ruleKind}'`);
+    }
     expect(setBasedSql).toContain("WHEN 'opaque_identifier'");
     expect(setBasedSql).toContain("length(leaf.value #>> '{}') <= 192");
     expect(setBasedSql).toContain("~ '^[A-Za-z0-9][A-Za-z0-9._:-]*$'");

@@ -963,6 +963,7 @@ function buildAssistantRouteSystemPromptResult(input: {
     channel: input.resolvedChannel,
     canonicalTimeZoneAvailable:
       input.planInput.promptTimeContext.canonicalTimeZoneAvailable !== false,
+    currentInstant: input.planInput.promptTimeContext.currentInstant,
     currentLocalDate: input.planInput.promptTimeContext.currentLocalDate,
     currentTimeZone: input.planInput.promptTimeContext.currentTimeZone,
     conversationScope: input.conversationScope,

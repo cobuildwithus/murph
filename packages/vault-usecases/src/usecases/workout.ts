@@ -120,6 +120,7 @@ export interface AddWorkoutRecordInput {
 
 export interface ResolveWorkoutCaptureInput {
   text: string
+  title?: string
   durationMinutes?: number
   defaultDurationMinutes?: number
   activityType?: string
@@ -128,7 +129,7 @@ export interface ResolveWorkoutCaptureInput {
 }
 
 export interface ResolvedWorkoutCapture {
-  note: string
+  note?: string
   title: string
   activityType: string
   durationMinutes: number
@@ -139,11 +140,7 @@ export interface ResolvedWorkoutCapture {
 export function resolveWorkoutCapture(
   input: ResolveWorkoutCaptureInput,
 ): ResolvedWorkoutCapture {
-  const note = normalizeOptionalText(input.text)
-  if (!note) {
-    throw new VaultCliError('contract_invalid', 'Workout text is required.')
-  }
-
+  const note = normalizeOptionalText(input.text) ?? undefined
   const activity = resolveWorkoutActivityDescriptor(input.activityType)
   const durationMinutes = resolveDurationMinutes(
     input.durationMinutes,
@@ -154,7 +151,9 @@ export function resolveWorkoutCapture(
 
   return {
     note,
-    title: buildWorkoutTitle(activity.activityType, durationMinutes),
+    title:
+      normalizeOptionalText(input.title)
+      ?? buildWorkoutTitle(activity.activityType, durationMinutes),
     activityType: activity.activityType,
     durationMinutes,
     distanceKm,
@@ -423,7 +422,7 @@ export async function addStructuredWorkoutRecord(input: {
       distanceKm: typeof result.event.distanceKm === 'number' ? result.event.distanceKm : null,
       workout: result.event.workout ?? null,
       manifestFile: result.manifestPath,
-      note: result.event.note ?? result.event.title,
+      note: result.event.note ?? null,
     }
   } catch (error) {
     throw toEventUpsertVaultCliError(error)
@@ -490,6 +489,7 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
   } else {
     const capture = resolveWorkoutCapture({
       text: input.text ?? '',
+      title: input.title,
       durationMinutes: input.durationMinutes,
       defaultDurationMinutes,
       activityType: input.activityType,
@@ -500,7 +500,7 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
       occurredAt: input.occurredAt ?? new Date().toISOString(),
       source: input.source ?? 'manual',
       title: capture.title,
-      note: capture.note,
+      ...(capture.note ? { note: capture.note } : {}),
       activityType: capture.activityType,
       durationMinutes: capture.durationMinutes,
       ...(typeof capture.distanceKm === 'number'

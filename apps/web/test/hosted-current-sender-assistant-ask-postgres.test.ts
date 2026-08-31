@@ -28,7 +28,7 @@ import {
   HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
   readHostedMailboxWakeByItemId,
 } from "@/src/lib/hosted-mailbox/store";
-import { runHostedRetentionCleanup } from "@/src/lib/hosted-retention/cleanup";
+import { runHostedControlPlaneRetentionCleanup } from "@/src/lib/hosted-retention/cleanup";
 import { checkpointHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import {
   upsertHostedMemberTelegramRoutingBindingTx,
@@ -109,10 +109,9 @@ describe.skipIf(!runPostgresProof)(
         );
 
         const expiredAt = new Date(now.getTime() + 11 * 60 * 1_000);
-        await runHostedRetentionCleanup({
+        await runHostedControlPlaneRetentionCleanup({
           now: expiredAt,
           prisma,
-          signalRuntimeRecheck: async () => undefined,
         });
         await expect(prisma.hostedMailboxItem.findMany({
           orderBy: { id: "asc" },
@@ -146,10 +145,9 @@ describe.skipIf(!runPostgresProof)(
           userId: recoverable.senderMemberId,
         });
         const settledCleanupAt = new Date(expiredAt.getTime() + 1_000);
-        await runHostedRetentionCleanup({
+        await runHostedControlPlaneRetentionCleanup({
           now: settledCleanupAt,
           prisma,
-          signalRuntimeRecheck: async () => undefined,
         });
         await expect(prisma.hostedMailboxItem.findUniqueOrThrow({
           select: { contentRetiredAt: true, retentionDisposition: true },
@@ -162,10 +160,9 @@ describe.skipIf(!runPostgresProof)(
         const privacyDeadline = new Date(
           abandonedRequest.createdAt.getTime() + 14 * 24 * 60 * 60 * 1_000,
         );
-        await runHostedRetentionCleanup({
+        await runHostedControlPlaneRetentionCleanup({
           now: privacyDeadline,
           prisma,
-          signalRuntimeRecheck: async () => undefined,
         });
         await expect(handleHostedRuntimeAssistantAskControl({
           boundRuntimeMemberId: abandoned.senderMemberId,
