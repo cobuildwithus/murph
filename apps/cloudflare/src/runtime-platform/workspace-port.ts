@@ -32,6 +32,9 @@ import {
   HostedWebControlPlaneResponseError,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
+import {
+  matchesRequestedHostedSystemProgressProjection,
+} from "./workspace-progress-projection.ts";
 
 export function createHostedWebWorkspacePort(input: {
   boundUserId: string;
@@ -248,6 +251,10 @@ function isExactCanonicalCheckpointSuccessor(input: {
       === (input.request.inboxMediaRetentionWakeAt ?? null)
     && (workspace.nextWakeAt ?? null) === (input.request.nextWakeAt ?? null)
     && (workspace.nextWakeReason ?? null) === (input.request.nextWakeReason ?? null)
+    && matchesRequestedHostedSystemProgressProjection({
+      request: input.request,
+      workspace,
+    })
     && areJsonValuesEqual(workspace.snapshotRef, input.request.snapshotRef)
     && areJsonValuesEqual(
       workspace.redactedStatus ?? null,

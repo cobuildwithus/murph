@@ -831,8 +831,8 @@ export const vaultCliCommandDescriptors = [
         'resolveWorkoutImportStatusForRawSource',
       ],
     },
-    register({ cli, services }) {
-      registerDocumentCommands(cli, services)
+    register({ cli, services, inboxServices }) {
+      registerDocumentCommands(cli, services, inboxServices)
     },
   },
   {

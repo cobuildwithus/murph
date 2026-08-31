@@ -1102,11 +1102,10 @@ class CodexAppServerProcess {
     this.launchKey = input.launchKey
 
     const useProcessGroup = process.platform !== 'win32'
-    // The warm app-server outlives hosted workspace restores, which delete and
-    // recreate the workspace path between invocations. A process anchored to
-    // that directory keeps a dead cwd inode, and Codex config loading then
-    // fails with ENOENT on the next thread/start. Threads receive the real
-    // workspace via the explicit per-thread `cwd` param instead.
+    // Keep the process cwd outside the restorable workspace. Hosted restore
+    // stops this process before replacing or sanitizing Codex home, while
+    // threads receive the restored workspace through the explicit per-thread
+    // `cwd` param.
     this.child = spawn(input.codexCommand, [...input.args], {
       cwd: tmpdir(),
       detached: useProcessGroup,

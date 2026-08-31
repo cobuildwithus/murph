@@ -169,6 +169,7 @@ test("device sync registry requires refresh support for refreshable OAuth creden
           ...descriptor("demo", {
             kind: "oauth2",
             callbackPath: "/oauth/demo/callback",
+            defaultScopes: [],
           }),
           sync: {
             windows: {

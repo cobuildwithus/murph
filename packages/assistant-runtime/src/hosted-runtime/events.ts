@@ -138,6 +138,9 @@ export async function executeHostedMailboxEvent(input: {
       : {}),
     postCheckpointRecord: mailboxEffect.postCheckpointRecord,
     redactedLogEntries: mailboxEffect.redactedLogEntries ?? [],
+    ...(mailboxEffect.systemProgressed === true
+      ? { systemProgressed: true as const }
+      : {}),
   };
 }
 
@@ -380,6 +383,9 @@ async function executeHostedSystemWake(input: {
         nextWakeAt: nextWake.at,
         ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
         postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
+        ...(deviceSyncMetrics.systemProgressed === true
+          ? { systemProgressed: true as const }
+          : {}),
       });
     case "environment-voice.captured": {
       const { executeHostedEnvironmentVoiceWake } = await import(

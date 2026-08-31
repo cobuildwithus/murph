@@ -1475,6 +1475,32 @@ fi
     expect(workspaceVerify).toContain("run_diff_package_boundary_verification");
   });
 
+  it("generates hosted web Prisma before Cloudflare typecheck fanout", () => {
+    const runTypecheckPackages = extractWorkspaceVerifyFunction(
+      "run_typecheck_packages",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+typecheck_workspace_concurrency=2
+run_command_with_retry() { printf '%s\\n' "$*"; }
+
+${runTypecheckPackages}
+
+run_typecheck_packages apps/cloudflare
+printf 'separator\\n'
+run_typecheck_packages packages/cli
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "Hosted web Prisma client pnpm --dir apps/web prisma:generate\n" +
+        "Workspace package typecheck pnpm -r --no-sort --workspace-concurrency=2 --filter ./apps/cloudflare typecheck\n" +
+        "separator\n" +
+        "Workspace package typecheck pnpm -r --no-sort --workspace-concurrency=2 --filter ./packages/cli typecheck\n",
+    );
+  });
+
   it("propagates affected package fanout failures before boundary checks", () => {
     const runTestDiffPackageTests = extractWorkspaceVerifyFunction(
       "run_test_diff_package_tests",

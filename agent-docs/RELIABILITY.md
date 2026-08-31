@@ -310,6 +310,19 @@ Last verified: 2026-08-30
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- Hosted background admission uses one capability-scoped projection on the
+  existing workspace checkpoint row. A capable runtime checkpoints an absolute
+  `systemMailboxProgressGeneration` plus the independently calculated next
+  default-processing wake; the generation stays equal or advances by exactly
+  one only after explicitly proven durable system progress. Legacy checkpoints
+  clear the projection atomically so an older runtime disables the gate instead
+  of preserving stale authority. Orchestration may delay repeated system-only
+  processing for 30 seconds, two minutes, then ten minutes while the progress
+  generation and handled-through frontier remain unchanged. Workspace-version,
+  attempt, signal, and selected-wake churn are not progress. Due foreground,
+  default-processing, provider-owned, and retention work bypasses the delay
+  without clearing it. This reuses the workspace CAS and Temporal timer owners;
+  it adds no queue, scheduler, per-member state table, or second wake authority.
 - A hosted-group projection grant that needs its first private projection and
   one generation-stable `runtime.maintenance-requested` control row commit in
   the same Web transaction. An append failure therefore rolls back the grant
@@ -377,7 +390,12 @@ Last verified: 2026-08-30
 - `packages/assistant-engine` owns one resident Codex App Server process and one
   memoized readiness promise on that process. Readiness covers spawn plus the
   App Server initialization handshake; it does not reserve the process for a
-  turn. Matching preparation callers join that same promise, while a matching
+  turn. Its warmth is scoped to one restored workspace: the Cloudflare
+  container invocation boundary synchronously stops the exact engine-owned
+  process before it starts any hosted restore path that validates, replaces,
+  clears, or sanitizes Codex home, so the replacement rebuilds private indexes
+  against the restored home. Matching preparation callers join that same
+  promise, while a matching
   foreground turn synchronously reserves the exact process before joining its
   readiness. Hosted preparation is a one-shot decision from the first fresh
   auto-reply-enabled pre-pass conversation candidate: Linq or Telegram may admit
@@ -748,12 +766,20 @@ Last verified: 2026-08-30
 - Account deletion must not discard its only external-cleanup owner. The
   canonical account transaction persists the KMS-encrypted, foreign-key-free
   receipt before deleting the member. The existing hourly retention sweep
-  retries Cloudflare, Stripe-customer, and Privy-user targets independently;
+  retries Cloudflare, isolated runtime-log deletion, Temporal workflow
+  termination, Stripe-customer, and Privy-user targets independently;
   confirmed absence is idempotent success, completed targets are skipped, and
-  unconfigured, timed-out, or ambiguous targets remain pending. The deletion
-  request returns `cleanupPending` immediately after the canonical transaction
-  instead of waiting on those providers. Each retention attempt has a bounded
-  target deadline, and the bounded batch runs receipts concurrently so one
+  unconfigured, timed-out, or ambiguous targets remain pending. Temporal is
+  complete only after every captured runtime workflow is terminated or
+  confirmed absent. Its receipt stores the first unconfirmed runtime index in
+  the immutable encrypted identifier order, advances that cursor only through
+  contiguous successful batches of four, and applies retry backoff only when
+  the cursor does not move. Its predeploy expansion uses a nullable column with
+  default zero for existing receipts and old-Web inserts; the exact-deployment
+  postdrain contract lane fails on any null before requiring the column. The
+  deletion request returns `cleanupPending` immediately after the canonical
+  transaction instead of waiting on those targets. Each retention attempt has
+  a bounded target deadline, and the bounded batch runs receipts concurrently so one
   stalled vendor does not block unrelated retention work. Because every
   provider delete is idempotent and progress is monotonic, concurrent attempts
   may duplicate a provider request but cannot erase completed progress or

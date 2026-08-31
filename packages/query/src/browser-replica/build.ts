@@ -76,17 +76,19 @@ export async function createBrowserVaultReplica(
   const allMetricPoints = input.metricPoints;
   const requestedMetrics = collectRequestedBrowserVaultMetrics(defaultProjectedVault.entities);
   const explicitRequestedMetrics = collectExplicitBrowserVaultMetrics(defaultProjectedVault.entities);
+  const requestedMetricKeys = new Set(requestedMetrics.map((metric) => metric.metricKey));
+  const explicitRequestedMetricKeys = new Set(explicitRequestedMetrics.map((metric) => metric.metricKey));
   const anchoredMetricRecords = collectExperimentMeasurementAnchorRecords(defaultProjectedVault.entities);
   const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
   const metricPoints = allMetricPoints.filter((point) =>
-    isBrowserVaultMetricRowPoint(point, requestedMetrics) &&
+    isBrowserVaultMetricRowPoint(point, requestedMetricKeys) &&
     (point.effectiveDate >= cutoff || isAnchoredBrowserMetricPoint(point, anchoredMetricRecords))
   );
   const selectionMetricPoints = allMetricPoints.filter((point) =>
-    isBrowserVaultRequestedMetricPoint(point, requestedMetrics) &&
+    isBrowserVaultRequestedMetricPoint(point, requestedMetricKeys) &&
     (point.effectiveDate >= cutoff ||
       isAnchoredBrowserMetricPoint(point, anchoredMetricRecords) ||
-      isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetrics))
+      isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetricKeys))
   );
   await yieldToBrowserVaultReplicaCancellation(input.signal);
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
@@ -365,18 +367,18 @@ function dedupeRequestedMetrics(metrics: readonly BrowserVaultRequestedMetric[])
 // metric-SELECTION surface keeps its stricter requested-only gate.
 function isBrowserVaultMetricRowPoint(
   point: MetricPoint,
-  requestedMetrics: readonly BrowserVaultRequestedMetric[],
+  requestedMetricKeys: ReadonlySet<string>,
 ): boolean {
-  return isBrowserVaultRequestedMetricPoint(point, requestedMetrics)
+  return isBrowserVaultRequestedMetricPoint(point, requestedMetricKeys)
     || point.source.kind === "test-result"
     || point.source.kind === "observation";
 }
 
 function isBrowserVaultRequestedMetricPoint(
   point: MetricPoint,
-  requestedMetrics: readonly BrowserVaultRequestedMetric[],
+  requestedMetricKeys: ReadonlySet<string>,
 ): boolean {
-  return requestedMetrics.some((metric) => metric.metricKey === point.metricKey);
+  return requestedMetricKeys.has(point.metricKey);
 }
 
 function isActiveGoalEntity(entity: CanonicalEntity): boolean {
