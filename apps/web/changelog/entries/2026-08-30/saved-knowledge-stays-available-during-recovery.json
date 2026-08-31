@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "saved-knowledge-stays-available-during-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Saved knowledge stays available during recovery",
+    "summary": "Murph can keep using valid saved knowledge when another saved item needs repair.",
+    "details": "Affected reads now say when results are incomplete, preserve clear result counts, and point to a bounded repair check. A damaged requested item is also distinguished from one that does not exist.",
+    "relevanceTags": ["assistant", "context", "reliability"],
+    "sourcePullRequests": [2625]
+  }
+}
