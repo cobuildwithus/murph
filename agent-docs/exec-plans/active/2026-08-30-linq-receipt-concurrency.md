@@ -2,7 +2,7 @@
 
 Status: blocked on ReviewGPT implementation availability
 Created: 2026-08-30
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 ## Goal
 
@@ -75,6 +75,11 @@ Updated: 2026-08-30
 - Active PR #2634 is non-overlapping: it changes only planner decomposition in
   `webhook-provider-linq.ts` and explicitly preserves persistence and retry
   behavior; the selected owner boundary is the provider-event/delivery store.
+- A handoff-time refresh found new PR #2645, but its diff is limited to
+  identity-less Linq transport-response validation in `packages/operator-config`;
+  it does not touch delivery or provider-event persistence. No post-cut commit
+  on `origin/main` changed either selected owner file. The new adjacent PR is
+  therefore not an exact owner or non-coexistence conflict.
 - The local real-PostgreSQL diagnostic deterministically reproduces the
   production state: after both overlapping transactions commit, the provider
   event is durable while the delivery remains `accepted` with null terminal
