@@ -81,7 +81,7 @@ cd apps/web && pnpm typecheck
 
 ## Rules
 
-- Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend implementation has no separate implementation-model requirement. Follow `agent-docs/operations/completion-workflow.md` for routed browser proof, the frontend lens inside the preliminary `completion-specialists` ReviewGPT pass, and any independently applicable final ReviewGPT gate.
+- Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend implementation has no separate implementation-model requirement. Follow `agent-docs/operations/completion-workflow.md` for parent-owned browser proof, responsive and accessibility review, and any independently applicable final ReviewGPT gate.
 - Follow `agent-docs/operations/product-ux.md` before and after code. Treat
   loading time, progress, skeletons, empty, partial, stale, error, and recovery
   states as part of the product experience.
@@ -102,9 +102,9 @@ cd apps/web && pnpm typecheck
   resolution so ordinary body copy is legible.
 - The `Pull request evidence` check requires a dedicated `Design proof` section
   with an absolute anchored `Design page` link plus risk-matched `Evidence` and
-  `Coverage` for user-facing UI diffs. It validates structure only. The
-  preliminary frontend review owns repository origin, reachability, currentness,
-  and representation quality; refresh an expired or inaccessible preview. The
+  `Coverage` for user-facing UI diffs. It validates structure only. The parent
+  review owns repository origin, reachability, currentness, and representation
+  quality; refresh an expired or inaccessible preview. The
   check does not impose a screenshot count. Design and screenshot-study-only
   changes are exempt so those references can be maintained independently.
   Existing `page.tsx` and `layout.tsx` files also receive a narrow metadata-only

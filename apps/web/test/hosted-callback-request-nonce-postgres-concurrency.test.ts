@@ -261,6 +261,102 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     }, 20_000);
 
+    it("drains sustained full batches above ingress while fresh inserts stay responsive", async () => {
+      const fixtureId = randomUUID();
+      const noncePrefix = `nonce_capacity_${fixtureId}_`;
+      const userId = `member_capacity_${fixtureId}`;
+      const expiredAt = new Date("2000-01-01T00:00:00.000Z");
+      const freshExpiresAt = new Date("9999-12-31T23:59:59.999Z");
+      const expiredRowCount = 100_000;
+      const freshInsertCount = 20;
+      const redactedPeakHourlyIngressUpperBound = 250_000;
+      const cleanupRouteDurationMs = 800_000;
+      const foregroundInsertLatencyBoundMs = 5_000;
+      const cleanupClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const insertClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const clients = [cleanupClient, insertClient, observer];
+      const freshNonceHashes = Array.from(
+        { length: freshInsertCount },
+        (_, index) => `${noncePrefix}fresh_${index}`,
+      );
+
+      try {
+        await observer.$executeRaw`
+          INSERT INTO "hosted_web_internal_request_nonce" (
+            "nonce_hash",
+            "user_id",
+            "method",
+            "path",
+            "search",
+            "created_at",
+            "expires_at"
+          )
+          SELECT
+            ${noncePrefix} || lpad(generated.sequence_number::text, 8, '0'),
+            ${userId},
+            'POST',
+            '/api/internal/hosted-runtime/log',
+            '',
+            ${expiredAt},
+            ${expiredAt}
+          FROM generate_series(
+            1,
+            ${expiredRowCount}::integer
+          ) AS generated(sequence_number)
+        `;
+
+        const cleanupStartedAt = performance.now();
+        const cleanup = deleteExpiredHostedCallbackRequestNonces({
+          prisma: cleanupClient,
+        });
+        const admissionLatenciesMs: number[] = [];
+        const admissions = (async () => {
+          const store = new PrismaHostedCallbackRequestNonceStore(insertClient);
+          for (const nonceHash of freshNonceHashes) {
+            const startedAt = performance.now();
+            await expect(store.consumeHostedCallbackRequestNonce({
+              expiresAt: freshExpiresAt.toISOString(),
+              method: "POST",
+              nonceHash,
+              now: "2026-08-30T12:00:00.000Z",
+              path: "/api/internal/hosted-runtime/log",
+              search: "",
+              userId,
+            })).resolves.toBe(true);
+            admissionLatenciesMs.push(performance.now() - startedAt);
+          }
+        })();
+        const [deleted] = await withDeadline(
+          Promise.all([cleanup, admissions]),
+          120_000,
+        );
+        const cleanupElapsedMs = performance.now() - cleanupStartedAt;
+        const realizedHourlyThroughput =
+          deleted * 60 * 60 * 1_000 / Math.max(cleanupElapsedMs, 1);
+
+        expect(deleted).toBeGreaterThanOrEqual(expiredRowCount);
+        expect(realizedHourlyThroughput).toBeGreaterThan(
+          redactedPeakHourlyIngressUpperBound * 2,
+        );
+        expect(cleanupElapsedMs).toBeLessThan(cleanupRouteDurationMs);
+        expect(Math.max(...admissionLatenciesMs)).toBeLessThan(
+          foregroundInsertLatencyBoundMs,
+        );
+        await expect(observer.hostedWebInternalRequestNonce.count({
+          where: { nonceHash: { in: freshNonceHashes } },
+        })).resolves.toBe(freshInsertCount);
+      } finally {
+        try {
+          await observer.hostedWebInternalRequestNonce.deleteMany({
+            where: { nonceHash: { startsWith: noncePrefix } },
+          });
+        } finally {
+          await disconnectAll(clients);
+        }
+      }
+    }, 150_000);
+
     it("fails closed when same-nonce admission resumes after retention commits past expiry", async () => {
       const fixtureId = randomUUID();
       const nonceHash = `nonce_expiry_retention_${fixtureId}`;

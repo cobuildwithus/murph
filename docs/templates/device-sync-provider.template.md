@@ -12,7 +12,6 @@ Use this together with the importer adapter template so transport and normalizat
 ```ts
 import {
   ACME_DEVICE_PROVIDER_DESCRIPTOR,
-  requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
 
@@ -47,7 +46,7 @@ import type {
 } from "../types.ts";
 
 const ACME_DESCRIPTOR = ACME_DEVICE_PROVIDER_DESCRIPTOR;
-const ACME_OAUTH = requireDeviceProviderOAuthDescriptor(ACME_DESCRIPTOR);
+const ACME_CONNECTION = ACME_DESCRIPTOR.connection;
 const ACME_SYNC = requireDeviceProviderSyncDescriptor(ACME_DESCRIPTOR);
 
 const DEFAULT_ACME_BASE_URL = "https://api.acme.example";
@@ -111,12 +110,10 @@ export function createAcmeDeviceSyncProvider(
   const reconcileIntervalMs = config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS;
   const descriptor = {
     ...ACME_DESCRIPTOR,
-    oauth: ACME_DESCRIPTOR.oauth
-      ? {
-          ...ACME_DESCRIPTOR.oauth,
-          defaultScopes: [...(config.scopes ?? ACME_DESCRIPTOR.oauth.defaultScopes)],
-        }
-      : undefined,
+    connection: {
+      ...ACME_CONNECTION,
+      defaultScopes: [...(config.scopes ?? ACME_CONNECTION.defaultScopes)],
+    },
     sync: {
       ...ACME_DESCRIPTOR.sync,
       windows: {
@@ -127,7 +124,7 @@ export function createAcmeDeviceSyncProvider(
       },
     },
   };
-  const defaultScopes = [...(descriptor.oauth?.defaultScopes ?? [])];
+  const defaultScopes = [...descriptor.connection.defaultScopes];
 
   async function postTokenRequest(parameters: Record<string, string>) {
     return postOAuthTokenRequest<AcmeTokenResponse>({

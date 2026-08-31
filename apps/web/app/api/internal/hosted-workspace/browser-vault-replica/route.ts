@@ -43,10 +43,17 @@ export const POST = withJsonError(async (request: Request) => {
       browserVaultReplicaRef: result.workspace.browserVaultReplicaRef,
       checkpointedAt: result.workspace.checkpointedAt,
       createdAt: result.workspace.createdAt,
+      inboxMediaRetentionWakeAt: result.workspace.inboxMediaRetentionWakeAt,
+      nextDefaultProcessingWakeAt:
+        result.workspace.nextDefaultProcessingWakeAt,
+      nextDefaultProcessingWakeReason:
+        result.workspace.nextDefaultProcessingWakeReason,
       nextWakeAt: result.workspace.nextWakeAt,
       nextWakeReason: result.workspace.nextWakeReason,
       redactedStatus: result.workspace.redactedStatusJson,
       snapshotRef: result.workspace.snapshotRef,
+      systemMailboxProgressGeneration:
+        result.workspace.systemMailboxProgressGeneration,
       updatedAt: result.workspace.updatedAt,
       userId: result.workspace.userId,
       version: result.workspace.version,
