@@ -123,7 +123,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       platforms:
         "iOS, Android, and Apple Watch. CareClinic also documents a limited legacy web interface for basic logging.",
       pricing:
-        "A free version is available. Premium is offered as monthly, annual, and lifetime purchases, with final prices varying by platform and promotion.",
+        "CareClinic is available as a free download. Premium offers monthly, annual, and lifetime plans; verify the final amount in checkout.",
       primaryJob:
         "Help an individual document symptoms, treatments, behaviors, and outcomes in a consistent condition-management routine.",
     },
@@ -133,9 +133,9 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       format: [1],
       hardware: [2],
       inputs: [1, 2],
-      insightStyle: [1],
+      insightStyle: [1, 5],
       platforms: [1, 4],
-      pricing: [3],
+      pricing: [3, 5],
       primaryJob: [1],
     },
     faqs: [
@@ -180,6 +180,10 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       {
         label: "CareClinic web browser support",
         url: "https://start.careclinic.io/knowledgebase/settings-menu/can-i-log-data-on-my-desktop-web-browser/202/",
+      },
+      {
+        label: "CareClinic app features",
+        url: "https://careclinic.io/features/",
       },
     ],
     tradeoffs: [
@@ -298,7 +302,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       clinicalRole:
         "A consumer quantified-self analytics service, not a medical record, diagnostic service, or clinical-care platform.",
       followThrough:
-        "Daily insights, weekly summaries, mood prompts, custom tracking, goals, and self-directed personal experiments.",
+        "Daily insights, weekly summaries, mood prompts, custom tracking, and self-directed personal experiments.",
       format:
         "A full web dashboard with iOS and Android companion apps, integration feeds, charts, correlations, and custom attributes.",
       hardware:
@@ -389,13 +393,13 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       clinicalRole:
         "A consumer wellness dashboard and coaching product. It is not an electronic health record or substitute for medical diagnosis and treatment.",
       followThrough:
-        "Daily reports, quests, goals, reminders, meditations, AI coaching, and optional human coaching on Max plans.",
+        "Daily reports, goals, meditations, AI coaching, and optional human coaching on Max plans.",
       format:
         "An iPhone-first visual dashboard with Health Score, Daily Reports, timelines, photo-based food logging, and coaching layers.",
       hardware:
         "No proprietary tracker is required, but Apple Health and iPhone are foundational. Apple Watch, Oura, and other supported sources can deepen the data.",
       inputs:
-        "Sleep, workouts, recovery, heart data, food photos, mood, weight, body composition, places, productivity, blood biomarkers, and supported connected services.",
+        "Food photos, sleep, workouts, steps, mood, places, productivity, blood biomarkers, and supported connected services.",
       insightStyle:
         "Automated Daily Reports and Health Score summaries pair with an AI coach. Max memberships can add a human coach.",
       platforms:
@@ -410,9 +414,9 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       followThrough: [1, 2, 3],
       format: [1, 3],
       hardware: [1],
-      inputs: [1],
+      inputs: [1, 3],
       insightStyle: [1],
-      platforms: [2],
+      platforms: [1, 2],
       pricing: [2],
       primaryJob: [1],
     },
@@ -584,7 +588,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       inputs:
         "Activity, workouts, routes, sleep, weight, nutrition, glucose, blood pressure, and other fields from more than 50 supported services, subject to source-specific permissions.",
       insightStyle:
-        "Dashboards, custom visualizations, comparisons, and rule-based analysis. A public beta MCP server can expose data to external AI clients, but FitnessSyncer is not itself a native conversational coach.",
+        "Dashboards, custom visualizations, comparisons, and rule-based analysis. An MCP server can expose data to external AI clients, but FitnessSyncer is not itself a native conversational coach.",
       platforms:
         "Web, iOS, and Android.",
       pricing:
@@ -599,7 +603,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       hardware: [2],
       inputs: [2],
       insightStyle: [1, 4],
-      platforms: [1],
+      platforms: [1, 5],
       pricing: [3],
       primaryJob: [1, 2],
     },
@@ -616,7 +620,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Not by itself. FitnessSyncer offers charts, Daily Analyzer, rules, and reports. Its beta MCP server can let compatible external AI clients query authorized data, but that is separate from a built-in health coach.",
+          "Not by itself. FitnessSyncer offers charts, Daily Analyzer, rules, and reports. Its MCP server can let compatible external AI clients query authorized data, but that is separate from a built-in health coach.",
         question: "Does FitnessSyncer include an AI coach?",
       },
     ],
@@ -626,7 +630,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       "Compare Murph with FitnessSyncer for cross-app data syncing, dashboards, supported services, external AI access, pricing, platforms, and best use cases.",
     name: "FitnessSyncer",
     overview:
-      "FitnessSyncer is a consumer data hub built to synchronize activity and wellness information among more than 50 services. It also provides a unified stream, archival history, custom charts, goals, reports, and a beta MCP connection for external AI clients. Murph is not a sync utility: it is an ongoing conversational health assistant focused on context, decisions, and follow-through.",
+      "FitnessSyncer is a consumer data hub built to synchronize activity and wellness information among more than 50 services. It also provides a unified stream, archival history, custom charts, goals, reports, and an MCP connection for external AI clients. Murph is not a sync utility: it is an ongoing conversational health assistant focused on context, decisions, and follow-through.",
     relationship: "different-role",
     slug: "fitnesssyncer",
     sources: [
@@ -646,11 +650,15 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         label: "FitnessSyncer MCP server",
         url: "https://www.fitnesssyncer.com/support/mcp-server",
       },
+      {
+        label: "FitnessSyncer downloads",
+        url: "https://www.fitnesssyncer.com/downloads",
+      },
     ],
     tradeoffs: [
       "FitnessSyncer has unusually broad service coverage, but each provider controls which fields can be read or written.",
       "Its emphasis is fitness and wellness data routing, not clinical-record retrieval or longitudinal coaching.",
-      "The MCP server is a beta bridge to third-party AI software rather than a native assistant inside FitnessSyncer.",
+      "The MCP server is a bridge to third-party AI software rather than a native assistant inside FitnessSyncer.",
     ],
   },
   {

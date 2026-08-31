@@ -117,13 +117,13 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       "Choose Murph when you want help interpreting health information alongside records, goals, symptoms, meals, workouts, and life constraints, then turning that understanding into practical next steps.",
     competitor: {
       clinicalRole:
-        "Consumer wellness product. Oura says the ring is not a medical device for diagnosing or treating conditions, and several health features are region-specific.",
+        "Consumer wellness product. Oura says the ring is not a medical device for diagnosing or treating conditions.",
       followThrough:
-        "Daily scores, stress and resilience guidance, activity prompts, trends, reports, and app-based recommendations through Oura Advisor.",
+        "Daily scores, stress and resilience guidance, activity prompts, trends, reports, and recommendations in the Oura app.",
       format:
         "A titanium smart ring with no display, paired with the Oura app for syncing, scores, trends, reports, and guidance.",
       hardware:
-        "Oura Ring 5 comes in whole sizes 6 through 13, advertises 6 to 9 days of battery life, and stores about three days of data between syncs.",
+        "Oura Ring 5 comes in whole sizes 6 through 13, advertises 6 to 9 days of battery life, and stores up to three days of data between syncs.",
       inputs:
         "Ring measurements for heart rate, HRV, temperature, blood oxygen, respiration, movement, sleep, and workouts, plus profile and selected partner data.",
       insightStyle:
@@ -136,13 +136,13 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         "Track sleep and whole-body readiness passively in a ring and summarize the measurements into daily scores and long-term trends.",
     },
     competitorEvidence: {
-      clinicalRole: [1, 2],
+      clinicalRole: [7],
       followThrough: [1, 2],
       format: [1],
-      hardware: [1],
+      hardware: [1, 5],
       inputs: [1, 3],
-      insightStyle: [1],
-      platforms: [1],
+      insightStyle: [1, 5],
+      platforms: [1, 6],
       pricing: [1, 2],
       primaryJob: [1],
     },
@@ -190,6 +190,18 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         label: "Oura export and API access",
         url: "https://support.ouraring.com/hc/en-us/articles/42985877449619-Export-Share-Your-Oura-Data",
       },
+      {
+        label: "Discover Oura Ring 5",
+        url: "https://support.ouraring.com/hc/en-us/articles/50997181300243-Discover-Oura-Ring-5",
+      },
+      {
+        label: "Oura general requirements",
+        url: "https://support.ouraring.com/hc/en-us/articles/4408961184147-General-FAQs",
+      },
+      {
+        label: "Oura and medical conditions",
+        url: "https://support.ouraring.com/hc/en-us/articles/360038214494-Oura-Medical-Conditions",
+      },
     ],
     tradeoffs: [
       "Full functionality requires both an upfront ring purchase and an ongoing membership.",
@@ -220,7 +232,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       hardware:
         "Most automatic metrics require compatible Garmin hardware. CIRQA costs $199.99, advertises up to 10 days of battery life, and uses connected-phone GPS.",
       inputs:
-        "Garmin device measurements, recorded activities, sleep, heart rate, HRV, location and route data, nutrition entries, goals, and selected partner data.",
+        "Garmin device measurements, recorded activities, sleep, heart rate, HRV, location and route data, nutrition entries, and goals.",
       insightStyle:
         "Dense dashboards and sport-specific metrics, including Body Battery, sleep, stress, Training Readiness, Training Status, VO2 max, and recovery time where supported.",
       platforms:
@@ -233,9 +245,9 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     competitorEvidence: {
       clinicalRole: [1],
       followThrough: [1, 2],
-      format: [1, 2, 3],
+      format: [1, 2],
       hardware: [1],
-      inputs: [1, 2, 3],
+      inputs: [1, 2],
       insightStyle: [1],
       platforms: [1, 2],
       pricing: [1, 2],
@@ -278,18 +290,18 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         url: "https://www.garmin.com/en-US/p/1565777/",
       },
       {
-        label: "Garmin data and integration support",
+        label: "Garmin export support",
         url: "https://support.garmin.com/en-US/?faq=W1TvTPW8JZ6LfJSfK512Q8",
       },
       {
-        label: "Garmin export support",
+        label: "Garmin Health Connect sharing",
         url: "https://support.garmin.com/en-US/?faq=JToBEy0jfe6pIygark2Ui5",
       },
     ],
     tradeoffs: [
       "Most useful Garmin metrics require a separate Garmin device, and availability differs by model.",
       "Some CIRQA coaching, nutrition, breathing, and guided-workout features require Connect+.",
-      "Third-party exports do not carry every Garmin metric or route detail.",
+      "Some third-party sync paths do not carry every Garmin metric or route detail.",
     ],
     useTogether:
       "Use Garmin Connect as the native record for Garmin activities, recovery metrics, and routes. Use Murph separately to discuss the information you choose to share, relate it to the rest of your health, and carry a decision into everyday life.",
@@ -323,7 +335,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       inputs:
         "Fitbit or Pixel Watch measurements, Google account and profile data, workouts, sleep, connected-app data, and eligible medical-record information used within stated permissions.",
       insightStyle:
-        "Conversational and proactive coaching grounded primarily in Google's first-party wearable measurements, with activity, Cardio Load, sleep, vitals, and content views.",
+        "Conversational and proactive coaching using paired Fitbit or Pixel Watch data plus profile and supported third-party data; selected calculations, including Sleep Score and Cardio Load, require first-party data.",
       platforms:
         "Google Health app on Android 11 or later and iOS 16.4 or later. Premium coaching requires an eligible country, age 18 or older, internet access, and supported first-party hardware.",
       pricing:
@@ -333,24 +345,24 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     },
     competitorEvidence: {
       clinicalRole: [1, 3],
-      followThrough: [1, 3],
+      followThrough: [1, 2, 3],
       format: [1, 2, 3],
       hardware: [2, 3],
-      inputs: [3, 4],
-      insightStyle: [1, 3],
-      platforms: [3],
+      inputs: [3, 4, 6],
+      insightStyle: [1, 3, 4],
+      platforms: [3, 7],
       pricing: [1, 2, 3],
       primaryJob: [1, 3],
     },
     faqs: [
       {
         answer:
-          "Fitbit Premium was renamed Google Health Premium on May 19, 2026, and the Fitbit app became the Google Health app. The legacy name remains useful for search, but current copy should explain the rename clearly.",
+          "Google identifies Google Health Premium as formerly Fitbit Premium, and the Fitbit app began becoming the Google Health app on May 19, 2026. The legacy name remains useful for search, but current copy should explain the transition clearly.",
         question: "What happened to Fitbit Premium?",
       },
       {
         answer:
-          "Current Premium coaching requires a paired Fitbit device or Pixel Watch, even though the base Google Health app can import selected data from other services. Without first-party hardware, the app experience is reduced.",
+          "Current Premium coaching requires a paired Fitbit device or Pixel Watch, even though the base Google Health app can import selected data from other services. Without one, Google Health Coach and Premium coaching are unavailable.",
         question: "Can I use Google Health Premium without a Fitbit or Pixel Watch?",
       },
       {
@@ -387,8 +399,16 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         url: "https://support.google.com/googlehealth/answer/14236613",
       },
       {
-        label: "Google Health data export",
+        label: "Control and download Google Health data",
         url: "https://support.google.com/googlehealth/answer/14286982",
+      },
+      {
+        label: "Google Health medical-record support",
+        url: "https://support.google.com/googlehealth/answer/16998660?hl=en",
+      },
+      {
+        label: "Google Health setup requirements",
+        url: "https://support.google.com/product-documentation/answer/14226283",
       },
     ],
     tradeoffs: [
@@ -706,7 +726,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       "POLAR Loop offers focused sensing and Polar Flow's training analysis at a one-time hardware price. Murph is not a sports sensor; it can complement Polar by helping a person reason across training signals and the rest of their health context.",
     category: "wearables",
     chooseCompetitor:
-      "Choose POLAR Loop when you want passive heart rate, sleep, recovery, and training-load measurement in a simple screen-free band with free Polar Flow software.",
+      "Choose POLAR Loop when you want passive heart rate, sleep, and recovery tracking plus training-load analysis in a simple screen-free band with free Polar Flow software.",
     chooseMurph:
       "Choose Murph when you need a broader conversation across health data, records, symptoms, goals, and routines, plus help with decisions, plans, reminders, check-ins, and personal experiments.",
     competitor: {
@@ -715,13 +735,13 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       followThrough:
         "Nightly Recharge, SleepWise, Training Load Pro, daily activity guidance, structured goals, plans, reports, and more than 170 sport profiles in Flow.",
       format:
-        "A screen-free wrist band paired with the free Polar Flow mobile and web platform. Manual outdoor recording uses phone GPS.",
+        "A screen-free wrist band paired with the free Polar Flow mobile and web platform. Manual outdoor recording can use phone GPS.",
       hardware:
         "POLAR Loop weighs 29 grams, is rated WR30, advertises eight days of battery life, and can retain about four weeks of data on the device.",
       inputs:
-        "Continuous heart rate and activity, nightly HRV, sleep stages, recognized or manually recorded workouts, phone location for routes, and Flow profile data.",
+        "Continuous heart rate and activity, nightly HRV, sleep stages, recognized or manually recorded workouts, and phone location for routes.",
       insightStyle:
-        "Sports-science-oriented sleep, recovery, load, energy-source, fitness, and workout analysis rather than a general-purpose health conversation.",
+        "Polar presents Loop and Flow as sports-science-oriented sleep, recovery, training-load, energy-source, fitness, and workout analysis.",
       platforms:
         "POLAR Loop with Polar Flow on iOS 17 or later, Android 8 or later, supported Huawei devices, and desktop web.",
       pricing:
@@ -736,7 +756,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       hardware: [1],
       inputs: [1, 2],
       insightStyle: [1, 2],
-      platforms: [1, 2],
+      platforms: [1, 2, 5],
       pricing: [1, 2],
       primaryJob: [1, 2],
     },
@@ -784,6 +804,10 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         label: "Polar account-data download",
         url: "https://support.polar.com/us-en/how-to-download-all-your-data-from-polar-flow",
       },
+      {
+        label: "Polar Flow device compatibility",
+        url: "https://support.polar.com/en/support/polar_flow_app_and_compatible_devices?category=getting_started",
+      },
     ],
     tradeoffs: [
       "There is no onboard GPS, display, buttons, notification system, or haptic feedback.",
@@ -806,7 +830,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       "Choose Murph when you need to reason across training, symptoms, labs, records, nutrition, goals, constraints, and prior outcomes, then turn that context into a manageable next step.",
     competitor: {
       clinicalRole:
-        "Consumer sports, fitness, and wellness support. COROS is oriented toward training analysis rather than diagnosis or comprehensive clinical care.",
+        "Endurance-sport and fitness support centered on training analysis.",
       followThrough:
         "Structured plans and workouts, training calendar, recovery timer, fitness trends, free coaching resources, navigation, and coach collaboration through Training Hub.",
       format:
@@ -820,25 +844,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       platforms:
         "COROS app for iOS and Android plus COROS Training Hub on the web. A compatible COROS device is required for automatic first-party sensing.",
       pricing:
-        "Verified 2026-08-30: the COROS app, Training Hub, EvoLab, plans, and coaching resources have no recurring software fee. Hardware ranged from a $79 arm heart-rate monitor to watches starting around $199 on sale.",
+        "Verified 2026-08-30: COROS says fitness insights from its watches require no subscription or monthly fee; official training plans and Training Hub coaching analysis are free. Hardware ranged from a $79 arm heart-rate monitor to watches starting around $199 on sale.",
       primaryJob:
         "Record endurance and outdoor activity and turn it into detailed training, recovery, navigation, and performance analysis.",
     },
     competitorEvidence: {
       clinicalRole: [1],
-      followThrough: [1, 4],
-      format: [1, 4],
+      followThrough: [1, 6, 7],
+      format: [1, 6],
       hardware: [1],
-      inputs: [2, 4],
-      insightStyle: [4],
-      platforms: [1, 4],
-      pricing: [1],
-      primaryJob: [1, 4],
+      inputs: [2, 6, 7],
+      insightStyle: [7],
+      platforms: [1, 6],
+      pricing: [1, 5, 6],
+      primaryJob: [1, 6, 7],
     },
     faqs: [
       {
         answer:
-          "COROS does not charge a recurring fee for its app, Training Hub, EvoLab, plans, or coaching resources. A compatible device is still needed for automatic tracking, and hardware prices vary substantially.",
+          "COROS says fitness insights from its watches require no subscription or monthly fee. Its official training plans and Training Hub coaching analysis are also free. A compatible device is still needed for automatic tracking, and hardware prices vary substantially.",
         question: "Does COROS require a software subscription?",
       },
       {
@@ -878,6 +902,18 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       {
         label: "COROS MCP for AI clients",
         url: "https://support.coros.com/hc/en-us/articles/50841795180948-COROS-MCP-A-Guide-to-Connecting-Your-Training-Data-to-AI",
+      },
+      {
+        label: "COROS subscription-free running insights",
+        url: "https://coros.com/roadrun",
+      },
+      {
+        label: "COROS Training Hub manual",
+        url: "https://support.coros.com/hc/en-us/articles/4412176269844-COROS-Training-Hub-Manual",
+      },
+      {
+        label: "COROS EvoLab",
+        url: "https://support.coros.com/hc/en-us/articles/26485283220884-EvoLab",
       },
     ],
     tradeoffs: [
@@ -1002,7 +1038,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       "Choose Murph when you want to connect relevant health information with personal history, questions, symptoms, records, routines, and goals, then receive support with decisions and follow-through.",
     competitor: {
       clinicalRole:
-        "Consumer wellness product. Sleep-apnea pattern indicators, vascular trends, and other health insights are not diagnostic measurements or medical advice.",
+        "Consumer wellness product. Sleep-apnea pattern indicators, vascular trends, and other health insights are not diagnostic measurements.",
       followThrough:
         "Health, sedentary, and battery vibration alerts, reports, notes, health-data sharing, workout views, and app-based recommendations or advertised AI insights.",
       format:
@@ -1014,7 +1050,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       insightStyle:
         "App-based sleep, recovery, activity, stress, vital-sign, vascular-load, and women's-health trends, with selected alerts delivered through ring vibration.",
       platforms:
-        "RingConn ring plus the RingConn app on iOS 17 or later or Android 10 or later over Bluetooth 5.0. No consumer web dashboard was documented.",
+        "RingConn ring plus the RingConn app on iOS 17 or later or Android 10 or later over Bluetooth 5.0.",
       pricing:
         "Verified 2026-08-30: RingConn Gen 3 starts at $349, with selected finishes at $369. Gen 2 starts at $299 and Gen 2 Air at $199. RingConn lists no subscription fee for these models.",
       primaryJob:
@@ -1025,10 +1061,10 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       followThrough: [1, 2],
       format: [1],
       hardware: [1],
-      inputs: [1, 2],
+      inputs: [1, 2, 3],
       insightStyle: [1, 2],
       platforms: [1],
-      pricing: [1],
+      pricing: [1, 4],
       primaryJob: [1, 2],
     },
     faqs: [
@@ -1072,8 +1108,8 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         url: "https://ringconn.com/pages/ringconn-app-privacy-policy",
       },
       {
-        label: "RingConn wearable data sync",
-        url: "https://ringconn.com/blogs/guides/wearable-data-sync",
+        label: "RingConn product comparison",
+        url: "https://ringconn.com/pages/product-compare",
       },
     ],
     tradeoffs: [
@@ -1103,7 +1139,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       format:
         "A jewelry-style smart ring with no display, paired with the Circular app for measurements and analytics; the ring provides haptic wake-up and medication-reminder alerts.",
       hardware:
-        "Circular Ring 2 advertises about 7 to 8 days in Power Mode or 4 to 5 days in Performance Mode, with an approximately 30-minute recharge.",
+        "Circular Ring 2 advertises about 8 days in Power Mode or 4 to 5 days in Performance Mode, with an approximately 30-minute recharge.",
       inputs:
         "Heart rate, HRV, temperature, blood oxygen, sleep, stress, movement, sport sessions, a 40-second ECG check, women's-health information, and profile data.",
       insightStyle:
@@ -1116,12 +1152,12 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         "Provide ring-based ECG, sleep, recovery, stress, activity, and wellness analytics with Kira app guidance.",
     },
     competitorEvidence: {
-      clinicalRole: [2, 3],
+      clinicalRole: [1, 2],
       followThrough: [1, 3],
       format: [1, 3],
       hardware: [1],
-      inputs: [1],
-      insightStyle: [1, 3],
+      inputs: [1, 4],
+      insightStyle: [1, 2, 3],
       platforms: [1, 3],
       pricing: [1, 3],
       primaryJob: [1],
@@ -1134,7 +1170,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Not safely as current features. Circular's August 26, 2026 release notes still described blood-pressure and glucose trends as upcoming. Blood-pressure copy points to late 2026 and requires cuff calibration; glucose timing and premium pricing remain unverified.",
+          "Not safely. Circular's current official pages conflict: product copy presents blood-pressure trends while also calling blood-pressure and glucose capabilities upcoming; the August 26 release notes describe both as upcoming or unfinished. General availability and any paid scope remain unverified.",
         question: "Are Circular blood-pressure and glucose trends available now?",
       },
       {
@@ -1173,8 +1209,8 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     tradeoffs: [
       "The advertised $299 sale price and availability can change by variant and at checkout.",
-      "Blood-pressure and glucose trends remained upcoming, with timing and future paid scope not fully verified.",
-      "The ring has no display and limits on-ring interaction to selected haptic alerts; personalized Kira guidance needs about 14 days of calibration.",
+      "Official Circular pages conflict on whether blood-pressure and glucose trends are available; rollout timing and any paid scope remain unverified.",
+      "The ring has no display and limits on-ring interaction to selected haptic alerts; personalized Kira guidance follows a calibration period.",
     ],
     useTogether:
       "Use Circular for its available ring measurements, ECG check, sleep analytics, and native Kira guidance. Use Murph separately to discuss selected findings alongside broader health context and support a practical decision or plan.",
@@ -1194,7 +1230,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       clinicalRole:
         "Consumer wellness ecosystem with selected medical-device and clinical-service features. Availability and regulatory status vary by device, service, and region.",
       followThrough:
-        "Goals, trends, reports, reminders, app insights, and optional Withings+ AI assistance, Health and Readiness scores, cardiologist review, and selected clinical programs.",
+        "Goals, trends, reports, reminders, app insights, and optional Withings+ AI assistance, Health Improvement Score, Daily Readiness Indicator, cardiologist review, and selected clinical programs.",
       format:
         "One iOS and Android app connecting hybrid watches, smart scales, blood-pressure monitors, sleep sensors, thermometers, and other home health devices.",
       hardware:
@@ -1214,11 +1250,11 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       clinicalRole: [1, 2],
       followThrough: [1, 2],
       format: [1],
-      hardware: [1],
+      hardware: [1, 5],
       inputs: [1, 3],
       insightStyle: [1, 2],
       platforms: [1, 3],
-      pricing: [1, 2],
+      pricing: [1, 2, 6],
       primaryJob: [1],
     },
     faqs: [
@@ -1229,7 +1265,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Withings+ is optional. It adds premium interpretation, AI assistance, Health and Readiness scores, cardiologist ECG review, and selected nutrition or sleep services. Core measurements remain available without it.",
+          "Withings+ is optional. It adds premium interpretation, AI assistance, Health Improvement Score, Daily Readiness Indicator, cardiologist ECG review, and selected nutrition or sleep services. Core measurements remain available without it.",
         question: "Is Withings+ required?",
       },
       {
@@ -1264,6 +1300,14 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       {
         label: "Withings CSV export",
         url: "https://support.withings.com/hc/en-us/articles/31647944317201-Withings-App-Android-Exporting-your-data",
+      },
+      {
+        label: "Withings App standalone use",
+        url: "https://support.withings.com/hc/en-us/articles/202719068-Withings-App-Android-What-is-the-Withings-App-and-what-does-it-do",
+      },
+      {
+        label: "Withings+ pricing FAQ",
+        url: "https://support.withings.com/hc/en-us/articles/8986672043153-Withings-FAQ",
       },
     ],
     tradeoffs: [

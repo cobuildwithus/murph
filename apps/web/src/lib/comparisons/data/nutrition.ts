@@ -119,7 +119,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "Measure energy, macro, micronutrient, exercise, and biometric intake or progress in detail.",
     },
     competitorEvidence: {
-      clinicalRole: [1],
+      clinicalRole: [4, 5],
       followThrough: [1],
       format: [1],
       hardware: [2, 3],
@@ -167,6 +167,14 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       {
         label: "Cronometer integrations overview",
         url: "https://support.cronometer.com/hc/en-us/articles/360018579072-Devices-Integration-Overview",
+      },
+      {
+        label: "Cronometer Pro",
+        url: "https://cronometer.com/pro/",
+      },
+      {
+        label: "Cronometer terms and medical scope",
+        url: "https://cronometer.com/terms/",
       },
     ],
     tradeoffs: [
@@ -651,13 +659,13 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     },
     competitorEvidence: {
       clinicalRole: [2],
-      followThrough: [2],
+      followThrough: [1, 2],
       format: [2],
       hardware: [2],
-      inputs: [2],
+      inputs: [1, 2],
       insightStyle: [2],
       platforms: [2],
-      pricing: [1, 3],
+      pricing: [3, 4],
       primaryJob: [2],
     },
     faqs: [
@@ -698,6 +706,10 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       {
         label: "MyNetDiary App Store listing",
         url: "https://apps.apple.com/us/app/calorie-counter-mynetdiary/id287529757",
+      },
+      {
+        label: "MyNetDiary Premium pricing comparison",
+        url: "https://www.mynetdiary.com/switch-from-myfitnesspal.html",
       },
     ],
     tradeoffs: [
@@ -1731,7 +1743,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       insightStyle:
         "Estimated calories and macros, daily target progress, meal history, and goal-oriented summaries.",
       platforms:
-        "iOS, Apple Watch, and Android, with Apple Health and Google Fit or Health Connect references in official materials.",
+        "iOS, Apple Watch, and Android, with Apple Health and Google Fit references in official materials.",
       pricing:
         "US pricing checked August 30, 2026 is not transparently labeled by term. Apple lists Unlimited purchases from $2.99 to $29.99 and says some purchases may support Family Sharing; verify the price, duration, and renewal in checkout after the three-day trial.",
       primaryJob:
@@ -1744,8 +1756,8 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       hardware: [1, 3],
       inputs: [1, 3],
       insightStyle: [1, 3],
-      platforms: [3],
-      pricing: [3, 4],
+      platforms: [1, 3],
+      pricing: [1, 3, 4],
       primaryJob: [1],
     },
     faqs: [
@@ -1756,7 +1768,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "The official terms say a subscription is required to receive scan results after the trial. The storefront lists several prices without clear durations, so the specific billing period and renewal must be confirmed before purchase.",
+          "The official App Store listing says a subscription is required to receive scan results after the trial. The storefront lists several prices without clear durations, so the specific billing period and renewal must be confirmed before purchase.",
         question: "What does Cal AI cost after the trial?",
       },
       {

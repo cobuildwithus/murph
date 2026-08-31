@@ -225,7 +225,7 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       hardware: [1, 3],
       inputs: [3],
       insightStyle: [1],
-      platforms: [3],
+      platforms: [3, 5],
       pricing: [2, 3],
       primaryJob: [1],
     },
@@ -271,6 +271,10 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       {
         label: "RISE terms and medical scope",
         url: "https://www.risescience.com/terms",
+      },
+      {
+        label: "RISE wearable and platform support",
+        url: "https://help.risescience.com/hc/en-us/articles/40590044797335-What-wearables-and-trackers-work-with-RISE",
       },
     ],
     tradeoffs: [
@@ -1208,7 +1212,7 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       "Choose Murph if you prefer direct health conversation and want support that can reason across personal context rather than motivate tasks through a virtual-pet system.",
     competitor: {
       clinicalRole:
-        "A consumer self-care and habit app. The virtual pet, mood check-ins, and wellness exercises are not objective health measurement, diagnosis, psychotherapy, or crisis support.",
+        "A consumer self-care and habit app. Finch says its services do not provide medical care, mental health services, diagnosis, treatment, or emergency support.",
       followThrough:
         "Daily goals, journeys, reminders, rewards, streak-like pet progress, reflections, friend encouragement, events, and personalized suggestions.",
       format:
@@ -1220,20 +1224,20 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       insightStyle:
         "Gentle summaries and self-reflection insights framed through pet progress, journeys, events, rewards, and positive reinforcement.",
       platforms:
-        "iPhone, iPad, and Android. Finch is designed as a mobile experience rather than a continuous sensor or full web dashboard.",
+        "Available on iPhone and iPad, plus Android phones and tablets.",
       pricing:
         "Core features are free. Checked August 30, 2026, Finch Plus was listed at $9.99 per month or $69.99 per year, with regional, sponsored, and promotional prices possible.",
       primaryJob:
         "Make small self-care actions more approachable by tying them to a virtual pet and a gentle reward loop.",
     },
     competitorEvidence: {
-      clinicalRole: [4],
+      clinicalRole: [4, 6],
       followThrough: [3, 4],
       format: [4],
       hardware: [4],
       inputs: [4],
       insightStyle: [3, 4],
-      platforms: [4],
+      platforms: [4, 5],
       pricing: [2, 4],
       primaryJob: [4],
     },
@@ -1279,6 +1283,14 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       {
         label: "Finch US App Store listing",
         url: "https://apps.apple.com/us/app/finch-self-care-pet/id1528595748",
+      },
+      {
+        label: "Finch US Google Play listing",
+        url: "https://play.google.com/store/apps/details?hl=en_US&id=com.finch.finch",
+      },
+      {
+        label: "Finch terms and medical scope",
+        url: "https://befinch.notion.site/Finch-Care-PBC-Terms-of-Service-710ffd2b56ce4bc8ac8063461a3bb96e",
       },
     ],
     tradeoffs: [
