@@ -5,7 +5,12 @@ import path from "node:path";
 import { Cli } from "incur";
 import { test } from "vitest";
 
-import { initializeVault, parseFrontmatterDocument } from "@murphai/core";
+import {
+  initializeVault,
+  listGoals,
+  listWriteOperationMetadataPaths,
+  parseFrontmatterDocument,
+} from "@murphai/core";
 import { createUnwiredVaultServices } from "@murphai/vault-usecases";
 
 import { registerGoalCommands } from "../src/commands/health-goal-save.js";
@@ -167,6 +172,73 @@ test("goal save schema exposes typed fields while goal import-json remains the J
   const help = await readGoalSaveHelp(cli);
   assert.match(help, /goal import-json/u);
   assert.doesNotMatch(help, /goal upsert/u);
+});
+
+test("goal save with a missing id fails closed without falling back to a matching slug", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-goal-save-missing-id-",
+  );
+
+  try {
+    const cli = createGoalCli();
+    await initializeVault({ vaultRoot });
+
+    const created = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "Keep this goal",
+      "--slug",
+      "keep-this-goal",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(created.exitCode, null);
+    const createdGoal = requireData(created.envelope);
+    assert.equal(createdGoal.created, true);
+
+    const replacementSuffix = createdGoal.goalId.endsWith("A") ? "B" : "A";
+    const missingGoalId = `${createdGoal.goalId.slice(0, -1)}${replacementSuffix}`;
+    const goalsBefore = await listGoals(vaultRoot);
+    const operationsBefore = await listWriteOperationMetadataPaths(vaultRoot);
+
+    const missing = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "Must not replace",
+      "--id",
+      missingGoalId,
+      "--slug",
+      "keep-this-goal",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(missing.exitCode, 1);
+    assert.equal(missing.envelope.ok, false);
+    if (!missing.envelope.ok) {
+      assert.equal(missing.envelope.error.code, "not_found");
+      assert.equal(missing.envelope.error.message, "Goal was not found.");
+      assert.equal(missing.envelope.error.retryable, false);
+      assert.equal(missing.envelope.error.stage, "read");
+      assert.equal(
+        missing.envelope.error.hint,
+        "After this error, run only goal list once. Do not write again this turn. If a listed goal matches, end with one question naming its exact goal id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.",
+      );
+    }
+
+    const goalsAfter = await listGoals(vaultRoot);
+    assert.deepEqual(goalsAfter, goalsBefore);
+    assert.equal(goalsAfter[0]?.entity.title, "Keep this goal");
+    assert.deepEqual(
+      await listWriteOperationMetadataPaths(vaultRoot),
+      operationsBefore,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
 });
 
 test("goal save persists typed fields and repeated relationships", async () => {
