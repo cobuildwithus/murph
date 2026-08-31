@@ -315,7 +315,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // graph without adding a forbidden boot input. Exact macOS production assembly
 // measured 11,592,493B total on 2026-08-30; ratchet only the total baseline and
 // retain the fixed cross-platform allowance and all startup-specific gates.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_592_493 + 32_768;
+// Runtime progress non-starvation and bounded receipt replay extend those same
+// lazy paths without changing the boot graph. Four canonical Linux production
+// gates measured 11,632,316B total on 2026-08-31; ratchet only the total
+// baseline and retain the fixed allowance and all startup-specific gates.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_632_316 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 64_257;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 1_950_662;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;
