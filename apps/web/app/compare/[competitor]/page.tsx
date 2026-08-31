@@ -12,6 +12,7 @@ import {
 import { createComparisonStructuredData } from "@/src/lib/comparisons/structured-data";
 import { serializeStructuredData } from "@/src/lib/public-agent-content";
 import {
+  createMurphOgImageRef,
   createMurphPageMetadata,
   MURPH_INDEXABLE_PAGE_ROBOTS,
   MURPH_NOINDEX_PAGE_ROBOTS,
@@ -40,6 +41,10 @@ export async function generateMetadata({
 
   const path = comparisonPath(comparison);
   const title = `Murph vs ${comparison.name}`;
+  const ogImage = createMurphOgImageRef({
+    alt: title,
+    url: `${path}/opengraph-image`,
+  });
 
   return createMurphPageMetadata({
     alternates: {
@@ -47,6 +52,7 @@ export async function generateMetadata({
     },
     description: comparison.metaDescription,
     openGraph: {
+      images: [ogImage],
       modifiedTime: comparison.lastVerified,
       publishedTime: "2026-08-30",
       type: "article",
@@ -54,6 +60,9 @@ export async function generateMetadata({
     },
     robots: MURPH_INDEXABLE_PAGE_ROBOTS,
     title,
+    twitter: {
+      images: [ogImage],
+    },
   });
 }
 

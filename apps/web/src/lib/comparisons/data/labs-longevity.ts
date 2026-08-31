@@ -32,6 +32,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       primaryJob:
         "Provide a broad twice-yearly laboratory view and make the results easier to inspect over time.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [3, 4],
+      insightStyle: [1],
+      platforms: [3],
+      pricing: [1, 3],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -115,6 +126,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       primaryJob:
         "Turn one broad annual lab baseline into a protocol and a catalog of possible next services.",
     },
+    competitorEvidence: {
+      clinicalRole: [3],
+      followThrough: [1, 3],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1, 3],
+      pricing: [1, 3],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -178,7 +200,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       clinicalRole:
         "A wellness analytics service that says its results and recommendations are not medical advice, diagnosis, or treatment.",
       followThrough:
-        "Personalized recommendations, an action plan, trend tracking, and suggested retesting, without included ongoing clinical care or human coaching.",
+        "Personalized recommendations, an action plan, trend tracking, and suggested retesting; its Nutrition DeepDive uses algorithmic recommendations, and InsideTracker says the tool complements rather than replaces a doctor's visit.",
       format:
         "A yearly analytics membership that can be paired with an InsideTracker blood test or supported outside results.",
       hardware:
@@ -193,6 +215,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         "For new US and Canadian customers, Membership plus Ultimate is $489. The standalone $149 membership is listed for international customers; current members can buy Ultimate for $340. InnerAge and DNA can cost extra.",
       primaryJob:
         "Translate performance-related labs and tracker data into structured recommendations and trends.",
+    },
+    competitorEvidence: {
+      clinicalRole: [5],
+      followThrough: [2, 6],
+      format: [2],
+      hardware: [2],
+      inputs: [1, 2],
+      insightStyle: [2],
+      platforms: [3],
+      pricing: [1, 2],
+      primaryJob: [2],
     },
     faqs: [
       {
@@ -237,6 +270,14 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         label: "InsideTracker testing availability",
         url: "https://support.insidetracker.com/en-US/where-and-what-products-can-i-test-with-insidetracker-288949",
       },
+      {
+        label: "InsideTracker terms of service",
+        url: "https://store.insidetracker.com/policies/terms-of-service",
+      },
+      {
+        label: "InsideTracker recommendation methodology",
+        url: "https://support.insidetracker.com/en-US/are-insights-coming-from-an-individual-provider-on-a-case-by-case-basis-or-are-they-more-algorithmic-398631",
+      },
     ],
     tradeoffs: [
       "The lowest-priced membership does not include an InsideTracker blood draw.",
@@ -265,17 +306,28 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       format:
         "A recurring at-home test cycle offered monthly, quarterly, or every six months, with one-time specialty panels also available.",
       hardware:
-        "A disposable EasyDraw upper-arm collection device is used for mailed samples. No ongoing wearable is required.",
+        "An EasyDraw upper-arm collection device is used for mailed samples. No ongoing wearable is required.",
       inputs:
         "At-home blood samples, health information, supported outside labs, supplements, and compatible wearable or CGM data.",
       insightStyle:
         "Panel-based biomarker trends and a personalized action plan, with depth determined by the base panel and selected upgrades.",
       platforms:
-        "Digital dashboard with integrations that include Oura, Apple Health, Fitbit, Eight Sleep, Dexcom, FreeStyle CGMs, and Google Fit.",
+        "Digital dashboard with integrations that include Oura, Apple Watch, Fitbit, Eight Sleep, Dexcom, FreeStyle CGMs, and Google Fit.",
       pricing:
-        "The first Core cycle is currently $124 delivered, then $149 per cycle including listed shipping. Ultimate 360 is currently $274 one time; upgrades and coaching cost more.",
+        "The introductory base-panel cycle is $124 at checkout ($99 plus $25 shipping), then $149 per renewal ($124 plus $25 shipping). Ultimate 360 is $249 for new customers and $274 on renewal; panel add-ons and coaching cost more.",
       primaryJob:
         "Make repeat laboratory testing possible from home and show changes across test cycles.",
+    },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [1, 4],
+      format: [1],
+      hardware: [1, 6],
+      inputs: [1, 4],
+      insightStyle: [1],
+      platforms: [5],
+      pricing: [2, 6, 7],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -285,7 +337,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "No. The base Core program starts with a smaller included panel, while additional markers and programs require upgrades. SiPhox pages also vary in how they count calculated and measured outputs.",
+          "No. The base panel starts with a smaller included set, while additional markers and programs require upgrades. SiPhox pages also vary in how they count calculated and measured outputs.",
         question: "Are all SiPhox biomarkers included in the base price?",
       },
       {
@@ -319,6 +371,18 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       {
         label: "SiPhox terms of service",
         url: "https://siphoxhealth.com/policies/terms-of-service",
+      },
+      {
+        label: "SiPhox compatible wearables",
+        url: "https://siphoxhealth.zendesk.com/hc/en-us/articles/48519620635668-What-wearables-are-compatible-with-SiPhox-Health",
+      },
+      {
+        label: "SiPhox Health and InsideTracker comparison",
+        url: "https://siphoxhealth.com/comparison/siphox-vs-insidetracker",
+      },
+      {
+        label: "SiPhox shop",
+        url: "https://siphoxhealth.com/shop",
       },
     ],
     tradeoffs: [
@@ -359,6 +423,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         "Monthly Membership starts with a $199 payment and then $149 per month. Core Annual is $599. Medications, supplements, and specialty services are extra.",
       primaryJob:
         "Combine repeat biomarker testing with clinician access, coaching, and possible longevity treatment.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 4],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [2],
+      insightStyle: [2],
+      platforms: [2],
+      pricing: [1],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -443,6 +518,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       primaryJob:
         "Offer flexible direct testing at listed prices and keep the resulting records and guidance together.",
     },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [1, 3],
+      format: [1],
+      hardware: [3],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [3, 4],
+      pricing: [1, 2],
+      primaryJob: [3],
+    },
     faqs: [
       {
         answer:
@@ -512,7 +598,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       followThrough:
         "A personalized action plan, 14 days of care team messaging, and an option to continue into the separate Complete Care program.",
       format:
-        "A one-time virtual Clinical Lab Review using Parsley's 80+ biomarker panel or qualifying outside labs from the prior six months.",
+        "A 30-minute virtual Clinical Lab Review using Parsley's 80+ biomarker panel or qualifying outside labs from the prior six months, sold as an annual membership that auto-renews unless canceled.",
       hardware:
         "No proprietary device. The panel uses Quest collection or optional at-home phlebotomy where available.",
       inputs:
@@ -522,9 +608,20 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       platforms:
         "HIPAA-compliant patient portal, virtual visits, and secure care team messaging.",
       pricing:
-        "$550 for the Advanced Lab Panel plus visit, or $250 to bring recent outside labs. Complete Care is a separate membership with insurance and self-pay rules.",
+        "$550 per year for the Advanced Lab Panel plus visit, or $250 per year to bring recent outside labs. The Clinical Lab Review membership auto-renews unless canceled; Complete Care is separate, with insurance and self-pay rules.",
       primaryJob:
         "Explain broad blood results in clinical context and define appropriate medical and lifestyle next steps.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 4],
+      followThrough: [1],
+      format: [5],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1, 2],
+      platforms: [3],
+      pricing: [3, 5],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -534,7 +631,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Clinical Lab Review is self-pay at $550 with Parsley's panel or $250 with recent eligible outside labs. Complete Care is a different program with membership fees, medical billing, copays, and deductibles.",
+          "Clinical Lab Review is self-pay at $550 per year with Parsley's panel or $250 per year with recent eligible outside labs. The membership auto-renews unless canceled. Complete Care is a different program with membership fees, medical billing, copays, and deductibles.",
         question: "Is Parsley Clinical Lab Review covered by the Complete Care price?",
       },
       {
@@ -569,9 +666,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         label: "Parsley terms of use",
         url: "https://www.parsleyhealth.com/terms-of-use",
       },
+      {
+        label: "Parsley Clinical Lab Review workflow and renewal",
+        url: "https://www.parsleyhealth.com/labs/how-it-works",
+      },
     ],
     tradeoffs: [
-      "Clinical Lab Review is self-pay and includes a limited messaging window rather than open-ended care.",
+      "Clinical Lab Review is self-pay, auto-renews annually unless canceled, and includes 14 days of follow-up messaging rather than open-ended care.",
       "New York and New Jersey use split payment and do not offer the at-home draw for this panel.",
       "Functional Age and Aging Velocity are model-based summaries rather than direct physiological measurements.",
     ],
@@ -599,7 +700,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       hardware:
         "No proprietary device is required in Standard. Higher tiers can include a device and advanced diagnostics.",
       inputs:
-        "Genetic data, health history, 65+ standard panel markers, repeat bloodwork, goals, and optional biological age or specialty testing.",
+        "Genetic data, health history, 65+ standard panel markers, repeat bloodwork, goals, two included biological age tests with Standard membership, and tier-specific specialty testing.",
       insightStyle:
         "A detailed genetics and lab report interpreted by a physician, with personalized nutrition, lifestyle, supplement, and treatment planning.",
       platforms:
@@ -608,6 +709,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         "Standard starts at $362 per month. Peak is $25,000 per year, while Elite requires an inquiry. Testing and access vary by tier.",
       primaryJob:
         "Provide high-touch precision medicine and coaching informed by genetics and recurring clinical data.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 4],
+      followThrough: [1, 2],
+      format: [1, 2, 4],
+      hardware: [1, 2],
+      inputs: [1, 2, 3, 5],
+      insightStyle: [1],
+      platforms: [4],
+      pricing: [1, 2],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -652,6 +764,14 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         label: "Wild Health terms of service",
         url: "https://www.wildhealth.com/terms-of-service",
       },
+      {
+        label: "Wild Health biological age testing",
+        url: "https://www.wildhealth.com/biological-age-test",
+      },
+      {
+        label: "Wild Health FAQ",
+        url: "https://www.wildhealth.com/faq",
+      },
     ],
     tradeoffs: [
       "Official commitment terms conflict: the current FAQ says four months for monthly plans, while the terms still say six months for Precision Care. Confirm the controlling term before checkout.",
@@ -680,17 +800,28 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       format:
         "A monthly telehealth membership with Basic, Plus, and Premium tiers that differ by sex, state, panel depth, and clinician access.",
       hardware:
-        "No proprietary hardware. Testing uses Quest and other approved collection workflows.",
+        "Lab collection may use an at-home kit or a Quest lab order. No ongoing wearable is required.",
       inputs:
         "Blood tests, symptoms, medical history, health goals, and follow-up information used in telehealth care.",
       insightStyle:
         "Clinician interpretation and treatment-oriented recommendations rather than a general quantified-self dashboard.",
       platforms:
-        "Hone website and member app with laboratory scheduling and telehealth visits.",
+        "A mobile-friendly web account, not a downloadable app, for lab action items and results, virtual-consult scheduling, provider notes, medications, and billing.",
       pricing:
         "Basic costs $50 to start, comprising the first $25 membership month and a one-time $25 onboarding fee, then $25 per month. Plus and Premium cost more, and medications are extra.",
       primaryJob:
         "Evaluate hormone and metabolic concerns and manage eligible telehealth treatment over time.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 4],
+      followThrough: [1],
+      format: [2, 3],
+      hardware: [5],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [5],
+      pricing: [2],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -735,6 +866,10 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         label: "Hone telehealth location requirements",
         url: "https://help.honehealth.com/hc/en-us/articles/40162272090519-Telehealth-Location-Requirements",
       },
+      {
+        label: "Hone online account and lab workflow",
+        url: "https://help.honehealth.com/hc/en-us/articles/40162302949527-How-to-Use-Your-Hone-Health-Account-to-Manage-Your-Care-Online",
+      },
     ],
     tradeoffs: [
       "Availability varies by state, tier, and sex, and the member must be in an eligible state during a visit.",
@@ -774,6 +909,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         "The Elite Health Profile list price is $399 plus an independent physician service fee that generally starts at $6. Promotions can temporarily lower the test price.",
       primaryJob:
         "Provide direct access to established laboratory testing without requiring a prior doctor visit.",
+    },
+    competitorEvidence: {
+      clinicalRole: [3],
+      followThrough: [2],
+      format: [3],
+      hardware: [2, 3],
+      inputs: [2],
+      insightStyle: [2],
+      platforms: [2],
+      pricing: [2],
+      primaryJob: [3],
     },
     faqs: [
       {
@@ -850,13 +996,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       inputs:
         "Conventional blood and urine measurements including CBC, metabolic, lipid, HbA1c, and urinalysis-related values.",
       insightStyle:
-        "Clinical laboratory results with reference ranges in a patient account rather than a broad AI coaching protocol.",
+        "Laboratory results with trend tracking and AI-assisted explanations in MyLabcorp; Labcorp directs personalized interpretation to the ordering provider.",
       platforms:
-        "Labcorp Patient web and mobile account for scheduling and results.",
+        "Results are available through the Labcorp Patient web portal and MyLabcorp mobile app; MyLabcorp also manages appointments and billing.",
       pricing:
         "The Comprehensive Health Test is $169. Men's and Women's Health Tests are $219, with expanded panels priced separately.",
       primaryJob:
         "Offer direct access to conventional laboratory tests through Labcorp's national collection network.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1, 4],
+      platforms: [1, 4],
+      pricing: [1],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -866,7 +1023,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "No. The Comprehensive Health Test includes provider order approval and online results, but ongoing advising is a separate product and medical care remains with the person's clinician.",
+          "No. The Comprehensive Health Test includes provider order approval and online results. MyLabcorp offers AI-assisted explanations and trend tracking, but not ongoing personalized coaching; advisor sessions are a separate product, and medical care remains with the person's clinician.",
         question: "Does the Labcorp OnDemand test include coaching?",
       },
       {
@@ -897,6 +1054,10 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         label: "About Labcorp OnDemand",
         url: "https://www.ondemand.labcorp.com/about-us",
       },
+      {
+        label: "Labcorp test results and MyLabcorp",
+        url: "https://www.labcorp.com/patients/tests/results",
+      },
     ],
     tradeoffs: [
       "The test itself does not include ongoing coaching, wearable analysis, or cross-source longitudinal guidance.",
@@ -925,17 +1086,28 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       format:
         "A rolling three-month supplement subscription with monthly billing and quarterly shipments, or a nonrenewing starter package.",
       hardware:
-        "No proprietary device. Members use a partner blood draw or upload a qualifying recent report.",
+        "The PRO workflow uses a laboratory report rather than sensor hardware; Bioniq can arrange a blood test in supported locations.",
       inputs:
-        "A 50+ parameter partner panel or required recent laboratory values, plus lifestyle, symptom, body, and goal information in the app.",
+        "A recent blood-test report or a Bioniq-arranged blood test where available, plus the app health questionnaire and required laboratory markers.",
       insightStyle:
         "Lab analysis focused on nutrient status and a personalized supplement recipe with nutrition guidance.",
       platforms:
-        "Bioniq mobile app for laboratory upload, formula details, recommendations, and subscription management.",
+        "Bioniq mobile app for the health questionnaire, laboratory-report upload, analyzed results, formula details, and nutritional recommendations. PRO cancellation or freeze requests are handled by email rather than in the app.",
       pricing:
-        "Official prices conflict. Transactional checkout lists $199 monthly with a 90-day commitment or $750 one time, while another official page still shows $149 monthly and $699 or $600 packages. Confirm the live checkout price.",
+        "Pricing was not publicly verifiable on August 30, 2026. Bioniq documents a rolling three-month subscription billed monthly and shipped quarterly, plus a nonrenewing three-month starter package in supported countries; confirm current availability and price directly.",
       primaryJob:
         "Create and deliver a personalized daily supplement formula informed by blood data.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 7],
+      followThrough: [1, 2],
+      format: [2, 3],
+      hardware: [1, 5],
+      inputs: [1, 4],
+      insightStyle: [1, 2],
+      platforms: [2, 4, 6],
+      pricing: [2, 3],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -945,7 +1117,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "No. The formula subscription is separate from the initial partner blood test or outside-lab processing credit. Repeat blood testing is optional and not included every three months.",
+          "The supplement plan and initial blood-test or upload-processing option are separate parts of onboarding. Repeat testing is optional and is not included with every quarterly shipment; confirm current testing and plan charges directly.",
         question: "Is blood testing included in the Bioniq monthly price?",
       },
       {
@@ -965,20 +1137,32 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     slug: "bioniq",
     sources: [
       {
-        label: "Bioniq PRO blood testing and program details",
-        url: "https://www.bioniq.com/products/pro/bloodtest-us",
+        label: "Bioniq PRO process",
+        url: "https://help.bioniq.com/what-is-the-bioniq-pro-process",
       },
       {
-        label: "Bioniq PRO current package pricing",
-        url: "https://www.bioniq.com/products/pro-upd",
+        label: "Bioniq PRO subscription structure",
+        url: "https://help.bioniq.com/how-does-the-bioniq-pro-subscription-work",
       },
       {
-        label: "Bioniq PRO transactional checkout",
-        url: "https://www.bioniq.com/cart/pro/select-plan",
+        label: "Bioniq PRO nonrenewing packages",
+        url: "https://help.bioniq.com/do-you-offer-packages-for-bioniq-pro",
       },
       {
-        label: "Bioniq US test and upload pricing",
-        url: "https://www.bioniq.com/cart/pro/choose-option?country_code=US",
+        label: "Bioniq PRO lab-report upload",
+        url: "https://help.bioniq.com/i-have-a-blood-test",
+      },
+      {
+        label: "Bioniq blood-test availability",
+        url: "https://help.bioniq.com/bioniq-blood-test-availability",
+      },
+      {
+        label: "Bioniq PRO cancellation and freeze process",
+        url: "https://help.bioniq.com/how-do-i-cancel-my-bioniq-pro-subscription",
+      },
+      {
+        label: "Bioniq medical-scope disclaimer",
+        url: "https://www.bioniq.com/legals/go-imprint",
       },
     ],
     tradeoffs: [
@@ -1016,9 +1200,20 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       platforms:
         "Neko app plus a required physical clinic visit, with advertised Apple Health and wearable syncing.",
       pricing:
-        "£299 in the United Kingdom and 2,750 SEK in Sweden. The announced US price is $499, with the first New York clinic opening September 24, 2026.",
+        "£299 in the United Kingdom and SEK 2,750 in Sweden. The announced US price is $499, with the first New York clinic opening September 24, 2026.",
       primaryJob:
         "Collect many noninvasive physical measurements in one visit and review them with a clinician immediately.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1],
+      pricing: [1, 4, 5],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -1063,6 +1258,10 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         label: "Neko New York opening announcement",
         url: "https://www.nekohealth.com/us/en/press/neko-health-is-opening-in-new-york-city",
       },
+      {
+        label: "Neko Health Scan in Sweden",
+        url: "https://www.nekohealth.com/se/en/health-scan",
+      },
     ],
     tradeoffs: [
       "The service requires travel to a limited set of physical centers and is not yet live in the United States on the verification date.",
@@ -1102,6 +1301,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         "CORE is currently $10,500 and APEX is $21,500. APEX Family and some services require an inquiry or separate purchase.",
       primaryJob:
         "Deliver an extensive annual preventive workup across imaging, laboratory, and genetic modalities.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 4],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [4],
+      platforms: [1, 4],
+      pricing: [1, 2, 3],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -1186,6 +1396,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       primaryJob:
         "Use preventive MRI to look for structural findings and track them over time, with labs added in membership tiers.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1],
+      pricing: [1],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -1264,6 +1485,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         "TruAge is $499 one time, TruHealth is $499, and the combined kit is $849. A four-test subscription is marketed near $249 per test.",
       primaryJob:
         "Estimate biological aging patterns from blood DNA methylation and compare those estimates across repeat tests.",
+    },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [1, 4],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1],
+      pricing: [1],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -1347,6 +1579,17 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         "$129 per month for membership, including a TallyAge test every six months and a daily Vitality supplement. A one-time TallyAge test is $249.",
       primaryJob:
         "Estimate epigenetic age from cheek cells and pair the result with lifestyle guidance and supplements.",
+    },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [1],
+      format: [1, 2],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1, 2],
+      platforms: [1],
+      pricing: [1, 2],
+      primaryJob: [1],
     },
     faqs: [
       {

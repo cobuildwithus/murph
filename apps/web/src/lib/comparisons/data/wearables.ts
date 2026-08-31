@@ -32,6 +32,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       primaryJob:
         "Measure sleep, strain, and recovery continuously and turn those signals into daily performance guidance.",
     },
+    competitorEvidence: {
+      clinicalRole: [2],
+      followThrough: [2, 4, 6],
+      format: [3],
+      hardware: [2],
+      inputs: [3, 6],
+      insightStyle: [2],
+      platforms: [3, 5],
+      pricing: [1],
+      primaryJob: [2],
+    },
     faqs: [
       {
         answer:
@@ -124,6 +135,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       primaryJob:
         "Track sleep and whole-body readiness passively in a ring and summarize the measurements into daily scores and long-term trends.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 2],
+      followThrough: [1, 2],
+      format: [1],
+      hardware: [1],
+      inputs: [1, 3],
+      insightStyle: [1],
+      platforms: [1],
+      pricing: [1, 2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -207,6 +229,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         "Verified 2026-08-30: Garmin Connect's base tier is free. CIRQA is $199.99 with no required subscription. Garmin Connect+ is optional at $6.99 per month or $69.99 per year in the United States.",
       primaryJob:
         "Collect Garmin device data and support detailed health, fitness, navigation, training, and social analysis.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1, 2, 3],
+      hardware: [1],
+      inputs: [1, 2, 3],
+      insightStyle: [1],
+      platforms: [1, 2],
+      pricing: [1, 2],
+      primaryJob: [1, 2],
     },
     faqs: [
       {
@@ -298,6 +331,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       primaryJob:
         "Use Fitbit and Pixel Watch data to deliver personalized fitness, sleep, recovery, and wellness coaching inside Google's health app.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 3],
+      followThrough: [1, 3],
+      format: [1, 2, 3],
+      hardware: [2, 3],
+      inputs: [3, 4],
+      insightStyle: [1, 3],
+      platforms: [3],
+      pricing: [1, 2, 3],
+      primaryJob: [1, 3],
+    },
     faqs: [
       {
         answer:
@@ -385,6 +429,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         "Verified 2026-08-30: Apple Health and Apple Fitness are free. Apple Fitness+ is $9.99 per month or $79.99 per year in the United States. Apple hardware is purchased separately.",
       primaryJob:
         "Aggregate Apple health data, present activity and workout progress, and optionally provide a library of guided workouts and meditations.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2, 3],
+      format: [1, 2, 3],
+      hardware: [1, 2],
+      inputs: [1],
+      insightStyle: [1, 2, 3],
+      platforms: [1, 2, 3],
+      pricing: [2, 3],
+      primaryJob: [1, 2, 3],
     },
     faqs: [
       {
@@ -475,6 +530,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       primaryJob:
         "Bring Samsung activity, sleep, nutrition, recovery, and supported vital-sign information into one wellness and fitness experience.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 4],
+      format: [1],
+      hardware: [1],
+      inputs: [1, 2],
+      insightStyle: [1],
+      platforms: [1, 3],
+      pricing: [1, 4],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -564,6 +630,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       primaryJob:
         "Capture passive sleep, recovery, stress, movement, and longevity signals in a ring and interpret them through Ultrahuman's app and optional services.",
     },
+    competitorEvidence: {
+      clinicalRole: [2, 3],
+      followThrough: [1, 2],
+      format: [1, 2],
+      hardware: [1],
+      inputs: [1, 5],
+      insightStyle: [1, 2],
+      platforms: [1, 5],
+      pricing: [1, 2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -652,6 +729,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       primaryJob:
         "Measure sleep, recovery, activity, and training in a screen-free band and analyze the results through Polar Flow.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1, 2],
+      hardware: [1],
+      inputs: [1, 2],
+      insightStyle: [1, 2],
+      platforms: [1, 2],
+      pricing: [1, 2],
+      primaryJob: [1, 2],
+    },
     faqs: [
       {
         answer:
@@ -735,6 +823,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         "Verified 2026-08-30: the COROS app, Training Hub, EvoLab, plans, and coaching resources have no recurring software fee. Hardware ranged from a $79 arm heart-rate monitor to watches starting around $199 on sale.",
       primaryJob:
         "Record endurance and outdoor activity and turn it into detailed training, recovery, navigation, and performance analysis.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 4],
+      format: [1, 4],
+      hardware: [1],
+      inputs: [2, 4],
+      insightStyle: [4],
+      platforms: [1, 4],
+      pricing: [1],
+      primaryJob: [1, 4],
     },
     faqs: [
       {
@@ -826,6 +925,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       primaryJob:
         "Track hybrid training, recovery, sleep, heart rate, movement quality, and muscle load in a screen-free system at an accessible hardware price.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 3],
+      format: [1, 3],
+      hardware: [1],
+      inputs: [1, 3],
+      insightStyle: [1, 3],
+      platforms: [1, 3],
+      pricing: [1, 2, 3],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -909,6 +1019,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         "Verified 2026-08-30: RingConn Gen 3 starts at $349, with selected finishes at $369. Gen 2 starts at $299 and Gen 2 Air at $199. RingConn lists no subscription fee for these models.",
       primaryJob:
         "Track sleep, recovery, activity, vital signs, and selected vascular or women's-health trends passively in a subscription-free ring.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 2],
+      followThrough: [1, 2],
+      format: [1],
+      hardware: [1],
+      inputs: [1, 2],
+      insightStyle: [1, 2],
+      platforms: [1],
+      pricing: [1],
+      primaryJob: [1, 2],
     },
     faqs: [
       {
@@ -994,6 +1115,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       primaryJob:
         "Provide ring-based ECG, sleep, recovery, stress, activity, and wellness analytics with Kira app guidance.",
     },
+    competitorEvidence: {
+      clinicalRole: [2, 3],
+      followThrough: [1, 3],
+      format: [1, 3],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1, 3],
+      platforms: [1, 3],
+      pricing: [1, 3],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -1077,6 +1209,17 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         "Verified 2026-08-30: base app access and stored measurements are free, with hardware sold separately. Live pages showed Withings+ at $9.95 per month or $99.50 per year; an older official FAQ still listed $99.95 per year.",
       primaryJob:
         "Bring wearable and home measurements such as activity, sleep, weight, body composition, blood pressure, and temperature into one longitudinal record.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 2],
+      followThrough: [1, 2],
+      format: [1],
+      hardware: [1],
+      inputs: [1, 3],
+      insightStyle: [1, 2],
+      platforms: [1, 3],
+      pricing: [1, 2],
+      primaryJob: [1],
     },
     faqs: [
       {

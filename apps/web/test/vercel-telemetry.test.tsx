@@ -421,6 +421,11 @@ test("VercelTelemetry aggregates public dynamic routes without sending identifie
       route: "/biomarkers/results/[metricKey]",
     },
     {
+      expected: "/compare/[competitor]",
+      pathname: "/compare/murph-vs-whoop",
+      route: "/compare/[competitor]",
+    },
+    {
       expected: "/experiments/[experiment]",
       pathname: "/experiments/sleep-consistency",
       route: "/experiments/[experimentId]",

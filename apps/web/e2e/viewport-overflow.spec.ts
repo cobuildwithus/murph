@@ -20,6 +20,7 @@ const ROUTES = [
   "/changelog",
   "/compare",
   "/compare/murph-vs-bodybuddy",
+  "/compare/murph-vs-commonhealth",
   "/compare/murph-vs-whoop",
   "/growth",
   "/subprocessors",
@@ -54,6 +55,36 @@ function isLoopbackUrl(rawUrl: string): boolean {
     return false;
   }
 }
+
+test("comparison evidence links keep 24px targets at narrow widths", async ({
+  page,
+}) => {
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  for (const width of [320, 390] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    const response = await page.goto("/compare/murph-vs-whoop", {
+      waitUntil: "load",
+    });
+    expect(response?.status(), "WHOOP comparison should respond 200").toBe(200);
+    const sourceLinks = page.getByRole("link", {
+      name: /^Open source \d+ for WHOOP/u,
+    });
+    expect(await sourceLinks.count()).toBeGreaterThan(1);
+
+    for (const sourceLink of await sourceLinks.all()) {
+      const bounds = await sourceLink.boundingBox();
+      expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(24);
+      expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(24);
+    }
+  }
+});
 
 test("challenge-card studies retain every semantic edge at mobile widths", async ({
   page,

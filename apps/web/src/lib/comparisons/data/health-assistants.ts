@@ -32,6 +32,17 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
       primaryJob:
         "Help an adult follow an existing health or wellness plan through proactive messages, easy logging, and daily accountability.",
     },
+    competitorEvidence: {
+      clinicalRole: [3],
+      followThrough: [1],
+      format: [1, 3],
+      hardware: [1],
+      inputs: [1, 2],
+      insightStyle: [1],
+      platforms: [2, 3],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -112,6 +123,17 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
         "Ada says its consumer symptom assessment is free and does not contain advertising or a paid consumer subscription.",
       primaryJob:
         "Help a person think through a current symptom and decide what kind of care or next step may be appropriate.",
+    },
+    competitorEvidence: {
+      clinicalRole: [5],
+      followThrough: [3],
+      format: [2],
+      hardware: [1],
+      inputs: [2],
+      insightStyle: [2, 3],
+      platforms: [3, 4, 5],
+      pricing: [1],
+      primaryJob: [1, 2],
     },
     faqs: [
       {
@@ -202,6 +224,17 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
       primaryJob:
         "Combine Hume body-composition and wearable measurements into a single wellness dashboard with trend-based guidance.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 5],
+      followThrough: [2, 3],
+      format: [1, 2],
+      hardware: [1, 2, 4],
+      inputs: [1, 2, 3, 4],
+      insightStyle: [1, 2],
+      platforms: [3, 4],
+      pricing: [1, 2, 3],
+      primaryJob: [1, 2],
+    },
     faqs: [
       {
         answer:
@@ -287,6 +320,17 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
       primaryJob:
         "Motivate longevity-oriented behavior through model-generated aging estimates and a gamified set of daily wellness actions.",
     },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [2],
+      format: [2],
+      hardware: [2, 3],
+      inputs: [2, 3],
+      insightStyle: [1, 2],
+      platforms: [2, 3],
+      pricing: [2, 4],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -371,6 +415,17 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
         "Healthily advertises a seven-day trial. Its App Store list includes $4.99 weekly, $6.49 and $24.99 subscription entries, and a $29.99 lifetime entry, but some durations are unclear and checkout terms control.",
       primaryJob:
         "Help a user record wellness factors, follow short self-care plans, and review progress in a structured mobile journal.",
+    },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [2],
+      format: [2],
+      hardware: [4],
+      inputs: [2],
+      insightStyle: [2, 5],
+      platforms: [2, 3],
+      pricing: [2],
+      primaryJob: [2],
     },
     faqs: [
       {

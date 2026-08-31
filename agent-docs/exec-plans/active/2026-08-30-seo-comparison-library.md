@@ -6,7 +6,7 @@ Updated: 2026-08-30
 
 ## Goal
 
-- Publish a source-backed library of at least 60 static public pages that help
+- Publish a source-backed library of at least 60 public pages that help
   someone decide whether Murph should replace, complement, or be used instead
   of a named consumer health product.
 - Make every page useful to a human reader and legible to search crawlers and
@@ -17,13 +17,14 @@ Updated: 2026-08-30
 
 - `/compare` provides a calm, scannable index grouped by the job a visitor is
   trying to do, with useful copy rather than a link farm.
-- 102 `/compare/murph-vs-<competitor>` routes are pre-rendered from a
-  typed catalog, have distinct titles/descriptions/verdicts/details/FAQs, and
-  include current first-party source links plus a visible verification date.
+- 102 `/compare/murph-vs-<competitor>` routes are statically enumerated from a
+  typed catalog and server-rendered with distinct
+  titles/descriptions/verdicts/details/FAQs, current first-party source links,
+  and a visible verification date.
 - Each detail page answers the replacement-versus-complement question above
-  the fold, includes a responsive semantic comparison table, discusses who
-  each product is for, names material limitations, and links to relevant peer
-  comparisons.
+  the fold, includes a responsive semantic comparison table with direct
+  per-row official-source links, discusses who each product is for, names
+  material limitations, and links to relevant peer comparisons.
 - Metadata includes canonical URLs and share metadata; the routes appear in the
   XML sitemap and remain crawlable under the existing robots policy.
 - Machine-readable markup is limited to truthful page, breadcrumb, and FAQ
@@ -45,9 +46,9 @@ Updated: 2026-08-30
     nutrition/weight, and mental wellbeing.
   - Current first-party product facts verified on 2026-08-30, with volatile
     pricing phrased cautiously and linked to the current official source.
-  - Static route generation, comparison UI, metadata/structured data, sitemap,
-    internal navigation, focused catalog/rendering tests, design proof, and a
-    public changelog entry.
+  - Static route enumeration, server-rendered comparison UI,
+    metadata/structured data, sitemap, internal navigation, focused
+    catalog/rendering tests, design proof, and a public changelog entry.
 - Out of scope:
   - B2B data infrastructure, discontinued products, and utilities that are not
     plausible consumer alternatives, except where a short educational contrast
@@ -97,9 +98,12 @@ Updated: 2026-08-30
 3. Risk: The table implies unsupported equivalence or medical superiority.
    Mitigation: compare capabilities and operating models, not health outcomes;
    use plain “yes/no/varies” explanations and explicit medical boundaries.
-4. Risk: Sixty pages harm build time or create accidental dynamic rendering.
+4. Risk: A large route family harms build or request performance.
    Mitigation: pure immutable data, static params, server components, no remote
-   fetches at render time, and production-build inspection of generated routes.
+   fetches at render time, and production-build inspection of the generated
+   route family. The shared authenticated root layout intentionally makes the
+   HTML request-rendered; the comparison content itself has no request-bound
+   data or render-time research fetches.
 5. Risk: Dense comparison content overflows or becomes unreadable on phones.
    Mitigation: responsive table treatment, short cells, visible row labels,
    mobile and desktop screenshots, and the viewport-overflow check.
@@ -111,8 +115,9 @@ Updated: 2026-08-30
 2. Inspect existing public-route, metadata, design-system, sitemap, robots,
    screenshot-study, changelog, and test patterns.
 3. Implement the typed comparison catalog and invariant tests.
-4. Implement the `/compare` index, static detail route, shared production view,
-   semantic metadata/JSON-LD, sitemap entries, and design-catalog study.
+4. Implement the `/compare` index, server-rendered detail route, shared
+   production view, semantic metadata/JSON-LD, sitemap entries, and
+   design-catalog study.
 5. Add a changelog fragment and any required living-document updates.
 6. Run focused tests, lint/typecheck/build, inspect desktop/mobile output, and
    review the final diff for claim accuracy, privacy, accessibility, and scope.
@@ -153,9 +158,10 @@ Updated: 2026-08-30
 - Deliberate exclusions: No rankings, affiliate calls to action, hands-on-test
   claims, review scores, medical outcome claims, or implied integrations that
   Murph does not provide.
-- Proof: Real index and WHOOP/BodyBuddy routes at phone and desktop widths,
-  responsive comparison-table captures, a 320-pixel overflow matrix, semantic
-  render tests, and a production build containing the static route family.
+- Proof: Real index and WHOOP/BodyBuddy/CommonHealth routes at phone and desktop
+  widths, responsive comparison-table captures, a 320-pixel overflow matrix,
+  semantic render tests, and a production build containing the enumerated
+  route and dedicated Open Graph image families.
 
 ## Product UX walkthrough
 
@@ -170,7 +176,8 @@ Updated: 2026-08-30
   editorial hierarchy at 1280 pixels.
 - Trust path: the visible desk-research, non-hands-on, non-affiliate disclosure
   matches structured provenance; official sources are grouped by product and
-  connected to comparison rows through stable evidence references.
+  connected to every comparison-table value through direct numbered evidence
+  links with at least 24-by-24-pixel targets at narrow phone widths.
 - Difference from the first pass: the original mobile table hid the competitor
   column, the index was a long single-column wall, and the useful answer arrived
   too late. The final candidate uses paired mobile rows, a compact multi-column
@@ -179,24 +186,35 @@ Updated: 2026-08-30
 ## Verification
 
 - Completed local proof:
-  - Focused Vitest: 3 files and 22 tests passed for catalog invariants, rendered
-    comparison pages, metadata/search, sitemap, and public agent guidance.
+  - Focused Vitest: 4 files and 35 tests passed for catalog invariants, rendered
+    comparison pages, direct evidence anchors, dedicated share-card metadata,
+    sitemap/search, telemetry redaction, and public agent guidance.
   - Scoped ESLint passed for every changed Web source, comparison data, test,
     and Playwright proof file.
   - `pnpm --dir apps/web typecheck:prepared` passed after the final responsive
     changes.
-  - `pnpm --dir apps/web build` completed all 385 static pages and emitted the
-    comparison index, detail, and Open Graph route families. The build retained
-    an existing optional Privy/Farcaster dependency warning.
+  - `pnpm --dir apps/web build` completed 385 static-generation tasks and
+    emitted the request-rendered comparison index/detail routes plus their
+    dedicated Open Graph route family. Request rendering is inherited from the
+    existing cookie-aware root auth layout; the build retained an existing
+    optional Privy/Farcaster dependency warning.
   - The task-scoped Playwright design-proof spec passed for the index, WHOOP,
-    and BodyBuddy at desktop and phone widths with browser/page error
-    assertions enabled.
+    BodyBuddy, and CommonHealth at desktop and phone widths with browser/page
+    error assertions enabled. Search accessible naming, keyboard clear-focus
+    recovery, and 24-pixel evidence targets are asserted in browser proof.
   - The viewport-overflow proof passed for `/compare`, WHOOP, and BodyBuddy at
     320, 375, 390, 768, and 1280 pixels. A genuine 320-pixel index overflow was
     found during the first run, fixed, and independently rerun green.
   - Three independent official-source claim audits corrected the accepted
     wearable, health-data, assistant, lab, nutrition, fitness, sleep, and mental
-    wellbeing findings; targeted stale-claim searches and scoped checks passed.
+    wellbeing findings. The final catalog contains 404 first-party competitor
+    source records and explicit evidence mappings for all 918 competitor table
+    values; targeted stale-claim searches and scoped checks passed.
+  - The first preliminary specialist pass was invalid because its evidence
+    packet omitted required interaction and narrow-phone states. Its two
+    substantive findings were accepted: table values now link directly to
+    supporting sources, and long unbroken product names wrap safely. The retry
+    will use the corrected evidence packet and exact pushed head.
 - Remaining external proof:
   - One exact-pushed-head `completion-specialists` ReviewGPT pass with Product
     UX, frontend, and coverage lenses as applicable.

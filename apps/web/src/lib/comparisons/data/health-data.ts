@@ -32,6 +32,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       primaryJob:
         "Bring clinical records and day-to-day health tracking into one consumer-controlled health profile.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 5],
+      followThrough: [5],
+      format: [5],
+      hardware: [3],
+      inputs: [4],
+      insightStyle: [5],
+      platforms: [4],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -116,6 +127,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       primaryJob:
         "Help an individual document symptoms, treatments, behaviors, and outcomes in a consistent condition-management routine.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [2],
+      inputs: [1, 2],
+      insightStyle: [1],
+      platforms: [1, 4],
+      pricing: [3],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -195,6 +217,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         "A substantial free plan is available. Bearable publishes typical US Premium pricing around $6.99 monthly or $34.99 annually, with regional prices and discounts varying.",
       primaryJob:
         "Make daily symptom and lifestyle tracking flexible enough to reveal possible personal patterns.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [3, 4],
+      inputs: [1, 3],
+      insightStyle: [1, 2],
+      platforms: [1],
+      pricing: [5],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -281,6 +314,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       primaryJob:
         "Find measurable relationships across many aspects of a person's digital and physical life.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1, 4],
+      hardware: [1],
+      inputs: [2],
+      insightStyle: [1, 3],
+      platforms: [4],
+      pricing: [1],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -361,6 +405,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       primaryJob:
         "Turn Apple-centered lifestyle and biometrics data into a polished daily health dashboard and coaching program.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2, 3],
+      format: [1, 3],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [2],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -440,6 +495,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         "A limited free version is available. Welltory Premium is listed at $99 per year, and a lifetime purchase is listed at $599.",
       primaryJob:
         "Translate HRV and connected wellness signals into understandable daily stress, energy, recovery, and lifestyle feedback.",
+    },
+    competitorEvidence: {
+      clinicalRole: [2, 5],
+      followThrough: [1, 2, 5],
+      format: [2, 5],
+      hardware: [2, 3],
+      inputs: [2, 3],
+      insightStyle: [2, 5],
+      platforms: [4],
+      pricing: [1],
+      primaryJob: [2],
     },
     faqs: [
       {
@@ -526,6 +592,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       primaryJob:
         "Synchronize and consolidate fitness data across services that do not reliably exchange it on their own.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 3],
+      format: [1, 3],
+      hardware: [2],
+      inputs: [2],
+      insightStyle: [1, 4],
+      platforms: [1],
+      pricing: [3],
+      primaryJob: [1, 2],
+    },
     faqs: [
       {
         answer:
@@ -607,6 +684,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       primaryJob:
         "Give health practices a unified longitudinal record and intelligence layer across their entire client population.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1, 2],
+      hardware: [1, 3],
+      inputs: [1, 2, 3],
+      insightStyle: [1],
+      platforms: [1, 2],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -687,6 +775,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         "Free. CommonHealth is developed by the nonprofit Commons Project Foundation.",
       primaryJob:
         "Put portable copies of a consumer's clinical records and verifiable health cards under that consumer's control.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 2],
+      followThrough: [2, 3],
+      format: [2, 3],
+      hardware: [3],
+      inputs: [2, 3],
+      insightStyle: [1],
+      platforms: [2],
+      pricing: [1, 2],
+      primaryJob: [1, 2],
     },
     faqs: [
       {

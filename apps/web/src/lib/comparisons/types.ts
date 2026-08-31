@@ -86,6 +86,10 @@ export interface CompetitorProfile {
   primaryJob: string;
 }
 
+export type CompetitorEvidence = {
+  [Key in keyof CompetitorProfile]: readonly [number, ...number[]];
+};
+
 export interface ComparisonEntry {
   aliases?: readonly string[];
   bestFor: string;
@@ -94,6 +98,7 @@ export interface ComparisonEntry {
   chooseCompetitor: string;
   chooseMurph: string;
   competitor: CompetitorProfile;
+  competitorEvidence: CompetitorEvidence;
   faqs: readonly [ComparisonFaq, ComparisonFaq, ComparisonFaq];
   headline: string;
   lastVerified: ComparisonIsoDate;

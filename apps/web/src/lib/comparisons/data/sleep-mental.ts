@@ -32,6 +32,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       primaryJob:
         "Actively regulate bed temperature while passively estimating sleep and recovery signals.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 3],
+      format: [1, 4],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1],
+      pricing: [1, 3, 4],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -115,6 +126,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       primaryJob:
         "Estimate sleep from a nearby phone and wake the user during a lighter portion of a selected alarm window.",
     },
+    competitorEvidence: {
+      clinicalRole: [3],
+      followThrough: [2, 3],
+      format: [3],
+      hardware: [3],
+      inputs: [2, 3],
+      insightStyle: [3],
+      platforms: [2, 3],
+      pricing: [3, 4],
+      primaryJob: [3],
+    },
     faqs: [
       {
         answer:
@@ -195,6 +217,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
         "Checked August 30, 2026: RISE listed a seven-day trial followed by $69.99 per year. AI Expert was a separate optional purchase whose displayed term and price should be confirmed at checkout.",
       primaryJob:
         "Translate estimated sleep debt and circadian timing into a practical daily energy schedule.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 4],
+      followThrough: [1, 3],
+      format: [1, 2],
+      hardware: [1, 3],
+      inputs: [3],
+      insightStyle: [1],
+      platforms: [3],
+      pricing: [2, 3],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -277,6 +310,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       primaryJob:
         "Turn Apple Watch signals into a detailed, automatic sleep and readiness history.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 3],
+      followThrough: [1, 2],
+      format: [1, 2],
+      hardware: [1, 2],
+      inputs: [1, 2],
+      insightStyle: [1, 2, 3],
+      platforms: [1, 2],
+      pricing: [1],
+      primaryJob: [1, 2],
+    },
     faqs: [
       {
         answer:
@@ -358,6 +402,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       primaryJob:
         "Estimate sleep within Apple's ecosystem and pair the nightly record with audio events and a smart alarm.",
     },
+    competitorEvidence: {
+      clinicalRole: [2],
+      followThrough: [2],
+      format: [2, 3],
+      hardware: [2, 3],
+      inputs: [2, 3],
+      insightStyle: [2],
+      platforms: [2],
+      pricing: [2],
+      primaryJob: [2],
+    },
     faqs: [
       {
         answer:
@@ -434,6 +489,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
         "A free version is available. Checked August 30, 2026, Premium was listed at $4.99 per month or $39.99 per year after a seven-day trial.",
       primaryJob:
         "Convert Apple Watch and iPhone signals into automatic sleep estimates and personalized sleep guidance.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 4],
+      followThrough: [1, 2],
+      format: [1, 2],
+      hardware: [1],
+      inputs: [1, 3],
+      insightStyle: [1, 2],
+      platforms: [1, 3],
+      pricing: [2, 3],
+      primaryJob: [1, 2],
     },
     faqs: [
       {
@@ -516,6 +582,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       primaryJob:
         "Estimate sleep without a wearable and turn the results into a guided sleep-improvement routine.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 2],
+      followThrough: [1, 3],
+      format: [1, 2, 3],
+      hardware: [1, 2],
+      inputs: [1, 2],
+      insightStyle: [1, 2, 3],
+      platforms: [1, 2],
+      pricing: [3, 4],
+      primaryJob: [1, 2, 3],
+    },
     faqs: [
       {
         answer:
@@ -596,6 +673,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
         "Checked August 30, 2026: a one-week trial was $19, followed by $297 for each 28-day program period unless canceled.",
       primaryJob:
         "Help adults change behaviors and thoughts that perpetuate insomnia through a structured CBT-I-based program.",
+    },
+    competitorEvidence: {
+      clinicalRole: [2],
+      followThrough: [2],
+      format: [2],
+      hardware: [2],
+      inputs: [2],
+      insightStyle: [2],
+      platforms: [2, 3],
+      pricing: [1],
+      primaryJob: [2],
     },
     faqs: [
       {
@@ -678,6 +766,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       primaryJob:
         "Provide a broad library of guided practices and audio that support relaxation, meditation, and bedtime routines.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 2],
+      followThrough: [1, 2],
+      format: [1, 2],
+      hardware: [1],
+      inputs: [1, 2],
+      insightStyle: [1, 2],
+      platforms: [1, 2],
+      pricing: [2, 3, 4],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -758,6 +857,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
         "Checked August 30, 2026: $12.99 per month after a seven-day trial or $69.99 per year after a 14-day trial. Therapy and coaching are separate from the standard consumer membership.",
       primaryJob:
         "Teach and support regular meditation, sleep, and mental-wellness practices through expert-created content.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 4],
+      followThrough: [1, 2, 4],
+      format: [1, 2],
+      hardware: [4],
+      inputs: [1, 4],
+      insightStyle: [1, 4],
+      platforms: [1, 4],
+      pricing: [3],
+      primaryJob: [1, 2],
     },
     faqs: [
       {
@@ -840,6 +950,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       primaryJob:
         "Personalize a regular guided meditation practice from self-reported needs and preferences.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [2, 4],
+      format: [1, 3],
+      hardware: [1],
+      inputs: [3],
+      insightStyle: [3],
+      platforms: [1, 4],
+      pricing: [4],
+      primaryJob: [1, 3],
+    },
     faqs: [
       {
         answer:
@@ -920,6 +1041,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
         "Published direct-plan copy checked August 30, 2026 listed self-help Tools at $99.99 per year and Coach plus Tools at $99.99 per month. App-store purchases and supported-program pricing can differ.",
       primaryJob:
         "Offer always-available emotional-support chat and structured self-help exercises between or outside formal care.",
+    },
+    competitorEvidence: {
+      clinicalRole: [3],
+      followThrough: [2, 3],
+      format: [1, 2],
+      hardware: [1],
+      inputs: [1, 2],
+      insightStyle: [3],
+      platforms: [1, 3, 4],
+      pricing: [3],
+      primaryJob: [3],
     },
     faqs: [
       {
@@ -1002,6 +1134,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       primaryJob:
         "Make mood, activity, and habit self-tracking quick enough to sustain as a daily journal.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1],
+      hardware: [1, 3],
+      inputs: [1, 3],
+      insightStyle: [1],
+      platforms: [1, 4],
+      pricing: [4],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -1083,6 +1226,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       primaryJob:
         "Make small self-care actions more approachable by tying them to a virtual pet and a gentle reward loop.",
     },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [3, 4],
+      format: [4],
+      hardware: [4],
+      inputs: [4],
+      insightStyle: [3, 4],
+      platforms: [4],
+      pricing: [2, 4],
+      primaryJob: [4],
+    },
     faqs: [
       {
         answer:
@@ -1163,6 +1317,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
         "Checked August 30, 2026: Muse S Athena was $474.99 device-only or $539 with one year of Premium. Premium was also listed at $12.99 monthly or $55 annually; bundle renewal terms can differ.",
       primaryJob:
         "Use head-worn brain and physiological sensors to guide meditation, cognitive training, and sleep-focused experiences.",
+    },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [2, 4],
+      format: [1, 2, 3],
+      hardware: [3, 4],
+      inputs: [3, 4],
+      insightStyle: [2, 4],
+      platforms: [1, 4],
+      pricing: [1, 2],
+      primaryJob: [4],
     },
     faqs: [
       {
@@ -1246,6 +1411,17 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
         "Checked August 30, 2026: MSRP was $448 and the public offer was $368, including the first year of SmartVibes valued at $99. After that year, renewal is needed to retain SmartVibes automation and Premium features, not to manually play basic Vibes.",
       primaryJob:
         "Deliver scheduled tactile stimulation intended to support different functional states without requiring the user to watch a screen.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 5],
+      followThrough: [1, 2, 3, 4],
+      format: [1, 2],
+      hardware: [1],
+      inputs: [1, 2],
+      insightStyle: [1, 2],
+      platforms: [1, 2],
+      pricing: [1, 2, 3],
+      primaryJob: [1],
     },
     faqs: [
       {

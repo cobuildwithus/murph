@@ -22,6 +22,9 @@ export function ComparisonArticle({
   const titleId = `comparison-${comparison.slug}`;
   const sourceSectionId = `${titleId}-sources`;
   const reviewedLabel = formatComparisonDate(comparison.lastVerified);
+  const competitorNameParts = comparison.name.split(
+    /(?<=[a-z0-9])(?=[A-Z][a-z])/u,
+  );
 
   return (
     <article aria-labelledby={titleId}>
@@ -53,10 +56,16 @@ export function ComparisonArticle({
                 Murph comparison guide
               </p>
               <h1
-                className="mt-5 max-w-[11ch] text-balance font-serif text-[clamp(3.15rem,7vw,5.8rem)] font-semibold leading-[0.9] tracking-[-0.045em]"
+                className="mt-5 max-w-[11ch] [overflow-wrap:anywhere] text-balance font-serif text-[clamp(3.15rem,7vw,5.8rem)] font-semibold leading-[0.9] tracking-[-0.045em]"
                 id={titleId}
               >
-                Murph vs {comparison.name}
+                Murph vs{" "}
+                {competitorNameParts.map((part, index) => (
+                  <span key={`${part}-${index}`}>
+                    {index > 0 ? <wbr /> : null}
+                    {part}
+                  </span>
+                ))}
               </h1>
             </div>
 
@@ -259,7 +268,7 @@ export function ComparisonArticle({
               </p>
             </div>
             <ol className="divide-y divide-[#c4a882]/30 border-y border-[#c4a882]/30">
-              <li className="grid grid-cols-[2rem_1fr] gap-3 py-4" id={`${titleId}-source-01`}>
+              <li className="grid scroll-mt-24 grid-cols-[2rem_1fr] gap-3 py-4" id={`${titleId}-source-01`}>
                 <span className="font-mono text-[10px] leading-6 text-[#736a58]">01</span>
                 <Link
                   className="w-fit text-[0.9rem] leading-6 text-[#2d3436] underline decoration-[#c4a882] underline-offset-4 transition-colors hover:text-[#5a6e32]"
@@ -268,7 +277,7 @@ export function ComparisonArticle({
                   Murph public product description
                 </Link>
               </li>
-              <li className="grid grid-cols-[2rem_1fr] gap-3 py-4" id={`${titleId}-source-02`}>
+              <li className="grid scroll-mt-24 grid-cols-[2rem_1fr] gap-3 py-4" id={`${titleId}-source-02`}>
                 <span className="font-mono text-[10px] leading-6 text-[#736a58]">02</span>
                 <Link
                   className="w-fit text-[0.9rem] leading-6 text-[#2d3436] underline decoration-[#c4a882] underline-offset-4 transition-colors hover:text-[#5a6e32]"
@@ -279,7 +288,7 @@ export function ComparisonArticle({
               </li>
               {comparison.sources.map((source, index) => (
                 <li
-                  className="grid grid-cols-[2rem_1fr] gap-3 py-4"
+                  className="grid scroll-mt-24 grid-cols-[2rem_1fr] gap-3 py-4"
                   id={`${titleId}-source-${String(index + 3).padStart(2, "0")}`}
                   key={source.url}
                 >

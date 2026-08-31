@@ -22,6 +22,17 @@ const DESIGN_COMPARISON = {
     pricing: "Hardware purchase with an optional membership.",
     primaryJob: "Measure sleep, strain, and recovery continuously.",
   },
+  competitorEvidence: {
+    clinicalRole: [1],
+    followThrough: [1],
+    format: [1],
+    hardware: [1],
+    inputs: [1],
+    insightStyle: [1],
+    platforms: [2],
+    pricing: [1],
+    primaryJob: [1],
+  },
   faqs: [
     {
       answer:
@@ -61,5 +72,25 @@ const DESIGN_COMPARISON = {
 } satisfies ComparisonEntry;
 
 export function PublicComparisonTableStudy() {
-  return <ComparisonTable comparison={DESIGN_COMPARISON} />;
+  return (
+    <div className="grid gap-10">
+      <ComparisonTable comparison={DESIGN_COMPARISON} />
+      <ol aria-label="Synthetic comparison references" className="sr-only">
+        <li id="comparison-recovery-wearable-source-01">
+          Murph public product description
+        </li>
+        <li id="comparison-recovery-wearable-source-02">
+          Murph public health boundary
+        </li>
+        {DESIGN_COMPARISON.sources.map((source, index) => (
+          <li
+            id={`comparison-recovery-wearable-source-${String(index + 3).padStart(2, "0")}`}
+            key={source.url}
+          >
+            {source.label}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
 }

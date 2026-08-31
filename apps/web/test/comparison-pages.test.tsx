@@ -8,6 +8,7 @@ import {
   generateMetadata,
   generateStaticParams,
 } from "../app/compare/[competitor]/page";
+import { metadata as comparisonIndexMetadata } from "../app/compare/page";
 import { PublicComparisonTableStudy } from "../app/design/public-comparison-table-study";
 import { ComparisonArticle } from "../src/components/comparisons/comparison-page";
 import {
@@ -17,6 +18,10 @@ import {
   listComparisonRoutes,
   listRelatedComparisons,
 } from "../src/lib/comparisons/catalog";
+import {
+  MURPH_COMPARISON_EVIDENCE,
+  MURPH_COMPARISON_PROFILE,
+} from "../src/lib/comparisons/murph-profile";
 import { createComparisonStructuredData } from "../src/lib/comparisons/structured-data";
 import { COMPARISON_CATEGORIES } from "../src/lib/comparisons/types";
 import {
@@ -57,6 +62,21 @@ describe("comparison catalog", () => {
   it("publishes a substantial, unique, source-backed catalog", () => {
     expect(COMPARISONS.length).toBeGreaterThanOrEqual(60);
 
+    assert.deepEqual(
+      Object.keys(MURPH_COMPARISON_EVIDENCE).sort(),
+      Object.keys(MURPH_COMPARISON_PROFILE).sort(),
+      "Murph must map evidence for every comparison dimension.",
+    );
+    for (const [key, ordinals] of Object.entries(MURPH_COMPARISON_EVIDENCE)) {
+      for (const ordinal of ordinals) {
+        assert.equal(
+          Number.isInteger(ordinal) && ordinal >= 1 && ordinal <= 2,
+          true,
+          `Murph.${key} has out-of-range source ${ordinal}.`,
+        );
+      }
+    }
+
     const slugs = new Set<string>();
     const names = new Set<string>();
     const descriptions = new Set<string>();
@@ -82,6 +102,36 @@ describe("comparison catalog", () => {
       assert.equal(comparison.faqs.length, 3);
       assert.ok(comparison.tradeoffs.length >= 2);
       assert.ok(comparison.sources.length >= 2);
+
+      const competitorProfileKeys = Object.keys(
+        comparison.competitor,
+      ) as Array<keyof typeof comparison.competitor>;
+      assert.deepEqual(
+        Object.keys(comparison.competitorEvidence).sort(),
+        [...competitorProfileKeys].sort(),
+        `${comparison.slug} must map evidence for every comparison dimension.`,
+      );
+      for (const key of competitorProfileKeys) {
+        const ordinals = comparison.competitorEvidence[key];
+        assert.ok(
+          ordinals.length > 0,
+          `${comparison.slug}.${key} needs a source reference.`,
+        );
+        assert.equal(
+          new Set(ordinals).size,
+          ordinals.length,
+          `${comparison.slug}.${key} repeats a source reference.`,
+        );
+        for (const ordinal of ordinals) {
+          assert.equal(
+            Number.isInteger(ordinal)
+              && ordinal >= 1
+              && ordinal <= comparison.sources.length,
+            true,
+            `${comparison.slug}.${key} has out-of-range source ${ordinal}.`,
+          );
+        }
+      }
 
       const copy = humanCopy(comparison);
       assert.ok(copy.join(" ").length >= 1_000, `${comparison.slug} needs more substantive copy.`);
@@ -127,7 +177,7 @@ describe("comparison catalog", () => {
     }
   });
 
-  it.each(["whoop", "bodybuddy"])(
+  it.each(["whoop", "bodybuddy", "commonhealth"])(
     "renders the %s guide as substantive semantic HTML",
     (slug) => {
       const comparison = comparisonBySlug(slug);
@@ -141,8 +191,13 @@ describe("comparison catalog", () => {
         .replaceAll(/<[^>]+>/gu, " ")
         .replaceAll(/\s+/gu, " ")
         .trim();
+      const headingMarkup = markup.match(/<h1[^>]*>([\s\S]*?)<\/h1>/u)?.[1];
 
-      assert.match(markup, new RegExp(`<h1[^>]*>\\s*Murph vs ${comparison.name}`, "u"));
+      assert.ok(headingMarkup, "Comparison guide needs an h1.");
+      assert.equal(
+        headingMarkup.replaceAll(/<[^>]+>/gu, "").trim(),
+        `Murph vs ${comparison.name}`,
+      );
       assert.match(markup, /<caption[^>]*>Murph and [^<]+ feature comparison<\/caption>/u);
       assert.match(markup, /scope="col"/u);
       assert.match(markup, /scope="row"/u);
@@ -150,6 +205,46 @@ describe("comparison catalog", () => {
       assert.match(markup, /official-source desk research/iu);
       assert.equal((markup.match(/<h3\b/gu) ?? []).length, 3);
       assert.ok(readableText.length > 2_000);
+
+      for (const ordinals of Object.values(MURPH_COMPARISON_EVIDENCE)) {
+        for (const ordinal of ordinals) {
+          const sourceNumber = String(ordinal).padStart(2, "0");
+          assert.match(
+            markup,
+            new RegExp(
+              `href="#comparison-${comparison.slug}-source-${sourceNumber}"`,
+              "u",
+            ),
+          );
+          assert.match(
+            markup,
+            new RegExp(
+              `id="comparison-${comparison.slug}-source-${sourceNumber}"`,
+              "u",
+            ),
+          );
+        }
+      }
+
+      for (const ordinals of Object.values(comparison.competitorEvidence)) {
+        for (const ordinal of ordinals) {
+          const sourceNumber = String(ordinal + 2).padStart(2, "0");
+          assert.match(
+            markup,
+            new RegExp(
+              `href="#comparison-${comparison.slug}-source-${sourceNumber}"`,
+              "u",
+            ),
+          );
+          assert.match(
+            markup,
+            new RegExp(
+              `id="comparison-${comparison.slug}-source-${sourceNumber}"`,
+              "u",
+            ),
+          );
+        }
+      }
     },
   );
 
@@ -197,12 +292,47 @@ describe("comparison catalog", () => {
     expect(metadata.description).toBe(comparison.metaDescription);
     expect(metadata.alternates?.canonical).toBe(comparisonPath(comparison));
     expect(metadata.robots).toEqual(MURPH_INDEXABLE_PAGE_ROBOTS);
+    expect(metadata.openGraph).toMatchObject({
+      images: [
+        {
+          alt: `Murph vs ${comparison.name}`,
+          url: `${comparisonPath(comparison)}/opengraph-image`,
+        },
+      ],
+    });
+    expect(metadata.twitter).toMatchObject({
+      images: [
+        {
+          alt: `Murph vs ${comparison.name}`,
+          url: `${comparisonPath(comparison)}/opengraph-image`,
+        },
+      ],
+    });
     expect(
       metadata.openGraph && "type" in metadata.openGraph
         ? metadata.openGraph.type
         : undefined,
     ).toBe("article");
     expect(missingMetadata.robots).toEqual(MURPH_NOINDEX_PAGE_ROBOTS);
+  });
+
+  it("points the comparison index metadata at its dedicated share card", () => {
+    expect(comparisonIndexMetadata.openGraph).toMatchObject({
+      images: [
+        {
+          alt: "Murph comparison guides",
+          url: "/compare/opengraph-image",
+        },
+      ],
+    });
+    expect(comparisonIndexMetadata.twitter).toMatchObject({
+      images: [
+        {
+          alt: "Murph comparison guides",
+          url: "/compare/opengraph-image",
+        },
+      ],
+    });
   });
 
   it("registers the real production table in the synthetic design study", () => {

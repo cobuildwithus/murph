@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   COMPARISON_CATEGORIES,
@@ -26,6 +26,7 @@ export function ComparisonDirectory({
   comparisons: readonly ComparisonDirectoryItem[];
 }) {
   const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const normalizedQuery = normalizeSearchValue(query);
   const filteredComparisons = useMemo(() => {
     if (!normalizedQuery) {
@@ -51,12 +52,18 @@ export function ComparisonDirectory({
   }, [comparisons, normalizedQuery]);
 
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-14 sm:gap-16">
+    <div
+      className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-14 sm:gap-16"
+      data-comparison-directory
+    >
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-8 border-b border-[#c4a882]/40 pb-10">
-        <label className="group block min-w-0 max-w-full" htmlFor="comparison-search">
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#5a6e32]">
+        <div className="group block min-w-0 max-w-full">
+          <label
+            className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#5a6e32]"
+            htmlFor="comparison-search"
+          >
             Find your comparison
-          </span>
+          </label>
           <span className="mt-3 flex items-center gap-4 border-b-2 border-[#2d3436] pb-3 transition-colors focus-within:border-[#5a6e32]">
             <svg
               aria-hidden="true"
@@ -69,13 +76,27 @@ export function ComparisonDirectory({
             </svg>
             <input
               autoComplete="off"
-              className="min-w-0 flex-1 bg-transparent font-serif text-[clamp(1.35rem,3vw,2rem)] font-semibold tracking-[-0.025em] text-[#2d3436] outline-none placeholder:text-[#9a927f]"
+              className="min-w-0 flex-1 bg-transparent font-serif text-[clamp(1.35rem,3vw,2rem)] font-semibold tracking-[-0.025em] text-[#2d3436] outline-none placeholder:text-[#9a927f] [&::-webkit-search-cancel-button]:appearance-none"
               id="comparison-search"
               onChange={(event) => setQuery(event.target.value)}
               placeholder="WHOOP, Oura, Apple Health..."
+              ref={searchInputRef}
               type="search"
               value={query}
             />
+            {normalizedQuery ? (
+              <button
+                aria-label="Clear comparison search"
+                className="inline-flex min-h-6 shrink-0 items-center border-b border-[#c4a882] font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58] transition-colors hover:text-[#5a6e32]"
+                onClick={() => {
+                  setQuery("");
+                  searchInputRef.current?.focus();
+                }}
+                type="button"
+              >
+                Clear
+              </button>
+            ) : null}
             <span
               aria-live="polite"
               className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]"
@@ -83,7 +104,7 @@ export function ComparisonDirectory({
               {filteredComparisons.length} found
             </span>
           </span>
-        </label>
+        </div>
 
         <nav
           aria-label="Comparison categories"

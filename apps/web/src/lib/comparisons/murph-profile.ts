@@ -1,4 +1,4 @@
-import type { CompetitorProfile } from "./types";
+import type { CompetitorEvidence, CompetitorProfile } from "./types";
 
 export const MURPH_COMPARISON_PROFILE: CompetitorProfile = {
   clinicalRole:
@@ -21,3 +21,15 @@ export const MURPH_COMPARISON_PROFILE: CompetitorProfile = {
     "Turn scattered health context into an ongoing private relationship, clearer decisions, and practical follow-through.",
 };
 
+// One-based positions in the two visible Murph references on every guide.
+export const MURPH_COMPARISON_EVIDENCE: CompetitorEvidence = {
+  clinicalRole: [2],
+  followThrough: [1],
+  format: [1],
+  hardware: [1],
+  inputs: [1],
+  insightStyle: [1],
+  platforms: [1],
+  pricing: [1],
+  primaryJob: [1],
+};

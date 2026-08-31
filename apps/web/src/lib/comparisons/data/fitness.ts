@@ -32,6 +32,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Deliver individualized fitness programming and accountability through a dedicated human coach.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [3],
+      format: [3],
+      hardware: [1, 3],
+      inputs: [1, 3],
+      insightStyle: [3],
+      platforms: [1],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -106,6 +117,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
         "$15.99 per month or $95.99 per year, with a seven-day trial according to Fitbod's current subscription information.",
       primaryJob:
         "Generate and track personalized strength workouts without requiring a human trainer.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [2],
+      format: [1],
+      hardware: [1],
+      inputs: [2],
+      insightStyle: [2],
+      platforms: [2],
+      pricing: [3],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -182,6 +204,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Support progressive strength training through free software or optional personalized human coaching.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [2, 3],
+      format: [2, 3],
+      hardware: [2],
+      inputs: [2, 3],
+      insightStyle: [2, 3],
+      platforms: [3],
+      pricing: [2, 3],
+      primaryJob: [2, 3],
+    },
     faqs: [
       {
         answer:
@@ -256,6 +289,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
         "A limited free experience is available. The current U.S. App Store lists paid purchases at $34.99, $59.99, and $74.99 or $79.99 depending on plan and term; checkout shows the exact renewal offer.",
       primaryJob:
         "Generate adaptable fitness sessions across bodyweight, gym, running, mobility, and conditioning.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [2],
+      format: [1, 2],
+      hardware: [2],
+      inputs: [2],
+      insightStyle: [2],
+      platforms: [2, 4],
+      pricing: [3, 4],
+      primaryJob: [2],
     },
     faqs: [
       {
@@ -337,6 +381,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Bundle fitness classes, training programs, meal planning, recipes, and mindfulness into one membership.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1, 3],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -412,6 +467,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Deliver a fresh weekly strength plan and community accountability through coach-led training teams.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1, 2],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -482,6 +548,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       pricing: "Free, with no paid consumer subscription required for the workout library.",
       primaryJob:
         "Make a broad library of guided workouts and training programs available at no charge.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1],
+      hardware: [1],
+      inputs: [1, 2],
+      insightStyle: [1],
+      platforms: [2, 3],
+      pricing: [1],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -559,6 +636,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Deliver instructor-led fitness classes and programs at home, outside, or on compatible cardio equipment.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1, 2],
+      hardware: [1, 2],
+      inputs: [2],
+      insightStyle: [2],
+      platforms: [1],
+      pricing: [1],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -634,6 +722,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Provide guided full-body digital strength training through a connected home gym.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1, 3],
+      insightStyle: [1],
+      platforms: [3],
+      pricing: [1],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -706,6 +805,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
         "The current FAQ lists one-to-one training at $149 per month, billed as $447 each quarter, with a 14-day trial. Confirm the live checkout because other current promotional pages have shown a different rate.",
       primaryJob:
         "Pair a member with a dedicated human trainer for customized workouts and frequent remote accountability.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [2],
+      format: [1],
+      hardware: [2],
+      inputs: [2],
+      insightStyle: [2],
+      platforms: [1, 3],
+      pricing: [3],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -780,6 +890,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Build adaptive powerlifting and powerbuilding programs for strength development and meet preparation.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1, 3],
+      insightStyle: [1],
+      platforms: [4],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -815,6 +936,10 @@ export const FITNESS_COMPARISONS = defineComparisons([
       {
         label: "JuggernautAI version 3 overview",
         url: "https://www.juggernautai.app/blog/juggernautai-v3-0-is-here",
+      },
+      {
+        label: "JuggernautAI Apple Health and Health Connect integrations",
+        url: "https://www.juggernautai.app/blog/juggernautai-v2-0-is-out-now",
       },
     ],
     tradeoffs: [
@@ -854,6 +979,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
         "Unlimited workout logging is free. Pro is $12.99 per month or $79.99 per year, with a 14-day trial on the annual plan.",
       primaryJob:
         "Generate and progress gym-based muscle and strength programs from a user's goals and training history.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [3],
+      pricing: [2],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -931,6 +1067,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Make resistance-training routines and set-by-set workout history easy to create and record.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [3],
+      format: [3],
+      hardware: [3],
+      inputs: [3],
+      insightStyle: [3],
+      platforms: [1],
+      pricing: [3],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -1007,6 +1154,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Track strength workouts and progress while sharing routines and activity with a lifting community.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1, 2],
+      hardware: [2],
+      inputs: [1, 2],
+      insightStyle: [1, 2],
+      platforms: [1],
+      pricing: [3],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -1078,6 +1236,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
         "A free tier is available. The U.S. individual subscription is $11.99 per month or $79.99 per year, with a 30-day trial for eligible new subscribers.",
       primaryJob:
         "Record, analyze, map, discover, and socially share activities across many sports.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [3],
+      inputs: [1, 3],
+      insightStyle: [1],
+      platforms: [3],
+      pricing: [2],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -1151,6 +1320,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Guide runners through personalized training plans for distances from 5K to ultramarathon.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -1223,6 +1403,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
         "$9.99 per month or $79.99 per year, with one month free for eligible new subscribers and sharing with up to five family members.",
       primaryJob:
         "Stream trainer-led workouts and meditations with an integrated Apple device experience.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 3],
+      format: [1],
+      hardware: [2],
+      inputs: [1, 3],
+      insightStyle: [1, 3],
+      platforms: [2, 3],
+      pricing: [1],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -1303,6 +1494,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       primaryJob:
         "Plan and autoregulate muscle-gain training through structured hypertrophy mesocycles.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1],
+      insightStyle: [2],
+      platforms: [3],
+      pricing: [1],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -1375,11 +1577,22 @@ export const FITNESS_COMPARISONS = defineComparisons([
       insightStyle:
         "Applies the chosen program's progression rules, reports lifting performance, and can generate a starter plan from structured preferences.",
       platforms:
-        "iPhone, Android, Apple Watch, and a web program builder, with offline logging and selected HealthKit heart-rate support.",
+        "iPhone, Android, and a web program builder. Boostcamp's current official pages conflict on Apple Watch support: its features page documents a companion app, offline logging, and HealthKit heart-rate logging, while its homepage says no watch app is available.",
       pricing:
         "Core programs and logging are free. Pro is $59.99 per year, advertised as the equivalent of $4.99 per month when billed annually, with a seven-day trial, or $14.99 month-to-month with no trial.",
       primaryJob:
         "Help lifters discover, follow, build, and log structured strength-training programs.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [2],
+      inputs: [1, 4],
+      insightStyle: [1],
+      platforms: [1, 2, 3],
+      pricing: [4],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -1401,7 +1614,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
     headline: "Murph vs Boostcamp: personal health context or strength program library?",
     lastVerified: "2026-08-30",
     metaDescription:
-      "Compare Murph and Boostcamp on free strength programs, workout logging, coach templates, plan generation, Apple Watch, Pro features, and pricing.",
+      "Compare Murph and Boostcamp on free strength programs, workout logging, coach templates, plan generation, platform caveats, Pro features, and pricing.",
     name: "Boostcamp",
     overview:
       "Boostcamp makes structured strength training accessible through a large catalog of free coach-designed and community programs, a modern workout tracker, and tools for custom programming. Some personalization is algorithmic, but the standard product is not one-to-one coaching. Murph's value sits outside the template library: a wider private health conversation with context and follow-through.",
@@ -1460,6 +1673,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
         "A limited free experience is available. SHRED Pro is $19.99 per month or $119.99 per year, with a seven-day trial on the annual plan.",
       primaryJob:
         "Generate and guide personalized gym and home workouts with a polished visual experience.",
+    },
+    competitorEvidence: {
+      clinicalRole: [3],
+      followThrough: [1],
+      format: [1, 3],
+      hardware: [3],
+      inputs: [1, 3],
+      insightStyle: [1],
+      platforms: [1, 3],
+      pricing: [2],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -1530,6 +1754,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
         "Core planning and logging are free. JEFIT Elite is $12.99 per month or $69.99 per year in current U.S. pricing.",
       primaryJob:
         "Plan, log, analyze, and share resistance-training routines across phone, watch, and web.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 5],
+      format: [1, 5],
+      hardware: [4],
+      inputs: [4, 5],
+      insightStyle: [1, 5],
+      platforms: [1, 3],
+      pricing: [2],
+      primaryJob: [1],
     },
     faqs: [
       {

@@ -31,6 +31,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Log food and exercise against calorie, weight, and macro goals.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [2],
+      format: [2],
+      hardware: [3],
+      inputs: [2, 3],
+      insightStyle: [2],
+      platforms: [2, 3],
+      pricing: [1],
+      primaryJob: [2],
+    },
     faqs: [
       {
         answer:
@@ -107,6 +118,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Measure energy, macro, micronutrient, exercise, and biometric intake or progress in detail.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [2, 3],
+      inputs: [1, 3],
+      insightStyle: [1],
+      platforms: [2, 3],
+      pricing: [1],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -182,6 +204,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "US pricing checked August 30, 2026: $11.99 monthly, $47.99 for six months, or $71.99 yearly. A Nutrition and Workouts bundle is $89.99 yearly for eligible new users.",
       primaryJob:
         "Adapt calorie and macro targets from logged intake and changes in body weight.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [3, 4],
+      inputs: [1, 4],
+      insightStyle: [1],
+      platforms: [1, 4],
+      pricing: [2],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -263,6 +296,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Guide weight change through a structured behavior program, with optional separate access to medical obesity care.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 2],
+      followThrough: [2],
+      format: [2],
+      hardware: [3],
+      inputs: [2, 3],
+      insightStyle: [2],
+      platforms: [3],
+      pricing: [1, 2],
+      primaryJob: [1, 2],
+    },
     faqs: [
       {
         answer:
@@ -339,6 +383,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "US pricing checked August 30, 2026 is promotional and dynamic. The site advertises membership from $12 monthly. Med+ advertises $25 for month one, then $74 monthly on a twelve-month term or $84 monthly on six months; GLP-1 medication is extra.",
       primaryJob:
         "Support weight management through Points, recipes, community, coaching, and optional clinical care.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 3],
+      followThrough: [1, 2],
+      format: [1],
+      hardware: [1, 2],
+      inputs: [1, 2],
+      insightStyle: [1, 2],
+      platforms: [1],
+      pricing: [1],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -420,6 +475,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Create and track a personalized calorie budget for weight change.",
     },
+    competitorEvidence: {
+      clinicalRole: [3],
+      followThrough: [1, 3],
+      format: [3],
+      hardware: [3],
+      inputs: [1, 3],
+      insightStyle: [3],
+      platforms: [2, 3],
+      pricing: [1],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -495,6 +561,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "Pricing checked August 30, 2026 varies by storefront and account. The US App Store exposes individual tiers from $5.99 monthly or $39.99 yearly and family tiers from $9.99 monthly or $69.99 yearly, alongside other active storefront price points.",
       primaryJob:
         "Track calories, macros, nutrients, recipes, fasting, and weight in the Apple ecosystem.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [2],
+      format: [1, 2],
+      hardware: [1, 2],
+      inputs: [1, 2],
+      insightStyle: [1, 2],
+      platforms: [1, 3],
+      pricing: [3],
+      primaryJob: [1, 2],
     },
     faqs: [
       {
@@ -572,6 +649,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Track food, weight, activity, and related health measures against personalized diet goals.",
     },
+    competitorEvidence: {
+      clinicalRole: [2],
+      followThrough: [2],
+      format: [2],
+      hardware: [2],
+      inputs: [2],
+      insightStyle: [2],
+      platforms: [2],
+      pricing: [1, 3],
+      primaryJob: [2],
+    },
     faqs: [
       {
         answer:
@@ -647,6 +735,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "US pricing checked August 30, 2026 is account and promotion dependent. A current App Store offer shows $7.49 monthly, $14.99 for three months, or $49.99 yearly, while higher-price SKUs remain listed.",
       primaryJob:
         "Guide everyday eating through meal logging, ratings, recipes, and packaged nutrition plans.",
+    },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [1, 2],
+      format: [1],
+      hardware: [1],
+      inputs: [1, 2, 3],
+      insightStyle: [1, 2],
+      platforms: [1, 3],
+      pricing: [3],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -729,6 +828,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Track food, calories, macros, weight, and fasting against a personal goal.",
     },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [1],
+      format: [1],
+      hardware: [1, 3],
+      inputs: [1, 2, 3],
+      insightStyle: [1],
+      platforms: [1, 2, 3],
+      pricing: [2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -809,6 +919,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Use breath carbon dioxide to infer current fuel use and guide daily nutrition choices.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1, 2],
+      hardware: [1],
+      inputs: [1, 2],
+      insightStyle: [1, 2],
+      platforms: [1],
+      pricing: [1],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -883,6 +1004,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "US pricing checked August 30, 2026: limited free use; Premium is $9.99 monthly or $59.99 yearly with a seven-day trial. Older or discounted $4.99 and $39.99 SKUs also appear in the official storefront.",
       primaryJob:
         "Make food logging fast and estimate how meals may affect personal glucose response.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1, 3],
+      hardware: [1, 4],
+      inputs: [1, 3, 4],
+      insightStyle: [1, 2],
+      platforms: [3],
+      pricing: [2, 3],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -966,6 +1098,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Use continuous glucose feedback to guide eating and weight habits, with optional GLP-1 support or prescribing.",
     },
+    competitorEvidence: {
+      clinicalRole: [2, 3, 4],
+      followThrough: [1, 2, 3],
+      format: [1, 3],
+      hardware: [1, 2],
+      inputs: [1, 2, 3],
+      insightStyle: [1, 2, 3],
+      platforms: [1, 2],
+      pricing: [1, 2, 3],
+      primaryJob: [1, 2, 3],
+    },
     faqs: [
       {
         answer:
@@ -1048,6 +1191,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Combine food, glucose, activity, sleep, and labs into a metabolic-health feedback system.",
     },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1],
+      format: [1],
+      hardware: [1, 2],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1, 2],
+      pricing: [1, 3],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -1125,6 +1279,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "Pricing checked August 30, 2026: US free app; ZOE Plus $15.99 monthly or $99.99 yearly. UK app-only membership starts at £9.99 monthly billed as £119.88 yearly, with an optional £149 stool test for members.",
       primaryJob:
         "Score meals and guide food choices using quality, plant diversity, and personalized-response models.",
+    },
+    competitorEvidence: {
+      clinicalRole: [2],
+      followThrough: [1],
+      format: [1, 2, 4],
+      hardware: [2, 4],
+      inputs: [1, 2, 4],
+      insightStyle: [1, 3, 4],
+      platforms: [1, 2],
+      pricing: [2, 4],
+      primaryJob: [1, 3],
     },
     faqs: [
       {
@@ -1205,6 +1370,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "US pricing checked August 30, 2026: Nourish says 94% of patients pay $0 out of pocket. Actual copay, deductible, coverage, and visit limits require a benefits check; a transparent universal self-pay price was not verified.",
       primaryJob:
         "Deliver ongoing one-to-one nutrition care from a licensed registered dietitian.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1, 4],
+      followThrough: [1],
+      format: [1],
+      hardware: [2],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1, 2],
+      pricing: [1],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -1288,6 +1464,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Help a patient find, book, and continue care with a registered dietitian.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 3],
+      followThrough: [1],
+      format: [1, 3],
+      hardware: [4],
+      inputs: [1],
+      insightStyle: [1],
+      platforms: [1, 3],
+      pricing: [2],
+      primaryJob: [1, 3],
+    },
     faqs: [
       {
         answer:
@@ -1369,6 +1556,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "US pricing checked August 30, 2026: bring-your-own-sensor access is $39 monthly or $199 yearly after a three-day trial. Sensor plans currently show conflicting promotions around $152 monthly for six months, $178 to $179 for three months, and $212 to $215 for one month.",
       primaryJob:
         "Use continuous glucose data, AI, and optional nutrition coaching to explore metabolic responses.",
+    },
+    competitorEvidence: {
+      clinicalRole: [2, 3],
+      followThrough: [2, 3, 4],
+      format: [1, 2],
+      hardware: [1, 2],
+      inputs: [1, 3],
+      insightStyle: [2, 3],
+      platforms: [1, 3],
+      pricing: [1, 2],
+      primaryJob: [2, 3],
     },
     faqs: [
       {
@@ -1452,6 +1650,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       primaryJob:
         "Track net carbohydrates and plan keto or low-carb eating.",
     },
+    competitorEvidence: {
+      clinicalRole: [1, 3],
+      followThrough: [1],
+      format: [1],
+      hardware: [1],
+      inputs: [1, 3],
+      insightStyle: [1],
+      platforms: [1, 3],
+      pricing: [1, 2],
+      primaryJob: [1],
+    },
     faqs: [
       {
         answer:
@@ -1527,6 +1736,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "US pricing checked August 30, 2026 is not transparently labeled by term. Apple lists Unlimited purchases from $2.99 to $29.99 and says some purchases may support Family Sharing; verify the price, duration, and renewal in checkout after the three-day trial.",
       primaryJob:
         "Estimate meal calories and macros quickly from a photo or short description.",
+    },
+    competitorEvidence: {
+      clinicalRole: [4],
+      followThrough: [1, 3],
+      format: [1, 3],
+      hardware: [1, 3],
+      inputs: [1, 3],
+      insightStyle: [1, 3],
+      platforms: [3],
+      pricing: [3, 4],
+      primaryJob: [1],
     },
     faqs: [
       {
@@ -1608,6 +1828,17 @@ export const NUTRITION_COMPARISONS = defineComparisons([
         "US pricing checked August 30, 2026: the base journal lists $9.99 monthly, $19.99 quarterly, or $49.99 yearly. AteMate Coach is a separate $19.99 monthly tier; Coach Plus is another tier whose public US price was not verified.",
       primaryJob:
         "Build awareness of eating patterns through photos and context rather than compulsory calorie counting.",
+    },
+    competitorEvidence: {
+      clinicalRole: [1],
+      followThrough: [1, 2],
+      format: [1],
+      hardware: [1, 2, 3],
+      inputs: [1, 2, 3],
+      insightStyle: [1],
+      platforms: [2, 3],
+      pricing: [2],
+      primaryJob: [1],
     },
     faqs: [
       {
