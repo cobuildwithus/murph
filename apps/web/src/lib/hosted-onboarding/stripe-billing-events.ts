@@ -1466,9 +1466,9 @@ export async function applyStripeInvoicePaid(
   if (!updatedMember) {
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
-      ...(runtimeRecheckMemberId
-        ? { positivePaymentTransitionOccurred: true as const }
-        : {}),
+      ...buildHostedStripePositivePaymentTransitionOutcome(
+        runtimeRecheckMemberId,
+      ),
       runtimeRecheckMemberIds: runtimeRecheckMemberId
         ? [runtimeRecheckMemberId]
         : [],
@@ -1498,9 +1498,10 @@ export async function applyStripeInvoicePaid(
         accessRestorationHandoff?.hostedExecutionEventId ?? null,
       hostedExecutionMailboxItemId:
         accessRestorationHandoff?.hostedExecutionMailboxItemId ?? null,
-      ...(restoredDirectAccess || runtimeRecheckMemberId
-        ? { positivePaymentTransitionOccurred: true as const }
-        : {}),
+      ...buildHostedStripePositivePaymentTransitionOutcome(
+        restoredDirectAccess,
+        runtimeRecheckMemberId,
+      ),
       runtimeRecheckMemberIds: runtimeRecheckMemberId
         && !accessRestorationHandoff
         ? [runtimeRecheckMemberId]
@@ -1540,9 +1541,10 @@ export async function applyStripeInvoicePaid(
       ?? accessRestorationHandoff?.hostedExecutionMailboxItemId
       ?? null,
     newlyActivatedMemberIds: activation.activated ? [updatedMember.core.id] : [],
-    ...(restoredDirectAccess || runtimeRecheckMemberId
-      ? { positivePaymentTransitionOccurred: true as const }
-      : {}),
+    ...buildHostedStripePositivePaymentTransitionOutcome(
+      restoredDirectAccess,
+      runtimeRecheckMemberId,
+    ),
     runtimeRecheckMemberIds: runtimeRecheckMemberId
       && !accessRestorationHandoff
       ? [runtimeRecheckMemberId]
@@ -1689,6 +1691,14 @@ function buildEmptyHostedStripeActivationOutcome(): HostedStripeActivationOutcom
     runtimeRecheckMemberIds: [],
     welcomeEmailMemberId: null,
   };
+}
+
+function buildHostedStripePositivePaymentTransitionOutcome(
+  ...transitionFacts: readonly unknown[]
+): Pick<HostedStripeActivationOutcome, "positivePaymentTransitionOccurred"> {
+  return transitionFacts.some(Boolean)
+    ? { positivePaymentTransitionOccurred: true }
+    : {};
 }
 
 async function reconcileHostedMemberUsagePlanTransitionTx(input: {

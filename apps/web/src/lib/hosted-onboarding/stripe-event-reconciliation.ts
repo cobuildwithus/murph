@@ -2139,7 +2139,7 @@ function mapHostedStripeActivationOutcome(
       outcome.hostedExecutionMailboxItemId ?? null,
     newlyActivatedMemberIds: outcome.newlyActivatedMemberIds,
     positivePaymentTransitionOccurred:
-      outcome.positivePaymentTransitionOccurred ?? false,
+      didHostedStripePositivePaymentTransitionOccur(outcome),
     runtimeRecheckMemberIds: outcome.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
@@ -2218,7 +2218,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
       outcome?.hostedExecutionMailboxItemId ?? null,
     newlyActivatedMemberIds: outcome?.newlyActivatedMemberIds ?? [],
     positivePaymentTransitionOccurred:
-      outcome?.positivePaymentTransitionOccurred ?? false,
+      didHostedStripePositivePaymentTransitionOccur(outcome),
     runtimeRecheckMemberIds: outcome?.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
@@ -2256,6 +2256,15 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,
   };
+}
+
+function didHostedStripePositivePaymentTransitionOccur(
+  outcome:
+    | { positivePaymentTransitionOccurred?: true }
+    | null
+    | undefined,
+): boolean {
+  return outcome?.positivePaymentTransitionOccurred === true;
 }
 
 function buildClaimableHostedStripeEventWhere(input: {
