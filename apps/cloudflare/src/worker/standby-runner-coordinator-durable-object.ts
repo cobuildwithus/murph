@@ -112,11 +112,11 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     return this.store.readState();
   }
 
-  alarm(): void {
-    this.startBackgroundWork();
+  alarm(): Promise<void> {
+    return this.startBackgroundWork();
   }
 
-  private startBackgroundWork(): void {
+  private startBackgroundWork(): Promise<void> {
     const work = this.backgroundWork
       .then(async () => await this.runMaintenance())
       .catch(async () => {
@@ -124,6 +124,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       });
     this.backgroundWork = work;
     this.state.waitUntil(work);
+    return work;
   }
 
   private async runMaintenance(): Promise<void> {
@@ -142,7 +143,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     await this.reconcileClaimTombstones(namespace);
     if (mode === "off" || currentReleaseId !== state.releaseId) {
       const converged = await this.retireCoordinatorOwnedSlots(namespace);
-      if (!converged) {
+      if (!converged || this.store.hasClaimTombstones()) {
         await this.scheduleAlarm(HOSTED_STANDBY_RETRY_MS);
       }
       return;
@@ -265,11 +266,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
   }
 
   private async scheduleAlarm(delayMs: number): Promise<void> {
-    try {
-      await this.setAlarm(Date.now() + delayMs);
-    } catch {
-      // The next scheduled Worker tick is the independent bootstrap backstop.
-    }
+    await this.setAlarm(Date.now() + delayMs);
   }
 }
 
@@ -408,6 +405,14 @@ class StandbyRunnerCoordinatorStore {
        ORDER BY claimed_at_ms ASC`,
       cutoffMs,
     ).toArray();
+  }
+
+  hasClaimTombstones(): boolean {
+    return this.sql.exec<{ present: number }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM standby_claim_tombstone
+       ) AS present`,
+    ).toArray()[0]?.present === 1;
   }
 
   deleteClaim(claimId: string): void {

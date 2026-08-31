@@ -1,13 +1,15 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 import { destroyHostedExecutionContainer } from "../src/runner-container.js";
 import { StandbyRunnerContainer } from "../src/standby-runner-container.js";
 import {
   HOSTED_STANDBY_LOCATION_HINT,
+  HOSTED_STANDBY_ORPHAN_GRACE_MS,
   HOSTED_STANDBY_REGION,
+  HOSTED_STANDBY_RETRY_MS,
   createHostedRunnerContainerNamespaceRouter,
   createHostedStandbyClaimId,
   createHostedStandbySlotName,
@@ -29,6 +31,11 @@ import type {
 const RELEASE_ID = "release_1";
 const BUNDLE_FINGERPRINT = "bundle-fingerprint";
 const SOURCE_FINGERPRINT = "source-fingerprint";
+const CLAIMED_AT_MS = Date.UTC(2026, 7, 31, 12);
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("hosted standby contract", () => {
   it("parses rollout modes strictly and creates opaque release-scoped identities", () => {
@@ -421,6 +428,117 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
       readySlotName: provisioning.provisioningSlotName,
     });
   });
+
+  it("keeps mode-off cleanup alive without retiring a claim bound during its grace period", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const harness = await createClaimedCoordinatorHarness(CLAIMED_AT_MS);
+
+    harness.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    harness.setAlarm.mockClear();
+    await harness.runAlarm();
+
+    expect(countClaimTombstones(harness.db)).toBe(1);
+    expect(harness.setAlarm).toHaveBeenCalledWith(
+      CLAIMED_AT_MS + HOSTED_STANDBY_RETRY_MS,
+    );
+    await expect(harness.claimedSlot.readStandbySlotBinding()).resolves.toMatchObject({
+      state: "unbound",
+      userId: null,
+    });
+
+    await harness.claimedSlot.bindStandbySlot({
+      claimId: harness.claimId,
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName: harness.slotName,
+      userId: "member_late_bind",
+    });
+    vi.setSystemTime(CLAIMED_AT_MS + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1);
+    harness.setAlarm.mockClear();
+    await harness.runAlarm();
+
+    expect(countClaimTombstones(harness.db)).toBe(0);
+    expect(harness.setAlarm).not.toHaveBeenCalled();
+    await expect(harness.claimedSlot.readStandbySlotBinding()).resolves.toMatchObject({
+      state: "bound",
+      userId: "member_late_bind",
+    });
+  });
+
+  it("keeps stale-release cleanup alive through exact-target failures until retirement converges", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const harness = await createClaimedCoordinatorHarness(CLAIMED_AT_MS);
+
+    harness.environment.CF_VERSION_METADATA = { id: "release_2" };
+    harness.setAlarm.mockClear();
+    await harness.runAlarm();
+
+    expect(countClaimTombstones(harness.db)).toBe(1);
+    expect(harness.setAlarm).toHaveBeenCalledWith(
+      CLAIMED_AT_MS + HOSTED_STANDBY_RETRY_MS,
+    );
+    expect(harness.slots.size).toBe(2);
+
+    vi.setSystemTime(CLAIMED_AT_MS + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1);
+    const readBinding = vi.spyOn(
+      harness.claimedSlot,
+      "readStandbySlotCoordinatorState",
+    ).mockRejectedValueOnce(new Error("binding unavailable"));
+    harness.setAlarm.mockClear();
+    await harness.runAlarm();
+
+    expect(readBinding).toHaveBeenCalledTimes(1);
+    expect(countClaimTombstones(harness.db)).toBe(1);
+    expect(harness.setAlarm).toHaveBeenCalledWith(
+      CLAIMED_AT_MS + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1
+        + HOSTED_STANDBY_RETRY_MS,
+    );
+
+    const retire = vi.spyOn(harness.claimedSlot, "retireStandbySlot")
+      .mockRejectedValueOnce(new Error("retirement unavailable"));
+    harness.setAlarm.mockClear();
+    await harness.runAlarm();
+
+    expect(retire).toHaveBeenCalledTimes(1);
+    expect(countClaimTombstones(harness.db)).toBe(1);
+    expect(harness.setAlarm).toHaveBeenCalledWith(
+      CLAIMED_AT_MS + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1
+        + HOSTED_STANDBY_RETRY_MS,
+    );
+
+    harness.setAlarm.mockClear();
+    await harness.runAlarm();
+
+    expect(countClaimTombstones(harness.db)).toBe(0);
+    expect(harness.setAlarm).not.toHaveBeenCalled();
+    expect(harness.slots.size).toBe(2);
+    await expect(harness.claimedSlot.readStandbySlotBinding()).resolves.toMatchObject({
+      state: "retired",
+      userId: null,
+    });
+  });
+
+  it("surfaces failed stale-release alarm persistence for platform retry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const harness = await createClaimedCoordinatorHarness(CLAIMED_AT_MS);
+
+    harness.environment.CF_VERSION_METADATA = { id: "release_2" };
+    harness.setAlarm.mockClear();
+    harness.setAlarm.mockRejectedValue(new Error("alarm persistence unavailable"));
+
+    await expect(harness.runAlarm()).rejects.toThrow(
+      "alarm persistence unavailable",
+    );
+    expect(harness.setAlarm).toHaveBeenCalledTimes(2);
+    expect(countClaimTombstones(harness.db)).toBe(1);
+    await expect(harness.claimedSlot.readStandbySlotBinding()).resolves.toMatchObject({
+      state: "unbound",
+      userId: null,
+    });
+  });
 });
 
 describe("standby scheduled bootstrap", () => {
@@ -466,6 +584,72 @@ describe("standby scheduled bootstrap", () => {
     expect(waitUntil).not.toHaveBeenCalled();
   });
 });
+
+async function createClaimedCoordinatorHarness(claimedAtMs: number) {
+  const pending: Promise<unknown>[] = [];
+  const db = new DatabaseSync(":memory:");
+  const setAlarm = vi.fn(async (_scheduledTime: number | Date) => {});
+  const state = createDurableObjectState(db, pending, { setAlarm });
+  const slots = new Map<string, ReturnType<typeof createSlotStub>>();
+  const getByName = vi.fn((name: string) => {
+    let slot = slots.get(name);
+    if (!slot) {
+      slot = createSlotStub(name);
+      slots.set(name, slot);
+    }
+    return slot;
+  });
+  const environment: Record<string, unknown> & {
+    STANDBY_RUNNER_CONTAINER: { getByName: typeof getByName };
+  } = {
+    CF_VERSION_METADATA: { id: RELEASE_ID },
+    HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+    STANDBY_RUNNER_CONTAINER: { getByName },
+  };
+  const coordinator = new StandbyRunnerCoordinatorDurableObject(
+    state,
+    environment,
+  );
+
+  coordinator.ensureReadyStandby({
+    releaseId: RELEASE_ID,
+    region: HOSTED_STANDBY_REGION,
+  });
+  await flushBackgroundWork(pending);
+  const claimId = createHostedStandbyClaimId();
+  const claim = coordinator.claimReadyStandby({
+    claimId,
+    deadlineAtEpochMs: claimedAtMs + 250,
+    releaseId: RELEASE_ID,
+    region: HOSTED_STANDBY_REGION,
+  });
+  if (claim.outcome !== "claimed") {
+    throw new Error("Expected a claimed standby slot.");
+  }
+  await flushBackgroundWork(pending);
+  const claimedSlot = slots.get(claim.slotName);
+  if (!claimedSlot) {
+    throw new Error("Expected the claimed standby slot.");
+  }
+
+  return {
+    claimedSlot,
+    claimId,
+    db,
+    environment,
+    async runAlarm() {
+      const alarm = coordinator.alarm();
+      try {
+        await alarm;
+      } finally {
+        pending.splice(0);
+      }
+    },
+    setAlarm,
+    slotName: claim.slotName,
+    slots,
+  };
+}
 
 function createStandbyContainerHarness(input: {
   destroy?: () => Promise<void>;
@@ -637,6 +821,9 @@ function createDeferred<T>(): {
 function createDurableObjectState(
   db: DatabaseSync,
   pending: Promise<unknown>[],
+  input: {
+    setAlarm?: (scheduledTime: number | Date) => Promise<void>;
+  } = {},
 ): DurableObjectStateLike {
   const sql = new SqliteDurableObjectSqlStorage(db);
   const values = new Map<string, unknown>();
@@ -655,7 +842,7 @@ function createDurableObjectState(
       async put<T>(key: string, value: T) {
         values.set(key, value);
       },
-      async setAlarm() {},
+      setAlarm: input.setAlarm ?? (async () => {}),
       sql,
       transactionSync<T>(callback: () => T): T {
         db.exec("BEGIN IMMEDIATE");
@@ -673,6 +860,12 @@ function createDurableObjectState(
       pending.push(promise);
     },
   };
+}
+
+function countClaimTombstones(db: DatabaseSync): number {
+  return db.prepare(
+    "SELECT claim_id FROM standby_claim_tombstone",
+  ).all().length;
 }
 
 class SqliteDurableObjectSqlStorage implements DurableObjectSqlStorageLike {
