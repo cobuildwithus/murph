@@ -23,7 +23,7 @@ Updated: 2026-08-30
 ## Constraints
 
 - Keep deletion inside the existing inbox-retention owner and its canonical lock/tombstone transaction.
-- Fail closed when source metadata, canonical promotion evidence, bytes, path ownership, or references are ambiguous.
+- Fail closed when stable promotion correlation, canonical evidence, bytes, path ownership, or references are ambiguous.
 - Preserve the current grace period and all existing protection rules.
 - Add no dependency, service, index, queue, or second retention format.
 
@@ -47,20 +47,19 @@ Updated: 2026-08-30
 
 - Preserve the existing 14-day grace period instead of accelerating cleanup for recent promoted media.
 - Reuse the existing monthly attachment-retention ledger with a document-specific tombstone variant instead of adding a second owner or file family.
-- Require the capture's default promotion metadata as a lightweight eligibility prefilter, then reuse Core's full live exact-source audit/event/manifest/artifact proof under the existing canonical lock.
+- Record one idempotent, content-free capture/attachment/document/event correlation in the existing audit stream at the successful default-promotion boundary, then reuse Core's full live exact-source audit/event/manifest/artifact proof under the existing canonical lock.
 - Accept any matching live exact owner while preserving Core's deleted-source fence; same bytes alone never prove promotion.
+- Keep historical promotions without the stable correlation fail-closed instead of inferring ownership from content that capture retention can truncate or delete.
 - Keep the historical `inbox_media_retention` orchestration mode so this storage cleanup adds no scheduler or runtime state.
 - Admit promoted documents through the existing retention batch limits and verify all admitted byte receipts from one transient audit/event ledger snapshot. This removes repeated vault-wide reads without adding a cache, cursor, index, or persisted state.
 
 ## Verification
 
 - Passed: contracts full package tests and artifact verification (42 files, 347 tests).
-- Passed: Core exact-source regression suite (1 file, 8 tests).
-- Passed: inbox attachment-retention regression suite (1 file, 28 tests).
-- Passed: contracts, Core, and inboxd typechecks.
-- Passed: Core and contracts builds plus regenerated contract artifacts.
-- Passed: `git diff --check` before review-candidate commit.
-- Passed: post-review Core full package suite (49 files, 835 tests) and focused batch-isolation proof.
-- Passed: post-review inboxd full package suite (21 files, 220 passed, 3 skipped) and focused one-proof-per-pass lazy materialization proof.
-- Passed: hosted lazy snapshot -> materialize -> retain -> checkpoint -> restore -> rebuild -> validate journey.
-- Passed: post-review Core, inboxd, and assistant-runtime typechecks.
+- Passed: Core full package suite (49 files, 836 tests) and focused exact-source/correlation suite (10 tests).
+- Passed: inboxd full package suite (21 files, 222 passed, 3 skipped) and focused attachment-retention suite (31 tests).
+- Passed: inbox-services full package suite (13 files, 67 tests) and focused created/reused/override promotion seams (7 tests).
+- Passed: hosted lazy snapshot -> materialize -> retain -> checkpoint -> restore -> rebuild -> validate journey; hosted retention file (17 tests) and Linq preservation E2E (1 test).
+- Passed: contracts, Core, inbox-services, inboxd, and assistant-runtime typechecks and builds.
+- Passed: completion correctness, security/privacy, simplicity, and coverage audits after accepted remediation.
+- Passed: agent-doc drift and `git diff --check` before the review-candidate commit.

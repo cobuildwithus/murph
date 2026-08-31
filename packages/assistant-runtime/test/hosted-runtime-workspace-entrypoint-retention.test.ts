@@ -34,6 +34,7 @@ import {
   patchAutomation,
   readHabitatAspect,
   readJsonlRecords,
+  recordInboxDocumentDefaultPromotion,
   repairVault,
   runCanonicalWrite,
   showAutomation,
@@ -527,6 +528,12 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         title: "hosted-promoted.pdf",
         note: "Hosted promoted document context",
         source: "import",
+      });
+      await recordInboxDocumentDefaultPromotion({
+        attachmentId: persisted.stored.attachments[0]!.attachmentId,
+        captureId: persisted.stored.captureId,
+        documentId: imported.documentId,
+        vaultRoot: sourceVaultRoot,
       });
 
       const baseBundle = await snapshotHostedBundleRoots({

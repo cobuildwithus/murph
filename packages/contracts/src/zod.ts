@@ -1776,8 +1776,8 @@ export const auditRecordSchema = withContractMetadata(
   "Murph Audit Record",
 );
 
-const INBOX_CAPTURE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
-const INBOX_ATTACHMENT_ID_PATTERN = "^att_[A-Za-z0-9][A-Za-z0-9_-]*_[0-9]{2}$";
+export const INBOX_CAPTURE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
+export const INBOX_ATTACHMENT_ID_PATTERN = "^att_[A-Za-z0-9][A-Za-z0-9_-]*_[0-9]{2}$";
 const INBOX_CAPTURE_ATTACHMENT_KIND_VALUES = ["image", "audio", "video", "document", "other"] as const;
 const INBOX_RETENTION_ATTACHMENT_KIND_VALUES = ["image", "audio", "video"] as const;
 const HEX_SHA256_PATTERN = "^[a-f0-9]{64}$";

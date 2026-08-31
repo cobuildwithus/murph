@@ -10,7 +10,9 @@ import {
   deleteEvent,
   importDocument,
   initializeVault,
+  listInboxDocumentDefaultPromotionCorrelations,
   listLiveExactDocumentImportEvidence,
+  recordInboxDocumentDefaultPromotion,
   resolveRawAssetDirectory,
   resolveRawManifestPath,
   resolveVaultPath,
@@ -18,6 +20,7 @@ import {
   VaultError,
 } from "../src/index.ts";
 import { parseRawImportManifest, stageRawImportManifest } from "../src/operations/raw-manifests.ts";
+import { emitAuditRecord } from "../src/audit.ts";
 import { WriteBatch } from "../src/operations/write-batch.ts";
 
 const FIXED_TIME = "2026-04-08T10:15:00.000Z";
@@ -182,6 +185,97 @@ test("exact document evidence batch isolates damaged receipts from valid neighbo
   assert.deepEqual(groups[0]?.evidence?.map((entry) => entry.documentId), [valid.documentId]);
   assert.equal(groups[1]?.evidence, null);
   assert.deepEqual(groups[2]?.evidence, []);
+});
+
+test("exact document evidence binds one idempotent inbox promotion correlation", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-document-promotion-correlation");
+  const sourceRoot = await makeTempDirectory("murph-core-document-promotion-correlation-source");
+  await initializeVault({ vaultRoot });
+
+  const sourcePath = path.join(sourceRoot, "correlated.txt");
+  const content = "stable correlated document\n";
+  await fs.writeFile(sourcePath, content, "utf8");
+  const imported = await importDocument({ vaultRoot, sourcePath });
+  const correlation = {
+    attachmentId: "att_cap_core_document_correlation_01",
+    captureId: "cap_core_document_correlation",
+    documentId: imported.documentId,
+    vaultRoot,
+  };
+
+  assert.deepEqual(
+    await recordInboxDocumentDefaultPromotion(correlation),
+    { created: true },
+  );
+  assert.deepEqual(
+    await recordInboxDocumentDefaultPromotion(correlation),
+    { created: false },
+  );
+
+  const recorded = await listInboxDocumentDefaultPromotionCorrelations({ vaultRoot });
+  assert.deepEqual(recorded, [{
+    attachmentId: correlation.attachmentId,
+    captureId: correlation.captureId,
+    documentId: imported.documentId,
+    eventId: imported.event.id,
+  }]);
+  const [group] = await listLiveExactDocumentImportEvidence({
+    sources: [{
+      byteLength: Buffer.byteLength(content),
+      sha256: createHash("sha256").update(content).digest("hex"),
+    }],
+    vaultRoot,
+  });
+  assert.deepEqual(group?.evidence?.[0]?.defaultPromotions, recorded);
+
+  const otherSourcePath = path.join(sourceRoot, "other.txt");
+  await fs.writeFile(otherSourcePath, "other canonical owner\n", "utf8");
+  const other = await importDocument({ vaultRoot, sourcePath: otherSourcePath });
+  await assert.rejects(
+    recordInboxDocumentDefaultPromotion({
+      ...correlation,
+      documentId: other.documentId,
+    }),
+    /already belongs to a different canonical owner/,
+  );
+  await assert.rejects(
+    recordInboxDocumentDefaultPromotion({
+      ...correlation,
+      captureId: imported.documentId,
+    }),
+    /targets must be distinct/,
+  );
+  await assert.rejects(
+    recordInboxDocumentDefaultPromotion({
+      ...correlation,
+      captureId: "a".repeat(256),
+    }),
+    /bounded inbox capture ID/,
+  );
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+  await emitAuditRecord({
+    vaultRoot,
+    action: "document_import",
+    commandName: "core.recordInboxDocumentDefaultPromotion",
+    targetIds: [
+      correlation.captureId,
+      correlation.attachmentId,
+      other.documentId,
+      other.event.id,
+    ],
+  });
+  assert.deepEqual(
+    await listInboxDocumentDefaultPromotionCorrelations({ vaultRoot }),
+    [],
+  );
+  const [conflicted] = await listLiveExactDocumentImportEvidence({
+    sources: [{
+      byteLength: Buffer.byteLength(content),
+      sha256: createHash("sha256").update(content).digest("hex"),
+    }],
+    vaultRoot,
+  });
+  assert.deepEqual(conflicted?.evidence?.[0]?.defaultPromotions, []);
 });
 
 test("exact document reuse fails closed after its source document is deleted", async () => {

@@ -286,6 +286,9 @@ function createCoreRuntimeModule(
         event: { id: 'document-created' },
       }
     },
+    async recordInboxDocumentDefaultPromotion() {
+      return { created: true }
+    },
     async promoteInboxJournal() {
       return {
         lookupId: 'journal:2026-04-08',
@@ -1087,6 +1090,9 @@ test('document preservation and experiment helper branches are deterministic', a
   )
 
   const importedFiles: string[] = []
+  const preservedDocumentCorrelations: Array<
+    Parameters<NonNullable<CoreRuntimeModule['recordInboxDocumentDefaultPromotion']>>[0]
+  > = []
   let closed = 0
   const result = await preserveCanonicalDocumentAttachments({
     input: {
@@ -1094,7 +1100,12 @@ test('document preservation and experiment helper branches are deterministic', a
       captureId: capture.captureId,
       requestId: null,
     },
-    loadCore: async () => createCoreRuntimeModule(),
+    loadCore: async () => createCoreRuntimeModule({
+      async recordInboxDocumentDefaultPromotion(input) {
+        preservedDocumentCorrelations.push(input)
+        return { created: true }
+      },
+    }),
     loadImporters: async () => ({
       createImporters() {
         return {
@@ -1123,6 +1134,25 @@ test('document preservation and experiment helper branches are deterministic', a
   assert.deepEqual(importedFiles, [
     path.join(paths.absoluteVaultRoot, newDocumentPath),
   ])
+  assert.deepEqual(
+    preservedDocumentCorrelations.map(({ attachmentId, captureId, documentId }) => ({
+      attachmentId,
+      captureId,
+      documentId,
+    })),
+    [
+      {
+        attachmentId: 'attachment-1',
+        captureId: capture.captureId,
+        documentId: 'document-existing',
+      },
+      {
+        attachmentId: 'attachment-2',
+        captureId: capture.captureId,
+        documentId: 'document-created',
+      },
+    ],
+  )
   assert.equal(closed, 1)
 
   await assert.rejects(
@@ -1479,6 +1509,17 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         }),
       ],
     }),
+    createCapture('capture-document-default-retry', {
+      text: 'default retry note',
+      attachments: [
+        createAttachment({
+          ordinal: 1,
+          kind: 'document',
+          storedPath: 'raw/inbox/email/capture-document-default-retry/attachments/retry.pdf',
+          fileName: 'Retry.pdf',
+        }),
+      ],
+    }),
     createCapture('capture-document-overrides', {
       text: 'document override fallback',
       attachments: [
@@ -1572,6 +1613,11 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   )
   await writeTextFile(
     paths.absoluteVaultRoot,
+    'raw/inbox/email/capture-document-default-retry/attachments/retry.pdf',
+    'default retry body',
+  )
+  await writeTextFile(
+    paths.absoluteVaultRoot,
     'raw/inbox/email/capture-document-overrides/attachments/manual.pdf',
     'manual document draft body',
   )
@@ -1622,6 +1668,25 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   )
   await writeJsonFile(
     paths.absoluteVaultRoot,
+    'raw/documents/default-retry/manifest.json',
+    {
+      importId: 'document-default-existing',
+      importKind: 'document',
+      importedAt: '2026-04-08T07:05:30.000Z',
+      source: 'import',
+      artifacts: [
+        { role: 'source_document', sha256: sha256('default retry body') },
+      ],
+      provenance: {
+        occurredAt: '2026-04-08T11:22:33.000Z',
+        note: 'default retry note',
+        lookupId: 'document-default-existing',
+        title: 'Retry.pdf',
+      },
+    },
+  )
+  await writeJsonFile(
+    paths.absoluteVaultRoot,
     'raw/documents/overrides-existing/manifest.json',
     {
       importId: 'document-overrides-existing',
@@ -1644,6 +1709,9 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   const journalCalls: Array<Parameters<NonNullable<CoreRuntimeModule['promoteInboxJournal']>>[0]> = []
   const experimentCalls: Array<Parameters<NonNullable<CoreRuntimeModule['promoteInboxExperimentNote']>>[0]> = []
   const importedFiles: Array<Parameters<ReturnType<ImportersFactoryRuntimeModule['createImporters']>['importDocument']>[0]> = []
+  const documentCorrelationCalls: Array<
+    Parameters<NonNullable<CoreRuntimeModule['recordInboxDocumentDefaultPromotion']>>[0]
+  > = []
 
   const env = createInboxAppEnvironment({
     inbox: createInboxRuntimeModule(createRuntimeStore(captures)),
@@ -1655,6 +1723,10 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
           event: { id: 'meal-created' },
           manifestPath: 'raw/meals/meal-created/manifest.json',
         }
+      },
+      async recordInboxDocumentDefaultPromotion(input) {
+        documentCorrelationCalls.push(input)
+        return { created: true }
       },
       async promoteInboxJournal(input) {
         journalCalls.push(input)
@@ -1736,6 +1808,12 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     requestId: null,
   })
   assert.equal(preserved.createdCount, 1)
+  assert.deepEqual(documentCorrelationCalls, [{
+    attachmentId: 'attachment-1',
+    captureId: 'capture-preserve-delegated',
+    documentId: 'document-created',
+    vaultRoot: paths.absoluteVaultRoot,
+  }])
 
   const canonicalMeal = await ops.promoteMeal({
     vault: paths.absoluteVaultRoot,
@@ -1829,6 +1907,28 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   assert.equal(createdDocumentImport?.note, 'document note')
   assert.equal(createdDocumentImport?.occurredAt, '2026-04-08T11:22:33.000Z')
   assert.equal(createdDocumentImport?.source, 'import')
+  assert.deepEqual(documentCorrelationCalls.at(-1), {
+    attachmentId: 'attachment-1',
+    captureId: 'capture-document-created',
+    documentId: 'document-created',
+    vaultRoot: paths.absoluteVaultRoot,
+  })
+  const documentImportsBeforeDefaultRetry = importedFiles.length
+  const retriedDefaultDocument = await ops.promoteDocument({
+    vault: paths.absoluteVaultRoot,
+    captureId: 'capture-document-default-retry',
+    requestId: null,
+  })
+  assert.equal(retriedDefaultDocument.created, false)
+  assert.equal(retriedDefaultDocument.relatedId, 'document-default-existing')
+  assert.equal(importedFiles.length, documentImportsBeforeDefaultRetry)
+  assert.deepEqual(documentCorrelationCalls.at(-1), {
+    attachmentId: 'attachment-1',
+    captureId: 'capture-document-default-retry',
+    documentId: 'document-default-existing',
+    vaultRoot: paths.absoluteVaultRoot,
+  })
+  const correlationsBeforeOverride = documentCorrelationCalls.length
 
   const overriddenDocument = await ops.promoteDocument({
     vault: paths.absoluteVaultRoot,
@@ -1847,6 +1947,7 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     '2026-04-08T14:20:00.000Z',
   )
   assert.equal(overriddenDocumentImport?.source, 'manual')
+  assert.equal(documentCorrelationCalls.length, correlationsBeforeOverride)
   assert.match(
     overriddenDocumentImport?.filePath ?? '',
     /capture-document-overrides\/attachments\/manual\.pdf$/,
@@ -1874,6 +1975,12 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   const emptyDocumentImport = importedFiles.at(-1)
   assert.equal(emptyDocumentImport?.title, undefined)
   assert.equal(emptyDocumentImport?.note, undefined)
+  assert.deepEqual(documentCorrelationCalls.at(-1), {
+    attachmentId: 'attachment-1',
+    captureId: 'capture-document-empty',
+    documentId: 'document-created',
+    vaultRoot: paths.absoluteVaultRoot,
+  })
 
   const journalResult = await ops.promoteJournal({
     vault: paths.absoluteVaultRoot,

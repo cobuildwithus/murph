@@ -153,6 +153,13 @@ export async function promoteCanonicalAttachmentImport<
     lookupId: string
     relatedId: string
   }>
+  beforePersistPromotion?(input: {
+    attachment: TAttachment
+    capture: RuntimeCaptureRecord
+    paths: InboxPaths
+    prepared: TPrepared
+    relatedId: string
+  }): Promise<void>
 }): Promise<CanonicalAttachmentPromotionResult<TTarget>> {
   return withPromotionScope<TPrepared, undefined, CanonicalAttachmentPromotionResult<TTarget>>(
     {
@@ -189,6 +196,7 @@ export async function promoteCanonicalAttachmentImport<
           }),
           metadata,
         })
+        const beforePersistPromotion = input.beforePersistPromotion
         const promotion = await reconcileCanonicalImportPromotion({
           paths,
           promotionStore,
@@ -206,6 +214,15 @@ export async function promoteCanonicalAttachmentImport<
               attachment,
               metadata,
             }),
+          beforePersistPromotion: beforePersistPromotion
+            ? (promotion) => beforePersistPromotion({
+              attachment,
+              capture,
+              paths,
+              prepared,
+              relatedId: promotion.relatedId,
+              })
+            : undefined,
         })
 
         return {
@@ -277,36 +294,42 @@ export async function preserveCanonicalDocumentAttachments(input: {
           metadata,
         })
 
-        if (canonicalPromotion) {
-          documents.push({
-            attachmentId: attachment.attachmentId ?? null,
-            ordinal: attachment.ordinal,
-            lookupId: canonicalPromotion.lookupId,
-            relatedId: canonicalPromotion.relatedId,
-            created: false,
-          })
-          continue
-        }
+        const promotion = canonicalPromotion
+          ? {
+              created: false,
+              lookupId: canonicalPromotion.lookupId,
+              relatedId: canonicalPromotion.relatedId,
+            }
+          : await importers.importDocument({
+              filePath: await resolvePromotionAttachmentFilePath(
+                paths.absoluteVaultRoot,
+                capture,
+                attachment,
+              ),
+              vaultRoot: paths.absoluteVaultRoot,
+              occurredAt: metadata.occurredAt ?? undefined,
+              title: title ?? undefined,
+              note: metadata.note ?? undefined,
+              source: metadata.source ?? undefined,
+            }).then((result) => ({
+              created: true,
+              lookupId: result.documentId,
+              relatedId: result.documentId,
+            }))
 
-        const result = await importers.importDocument({
-          filePath: await resolvePromotionAttachmentFilePath(
-            paths.absoluteVaultRoot,
-            capture,
-            attachment,
-          ),
-          vaultRoot: paths.absoluteVaultRoot,
-          occurredAt: metadata.occurredAt ?? undefined,
-          title: title ?? undefined,
-          note: metadata.note ?? undefined,
-          source: metadata.source ?? undefined,
-        })
+        if (typeof attachment.attachmentId === 'string') {
+          await core.recordInboxDocumentDefaultPromotion({
+            attachmentId: attachment.attachmentId,
+            captureId: capture.captureId,
+            documentId: promotion.relatedId,
+            vaultRoot: paths.absoluteVaultRoot,
+          })
+        }
 
         documents.push({
           attachmentId: attachment.attachmentId ?? null,
           ordinal: attachment.ordinal,
-          lookupId: result.documentId,
-          relatedId: result.documentId,
-          created: true,
+          ...promotion,
         })
       }
 
@@ -341,13 +364,19 @@ export function requireDocumentPromotionCore(
   core: CoreRuntimeModule,
 ): CoreRuntimeModule & {
   importDocument: NonNullable<CoreRuntimeModule['importDocument']>
+  recordInboxDocumentDefaultPromotion: NonNullable<
+    CoreRuntimeModule['recordInboxDocumentDefaultPromotion']
+  >
 } {
-  if (!core.importDocument) {
+  if (!core.importDocument || !core.recordInboxDocumentDefaultPromotion) {
     throw unsupportedPromotion('document')
   }
 
   return core as CoreRuntimeModule & {
     importDocument: NonNullable<CoreRuntimeModule['importDocument']>
+    recordInboxDocumentDefaultPromotion: NonNullable<
+      CoreRuntimeModule['recordInboxDocumentDefaultPromotion']
+    >
   }
 }
 
@@ -942,6 +971,9 @@ async function reconcileCanonicalImportPromotion(input: {
     lookupId: string
     relatedId: string
   }>
+  beforePersistPromotion?(input: {
+    relatedId: string
+  }): Promise<void>
 }): Promise<{
   lookupId: string
   relatedId: string
@@ -953,6 +985,9 @@ async function reconcileCanonicalImportPromotion(input: {
       input.canonicalPromotion,
       input.target,
     )
+    await input.beforePersistPromotion?.({
+      relatedId: input.canonicalPromotion.relatedId,
+    })
     await persistPromotionEntry({
       paths: input.paths,
       promotionStore: input.promotionStore,
@@ -977,6 +1012,9 @@ async function reconcileCanonicalImportPromotion(input: {
   }
 
   const createdPromotion = await input.createPromotion()
+  await input.beforePersistPromotion?.({
+    relatedId: createdPromotion.relatedId,
+  })
   await persistPromotionEntry({
     paths: input.paths,
     promotionStore: input.promotionStore,

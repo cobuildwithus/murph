@@ -192,6 +192,28 @@ export function createInboxPromotionOps(
             relatedId: result.documentId,
           }
         },
+        beforePersistPromotion: async ({
+          attachment,
+          capture,
+          paths,
+          prepared,
+          relatedId,
+        }) => {
+          if (
+            input.note !== undefined
+            || input.occurredAt !== undefined
+            || input.source !== undefined
+            || typeof attachment.attachmentId !== 'string'
+          ) {
+            return
+          }
+          await prepared.core.recordInboxDocumentDefaultPromotion({
+            attachmentId: attachment.attachmentId,
+            captureId: capture.captureId,
+            documentId: relatedId,
+            vaultRoot: paths.absoluteVaultRoot,
+          })
+        },
       })
     },
 

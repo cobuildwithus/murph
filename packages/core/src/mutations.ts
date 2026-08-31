@@ -27,6 +27,8 @@ import type {
   IntegrationIngestRecord,
 } from "@murphai/contracts";
 import {
+  INBOX_ATTACHMENT_ID_PATTERN,
+  INBOX_CAPTURE_ID_PATTERN,
   auditRecordSchema,
   assertContractId,
   collectEventRawReferencePaths,
@@ -228,6 +230,19 @@ interface ImportDocumentResult {
   eventPath: string;
   auditPath: string | null;
   manifestPath: string;
+}
+
+export interface InboxDocumentDefaultPromotionCorrelation {
+  attachmentId: string;
+  captureId: string;
+  documentId: string;
+  eventId: string;
+}
+
+interface RecordInboxDocumentDefaultPromotionInput
+  extends Omit<InboxDocumentDefaultPromotionCorrelation, "eventId"> {
+  vaultRoot: string;
+  occurredAt?: DateInput;
 }
 
 interface AddMealInput {
@@ -5996,13 +6011,10 @@ interface ExactDocumentSource {
 }
 
 export interface LiveExactDocumentImportEvidence {
+  defaultPromotions: InboxDocumentDefaultPromotionCorrelation[];
   documentId: string;
   manifestPath: string;
-  note: string | null;
-  occurredAt: string;
   rawRef: string;
-  source: string;
-  title: string;
 }
 
 export interface LiveExactDocumentImportEvidenceGroup {
@@ -6012,7 +6024,11 @@ export interface LiveExactDocumentImportEvidenceGroup {
 }
 
 const DOCUMENT_SOURCE_AUDIT_COMMAND = "core.importDocument";
+const INBOX_DOCUMENT_DEFAULT_PROMOTION_AUDIT_COMMAND =
+  "core.recordInboxDocumentDefaultPromotion";
 const WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND = "core.importEventBatch.sourceRawRefOnce";
+const INBOX_CAPTURE_ID_REGEX = new RegExp(INBOX_CAPTURE_ID_PATTERN);
+const INBOX_ATTACHMENT_ID_REGEX = new RegExp(INBOX_ATTACHMENT_ID_PATTERN);
 
 function buildRawSourceReceiptTarget(
   sourceReceipt: CommittedPayloadReceipt,
@@ -6063,6 +6079,179 @@ async function loadExactDocumentAuditRecords(vaultRoot: string): Promise<AuditRe
     }
   }
   return records;
+}
+
+function normalizeInboxDocumentDefaultPromotionCorrelation(
+  input: InboxDocumentDefaultPromotionCorrelation,
+): InboxDocumentDefaultPromotionCorrelation {
+  const documentId = assertContractId(input.documentId, ID_PREFIXES.document, "documentId");
+  const eventId = assertContractId(input.eventId, ID_PREFIXES.event, "eventId");
+  const { attachmentId, captureId } = input;
+  if (captureId.length > 255 || !INBOX_CAPTURE_ID_REGEX.test(captureId)) {
+    throw new TypeError("captureId must be a bounded inbox capture ID");
+  }
+  if (attachmentId.length > 255 || !INBOX_ATTACHMENT_ID_REGEX.test(attachmentId)) {
+    throw new TypeError("attachmentId must be a bounded inbox attachment ID");
+  }
+  return { attachmentId, captureId, documentId, eventId };
+}
+
+function buildInboxDocumentPromotionAttachmentKey(input: {
+  attachmentId: string;
+  captureId: string;
+}): string {
+  return JSON.stringify([input.captureId, input.attachmentId]);
+}
+
+function resolveInboxDocumentDefaultPromotionCorrelations(
+  auditRecords: readonly AuditRecord[],
+): InboxDocumentDefaultPromotionCorrelation[] {
+  const correlationsByAttachment = new Map<
+    string,
+    InboxDocumentDefaultPromotionCorrelation | null
+  >();
+  for (const record of auditRecords) {
+    const correlation = parseInboxDocumentDefaultPromotionAuditRecord(record);
+    if (!correlation) {
+      continue;
+    }
+    const key = buildInboxDocumentPromotionAttachmentKey(correlation);
+    const existing = correlationsByAttachment.get(key);
+    if (existing === null) {
+      continue;
+    }
+    if (!existing) {
+      correlationsByAttachment.set(key, correlation);
+      continue;
+    }
+    if (
+      existing.documentId !== correlation.documentId
+      || existing.eventId !== correlation.eventId
+    ) {
+      correlationsByAttachment.set(key, null);
+    }
+  }
+  return [...correlationsByAttachment.values()]
+    .filter((correlation): correlation is InboxDocumentDefaultPromotionCorrelation =>
+      correlation !== null
+    );
+}
+
+function parseInboxDocumentDefaultPromotionAuditRecord(
+  record: AuditRecord,
+): InboxDocumentDefaultPromotionCorrelation | null {
+  if (
+    record.commandName !== INBOX_DOCUMENT_DEFAULT_PROMOTION_AUDIT_COMMAND
+    || record.status !== "success"
+    || record.targetIds?.length !== 4
+  ) {
+    return null;
+  }
+  try {
+    return normalizeInboxDocumentDefaultPromotionCorrelation({
+      captureId: record.targetIds[0] ?? "",
+      attachmentId: record.targetIds[1] ?? "",
+      documentId: record.targetIds[2] ?? "",
+      eventId: record.targetIds[3] ?? "",
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function listInboxDocumentDefaultPromotionCorrelations(input: {
+  vaultRoot: string;
+}): Promise<InboxDocumentDefaultPromotionCorrelation[]> {
+  return resolveInboxDocumentDefaultPromotionCorrelations(
+    await loadExactDocumentAuditRecords(input.vaultRoot),
+  );
+}
+
+export async function recordInboxDocumentDefaultPromotion({
+  vaultRoot,
+  occurredAt = new Date(),
+  ...rawCorrelation
+}: RecordInboxDocumentDefaultPromotionInput): Promise<{ created: boolean }> {
+  const documentId = assertContractId(
+    rawCorrelation.documentId,
+    ID_PREFIXES.document,
+    "documentId",
+  );
+  const auditRecords = await loadExactDocumentAuditRecords(vaultRoot);
+  const canonicalEventIds = new Set<string>();
+  for (const record of auditRecords) {
+    if (
+      record.commandName !== DOCUMENT_SOURCE_AUDIT_COMMAND
+      || record.status !== "success"
+      || record.targetIds?.length !== 3
+      || record.targetIds[1] !== documentId
+    ) {
+      continue;
+    }
+    try {
+      canonicalEventIds.add(assertContractId(record.targetIds[2], ID_PREFIXES.event, "eventId"));
+    } catch {
+      // A damaged source-owner audit cannot authorize a new correlation.
+    }
+  }
+  if (canonicalEventIds.size !== 1) {
+    throw new TypeError(
+      "Inbox document promotion correlation requires exactly one canonical document import owner",
+    );
+  }
+  const correlation = normalizeInboxDocumentDefaultPromotionCorrelation({
+    ...rawCorrelation,
+    documentId,
+    eventId: [...canonicalEventIds][0] ?? "",
+  });
+  const targetIds = [
+    correlation.captureId,
+    correlation.attachmentId,
+    correlation.documentId,
+    correlation.eventId,
+  ];
+  if (new Set(targetIds).size !== targetIds.length) {
+    throw new TypeError("Inbox document promotion correlation targets must be distinct");
+  }
+  const existingCorrelations = auditRecords
+    .map(parseInboxDocumentDefaultPromotionAuditRecord)
+    .filter((candidate): candidate is InboxDocumentDefaultPromotionCorrelation =>
+      candidate !== null
+    )
+    .filter((candidate) =>
+      candidate.captureId === correlation.captureId
+      && candidate.attachmentId === correlation.attachmentId
+    );
+  if (existingCorrelations.length > 0) {
+    if (existingCorrelations.every((existing) =>
+      existing.documentId === correlation.documentId
+      && existing.eventId === correlation.eventId
+    )) {
+      return { created: false };
+    }
+    throw new TypeError(
+      "Inbox document promotion correlation already belongs to a different canonical owner",
+    );
+  }
+
+  return runCanonicalWrite({
+    vaultRoot,
+    operationType: "inbox_document_promotion_correlation",
+    summary: "Record an inbox document promotion correlation.",
+    occurredAt,
+    mutate: async ({ batch }) => {
+      await emitAuditRecord({
+        vaultRoot,
+        batch,
+        action: "document_import",
+        commandName: INBOX_DOCUMENT_DEFAULT_PROMOTION_AUDIT_COMMAND,
+        summary: "Recorded an inbox document promotion correlation.",
+        occurredAt,
+        targetIds,
+      });
+      return { created: true };
+    },
+  });
 }
 
 async function loadExactDocumentEventLedgerEntries(
@@ -6142,7 +6331,10 @@ async function inspectExactSourceAuditEvidence(input: {
     }
   }
 
-  return { completionTargetEventIds, documentIdsByEventId };
+  return {
+    completionTargetEventIds,
+    documentIdsByEventId,
+  };
 }
 
 async function inspectExactDocumentSourceSet(input: {
@@ -6462,6 +6654,17 @@ export async function listLiveExactDocumentImportEvidence(input: {
   const hasRelevantAuditEvidence = auditRecords.some((record) =>
     record.targetIds?.some((targetId) => targetIds.has(targetId)) === true
   );
+  const defaultPromotionsByEventId = new Map<
+    string,
+    InboxDocumentDefaultPromotionCorrelation[]
+  >();
+  if (hasRelevantAuditEvidence) {
+    for (const promotion of resolveInboxDocumentDefaultPromotionCorrelations(auditRecords)) {
+      const promotions = defaultPromotionsByEventId.get(promotion.eventId) ?? [];
+      promotions.push(promotion);
+      defaultPromotionsByEventId.set(promotion.eventId, promotions);
+    }
+  }
   const eventLedgerEntries = hasRelevantAuditEvidence
     ? await loadExactDocumentEventLedgerEntries(input.vaultRoot)
     : [];
@@ -6487,13 +6690,12 @@ export async function listLiveExactDocumentImportEvidence(input: {
       evidence: exactSources.deletedExactSourceExists
         ? null
         : exactSources.liveSources.map(({ rawRef, result }) => ({
+            defaultPromotions: [
+              ...(defaultPromotionsByEventId.get(result.event.id) ?? []),
+            ].filter((promotion) => promotion.documentId === result.documentId),
             documentId: result.documentId,
             manifestPath: result.manifestPath,
-            note: result.event.note ?? null,
-            occurredAt: result.event.occurredAt,
             rawRef,
-            source: result.event.source,
-            title: result.event.title,
           })),
     });
   }

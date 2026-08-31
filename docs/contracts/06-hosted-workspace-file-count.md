@@ -210,10 +210,13 @@ landing; record the chosen posture here so the decision is reviewable.
   the deleted raw inbox attachment path, sha256, purge time, reason, and
   retained parser derivative when applicable. Promoted document cleanup reuses
   this owner and the existing bounded pass: after 14 days it deletes only the
-  duplicate `raw/inbox/**` bytes whose source hash, default promotion metadata,
-  live audit/event identity, canonical manifest, and canonical raw artifact all
-  agree. Lazy restore materializes the source and canonical proof paths before
-  the locked recheck; missing or damaged proof fails closed. Promoted documents
+  duplicate `raw/inbox/**` bytes whose stable capture/attachment correlation,
+  source hash, live import audit/event identity, canonical manifest, and
+  canonical raw artifact all agree. The content-free correlation is written to
+  the existing audit stream when default promotion succeeds; historical or
+  override promotions without it stay fail-closed. Lazy restore materializes
+  the source and canonical proof paths before the locked recheck; missing or
+  damaged proof fails closed. Promoted documents
   use the existing media admission bounds, and all admitted receipts reuse one
   transient audit/event ledger snapshot per pass. No new sidecar, cursor, queue,
   index, or file family is introduced. A heavy user adding

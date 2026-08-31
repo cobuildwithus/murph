@@ -369,6 +369,14 @@ export interface CoreRuntimeModule {
       id: string
     }
   }>
+  recordInboxDocumentDefaultPromotion?(input: {
+    attachmentId: string
+    captureId: string
+    documentId: string
+    vaultRoot: string
+  }): Promise<{
+    created: boolean
+  }>
   promoteInboxJournal?(input: {
     vaultRoot: string
     date: string

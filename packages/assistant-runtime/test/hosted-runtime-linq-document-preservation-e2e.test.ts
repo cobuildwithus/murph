@@ -3,7 +3,7 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { initializeVault } from "@murphai/core";
+import { importDocument as importCoreDocument, initializeVault } from "@murphai/core";
 import {
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
@@ -53,14 +53,23 @@ describe("hosted Linq document preservation", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-document-"));
     const vaultRoot = path.join(workspaceRoot, "vault");
     const pdfBytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
-    const importDocument = vi.fn(async (input: { filePath: string }) => {
+    const importDocument = vi.fn(async (input: {
+      filePath: string;
+      note?: string;
+      occurredAt?: Date | string;
+      source?: string;
+      title?: string;
+      vaultRoot: string;
+    }) => {
       await access(input.filePath);
-      return {
-        documentId: "doc_preserved_pdf",
-        event: {
-          id: "event_preserved_pdf",
-        },
-      };
+      return importCoreDocument({
+        sourcePath: input.filePath,
+        vaultRoot: input.vaultRoot,
+        ...(input.note === undefined ? {} : { note: input.note }),
+        ...(input.occurredAt === undefined ? {} : { occurredAt: input.occurredAt }),
+        ...(input.source === undefined ? {} : { source: input.source }),
+        ...(input.title === undefined ? {} : { title: input.title }),
+      });
     });
     const services = createIntegratedInboxServices({
       loadImportersModule: async () => ({

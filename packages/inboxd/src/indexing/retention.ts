@@ -15,6 +15,7 @@ import {
 import {
   normalizeRelativeVaultPath,
   acquireCanonicalWriteLock,
+  listInboxDocumentDefaultPromotionCorrelations,
   listLiveExactDocumentImportEvidence,
   isVaultError,
   listEventLedgerShardPaths,
@@ -28,6 +29,7 @@ import {
   withCanonicalWriteLockScope,
   walkVaultFiles,
   type LiveExactDocumentImportEvidence,
+  type InboxDocumentDefaultPromotionCorrelation,
 } from "@murphai/core";
 import { openInboxRuntime, type InboxRuntimeStore } from "../kernel/sqlite.js";
 
@@ -79,8 +81,7 @@ interface InboxAttachmentRetentionCandidate {
 
 interface InboxRetentionReferenceInventory {
   durableRawInboxRefs: Set<string>;
-  promotedDocumentDefaultPromotionKeysBySha256: Map<string, Set<string>>;
-  promotedDocumentMaterializationPathsBySha256: Map<string, Set<string>>;
+  promotedDocumentMaterializationPathsByAttachmentKey: Map<string, Set<string>>;
 }
 
 export interface ListTransientInboxVideoStoredPathsInput {
@@ -690,8 +691,16 @@ async function listInboxRetentionReferenceInventory(
   options: { rejectInvalidRecords?: boolean } = {},
 ): Promise<InboxRetentionReferenceInventory> {
   const durableRawInboxRefs = new Set<string>();
-  const promotedDocumentDefaultPromotionKeysBySha256 = new Map<string, Set<string>>();
-  const promotedDocumentMaterializationPathsBySha256 = new Map<string, Set<string>>();
+  const promotedDocumentMaterializationPathsByAttachmentKey = new Map<string, Set<string>>();
+  const defaultPromotionsByEventId = new Map<
+    string,
+    InboxDocumentDefaultPromotionCorrelation[]
+  >();
+  for (const promotion of await listInboxDocumentDefaultPromotionCorrelations({ vaultRoot })) {
+    const promotions = defaultPromotionsByEventId.get(promotion.eventId) ?? [];
+    promotions.push(promotion);
+    defaultPromotionsByEventId.set(promotion.eventId, promotions);
+  }
   const ledgerPaths = await listEventLedgerShardPaths(vaultRoot);
 
   for (const relativePath of ledgerPaths) {
@@ -712,8 +721,8 @@ async function listInboxRetentionReferenceInventory(
       if (parsed.success) {
         collectPromotedDocumentMaterializationPaths(
           parsed.data,
-          promotedDocumentDefaultPromotionKeysBySha256,
-          promotedDocumentMaterializationPathsBySha256,
+          defaultPromotionsByEventId,
+          promotedDocumentMaterializationPathsByAttachmentKey,
         );
       }
     }
@@ -721,17 +730,24 @@ async function listInboxRetentionReferenceInventory(
 
   return {
     durableRawInboxRefs,
-    promotedDocumentDefaultPromotionKeysBySha256,
-    promotedDocumentMaterializationPathsBySha256,
+    promotedDocumentMaterializationPathsByAttachmentKey,
   };
 }
 
 function collectPromotedDocumentMaterializationPaths(
   record: EventRecord,
-  promotionKeysBySha256: Map<string, Set<string>>,
-  pathsBySha256: Map<string, Set<string>>,
+  defaultPromotionsByEventId: ReadonlyMap<
+    string,
+    readonly InboxDocumentDefaultPromotionCorrelation[]
+  >,
+  pathsByAttachmentKey: Map<string, Set<string>>,
 ): void {
   if (record.kind !== "document") {
+    return;
+  }
+  const defaultPromotions = (defaultPromotionsByEventId.get(record.id) ?? [])
+    .filter((promotion) => promotion.documentId === record.documentId);
+  if (defaultPromotions.length === 0) {
     return;
   }
 
@@ -760,19 +776,13 @@ function collectPromotedDocumentMaterializationPaths(
       continue;
     }
 
-    const paths = pathsBySha256.get(attachment.sha256) ?? new Set<string>();
-    paths.add(rawPath);
-    paths.add(manifestPath);
-    pathsBySha256.set(attachment.sha256, paths);
-
-    const promotionKeys = promotionKeysBySha256.get(attachment.sha256) ?? new Set<string>();
-    promotionKeys.add(buildDefaultPromotionKey({
-      note: record.note ?? null,
-      occurredAt: record.occurredAt,
-      source: record.source,
-      title: record.title,
-    }));
-    promotionKeysBySha256.set(attachment.sha256, promotionKeys);
+    for (const promotion of defaultPromotions) {
+      const attachmentKey = buildInboxDocumentPromotionAttachmentKey(promotion);
+      const paths = pathsByAttachmentKey.get(attachmentKey) ?? new Set<string>();
+      paths.add(rawPath);
+      paths.add(manifestPath);
+      pathsByAttachmentKey.set(attachmentKey, paths);
+    }
   }
 }
 
@@ -781,23 +791,11 @@ function resolvePromotedDocumentMaterializationPaths(
   attachment: InboxCaptureAttachmentRecord,
   capture: InboxCaptureRecord,
 ): string[] {
-  const expectedTitle = normalizePromotionText(attachment.fileName ?? null);
-  if (!expectedTitle) {
-    return [];
-  }
-  const promotionKey = buildDefaultPromotionKey({
-    note: normalizePromotionText(capture.text ?? null),
-    occurredAt: capture.occurredAt,
-    source: "import",
-    title: expectedTitle,
-  });
-  if (!inventory.promotedDocumentDefaultPromotionKeysBySha256
-    .get(attachment.sha256 ?? "")
-    ?.has(promotionKey)) {
-    return [];
-  }
-  const paths = inventory.promotedDocumentMaterializationPathsBySha256.get(
-    attachment.sha256 ?? "",
+  const paths = inventory.promotedDocumentMaterializationPathsByAttachmentKey.get(
+    buildInboxDocumentPromotionAttachmentKey({
+      attachmentId: attachment.attachmentId,
+      captureId: capture.captureId,
+    }),
   );
   if (!paths || paths.size === 0 || paths.size > MAX_PROMOTED_DOCUMENT_EVIDENCE_PATHS) {
     return [];
@@ -814,15 +812,14 @@ function hasMatchingLivePromotedDocument(input: {
   }
 
   const materializedPaths = new Set(input.candidate.canonicalDocumentMaterializationPaths);
-  const expectedTitle = normalizePromotionText(input.candidate.attachment.fileName ?? null);
-  const expectedNote = normalizePromotionText(input.candidate.capture.text ?? null);
-  return expectedTitle !== null && input.evidence.some((candidate) =>
+  return input.evidence.some((candidate) =>
     materializedPaths.has(candidate.manifestPath)
     && materializedPaths.has(candidate.rawRef)
-    && candidate.note === expectedNote
-    && candidate.occurredAt === input.candidate.capture.occurredAt
-    && candidate.source === "import"
-    && candidate.title === expectedTitle
+    && candidate.defaultPromotions.some((promotion) =>
+      promotion.captureId === input.candidate.capture.captureId
+      && promotion.attachmentId === input.candidate.attachment.attachmentId
+      && promotion.documentId === candidate.documentId
+    )
   );
 }
 
@@ -833,18 +830,11 @@ function buildPromotedDocumentReceiptKey(input: {
   return `${input.sha256}:${input.byteLength}`;
 }
 
-function buildDefaultPromotionKey(input: {
-  note: string | null;
-  occurredAt: string;
-  source: string;
-  title: string;
+function buildInboxDocumentPromotionAttachmentKey(input: {
+  attachmentId: string;
+  captureId: string;
 }): string {
-  return JSON.stringify([input.source, input.occurredAt, input.title, input.note]);
-}
-
-function normalizePromotionText(value: string | null | undefined): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
+  return JSON.stringify([input.captureId, input.attachmentId]);
 }
 
 function normalizeRetentionNow(now: Date | string | undefined): string {
