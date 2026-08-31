@@ -95,6 +95,7 @@ export type HostedIdleMaintenanceOutcome =
 // statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
+  generatedImageRetentionMaxCaptures?: number;
   materializeRetentionCandidatePaths?: ((
     storedPaths: readonly string[]
   ) => Promise<InboxMediaRetentionMaterializeResult | void>) | null;
@@ -174,28 +175,43 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           retentionWake,
           resolveInboxMediaRetentionWake(retentionResult),
         );
-        const retireGeneratedImages = () => runGeneratedImageCaptureRetention({
-          materializeCandidatePaths:
-            input.materializeRetentionCandidatePaths ?? undefined,
-          ...(input.pendingWork ? { maxCaptures: 1 } : {}),
-          protectedCaptureIds: input.protectedCaptureIds,
-          protectedStoredPaths: input.protectedStoredPaths,
-          signal: abortController.signal,
-          vaultRoot,
-        });
-        const generatedImageRetention = input.persistGeneratedImageRetention
-          ? await input.persistGeneratedImageRetention(retireGeneratedImages)
-          : await retireGeneratedImages();
-        if (generatedImageRetention.blockedCaptureCount > 0) {
-          emitGeneratedImageRetentionBlockedLog({
-            memberId: input.memberId,
-            result: generatedImageRetention,
+        const generatedImageRetentionMaxCaptures =
+          input.generatedImageRetentionMaxCaptures === undefined
+            ? input.pendingWork ? 1 : undefined
+            : input.pendingWork
+              ? Math.min(input.generatedImageRetentionMaxCaptures, 1)
+              : input.generatedImageRetentionMaxCaptures;
+        if (generatedImageRetentionMaxCaptures === 0) {
+          retentionWake = mergeInboxRetentionWakes(
+            retentionWake,
+            resolveInboxMediaRetentionImmediateWake(),
+          );
+        } else {
+          const retireGeneratedImages = () => runGeneratedImageCaptureRetention({
+            materializeCandidatePaths:
+              input.materializeRetentionCandidatePaths ?? undefined,
+            ...(generatedImageRetentionMaxCaptures === undefined
+              ? {}
+              : { maxCaptures: generatedImageRetentionMaxCaptures }),
+            protectedCaptureIds: input.protectedCaptureIds,
+            protectedStoredPaths: input.protectedStoredPaths,
+            signal: abortController.signal,
+            vaultRoot,
           });
+          const generatedImageRetention = input.persistGeneratedImageRetention
+            ? await input.persistGeneratedImageRetention(retireGeneratedImages)
+            : await retireGeneratedImages();
+          if (generatedImageRetention.blockedCaptureCount > 0) {
+            emitGeneratedImageRetentionBlockedLog({
+              memberId: input.memberId,
+              result: generatedImageRetention,
+            });
+          }
+          retentionWake = mergeInboxRetentionWakes(
+            retentionWake,
+            resolveGeneratedImageRetentionWake(generatedImageRetention),
+          );
         }
-        retentionWake = mergeInboxRetentionWakes(
-          retentionWake,
-          resolveGeneratedImageRetentionWake(generatedImageRetention),
-        );
         const envelopeMigration = await runInboxEnvelopeMigration({
           apply: true,
           ...(input.pendingWork ? { maxFiles: 1 } : {}),

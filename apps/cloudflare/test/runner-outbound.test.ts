@@ -39,6 +39,7 @@ import {
   buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   isHostedRuntimePrivateImageDeliveryUrl,
+  type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -209,6 +210,12 @@ const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/h
 const PRIVATE_MEDIA_PUBLISH_EXPIRES_AT = "2033-05-18T03:33:20.000Z";
 const PRIVATE_MEDIA_PUBLISH_URL =
   `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+type HostedSystemProgressProjection = Required<Pick<
+  HostedWorkspaceCheckpointRequest,
+  | "nextDefaultProcessingWakeAt"
+  | "nextDefaultProcessingWakeReason"
+  | "systemMailboxProgressGeneration"
+>>;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
@@ -6625,6 +6632,11 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("retains delayed cleanup when completion retry sees the new snapshot already current", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
+    const progressProjection: HostedSystemProgressProjection = {
+      nextDefaultProcessingWakeAt: "2026-05-02T00:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant",
+      systemMailboxProgressGeneration: "7",
+    };
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_retry_replaced_cleanup";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -6682,6 +6694,7 @@ describe("handleRunnerOutboundRequest", () => {
             ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
               "5",
               checkpointRequest.snapshotRef,
+              progressProjection,
             ),
             checkpointConflictReason: "workspace_version",
             checkpointed: false,
@@ -6698,6 +6711,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotCompleteRequest({
+        progressProjection,
         snapshotId,
         snapshotRef,
         workspaceVersion: "4",
@@ -6726,6 +6740,96 @@ describe("handleRunnerOutboundRequest", () => {
       replacedSnapshotRef,
       snapshotId,
     });
+  });
+
+  it("does not synthesize snapshot checkpoint success when system progress state differs", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_retry_progress_mismatch";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: sha256Hex(bytes),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const requestedProgressProjection: HostedSystemProgressProjection = {
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: "7",
+    };
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef),
+    );
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: bytes.byteLength,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(
+          args,
+          "workspace snapshot progress-mismatch checkpoint request",
+        );
+        return new Response(
+          JSON.stringify({
+            ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+              "5",
+              checkpointRequest.snapshotRef,
+              {
+                ...requestedProgressProjection,
+                systemMailboxProgressGeneration: "8",
+              },
+            ),
+            checkpointConflictReason: "workspace_version",
+            checkpointed: false,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      },
+    }));
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        progressProjection: requestedProgressProjection,
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot checkpoint state mismatch.",
+    });
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
   });
 
   it("replays completion against the exact snapshot ref committed before response loss", async () => {
@@ -8061,6 +8165,11 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("deletes replaced state without deleting the current snapshot", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
+    const progressProjection: HostedSystemProgressProjection = {
+      nextDefaultProcessingWakeAt: "2026-05-02T00:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant",
+      systemMailboxProgressGeneration: "7",
+    };
     const snapshotId = "snapshot_complete_expired_current_retry";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
       snapshotId,
@@ -8110,6 +8219,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
     const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
       currentSnapshotRef: snapshotRef,
+      currentSystemProgressProjection: progressProjection,
       currentWorkspaceVersion: "5",
       onCheckpoint: () => {
         throw new Error("expired current retry should not checkpoint again");
@@ -8119,6 +8229,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotCompleteRequest({
+        progressProjection,
         snapshotId,
         snapshotRef,
         workspaceVersion: "4",
@@ -8152,6 +8263,82 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+  });
+
+  it("keeps an expired current snapshot session when system progress state differs", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_expired_progress_mismatch";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const requestedProgressProjection: HostedSystemProgressProjection = {
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: "7",
+    };
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef, {
+        expiresAt: "2000-01-01T00:00:00.000Z",
+      }),
+    );
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: snapshotRef,
+      currentSystemProgressProjection: {
+        ...requestedProgressProjection,
+        systemMailboxProgressGeneration: "8",
+      },
+      currentWorkspaceVersion: "5",
+      onCheckpoint: () => {
+        throw new Error("expired current retry should not checkpoint again");
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        progressProjection: requestedProgressProjection,
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot checkpoint state mismatch.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
   });
 
   it("rejects an expired retry before session or web access when the active fence moved", async () => {
@@ -10644,6 +10831,7 @@ function createWorkspaceSnapshotStartRequest(input: {
 }
 
 function createWorkspaceSnapshotCompleteRequest(input: {
+  progressProjection?: HostedSystemProgressProjection;
   snapshotId: string;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
   workspaceVersion: string;
@@ -10658,6 +10846,7 @@ function createWorkspaceSnapshotCompleteRequest(input: {
           attemptId: "attempt_1",
           expectedWorkspaceVersion: input.workspaceVersion,
           leaseGeneration: "9",
+          ...input.progressProjection,
           nextWakeAt: null,
           nextWakeReason: null,
           reason: input.reason ?? "idle_shutdown",
@@ -11626,12 +11815,14 @@ function createHostedWorkspaceCheckpointResponse(
 function createHostedWorkspaceCheckpointResponseWithSnapshotRef(
   version: string,
   snapshotRef: unknown,
+  progressProjection?: HostedSystemProgressProjection,
 ) {
   const response = createHostedWorkspaceCheckpointResponse(version, null);
   return {
     ...response,
     workspace: {
       ...response.workspace,
+      ...progressProjection,
       snapshotRef,
     },
   };
@@ -11640,6 +11831,7 @@ function createHostedWorkspaceCheckpointResponseWithSnapshotRef(
 function createHostedWorkspaceReadResponse(
   snapshotRef: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"] = null,
   version = "4",
+  progressProjection?: HostedSystemProgressProjection,
 ): HostedWorkspaceReadResponse {
   return {
     fetchedAt: "2026-04-26T00:00:05.000Z",
@@ -11647,6 +11839,7 @@ function createHostedWorkspaceReadResponse(
       checkpointedAt: "2026-04-26T00:00:05.000Z",
       createdAt: "2026-04-26T00:00:00.000Z",
       inboxMediaRetentionWakeAt: null,
+      ...progressProjection,
       nextWakeAt: null,
       nextWakeReason: null,
       redactedStatus: null,
@@ -11661,8 +11854,13 @@ function createHostedWorkspaceReadResponse(
 function createHostedWorkspaceReadFetchResponse(
   snapshotRef: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"] = null,
   version = "4",
+  progressProjection?: HostedSystemProgressProjection,
 ): Response {
-  return new Response(JSON.stringify(createHostedWorkspaceReadResponse(snapshotRef, version)), {
+  return new Response(JSON.stringify(createHostedWorkspaceReadResponse(
+    snapshotRef,
+    version,
+    progressProjection,
+  )), {
     headers: {
       "content-type": "application/json; charset=utf-8",
     },
@@ -11679,6 +11877,7 @@ function isHostedWorkspaceReadFetch(args: Parameters<typeof fetch>): boolean {
 
 function createWorkspaceSnapshotCompleteWebFetchMock(input: {
   currentSnapshotRef?: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"];
+  currentSystemProgressProjection?: HostedSystemProgressProjection;
   currentWorkspaceVersion?: string;
   onWorkspaceRead?(): Promise<void> | void;
   onCheckpoint(args: Parameters<typeof fetch>): Promise<Response> | Response;
@@ -11689,6 +11888,7 @@ function createWorkspaceSnapshotCompleteWebFetchMock(input: {
       return createHostedWorkspaceReadFetchResponse(
         input.currentSnapshotRef ?? null,
         input.currentWorkspaceVersion ?? "4",
+        input.currentSystemProgressProjection,
       );
     }
     return await input.onCheckpoint(args);
