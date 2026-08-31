@@ -230,7 +230,15 @@ Account-deletion cleanup coverage is split at the ownership boundary.
 before suspension and inserted in the canonical transaction before member
 removal. `hosted-account-deletion-cleanup.test.ts` proves receipt-bound
 encryption, independent per-target progress, unconfigured-target pending
-state, lease-loss handling, retry convergence, and batch isolation. Cloudflare
+state, contiguous Temporal cursor recovery, 1,024-runtime convergence without
+reissuing a confirmed prefix, bounded concurrency, lease-loss handling, retry
+convergence, and batch isolation. Static and real-PostgreSQL migration proof
+cover the nullable/default-zero expansion for existing and old-Web rows, the
+fail-closed postdrain null precondition, final non-null hardening, and both
+receipt deletion guards. The private
+workflow machine and replay suites prove deleted canonical state waits
+signal-only while pre-patch histories retain their original Activity/timer
+ordering. Cloudflare
 runner tests prove already-absent state is idempotent and full Durable Object
 storage is erased only after R2/container cleanup. The shared control-client
 suite rejects legacy responses without explicit `deleteAllCompleted` evidence,

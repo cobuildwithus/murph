@@ -474,13 +474,21 @@ describe('assistant Codex turn planning', () => {
   it('reuses one UTC-only time authority when the member timezone is unknown', async () => {
     const promptTimeContext = {
       canonicalTimeZoneAvailable: false,
-      currentLocalDate: '2026-08-11',
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-14',
       currentTimeZone: 'UTC',
     } as const
     const session = createSession()
     const executionPlan = await buildCodexTurnExecutionPlan({
       input: {
         ...createMessageInput(),
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: [],
+            memberId: 'member-utc-only-time-fixture',
+            userEnvKeys: [],
+          },
+        },
         promptTimeContext,
       },
       plan: createSharedPlan(),
@@ -500,7 +508,10 @@ describe('assistant Codex turn planning', () => {
       "The member's canonical timezone is unknown for this turn.",
     )
     expect(attemptPlan.routePlan.systemPrompt).toContain(
-      'The current UTC date is August 11, 2026; the member-local date is unknown for this turn.',
+      'The current UTC date is February 14, 2027; the member-local date is unknown for this turn.',
+    )
+    expect(attemptPlan.routePlan.turnContextPrompt).toContain(
+      'Current time authority: 2027-02-14T07:17:05.678Z (UTC only). The member-local clock is unknown',
     )
     expect(attemptPlan.routePlan.systemPrompt).not.toContain(
       "The user's canonical timezone for this vault is UTC.",
@@ -7909,6 +7920,7 @@ function createUnreachableInboxServices(): InboxServices {
     showAttachmentStatus: unreachable,
     show: unreachable,
     search: unreachable,
+    preserveDocumentAttachment: unreachable,
     preserveDocumentAttachments: unreachable,
     promoteMeal: unreachable,
     promoteDocument: unreachable,
