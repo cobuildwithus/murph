@@ -226,6 +226,7 @@ import {
   retainHostedSystemMailboxItemUntilDeliveryWake,
   resolveHostedBrowserVaultRefreshAttempt,
   resolveHostedSystemMailboxNextWakeCandidate,
+  resolveHostedSystemMailboxWakeCandidates,
   type HostedSystemMailboxCheckpointPreparation,
 } from "./hosted-runtime/system-mailbox.ts";
 import {
@@ -267,6 +268,7 @@ import {
   selectHostedRuntimeOwnerWakeCandidate,
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
+  type HostedSystemMailboxWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
 import {
   consumePendingRuntimeWakeUnlessShuttingDown,
@@ -1016,6 +1018,10 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   nowMs: number;
   operatorHomeRoot: string;
   runtimeEnv: Readonly<Record<string, string>>;
+  systemMailboxWakes?: {
+    defaultOwned: HostedRuntimeWakeCandidate;
+    next: HostedSystemMailboxWakeCandidate;
+  };
   vaultRoot: string;
 }): Promise<{
   assistantCronWakeAt: string | null;
@@ -1042,10 +1048,12 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     nowMs: input.nowMs,
     vaultRoot: input.vaultRoot,
   });
-  const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
-    now: () => now.toISOString(),
-    vaultRoot: input.vaultRoot,
-  });
+  const systemMailboxWakes = input.systemMailboxWakes
+    ?? await resolveHostedSystemMailboxWakeCandidates({
+      now: () => now.toISOString(),
+      vaultRoot: input.vaultRoot,
+    });
+  const systemMailboxWake = systemMailboxWakes.next;
   const assistantCronWake = await resolveHostedAssistantCronWakeAfterInitialImport({
     operatorHomeRoot: input.operatorHomeRoot,
     runtimeEnv: input.runtimeEnv,
@@ -1074,14 +1082,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   ]);
   const assistantWake = selectEarliestHostedRuntimeWake([
     outboxWake,
-    {
-      at: systemMailboxWake.executionClass === "default_owned"
-        ? systemMailboxWake.at
-        : null,
-      reason: systemMailboxWake.executionClass === "default_owned"
-        ? systemMailboxWake.reason
-        : null,
-    },
+    systemMailboxWakes.defaultOwned,
     {
       at: pendingAssistantInputWakeAt,
       reason: pendingAssistantInputWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
@@ -1783,6 +1784,38 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
       nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
     });
+    const imageCodexModelCatalogJson =
+      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+    const imageHealthCommonsPackageRoot =
+      process.env["MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]?.trim();
+    const baseRuntimeEnv = {
+      ...projectHostedRuntimeTrustStoreEnv(process.env),
+      ...guardedRuntime.forwardedEnv,
+      ...guardedRuntime.userEnv,
+      ...(isMurphAndroidAppEnabled(guardedRuntime.platformEnv)
+        ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
+        : {}),
+      ...(imageCodexModelCatalogJson
+        ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
+        : {}),
+      ...(imageHealthCommonsPackageRoot
+        ? { MURPH_HEALTH_COMMONS_PACKAGE_ROOT: imageHealthCommonsPackageRoot }
+        : {}),
+    };
+    const systemMailboxProcessingMode =
+      input.request.processingMode === "system_mailbox";
+    // This marker can only suppress assistant execution. The Cloudflare
+    // boundary sets it when platform policy has already made the normal
+    // assistant handoff impossible. Assistant sources remain durable in the
+    // vault and are re-derived when policy later wakes a default invocation.
+    const assistantExecutionBlocked =
+      systemMailboxProcessingMode
+      && input.request.assistantExecutionBlocked === true;
+    let invocationRuntimeEnv = projectHostedRuntimeProcessEnvironment({
+      runtimeEnv: baseRuntimeEnv,
+    });
+    let acceptedCanonicalSystemProgressCheckpointOrdinal = 0;
+    let systemMailboxProgressedSinceCheckpoint = false;
     const foregroundWorkspacePort = guardedWorkspacePort;
     const checkpointRuntimeRedactedStatus = async (
       checkpointInput: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
@@ -1804,10 +1837,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         )
           ? checkpointInput.nextWakeReason ?? null
           : workspace?.nextWakeReason ?? null;
-        const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+        const checkpointNowMs = Date.now();
+        const checkpointNow = new Date(checkpointNowMs).toISOString();
+        const systemMailboxWakes = await resolveHostedSystemMailboxWakeCandidates({
           allowedRouteActions: ["run-assistant-ask"],
+          now: () => checkpointNow,
           vaultRoot: restored.vaultRoot,
         });
+        const systemMailboxWake = systemMailboxWakes.next;
         const checkpointWake = selectEarliestHostedRuntimeWake([
           {
             at: requestedCheckpointNextWakeAt,
@@ -1818,6 +1855,22 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             reason: systemMailboxWake.reason,
           },
         ]);
+        const defaultProcessingWake =
+          await resolveHostedSystemMailboxProcessingModeWake({
+            assistantExecutionBlocked,
+            extraCandidates: [
+              createHostedRuntimeWakeCandidate(
+                requestedCheckpointNextWakeAt,
+                requestedCheckpointNextWakeReason,
+              ),
+            ],
+            mailboxImportRetryAt: null,
+            nowMs: checkpointNowMs,
+            operatorHomeRoot: restored.operatorHomeRoot,
+            runtimeEnv: invocationRuntimeEnv,
+            systemMailboxWakes,
+            vaultRoot: restored.vaultRoot,
+          });
         const canonicalRuntimeCommit = checkpointInput.reason === "canonical_runtime_commit";
         const checkpointWorkspacePort = canonicalRuntimeCommit
           ? workspacePort
@@ -1826,26 +1879,37 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           redactedStatus: checkpointInput.redactedStatus,
           vaultRoot: restored.vaultRoot,
         });
+        const canonicalSystemProgressCommitted =
+          systemMailboxProcessingMode
+          && checkpointInput.reason === "canonical_runtime_commit"
+          && checkpointInput.canonicalSystemProgressCommitted === true;
+        systemMailboxProgressedSinceCheckpoint ||=
+          canonicalSystemProgressCommitted;
+        const systemMailboxProgressedForCheckpoint =
+          systemMailboxProgressedSinceCheckpoint;
+        const systemMailboxProgressGeneration =
+          checkpointInput.systemMailboxProgressGeneration
+          ?? resolveHostedSystemMailboxCheckpointProgressGeneration({
+            currentGeneration:
+              workspace?.systemMailboxProgressGeneration
+              ?? checkpointMetadata.systemMailboxProgressGeneration,
+            progressed: systemMailboxProgressedForCheckpoint,
+          });
         const checkpointOperation = checkpointWorkspacePort.checkpoint({
           attemptId: checkpointMetadata.attemptId,
           expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
           inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
           leaseGeneration: checkpointMetadata.leaseGeneration,
-          ...(checkpointMetadata.systemMailboxProgressGeneration === null
-            ? {}
-            : {
-                nextDefaultProcessingWakeAt:
-                  checkpointMetadata.nextDefaultProcessingWakeAt,
-                nextDefaultProcessingWakeReason:
-                  checkpointMetadata.nextDefaultProcessingWakeReason,
-                systemMailboxProgressGeneration:
-                  checkpointMetadata.systemMailboxProgressGeneration,
-              }),
+          nextDefaultProcessingWakeAt:
+            defaultProcessingWake.nextDefaultProcessingWakeAt,
+          nextDefaultProcessingWakeReason:
+            defaultProcessingWake.nextDefaultProcessingWakeReason,
           nextWakeAt: checkpointWake.nextWakeAt,
           nextWakeReason: checkpointWake.nextWakeReason,
           reason: checkpointInput.reason,
           redactedStatus,
           snapshotRef: workspace?.snapshotRef ?? null,
+          systemMailboxProgressGeneration,
         });
         const checkpoint = canonicalRuntimeCommit
           ? await checkpointOperation
@@ -1857,6 +1921,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           assertRuntimeNotAborted();
         }
         assertHostedWorkspaceCheckpointAccepted(checkpoint, input.request.userId);
+        if (canonicalSystemProgressCommitted) {
+          acceptedCanonicalSystemProgressCheckpointOrdinal += 1;
+        }
+        systemMailboxProgressedSinceCheckpoint = false;
         return checkpoint;
       } finally {
         resumeDetachedAssistantAskAfterWorkspaceBoundary();
@@ -2036,39 +2104,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       vaultRoot: restored.vaultRoot,
       workspace: activeWorkspace,
     };
-    const imageCodexModelCatalogJson =
-      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
-    const imageHealthCommonsPackageRoot =
-      process.env["MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]?.trim();
-    const baseRuntimeEnv = {
-      ...projectHostedRuntimeTrustStoreEnv(process.env),
-      ...guardedRuntime.forwardedEnv,
-      ...guardedRuntime.userEnv,
-      ...(isMurphAndroidAppEnabled(guardedRuntime.platformEnv)
-        ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
-        : {}),
-      ...(imageCodexModelCatalogJson
-        ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
-        : {}),
-      ...(imageHealthCommonsPackageRoot
-        ? { MURPH_HEALTH_COMMONS_PACKAGE_ROOT: imageHealthCommonsPackageRoot }
-        : {}),
-    };
-    const systemMailboxProcessingMode =
-      input.request.processingMode === "system_mailbox";
-    // This marker can only suppress assistant execution. The Cloudflare
-    // boundary sets it when platform policy has already made the normal
-    // assistant handoff impossible. Assistant sources remain durable in the
-    // vault and are re-derived when policy later wakes a default invocation.
-    const assistantExecutionBlocked =
-      systemMailboxProcessingMode
-      && input.request.assistantExecutionBlocked === true;
     let hostedCodexRuntime: Awaited<
       ReturnType<typeof prepareHostedCodexRuntimeEnvironment>
     > | null = null;
-    let invocationRuntimeEnv = projectHostedRuntimeProcessEnvironment({
-      runtimeEnv: baseRuntimeEnv,
-    });
     const prepareInvocationCodexRuntime = async (): Promise<
       NonNullable<typeof hostedCodexRuntime>
     > => {
@@ -2630,7 +2668,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let checkpointReportedConversationInputAhead = false;
       let defaultOwnerWakeObserved = false;
       let assistantCronDeadlineMs: number | null = null;
-      let systemMailboxProgressedSinceCheckpoint = false;
       const observeForegroundWake = (
         notification: RuntimeWakeNotification | null,
       ): boolean => {
@@ -3055,6 +3092,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (consumeForegroundWake()) {
           return { preempted: true, prepared: false };
         }
+        const acceptedProgressCheckpointOrdinalBeforePreparation =
+          acceptedCanonicalSystemProgressCheckpointOrdinal;
         return await withCanonicalWritePersistence(async () => {
           const persistedPreparation = await runHostedWorkspaceCanonicalWriteAtBoundary({
             previousRedactedStatus: currentRedactedStatus,
@@ -3159,6 +3198,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             exactDeliveryRecordItem,
             preparation,
           } = persistedPreparation.result;
+          const preparationSystemProgressed =
+            preparation?.status === "processed"
+            && preparation.metrics.systemProgressed === true;
           if (persistedPreparation.canonicalWritePersisted) {
             activeWorkspace = persistedPreparation.workspace;
             currentRedactedStatus =
@@ -3166,9 +3208,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               ?? persistedPreparation.workspace?.redactedStatus
               ?? currentRedactedStatus;
           }
-          systemMailboxProgressedSinceCheckpoint ||=
-            preparation?.status === "processed"
-            && preparation.metrics.systemProgressed === true;
+          if (
+            acceptedCanonicalSystemProgressCheckpointOrdinal
+              === acceptedProgressCheckpointOrdinalBeforePreparation
+          ) {
+            systemMailboxProgressedSinceCheckpoint ||= preparationSystemProgressed;
+          }
           if (preparation?.status === "preempted") {
             return { preempted: true, prepared: true };
           }
@@ -4192,7 +4237,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       || readHostedCanonicalWriteReceiptLogStatusFingerprint(
         activeWorkspace?.redactedStatus ?? null,
       ) !== null;
-    let systemMailboxProgressedSinceCheckpoint = false;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
     let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;

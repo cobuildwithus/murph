@@ -666,6 +666,7 @@ test("device sync service records privacy-safe job phase timings", async () => {
       async importDeviceProviderSnapshot() {
         advanceClock(2_000);
         return {
+          applied: true,
           deviceProviderSnapshotImportTiming: {
             canonicalCoreElapsedMs: 1_600,
             canonicalWriteElapsedMs: 200,
@@ -709,6 +710,7 @@ test("device sync service records privacy-safe job phase timings", async () => {
     assert.deepEqual(service.listJobTimingDiagnostics(), [{
       at: "2026-08-25T10:00:05.700Z",
       attempts: 1,
+      canonicalProgressCommitted: true,
       connectionSourceReadCount: 1,
       connectionSourceReadElapsedMs: 1_000,
       credentialRefreshCount: 1,
@@ -7344,6 +7346,7 @@ test("device sync service aborts and releases provider jobs when foreground work
     async importDeviceProviderSnapshot(input) {
       imports.push(input);
       return {
+        applied: false,
         ok: true,
       };
     },
@@ -7451,6 +7454,10 @@ test("device sync service aborts and releases provider jobs when foreground work
         },
       ],
     );
+    const completedDiagnostic = service.listJobTimingDiagnostics()[1];
+    assert(completedDiagnostic);
+    assert.equal(completedDiagnostic.durableProgressCommitted, true);
+    assert.equal(Object.hasOwn(completedDiagnostic, "canonicalProgressCommitted"), false);
   } finally {
     close();
   }

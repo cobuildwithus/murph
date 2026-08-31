@@ -1366,7 +1366,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       parserProcessed: 0,
       postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
-      ...(jobTimingDiagnostics.some((diagnostic) => diagnostic.durableProgressCommitted)
+      ...(jobTimingDiagnostics.some((diagnostic) => diagnostic.canonicalProgressCommitted === true)
         ? { systemProgressed: true as const }
         : {}),
       ...(deviceSyncResult.stagedDirtyAcks

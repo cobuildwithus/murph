@@ -48,6 +48,7 @@ import {
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
+  type HostedRuntimeWakeCandidate,
   type HostedSystemMailboxWakeCandidate,
 } from "./wake-candidates.ts";
 
@@ -369,6 +370,46 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
     await readHostedSystemMailboxState(input.vaultRoot),
     now,
   );
+  return resolveHostedSystemMailboxWakeCandidatesFromState({
+    ...input,
+    now,
+    state,
+  }).next;
+}
+
+export async function resolveHostedSystemMailboxWakeCandidates(input: {
+  allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
+  allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
+  excludeItemId?: string | null;
+  now?: () => string;
+  vaultRoot: string;
+}): Promise<{
+  defaultOwned: HostedRuntimeWakeCandidate;
+  next: HostedSystemMailboxWakeCandidate;
+}> {
+  const now = (input.now ?? (() => new Date().toISOString()))();
+  const state = excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
+    await readHostedSystemMailboxState(input.vaultRoot),
+    now,
+  );
+  return resolveHostedSystemMailboxWakeCandidatesFromState({
+    ...input,
+    now,
+    state,
+  });
+}
+
+function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
+  allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
+  allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
+  excludeItemId?: string | null;
+  now: string;
+  state: HostedSystemMailboxState;
+}): {
+  defaultOwned: HostedRuntimeWakeCandidate;
+  next: HostedSystemMailboxWakeCandidate;
+} {
+  const { now, state } = input;
   const remainingState = input.excludeItemId
     ? {
         pending: state.pending.filter((item) =>
@@ -398,27 +439,67 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
     now,
     state: selectionState,
   });
-  if (readyItem !== null) {
-    return {
+  const defaultOwnedItems = findNextHostedSystemMailboxQueueItemsForWake({
+    allowedRouteActions: null,
+    state: remainingState,
+  }).filter((item) =>
+    resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
+  );
+  const readyItemAcrossAllRoutes = findNextHostedSystemMailboxQueueItem({
+    allowedRouteActions: null,
+    now,
+    state: remainingState,
+  });
+  const readyDefaultOwnedItem = readyItemAcrossAllRoutes !== null
+      && resolveHostedSystemMailboxItemExecutionClass(readyItemAcrossAllRoutes)
+        === "default_owned"
+    ? readyItemAcrossAllRoutes
+    : findNextHostedSystemMailboxQueueItem({
+        allowedRouteActions: null,
+        now,
+        state: { pending: defaultOwnedItems },
+      });
+  const defaultOwned = readyDefaultOwnedItem === null
+    ? selectHostedRuntimeWakeCandidate(defaultOwnedItems.map((item) =>
+        createHostedRuntimeWakeCandidate(
+          resolveSystemMailboxItemNextWakeAt(item, now),
+          resolveHostedSystemMailboxItemWakeReason(item),
+        )
+      ))
+    : createHostedRuntimeWakeCandidate(
+        resolveSystemMailboxItemNextWakeAt(readyDefaultOwnedItem, now),
+        resolveHostedSystemMailboxItemWakeReason(readyDefaultOwnedItem),
+      );
+  const next: HostedSystemMailboxWakeCandidate = readyItem !== null
+    ? {
       ...createHostedRuntimeWakeCandidate(
         resolveSystemMailboxItemNextWakeAt(readyItem, now),
         resolveHostedSystemMailboxItemWakeReason(readyItem),
       ),
-      executionClass: readyItem.mailboxLaneSeq !== null
-        && isHostedSystemMailboxModelFreeFrontierItem(readyItem)
-        ? "model_free"
-        : "default_owned",
+      executionClass: resolveHostedSystemMailboxItemExecutionClass(readyItem),
+    }
+    : {
+      ...selectHostedRuntimeWakeCandidate(items.map((item) =>
+        createHostedRuntimeWakeCandidate(
+          resolveSystemMailboxItemNextWakeAt(item, now),
+          resolveHostedSystemMailboxItemWakeReason(item),
+        )
+      )),
+      executionClass: null,
     };
-  }
   return {
-    ...selectHostedRuntimeWakeCandidate(items.map((item) =>
-      createHostedRuntimeWakeCandidate(
-        resolveSystemMailboxItemNextWakeAt(item, now),
-        resolveHostedSystemMailboxItemWakeReason(item),
-      )
-    )),
-    executionClass: null,
+    defaultOwned,
+    next,
   };
+}
+
+function resolveHostedSystemMailboxItemExecutionClass(
+  item: HostedSystemMailboxPendingItem,
+): "default_owned" | "model_free" {
+  return item.mailboxLaneSeq !== null
+      && isHostedSystemMailboxModelFreeFrontierItem(item)
+    ? "model_free"
+    : "default_owned";
 }
 
 export function findNextHostedSystemMailboxQueueItem(input: {
@@ -1059,19 +1140,43 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem[] {
-  const seenSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
   const items: HostedSystemMailboxPendingItem[] = [];
-  for (const item of input.state.pending) {
-    if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
-      continue;
+  const seenItemIds = new Set<string>();
+  const appendItem = (item: HostedSystemMailboxPendingItem): void => {
+    if (!seenItemIds.has(item.itemId)) {
+      seenItemIds.add(item.itemId);
+      items.push(item);
     }
-    const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
-    if (seenSerializationKeys.has(serializationKey)) {
-      continue;
+  };
+  const appendSerializationFrontier = (
+    candidates: readonly HostedSystemMailboxPendingItem[],
+  ): void => {
+    const seenSerializationKeys =
+      new Set<HostedSystemMailboxSerializationKey>();
+    for (const item of candidates) {
+      if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
+        continue;
+      }
+      const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
+      if (seenSerializationKeys.has(serializationKey)) {
+        continue;
+      }
+      seenSerializationKeys.add(serializationKey);
+      appendItem(item);
     }
-    seenSerializationKeys.add(serializationKey);
-    items.push(item);
+  };
+
+  if (input.allowedRouteActions === null) {
+    for (const item of input.state.pending) {
+      if (isHostedPendingEffectsContinuationSystemMailboxItem(item)) {
+        appendItem(item);
+      }
+    }
+    appendSerializationFrontier(
+      input.state.pending.filter(isHostedUserInvokedDelegatedSystemMailboxItem),
+    );
   }
+  appendSerializationFrontier(input.state.pending);
   return items;
 }
 

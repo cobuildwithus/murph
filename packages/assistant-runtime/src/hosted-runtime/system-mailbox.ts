@@ -90,6 +90,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_RETRY_MS = 1_000;
 export {
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
+  resolveHostedSystemMailboxWakeCandidates,
 } from "./system-mailbox-state.ts";
 export type {
   HostedSystemMailboxPendingItem,

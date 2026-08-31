@@ -375,6 +375,7 @@ export interface HostedWorkspaceRunnerDeferredUsageCapture {
 }
 
 export interface HostedWorkspaceRunnerRuntimeStatusCheckpointInput {
+  canonicalSystemProgressCommitted?: true;
   nextDefaultProcessingWakeAt?: string | null;
   nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: string | null;
@@ -2836,6 +2837,9 @@ function createHostedWorkspaceCanonicalWritePort(input: {
                   nextWakeAt: resolveHostedWorkspaceRunnerNowIso(input.input.now),
                   nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
                 }
+              : {}),
+            ...(writeInput.receipt.operationType === "device_batch_import"
+              ? { canonicalSystemProgressCommitted: true as const }
               : {}),
             reason: "canonical_runtime_commit",
             redactedStatus: checkpointRedactedStatus,

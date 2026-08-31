@@ -10,6 +10,7 @@ import {
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxHandledThroughSeq,
   resolveHostedSystemMailboxNextWakeCandidate,
+  resolveHostedSystemMailboxWakeCandidates,
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
   updateHostedSystemMailboxPendingItem,
   updateHostedSystemMailboxState,
@@ -351,6 +352,13 @@ describe("hosted runtime system mailbox state", () => {
   });
 
   it("serializes projection retries without blocking unrelated runtime controls", async () => {
+    const maintenanceRetry = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_maintenance_retry",
+      mailboxDedupeKey: "runtime-control:maintenance:retry",
+      mailboxLaneSeq: "1",
+      nextAttemptAt: "2026-04-27T00:01:00.000Z",
+      wakeKind: "runtime.maintenance-requested",
+    });
     const projectionRetry = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_projection_retry",
       mailboxDedupeKey: "runtime-control:group-share-projection:generation_1",
@@ -415,6 +423,25 @@ describe("hosted runtime system mailbox state", () => {
         at: "2026-04-27T00:00:00.000Z",
         executionClass: "default_owned",
         reason: "assistant",
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [maintenanceRetry, codexDisconnect],
+      }));
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        allowedRouteActions: ["apply-runtime-control-request"],
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: "2026-04-27T00:01:00.000Z",
+          executionClass: null,
+          reason: "mailbox",
+        },
       });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -489,6 +516,20 @@ describe("hosted runtime system mailbox state", () => {
         executionClass: "default_owned",
         reason: "assistant",
       });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: "2026-04-27T00:00:00.000Z",
+          reason: "assistant",
+        },
+        next: {
+          at: "2026-04-27T00:00:00.000Z",
+          executionClass: "default_owned",
+          reason: "assistant",
+        },
+      });
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         allowedRouteActions: ["run-device-sync-wake"],
         now: () => "2026-04-27T00:00:00.000Z",
@@ -509,6 +550,78 @@ describe("hosted runtime system mailbox state", () => {
         at: "2026-04-27T00:00:00.000Z",
         executionClass: "model_free",
         reason: "device-sync.reconcile",
+      });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: "2026-04-27T00:01:00.000Z",
+          reason: "assistant",
+        },
+        next: {
+          at: "2026-04-27T00:00:00.000Z",
+          executionClass: "model_free",
+          reason: "device-sync.reconcile",
+        },
+      });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        allowedRouteActions: ["run-assistant-ask"],
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: "2026-04-27T00:01:00.000Z",
+          reason: "assistant",
+        },
+        next: {
+          at: null,
+          executionClass: null,
+          reason: null,
+        },
+      });
+
+      const maintenanceRetry = buildPendingRuntimeControlMailboxItem({
+        itemId: "pending_maintenance_before_approved_continuation",
+        mailboxDedupeKey: "runtime-control:maintenance:before-approved",
+        mailboxLaneSeq: "1",
+        nextAttemptAt: "2026-04-27T00:01:00.000Z",
+        wakeKind: "runtime.maintenance-requested",
+      });
+      const approvedContinuationRetry = {
+        ...approvedContinuationA,
+        nextAttemptAt: "2026-04-27T00:00:30.000Z",
+      };
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [maintenanceRetry, approvedContinuationRetry],
+      }));
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: "2026-04-27T00:00:30.000Z",
+          reason: "assistant",
+        },
+        next: {
+          at: "2026-04-27T00:00:30.000Z",
+          executionClass: null,
+          reason: "assistant",
+        },
+      });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:30.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: "2026-04-27T00:00:30.000Z",
+          reason: "assistant",
+        },
+        next: {
+          at: "2026-04-27T00:00:30.000Z",
+          executionClass: "default_owned",
+          reason: "assistant",
+        },
       });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
