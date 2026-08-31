@@ -1,20 +1,17 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-28
+Last verified: 2026-08-31
 
 This document owns the managed-browser `pr-review` loop: the final
 cross-cutting gate for eligible PR-lane work and the replacement for local
-`deep-review` on that path. The separate preliminary Product UX, prompt,
-frontend, and coverage review is performed by one local review-only specialist
-subagent under `agent-docs/operations/completion-workflow.md`; it is not a
-ReviewGPT stage and does not create or advance this gate's immutable baseline.
+`deep-review` on that path. Product UX, prompt, frontend, and coverage proof are
+parent-owned and do not create a preliminary ReviewGPT or local-subagent gate.
 
 The final gate uses the managed Eragon, Phlebas, Hercules, Mountain,
 Vonneumann, and Apollo browser lanes. After focused local proof and the
-parent's candidate review, it may start concurrently with the local specialist
-subagent against the same candidate, with ReviewGPT bound to the exact pushed
-head. Findings from both reviews must be resolved before the parent's final
-review and completion.
+parent's candidate review, it starts concurrently with CI and is bound to the
+exact pushed head. Its accepted findings must be resolved before the parent's
+final review and completion.
 
 Never combine local `deep-review` with the final ReviewGPT gate for the same
 completed change, including when the change is complex, sensitive, or the user
@@ -115,9 +112,7 @@ or operational harm, and the smallest justified fix with its complexity cost.
 
 A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause: report the result
 and dispositions, then wait for the user to resume before mutating the
-candidate, launching another review, or merging. If a concurrent final stage
-returns `FINDINGS`, that stricter pause also blocks pending specialist-driven
-mutation. A validated final
+candidate, launching another review, or merging. A validated final
 `ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly to
 the remaining parent review and merge checks without a user-resume pause.
 
@@ -202,19 +197,19 @@ table. Here `<full-sha>` means exactly the 40-character lowercase hexadecimal
 value returned by `git rev-parse HEAD`; a shortened SHA is invalid.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
-to go green first. Final round 1 may run in parallel with both CI and the local
-specialist subagent against the same candidate. Green CI on the final head and
-resolved results from both reviews remain separate merge-readiness gates.
+to go green first. Final round 1 runs in parallel with CI. Green CI on the final
+head and a resolved final review remain separate merge-readiness gates.
 
 Skip the final gate for docs/process-only PRs, prompt-primary PRs,
 frontend-only PRs that satisfy the eligibility exemption, trivial copy-only
 changes, other low-risk changes that satisfy
 `agent-docs/operations/completion-workflow.md` § Final ReviewGPT Eligibility, or
 explicit current-task user opt-out. If ReviewGPT is opted out and the
-cross-cutting trigger still applies, route to local `deep-review` instead;
-never run both. Prompt-primary PRs still run the local specialist prompt
-lens, and exempt frontend-only PRs still run every applicable preliminary
-product, frontend, and coverage lens plus their ordinary rendered and UI proof.
+cross-cutting trigger still applies, record the opt-out and continue with parent
+review and direct proof; do not substitute a mandatory local subagent.
+Prompt-primary PRs still require parent prompt inspection, and exempt
+frontend-only PRs still require Product UX, rendered, accessibility, and focused
+UI proof.
 Run the separate final gate only when other scope independently requires it or
 the current user explicitly asks for it.
 
@@ -504,12 +499,10 @@ the current user explicitly asks for it.
    reconciliation for a low-incidence temporary window.
 
    Apply the parent-owned finding-disposition boundary after completing this
-   triage. Preliminary specialist remediation may proceed after the parent
-   reports every disposition as a progress update. A final `FINDINGS` result
-   pauses steps 5–7 until the user resumes, including any pending
-   specialist-driven mutation, except that a qualifying `Complexity Collapse`
-   or `Non-Production Remediation` exception may proceed immediately after the
-   report. Remediation remains limited to accepted findings and the proven task
+   triage. A final `FINDINGS` result pauses steps 5–7 until the user resumes,
+   except that a qualifying `Complexity Collapse` or `Non-Production
+   Remediation` exception may proceed immediately after the report. Remediation
+   remains limited to accepted findings and the proven task
    or exception boundary. A validated final `ROUND_OUTCOME: PASS` continues
    without that pause.
 
@@ -630,9 +623,8 @@ worktree active, and stop. Do not poll for a quiet base.
 - Hard cap: 7 rounds per PR. There is no automatic eighth substantive round. An
   accepted round-seven finding may still be reproduced and fixed; do not leave a
   known bug in place merely because the review counter reached seven. After that
-  fix, pause the ReviewGPT loop and confirm the specialist subagent pass,
-  required local audit, parent final review, verification, and PR CI are all
-  complete. Record the cap
+  fix, pause the ReviewGPT loop and confirm parent final review, verification,
+  and PR CI are all complete. Record the cap
   retrospective and obtain an explicit continuation decision before starting
   round eight; the answer may be delete, revert, shrink, split, redesign,
   continue, or abandon. A green non-ReviewGPT gate does not make the PR
@@ -646,14 +638,10 @@ worktree active, and stop. Do not poll for a quiet base.
 - The final gate requires a clean exact-head worktree/PR lane. Current-checkout
   fast-path work cannot use this document as a substitute for its routed local
   proof.
-- When the local specialist runs concurrently, keep its response separate and
-  preserve the final round-one baseline if specialist remediation creates a
-  later substantive round.
 - Do not run local Codex `deep-review` for a completed change that uses this PR
   gate. An explicit request for deep review or a final bug hunt is fulfilled by
   this cross-cutting ReviewGPT review and does not create a second pass.
-- The local specialist subagent does not substitute for this final gate when
-  final ReviewGPT is routed. Do not substitute pasted text, connector context,
+- Do not substitute pasted text, connector context,
   dirty-worktree context, ad hoc archives, or an unmanaged/non-ReviewGPT browser
   profile for the final gate.
 - Do not commit ReviewGPT responses or rendered evidence. Files under

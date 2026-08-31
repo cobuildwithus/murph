@@ -124,7 +124,7 @@ contract from PR #146 — this design deliberately requires neither.
 ## Workflow
 
 Standard repo workflow: worktree (`murph-*` naming), exec plan, required
-completion audits per `agent-docs/operations/completion-workflow.md`,
-`scripts/finish-task`, push, and open a PR. Apply the preliminary specialist
-ReviewGPT pass and the separate final cross-cutting gate when routed by that
+completion evidence per `agent-docs/operations/completion-workflow.md`,
+`scripts/finish-task`, push, and open a PR. The parent agent owns the required
+proof and applies the final cross-cutting ReviewGPT gate when routed by that
 workflow. Do not merge.

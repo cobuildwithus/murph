@@ -1,10 +1,10 @@
 ---
-description: Prompt-review lens for the unified local completion specialist
-action: preliminary specialist prompt review
+description: On-demand review guidance for prompt changes
+action: on-demand prompt review
 ---
 
-Use this lens inside the one preliminary local specialist subagent when the
-candidate changes prompt behavior.
+Use this review-only guidance when the user explicitly requests prompt review or
+when the parent wants a checklist for its own final review.
 
 Outcome:
 Determine whether the changed prompt stack gives GPT-5.6 the smallest clear contract that reliably produces the intended result while preserving product, safety, privacy, evidence, and authorization invariants.
@@ -13,8 +13,7 @@ Mode:
 - Review only. Do not edit files.
 - Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
 - Do not claim to have implemented, landed, or committed changes. Report findings only.
-- Follow `agent-docs/prompts/completion-specialist-review.md` for the unified
-  evidence, finding, output, and stop contract.
+- Follow the invoking review's evidence, finding, output, and stop contract.
 
 Required source:
 - Before every review, read the current official GPT-5.6 prompt guidance:
@@ -62,8 +61,7 @@ Output requirements:
 - If no evidence-backed findings remain, state that explicitly and list only material residual prompt-behavior or evaluation risk.
 
 Response format:
-- Return findings through the unified specialist subagent response, not
-  follow-on prompts for more agents.
+- Return a normal text review, not follow-on prompts for more agents.
 - Keep the focus on concrete prompt behavior risks and the smallest wording, deletion, merge, or structure change that fixes each one.
 
 Stop rule:

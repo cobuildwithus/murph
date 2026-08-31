@@ -1,10 +1,10 @@
 ---
-description: Executable-proof lens for the unified local completion specialist
-action: preliminary specialist proof review
+description: On-demand review guidance for executable proof
+action: on-demand proof review
 ---
 
-Use this review-only lens inside the one preliminary local specialist subagent
-when either:
+Use this review-only guidance when the user explicitly requests proof review or
+when the parent wants a checklist for its own final review and either:
 
 - tests, fixtures, or direct-proof infrastructure are a primary PR outcome; or
 - the changed behavior makes a material proof claim that ordinary focused
@@ -34,8 +34,7 @@ Mode:
 - Review the complete candidate patch and its existing proof; do not mutate the
   checkout, create artifacts, create commits, push, or claim that suggested
   changes landed.
-- Follow `agent-docs/prompts/completion-specialist-review.md` for the unified
-  specialist evidence, finding, output, and stop contract.
+- Follow the invoking review's evidence, finding, output, and stop contract.
 
 Review priorities:
 
@@ -72,8 +71,7 @@ Finding constraints:
 
 Output:
 
-- Return findings through the unified specialist subagent response, ordered by
-  severity.
+- Return findings ordered by severity.
 - For each finding name the missing behavior proof, current evidence, stable
   test boundary, smallest correction, and exact verification command.
 - State explicitly when current proof is sufficient.
