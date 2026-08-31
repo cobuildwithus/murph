@@ -494,12 +494,12 @@ export async function runHostedAssistantAutomation(
         if (
           shouldPersistHostedAssistantAutomationEvent(event.type)
           && (
-            shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)
+            shouldAlwaysPersistHostedAssistantAutomationEvent(event)
             || redactedAutomationEventLogCount < HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT
           )
         ) {
           redactedLogEntries.push(logEntry);
-          if (!shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)) {
+          if (!shouldAlwaysPersistHostedAssistantAutomationEvent(event)) {
             redactedAutomationEventLogCount += 1;
           }
         }
@@ -1196,9 +1196,16 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
   ]).has(type);
 }
 
-function shouldAlwaysPersistHostedAssistantAutomationEvent(type: string): boolean {
-  return type === "input.reply-failed"
-    || type === "onboarding.followup.completed";
+function shouldAlwaysPersistHostedAssistantAutomationEvent(
+  event: AssistantRunEvent,
+): boolean {
+  return event.type === "input.reply-failed"
+    || event.type === "onboarding.followup.completed"
+    || (
+      (event.type === "cron.job.completed"
+        || event.type === "cron.occurrence.expired")
+      && event.failureContext?.automationSlug === "personal-patterns-update"
+    );
 }
 
 export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {

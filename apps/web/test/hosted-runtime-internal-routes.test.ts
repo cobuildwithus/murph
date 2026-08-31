@@ -26,7 +26,9 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   isHostedRuntimeLogDatabaseConfigured: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
+  hasHostedPersonalPatternsRunAlert: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
+  reportHostedPersonalPatternsRunAlerts: vi.fn(),
   claimHostedAcceptedAttemptFailureRecheck: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
@@ -105,6 +107,13 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
 
 vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
   writeHostedRuntimeLogs: mocks.recordHostedRuntimeLogs,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-log/personal-patterns-run-alert", () => ({
+  hasHostedPersonalPatternsRunAlert:
+    mocks.hasHostedPersonalPatternsRunAlert,
+  reportHostedPersonalPatternsRunAlerts:
+    mocks.reportHostedPersonalPatternsRunAlerts,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/database", async (importOriginal) => ({
@@ -187,6 +196,7 @@ describe("hosted runtime internal web routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hasHostedPersonalPatternsRunAlert.mockReturnValue(false);
     delete process.env.HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED;
     delete process.env.HOSTED_CUSTOM_INFERENCE_ENABLED;
     delete process.env.HOSTED_VENICE_ENABLED;
@@ -2481,6 +2491,37 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledOnce();
     expect(mocks.recordHostedRuntimeLogs.mock.calls[0]?.[0]?.entries).toHaveLength(50);
+  });
+
+  it("schedules a Personal Patterns alert after runtime logs persist", async () => {
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
+    mocks.hasHostedPersonalPatternsRunAlert.mockReturnValue(true);
+    const entries = [{
+      at: FIXED_NOW,
+      component: "runtime",
+      eventCode: "assistant.automation_detail",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        failureAutomationSlug: "personal-patterns-update",
+        failureOccurrenceAt: FIXED_NOW,
+        failureRunOutcome: "failed",
+        type: "cron.job.completed",
+      },
+    }];
+
+    const response = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      { entries },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.after).toHaveBeenCalledOnce();
+    await mocks.after.mock.calls[0]?.[0]();
+    expect(mocks.reportHostedPersonalPatternsRunAlerts).toHaveBeenCalledWith({
+      entries,
+      memberId: "member_routes_1",
+    });
   });
 
   it("reports zero persisted logs when deletion wins the diagnostic race", async () => {

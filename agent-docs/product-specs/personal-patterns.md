@@ -127,6 +127,12 @@ The managed Personal Patterns automation checks each day at 13:00 local time.
 It sends at most one private message per run. The first report becomes a quiet
 baseline. Later new results become one summary with at most three highlights.
 
+The hosted runtime emits a privacy-safe internal email alert when this managed
+run fails or when its occurrence starts too late and expires. Alert delivery
+uses the existing operational email channel and does not change the member's
+message. A complete platform outage requires an external uptime monitor,
+because the runtime cannot report while it is offline.
+
 Only a new grade A-D identity can trigger that daily message. Murph describes D
 as an Early signal and A-C as a Pattern. Grade E Observations remain visible on
 the page but stay quiet. A saved private ledger deduplicates result identities.
