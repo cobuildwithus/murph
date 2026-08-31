@@ -1,6 +1,6 @@
 # Restore stable Vercel production builds
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-08-31
 
@@ -17,8 +17,8 @@ Updated: 2026-08-31
 - The retained production-derived real-Codex planner journey passes and its
   synthetic member-visible reply is manually judged Ready.
 - The assistant-engine package typecheck and build pass.
-- An exact pushed candidate head completes a real Vercel Standard preview build
-  without OOM, timeout, or an opaque compile stall.
+- An exact pushed candidate head completes a real Vercel Standard build without
+  OOM, timeout, or an opaque compile stall.
 - Required PR review and CI gates resolve with no accepted finding left open.
 
 ## Scope
@@ -56,10 +56,10 @@ Updated: 2026-08-31
 2. [done] Inspect the diff for exact scope and privacy-safe contents.
 3. [done] Run deterministic planner tests plus package typecheck and build.
 4. [done] Run and review the focused real-Codex planner journey.
-5. [in progress] Commit, push, open the PR, and require an exact-head Vercel
-   Standard build.
-6. [pending] Run preliminary specialist and final ReviewGPT gates with CI, resolve any
-   accepted findings, complete parent review, and close the plan.
+5. [done] Commit, push, open the PR, and require an exact-head Vercel Standard
+   build.
+6. [done] Run preliminary specialist and final ReviewGPT gates with CI, resolve
+   any accepted findings, complete parent review, and close the plan.
 
 ## Decisions
 
@@ -85,7 +85,21 @@ Updated: 2026-08-31
   boundary; subsequent heads either OOM-killed or stalled in Webpack compile,
   while the immediately preceding production head completed on the same machine
   and cold-cache policy.
-- Pending: exact-head Vercel preview, required GitHub checks, and ReviewGPT.
+- Passed: three independent Standard-builder deployments completed without OOM,
+  timeout, or compile stall. The final forced-cache-bypass build was explicitly
+  bound to the rebased candidate head: Webpack compiled in 5.2 minutes, all 284
+  static pages generated in 42 seconds, and the full deployment reached Ready
+  in 10 minutes. The two preceding source-identical forced passes compiled in
+  6.1 and 7.4 minutes.
+- Passed: preliminary specialist review. Its one accepted coverage finding was
+  resolved by the repeated forced-cache-bypass deployment evidence above;
+  Product UX and frontend were not applicable, and prompt review found no issue.
+- Passed: final ReviewGPT round 1 with no qualifying findings.
+- Passed: all required GitHub checks on the rebased candidate head, including
+  release app verification, assistant/platform/CLI coverage, release build and
+  typecheck, production runner bundle budget, and the scoped invariant gates.
+- Passed: final parent review, including exact historical blob comparison,
+  whitespace validation, scope/LOC review, and privacy scan.
 
 ## Changelog decision
 
@@ -93,3 +107,4 @@ Updated: 2026-08-31
   deliberately preserves all member-visible assistant behavior; it is internal
   deployment reliability work rather than a shipped member capability or UX
   change.
+Completed: 2026-08-31
