@@ -1593,12 +1593,15 @@ export async function seedHostedWorkspaceWakeForTest(input: {
           : {}),
       },
       where: {
+        ...(input.defaultProcessingWake
+          ? { systemMailboxProgressGeneration: { not: null } }
+          : {}),
         userId: input.userId,
       },
     });
     if (result.count !== 1) {
       throw new Error(
-        "Hosted-local workspace wake seed requires exactly one existing workspace.",
+        "Hosted-local workspace wake seed requires exactly one compatible existing workspace.",
       );
     }
   });
