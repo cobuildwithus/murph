@@ -2534,6 +2534,12 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state.',
     )
+    expect(prompt).toContain(
+      "Skip this search only when the request is limited to deterministic exact food-label nutrition facts resolved by food-journal's label database; use that database directly.",
+    )
+    expect(prompt).toContain(
+      'Health reasoning or advice beyond the returned label facts still requires Commons.',
+    )
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
     expect(prompt).toContain('If unavailable or empty, continue honestly.')
     expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')

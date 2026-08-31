@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-30
+Last verified: 2026-08-31
 
 ## Purpose
 
@@ -25,10 +25,11 @@ unambiguous combined-option admission, per-worktree Spotlight, and focused proof
 contracts are specified by `agent-docs/operations/local-storage-lifecycle.md` and
 `agent-docs/references/testing-ci-map.md`.
 
-Receipt-owned positive Stripe payment notifications cover subscription starts
-and renewals, paid plan-change and recurring-usage invoices, and fulfilled
-usage-credit payments without exposing member or customer identity. Their
-retry, privacy, configuration, and deploy-skew contracts are specified by
+Receipt-owned positive Stripe payment notifications cover subscription starts,
+paid plan-change and recurring-usage invoices, and fulfilled usage-credit
+payments without exposing member or customer identity. All invoices with
+`billing_reason: subscription_cycle` remain silent. Their retry, privacy,
+configuration, and deploy-skew contracts are specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, `agent-docs/SECURITY.md`,
 `agent-docs/product-specs/hosted-usage-topups.md`, and `apps/web/README.md`.
 
@@ -122,10 +123,13 @@ deployment-concerns disposition. Applicable deploy boundaries record supported s
 rollback floor, expected exposure, reversibility, convergence proof, and
 post-deploy checks; other changes record one concrete not-applicable reason.
 Every PR also records non-obvious affected surfaces, a mechanically validated
-architecture/reuse summary, foreground reply-path impact, complete initial
-provider-input impact, and categorized added/deleted LOC. User-facing hosted
-Web UI changes additionally carry mechanically validated design-proof fields
-and dedicated risk-matched catalog/study evidence. Content-only authored
+architecture/reuse summary, an exact synthetic-merge-first-parent-to-candidate
+cyclomatic-complexity result plus agent hotspot judgment, foreground reply-path
+impact, complete initial provider-input impact, and categorized added/deleted
+LOC. Automated PR-body owners provide the same fields; Frog reconciliation uses
+the concrete metadata-only disposition from its existing footer. User-facing
+hosted Web UI changes additionally carry mechanically validated design-proof
+fields and dedicated risk-matched catalog/study evidence. Content-only authored
 changelog entries plus optional edition metadata use the narrow changelog-owned
 no-preview proof route; renderer, component, style, visual, or interaction
 changes keep the normal current-branch proof rule.
@@ -558,6 +562,13 @@ diagnostics are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Linq group-avatar ingestion accepts only the extension-bearing private-media
+capability on the configured Worker origin. Its URL validation, encrypted R2
+staging, one-day lifetime, and GET/HEAD trust boundary are jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `apps/cloudflare/DEPLOY.md`.
+The private deploy workflow's existing Images-named GitHub Environment secret
+maps only to the current Worker capability key and grants no Images URL access.
+
 Ready hosted generated-image completions enter the next Codex admission by
 exact trusted input id. If newer conversation input is already waiting, the
 completion precedes it in the same frozen batch while the ordinary pending
@@ -787,7 +798,7 @@ payloads reuse the set-based root unwrap path. This contract is specified by
 | `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, including focused local proof, immutable exact-base/exact-synthetic-merge docs-drift CI comparisons, deliberate near-merge Ready admission, broad exact-head PR CI, protected-main live Junction proof, fail-closed tag-release matrices, staggered six-hour native iOS and Android production canaries with latest-completed-outcome checkpoint admission, exact-current-main manual recovery, committed source identity, release-note-only production-alias lag, scoped iOS credential projection from the existing protected environment, explicit-rerun recovery, private complete-argv and last-failure Testbox transcript retention, parent-owned claim-based rendered evidence, canonical command and executor semantics, patched-Incur generation idempotence and exact runner patch staging, runtime proof boundaries, and package/app testing surfaces. | Verification policy | High | 2026-08-31 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Point-in-time production catalog at its exact audited base covering interactive transactions and explicit locks, starvation classifications, retained-lock evidence policy, replacement patterns, PR ordering, and privacy-safe observability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | TypeScript 7 worker budgets, optional local canonical verification with explicit Crabbox-on-Blacksmith escalation and an exclusive heavyweight lane, focused PR proof, direct-default acceptance, scoped diff and repo-tools caps, incremental CI state, editor/watch guidance, and benchmark method. | Verification performance policy | Medium | 2026-07-29 |
-| `agent-docs/operations/completion-workflow.md` | Outcome-based completion with proportional Product UX plans and walkthroughs, parent-owned prompt/frontend/coverage evidence, a concise PR contract, one proportional exact-head ReviewGPT gate, cross-owner composition mapping with stable composed/E2E proof, parent-owned accept/reject dispositions with a final-finding pause, focused local proof, broad PR CI, scoped commit and plan closure, and merge-readiness handoff. | Completion workflow | High | 2026-08-31 |
+| `agent-docs/operations/completion-workflow.md` | Outcome-based completion with proportional Product UX plans and walkthroughs, parent-owned prompt/frontend/coverage evidence, a concise PR contract including exact synthetic-merge-first-parent cyclomatic-complexity review and automated-producer evidence, one proportional exact-head ReviewGPT gate, cross-owner composition mapping with stable composed/E2E proof, parent-owned accept/reject dispositions with a final-finding pause, focused local proof, broad PR CI, scoped commit and plan closure, and merge-readiness handoff. | Completion workflow | High | 2026-08-31 |
 | `agent-docs/operations/imessage-deliverability.md` | iMessage/SMS deliverability guidance for assistant prompts, outbound copy, exact-message targeting, inbound-triggered daily home-line redirects with a one-hundred-message explicit-resend bank, reminders, member-owned current-home routing, daily line limits, notifications, line health, pacing, links, cold-contact behavior, outbox-owned interactive response cards with provider-owned outer chrome, a provider-static raster carrying the canonical Murph badge and native-visible hierarchy, neutral incomplete nutrition progress, and a physical-device visibility gate, first-rate-limit and complete-response 2.5-second capability-deadline fallback, durable failure-only fallback log entries, classified stale-app-card recovery under the promoted identity, one trusted provider reply-thread binding, invocation-local late-input delivery context without durable recipient exposure, bounded offline V1-V5 fragments, offline native decoding, one effective text-fallback identity across provider entry, authorized stale-thread recovery, replay, and ambiguous-delivery suppression, the one-hundred-message group outreach bank, provider-native authoritative group-signup reply identity and accepted-day suppression, conversation-first instant-start activation signaling with request-local failure handling and provider-dependent crash recovery, member-wide accepted meal-capture engagement, and blocked-model system-import admission. | Phone-number messaging policy | High | 2026-08-11 |
 | `agent-docs/operations/local-storage-lifecycle.md` | Local Vitest temp-root ownership, abrupt-run stale cleanup, unmanaged temporary checkout ratcheting, automatic Spotlight exclusion for registered worktrees, and exact build-output cleanup rules. | Local rebuildable-storage lifecycle | High | 2026-08-10 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Hosted-local worktree dev workflow and helper spec for isolated ports, database, local hosted crypto state, Wrangler state, Next dist dir, optional MinIO data, fail-closed Temporal disable overrides across child env sources, frontend-only Vercel-link setup with local hosted URL overrides, and webhook tunnels. | Local hosted runtime workflow | Medium | 2026-08-20 |

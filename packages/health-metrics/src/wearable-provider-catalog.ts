@@ -317,6 +317,14 @@ function buildProviderLookup(
 
 const defaultProviderLookup = buildProviderLookup(defaultWearableProviderDescriptors);
 
+export const WEARABLE_QUERY_PROVIDER_SLUG_MAX_LENGTH = 80;
+
+const WEARABLE_QUERY_PROVIDER_SLUG_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/u;
+const WEARABLE_QUERY_PROVIDER_ALIASES = new Map<string, string>([
+  ["apple-healthkit", "apple-health-kit"],
+]);
+const INTERNAL_WEARABLE_QUERY_PROVIDERS = new Set(["junction"]);
+
 export function resolveWearableProviderDescriptor(
   provider: string,
   descriptors: readonly WearableProviderDescriptor[] = defaultWearableProviderDescriptors,
@@ -336,6 +344,28 @@ export function canonicalizeWearableProviderSlug(
 ): string {
   const key = normalizeWearableProviderKey(provider);
   return key ? resolveWearableProviderDescriptor(key, descriptors)?.provider ?? key : "";
+}
+
+/**
+ * Normalizes a public provider filter without coupling queries to the finite
+ * set of onboarding preference choices or currently installed connectors.
+ * Valid source slugs may legitimately have no matching evidence in a vault.
+ */
+export function normalizeWearableQueryProviderSlug(provider: string): string | null {
+  const key = normalizeWearableProviderKey(provider);
+  if (
+    !key
+    || key.length > WEARABLE_QUERY_PROVIDER_SLUG_MAX_LENGTH
+    || !WEARABLE_QUERY_PROVIDER_SLUG_PATTERN.test(key)
+  ) {
+    return null;
+  }
+
+  const canonical = canonicalizeWearableProviderSlug(key).replace(/_/gu, "-");
+  const publicProvider = WEARABLE_QUERY_PROVIDER_ALIASES.get(canonical) ?? canonical;
+  return INTERNAL_WEARABLE_QUERY_PROVIDERS.has(publicProvider)
+    ? null
+    : publicProvider;
 }
 
 export function resolveWearableProviderSourcePriority(

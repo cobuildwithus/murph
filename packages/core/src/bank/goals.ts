@@ -412,6 +412,12 @@ async function upsertGoalWithLatestRecord(input: UpsertGoalInput): Promise<Upser
     recordId: normalizedGoalId,
     slug: requestedSlug,
   });
+  if (
+    input.requireExistingGoalId &&
+    existingRecord?.entity.goalId !== normalizedGoalId
+  ) {
+    throw new VaultError("VAULT_GOAL_MISSING", "Goal was not found.");
+  }
   const existingEntity = existingRecord?.entity;
   const title = requireString(input.title ?? existingEntity?.title, "title", 160);
   const existingWindow = existingEntity?.window;

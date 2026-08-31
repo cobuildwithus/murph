@@ -19,6 +19,8 @@ import {
 import {
   addMeal,
   initializeVault,
+  listGoals,
+  listWriteOperationMetadataPaths,
   readHabitatAspect,
   readMemoryDocument,
   readPreferencesDocument,
@@ -209,6 +211,12 @@ import {
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptLayers,
 } from '../src/assistant/system-prompt.ts'
+import {
+  buildAssistantCliSurfaceContract,
+} from '../src/assistant/cli-surface-bootstrap.ts'
+import {
+  readAssistantCliLlmsFullManifest,
+} from '../src/assistant/cli-surface-manifest.ts'
 import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
 } from '../src/assistant/first-contact-welcome.ts'
@@ -19281,6 +19289,443 @@ async function materializeStrictMealImportVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+describeRealCodex('real Codex food label query recovery e2e', () => {
+  it('repairs one overlong food-label query before completing the lookup', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-food-label-query-recovery-e2e-'),
+    )
+    const syntheticPackageDescription = [
+      'Northstar Foods Hearth-Roasted Chickpea Bowl',
+      'family-size limited seasonal pantry edition with lemon tahini',
+      'toasted sesame herb garnish fire-roasted peppers and brown rice',
+      'refrigerated prepared meal with recyclable sleeve',
+      'chef-inspired weeknight collection batch seven',
+      'serving suggestion with fresh parsley and a squeeze of lemon',
+    ].join(' ')
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'food-commands.log')
+      const queryLogPath = path.join(workingDirectory, 'food-queries.log')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const statePath = path.join(workingDirectory, 'food-search-state.txt')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeFoodLabelQueryRecoveryVaultCli({
+          binDirectory,
+          commandLogPath,
+          queryLogPath,
+          statePath,
+        }),
+        writeFile(commandLogPath, '', 'utf8'),
+        writeFile(queryLogPath, '', 'utf8'),
+        writeFile(statePath, '', 'utf8'),
+      ])
+
+      expect(syntheticPackageDescription.length).toBeGreaterThan(256)
+      const inheritedPath = normalizeEnvString(config.env.PATH)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-30',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: inheritedPath
+            ? `${binDirectory}${path.delimiter}${inheritedPath}`
+            : binDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Look up this food label and tell me the calories and protein per labeled serving.',
+          `Use this exact package description for the lookup: ${syntheticPackageDescription}`,
+          'Do not log a meal or save anything.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      const queries = (await readFile(queryLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const commandText = actions
+        .filter((action) => action.kind === 'command')
+        .map((action) => action.command)
+        .join('\n')
+      const forbiddenVaultCommands = commands.filter((command) =>
+        !command.startsWith('food search-labels ')
+      )
+      const reply = result.finalMessage.trim()
+
+      process.stdout.write(
+        `[food-label-query-recovery-e2e] ${JSON.stringify({
+          lookupAttempts: queries.length,
+          queryLengths: queries.map((query) => query.length),
+          reply,
+        })}\n`,
+      )
+      expect(queries).toHaveLength(2)
+      expect(queries[0]?.length).toBeGreaterThan(256)
+      expect(queries[1]?.length).toBeGreaterThan(0)
+      expect(queries[1]?.length).toBeLessThanOrEqual(256)
+      expect(queries[1]).not.toBe(queries[0])
+      expect(queries[1]).toMatch(/Northstar|chickpea/iu)
+      expect(forbiddenVaultCommands).toEqual([])
+      expect(commandText).toContain('food-journal')
+      expect(commandText).not.toContain('commons knowledge search')
+      expect(commandText).not.toMatch(
+        /\bvault-cli\s+(?:meal\s+(?:add|edit|import-json)|food\s+(?:save|edit|import-json))\b/iu,
+      )
+      expect(commandText).not.toMatch(/\b(?:curl|wget)\b/iu)
+      expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+      expect(reply).toMatch(/420.*calor|calor.*420/iu)
+      expect(reply).toMatch(/18\s*(?:g|grams?).*protein|protein.*18\s*(?:g|grams?)/iu)
+      expect(reply).toMatch(/(?:1|one)\s+bowl/iu)
+      expect(reply).not.toContain(syntheticPackageDescription)
+      expect(reply).not.toMatch(
+        /VALIDATION_ERROR|too_big|expected string|submitted query|query limit|internal error|characters? long/iu,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
+async function materializeFoodLabelQueryRecoveryVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+  queryLogPath: string
+  statePath: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const validationError = {
+    code: 'VALIDATION_ERROR',
+    message: 'Too big: expected string to have <=256 characters',
+    fieldErrors: [{
+      code: 'too_big',
+      expected: '',
+      message: 'Too big: expected string to have <=256 characters',
+      missing: false,
+      path: 'query',
+      received: '',
+    }],
+  }
+  const lookupResult = {
+    genericOnly: false,
+    includeOffMarket: false,
+    items: [{
+      brand: 'Northstar Foods',
+      contaminantSummary: {
+        alertCount: 0,
+        alerts: [],
+        alertsTruncated: false,
+        murphConcernLevel: 'unknown',
+        observationCount: 0,
+        observations: [],
+        observationsTruncated: false,
+        status: 'no_known_product_tests',
+      },
+      dataOrigin: 'synthetic_branded_label',
+      dataOriginId: 'northstar-chickpea-bowl',
+      id: 'label:northstar-chickpea-bowl',
+      label: {
+        calories: 420,
+        carbohydrateGrams: 58,
+        fatGrams: 14,
+        fiberGrams: 12,
+        proteinGrams: 18,
+        servingSize: 1,
+        servingSizeUnit: 'bowl',
+      },
+      name: 'Northstar Foods Hearth-Roasted Chickpea Bowl',
+      offMarket: false,
+      upc: null,
+    }],
+    limit: 1,
+    query: 'Northstar Foods Hearth-Roasted Chickpea Bowl',
+    source: 'murph-data-api',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+  const helpText = [
+    'vault-cli food search-labels — Search the hosted food label database from hosted assistant runtime without writing records.',
+    '',
+    'Usage: vault-cli food search-labels <query> [options]',
+    '',
+    'Arguments:',
+    '  query  Food product, brand, USDA FDC id, UPC, or generic ingredient search text.',
+    '',
+    'Options:',
+    '  --limit <number>      Maximum label matches to return. Defaults to 1.',
+    '  --full-label          Return the complete source label.',
+    '  --generic             Search only USDA generic food rows.',
+    '  --include-off-market  Include labels marked off-market.',
+    '  --format <toon|json|yaml|md|jsonl>  Output format',
+    '  --schema              Show JSON Schema for command',
+  ].join('\n')
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      `  food\\ search-labels\\ --help*) printf '%s\\n' ${quoteNutritionShellLiteral(helpText)} ;;`,
+      '  food\\ search-labels\\ *)',
+      '    query="$3"',
+      `    printf '%s\\n' "$query" >> ${quoteNutritionShellLiteral(input.queryLogPath)}`,
+      `    if grep -q '^completed$' ${quoteNutritionShellLiteral(input.statePath)}; then`,
+      '      printf \'duplicate food label lookup\\n\' >&2',
+      '      exit 65',
+      '    fi',
+      `    if [ ! -s ${quoteNutritionShellLiteral(input.statePath)} ]; then`,
+      '      if [ "${#query}" -le 256 ]; then',
+      '        printf \'first food label query must exceed 256 characters\\n\' >&2',
+      '        exit 66',
+      '      fi',
+      `      printf '%s\\n' rejected > ${quoteNutritionShellLiteral(input.statePath)}`,
+      `      ${emit(validationError)}`,
+      '      exit 1',
+      '    fi',
+      '    if [ "${#query}" -gt 256 ]; then',
+      '      printf \'corrected food label query still exceeds 256 characters\\n\' >&2',
+      '      exit 67',
+      '    fi',
+      '    case "$query" in',
+      '      *Northstar*|*northstar*|*Chickpea*|*chickpea*) ;;',
+      '      *) printf \'corrected query lost the product identity\\n\' >&2; exit 68 ;;',
+      '    esac',
+      `    printf '%s\\n' completed > ${quoteNutritionShellLiteral(input.statePath)}`,
+      `    ${emit(lookupResult)}`,
+      '    ;;',
+      '  *) printf \'unsupported food label recovery fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
+  it('stale typed goal id preserves the intended target', {
+    timeout: 600_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-stale-goal-id-e2e-'),
+    )
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
+
+    try {
+      await initializeVault({
+        timezone: 'America/New_York',
+        vaultRoot,
+      })
+      const existing = await upsertGoal({
+        horizon: 'long_term',
+        priority: 1,
+        slug: 'improve-sleep-consistency',
+        status: 'active',
+        title: 'Improve sleep consistency',
+        vaultRoot,
+      })
+      const existingGoalId = String(existing.record.entity.goalId)
+      const replacementSuffix = existingGoalId.endsWith('A') ? 'B' : 'A'
+      const staleGoalId =
+        `${existingGoalId.slice(0, -1)}${replacementSuffix}`
+      const goalsBefore = await listGoals(vaultRoot)
+      const operationsBefore =
+        await listWriteOperationMetadataPaths(vaultRoot)
+      const [manifest] = await Promise.all([
+        readAssistantCliLlmsFullManifest({
+          timeoutMs: 5 * 60_000,
+          workingDirectory: fileURLToPath(
+            new URL('../../../', import.meta.url),
+          ),
+        }),
+        materializeStaleGoalRecoveryVaultCli({
+          binDirectory,
+          commandLogPath,
+          vaultRoot,
+        }),
+      ])
+      const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+      expect(assistantCliContract).not.toBeNull()
+      expect(assistantCliContract).toContain('`goal save`')
+      expect(assistantCliContract).toContain(
+        '- `goal`: `import-json`, `list`, `save`, `scaffold`, `show`.',
+      )
+      const inheritedPath = normalizeEnvString(config.env.PATH)
+
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract,
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-30',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          PATH: inheritedPath
+            ? `${binDirectory}${path.delimiter}${inheritedPath}`
+            : binDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          `Update my saved goal with ID ${staleGoalId}.`,
+          'Its title is "Improve sleep consistency" and its slug is improve-sleep-consistency.',
+          'Set its priority to 2. That ID is the exact goal I mean; make the change now.',
+        ].join(' '),
+        reasoningEffort: 'medium',
+        sandbox: 'workspace-write',
+        workingDirectory: vaultRoot,
+      })
+      const rawCommandLog = (await readFile(commandLogPath, 'utf8')).trim()
+      const commands = rawCommandLog === '' ? [] : rawCommandLog.split('\n')
+      const goalSaveCommands = commands.filter((command) =>
+        /^goal save\b/u.test(command)
+      )
+      const goalListCommands = commands.filter((command) =>
+        /^goal list\b/u.test(command)
+      )
+      const reply = result.finalMessage.trim()
+
+      process.stdout.write(
+        `[stale-typed-goal-id-recovery-e2e] ${JSON.stringify({
+          commands,
+          reply,
+        })}\n`,
+      )
+      expect(commands).toHaveLength(2)
+      expect(goalSaveCommands).toHaveLength(1)
+      expect(goalSaveCommands[0]).toContain(staleGoalId)
+      expect(goalSaveCommands[0]).not.toContain(existingGoalId)
+      expect(goalListCommands).toHaveLength(1)
+      expect(commands.some((command) =>
+        /^goal import-json\b/u.test(command)
+      )).toBe(false)
+      expect(commands.some((command) =>
+        /^goal save\b/u.test(command) && command.includes(existingGoalId)
+      )).toBe(false)
+      expect(await listGoals(vaultRoot)).toEqual(goalsBefore)
+      expect(
+        await listWriteOperationMetadataPaths(vaultRoot),
+      ).toEqual(operationsBefore)
+      expect(
+        readCapabilityRoutingActions(result.jsonEvents).filter(
+          (action) => action.kind === 'dynamic',
+        ),
+      ).toHaveLength(0)
+      expect(reply).toMatch(
+        /could not find|does not exist|not found|no longer exists|missing|stale/iu,
+      )
+      expect(reply).toContain(existingGoalId)
+      expect(reply).toMatch(/priority (?:to )?2/iu)
+      expect(reply).not.toMatch(/\bcreat(?:e|ed|ing)\b/iu)
+      expect(reply).toMatch(/\?/u)
+      expect(reply).not.toMatch(
+        /\b(?:I|I've|it has|it's|the goal is) (?:updated|saved|changed|created)\b/iu,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
+async function materializeStaleGoalRecoveryVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+  vaultRoot: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  await writeFile(input.commandLogPath, '', 'utf8')
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
+      '',
+    ].join('\n'),
+    {
+      encoding: 'utf8',
+      mode: 0o700,
+    },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
   it('resolves an exact menu label before saving a restaurant meal', {
     timeout: 900_000,
@@ -20722,6 +21167,57 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
   )
 })
 
+describeRealCodex('real Codex degraded Knowledge read e2e', () => {
+  it(
+    'uses valid saved knowledge without claiming a degraded read is complete',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealDegradedKnowledgeReadJourney({ config })
+        const commands = expandRecordedVaultCommands(result.commands)
+        const knowledgeReads = commands.filter((command) =>
+          /^knowledge (?:list|search|show)\b/u.test(command)
+        )
+        process.stdout.write(
+          `[degraded-knowledge-read-e2e] ${JSON.stringify({
+            commands: knowledgeReads,
+            providerActionCount: result.providerActionCount,
+            reply: result.message,
+            scenario: 'synthetic completeness-sensitive saved Knowledge read',
+          })}\n`,
+        )
+
+        expect(knowledgeReads.length).toBeGreaterThanOrEqual(1)
+        expect(commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(
+            /^knowledge (?:append-section|rebuild|upsert)\b/u,
+          ),
+        ]))
+        expect(result.providerActionCount).toBeGreaterThanOrEqual(1)
+        expect(result.message).toMatch(/staging approval/iu)
+        expect(result.message).toMatch(/pending|awaiting|blocker/iu)
+        expect(result.message).toMatch(
+          /incomplete|not (?:a )?complete|may be missing|might be missing|could not read|couldn't read|cannot be read|unreadable|not exhaustive/iu,
+        )
+        expect(result.message).not.toMatch(
+          /complete saved (?:picture|record)|nothing else (?:is )?saved|no other saved/iu,
+        )
+        expect(result.message).not.toMatch(
+          /never saved|was not saved|wasn't saved|does not exist|doesn't exist/iu,
+        )
+        expect(result.message).not.toMatch(
+          /private malformed sentinel|synthetic-atlas-risk-notes|derived[\\/]knowledge|parse_frontmatter|parse_json|frontmatter|\.md\b/iu,
+        )
+        expect(result.message.length).toBeLessThanOrEqual(600)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+})
+
 describeRealCodex('real Codex automatic meal clarification e2e', () => {
   it(
     'keeps an unrelated incomplete meal out of scheduled capture recovery',
@@ -21109,6 +21605,105 @@ async function runRealCompactMemoryReadJourney(input: {
     return {
       commands: commandText === '' ? [] : commandText.split('\n'),
       message: result.finalMessage,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+async function runRealDegradedKnowledgeReadJourney(input: {
+  config: RealCodexE2eConfig
+}): Promise<{
+  commands: string[]
+  message: string
+  providerActionCount: number
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-degraded-knowledge-read-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    const pagesRoot = path.join(vaultRoot, 'derived', 'knowledge', 'pages')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+    await mkdir(pagesRoot, { recursive: true })
+    await Promise.all([
+      writeFile(commandLog, '', 'utf8'),
+      writeFile(
+        path.join(pagesRoot, 'synthetic-atlas-launch.md'),
+        [
+          '---',
+          'title: Synthetic Atlas launch',
+          'slug: synthetic-atlas-launch',
+          'pageType: concept',
+          'status: active',
+          '---',
+          '',
+          '# Synthetic Atlas launch',
+          '',
+          'The staging approval is still pending and blocks the launch.',
+          '',
+        ].join('\n'),
+        'utf8',
+      ),
+      writeFile(
+        path.join(pagesRoot, 'synthetic-atlas-risk-notes.md'),
+        [
+          '---',
+          'title: Private malformed sentinel',
+          'slug: Invalid private malformed sentinel',
+          'pageType: concept',
+          'status: active',
+          '---',
+          '',
+          '# Private malformed sentinel',
+          '',
+          'This malformed fixture content must never reach the reply.',
+          '',
+        ].join('\n'),
+        'utf8',
+      ),
+    ])
+    await materializeRealWorkoutVaultCli({
+      binDirectory,
+      commandLogPath: commandLog,
+      vaultRoot,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions: buildDirectConversationDeveloperInstructions(),
+      env: {
+        ...input.config.env,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: [
+        'Using my saved Knowledge, including the saved Atlas launch overview and risk notes, tell me whether the Atlas launch has any blockers.',
+        'Is that the complete saved picture?',
+      ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+
+    return {
+      commands: commandText === '' ? [] : commandText.split('\n'),
+      message: result.finalMessage,
+      providerActionCount: result.providerActionCount,
     }
   } finally {
     await removeRealCodexTemporaryPath(workingRoot)

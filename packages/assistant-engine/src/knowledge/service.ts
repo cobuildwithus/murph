@@ -10,12 +10,15 @@ import { loadIntegratedRuntime } from '@murphai/vault-usecases/runtime'
 import {
   DERIVED_KNOWLEDGE_INDEX_PATH,
   DERIVED_KNOWLEDGE_LOG_PATH,
+  KNOWLEDGE_READ_RECOVERY_ACTION,
   type KnowledgeGetResult,
   type KnowledgeIndexRebuildResult,
   type KnowledgeListResult,
   type KnowledgeLogTailResult,
   type KnowledgeLintProblem,
   type KnowledgeLintResult,
+  type KnowledgeReadDegradation,
+  type KnowledgeReadIssueCode,
   type KnowledgeSearchResult,
   type KnowledgeUpsertResult,
   normalizeKnowledgeSlug,
@@ -496,9 +499,8 @@ export async function searchKnowledgePages(
   }
 
   const filters = normalizeKnowledgeFilters(input)
-  const graph = toGenericKnowledgeGraph(
-    await readDerivedKnowledgeGraph(input.vault),
-  )
+  const readResult = await readDerivedKnowledgeGraphWithIssues(input.vault)
+  const graph = toGenericKnowledgeGraph(readResult.graph)
   const result = searchDerivedKnowledgeGraph(graph, query, {
     limit: input.limit ?? undefined,
     pageType: filters.pageType,
@@ -507,8 +509,11 @@ export async function searchKnowledgePages(
 
   return {
     ...result,
+    degradation: toKnowledgeReadDegradation(readResult.issues),
     pageType: filters.pageType,
+    returnedCount: result.hits.length,
     status: filters.status,
+    truncated: result.hits.length < result.total,
     vault: input.vault,
   }
 }
@@ -516,24 +521,55 @@ export async function searchKnowledgePages(
 export async function listKnowledgePages(
   input: KnowledgeListInput,
 ): Promise<KnowledgeListResult> {
-  const graph = toGenericKnowledgeGraph(
-    await readDerivedKnowledgeGraph(input.vault),
-  )
+  const readResult = await readDerivedKnowledgeGraphWithIssues(input.vault)
+  const graph = toGenericKnowledgeGraph(readResult.graph)
   const filters = normalizeKnowledgeFilters(input)
   const limit = normalizeKnowledgeListLimit(input.limit)
-  const pages = graph.nodes
+  const filteredPages = graph.nodes
     .filter((node: DerivedKnowledgeNode) => matchesKnowledgeFilter(node.pageType, filters.pageType))
     .filter((node: DerivedKnowledgeNode) => matchesKnowledgeFilter(node.status, filters.status))
     .map(toKnowledgeMetadata)
-    .slice(0, limit)
+  const pages = filteredPages.slice(0, limit)
 
   return {
+    degradation: toKnowledgeReadDegradation(readResult.issues),
     limit,
     pageCount: pages.length,
     pageType: filters.pageType,
     pages,
+    returnedCount: pages.length,
     status: filters.status,
+    totalCount: filteredPages.length,
+    truncated: pages.length < filteredPages.length,
     vault: input.vault,
+  }
+}
+
+function toKnowledgeReadDegradation(
+  issues: readonly DerivedKnowledgeGraphIssue[],
+): KnowledgeReadDegradation | null {
+  const issueCodes = new Set<KnowledgeReadIssueCode>()
+  let issueCount = 0
+  for (const issue of issues) {
+    if (malformedKnowledgePageMatchesSlug(
+      issue,
+      GROUP_ROOM_MODEL_KNOWLEDGE_SLUG,
+    )) {
+      continue
+    }
+
+    issueCount += 1
+    issueCodes.add(issue.parser === 'json' ? 'parse_json' : 'parse_frontmatter')
+  }
+
+  if (issueCount === 0) {
+    return null
+  }
+
+  return {
+    issueCodes: [...issueCodes].sort(),
+    issueCount,
+    recoveryAction: KNOWLEDGE_READ_RECOVERY_ACTION,
   }
 }
 
@@ -583,7 +619,8 @@ export async function getKnowledgePage(
 ): Promise<KnowledgeGetResult> {
   const slug = normalizeKnowledgeSlug(input.slug)
   assertGenericKnowledgePageSlug(slug, 'show')
-  const graph = await readDerivedKnowledgeGraph(input.vault)
+  const readResult = await readDerivedKnowledgeGraphWithIssues(input.vault)
+  const graph = readResult.graph
   const page = requireUniqueKnowledgePageBySlug(
     graph,
     slug,
@@ -591,6 +628,11 @@ export async function getKnowledgePage(
   )
 
   if (!page) {
+    if (readResult.issues.some(
+      (issue) => malformedKnowledgePageMatchesSlug(issue, slug),
+    )) {
+      throw knowledgePageInvalidError(slug)
+    }
     throw new VaultCliError(
       'knowledge_page_not_found',
       `No derived knowledge page exists for slug "${input.slug}".`,
@@ -599,7 +641,12 @@ export async function getKnowledgePage(
 
   const absolutePath = await resolveAssistantVaultPath(input.vault, page.relativePath, 'file path')
   const markdown = await (dependencies.readTextFile ?? defaultReadTextFile)(absolutePath)
-  const exactPage = parseDerivedKnowledgeNodeMarkdown(page.relativePath, markdown)
+  let exactPage: DerivedKnowledgeNode
+  try {
+    exactPage = parseDerivedKnowledgeNodeMarkdown(page.relativePath, markdown)
+  } catch {
+    throw knowledgePageInvalidError(slug)
+  }
   if (exactPage.slug !== slug) {
     throw new VaultCliError(
       'knowledge_page_not_found',
@@ -608,9 +655,29 @@ export async function getKnowledgePage(
   }
 
   return {
+    degradation: toKnowledgeReadDegradation(readResult.issues),
     page: toKnowledgePage(exactPage, markdown),
     vault: input.vault,
   }
+}
+
+function malformedKnowledgePageMatchesSlug(
+  issue: DerivedKnowledgeGraphIssue,
+  slug: string,
+): boolean {
+  return path.posix.basename(issue.relativePath, '.md') === slug
+}
+
+function knowledgePageInvalidError(slug: string): VaultCliError {
+  return new VaultCliError(
+    'knowledge_page_invalid',
+    `The derived knowledge page for slug "${slug}" exists but is invalid.`,
+    {
+      hint: 'Run `knowledge lint` for bounded repair details, then retry `knowledge show`.',
+      retryable: false,
+      stage: 'integrity',
+    },
+  )
 }
 
 export async function rebuildKnowledgeIndex(

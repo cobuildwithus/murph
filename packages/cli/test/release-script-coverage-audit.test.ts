@@ -1260,9 +1260,15 @@ printf '%s\\n' "$@" > .fake-tools/committer.args
 describe('monorepo release flow coverage audit', () => {
   it('exposes root-owned release scripts', () => {
     expect(rootPackageJson.name).toBe('murph-workspace')
+    expect(rootPackageJson.scripts?.build).toContain('-- bash -c')
     expect(rootPackageJson.scripts?.build).toContain('pnpm -r --sort')
-    expect(rootPackageJson.scripts?.build).toContain('--workspace-concurrency=${MURPH_BUILD_WORKSPACE_CONCURRENCY:-4}')
-    expect(rootPackageJson.scripts?.build).toContain("--filter './packages/**' build")
+    expect(rootPackageJson.scripts?.build).toContain(
+      '--workspace-concurrency="${MURPH_BUILD_WORKSPACE_CONCURRENCY:-4}"',
+    )
+    expect(rootPackageJson.scripts?.build).toContain('--filter "./packages/**" build')
+    expect(rootPackageJson.scripts?.build).toContain(
+      'node scripts/assemble-assistant-cli-surface.mjs',
+    )
     expect(rootPackageJson.scripts?.['changelog:update']).toBe('bash scripts/update-changelog.sh')
     expect(rootPackageJson.scripts?.['release:notes']).toBe('bash scripts/generate-release-notes.sh')
     expect(rootPackageJson.scripts?.['release:check']).toBe('bash scripts/release-check.sh')
@@ -5866,13 +5872,10 @@ exit 1
     expect(packPublishables).toContain("relativePath === 'docs'")
     expect(packPublishables).toContain("relativePath.startsWith('docs/')")
     expect(packPublishables).toContain('/(?:^|\\/)[^/]+\\.test(?:-d)?\\.[cm]?[jt]sx?$/u')
-    expect(packPublishables).toContain(
-      'const assistantCliSurfacePackagingTimeoutMs = 5 * 60_000;',
-    )
-    expect(packPublishables).toContain("'--manifest-timeout-ms'")
-    expect(packPublishables).toContain(
-      'String(assistantCliSurfacePackagingTimeoutMs)',
-    )
+    expect(packPublishables).toContain('assistantCliSurfaceAssemblyPath')
+    expect(packPublishables).toContain("'assemble-assistant-cli-surface.mjs'")
+    expect(packPublishables).toContain('[assistantCliSurfaceAssemblyPath]')
+    expect(packPublishables).not.toContain("'--manifest-timeout-ms'")
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)
@@ -5913,6 +5916,12 @@ exit 1
       const generatorPath = path.join(
         assistantDistDirectory,
         'generate-cli-surface-contract.js',
+      )
+      const cliEntryPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
+      const assemblyPath = path.join(
+        repoRoot,
+        'scripts',
+        'assemble-assistant-cli-surface.mjs',
       )
 
       try {
@@ -6040,8 +6049,13 @@ exit 1
         })
         expect(reconstructedCommandNames).toContain('device account reconcile')
       } finally {
-        if (!existsSync(artifactPath) && existsSync(generatorPath)) {
-          execFileSync(process.execPath, [generatorPath], {
+        if (
+          !existsSync(artifactPath) &&
+          existsSync(cliEntryPath) &&
+          existsSync(generatorPath) &&
+          existsSync(assemblyPath)
+        ) {
+          execFileSync(process.execPath, [assemblyPath], {
             cwd: repoRoot,
             env: withoutNodeV8Coverage(),
           })

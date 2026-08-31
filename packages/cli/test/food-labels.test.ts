@@ -340,6 +340,40 @@ describe('foodLabelSearchItemSchema', () => {
 })
 
 describe('searchFoodLabels', () => {
+  it('rejects an overlong single query before the hosted request', async () => {
+    const sentinel = 'PrivateFoodClientQuerySentinel'
+    const submittedQuery = `${sentinel}${'x'.repeat(257 - sentinel.length)}`
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      throw new Error('fetch should not run for an invalid query')
+    })
+    let caught: unknown
+
+    try {
+      await searchFoodLabels(
+        { q: submittedQuery },
+        {
+          env: hostedRuntimeEnv,
+          fetchImpl: fetchMock,
+        },
+      )
+    } catch (error) {
+      caught = error
+    }
+
+    assert.equal(submittedQuery.length, 257)
+    assert.equal(caught instanceof Error, true)
+    assert.equal((caught as Error).name, 'ZodError')
+    assert.deepEqual(
+      (caught as { issues?: Array<{ code?: string; path?: PropertyKey[] }> }).issues
+        ?.map(({ code, path }) => ({ code, path })),
+      [{ code: 'too_big', path: ['q'] }],
+    )
+    assert.equal(fetchMock.mock.calls.length, 0)
+    const serialized = JSON.stringify(caught)
+    assert.equal(serialized.includes(sentinel), false)
+    assert.equal(serialized.includes(submittedQuery), false)
+  })
+
   it('calls the internal foods API with the hosted provider credential', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [

@@ -142,6 +142,14 @@ The final ReviewGPT gate never becomes a fallback product-decision owner.
    while it runs, do not restart full acceptance solely because the base moved;
    follow the one-rebase direct-push rule in `verification-and-runtime.md`.
 2. Run a scope and shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, any new persisted state is explicitly classified and versioned, and any architecture/API/trust-boundary change is documented or split into an explicit plan. This check owns simplification: delete dead code, cut speculative structure, and collapse needless indirection yourself; there is no separate simplify subagent pass.
+   Run `pnpm complexity:diff` during this check for every PR. Inspect each
+   changed-file hotspot it reports above the threshold and decide whether a
+   smaller behavior-preserving shape is justified. A passing ratchet means the
+   PR did not increase complexity debt or concentrate complexity; it does not
+   prove that an existing hotspot is already well-shaped. Simplify when the
+   current task can do so proportionally, otherwise record the concrete reason
+   in the PR's `Complexity impact` section. Do not split cohesive policy owners,
+   add generic machinery, or change behavior merely to lower the metric.
    During this check, invoke `$write-changelog` and classify the change. Add a
    same-PR changelog item for every member-visible outcome, or record the
    concrete internal-only reason that makes the changelog not applicable. Keep
@@ -232,9 +240,9 @@ The final ReviewGPT gate never becomes a fallback product-decision owner.
    an intermediate scoped commit, not the final task commit;
    `scripts/finish-task` still owns plan closure later. Ensure the PR body
    contains the outcome, Product UX result, direct evidence, non-obvious
-   surfaces, architecture and reuse, hot reply path impact, provider-input
-   impact, deployment and changelog decisions, the change-shape breakdown, and
-   applicable design proof required below.
+   surfaces, architecture and reuse, complexity impact, hot reply path impact,
+   provider-input impact, deployment and changelog decisions, the change-shape
+   breakdown, and applicable design proof required below.
 8. When the final ReviewGPT gate is selected, establish its immutable round-one
    baseline on the exact pushed candidate head. The candidate must already have
    focused local proof and a parent candidate review. Run final ReviewGPT
@@ -310,6 +318,20 @@ Every PR includes:
   explain which existing contract is sufficient instead of using a bare
   placeholder. The pull-request evidence guard validates this section on every
   PR.
+- **Complexity impact.** Run `pnpm complexity:diff` against the PR base and
+  complete three concrete bullets labeled `Guard`, `Hotspots`, and `Agent
+  judgment`. `Guard` records the passing command, or a concrete not-applicable
+  reason only when no authored JavaScript or TypeScript changed. `Hotspots`
+  names changed-file functions above 20 and their disposition, or explains that
+  none remain. `Agent judgment` states whether further behavior-preserving
+  simplification is justified. The guard ratchets per-file debt above 20 and
+  per-function maximum complexity; unchanged legacy debt does not fail an
+  unrelated PR. Required CI compares GitHub's exact synthetic merge candidate
+  with that merge commit's first parent, so an event-payload base race cannot
+  widen or invalidate the comparison. The pull-request evidence guard validates
+  this section. Automated PR-body owners must supply the same fields; a
+  metadata-only producer such as the Frog reconciliation footer uses concrete
+  not-applicable values instead of bypassing the universal evidence check.
 - **Hot reply path impact.** State whether the PR changes the `Foreground Reply
   Critical Path` defined in `docs/contracts/00-invariants.md`: durable
   acceptance of a current conversation message through provider start and

@@ -18,7 +18,6 @@ type PaymentEmailSend = NonNullable<
 describe("hosted Stripe payment notification email", () => {
   it.each([
     ["subscription_create", "subscription_create"],
-    ["subscription_cycle", "subscription_cycle"],
     ["subscription_threshold", "subscription_threshold"],
     ["subscription_update", "subscription_update"],
     [null, "invoice"],
@@ -39,6 +38,13 @@ describe("hosted Stripe payment notification email", () => {
       });
     },
   );
+
+  it("ignores a paid subscription renewal", () => {
+    expect(resolveHostedStripePaymentNotificationCandidate({
+      event: makeInvoicePaidEvent({ billingReason: "subscription_cycle" }),
+      usageCreditEventHandled: false,
+    })).toBeNull();
+  });
 
   it.each([0, -1, null])(
     "ignores a non-positive invoice amount %s",
@@ -142,7 +148,7 @@ describe("hosted Stripe payment notification email", () => {
       subject: "Murph payment received — USD 8.00",
       to: ["operator@example.com"],
     });
-    expect(first?.text).toContain("category: recurring subscription");
+    expect(first?.text).toContain("category: new subscription");
     expect(first?.text).toContain("Stripe event id: evt_invoice_paid_123");
     expect(first?.text).toContain("mode: live");
     expect(first?.text).not.toContain("cus_private_customer");
@@ -177,7 +183,7 @@ function makeInvoicePaidEvent(overrides?: {
   return makeStripeEvent({
     amount_paid: overrides?.amountPaid === undefined ? 800 : overrides.amountPaid,
     billing_reason: overrides?.billingReason === undefined
-      ? "subscription_cycle"
+      ? "subscription_create"
       : overrides.billingReason,
     currency: "usd",
     customer: overrides?.customer ?? "cus_123",

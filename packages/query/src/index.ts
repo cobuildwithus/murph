@@ -430,6 +430,7 @@ export {
   summarizeKnowledgeBody,
 } from "./knowledge-model.ts";
 export {
+  KNOWLEDGE_READ_RECOVERY_ACTION,
   knowledgeGetResultSchema,
   knowledgeGraphSearchHitSchema,
   knowledgeGraphSearchResultSchema,
@@ -442,6 +443,8 @@ export {
   knowledgePageMetadataSchema,
   knowledgePageReferenceSchema,
   knowledgePageSchema,
+  knowledgeReadDegradationSchema,
+  knowledgeReadIssueCodeSchema,
   knowledgeSearchHitSchema,
   knowledgeSearchResultSchema,
   knowledgeUpsertResultSchema,
@@ -459,6 +462,8 @@ export type {
   KnowledgePage,
   KnowledgePageMetadata,
   KnowledgePageReference,
+  KnowledgeReadDegradation,
+  KnowledgeReadIssueCode,
   KnowledgeSearchHit,
   KnowledgeSearchResult,
   KnowledgeUpsertResult,
