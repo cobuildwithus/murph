@@ -142,7 +142,6 @@ type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
   newlyActivatedMemberIds: string[];
-  positivePaymentTransitionOccurred?: true;
   runtimeRecheckMemberIds?: string[];
   welcomeEmailMemberId: string | null;
 };
@@ -1466,9 +1465,6 @@ export async function applyStripeInvoicePaid(
   if (!updatedMember) {
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
-      ...buildHostedStripePositivePaymentTransitionOutcome(
-        runtimeRecheckMemberId,
-      ),
       runtimeRecheckMemberIds: runtimeRecheckMemberId
         ? [runtimeRecheckMemberId]
         : [],
@@ -1498,10 +1494,6 @@ export async function applyStripeInvoicePaid(
         accessRestorationHandoff?.hostedExecutionEventId ?? null,
       hostedExecutionMailboxItemId:
         accessRestorationHandoff?.hostedExecutionMailboxItemId ?? null,
-      ...buildHostedStripePositivePaymentTransitionOutcome(
-        restoredDirectAccess,
-        runtimeRecheckMemberId,
-      ),
       runtimeRecheckMemberIds: runtimeRecheckMemberId
         && !accessRestorationHandoff
         ? [runtimeRecheckMemberId]
@@ -1541,10 +1533,6 @@ export async function applyStripeInvoicePaid(
       ?? accessRestorationHandoff?.hostedExecutionMailboxItemId
       ?? null,
     newlyActivatedMemberIds: activation.activated ? [updatedMember.core.id] : [],
-    ...buildHostedStripePositivePaymentTransitionOutcome(
-      restoredDirectAccess,
-      runtimeRecheckMemberId,
-    ),
     runtimeRecheckMemberIds: runtimeRecheckMemberId
       && !accessRestorationHandoff
       ? [runtimeRecheckMemberId]
@@ -1650,10 +1638,6 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
     newlyActivatedMemberIds: familySubscription.activations
       .filter((activation) => activation.activated)
       .map((activation) => activation.memberId),
-    ...(familySubscription.accessRestoredMemberIds?.length
-      || familySubscription.billingModeChangedMemberIds?.length
-      ? { positivePaymentTransitionOccurred: true as const }
-      : {}),
     runtimeRecheckMemberIds: familySubscription.runtimeRecheckMemberIds ?? [],
     welcomeEmailMemberId: null,
   };
@@ -1691,14 +1675,6 @@ function buildEmptyHostedStripeActivationOutcome(): HostedStripeActivationOutcom
     runtimeRecheckMemberIds: [],
     welcomeEmailMemberId: null,
   };
-}
-
-function buildHostedStripePositivePaymentTransitionOutcome(
-  ...transitionFacts: readonly unknown[]
-): Pick<HostedStripeActivationOutcome, "positivePaymentTransitionOccurred"> {
-  return transitionFacts.some(Boolean)
-    ? { positivePaymentTransitionOccurred: true }
-    : {};
 }
 
 async function reconcileHostedMemberUsagePlanTransitionTx(input: {
