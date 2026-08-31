@@ -66,6 +66,7 @@ export interface HostedLocalDevHarness {
     cleared: boolean;
     ok: true;
   }>;
+  cloudflareStdoutTail(maxChars?: number): string;
   armForegroundPriorityOrderingObservationForTest(
     userId: string,
     barrierTarget:
@@ -365,6 +366,8 @@ export async function startHostedLocalDevHarness(input: {
       workerRuntimeEnv: stack.workerRuntimeEnv,
       stop,
       testControls,
+      cloudflareStdoutTail: (maxChars = 2_000_000): string =>
+        stack?.processes.cloudflare?.stdoutTail(maxChars) ?? "",
       stdoutTail: (maxChars?: number): string => stack?.stdoutTail(maxChars) ?? "",
       stderrTail: (maxChars?: number): string => stack?.stderrTail(maxChars) ?? "",
       waitForHostedCompletion: async (

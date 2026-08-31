@@ -1415,8 +1415,8 @@ function createWhoopProvider(input: {
     provider: WHOOP_DEVICE_PROVIDER_DESCRIPTOR.provider,
     descriptor: {
       ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-      oauth: {
-        ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth,
+      connection: {
+        ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR.connection,
         defaultScopes: ["offline"],
       },
     },

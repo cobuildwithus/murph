@@ -102,6 +102,7 @@ test("Venice egress restores Codex Responses Lite tools to the standard top-leve
       body: encodeJson({
         input: [
           {
+            id: "at_current_tools",
             role: "developer",
             tools: MURPH_NAMESPACE_TOOLS,
             type: "additional_tools",
@@ -301,7 +302,12 @@ test("Venice egress fails closed for malformed or conflicting Responses Lite too
     },
     {
       input: [{ ...additionalTools, id: "item_123" }],
-      label: "identified additional_tools item",
+      label: "unsupported additional_tools id",
+      tools: null,
+    },
+    {
+      input: [{ ...additionalTools, id: "at_" }],
+      label: "empty additional_tools id suffix",
       tools: null,
     },
     {
