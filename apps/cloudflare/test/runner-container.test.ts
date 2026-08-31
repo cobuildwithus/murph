@@ -33,6 +33,7 @@ import {
   RunnerContainer,
   type RunnerContainerStartupFailureStage,
 } from "../src/runner-container.ts";
+import { StandbyRunnerContainer } from "../src/standby-runner-container.ts";
 import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "../src/runner-egress-intercept.ts";
@@ -139,6 +140,8 @@ describe("RunnerContainer", () => {
     expect(RunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
     expect(DeploySmokeRunnerContainer.outbound).toBeUndefined();
     expect(DeploySmokeRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
+    expect(StandbyRunnerContainer.outbound).toBeUndefined();
+    expect(StandbyRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
   });
 
   it("keeps deploy-smoke live-model egress grants off the production runner container", () => {

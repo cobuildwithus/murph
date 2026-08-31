@@ -1,4 +1,5 @@
 import {
+  registerHostedRunnerContainerOutboundInterception,
   RunnerContainer,
   type HostedExecutionContainerInvokeRequest,
   type RunnerContainerBeginShellPrewarmInput,
@@ -287,6 +288,8 @@ export class StandbyRunnerContainer extends RunnerContainer {
     }
   }
 }
+
+registerHostedRunnerContainerOutboundInterception(StandbyRunnerContainer);
 
 class StandbyRunnerSlotStore {
   constructor(private readonly sql: DurableObjectSqlStorageLike) {

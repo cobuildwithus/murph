@@ -3817,7 +3817,7 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
 registerHostedRunnerContainerOutboundInterception(RunnerContainer);
 registerHostedRunnerContainerOutboundInterception(DeploySmokeRunnerContainer);
 
-function registerHostedRunnerContainerOutboundInterception(
+export function registerHostedRunnerContainerOutboundInterception(
   containerClass: typeof RunnerContainer,
 ): void {
   const outboundByHostSetter = Object.getOwnPropertyDescriptor(Container, "outboundByHost")?.set;
