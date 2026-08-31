@@ -927,6 +927,69 @@ describe('knowledge service helpers', () => {
     })
   })
 
+  it('keeps malformed reserved room state outside generic read degradation', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-reserved-degradation-')
+    await writeKnowledgePage(
+      vaultRoot,
+      'readable-page',
+      [
+        '---',
+        'title: Readable page',
+        'slug: readable-page',
+        'pageType: concept',
+        'status: active',
+        '---',
+        '',
+        '# Readable page',
+        '',
+        'Generic knowledge remains complete.',
+        '',
+      ].join('\n'),
+    )
+    await writeKnowledgePage(
+      vaultRoot,
+      'group-room-model',
+      [
+        '---',
+        'title: Private reserved sentinel',
+        'slug: Invalid private reserved sentinel',
+        '---',
+        '',
+        '# Unusable reserved page',
+        '',
+      ].join('\n'),
+    )
+
+    const listed = await listKnowledgePages({ vault: vaultRoot })
+    expect(listed).toMatchObject({
+      degradation: null,
+      pageCount: 1,
+      returnedCount: 1,
+      totalCount: 1,
+      truncated: false,
+    })
+
+    const searched = await searchKnowledgePages({
+      query: 'generic knowledge',
+      vault: vaultRoot,
+    })
+    expect(searched).toMatchObject({
+      degradation: null,
+      returnedCount: 1,
+      total: 1,
+      truncated: false,
+    })
+
+    const shown = await getKnowledgePage({
+      slug: 'readable-page',
+      vault: vaultRoot,
+    })
+    expect(shown.degradation).toBeNull()
+    expect(JSON.stringify({ listed, searched, shown })).not.toContain(
+      'Private reserved sentinel',
+    )
+  })
+
   it('reports lint problems for invalid source paths, missing files, and missing related pages', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-lint-')
     await writeKnowledgePage(

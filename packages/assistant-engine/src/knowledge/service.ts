@@ -548,18 +548,27 @@ export async function listKnowledgePages(
 function toKnowledgeReadDegradation(
   issues: readonly DerivedKnowledgeGraphIssue[],
 ): KnowledgeReadDegradation | null {
-  if (issues.length === 0) {
-    return null
+  const issueCodes = new Set<KnowledgeReadIssueCode>()
+  let issueCount = 0
+  for (const issue of issues) {
+    if (malformedKnowledgePageMatchesSlug(
+      issue,
+      GROUP_ROOM_MODEL_KNOWLEDGE_SLUG,
+    )) {
+      continue
+    }
+
+    issueCount += 1
+    issueCodes.add(issue.parser === 'json' ? 'parse_json' : 'parse_frontmatter')
   }
 
-  const issueCodes = new Set<KnowledgeReadIssueCode>()
-  for (const issue of issues) {
-    issueCodes.add(issue.parser === 'json' ? 'parse_json' : 'parse_frontmatter')
+  if (issueCount === 0) {
+    return null
   }
 
   return {
     issueCodes: [...issueCodes].sort(),
-    issueCount: issues.length,
+    issueCount,
     recoveryAction: KNOWLEDGE_READ_RECOVERY_ACTION,
   }
 }

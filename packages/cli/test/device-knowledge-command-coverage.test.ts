@@ -678,6 +678,20 @@ test('knowledge reads expose bounded degradation and a typed invalid-target reco
     )
   }
 
+  await writeVaultFile(
+    vaultRoot,
+    'derived/knowledge/pages/group-room-model.md',
+    [
+      '---',
+      'title: Private reserved sentinel',
+      'slug: Invalid private reserved sentinel',
+      '---',
+      '',
+      '# Unusable reserved page',
+      '',
+    ].join('\n'),
+  )
+
   const cli = createVaultCli()
   const listed = await runInProcessJsonCli<KnowledgeListResult>(cli, [
     'knowledge',
