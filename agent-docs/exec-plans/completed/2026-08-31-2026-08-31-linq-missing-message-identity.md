@@ -1,6 +1,6 @@
 # Require Linq message identity before acceptance
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-08-31
 
@@ -29,16 +29,16 @@ Updated: 2026-08-31
 - Outcome: a direct iMessage reply whose provider acknowledgement lacks the
   identity needed for delivery confirmation stays recoverable instead of
   appearing durably complete.
-- Reaches: the existing hosted-runtime direct-thread reply journey only;
-  identity-bearing replies, groups, rich links, and the Web onboarding client
-  preserve their current behavior.
-- Proof: the runtime-level regression proves one provider request, the existing
-  delivery key, and a retryable ambiguous result; static outbox-path inspection
-  proves that retry and reconciliation remain with the existing owner.
-- Walkthrough: `Ready`. An affected member receives the same intended reply via
-  deterministic recovery rather than a silent accepted-without-receipt state;
-  members receiving identity-bearing acknowledgements see no changed copy,
-  timing, audience, authority, or interaction.
+- Reaches: ordinary existing-chat sends in hosted direct conversations and
+  route-authorized groups. Identity-bearing replies, rich-link partial delivery,
+  receipt ingestion, and the Web onboarding client preserve current behavior.
+- Proof: the runtime-level and composed outbox regressions prove one provider
+  request per attempt, an identical body and delivery key across safe text
+  retry, and terminal ambiguity after one private-media reservation, upload, and
+  message attempt.
+- Walkthrough: `Ready`. Stable-body replies remain recoverable without an
+  untrackable accepted state; private vault-backed media fails closed after
+  provider ambiguity instead of risking a duplicate attachment or message.
 
 ## Scope
 
@@ -70,13 +70,13 @@ Updated: 2026-08-31
 
 ## Tasks
 
-1. Record the base failure with a focused hosted-runtime Linq regression.
-2. Send ReviewGPT the privacy-safe root-cause and implementation packet.
-3. Inspect and apply only a scoped, contract-aligned ReviewGPT patch.
-4. Run focused proof, affected typechecks, privacy/static checks, and completion
-   audits.
-5. Commit, push, open the PR, and run final ReviewGPT review concurrently with
-   required GitHub checks.
+1. [x] Record the base failure with a focused hosted-runtime Linq regression.
+2. [x] Send ReviewGPT the privacy-safe root-cause and implementation packet.
+3. [x] Inspect and apply only scoped, contract-aligned ReviewGPT patches.
+4. [x] Run focused proof, affected typechecks, privacy/static checks, and
+   completion audits.
+5. [x] Commit, push, update the PR, and pass final ReviewGPT review on the exact
+   candidate head concurrently with required GitHub checks.
 
 ## Decisions
 
@@ -99,11 +99,25 @@ Updated: 2026-08-31
 - Base proof: the focused runtime regression failed with `Missing expected
   rejection` while 73 neighboring tests passed.
 - Candidate proof: the same file passed 74/74 tests; the operator-config
-  typecheck passed; the changelog archive test passed 9/9; the Web typecheck
-  passed; and `git diff --check` passed.
+  typecheck passed; the composed assistant-runtime regression passed 15/15;
+  assistant-runtime typecheck passed; the changelog fragment test passed 7/7;
+  the Web typecheck passed; and `git diff --check` passed.
 - ReviewGPT implementation: the first adjacent Web-client patch was rejected.
   A corrected artifact from the hosted-runtime owner was hash-verified,
   inspected for provider-call and retry ownership, and applied. One omitted
   pre-existing Web test was restored verbatim as non-production remediation;
   the final base-to-head diff contains no Web production or test behavior
   change outside the authored changelog fragment.
+- ReviewGPT remediation: the accepted final-round finding was corrected by
+  reusing the existing private-attachment reservation-ambiguity marker before
+  generic replay. The hash-verified artifact added composed text and private
+  image regressions and narrowed the public changelog claim.
+- CI remediation: five CLI test doubles returned an empty response body despite
+  a separate `json()` method. Test-only real JSON `Response` fixtures now satisfy
+  the production parser contract; the focused CLI channel suite passed 29/29
+  and the CLI typecheck passed.
+- Final audit: ReviewGPT round 2 returned `ROUND_OUTCOME: PASS` with no
+  qualifying findings on the corrected production candidate. The later CLI
+  fixture correction is non-production-only and does not alter the reviewed
+  mechanism.
+Completed: 2026-08-31
