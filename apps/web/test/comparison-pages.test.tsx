@@ -117,8 +117,27 @@ describe("comparison catalog", () => {
       assert.match(comparison.lastVerified, /^\d{4}-\d{2}-\d{2}$/u);
       assert.ok(comparison.metaDescription.length >= 100);
       assert.ok(comparison.metaDescription.length <= 190);
+      assert.match(
+        comparison.metaDescription,
+        /\bpersonal health assistant\b/iu,
+        `${comparison.slug} must introduce Murph's product role in search snippets.`,
+      );
+      assert.doesNotMatch(
+        comparison.metaDescription,
+        /^Compare Murph\b/iu,
+        `${comparison.slug} must not spend its search snippet on a generic comparison opener.`,
+      );
+      assert.doesNotMatch(
+        comparison.headline,
+        /^Murph vs\b/iu,
+        `${comparison.slug} must not repeat the comparison label in its headline.`,
+      );
       assert.equal(comparison.faqs.length, 3);
       assert.ok(comparison.tradeoffs.length >= 2);
+      assert.ok(
+        comparison.tradeoffs.some((tradeoff) => /\bMurph\b/u.test(tradeoff)),
+        `${comparison.slug} must name a concrete Murph limitation among its tradeoffs.`,
+      );
       assert.ok(comparison.sources.length >= 2);
 
       const competitorProfileKeys = Object.keys(
@@ -338,7 +357,7 @@ describe("comparison catalog", () => {
     expect(comparisonIndexMetadata.openGraph).toMatchObject({
       images: [
         {
-          alt: "Murph comparison guides",
+          alt: "Murph personal health assistant comparison guides",
           url: "/compare/opengraph-image",
         },
       ],
@@ -346,7 +365,7 @@ describe("comparison catalog", () => {
     expect(comparisonIndexMetadata.twitter).toMatchObject({
       images: [
         {
-          alt: "Murph comparison guides",
+          alt: "Murph personal health assistant comparison guides",
           url: "/compare/opengraph-image",
         },
       ],

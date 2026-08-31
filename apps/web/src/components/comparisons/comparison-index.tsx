@@ -42,7 +42,7 @@ export function ComparisonIndex({ comparisons }: { comparisons: readonly Compari
                 Murph, compared clearly.
               </h1>
               <p className="mt-7 max-w-[61ch] text-pretty text-[1rem] leading-7 text-[#f5f0e8]/72 sm:text-[1.08rem]">
-                Find out where Murph overlaps with the health tools you know, where it does not, and when using both makes more sense than choosing one.
+                Murph is a personal health assistant that works in familiar messaging. See where it overlaps with the health tools you know, where it does not, and when using both makes more sense than choosing one.
               </p>
             </div>
 
@@ -98,7 +98,7 @@ export function ComparisonIndex({ comparisons }: { comparisons: readonly Compari
                 A wearable can measure your body better than Murph because Murph is not a wearable. A clinician can diagnose and treat in ways Murph cannot. A focused training or nutrition app may go deeper on its one job.
               </p>
               <p>
-                Murph is strongest when the problem is connecting those separate pieces, remembering the context behind them, deciding what to try, and following through over time. These guides make that boundary explicit.
+                Murph is designed for problems that require connecting those separate pieces, remembering the context behind them, deciding what to try, and following through over time. These guides make that boundary explicit.
               </p>
             </div>
           </section>

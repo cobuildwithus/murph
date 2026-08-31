@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-30
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 ## Goal
 
@@ -25,6 +25,10 @@ Updated: 2026-08-30
   the fold, includes a responsive semantic comparison table with direct
   per-row official-source links, discusses who each product is for, names
   material limitations, and links to relevant peer comparisons.
+- Each guide assumes the visitor already understands the competitor but is new
+  to Murph: it names the competitor's real advantage, gives an honest keep,
+  add, or switch decision, and makes Murph persuasive through a concrete
+  continuity or context advantage rather than a universal-winner claim.
 - Metadata includes canonical URLs and share metadata; the routes appear in the
   XML sitemap and remain crawlable under the existing robots policy.
 - Machine-readable markup is limited to truthful page, breadcrumb, and FAQ
@@ -44,7 +48,7 @@ Updated: 2026-08-30
   - Direct consumer health assistants and adjacent products across wearables,
     health records/dashboards, labs/longevity, sleep/recovery, fitness,
     nutrition/weight, and mental wellbeing.
-  - Current first-party product facts verified on 2026-08-30, with volatile
+  - Current first-party product facts verified on 2026-08-31, with volatile
     pricing phrased cautiously and linked to the current official source.
   - Static route enumeration, server-rendered comparison UI,
     metadata/structured data, sitemap, internal navigation, focused
@@ -149,6 +153,10 @@ Updated: 2026-08-30
   - A narrow-phone visitor comparing a product they already own needs the named
     relationship and choice guidance before dense evidence, with no clipped
     competitor content.
+  - A competitor-literate visitor meeting Murph for the first time needs the
+    incumbent's strength acknowledged before Murph's value is made concrete;
+    otherwise the page reads as generic conquest copy rather than useful
+    decision support.
   - A desktop researcher needs a fast way to find one product among more than
     100 guides, scan the main differences, and verify claims against official
     sources.
@@ -186,7 +194,7 @@ Updated: 2026-08-30
 ## Verification
 
 - Completed local proof:
-  - Focused Vitest: 4 files and 35 tests passed for catalog invariants, rendered
+  - Focused Vitest: 4 files and 36 tests passed for catalog invariants, rendered
     comparison pages, direct evidence anchors, dedicated share-card metadata,
     sitemap/search, telemetry redaction, and public agent guidance.
   - Scoped ESLint passed for every changed Web source, comparison data, test,
@@ -203,20 +211,43 @@ Updated: 2026-08-30
     error assertions enabled. Search accessible naming, keyboard clear-focus
     recovery, and 24-pixel evidence targets are asserted in browser proof.
   - The viewport-overflow proof passed for `/compare`, WHOOP, and BodyBuddy at
-    320, 375, 390, 768, and 1280 pixels. A genuine 320-pixel index overflow was
-    found during the first run, fixed, and independently rerun green.
+    320, 375, 390, 768, and 1280 pixels. The final feature-only slice covered
+    the index, WHOOP, BodyBuddy, and CommonHealth plus narrow evidence targets:
+    all 21 cases passed. A genuine 320-pixel index overflow was found during
+    the first run, fixed, and independently rerun green. The broader 100-case
+    site sweep passed 97 cases; its three failures were unrelated `/growth`
+    route-navigation races after that route redirected through `/ops/growth`
+    to `/`, not viewport overflow in a changed route.
   - Three independent official-source claim audits corrected the accepted
     wearable, health-data, assistant, lab, nutrition, fitness, sleep, and mental
-    wellbeing findings. The final catalog contains 404 first-party competitor
-    source records and explicit evidence mappings for all 918 competitor table
-    values; targeted stale-claim searches and scoped checks passed.
+    wellbeing findings. The final catalog contains 428 first-party competitor
+    source records, 1,424 direct competitor evidence references, and explicit
+    evidence mappings for all 918 competitor table values; targeted stale-claim
+    searches and scoped checks passed.
+  - All 102 guides received a competitor-literate editorial pass. Every guide
+    now opens with a product-specific headline, defines Murph as a personal
+    health assistant in its unique 100-to-190-character description, gives the
+    incumbent a concrete advantage, separates keep/add/switch decisions, and
+    names at least one material Murph limitation. Category-level repeated-copy
+    checks found no editorial seven-word phrase reused across three or more
+    guides.
+  - The comparison shell's final independent copy/UX/SEO/semantics audit was
+    clean after replacing false-binary decision labels, defining Murph on the
+    index and share cards, and removing unsupported superlatives.
   - The first preliminary specialist pass was invalid because its evidence
     packet omitted required interaction and narrow-phone states. Its two
     substantive findings were accepted: table values now link directly to
-    supporting sources, and long unbroken product names wrap safely. The retry
-    will use the corrected evidence packet and exact pushed head.
+    supporting sources, and long unbroken product names wrap safely.
+  - A later preliminary specialist retry found no production-code defect but
+    remained invalid because this verification record still contained the old
+    404-source/35-test totals and the rendered-evidence manifest omitted the
+    already captured filtered and empty search states. Both proof defects are
+    accepted for correction in the final exact-head packet.
 - Remaining external proof:
-  - One exact-pushed-head `completion-specialists` ReviewGPT pass with Product
-    UX, frontend, and coverage lenses as applicable.
+  - Recapture the editorialized exact-head states and run one
+    exact-pushed-head `completion-specialists` ReviewGPT pass with Product UX,
+    frontend, and coverage lenses as applicable. The manifest must include
+    desktop and phone filtered and empty search captures in addition to the
+    hero, directory, and representative table states.
   - Required exact-head pull-request checks and final current-base merge-tree
     proof.

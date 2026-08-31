@@ -6,12 +6,12 @@ export const FITNESS_COMPARISONS = defineComparisons([
     bestFor:
       "People who want one certified coach to build their workouts, review feedback, and stay in close contact.",
     bottomLine:
-      "Future Pro is the closer fit for individualized human fitness programming. Murph is the broader fit for connecting training with the rest of a person's health context and supporting practical follow-through.",
+      "Choose Future Pro if you want a human coach to own your training program. Choose Murph if the harder problem is keeping workouts, sleep, symptoms, meals, records, questions, and next steps in one continuing health conversation.",
     category: "fitness",
     chooseCompetitor:
       "Choose Future Pro when a dedicated human coach, frequent feedback, form review, and workout-by-workout program changes are the main need.",
     chooseMurph:
-      "Choose Murph when the main need spans training, sleep, symptoms, meals, records, decisions, and reminders in one private ongoing conversation.",
+      "Choose Murph when you want to bring a workout, a rough night of sleep, a symptom, or a lab result into the same thread, consider them together, and leave with a plan, reminder, or check-in.",
     competitor: {
       clinicalRole:
         "Fitness coaching, not medical diagnosis or treatment. Members should raise injuries and clinical concerns with an appropriate professional.",
@@ -56,17 +56,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Future Pro is more specialized for one-to-one workout coaching. Murph has a broader role across health context, decisions, plans, reminders, and follow-through, and is not a substitute for a dedicated personal trainer.",
+          "No. Future Pro wins when you need a professional to write sessions, inspect form, and revise the program. Murph does not replace that trainer. It becomes the better fit when the work between workouts includes organizing health context, resolving questions, and keeping agreed next steps from disappearing.",
         question: "Is Murph a direct replacement for Future Pro?",
       },
     ],
-    headline: "Murph vs Future Pro: broad health support or a human fitness coach?",
-    lastVerified: "2026-08-30",
+    headline: "A personal health assistant or a human fitness coach?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Future Pro on human coaching, workout personalization, health context, platforms, hardware, and current pricing.",
+      "Murph is a personal health assistant that connects workouts with sleep, symptoms, meals, and records; Future Pro assigns a human coach to own training.",
     name: "Future Pro",
     overview:
-      "Future Pro centers the experience on a certified human coach who learns a member's goals and constraints, writes weekly training, and responds to performance and feedback. Murph is a private personal health assistant with a wider remit. The meaningful choice is dedicated fitness expertise versus a conversation that can carry context across many parts of health.",
+      "Future Pro wins on individualized exercise judgment: a certified coach writes the week, reviews performance and form, and changes the program. This guide compares Future Pro, not Future's separate Health Coach membership. Murph is not a personal trainer. It provides an ongoing private conversation through familiar messaging, with web review and authorized health context, so questions outside the training program can become documented next steps.",
     relationship: "alternative",
     slug: "future-pro",
     sources: [
@@ -79,25 +79,30 @@ export const FITNESS_COMPARISONS = defineComparisons([
         label: "What to expect from a Future Pro coach",
         url: "https://faq.future.co/en/articles/12073321-what-should-i-expect-from-my-future-pro-coach",
       },
+      {
+        label: "Future Health Coach",
+        url: "https://future.co/health-coach/progress",
+      },
     ],
     tradeoffs: [
       "Future Pro costs substantially more than a self-guided training app because it includes a dedicated coach.",
-      "Its scope is intentionally fitness-focused rather than a longitudinal assistant for questions across health and daily life.",
+      "A Future Pro coach can make training-specific judgments Murph cannot, while Murph can carry non-training context that sits outside Future Pro's central job.",
       "Service availability is limited to the United States.",
+      "One-to-one coaching can be highly personal, but its value still depends on coach fit and on the member reporting constraints and feedback candidly.",
     ],
     useTogether:
-      "Use Future Pro to own workout programming and coach feedback, then use Murph separately for broader context, questions, reminders, and life logistics around the plan.",
+      "Let the Future Pro coach own exercises, progression, and form. Bring Murph the resulting plan when a rough night, new symptom, trip, eating change, or calendar problem affects execution, then keep the non-training follow-up there. The two services are not presented as automatically connected.",
   },
   {
     bestFor:
       "Independent lifters who want an automatically generated strength workout based on equipment, goals, history, and recent muscle use.",
     bottomLine:
-      "Fitbod is a focused algorithmic strength planner and logger. Murph is a broader conversational assistant, so it is the better fit when the question extends beyond selecting today's sets and exercises.",
+      "Choose Fitbod if you want an app to generate and log today's strength session. Choose Murph if you already have workout structure but need one place to connect training with sleep, symptoms, records, decisions, and follow-through.",
     category: "fitness",
     chooseCompetitor:
       "Choose Fitbod for generated gym sessions, exercise demonstrations, weight and repetition guidance, and a structured strength log.",
     chooseMurph:
-      "Choose Murph for a private conversation that can connect workouts with wider health context and help with plans, decisions, and follow-through.",
+      "Choose Murph when the useful question is not just 'what should I lift?' but 'how does this session fit my sleep, symptoms, schedule, or other health information, and what should I remember to revisit?'",
     competitor: {
       clinicalRole:
         "Consumer fitness software, not medical care or individualized clinical rehabilitation.",
@@ -142,17 +147,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Fitbod is more purpose-built for generating and logging strength sessions. Murph is broader and conversational, but it should not be described as Fitbod's workout-generation engine.",
+          "Fitbod. It is purpose-built to choose exercises, sets, repetitions, and suggested loads and to record the result. Murph does not reproduce that set-by-set workflow. Murph is the stronger choice when a workout is one input in a longer health conversation that should end in a decision, reminder, or check-in.",
         question: "Which is better for automated strength programming?",
       },
     ],
-    headline: "Murph vs Fitbod: a health conversation or generated strength workouts?",
-    lastVerified: "2026-08-30",
+    headline: "A health conversation or generated strength workouts?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph with Fitbod's algorithmic strength plans, workout logging, supported devices, integrations, equipment setup, and pricing.",
+      "A personal health assistant, Murph carries context and next steps beyond the gym; Fitbod generates and logs strength workouts set by set.",
     name: "Fitbod",
     overview:
-      "Fitbod is built around a specific job: turning goals, equipment, training history, and recovery estimates into a strength workout. It also records performance and supplies exercise demonstrations. Murph does not occupy that same narrow planning role. It brings a wider set of health context into an ongoing conversation and helps a member decide what to do next.",
+      "Fitbod wins at the gym workflow: configure equipment and goals, receive a strength session, follow demonstrations, log the work, and let that history inform the next session. Murph does not generate that detailed lifting prescription. Its private thread can place the session beside authorized or shared health information, explain relevant patterns, and keep a decision visible after the gym.",
     relationship: "alternative",
     slug: "fitbod",
     sources: [
@@ -167,23 +172,24 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Algorithmic recommendations can reduce planning effort, but they do not provide a human coach's judgment or relationship.",
-      "Fitbod is strongest for resistance training and is not designed as a broad personal health assistant.",
-      "Suggested weights and recovery estimates still require the user to apply judgment and report performance accurately.",
+      "Fitbod removes much of the session-planning work, but its exercise and load choices are driven by the settings, history, and feedback the user enters.",
+      "Fitbod's strength specialization is an advantage in the gym; Murph does not offer the same exercise library, suggested-load workflow, or set log.",
+      "Neither Fitbod nor Murph provides a trainer watching technique, so pain, injury, or form concerns still require appropriate professional judgment.",
+      "People already following a coach-written or rehabilitation program may not want a second system changing exercise selection.",
     ],
     useTogether:
-      "Let Fitbod generate and record strength sessions, and discuss the surrounding recovery, schedule, questions, and adherence with Murph without assuming an automatic data connection.",
+      "Let Fitbod generate and record the session. Share a short summary with Murph if poor recovery, an unfamiliar symptom, travel, or a shifting calendar changes the picture, then revisit the decision after the next workout. This workflow assumes manual sharing.",
   },
   {
     bestFor:
-      "People choosing between a free strength tracker and a paid relationship with a one-to-one remote coach.",
+      "Strength trainees who want either a capable free planner and log or a paid one-to-one coach who reviews form and changes the program.",
     bottomLine:
-      "Caliber combines a capable free workout app with an optional human coaching service. Murph is broader and conversation-first, while Caliber is the stronger choice when structured strength training or a dedicated coach is the central need.",
+      "Choose Caliber when strength programming is the job, especially if you want its free tracker or are ready to pay for a human coach. Choose Murph when training is only one part of the health context you need to understand and act on.",
     category: "fitness",
     chooseCompetitor:
       "Choose Caliber for strength routines and tracking, or for paid one-to-one coaching with form review and customized training.",
     chooseMurph:
-      "Choose Murph when you want health questions, context, plans, reminders, and practical follow-through to live in one ongoing private relationship.",
+      "Choose Murph when a workout question needs to sit beside a symptom, meal pattern, medical record, or wearable signal and lead to a concrete action you can revisit.",
     competitor: {
       clinicalRole:
         "Fitness and behavior coaching, not diagnosis, emergency care, or a replacement for licensed medical treatment.",
@@ -228,17 +234,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Caliber is the more specialized tool for strength programming, tracking, and trainer feedback. Murph is designed for broader health context and follow-through rather than replacing a strength coach.",
+          "Caliber owns the strength workflow: routines and tracking in the free app, with individualized trainer feedback in the paid service. Murph does not replace either the set log or the coach. It is useful when those workouts need to be considered alongside the rest of a person's health information and daily follow-through.",
         question: "How does Caliber differ from Murph?",
       },
     ],
-    headline: "Murph vs Caliber: personal health context or strength coaching?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or a strength app and coach?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Caliber across free strength tracking, human coaching, personalization, platforms, equipment, pricing, and scope.",
+      "Murph, a personal health assistant, connects training with other health context; Caliber offers a free strength app and optional one-to-one coaching.",
     name: "Caliber",
     overview:
-      "Caliber needs a two-part comparison. Its free app is a strength planner and logger with exercises and progress measures. Its premium membership adds a real coach who builds training and provides frequent feedback. Murph has a different center of gravity: a private health conversation that can use broader context and help with decisions and ongoing follow-through.",
+      "Caliber has two clear advantages depending on the tier: the free app supplies a serious strength planner and log, while the paid membership adds a real coach who can review form and change the program. Murph is neither a lifting log nor an assigned trainer. It gives a person a private place to combine conversation with authorized wearable and lab data, records, notes, meals, symptoms, and workouts, then keep the resulting decisions and next steps alive.",
     relationship: "alternative",
     slug: "caliber",
     sources: [
@@ -255,28 +261,29 @@ export const FITNESS_COMPARISONS = defineComparisons([
     tradeoffs: [
       "Caliber's paid coaching can be highly personal, but the price is not available without a consultation.",
       "The free app offers useful structure without the same ongoing human relationship as coaching.",
-      "Its core job is strength and behavior coaching, not synthesis across every health domain.",
+      "Murph can carry more kinds of health context, but it cannot match Caliber's set-by-set tracker or a paid coach's exercise judgment.",
+      "The free app and paid coaching tier solve substantially different jobs, so readers should compare the tier they would actually use.",
     ],
     useTogether:
-      "Use Caliber as the owner of a training program or coach relationship, and use Murph separately to think through wider health context and practical follow-through.",
+      "Keep the routine, completed sets, and form feedback in Caliber. Bring Murph the agreed plan if a lab result, symptom pattern, eating issue, or competing commitment changes how it fits, and keep that outside action from being lost. Treat the handoff as manual.",
   },
   {
     bestFor:
       "People who want an algorithmically personalized mix of bodyweight, gym, running, mobility, and high-intensity workouts.",
     bottomLine:
-      "Freeletics is a focused AI workout planner with a broad exercise catalog. Murph is a broader health assistant, so the choice turns on whether the immediate need is training generation or cross-domain context and support.",
+      "Choose Freeletics if you need software to decide and progress your workouts across several training styles. Choose Murph if the plan already exists but making it fit sleep, symptoms, schedule, records, and daily life is the harder job.",
     category: "fitness",
     chooseCompetitor:
       "Choose Freeletics for Training Journeys, generated sessions, exercise instruction, and plan changes based on workout feedback.",
     chooseMurph:
-      "Choose Murph when training is one part of a larger health picture and an ongoing private conversation is more useful than a workout app.",
+      "Choose Murph when you want to discuss what changed around a workout, connect it with other health information, record the decision, and have a reminder or check-in carry it into the next week.",
     competitor: {
       clinicalRole:
         "General fitness and wellness guidance, not clinical care, diagnosis, or injury rehabilitation.",
       followThrough:
         "Tracks completed sessions, asks for performance feedback, and updates later workouts within the selected Training Journey.",
       format:
-        "Algorithmic AI Coach with guided workout journeys and optional educational Coach+ question support, not a dedicated human trainer.",
+        "Algorithmic AI Coach with guided Training Journeys, not a dedicated human trainer.",
       hardware:
         "No proprietary hardware is required; users select bodyweight, free-weight, machine, or running options and available equipment.",
       inputs:
@@ -284,9 +291,9 @@ export const FITNESS_COMPARISONS = defineComparisons([
       insightStyle:
         "Selects and adjusts workouts from structured programs using the user's setup and reported results.",
       platforms:
-        "iPhone, iPad, Android, and Apple Watch, with documented Apple Health, Health Connect, and Strava support.",
+        "iPhone, iPad, Android, and Apple Watch, with documented Apple Health support.",
       pricing:
-        "A limited free experience is available. The current U.S. App Store lists paid purchases at $34.99, $59.99, and $74.99 or $79.99 depending on plan and term; checkout shows the exact renewal offer.",
+        "A limited free version is available. Current U.S. App Store in-app purchases range from $34.99 to $79.99; the exact product, term, and renewal price appear at checkout.",
       primaryJob:
         "Generate adaptable fitness sessions across bodyweight, gym, running, mobility, and conditioning.",
     },
@@ -304,7 +311,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. The standard Freeletics Coach is an algorithmic training system. Coach+ can answer training questions, but that does not make it an assigned one-to-one personal trainer.",
+          "No. The Freeletics Coach is an algorithmic training system, not an assigned one-to-one personal trainer.",
         question: "Is the Freeletics Coach a real person?",
       },
       {
@@ -314,17 +321,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Freeletics is more specialized for generating a progressive workout journey. Murph is more useful when the desired support includes broader health context, questions, planning, and reminders.",
+          "Choose Murph when the unresolved job is to relate training to sleep, symptoms, meals, records, or schedule friction and carry the decision forward. Choose Freeletics when you want a progressive Training Journey and generated sessions; Murph does not recreate its workout player or progression engine.",
         question: "When should I choose Murph instead of Freeletics?",
       },
     ],
-    headline: "Murph vs Freeletics: an AI workout coach or broader health support?",
-    lastVerified: "2026-08-30",
+    headline: "A personal health assistant or an AI workout coach?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph with Freeletics on algorithmic training, workout types, feedback, human coaching, devices, integrations, and subscription terms.",
+      "Murph works as a personal health assistant around training and daily health decisions; Freeletics generates adaptable workouts across several fitness styles.",
     name: "Freeletics",
     overview:
-      "Freeletics packages algorithmic personalization into structured Training Journeys spanning bodyweight work, weights, machines, running, mobility, and conditioning. The app chooses sessions and learns from the feedback a user supplies. Murph is not primarily a workout generator. It is designed to carry a wider health conversation and help turn context into decisions and follow-through.",
+      "Freeletics is strongest when the blank page is the problem: it selects sessions from a wide training catalog and adjusts the journey from reported performance. Murph does not supply that exercise-by-exercise experience. It keeps a private conversation and shared or authorized health context together, so a question can lead to documented follow-through.",
     relationship: "alternative",
     slug: "freeletics",
     sources: [
@@ -343,24 +350,25 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Workout adaptation depends on honest feedback and the limitations of an algorithm rather than ongoing human observation.",
+      "Freeletics adapts from the setup, performance, and post-workout feedback a member enters; it does not directly observe technique or assign a human trainer.",
       "Subscription prices and promotions vary by term and checkout surface.",
-      "The app covers more workout modes than many strength-only planners, but remains training-focused.",
+      "Freeletics covers more workout modes than many strength-only planners; Murph does not offer an equivalent Training Journey or visual exercise library.",
+      "The Coach personalizes within Freeletics' structured system; people already following a prescribed program may not want a parallel progression.",
     ],
     useTogether:
-      "Use Freeletics for session generation and progression, while using Murph separately for the wider questions, constraints, and follow-through that surround training.",
+      "Follow the Freeletics session and log feedback there. If travel, poor recovery, a new symptom, or an unpredictable week complicates the journey, use Murph to document the practical response and revisit it later. The services are not presented as connected.",
   },
   {
     aliases: ["Centr Coach"],
     bestFor:
       "People who want workouts, meal planning, recipes, recovery, and mindfulness content in one guided membership.",
     bottomLine:
-      "Centr is an all-in-one fitness content membership with a personalized planning layer. Murph is an ongoing health conversation, so it is stronger for contextual questions and follow-through than for delivering a large studio-style class and recipe library.",
+      "Choose Centr if you want one subscription full of workouts, programs, recipes, meal plans, recovery, and mindfulness content. Choose Murph if choosing content is not the problem and you need a private health conversation to make sense of your own context and keep next steps moving.",
     category: "fitness",
     chooseCompetitor:
       "Choose Centr for expert-led workout videos, multiweek programs, recipes, meal plans, and mindfulness content under one subscription.",
     chooseMurph:
-      "Choose Murph when you want support that starts from your broader personal context rather than selecting from a membership content catalog.",
+      "Choose Murph when you want to start with your own question and accumulated health information, then work toward a decision you can revisit instead of browsing a content catalog.",
     competitor: {
       clinicalRole:
         "Consumer fitness, nutrition, and mindfulness content, not medical diagnosis or personalized clinical treatment.",
@@ -405,17 +413,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Centr has the stronger ready-made library of workouts, recipes, meal plans, and mindfulness sessions. Murph has the broader conversational role and can help with context and follow-through beyond a fixed content catalog.",
+          "Centr wins on ready-to-use content: workouts, recipes, meal plans, programs, and mindfulness sessions. Murph does not replace that library. Murph wins when you want the starting point to be your accumulated health context and the ending point to be a decision or next step you can revisit.",
         question: "How is Centr different from Murph?",
       },
     ],
-    headline: "Murph vs Centr: personal health context or an all-in-one content library?",
-    lastVerified: "2026-08-30",
+    headline: "A personal health assistant or an all-in-one content library?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Centr Coach on workout content, meal plans, personalization, human support, platforms, equipment, and current membership prices.",
+      "Use Murph as a personal health assistant for questions rooted in your health context; choose Centr for workouts, recipes, meal plans, and mindfulness content.",
     name: "Centr",
     overview:
-      "Centr brings together guided strength, conditioning, Pilates, yoga, boxing, mobility, recovery, mindfulness, recipes, and meal plans. Centr Coach personalizes which parts of that library a member sees, but the core experience remains expert-produced content rather than a dedicated human coach. Murph is broader, conversational, and oriented around a person's accumulated health context.",
+      "Centr's advantage is breadth you can press play on: training, recovery, mindfulness, recipes, and meal plans live in one polished catalog, and Centr Coach helps organize it. Murph is not a class, recipe, or meal-plan library. Its advantage is beginning with one person's accumulated information and continuing the decision after the content ends.",
     relationship: "alternative",
     slug: "centr",
     sources: [
@@ -430,23 +438,24 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "A broad content library offers variety but is different from individualized feedback from a dedicated coach.",
+      "Centr Coach personalizes selections from the library, but it does not assign a person who observes form or rewrites programming from individual feedback.",
       "Some programs require equipment that a member may not own.",
       "Members who preferred desktop workouts now need the mobile app for the training experience.",
+      "Murph has no equivalent catalog of follow-along classes and recipes, so people seeking content will still need Centr or another source.",
     ],
     useTogether:
-      "Use Centr as the source for classes, programs, meals, and mindfulness sessions, and use Murph separately to reason about how that routine fits the rest of life and health.",
+      "Choose the workout, recipe, or mindfulness session in Centr. Bring its outcome to Murph when you need to compare it with a record or wearable pattern, understand why the routine keeps slipping, or remember what to revisit. No direct product link is claimed.",
   },
   {
     bestFor:
       "iPhone users who prefer a coach-led team program, fresh weekly workouts, in-ear instruction, and an active member chat.",
     bottomLine:
-      "Ladder offers the energy and structure of a coach-led training team without standard one-to-one programming. Murph offers a private, broader health relationship rather than a weekly class team.",
+      "Choose Ladder if a coach-led strength team, fresh weekly programming, and community accountability will get you training. Choose Murph if you need an individual, private thread that can connect training with the rest of your health and carry decisions beyond the team calendar.",
     category: "fitness",
     chooseCompetitor:
       "Choose Ladder for a consistent coach's strength program, five or more new weekly workouts, audio guidance, tracking, and team accountability.",
     chooseMurph:
-      "Choose Murph for individualized conversation and practical health follow-through that is not confined to one team's workout calendar.",
+      "Choose Murph when an individual workout question needs to be considered beside a sleep change, symptom, meal, or record and carried beyond the team's weekly calendar.",
     competitor: {
       clinicalRole:
         "Fitness programming and community support, not medical advice, diagnosis, or individualized rehabilitation.",
@@ -491,17 +500,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Ladder is the stronger fit for a fixed coach-led strength team and weekly workout cadence. Murph is the stronger fit for a private conversation that carries context across more than training.",
+          "Choose Ladder for the workout itself, the coach's voice in your ear, and team momentum. Choose Murph for private questions that cross training, sleep, symptoms, meals, records, and scheduling. Murph does not replace Ladder's weekly program or community.",
         question: "Should I choose Ladder or Murph?",
       },
     ],
-    headline: "Murph vs Ladder: private health support or a coach-led training team?",
-    lastVerified: "2026-08-30",
+    headline: "A private health assistant or a coach-led training team?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph with Ladder's coach-led workout teams, weekly programming, audio guidance, community, Apple platforms, equipment, and pricing.",
+      "In a private conversation, Murph acts as a personal health assistant; Ladder delivers coach-led weekly strength programming and team accountability.",
     name: "Ladder",
     overview:
-      "Ladder sits between a class library and personal training. Members choose a human coach's team, receive a new shared program each week, hear in-ear instruction, train alongside a community, and can log meals and macros in the same app. That is not the same as an individually written one-to-one plan. Murph takes a private and broader approach, using accumulated health context to support decisions and follow-through.",
+      "Ladder wins on coached momentum: one coach sets the team's week, prerecorded cues guide each session, and the chat makes training feel shared. It is not standard one-to-one programming, and Murph does not recreate that team. Murph gives an individual a private place to consider what the shared plan misses and keep a personal decision moving.",
     relationship: "alternative",
     slug: "ladder",
     sources: [
@@ -512,24 +521,25 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Team programming creates momentum, but it cannot account for every member's circumstances like a dedicated coach can.",
-      "Android users do not have a current native app in the documented product offering.",
+      "Shared programming creates weekly momentum, but standard membership does not mean every exercise and progression choice is privately rewritten for each member.",
+      "Ladder's official materials list iPhone and Apple Watch, so Android users should verify current availability before paying.",
       "Equipment requirements and coaching style depend on the selected team.",
+      "Murph provides neither Ladder's coached audio workout nor its team-based workout community, while Ladder does not serve as a private cross-domain health thread.",
     ],
     useTogether:
-      "Follow Ladder for the actual weekly training plan, then use Murph separately for broader questions, schedule friction, recovery context, and reminders.",
+      "Keep the weekly plan, weights, meals, macros, and team discussion in Ladder. Bring Murph a short summary if the team plan collides with an individual symptom, disrupted sleep, or the week's obligations, then keep the personal next step there. This requires a manual handoff.",
   },
   {
     aliases: ["NTC"],
     bestFor:
       "People who want a large, polished collection of guided workouts and programs without paying a subscription.",
     bottomLine:
-      "Nike Training Club is the better free workout library. Murph is the better fit for an ongoing private health conversation and personal follow-through, but it is not a replacement for NTC's video catalog.",
+      "Choose Nike Training Club if you mainly need excellent guided workouts for free. Choose Murph if workouts are already available and the unmet need is understanding personal health context, deciding what fits, and remembering what to do next.",
     category: "fitness",
     chooseCompetitor:
       "Choose Nike Training Club for free trainer-led workouts, exercise instruction, progressive programs, yoga, mobility, and general wellness content.",
     chooseMurph:
-      "Choose Murph when the central need is contextual guidance, decisions, reminders, and continuity across health topics rather than a class library.",
+      "Choose Murph when you want to begin with your own workout history, sleep, symptoms, meals, records, or question, then leave the conversation with a plan, reminder, or check-in.",
     competitor: {
       clinicalRole:
         "General fitness education and workout content, not medical care or individualized clinical exercise prescription.",
@@ -573,17 +583,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Use NTC for ready-to-play workout instruction. Use Murph when the more important job is understanding wider context and maintaining a private thread of decisions and follow-through.",
+          "No. NTC wins on free, ready-to-play trainer instruction, progressive programs, yoga, and mobility. Murph has no comparable video catalog. Murph is useful after content selection, when you need to relate the routine to other health context and keep a decision or next step alive.",
         question: "Can Murph replace the NTC workout library?",
       },
     ],
-    headline: "Murph vs Nike Training Club: ongoing context or free guided workouts?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or free guided workouts?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Nike Training Club on free workouts, programs, personalization, human coaching, platforms, equipment, and ongoing support.",
+      "Murph serves as a personal health assistant when context and follow-through are missing; Nike Training Club is a free source of guided workouts and programs.",
     name: "Nike Training Club",
     overview:
-      "Nike Training Club is a content-first product. It offers more than 200 trainer-led workouts along with strength, endurance, yoga, mobility, and progressive programs, all without a subscription. The trade is limited individual adaptation and no assigned coach. Murph does a different job: it keeps a private conversation alive across broader health context and helps a person decide and follow through.",
+      "Nike Training Club's case is simple: it gives people a large, polished workout and program library without charging a subscription. Murph cannot beat free on that job and does not supply follow-along video instruction. Murph addresses what the library leaves open: how a routine fits one person's other health information and what should happen after that decision.",
     relationship: "different-role",
     slug: "nike-training-club",
     sources: [
@@ -598,24 +608,25 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "A free library is excellent value, but workout selection and progression remain largely self-directed.",
+      "The library is excellent value, but users still choose the program and there is no assigned coach adapting it from individual feedback.",
       "Recorded instruction cannot provide the same feedback as a live human coach.",
-      "The app is designed around Nike's training content rather than context from every part of health.",
+      "Murph does not offer NTC's exercise demonstrations or progressive video programs; its value starts when personal context and follow-through are the missing pieces.",
+      "For someone who only needs workout content, NTC's zero subscription price is difficult for any paid assistant to beat.",
     ],
     useTogether:
-      "Use NTC to supply the workouts and programs, and use Murph separately to think through which routine fits, what gets in the way, and how to follow through.",
+      "Select and complete the workout in NTC. Bring its result to Murph if choosing the next class depends on recovery, a health question, or the time available, then make the follow-up explicit. Nothing here implies that data moves automatically.",
   },
   {
     aliases: ["Peloton Digital"],
     bestFor:
       "People who want live and on-demand instructor classes across many workout styles, with optional personalized planning and Peloton community features.",
     bottomLine:
-      "Peloton App is a polished instructor-led fitness membership with a growing algorithmic planning layer. Murph is a broader private health assistant, not a substitute for Peloton's live classes, instructors, or leaderboard.",
+      "Choose Peloton App if instructors, live and on-demand classes, music, and community are what keep you moving. Choose Murph if the workout source is covered and you need a private place to connect activity with other health information and carry a decision into daily life.",
     category: "fitness",
     chooseCompetitor:
       "Choose Peloton App for live and on-demand classes, familiar instructors, programs, challenges, music, and optional Peloton equipment experiences.",
     chooseMurph:
-      "Choose Murph when the main value is an ongoing private conversation that can help interpret broader context and support decisions and follow-through.",
+      "Choose Murph when the unresolved work starts after class, such as relating the session to a recovery change, private symptom, eating pattern, or medical record and deciding what to revisit.",
     competitor: {
       clinicalRole:
         "Consumer fitness and wellness instruction, not medical diagnosis or individualized clinical care.",
@@ -626,7 +637,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
       hardware:
         "The app works without Peloton hardware, while some metrics and advanced form features require compatible equipment.",
       inputs:
-        "Goals, preferences, schedule, experience, workout history, favorite music and instructors, and supported activity data.",
+        "Goals, workout preferences, workout history, and connected Apple Health, Garmin, or Fitbit activity data.",
       insightStyle:
         "Recommends classes and programs, builds personalized plans, and reports workout performance within the Peloton ecosystem.",
       platforms:
@@ -644,7 +655,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
       inputs: [2],
       insightStyle: [2],
       platforms: [1],
-      pricing: [1],
+      pricing: [1, 3],
       primaryJob: [1],
     },
     faqs: [
@@ -660,17 +671,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Peloton is the more specific choice for classes, instructors, music, and its fitness community. Murph is the more relevant choice for private conversation and context across a wider range of health questions.",
+          "Peloton wins on the workout experience: instructors, live classes, music, programs, and community. Murph does not replace any of those. Murph wins when the unresolved job begins after the class, such as relating activity to sleep or symptoms, documenting a decision, or making sure a next step happens.",
         question: "What is the main difference between Murph and Peloton App?",
       },
     ],
-    headline: "Murph vs Peloton App: a private health assistant or instructor-led classes?",
-    lastVerified: "2026-08-30",
+    headline: "A private health assistant or instructor-led classes?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Peloton App on classes, Peloton IQ planning, human coaching, equipment, platforms, integrations, membership tiers, and price.",
+      "Beyond class, Murph is a personal health assistant that carries private questions forward; Peloton App supplies instructors, music, live sessions, and community.",
     name: "Peloton App",
     overview:
-      "Peloton App is built around instructors and shared fitness experiences. Its catalog spans strength, cycling, running, walking, yoga, Pilates, meditation, and more, while Peloton IQ adds personalized recommendations and planning. Murph begins elsewhere: with a private ongoing health conversation that can carry relevant context and help a person make decisions and follow through.",
+      "Peloton's advantage is an experience people want to return to: recognizable instructors, live energy, music, challenges, community, and a deep class catalog, with Peloton IQ organizing recommendations and plans. Murph is not a streaming fitness service. It keeps private questions, shared records, and authorized signals together so the decision after class does not disappear before the next one.",
     relationship: "alternative",
     slug: "peloton-app",
     sources: [
@@ -686,22 +697,23 @@ export const FITNESS_COMPARISONS = defineComparisons([
     ],
     tradeoffs: [
       "App tiers differ in equipment-based cardio access, so the least expensive membership may not cover a member's intended routine.",
-      "The standard app offers personalization without the individual judgment of a dedicated human coach.",
+      "The standard app personalizes recommendations and plans, but it does not assign a person to review form or rewrite sessions from individual feedback.",
       "Advanced camera-based form, repetition, and weight features are tied to selected newer Peloton hardware.",
+      "Murph offers no equivalent live class, instructor relationship, leaderboard, or music-led workout experience.",
     ],
     useTogether:
-      "Use Peloton for classes and workout programming, and use Murph separately to discuss schedule, recovery, broader health context, and follow-through.",
+      "Take and record the class in Peloton. Bring Murph a useful workout summary if the class leaves a recovery question, calendar conflict, or pattern worth revisiting, then record what should change before the next session. Murph is not presented as a Peloton integration.",
   },
   {
     bestFor:
       "Home strength trainees who want digitally controlled resistance, automatic weight adjustments, guided classes, and performance tracking in one hardware system.",
     bottomLine:
-      "Tonal is a complete connected strength machine and content membership. Murph requires no proprietary device and serves a broader conversational role, so these products solve materially different problems.",
+      "Choose Tonal if you want the machine itself to supply resistance, guidance, and automatic performance tracking. Choose Murph if the missing tool is a private health conversation, not a home gym. For many owners, the honest answer is Tonal for lifting and Murph around it.",
     category: "fitness",
     chooseCompetitor:
       "Choose Tonal when the priority is a space-efficient home strength machine that controls resistance, guides lifting, and tracks performance automatically.",
     chooseMurph:
-      "Choose Murph when the priority is private health context, decisions, planning, and follow-through without buying a connected strength machine.",
+      "Choose Murph when the need is to place a workout beside wearable or lab signals, a symptom, or another personal record and keep the resulting decision moving without proprietary equipment.",
     competitor: {
       clinicalRole:
         "Connected consumer fitness equipment and instruction, not medical treatment or a clinical rehabilitation device.",
@@ -718,7 +730,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
       platforms:
         "Tonal hardware plus iPhone and Android companion apps, with Apple Watch, Apple Health, Strava, and Apple Music support.",
       pricing:
-        "Tonal 2 lists at $4,295, Smart Accessories at $495, installation from $295, and membership at $59.95 per month with a 12-month commitment.",
+        "Tonal 2 lists at $4,295, Smart Accessories at $495, installation from $295, and membership at $59.95 per month with a 12-month commitment. A separate third-party rental option is also advertised; its terms differ from purchase.",
       primaryJob:
         "Provide guided full-body digital strength training through a connected home gym.",
     },
@@ -746,17 +758,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "They have different primary jobs. Tonal is a connected strength-training system. Murph is a conversation-first personal health assistant and does not replace Tonal's resistance hardware.",
-        question: "Is Murph an alternative to buying Tonal?",
+          "No, not for the same job. Tonal wins if you need digitally controlled resistance, automatic weight changes, guided lifting, and sensor-based tracking. Murph cannot provide any of that hardware. Murph becomes relevant when the workout needs to sit inside a continuing conversation with other health information and next steps.",
+        question: "Can Murph replace Tonal?",
       },
     ],
-    headline: "Murph vs Tonal: a broader health conversation or connected strength hardware?",
-    lastVerified: "2026-08-30",
+    headline: "A personal health assistant or connected strength hardware?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Tonal on connected strength hardware, sensor-based personalization, coaching format, platforms, installation, membership, and total cost.",
+      "Murph is a personal health assistant with no required proprietary device; Tonal is connected strength hardware with digital resistance and automatic tracking.",
     name: "Tonal",
     overview:
-      "Tonal combines wall-mounted digital resistance, movement sensing, automatic weight selection, dynamic lifting modes, trainer-led sessions, and performance history. Much of its value comes from the physical machine. Murph does not require proprietary hardware and is not a home gym. Its role is broader conversation, context, decisions, and practical follow-through across health.",
+      "Tonal's moat is physical: wall-mounted digital resistance, movement sensing, automatic weight selection, dynamic modes, instruction, and performance history operate as one system. Murph is not a home gym or strength tracker. Its private conversation can place a Tonal summary beside other authorized information and carry a question beyond the machine.",
     relationship: "complement",
     slug: "tonal",
     sources: [
@@ -768,24 +780,25 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The hardware, accessories, installation, and required initial membership make Tonal a substantial purchase.",
-      "Wall and space requirements can rule it out for renters or some homes.",
+      "Buying Tonal requires hardware, accessories, installation, and an initial membership commitment; a separate rental path changes the upfront cost but has its own terms.",
+      "Professional wall installation and a compatible space are prerequisites; renters may also need landlord approval.",
       "Automated resistance and form signals are useful but do not turn the service into clinical supervision.",
+      "Murph avoids the hardware commitment but cannot replace Tonal's resistance, sensors, visual instruction, or automatic set record.",
     ],
     useTogether:
-      "Use Tonal to deliver and record strength sessions, while using Murph separately for broader health questions and practical support around the routine.",
+      "Let Tonal control resistance and keep the detailed lifting record. Bring Murph a session summary if the machine's numbers raise a question about recovery, a symptom, or another personal signal, then track the next action outside the gym interface. Share that summary manually.",
   },
   {
     aliases: ["CoPilot Fitness"],
     bestFor:
       "People who want a dedicated remote trainer to write workouts, communicate frequently, review movement, and adjust the plan.",
     bottomLine:
-      "trainwell is the focused choice for an ongoing human personal-training relationship. Murph is the broader personal health assistant, with more emphasis on cross-domain context and practical follow-through than trainer-led programming.",
+      "Choose trainwell if you want a real trainer to write workouts, review movement, and hold you accountable. Choose Murph if your recurring questions cross training, sleep, symptoms, meals, records, and daily logistics rather than staying inside a personal-training relationship.",
     category: "fitness",
     chooseCompetitor:
       "Choose trainwell for a matched human trainer, custom workouts, frequent messaging, movement review, and direct accountability.",
     chooseMurph:
-      "Choose Murph when the desired relationship spans many health questions and daily-life decisions rather than being centered on a personal trainer.",
+      "Choose Murph when the relationship must extend beyond exercise into accumulated health information, everyday decisions, and practical tasks that a personal trainer does not own.",
     competitor: {
       clinicalRole:
         "Remote fitness coaching and general habit support, not diagnosis, emergency care, or licensed medical treatment.",
@@ -796,22 +809,22 @@ export const FITNESS_COMPARISONS = defineComparisons([
       hardware:
         "No proprietary hardware is required. Workouts can use available home or gym equipment, with optional heart-rate devices.",
       inputs:
-        "Goals, history, schedule, equipment, injuries, workout performance, motion analysis, heart rate, habits, sleep, mood, and feedback.",
+        "Goals, experience, schedule, equipment, injuries and limitations, completed workouts, movement, heart rate, nutrition habits, and feedback.",
       insightStyle:
         "A human trainer interprets the member's performance and communication, then updates workouts and accountability.",
       platforms:
         "iPhone, Android, Apple Watch, and Wear OS, with selected health and heart-rate connections.",
       pricing:
-        "The current FAQ lists one-to-one training at $149 per month, billed as $447 each quarter, with a 14-day trial. Confirm the live checkout because other current promotional pages have shown a different rate.",
+        "The current FAQ lists one-to-one training at $149 per month, billed as $447 each quarter, with a 14-day trial.",
       primaryJob:
         "Pair a member with a dedicated human trainer for customized workouts and frequent remote accountability.",
     },
     competitorEvidence: {
       clinicalRole: [1],
-      followThrough: [2],
+      followThrough: [2, 3],
       format: [1],
       hardware: [2],
-      inputs: [2],
+      inputs: [1, 2, 3],
       insightStyle: [2],
       platforms: [1, 3],
       pricing: [3],
@@ -825,22 +838,22 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "trainwell's FAQ lists $149 per month billed quarterly, but a separate current marketing page has shown $179. Prospective members should verify the exact offer and billing schedule before subscribing.",
+          "trainwell's FAQ lists $149 per month, billed as $447 every three months, with a 14-day trial. Prospective members should still verify the live offer and billing schedule before subscribing.",
         question: "How much does trainwell cost?",
       },
       {
         answer:
-          "trainwell is the more direct option for personal training and movement feedback. Murph is broader across health context and follow-through and should not be treated as an assigned personal trainer.",
+          "trainwell wins at personal training because a human can inspect movement, exercise judgment, revise programming, and provide direct accountability. Murph is not that trainer. Murph is a better fit when the important work is organizing several kinds of health context and carrying a plan beyond the workout.",
         question: "How does trainwell compare with Murph?",
       },
     ],
-    headline: "Murph vs trainwell: broad health support or a dedicated human trainer?",
-    lastVerified: "2026-08-30",
+    headline: "A personal health assistant or a dedicated human trainer?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and trainwell on dedicated human coaching, custom workouts, messaging, movement feedback, supported devices, billing, and scope.",
+      "Murph works as a personal health assistant across health questions and practical tasks; trainwell assigns a human trainer for workouts, form review, and accountability.",
     name: "trainwell",
     overview:
-      "trainwell, formerly CoPilot, is built around a real trainer. The coach learns a member's goals and constraints, creates workouts, watches submitted movement, stays in frequent contact, and adjusts the plan. Murph's relationship is wider than personal training. It can carry health context across conversations and help with decisions, reminders, and follow-through.",
+      "trainwell, formerly CoPilot, wins when a person wants human eyes and judgment on training: the assigned trainer learns the constraints, builds sessions, reviews movement, communicates frequently, and adjusts the plan. Murph does not provide exercise supervision. It keeps non-training questions and authorized health information in one private thread and carries the practical work that falls outside the trainer relationship.",
     relationship: "alternative",
     slug: "trainwell",
     sources: [
@@ -853,30 +866,31 @@ export const FITNESS_COMPARISONS = defineComparisons([
     ],
     tradeoffs: [
       "Human coaching costs much more than self-guided workout software.",
-      "The publicly listed price is inconsistent across current trainwell pages and should be checked at purchase.",
-      "Its expertise and accountability are intentionally centered on fitness rather than every health domain.",
+      "Although the price is expressed monthly, standard billing is $447 every three months rather than month to month.",
+      "trainwell's fitness focus gives it exercise judgment Murph lacks; Murph can cover more kinds of health context but cannot review form like a trainer.",
+      "The assigned-trainer model offers continuity, but the experience depends heavily on the fit and communication rhythm between member and trainer.",
     ],
     useTogether:
-      "Let the trainwell trainer own exercise programming and form feedback, and use Murph separately for broader health questions, context, and life logistics.",
+      "Let the trainwell trainer own programming, technique, and accountability. Use Murph when that plan intersects with a medical record, eating change, sleep concern, or logistic outside the trainer's remit, and keep that external action there. This is a two-conversation workflow, not a stated integration.",
   },
   {
     aliases: ["Juggernaut AI"],
     bestFor:
       "Powerlifters and powerbuilders who want a specialized algorithmic program that adapts volume, intensity, and meet preparation.",
     bottomLine:
-      "JuggernautAI is a narrow and technically detailed strength-programming system. Murph is a broad health assistant, so the two differ most in specialization rather than in the amount of conversation they offer.",
+      "Choose JuggernautAI for powerlifting or powerbuilding programming, especially meet preparation. Choose Murph when the unmet job sits outside periodization: connecting training with other health information and carrying decisions into daily follow-through. Many lifters could use both.",
     category: "fitness",
     chooseCompetitor:
       "Choose JuggernautAI for powerlifting or powerbuilding programming, readiness-based changes, weak-point work, and meet peaking.",
     chooseMurph:
-      "Choose Murph for wider health context, questions, decisions, reminders, and follow-through that are not limited to barbell programming.",
+      "Choose Murph when readiness or barbell performance needs to be weighed beside a symptom, lab result, trip, or different health priority and the conclusion should be revisited later.",
     competitor: {
       clinicalRole:
         "Specialized strength-training software, not medical care, physical therapy, or individualized injury treatment.",
       followThrough:
         "Collects session readiness and effort feedback, adjusts upcoming work, and progresses the athlete toward strength or meet goals.",
       format:
-        "Algorithmic powerlifting and powerbuilding coach without ongoing one-to-one human coaching.",
+        "Algorithmic powerlifting and powerbuilding coach with community and coach Q&A, but no assigned ongoing one-to-one coach.",
       hardware:
         "No proprietary device is required, but effective use assumes access to barbells and other equipment appropriate to the selected program.",
       inputs:
@@ -893,7 +907,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
     competitorEvidence: {
       clinicalRole: [1],
       followThrough: [1],
-      format: [1],
+      format: [1, 2],
       hardware: [1],
       inputs: [1, 3],
       insightStyle: [1],
@@ -904,28 +918,28 @@ export const FITNESS_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. The program is generated and adjusted algorithmically. The annual plan includes one consultation, but that is not ongoing one-to-one coaching.",
+          "No assigned coach owns the program week to week. The membership includes community and coach video Q&A, and the annual plan includes one 30-minute consultation, but programming is generated and adjusted algorithmically.",
         question: "Does JuggernautAI give me a human coach?",
       },
       {
         answer:
-          "JuggernautAI is designed specifically for powerlifting and powerbuilding and can build toward a meet date. General fitness users may find its specialization unnecessary.",
+          "No. JuggernautAI presents programs for beginner through advanced lifters, although it recommends prior experience with the squat, bench press, and deadlift. Its powerlifting and powerbuilding focus may still be unnecessary for general fitness users.",
         question: "Is JuggernautAI only for competitive powerlifters?",
       },
       {
         answer:
-          "For barbell programming, JuggernautAI is the purpose-built option. Murph is for broader health context and practical support and should not be framed as a powerlifting periodization engine.",
+          "JuggernautAI. It is purpose-built for barbell volume, intensity, weak-point work, readiness adjustments, and peaking. Murph does not provide a competing periodization engine. Its advantage begins where that program ends: a private conversation across training and the rest of a person's health context.",
         question: "Which is better for powerlifting programming?",
       },
     ],
-    headline: "Murph vs JuggernautAI: broad health context or powerlifting programming?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or powerlifting programming?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and JuggernautAI on powerlifting plans, algorithmic adaptation, readiness inputs, human coaching, devices, equipment, and pricing.",
+      "Murph acts as a personal health assistant around training and other health priorities; JuggernautAI specializes in adaptive powerlifting and powerbuilding plans.",
     name: "JuggernautAI",
     overview:
-      "JuggernautAI takes detailed lifter inputs and turns them into a powerlifting or powerbuilding program. It adjusts work from readiness and effort feedback and can peak training toward a meet. Murph is not a specialized strength periodization product. Its advantage for the right person is a broader private conversation that can keep many kinds of health context in view.",
-    relationship: "alternative",
+      "JuggernautAI is purpose-built for its stated job: it turns lifter inputs into a powerlifting or powerbuilding program, adjusts work from readiness and effort, and can peak toward a meet. Murph cannot prescribe that specialist cycle. Murph keeps a private thread across workouts, authorized signals, records, notes, meals, and symptoms and supports the follow-through prompted by that combined picture.",
+    relationship: "complement",
     slug: "juggernautai",
     sources: [
       { label: "JuggernautAI", url: "https://www.juggernautai.app/" },
@@ -945,21 +959,22 @@ export const FITNESS_COMPARISONS = defineComparisons([
     tradeoffs: [
       "Its specialized programming may be excessive for someone seeking general movement or mixed-modal fitness.",
       "Readiness and effort adjustments depend on accurate self-reporting.",
-      "The price is higher than many general strength logs and hypertrophy planners.",
+      "At $34.99 monthly or $349.99 yearly, it is a substantial recurring cost for lifters who do not need specialized periodization.",
+      "Murph cannot replace JuggernautAI's powerlifting model, while JuggernautAI is not designed to hold the rest of a person's health workflow.",
     ],
     useTogether:
-      "Use JuggernautAI as the source of the lifting program, and use Murph separately for broader context, questions, and follow-through around training and life.",
+      "Keep programming, readiness ratings, and barbell progression in JuggernautAI. Bring Murph only the detail that matters if performance intersects with a symptom, lab result, travel week, or another health priority, then record the outside next step. No background transfer is assumed.",
   },
   {
     bestFor:
       "Gym users who want inexpensive algorithmic hypertrophy and strength plans, exercise guidance, load targets, and unlimited logging.",
     bottomLine:
-      "Alpha Progression is a focused and relatively affordable lifting planner. Murph has a wider conversational role and is not meant to replace detailed set, repetition, and load prescriptions.",
+      "Choose Alpha Progression if you want affordable software to build and progress a hypertrophy or strength plan. Choose Murph if programming is already handled and you need training to live in the same conversation as sleep, symptoms, records, meals, and next steps.",
     category: "fitness",
     chooseCompetitor:
       "Choose Alpha Progression for generated gym programs, hypertrophy periodization, progressive-overload targets, exercise demonstrations, and detailed lifting logs.",
     chooseMurph:
-      "Choose Murph when the need is to reason across more than strength training and carry decisions and support through an ongoing private conversation.",
+      "Choose Murph when logged effort needs to be considered beside poor recovery, travel, a symptom, or a time constraint and the decision should carry into the next week.",
     competitor: {
       clinicalRole:
         "Consumer strength and hypertrophy software, not medical care or an individualized rehabilitation plan.",
@@ -974,9 +989,9 @@ export const FITNESS_COMPARISONS = defineComparisons([
       insightStyle:
         "Generates programs and provides progressive-overload, intensity, periodization, and deload recommendations from training logs.",
       platforms:
-        "iPhone and Android. The public product materials do not emphasize a broad set of wearable integrations.",
+        "iPhone and Android.",
       pricing:
-        "Unlimited workout logging is free. Pro is $12.99 per month or $79.99 per year, with a 14-day trial on the annual plan.",
+        "Unlimited workout logging is free. Pro costs $12.99 monthly or $79.99 annually; the annual plan has a 14-day trial.",
       primaryJob:
         "Generate and progress gym-based muscle and strength programs from a user's goals and training history.",
     },
@@ -1004,17 +1019,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Alpha Progression is more specialized for hypertrophy plans, exercise selection, and progressive overload. Murph is more relevant for broader health context and follow-through outside the workout log.",
+          "Alpha Progression wins on hypertrophy planning, exercise selection, progressive overload, deloads, and detailed logging. Murph does none of those set by set. Murph is the better fit when the problem starts outside the workout log and requires other health information plus follow-up that can be revisited.",
         question: "What separates Alpha Progression from Murph?",
       },
     ],
-    headline: "Murph vs Alpha Progression: health support or algorithmic gym plans?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or a set-by-set lifting plan?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph with Alpha Progression on hypertrophy programming, progressive overload, workout logging, coaching type, platforms, equipment, and price.",
+      "As a personal health assistant, Murph handles decisions outside the set log; Alpha Progression generates hypertrophy programs, load targets, progression, and deloads.",
     name: "Alpha Progression",
     overview:
-      "Alpha Progression concentrates on resistance training. It can generate a program, recommend set weights and repetition ranges, periodize work, manage deloads, and learn from logged effort. That focused structure is useful for independent lifters. Murph approaches the person more broadly, using conversation and health context to help with decisions and practical follow-through.",
+      "Alpha Progression wins inside the lifting session: it can generate the program, recommend weights and repetition ranges, periodize work, schedule deloads, and learn from logged effort. Murph is not a lifting planner or log. Its value is keeping the decision around that program connected to other authorized information and visible beyond the session.",
     relationship: "alternative",
     slug: "alpha-progression",
     sources: [
@@ -1030,23 +1045,23 @@ export const FITNESS_COMPARISONS = defineComparisons([
     ],
     tradeoffs: [
       "Algorithmic programming does not include a human trainer's observation or accountability.",
-      "Its public integration story is narrower than that of some larger fitness platforms.",
-      "The product is optimized for resistance training rather than mixed health and lifestyle questions.",
+      "Alpha Progression is intentionally centered on gym-based strength and hypertrophy, not the rest of a person's health workflow.",
+      "Alpha Progression's resistance-training focus is a strength; Murph has no comparable load prescription, exercise library, or set log.",
     ],
     useTogether:
-      "Use Alpha Progression for the training plan and log, then use Murph separately for wider context, decisions, reminders, and questions around the routine.",
+      "Keep the program, loads, repetitions, and effort ratings in Alpha Progression. Bring Murph a concise result if logged effort clashes with recovery, travel, a symptom, or available time, then revisit the decision after another training week. Share only what matters; no sync is claimed.",
   },
   {
     aliases: ["Strong Workout Tracker"],
     bestFor:
       "Lifters who already know how they want to train and need a fast, flexible log for routines, sets, progress, and rest timers.",
     bottomLine:
-      "Strong is a streamlined manual strength log rather than a coach. Murph is a broader conversational assistant rather than a set-by-set gym tracker, which makes the products complementary for many lifters.",
+      "Choose Strong if you already own the training plan and want a fast set-by-set record. Choose Murph if the missing record is not another set, but the conversation connecting workouts with other health information and what you intend to do next. Many lifters can use both.",
     category: "fitness",
     chooseCompetitor:
       "Choose Strong when you want to build your own routines, record every set quickly, time rests, and review lifting progress.",
     chooseMurph:
-      "Choose Murph when your questions and follow-through extend beyond the mechanics of a strength-training log.",
+      "Choose Murph when a pattern in the lifting log raises a question about recovery, food, a symptom, or the weekly schedule and the answer needs to persist beyond one session.",
     competitor: {
       clinicalRole:
         "A fitness record and planning tool, not coaching, diagnosis, medical treatment, or rehabilitation.",
@@ -1091,17 +1106,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Strong is much more precise for recording exercises, sets, repetitions, and weights. Murph has a wider conversational and follow-through role and is not a replacement for a dedicated lifting log.",
+          "Strong wins on speed and precision for routines, exercises, sets, repetitions, weights, rest timers, and charts. Murph does not replace that source of truth. Murph becomes useful when you need to ask what the workout means alongside other health information and make the answer actionable.",
         question: "How does Strong differ from Murph?",
       },
     ],
-    headline: "Murph vs Strong: a broad health conversation or a focused lifting log?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or a focused lifting log?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Strong Workout Tracker on manual logging, routines, coaching, progress charts, Apple Watch support, free limits, and Pro pricing.",
+      "Murph serves as a personal health assistant around the routine; Strong is the focused manual log for sets, weights, rest timers, and lifting history.",
     name: "Strong",
     overview:
-      "Strong is built for lifters who want to record exactly what they did. Users construct routines, log sets, track effort and body measurements, review charts, and export their history. It does not claim to be a personal coach. Murph has a broader job: helping a person understand context, make decisions, and follow through across health through conversation.",
+      "Strong does one job cleanly: lifters build routines, record every set, track effort and measurements, review charts, and export the history. That manual control is the reason to choose it, and Murph has no equivalent gym interface. Murph is a private health assistant in messaging and on the web that can combine a workout summary with other shared or authorized context and carry a question into a decision and next step.",
     relationship: "different-role",
     slug: "strong",
     sources: [
@@ -1118,22 +1133,22 @@ export const FITNESS_COMPARISONS = defineComparisons([
     tradeoffs: [
       "Manual logging gives the user control but assumes they already have a sensible training plan.",
       "The free three-routine limit can be restrictive for lifters with several training days or phases.",
-      "Strong offers training records rather than human feedback or broad health guidance.",
+      "Murph cannot match Strong's set-entry speed, rest timer, lifting charts, or CSV export.",
     ],
     useTogether:
-      "Use Strong as the detailed source of truth for workouts, and use Murph separately for broader questions, planning, and practical follow-through around the routine.",
+      "Keep Strong as the detailed source of truth for the session. Bring Murph only the pattern that raises a recovery, nutrition, symptom, or calendar question, then store the decision for comparison after a later workout. This is a deliberate manual handoff.",
   },
   {
     aliases: ["Hevy Workout Tracker"],
     bestFor:
       "Lifters who want detailed workout logging plus a social feed, routine discovery, progression suggestions, and broad device support.",
     bottomLine:
-      "Hevy is a social strength log with a rule-based workout generator. Murph is a private health conversation with broader context, so privacy, community, and training detail are central to the choice.",
+      "Choose Hevy if you want a detailed lifting log, rule-based programming, and motivation from other lifters. Choose Murph if you want a private health assistant that can discuss training alongside sleep, symptoms, meals, records, or schedule and keep plans moving. Murph is not a set tracker or lifting network.",
     category: "fitness",
     chooseCompetitor:
       "Choose Hevy for set-by-set lifting records, shared routines, social motivation, progress charts, and a structured plan generator.",
     chooseMurph:
-      "Choose Murph when private contextual support across health matters more than a public or friend-based fitness log.",
+      "Choose Murph when the useful inputs include not just workouts but sleep, symptoms, meals, labs, records, and notes, and you want the resulting decision kept in a private thread with a next step.",
     competitor: {
       clinicalRole:
         "Consumer fitness logging and planning, not medical care, diagnosis, or individualized clinical exercise treatment.",
@@ -1178,17 +1193,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Hevy is more useful for detailed lifting records, program sharing, and a social feed. Murph is private by default and designed for broader health context and follow-through rather than a fitness network.",
+          "Choose Hevy if seeing friends train, sharing routines, and publishing progress will motivate you. Choose Murph if accountability should come from a private plan, reminder, or check-in grounded in more than gym activity. Murph does not replace Hevy's lifting feed or set log.",
         question: "Should I use Hevy or Murph for accountability?",
       },
     ],
-    headline: "Murph vs Hevy: private health context or a social workout log?",
-    lastVerified: "2026-08-30",
+    headline: "A private health assistant or a social workout log?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Hevy on social workout logging, Hevy Trainer, progressive overload, privacy, devices, integrations, free access, and Pro pricing.",
+      "Murph is a private personal health assistant spanning more than lifting; Hevy provides detailed strength logging, rule-based plans, and a social feed.",
     name: "Hevy",
     overview:
-      "Hevy combines a capable lifting log with a social network. Members can publish workouts, follow friends, share routines, track progress, and use Hevy Trainer for rule-based programming. Murph is private by default and is not built as a social lifting feed. Its role is to carry a broader health conversation and help with decisions and follow-through.",
+      "Hevy's advantage is the combination Murph does not offer: precise strength logging plus a network where lifters can publish workouts, follow friends, and share routines. Hevy Trainer also adds transparent rule-based programming. Murph is private by default and uses conversation, shared records, and authorized signals to support personal decisions, ongoing experiments, and optional group help beyond the lifting feed.",
     relationship: "different-role",
     slug: "hevy",
     sources: [
@@ -1200,23 +1215,23 @@ export const FITNESS_COMPARISONS = defineComparisons([
       { label: "Hevy pricing", url: "https://hevy.com/pricing" },
     ],
     tradeoffs: [
-      "Social sharing can be motivating, but it is a different privacy posture from a private health conversation.",
-      "Rule-based programming is less individualized than ongoing feedback from a human coach.",
-      "The product is strongest for resistance training rather than broad health questions.",
+      "Hevy's social layer can motivate, but people who do not value feeds, follows, likes, or comments may prefer a simpler private workflow.",
+      "Hevy Trainer follows defined rules and logged inputs; it is not technique observation or an assigned coach's judgment.",
+      "Murph offers neither Hevy's set-by-set log nor its lifting community, while Hevy does not provide the same cross-domain private health workflow.",
     ],
     useTogether:
-      "Keep the detailed workout and optional social record in Hevy, and use Murph separately for private questions, broader context, and follow-through.",
+      "Log and optionally share the workout in Hevy. Move to Murph only when a private concern or non-training signal changes the next decision, and keep the sensitive detail and follow-up in that conversation. No direct connection is claimed.",
   },
   {
     bestFor:
       "Runners, cyclists, and multi-sport athletes who want activity records, routes, segments, analysis, and a large social network.",
     bottomLine:
-      "Strava is the stronger activity record, route, and social competition platform. Murph is the broader private health relationship and does not replace Strava's GPS maps, segments, or athlete network.",
+      "Choose Strava for the activity record, routes, segments, analysis, and athlete network. Choose Murph for the private conversation after the upload, when the activity raises a question that crosses sport and another part of health.",
     category: "fitness",
     chooseCompetitor:
       "Choose Strava for GPS activity history, routes, maps, segments, leaderboards, clubs, training analysis, and broad device compatibility.",
     chooseMurph:
-      "Choose Murph when the need is a private conversation that can put activity in wider context and help with decisions and practical follow-through.",
+      "Choose Murph when an activity raises a private question about recovery, a symptom pattern, a nutrition change, or a longer-term health goal and the conclusion should remain easy to revisit.",
     competitor: {
       clinicalRole:
         "A consumer activity, analysis, route, and social platform, not medical care or individualized clinical training advice.",
@@ -1233,7 +1248,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
       platforms:
         "iPhone, Android, web, Apple Watch, and a large ecosystem of compatible devices and apps.",
       pricing:
-        "A free tier is available. The U.S. individual subscription is $11.99 per month or $79.99 per year, with a 30-day trial for eligible new subscribers.",
+        "A free tier is available. The U.S. individual subscription costs $11.99 monthly or $79.99 annually. Eligible new subscribers receive a 30-day trial.",
       primaryJob:
         "Record, analyze, map, discover, and socially share activities across many sports.",
     },
@@ -1251,7 +1266,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Not primarily. Strava offers goals, analysis, routes, and an AI-powered Athlete Intelligence feature, but it is not normally a dedicated human or algorithmic daily training-plan coach.",
+          "Strava offers goals, routes, performance analysis, and Athlete Intelligence summaries, but its core product is an activity record and athlete network rather than an assigned coach or a specialist watch-ready training plan.",
         question: "Is Strava a personal training coach?",
       },
       {
@@ -1261,17 +1276,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Strava is purpose-built for activity files, maps, segments, routes, leaderboards, and an athlete network. Murph is purpose-built for a broader private health conversation and practical support.",
+          "Strava wins on GPS files, maps, segments, routes, leaderboards, device compatibility, and social discovery. Murph cannot reproduce that network or activity analysis. Murph is useful when the next question is private, crosses more than sport, and should lead to a decision or next step.",
         question: "How is Strava different from Murph?",
       },
     ],
-    headline: "Murph vs Strava: private health support or a social activity platform?",
-    lastVerified: "2026-08-30",
+    headline: "A private health assistant or a social activity platform?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Strava on activity tracking, routes, segments, social features, coaching, devices, integrations, privacy, and subscription pricing.",
+      "After an activity, Murph is the personal health assistant for private follow-up; Strava provides the GPS record, routes, segments, analysis, and athlete network.",
     name: "Strava",
     overview:
-      "Strava is where many athletes keep and share the record of what they did. It brings together GPS activities, routes, segments, leaderboards, clubs, goals, and training analysis across a wide device ecosystem. Murph is not an activity-file network. It is a private personal health assistant that can help someone understand context, make decisions, and follow through across more than sport.",
+      "Strava wins as the athlete's public or private activity ledger: it receives files from a wide device ecosystem, maps routes, ranks segments, analyzes training, and connects clubs and friends. Murph is not an activity-file network. It is a private assistant that can combine a shared workout summary with conversation, records, notes, meals, symptoms, and authorized signals, then support the plan or follow-up that results.",
     relationship: "complement",
     slug: "strava",
     sources: [
@@ -1286,33 +1301,34 @@ export const FITNESS_COMPARISONS = defineComparisons([
       "Social comparison and public activity sharing will not suit everyone, although Strava provides privacy controls.",
       "Many of the most useful route, segment, and analysis features require a subscription.",
       "Training metrics and AI summaries are not a substitute for clinical interpretation or a dedicated coach.",
+      "Murph does not offer Strava's GPS maps, segments, leaderboards, route discovery, or large athlete network.",
     ],
     useTogether:
-      "Use Strava for the activity record, routes, analysis, and community, and use Murph separately for private questions and context around training and health.",
+      "Keep the full activity file, route, segments, analysis, and social record in Strava. Bring Murph a relevant summary if the activity raises a private recovery question, recurring symptom, dietary change, or longer-term goal, then preserve the conclusion there. No direct Strava connection is stated.",
   },
   {
     bestFor:
       "Runners preparing for a first event or a personal best who want a structured plan delivered to a watch with pace and distance guidance.",
     bottomLine:
-      "Runna is the more specific choice for an adaptive running plan from 5K through ultramarathon. Murph is broader and conversational, with less emphasis on watch-ready run prescriptions.",
+      "Choose Runna if the job is reaching a race start line with a structured, watch-ready plan. Choose Murph if the run plan already exists and the harder questions involve sleep, symptoms, meals, records, schedule, and what to do next.",
     category: "fitness",
     chooseCompetitor:
       "Choose Runna for a coach-designed running plan, structured sessions, pace targets, watch guidance, strength support, and race progression.",
     chooseMurph:
-      "Choose Murph when running is one part of a wider set of health questions, decisions, constraints, and follow-through needs.",
+      "Choose Murph when a run needs to be discussed beside another health signal and the decision should carry into the next week's review or a personal experiment.",
     competitor: {
       clinicalRole:
         "Consumer run-training software, not medical care, injury diagnosis, or individualized physical therapy.",
       followThrough:
-        "Schedules runs and strength sessions, sends workouts to supported watches, tracks completion, and updates plan guidance from progress.",
+        "Schedules runs and strength sessions, sends workouts to supported watches, records progress, and keeps the runner working through a goal- and schedule-specific plan.",
       format:
         "Algorithmic running plans designed by human coaches, without an assigned one-to-one coach in the standard membership.",
       hardware:
         "A phone is sufficient, while a compatible GPS watch makes structured pace, distance, and live cue delivery more useful.",
       inputs:
-        "Race goal, distance, event date, current ability, recent times, running days, availability, terrain, completed workouts, and performance.",
+        "Race goal, distance, event date, current ability, recent times, running days, availability, and terrain.",
       insightStyle:
-        "Builds a periodized running schedule with target paces and adapts recommendations as the athlete logs training.",
+        "Builds a periodized running schedule with target paces from the runner's goal, current ability, availability, and selected plan settings.",
       platforms:
         "iPhone and Android, with documented Apple Watch, Garmin, Fitbit, COROS, Suunto, and Strava support.",
       pricing:
@@ -1334,7 +1350,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Human coaches help design Runna's training approach, but the standard product generates and adjusts plans through software rather than assigning a private coach.",
+          "No. Human coaches design Runna's training approach and its support team can answer plan questions, but the standard product does not assign each member a private coach.",
         question: "Does Runna include a real personal running coach?",
       },
       {
@@ -1344,17 +1360,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Runna is more purpose-built for race plans, pace targets, and watch-ready workouts. Murph is more useful for broader health context and ongoing support beyond the running plan.",
+          "Runna. It is purpose-built for race plans, target paces, structured sessions, watch delivery, and progression. Murph cannot replace that running engine. Murph becomes useful alongside it when a training decision depends on other health information or needs a reminder and later review.",
         question: "Which is more useful for race training, Runna or Murph?",
       },
     ],
-    headline: "Murph vs Runna: broad health support or a personalized running plan?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or a personalized running plan?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Runna on adaptive race plans, watch workouts, pace guidance, human coaching, supported devices, Strava, trials, and pricing.",
+      "Murph is a personal health assistant for context around running; Runna builds personalized race plans with pace targets and watch-ready sessions.",
     name: "Runna",
     overview:
-      "Runna turns a race goal, current ability, schedule, and training history into a structured running plan. It delivers pace and distance targets to supported watches and includes strength work around the run schedule. Murph does not serve as the same kind of periodized run-plan engine. Its role is a wider health conversation with context and practical follow-through.",
+      "Runna is strongest on a runner's core workflow: enter the event, ability, and schedule; receive a periodized plan; send structured pace and distance targets to a watch; and follow the resulting calendar. It also includes runner-specific strength and mobility work plus form, nutrition, and injury-oriented education. Murph is not a run-plan engine. It keeps the private reasoning and authorized context around the calendar together so decisions survive beyond one training week.",
     relationship: "alternative",
     slug: "runna",
     sources: [
@@ -1366,31 +1382,32 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Software adaptation cannot observe technique or injury risk like an experienced in-person coach or clinician.",
+      "Runna cannot observe technique or diagnose an injury; its public form, nutrition, and injury guidance is not individualized clinical care.",
       "The subscription is specialized around running, with strength work playing a supporting role.",
       "Accurate goals and recent performance inputs matter for useful pace recommendations.",
+      "Murph does not supply Runna's race progression, pace prescriptions, or watch-ready sessions.",
     ],
     useTogether:
-      "Use Runna to own the run schedule and watch workouts, and use Murph separately for broader health context, questions, and practical follow-through.",
+      "Keep the race schedule, paces, and completed sessions in Runna. Bring Murph the relevant constraint if travel, disrupted sleep, a new symptom, or a competing obligation changes execution, then keep that decision visible between runs. Move those details manually.",
   },
   {
     aliases: ["Fitness+"],
     bestFor:
-      "Apple users who want polished trainer-led workouts, meditation, music, and on-screen metrics across familiar Apple devices.",
+      "iPhone users who want polished trainer-led workouts, meditation, music, and on-screen metrics across familiar Apple devices.",
     bottomLine:
-      "Apple Fitness+ is a well-priced class and meditation library designed for the Apple ecosystem. Murph is a broader private health assistant rather than a streaming workout service.",
+      "Choose Apple Fitness+ when you want polished workouts and meditations you can start immediately on Apple devices. Choose Murph when you need to connect activity with other health information and carry a personal decision beyond the class. Murph does not stream workouts.",
     category: "fitness",
     chooseCompetitor:
       "Choose Apple Fitness+ for guided video and audio workouts, Custom Plans, Apple Watch metrics, music, and easy family sharing.",
     chooseMurph:
-      "Choose Murph when the priority is an ongoing conversation that uses broader personal context and helps with decisions, reminders, and follow-through.",
+      "Choose Murph when the starting point is your own question, workout, sleep, symptom, meal, record, or wearable signal and the useful result is a decision you can revisit, not another class recommendation.",
     competitor: {
       clinicalRole:
         "Consumer fitness and mindfulness content, not medical care or individualized clinical exercise prescription.",
       followThrough:
         "Custom Plans, recommendations, workout history, collections, schedules, and Apple device notifications help members keep a routine.",
       format:
-        "Prerecorded human-trainer classes and meditation with light algorithmic recommendations, not a one-to-one coach.",
+        "On-demand video and audio workouts and meditations led by human trainers, with recommendations and Custom Plans but no assigned one-to-one coach.",
       hardware:
         "An iPhone is required. Apple Watch is optional, while selected Apple or Bluetooth heart-rate hardware can add live metrics.",
       inputs:
@@ -1400,7 +1417,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
       platforms:
         "iPhone, iPad, Apple TV, Apple Watch, and AirPlay-compatible screens, with Apple ecosystem health and workout metrics.",
       pricing:
-        "$9.99 per month or $79.99 per year, with one month free for eligible new subscribers and sharing with up to five family members.",
+        "$9.99 monthly or $79.99 annually. Eligible new subscribers receive one month free, and a membership can be shared with up to five family members.",
       primaryJob:
         "Stream trainer-led workouts and meditations with an integrated Apple device experience.",
     },
@@ -1428,17 +1445,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Fitness+ is more useful for follow-along classes and meditations on Apple devices. Murph is more useful for private conversation and context across a wider range of health needs.",
-        question: "What is the main difference between Murph and Fitness+?",
+          "No. Fitness+ is the better place to choose and follow a trainer-led workout or meditation. Murph can help decide how that routine fits the rest of a person's health context and keep later actions moving, but it does not stream classes.",
+        question: "Can Murph replace Apple Fitness+ workouts?",
       },
     ],
-    headline: "Murph vs Apple Fitness+: health context or an Apple workout library?",
-    lastVerified: "2026-08-30",
+    headline: "A personal health assistant or an Apple workout library?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Apple Fitness+ on trainer-led classes, Custom Plans, Apple Watch metrics, device requirements, human coaching, trials, and pricing.",
+      "For decisions beyond the workout, Murph is a personal health assistant; Apple Fitness+ streams trainer-led classes and meditations across Apple devices.",
     name: "Apple Fitness+",
     overview:
-      "Apple Fitness+ offers trainer-led strength, HIIT, cycling, yoga, Pilates, dance, walking, running, meditation, and other sessions inside the Apple ecosystem. Recommendations and Custom Plans organize that library, while an Apple Watch can place metrics on screen. Murph is not a streaming workout catalog. It is an ongoing private health conversation oriented around context, decisions, and follow-through.",
+      "Apple Fitness+ is strongest on polished content inside the Apple ecosystem: trainer-led workouts and meditations, music, live metrics from supported hardware, recommendations, and Custom Plans. Murph is not a streaming service. It is a private health assistant in messaging and on the web that can keep a workout in context with authorized health information, then support the decision or check-in that follows.",
     relationship: "different-role",
     slug: "apple-fitness-plus",
     sources: [
@@ -1458,22 +1475,22 @@ export const FITNESS_COMPARISONS = defineComparisons([
     tradeoffs: [
       "An iPhone is required, making the service a poor fit for people outside the Apple ecosystem.",
       "The content is polished but does not include a dedicated coach reviewing individual form and progress.",
-      "Custom Plans organize classes but provide less detailed progression than specialized strength or running programs.",
+      "Fitness+ gives a person a polished session to do now; Murph can help decide how it fits the wider picture, but it supplies neither the video class nor a progressive strength or race program.",
     ],
     useTogether:
-      "Use Apple Fitness+ for the workouts and meditations, and use Murph separately to discuss how the routine fits broader health context and daily life.",
+      "Choose and complete the workout or meditation in Fitness+. Use Murph if class selection keeps colliding with recovery, a symptom, eating habits, or available time, and preserve whatever you decide for the next week. This comparison does not claim Fitness+ sync.",
   },
   {
     aliases: ["RP Hypertrophy"],
     bestFor:
       "Intermediate and advanced lifters who want a detailed, autoregulated hypertrophy program with muscle priorities and fatigue-based volume changes.",
     bottomLine:
-      "RP Hypertrophy App is the more specialized muscle-building program. Murph is the broader personal health assistant and should not be presented as a substitute for hypertrophy periodization.",
+      "Choose RP Hypertrophy App when muscle gain and detailed mesocycle control are the job. Choose Murph when the mesocycle collides with recovery, a new symptom, travel, or a competing priority and the decision needs somewhere to live. Murph does not replace RP's program.",
     category: "fitness",
     chooseCompetitor:
       "Choose RP Hypertrophy App for mesocycle design, muscle-priority templates, set and load guidance, fatigue feedback, volume changes, and deloads.",
     chooseMurph:
-      "Choose Murph when training questions sit inside a wider health context and you value ongoing conversation and practical follow-through.",
+      "Choose Murph when the useful question crosses beyond the mesocycle, involves another health priority, and needs to remain visible between training sessions.",
     competitor: {
       clinicalRole:
         "Consumer hypertrophy-training software, not medical care, physical therapy, or individualized injury management.",
@@ -1518,17 +1535,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "RP is more specific for muscle-priority mesocycles, autoregulated volume, and deloads. Murph is more relevant for broader questions and follow-through across health and life.",
-        question: "How does RP Hypertrophy App differ from Murph?",
+          "No. RP is purpose-built for muscle priorities, volume changes, progression, and deloads inside a hypertrophy mesocycle. Murph can help reason about constraints around that program and keep later actions moving, but it should not be treated as RP's programming system.",
+        question: "Can Murph replace RP Hypertrophy App's programming?",
       },
     ],
-    headline: "Murph vs RP Hypertrophy App: broad support or muscle-gain periodization?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or hypertrophy periodization?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and RP Hypertrophy App on mesocycles, autoregulated volume, fatigue feedback, coaching type, platforms, equipment, and pricing.",
+      "Murph is a personal health assistant outside the mesocycle; RP Hypertrophy App autoregulates muscle-building volume, progression, and deloads.",
     name: "RP Hypertrophy App",
     overview:
-      "RP Hypertrophy App is designed around the logic of a muscle-building mesocycle. It uses training performance, pump, soreness, workload, and recovery ratings to alter volume and progression over time. That is a deeper hypertrophy-specific workflow than Murph offers. Murph instead carries a broader health conversation and helps with context, decisions, and follow-through.",
+      "RP Hypertrophy App is strongest on a specific, technical workflow: build a muscle-priority mesocycle, log performance, pump, soreness, workload, and recovery, then let RP adjust volume and progression. Murph works through a private conversation rather than a mesocycle interface. It can keep other authorized information beside the plan and sustain decisions RP's feedback form does not capture.",
     relationship: "alternative",
     slug: "rp-hypertrophy-app",
     sources: [
@@ -1549,20 +1566,21 @@ export const FITNESS_COMPARISONS = defineComparisons([
       "Detailed muscle-specific feedback creates training structure but also adds logging burden.",
       "The app is focused on hypertrophy and is less suitable for mixed sport, general movement, or endurance goals.",
       "Native platform availability is less complete than the responsive web experience.",
+      "Murph can carry other context and later actions, but it will not autoregulate muscle-specific volume, prescribe the mesocycle, or time the deload the way RP does.",
     ],
     useTogether:
-      "Let RP Hypertrophy App own the mesocycle, and use Murph separately for broader context, questions, and life-fit decisions around the plan.",
+      "Let RP own the mesocycle, exercise targets, feedback ratings, and deloads. Bring Murph a concise note if those ratings miss a symptom, lab result, trip, or competing health priority, and hold the outside action there between sessions. No automatic RP link is assumed.",
   },
   {
     bestFor:
-      "Strength trainees who want a large free program marketplace, modern logging, coach-designed templates, and optional advanced planning tools.",
+      "Self-directed strength trainees who want a large free catalog of coach- and community-designed programs, set-by-set logging, progression tools, and an optional plan builder.",
     bottomLine:
-      "Boostcamp offers more concrete strength programs and logging tools, much of it free. Murph provides a wider health conversation rather than a marketplace of lifting templates.",
+      "Choose Boostcamp when you need a strength program or detailed lifting log; much of that workflow is free. Choose Murph when the hard part is making a template fit personal constraints and remembering the decision afterward. Murph is not a program marketplace.",
     category: "fitness",
     chooseCompetitor:
       "Choose Boostcamp for coach-designed programs, community templates, a detailed lifting log, progression tools, and custom program building.",
     chooseMurph:
-      "Choose Murph when the central need is broader personal context, health questions, decisions, reminders, and follow-through.",
+      "Choose Murph when the difficult part is not finding a template but fitting it around a recovery pattern, changing schedule, or another health goal and sustaining the decision afterward.",
     competitor: {
       clinicalRole:
         "Consumer fitness programming and logging, not medical care, diagnosis, or clinical exercise supervision.",
@@ -1577,7 +1595,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
       insightStyle:
         "Applies the chosen program's progression rules, reports lifting performance, and can generate a starter plan from structured preferences.",
       platforms:
-        "iPhone, Android, and a web program builder. Boostcamp's current official pages conflict on Apple Watch support: its features page documents a companion app, offline logging, and HealthKit heart-rate logging, while its homepage says no watch app is available.",
+        "iPhone, Android, and a web program builder. Boostcamp's official pages currently disagree on Apple Watch support, so confirm watch availability before relying on it.",
       pricing:
         "Core programs and logging are free. Pro is $59.99 per year, advertised as the equivalent of $4.99 per month when billed annually, with a seven-day trial, or $14.99 month-to-month with no trial.",
       primaryJob:
@@ -1607,17 +1625,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Boostcamp is more purpose-built for selecting, creating, and logging strength programs. Murph is more useful for a broader private health conversation and practical support beyond the training template.",
-        question: "What does Boostcamp do that Murph does not?",
+          "No. Boostcamp is the better place to select or build a program, follow progression rules, and record every set. Murph can help with other context and later follow-through, but it does not provide Boostcamp's program catalog or lifting log.",
+        question: "Can Murph replace a Boostcamp program and workout log?",
       },
     ],
-    headline: "Murph vs Boostcamp: personal health context or strength program library?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or a strength program library?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Boostcamp on free strength programs, workout logging, coach templates, plan generation, platform caveats, Pro features, and pricing.",
+      "A personal health assistant, Murph helps fit training into the rest of life; Boostcamp offers a large free strength-program library and set-by-set log.",
     name: "Boostcamp",
     overview:
-      "Boostcamp makes structured strength training accessible through a large catalog of free coach-designed and community programs, a modern workout tracker, and tools for custom programming. Some personalization is algorithmic, but the standard product is not one-to-one coaching. Murph's value sits outside the template library: a wider private health conversation with context and follow-through.",
+      "Boostcamp answers two concrete questions: 'What structured program should I run?' and 'Where should I log it?' Its large free library, tracker, progression rules, and custom builder are genuine advantages. Murph approaches a different problem through an ongoing private conversation: how the chosen template coexists with authorized health information, a changing week, and decisions that need to persist.",
     relationship: "different-role",
     slug: "boostcamp",
     sources: [
@@ -1639,21 +1657,22 @@ export const FITNESS_COMPARISONS = defineComparisons([
       "The very large program catalog can require more self-selection than a dedicated coach relationship.",
       "Coach-designed templates are not the same as a coach adapting the plan to one member.",
       "The deepest analytics and custom planning tools require Pro.",
+      "Murph can help choose around personal constraints and sustain later actions, but it offers no equivalent program marketplace, set log, or progression engine.",
     ],
     useTogether:
-      "Use Boostcamp for program selection and the lifting log, then use Murph separately for broader questions, life fit, and follow-through around training.",
+      "Select, run, and log the program in Boostcamp. Turn to Murph if the template conflicts with a recovery pattern, dietary change, symptom, or calendar limit, and keep the later follow-up with that discussion. The handoff is manual.",
   },
   {
     aliases: ["Shred App"],
     bestFor:
       "People who want a visually guided gym or home workout plan with algorithmic personalization, classes, and optional social motivation.",
     bottomLine:
-      "SHRED is a workout-first product with AI-personalized programming and guided classes. Murph is conversation-first and broader, with less emphasis on generating every exercise, set, rest, and tempo.",
+      "Choose SHRED when you want software to generate a polished gym or home workout and guide every exercise. Choose Murph when the guided session leaves a question involving recovery, nutrition, medical history, or scheduling and the decision must carry forward. Murph does not replace SHRED's workout player.",
     category: "fitness",
     chooseCompetitor:
       "Choose SHRED for generated training plans, follow-along exercise guidance, class energy, strength progression, and fitness community features.",
     chooseMurph:
-      "Choose Murph when an ongoing private health relationship and support across more than workouts matters most.",
+      "Choose Murph when the useful conversation begins outside the workout player and the decision should carry forward after the guided session ends.",
     competitor: {
       clinicalRole:
         "Consumer fitness programming and content, not medical care, diagnosis, or individualized rehabilitation.",
@@ -1664,18 +1683,18 @@ export const FITNESS_COMPARISONS = defineComparisons([
       hardware:
         "No proprietary device is required. Users choose gym, home, or bodyweight training based on available equipment.",
       inputs:
-        "Goals, experience, schedule, workout location, equipment, preferences, completed sessions, performance, and social participation.",
+        "Goals, experience, schedule, workout location, available equipment, preferences, completed sessions, and logged performance.",
       insightStyle:
         "Selects and progresses exercises, weights, repetitions, rest, and tempo from SHRED's training system and logged performance.",
       platforms:
-        "iPhone, Android, and Apple Watch. Public materials do not provide a comprehensive current list of external integrations.",
+        "iPhone, Android, and Apple Watch.",
       pricing:
         "A limited free experience is available. SHRED Pro is $19.99 per month or $119.99 per year, with a seven-day trial on the annual plan.",
       primaryJob:
         "Generate and guide personalized gym and home workouts with a polished visual experience.",
     },
     competitorEvidence: {
-      clinicalRole: [3],
+      clinicalRole: [4],
       followThrough: [1],
       format: [1, 3],
       hardware: [3],
@@ -1698,43 +1717,44 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "SHRED is more specialized for delivering a polished, generated workout. Murph is more useful for broader private health context, questions, and follow-through across daily life.",
-        question: "Should I choose SHRED or Murph?",
+          "No. SHRED is purpose-built to select and progress exercises, weights, repetitions, rest, and tempo and to show how to perform the session. Murph can help with the circumstances around that training and later actions, but it is not a visual workout player.",
+        question: "Can Murph generate the same workouts as SHRED?",
       },
     ],
-    headline: "Murph vs SHRED: broad health conversation or AI-personalized workouts?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or generated guided workouts?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and SHRED on AI-personalized workouts, coach-built content, gym and home plans, social features, Apple Watch, trials, and pricing.",
+      "Outside the workout player, Murph is a personal health assistant for private questions; SHRED generates and visually guides personalized gym or home sessions.",
     name: "SHRED",
     overview:
-      "SHRED builds guided gym and home workouts from coach-created training content and an algorithmic personalization layer. It can prescribe exercise order, repetitions, load, rest, and tempo while providing polished demonstrations and social features. Murph is not a visual workout player. It is a broader private health assistant designed for contextual conversation and practical follow-through.",
+      "SHRED is strongest on execution: it turns coach-built content and software personalization into a guided session with exercise order, repetitions, load, rest, tempo, and demonstrations. Murph works through private conversation rather than a visual workout player. It can place the session beside other authorized context and carry an outside decision forward, but it does not generate or display SHRED's routine.",
     relationship: "alternative",
     slug: "shred",
     sources: [
       { label: "SHRED", url: "https://www.shred.app/" },
       { label: "SHRED pricing", url: "https://www.shred.app/pricing" },
       { label: "SHRED FAQ", url: "https://www.shred.app/faq" },
+      { label: "SHRED terms of use", url: "https://www.shred.app/terms" },
     ],
     tradeoffs: [
-      "Algorithmic personalization does not provide the same judgment or feedback as an assigned human coach.",
-      "A limited public integrations list makes device and data workflows harder to evaluate before signup.",
-      "The product remains workout-centered even though it includes social and habit-forming elements.",
+      "The free tier omits personalized programming and AI progression, so SHRED's main differentiator requires Pro.",
+      "Personalization still depends on the goals, equipment, schedule, and performance a user supplies; the app cannot directly observe technique.",
+      "Murph can carry other health context and later actions, but it will not supply SHRED's guided exercise player, set prescription, or class energy.",
     ],
     useTogether:
-      "Use SHRED for guided workouts and progression, and use Murph separately for wider context, questions, reminders, and life-fit decisions.",
+      "Follow and log the workout in SHRED. Move to Murph if the guided session runs into a fatigue pattern, medical record, meal change, or time constraint, and carry that issue beyond the workout player. This does not imply an app connection.",
   },
   {
     aliases: ["JEFIT Workout Planner"],
     bestFor:
       "Strength trainees who want a mature cross-platform workout planner, a large exercise database, detailed logs, community, and optional adaptive progression.",
     bottomLine:
-      "JEFIT is the more complete cross-platform strength planner and historical log. Murph is the broader health conversation and should not be mistaken for JEFIT's exercise database or set tracker.",
+      "Choose JEFIT when you want a mature cross-platform lifting log, routine builder, exercise database, and optional adaptive mesocycle programming. Choose Murph when lifting history must be interpreted beside a different health priority and an outside action needs to persist. Murph is not a set tracker.",
     category: "fitness",
     chooseCompetitor:
       "Choose JEFIT for exercise discovery, routine building, timers, detailed workout records, progress charts, community plans, and progressive-overload guidance.",
     chooseMurph:
-      "Choose Murph when the need reaches beyond logging and programming into broader context, decisions, reminders, and ongoing support.",
+      "Choose Murph when the hard part is interpreting what surrounds the routine and keeping an outside health decision moving, not logging another set.",
     competitor: {
       clinicalRole:
         "Consumer fitness planning and tracking, not medical diagnosis, treatment, or individualized clinical exercise care.",
@@ -1769,8 +1789,8 @@ export const FITNESS_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "It can when a JEFIT Elite member selects an Adaptive Progressive Overload plan. Adaptive Mesocycle Training uses four-phase training cycles and adjusts upcoming weeks from logged load progression, completed volume, movement balance, and phase alignment. It remains algorithmic programming rather than an assigned human coach.",
-        question: "Does JEFIT automatically adapt my whole program?",
+          "For an Elite member using an Adaptive Progressive Overload plan, JEFIT reviews load progression, completed volume, movement balance, and phase alignment to adjust the upcoming week inside a four-phase cycle. It is transparent program logic, not feedback from an assigned coach.",
+        question: "What does JEFIT's Adaptive Mesocycle Training actually adapt?",
       },
       {
         answer:
@@ -1779,17 +1799,17 @@ export const FITNESS_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "JEFIT is more precise for routines, exercises, sets, timers, and strength history. Murph is more relevant for a private health conversation and follow-through beyond the workout record.",
-        question: "How is JEFIT different from Murph?",
+          "No. JEFIT is the better place for exercises, routines, sets, timers, strength history, and adaptive mesocycle programming. Murph can help interpret other context and sustain later actions, but it should not be treated as the workout record.",
+        question: "Can Murph replace JEFIT as my workout planner?",
       },
     ],
-    headline: "Murph vs JEFIT: broader health support or detailed workout planning?",
-    lastVerified: "2026-08-30",
+    headline: "A health assistant or an adaptive lifting log?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and JEFIT on workout planning, strength logs, adaptive progression, exercise library, community, watches, free access, and Elite pricing.",
+      "Murph functions as a personal health assistant around the training record; JEFIT provides a cross-platform lifting log, exercise library, and adaptive mesocycles.",
     name: "JEFIT",
     overview:
-      "JEFIT is a long-running strength planner and tracker with a large exercise database, routine tools, timers, records, reports, community programs, and apps across phone, watch, and web. JEFIT Elite also includes Adaptive Mesocycle Training with four-phase cycles and week-to-week performance-based adjustments. Murph serves a broader and more conversational role across health context and follow-through.",
+      "JEFIT combines a large exercise database, routine builder, set log, timers, reports, community programs, and phone, watch, and web access. Elite's Adaptive Mesocycle Training adds week-to-week adjustments inside four-phase cycles. Murph keeps a private conversational record around that training, using other authorized health information to sustain decisions JEFIT's lifting workflow does not own.",
     relationship: "different-role",
     slug: "jefit",
     sources: [
@@ -1809,8 +1829,9 @@ export const FITNESS_COMPARISONS = defineComparisons([
       "The large number of settings and features can feel complex for someone who wants a simple guided plan.",
       "Community routines vary in quality and should not be confused with individualized expert coaching.",
       "Adaptive Mesocycle Training requires JEFIT Elite and remains algorithmic programming rather than feedback from an assigned human coach.",
+      "Murph cannot replace JEFIT's exercise database, set and load log, timers, training history, or adaptive mesocycle logic.",
     ],
     useTogether:
-      "Use JEFIT as the routine and workout record, and use Murph separately for broader context, questions, and practical follow-through around training.",
+      "Keep routines, sets, progress, and adaptive programming in JEFIT. Bring Murph the relevant history if it raises a recovery question, symptom concern, or different health goal, then maintain the outside action in that thread. No JEFIT-to-Murph connection is claimed.",
   },
 ]);

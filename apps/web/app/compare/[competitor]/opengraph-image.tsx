@@ -35,7 +35,7 @@ export default async function ComparisonOGImage({
         headline={headline}
         headlineFontSize={resolveHeadlineFontSize(headline)}
         logoDataUri={logoDataUri}
-        subtext={comparison?.headline ?? "A source-verified look at where the products differ."}
+        subtext={comparison?.headline ?? "A source-backed look at where the products differ."}
         subtextFontSize={20}
       />
     ),

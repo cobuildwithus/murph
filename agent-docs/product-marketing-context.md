@@ -248,6 +248,15 @@ support. Do not turn data portability into a claimed native Murph integration,
 describe desk research as hands-on testing, or imply that either consumer
 product supplies diagnosis, treatment, or emergency care.
 
+Write each guide for a visitor who already understands the named competitor but
+is meeting Murph for the first time. Name the competitor's genuine advantage,
+then give a concrete keep, add, or switch decision. Murph should earn the sale
+through specific contrasts: connecting otherwise separate context, remembering
+what matters later, preparing a better decision, or carrying an agreed plan
+into ordinary life. Credible boundaries and cases where the competitor wins are
+part of the persuasion; generic superlatives, manufactured shortcomings, and a
+forced universal-winner verdict are not.
+
 ## Objections
 
 | Objection | Response |

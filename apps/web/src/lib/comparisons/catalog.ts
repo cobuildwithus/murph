@@ -8,7 +8,7 @@ import { WEARABLE_COMPARISONS } from "./data/wearables";
 import type { ComparisonEntry } from "./types";
 
 export const COMPARISON_ROUTE_PREFIX = "murph-vs-";
-export const COMPARISON_REVIEWED_ON = "2026-08-30";
+export const COMPARISON_REVIEWED_ON = "2026-08-31";
 
 export const COMPARISONS: readonly ComparisonEntry[] = [
   ...WEARABLE_COMPARISONS,

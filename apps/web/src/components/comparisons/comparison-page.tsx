@@ -53,7 +53,7 @@ export function ComparisonArticle({
           <div className="mt-10 grid gap-9 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)] lg:items-end lg:gap-18">
             <div>
               <p className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
-                Murph comparison guide
+                Murph · personal health assistant
               </p>
               <h1
                 className="mt-5 max-w-[11ch] [overflow-wrap:anywhere] text-balance font-serif text-[clamp(3.15rem,7vw,5.8rem)] font-semibold leading-[0.9] tracking-[-0.045em]"
@@ -117,7 +117,7 @@ export function ComparisonArticle({
                 className="mt-3 font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                 id={`${titleId}-answer`}
               >
-                Should you choose Murph or {comparison.name}?
+                Keep it, add Murph, or switch?
               </h2>
             </div>
             <div className="max-w-[66ch]">
@@ -149,7 +149,7 @@ export function ComparisonArticle({
             <div className="grid border-y border-[#c4a882]/35 md:grid-cols-2">
               <div className="py-7 md:pr-8">
                 <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
-                  Choose Murph when
+                  The case for Murph
                 </p>
                 <p className="mt-3 text-[0.95rem] leading-7 text-[#4d4533]">
                   {comparison.chooseMurph}
@@ -157,7 +157,7 @@ export function ComparisonArticle({
               </div>
               <div className="border-t border-[#c4a882]/35 py-7 md:border-l md:border-t-0 md:pl-8">
                 <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-                  Choose {comparison.name} when
+                  The case for {comparison.name}
                 </p>
                 <p className="mt-3 text-[0.95rem] leading-7 text-[#4d4533]">
                   {comparison.chooseCompetitor}
@@ -349,10 +349,10 @@ export function ComparisonArticle({
             <div className="flex flex-col gap-7 sm:flex-row sm:items-end sm:justify-between">
               <div className="max-w-[58ch]">
                 <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#c4a882]">
-                  The relationship matters
+                  What Murph adds
                 </p>
                 <h2 className="mt-3 font-serif text-[clamp(1.7rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]">
-                  Bring the whole picture into one conversation.
+                  Keep what works. Bring the whole picture together.
                 </h2>
                 <p className="mt-4 text-[0.92rem] leading-7 text-[#f5f0e8]/70">
                   Murph helps connect the health context you already have, decide what to try next, and keep the practical work moving.

@@ -4,19 +4,19 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
   {
     aliases: ["Guava Health"],
     bestFor:
-      "People who want a consumer health record that combines provider records, daily tracking, and shareable visit preparation in one app.",
+      "People whose first problem is collecting provider records, structured daily logs, and shareable visit information in one consumer health record.",
     bottomLine:
-      "Guava is the more record-centered choice for collecting clinical documents and structured self-tracking. Murph is the more conversation-centered choice for interpreting personal context and carrying plans forward over time.",
+      "Guava is stronger when the job is retrieving provider records, maintaining a structured health file, and preparing information to share at a visit. Murph is stronger when the unresolved job is to interpret relevant context, decide what to do, and have the same assistant revisit the plan. Murph does not replace Guava's record-retrieval workflow.",
     category: "health-data",
     chooseCompetitor:
-      "Choose Guava if your first priority is a personal health record with broad US provider connections, medication and symptom logs, correlations, an LLM-enabled assistant for searching and analyzing your data, and tools for preparing or sharing information at a medical visit.",
+      "Choose Guava if provider-record retrieval, a structured medication and symptom history, correlation charts, and a visit-ready packet are the core jobs. Its assistant also lets you search and analyze the information held in Guava.",
     chooseMurph:
-      "Choose Murph if your first priority is an ongoing private health conversation that connects context across domains and helps turn decisions into reminders, check-ins, experiments, and practical follow-through.",
+      "Choose Murph if the harder part is reasoning across records, labs, wearable signals, symptoms, meals, and workouts in natural language, then turning a decision into reminders, check-ins, or a small experiment.",
     competitor: {
       clinicalRole:
         "A consumer personal health record and tracker. Guava organizes health information but does not replace a licensed clinician or emergency care.",
       followThrough:
-        "Medication and symptom tracking, reminders, goals, visit preparation, shareable summaries, and an emergency card.",
+        "Structured medication and symptom logs, reminders, goals, visit preparation, controlled sharing, and a Premium Emergency Card.",
       format:
         "A structured health timeline, record library, trackers, charts, correlations, and an assistant inside mobile and web apps.",
       hardware:
@@ -24,7 +24,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       inputs:
         "Medical records, labs, imaging documents, medications, symptoms, food, mood, menstrual cycle, activity, sleep, and connected-device data.",
       insightStyle:
-        "Charts and correlations surface relationships. Guava Assistant is an LLM-enabled chat interface that can search and analyze a user's Guava data, answer questions, log entries and reminders, explore correlations, help navigate the app, and prepare for visits.",
+        "Charts and correlations sit beside an AI assistant that can log entries and reminders, search and analyze Guava data, answer questions about that history, navigate features, and prepare visits. Guava warns that its generative AI is not always perfect.",
       platforms:
         "iOS, Android, and web, including a progressive web app experience.",
       pricing:
@@ -34,7 +34,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     },
     competitorEvidence: {
       clinicalRole: [1, 5],
-      followThrough: [5],
+      followThrough: [1, 2, 5],
       format: [5],
       hardware: [3],
       inputs: [4],
@@ -46,27 +46,27 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Guava combines a personal health record and structured tracker with an LLM-enabled assistant for working with data inside Guava. Murph centers the overall experience on an ongoing health conversation, broader authorized context, planning, and follow-through.",
+          "Guava starts with the record: it retrieves, organizes, tracks, and shares health information, with an assistant for working with data inside Guava. Murph starts with the relationship: conversation is the main interface, and the work continues into decisions, plans, reminders, and check-ins.",
         question: "What is the main difference between Murph and Guava?",
       },
       {
         answer:
-          "Guava lists connections for provider systems such as MyChart, CommonWell, Medicare, Veterans Affairs, athenahealth, and Healow, plus sources including Apple Health, Health Connect, Fitbit, Garmin, Oura, WHOOP, Withings, and Dexcom. Availability can depend on the provider, device, region, and data type.",
+          "Guava lists MyChart, CommonWell, Medicare, Veterans Affairs, athenahealth, and Healow, plus Apple Health, Health Connect, Fitbit, Garmin, Oura, WHOOP, Withings, and Dexcom. Its direct Connect Provider feature is US-specific; outside the US, document upload and other sources remain available. Verify the exact provider, metric, and route you need.",
         question: "What data sources does Guava support?",
       },
       {
         answer:
-          "Yes. Guava offers a free plan for core record and tracking features. Its official plans page lists Premium at $8 monthly or $78 annually for additional analytics and convenience features.",
+          "Yes. The free plan includes portal and device sync, tracking, summaries and correlations, sharing, and uploads. Premium costs $8 per month or $78 per year and adds automatic insights, Guava Assistant AI, automated lab extraction, family profile managers, photo food analysis, and an Emergency Card.",
         question: "Is Guava free?",
       },
     ],
-    headline: "Murph vs Guava: health assistant or personal health record?",
-    lastVerified: "2026-08-30",
+    headline: "Health assistant or personal health record?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Guava on medical records, symptom tracking, connected health data, AI assistance, platforms, pricing, and ideal use cases.",
+      "Guava builds a personal health record from portals, logs, and devices; Murph is a personal health assistant that interprets context and carries decisions forward.",
     name: "Guava",
     overview:
-      "Guava is a consumer health record and tracker designed to gather medical records, daily logs, and connected-device data in one place. Its strongest differentiators are broad record retrieval, structured tracking, correlations, an LLM-enabled assistant for working with Guava data, visit preparation, and controlled sharing. Murph approaches the problem through an ongoing conversation that can use authorized health context to explain patterns and help a person follow through.",
+      "Guava combines provider-record retrieval, uploaded documents, structured daily tracking, correlations, an AI assistant, visit preparation, and controlled sharing in one record-centered product. That makes it stronger than Murph for building a clinician-ready health file. Murph's advantage is a conversation-first relationship that can begin with a question, use relevant authorized context, weigh options, and keep the chosen next step moving; it is not a denser record wallet.",
     relationship: "alternative",
     slug: "guava",
     sources: [
@@ -92,24 +92,26 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Guava remains oriented around its record wallet and structured tracker even with its LLM-enabled assistant, while Murph is built around an ongoing conversation and continued support.",
-      "Some Guava clinical connections and record-retrieval features are most useful in the United States.",
-      "Advanced Guava analysis and convenience features require Premium, while the free plan covers the core experience.",
+      "Guava is more purpose-built for retrieving provider records and assembling information for a visit. Murph should not be chosen as a substitute for a dedicated record wallet.",
+      "Guava's structured logs create a consistent history when maintained carefully, but they also ask the member to keep the tracker current.",
+      "Guava's direct Connect Provider feature is limited to US providers; Guava says people elsewhere can still upload records and enter information manually.",
+      "Murph makes explanation and follow-through the center of the experience, while Guava may remain the better fit for someone who wants charts, documents, and shareable summaries to stay in the foreground.",
+      "Guava's assistant, automatic insights and lab extraction, family profile managers, photo food analysis, and Emergency Card require Premium.",
     ],
   },
   {
     bestFor:
-      "People managing chronic symptoms, medications, routines, or care plans who value detailed self-tracking and printable health reports.",
+      "People managing chronic symptoms, medications, routines, or care plans who will use detailed daily tracking, adherence tools, and appointment reports.",
     bottomLine:
-      "CareClinic is a detailed condition-management journal with reminders and reports. Murph is an ongoing assistant for combining health context with conversation, decisions, and practical follow-through.",
+      "Choose CareClinic when a detailed condition diary and adherence record are the goal. Choose Murph when the goal is to talk through changing context and keep the resulting decisions moving outside a tracker.",
     category: "health-data",
     chooseCompetitor:
-      "Choose CareClinic if you want a mobile diary for symptoms, medications, mood, sleep, nutrition, activity, and care-plan adherence, especially when regular logging and reports are central to your routine.",
+      "Choose CareClinic if you want to record symptoms, medications, mood, sleep, nutrition, activity, and care-plan adherence on a repeatable schedule, especially if you need reports to bring to appointments.",
     chooseMurph:
-      "Choose Murph if you want to discuss changing context in natural language, understand cross-domain patterns, and get continued help with plans, check-ins, experiments, and health-related tasks.",
+      "Choose Murph if you are less interested in maintaining a detailed diary and more interested in discussing how symptoms, sleep, meals, workouts, labs, or records fit together, then following up through reminders and check-ins.",
     competitor: {
       clinicalRole:
-        "A consumer self-management app for chronic conditions, symptoms, medications, and wellness routines. It is not a diagnostic or emergency service.",
+        "A consumer self-management app for recording and organizing symptoms, medications, routines, and other health information. CareClinic's terms say it does not provide medical advice, diagnosis, or treatment and is not a clinical system.",
       followThrough:
         "Reminders, care plans, recurring check-ins, caregiver participation, goals, adherence tracking, and reports for appointments.",
       format:
@@ -119,21 +121,21 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       inputs:
         "Symptoms, medications, treatments, mood, sleep, nutrition, activity, vitals, menstrual cycle, notes, documents, and supported health-platform data.",
       insightStyle:
-        "Trend and correlation reports pair with marketed AI-generated insights and recommendations. CareClinic does not clearly document an open-ended conversational coach.",
+        "Product pages market AI-powered pattern detection and personalized recommendations alongside charts and correlations. CareClinic's terms limit those insights to informational self-management and say the tools do not perform clinical analysis.",
       platforms:
         "iOS, Android, and Apple Watch. CareClinic also documents a limited legacy web interface for basic logging.",
       pricing:
-        "CareClinic is available as a free download. Premium offers monthly, annual, and lifetime plans; verify the final amount in checkout.",
+        "A free version with core features is available. Premium adds advanced analytics, PDF reports, caregiver sharing, and more integrations through monthly, annual, or lifetime plans; current amounts are not published on the cited pages, so confirm at checkout.",
       primaryJob:
         "Help an individual document symptoms, treatments, behaviors, and outcomes in a consistent condition-management routine.",
     },
     competitorEvidence: {
-      clinicalRole: [1],
+      clinicalRole: [1, 6],
       followThrough: [1],
       format: [1],
       hardware: [2],
       inputs: [1, 2],
-      insightStyle: [1, 5],
+      insightStyle: [1, 5, 6],
       platforms: [1, 4],
       pricing: [3, 5],
       primaryJob: [1],
@@ -141,12 +143,12 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "CareClinic centers on structured health journaling, reminders, care plans, and reports. Murph centers on a continuing conversation that connects context and helps a person reason, plan, and follow through.",
+          "CareClinic is a structured self-management system: log the day, follow a care plan, review adherence, and export a report. Murph is conversation-led: bring a changing question or decision, connect it with authorized context, and continue the work through a plan and follow-up.",
         question: "How is CareClinic different from Murph?",
       },
       {
         answer:
-          "CareClinic documents Apple Health, Google Fit or Health Connect, Fitbit, and Apple Watch connections. Its broader marketing also names products such as Garmin, Oura, WHOOP, and Dexcom, but connection paths and supported fields can differ, so users should verify the exact route they need.",
+          "CareClinic documents Apple Health, Google Fit or Health Connect, Fitbit, and Apple Watch connections. Its integration page markets Garmin, Oura, WHOOP, and Dexcom connections, but the FAQ on that same page says direct integrations for those four are still coming soon. Verify whether a currently available route and its supported fields meet your needs before choosing CareClinic for one of those devices.",
         question: "Which devices and health apps work with CareClinic?",
       },
       {
@@ -155,13 +157,13 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         question: "Can CareClinic be used on the web?",
       },
     ],
-    headline: "Murph vs CareClinic: conversational support or health diary?",
-    lastVerified: "2026-08-30",
+    headline: "Conversational support or health diary?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph with CareClinic for chronic illness tracking, medication reminders, reports, integrations, AI insights, pricing, and platform support.",
+      "CareClinic is a structured condition diary with reminders and reports; Murph is a personal health assistant focused on discussing changing context and following through.",
     name: "CareClinic",
     overview:
-      "CareClinic is a consumer health diary for tracking symptoms, medications, treatments, habits, and measurements. It emphasizes configurable care plans, adherence reminders, correlations, caregiver support, and reports that can be brought to an appointment. Murph is less like a diary interface and more like a continuing private health conversation with planning and follow-through.",
+      "CareClinic is strong at the disciplined mechanics of condition management: configurable diaries, care plans, adherence reminders, correlations, caregiver participation, and printable reports. Murph does not ask the diary to be the center of the experience. It gives someone a continuing place to explain what changed, consider several kinds of health context together, and turn the discussion into practical follow-up.",
     relationship: "alternative",
     slug: "careclinic",
     sources: [
@@ -185,23 +187,29 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         label: "CareClinic app features",
         url: "https://careclinic.io/features/",
       },
+      {
+        label: "CareClinic terms of use",
+        url: "https://careclinic.io/terms-of-use/",
+      },
     ],
     tradeoffs: [
-      "CareClinic rewards consistent structured logging, which can be valuable but can also require significant daily input.",
+      "CareClinic offers more purpose-built symptom scales, schedules, adherence views, and appointment reporting. Murph is not a replacement for a carefully configured condition journal.",
+      "CareClinic's structured history can be valuable when details matter, but building that history can require significant daily input.",
       "Its mobile apps contain the full experience; desktop access is documented as a limited legacy interface.",
-      "Premium prices and the depth of individual integrations can vary by storefront, promotion, device, and data type.",
+      "CareClinic's integration page contradicts itself about whether direct Garmin, Oura, WHOOP, and Dexcom connections are live or coming soon; verify the exact device and metric before relying on one of those routes.",
+      "CareClinic documents monthly, annual, and lifetime Premium plans, but the cited pages do not publish stable current amounts; confirm the final price at checkout.",
     ],
   },
   {
     bestFor:
-      "People who want a highly customizable symptom, mood, pain, fatigue, medication, and lifestyle tracker without a clinical-record focus.",
+      "People who want fast, highly customizable symptom and lifestyle logging, then want to explore correlations without adding a clinical-record system.",
     bottomLine:
-      "Bearable is the focused choice for structured self-reporting and correlation discovery. Murph is the conversational choice for broader context, explanation, planning, and ongoing follow-through.",
+      "Choose Bearable for focused self-reporting and correlation discovery. Choose Murph when the useful next step is a conversation that can draw on wider context and continue into a plan, reminder, or check-in.",
     category: "health-data",
     chooseCompetitor:
-      "Choose Bearable if your goal is to log symptoms and daily factors quickly, customize what you track, and inspect correlations or run personal experiments over time.",
+      "Choose Bearable if you want to decide exactly what to score each day, make logging quick, and inspect how symptoms move alongside medications, routines, and other factors over time.",
     chooseMurph:
-      "Choose Murph if you want an assistant that can discuss your health context, help interpret what matters, and carry decisions into practical plans, reminders, and check-ins.",
+      "Choose Murph if you want to ask why a pattern might matter, bring in context beyond a symptom log, and have the answer lead somewhere practical through a plan, experiment, reminder, or check-in.",
     competitor: {
       clinicalRole:
         "A consumer symptom and wellbeing tracker often used for chronic illness, pain, fatigue, mood, and self-management. It is not a medical-record system or clinician.",
@@ -214,34 +222,34 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       inputs:
         "Symptoms, mood, energy, pain, sleep, medications, nutrition, habits, events, menstrual cycle, custom factors, and connected health data.",
       insightStyle:
-        "Correlation and trend views help users compare symptoms with treatments, habits, and other factors. Bearable does not offer a built-in AI assistant or coach.",
+        "Correlation and trend views compare symptoms with treatments, habits, and other factors. Current official support material points users to CSV export for analysis in external AI tools rather than describing a built-in AI assistant.",
       platforms:
-        "iOS and Android phones and tablets. Bearable does not offer a full web or desktop app.",
+        "iOS and Android phones and tablets. Bearable does not offer a full web or desktop app and advises using one device at a time to avoid conflicts or data loss.",
       pricing:
-        "A substantial free plan is available. Bearable publishes typical US Premium pricing around $6.99 monthly or $34.99 annually, with regional prices and discounts varying.",
+        "Most features are free. Bearable's pricing page lists Premium at $6.99 per month or $34.99 per year and says the annual price is frequently discounted to $18.99.",
       primaryJob:
         "Make daily symptom and lifestyle tracking flexible enough to reveal possible personal patterns.",
     },
     competitorEvidence: {
       clinicalRole: [1],
-      followThrough: [1],
+      followThrough: [1, 2],
       format: [1],
       hardware: [3, 4],
       inputs: [1, 3],
       insightStyle: [1, 2],
-      platforms: [1],
+      platforms: [1, 6, 7],
       pricing: [5],
       primaryJob: [1],
     },
     faqs: [
       {
         answer:
-          "Bearable is a configurable logging and correlation tool. Murph is a conversational assistant that uses broader authorized context to explain, plan, and support follow-through rather than asking users to navigate a tracker alone.",
+          "Bearable helps you build and inspect a structured self-reported dataset. Murph helps you discuss a health question across authorized context and carry the conclusion into action. Bearable is stronger when the tracker itself is the job; Murph is stronger when interpretation and follow-up are the job, whether or not a tracking history already exists.",
         question: "What separates Bearable from Murph?",
       },
       {
         answer:
-          "No. Bearable's official support material describes charts, insights, correlations, and experiments, but it does not offer an AI chatbot or personal coach. Its analysis depends on the information a user logs and imports.",
+          "Bearable's current official pages do not describe a built-in AI coach. They describe charts, correlations, goals, and experiments, and Bearable's support material suggests exporting CSV data to an outside AI tool such as ChatGPT. Murph differs because the ongoing assistant conversation is the primary product.",
         question: "Does Bearable include an AI health coach?",
       },
       {
@@ -250,13 +258,13 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         question: "Can Bearable import wearable data?",
       },
     ],
-    headline: "Murph vs Bearable: health conversation or symptom tracker?",
-    lastVerified: "2026-08-30",
+    headline: "Health conversation or symptom tracker?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Bearable for symptom tracking, mood and fatigue logs, correlations, AI support, wearable data, platforms, and Premium pricing.",
+      "Bearable turns customizable symptom logs into correlations; Murph is a personal health assistant for discussing wider context and acting on what matters.",
     name: "Bearable",
     overview:
-      "Bearable is a mobile self-tracking app built around customizable symptoms, mood, energy, pain, medications, and daily lifestyle factors. Its main value is making consistent logging manageable and turning that history into correlations and personal experiments. Murph takes a conversational approach across a wider set of personal health context and adds ongoing help with decisions and follow-through.",
+      "Bearable is a mobile tracker built around customizable daily check-ins, symptom and factor ratings, medication logs, correlations, goals, and experiments. Murph does not reproduce those dedicated tracker screens. It can begin with the health question, relate the relevant pattern to other authorized context, and carry the resulting decision into follow-up.",
     relationship: "alternative",
     slug: "bearable",
     sources: [
@@ -280,27 +288,37 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         label: "Bearable pricing principles",
         url: "https://bearable.app/our-pricing-and-principles/",
       },
+      {
+        label: "Bearable browser and desktop support",
+        url: "https://bearable.app/support/common-questions/is-there-a-browser-or-desktop-version-of-bearable/",
+      },
+      {
+        label: "Bearable multi-device support",
+        url: "https://bearable.app/support/common-questions/can-i-use-bearable-on-multiple-devices/",
+      },
     ],
     tradeoffs: [
-      "Bearable's focused tracker is easy to customize, but useful correlations still depend on consistent self-reporting over time.",
-      "It does not retrieve clinical records or provide a built-in conversational assistant.",
-      "A full desktop or web experience is not available, connected metrics vary by mobile health platform, and Fitbit-recorded data may not currently reach Bearable on iPhone.",
+      "Bearable is more granular and purpose-built for repeatable symptom scoring. Murph does not offer the same configurable tracker screens or correlation charts.",
+      "Useful Bearable correlations depend on consistent self-reporting, and an association can generate a question without proving what caused a symptom.",
+      "Bearable's current official pages center user-entered and mobile-hub data and do not document patient-portal retrieval or a built-in assistant conversation.",
+      "A full Bearable desktop or web experience is not available, connected metrics vary by mobile health platform, and Fitbit-recorded data may not currently reach Bearable on iPhone.",
+      "Bearable advises using one device at a time because simultaneous use can cause conflicts or data loss.",
     ],
   },
   {
     aliases: ["Exist.io"],
     bestFor:
-      "Quantified-self users who want statistical relationships across health, mood, productivity, habits, media, location, and other parts of daily life.",
+      "Quantified-self users who want a transparent statistical dashboard spanning health, mood, productivity, habits, media, location, and daily life.",
     bottomLine:
-      "Exist is the broad statistical dashboard for people who enjoy quantified-self analysis. Murph is the ongoing conversational assistant for making sense of health context and acting on it.",
+      "Choose Exist when you want to inspect statistical relationships across a quantified life. Choose Murph when you want to discuss health context in plain language and have the conclusion continue into practical follow-through.",
     category: "health-data",
     chooseCompetitor:
-      "Choose Exist if you want an integration-rich web dashboard, custom tracking, daily and weekly summaries, and transparent statistical correlations across both health and non-health data.",
+      "Choose Exist if you enjoy maintaining an integration-rich quantified-self system and want custom attributes, daily and weekly summaries, and conventional statistical correlations across health and non-health data.",
     chooseMurph:
-      "Choose Murph if you would rather discuss context in natural language and get continued support with decisions, experiments, reminders, check-ins, and practical health work.",
+      "Choose Murph if you would rather bring a health question to a conversation, consider records, labs, wearables, symptoms, meals, or workouts together, and turn the answer into an experiment or follow-up.",
     competitor: {
       clinicalRole:
-        "A consumer quantified-self analytics service, not a medical record, diagnostic service, or clinical-care platform.",
+        "A consumer quantified-self analytics service focused on personal trends and correlations. Its official materials do not present it as clinical care.",
       followThrough:
         "Daily insights, weekly summaries, mood prompts, custom tracking, and self-directed personal experiments.",
       format:
@@ -310,7 +328,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       inputs:
         "Activity, sleep, workouts, weight, mood, productivity, tasks, calendar, weather, location, media, social activity, and custom numeric or tagged data.",
       insightStyle:
-        "Daily observations, long-term trends, and statistically tested correlations. Exist explicitly uses traditional statistics instead of generative AI.",
+        "Daily observations and long-term trends sit beside correlations with strength and confidence indicators. Exist explicitly uses traditional statistics rather than generative AI and warns that correlation does not establish cause.",
       platforms:
         "A full web app with iOS and Android companion apps for mood, custom tracking, and summaries.",
       pricing:
@@ -324,7 +342,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       format: [1, 4],
       hardware: [1],
       inputs: [2],
-      insightStyle: [1, 3],
+      insightStyle: [1, 3, 5],
       platforms: [4],
       pricing: [1],
       primaryJob: [1],
@@ -332,7 +350,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Exist is a quantified-self dashboard that calculates trends and correlations from connected services. Murph is a conversational health assistant focused on interpreting context and helping a person make and sustain practical decisions.",
+          "Exist shows what moves together across connected services and custom attributes. Murph helps someone reason about a health question and sustain a decision. Murph is not a more detailed quantified-self dashboard, and Exist is not an open-ended health conversation.",
         question: "How does Exist compare with Murph?",
       },
       {
@@ -342,17 +360,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Exist says correlations generally need at least three weeks of overlapping data. More history and consistent inputs can make an observed relationship more informative, but correlation alone does not establish medical causation.",
+          "Exist requires at least three weeks of data for an attribute and recalculates correlations weekly. More overlapping history can improve confidence, but Exist itself warns that a correlation cannot establish cause.",
         question: "How long does Exist need before showing correlations?",
       },
     ],
-    headline: "Murph vs Exist: conversational health help or quantified self?",
-    lastVerified: "2026-08-30",
+    headline: "Conversational health help or quantified self?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph with Exist for quantified-self analytics, integrations, statistical correlations, AI approach, web access, pricing, and best-fit users.",
+      "Exist finds statistical relationships across a quantified life; Murph is a personal health assistant built to interpret health context through conversation and follow-up.",
     name: "Exist",
     overview:
-      "Exist combines data from fitness, sleep, mood, productivity, tasks, media, weather, location, and other services to find trends and correlations. It deliberately uses conventional statistics rather than generative AI and gives users a detailed web dashboard. Murph is more conversational and health-specific, with an emphasis on explanation, decisions, and follow-through instead of a dashboard-first quantified-self workflow.",
+      "Exist imports signals across health and daily life, then presents trends and correlations in a full web dashboard with companion apps. It deliberately rejects generative AI and leaves interpretation to the member. Murph gives up Exist's non-health integration breadth and statistics interface in exchange for an ongoing health conversation that can interpret relevant context and carry the chosen next step forward.",
     relationship: "alternative",
     slug: "exist",
     sources: [
@@ -372,23 +390,29 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         label: "Exist frequently asked questions",
         url: "https://exist.io/page/faqs/",
       },
+      {
+        label: "Exist correlation methodology",
+        url: "https://kb.exist.io/article/37-what-are-correlations",
+      },
     ],
     tradeoffs: [
-      "Exist covers more non-health domains than most health trackers, but it is not a clinical-record wallet or care platform.",
+      "Murph does not reproduce Exist's non-health integrations or statistics dashboard. People who want to inspect the numbers directly may prefer Exist's dashboard-first approach.",
       "Meaningful correlations require enough overlapping history, and a statistical association is not proof of cause.",
       "Each attribute can use only one selected source at a time, which may require choices when services overlap.",
+      "Exist deliberately avoids generative AI. That can appeal to users who prefer a non-generative statistical interface and frustrate users who want open-ended explanation; Murph takes the opposite product approach by making conversation central.",
+      "After its 30-day trial, Exist lists one paid plan at $6.99 per month or $62.90 per year; it does not advertise a permanent free tier.",
     ],
   },
   {
     bestFor:
-      "iPhone users who want an all-in-one visual health dashboard with automated reports, AI coaching, food logging, and optional human coaching.",
+      "iPhone users who want an Apple-centered visual health dashboard, automated reports, food logging, AI guidance, and optional human coaching.",
     bottomLine:
-      "Gyroscope is the polished iPhone-first dashboard and coaching membership. Murph is the device-independent conversational relationship for understanding context and following through in familiar messaging.",
+      "Choose Gyroscope for a polished iPhone dashboard and tiered coaching program. Choose Murph when a continuing conversation and practical follow-up matter more than an Apple-centered score and report experience.",
     category: "health-data",
     chooseCompetitor:
-      "Choose Gyroscope if you want an iPhone and Apple Watch centered health dashboard with Daily Reports, a Health Score, Food XRAY, location and productivity tracking, and higher tiers that include coaching.",
+      "Choose Gyroscope if Daily Reports, a Health Score, photo-based food logging, location and productivity views, and optional human coaching fit how you want to use your iPhone and Apple Watch data.",
     chooseMurph:
-      "Choose Murph if you prefer an ongoing private conversation through familiar messaging, with a browser-based dashboard for richer review, do not want an iPhone-only product, and value practical plans, reminders, check-ins, and health errands.",
+      "Choose Murph if you want health support to live mainly in familiar messaging, do not want the full experience to depend on a modern iPhone, and want a discussion to become a plan, reminder, check-in, or practical health task. Murph does not provide Gyroscope's Health Score, Food XRAY, or Max human coaching.",
     competitor: {
       clinicalRole:
         "A consumer wellness dashboard and coaching product. It is not an electronic health record or substitute for medical diagnosis and treatment.",
@@ -397,25 +421,25 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       format:
         "An iPhone-first visual dashboard with Health Score, Daily Reports, timelines, photo-based food logging, and coaching layers.",
       hardware:
-        "No proprietary tracker is required, but Apple Health and iPhone are foundational. Apple Watch, Oura, and other supported sources can deepen the data.",
+        "No Gyroscope-branded sensor is required, but an iPhone running iOS 18 or newer is required for the full app. Apple Watch, Oura, Garmin, and other supported sources are optional.",
       inputs:
         "Food photos, sleep, workouts, steps, mood, places, productivity, blood biomarkers, and supported connected services.",
       insightStyle:
         "Automated Daily Reports and Health Score summaries pair with an AI coach. Max memberships can add a human coach.",
       platforms:
-        "iPhone, Apple Watch, and a web dashboard. Gyroscope does not offer an Android app.",
+        "The full app requires an iPhone running iOS 18 or newer. Members can view their data on the web, and Apple Watch data is supported. There is no current Android app.",
       pricing:
-        "A limited free tier is available. Gyroscope One is marketed at about $1 per day, while Max coaching options are presented at roughly $3 to $8 per day.",
+        "Basic is free with 30 days of storage and five daily tokens. One is listed at $1 per day with unlimited storage and 20 tokens; Max is listed at $3 to $8 per day with unlimited storage, 100 tokens, and AI, human coaching, or both.",
       primaryJob:
         "Turn Apple-centered lifestyle and biometrics data into a polished daily health dashboard and coaching program.",
     },
     competitorEvidence: {
-      clinicalRole: [1],
+      clinicalRole: [1, 5],
       followThrough: [1, 2, 3],
       format: [1, 3],
-      hardware: [1],
+      hardware: [1, 2],
       inputs: [1, 3],
-      insightStyle: [1],
+      insightStyle: [1, 2, 5],
       platforms: [1, 2],
       pricing: [2],
       primaryJob: [1],
@@ -423,7 +447,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Gyroscope packages health, food, places, productivity, and biometrics into a visual iPhone dashboard with AI and optional human coaching. Murph is built around an ongoing conversation, cross-domain explanation, and practical follow-through without requiring a proprietary device.",
+          "Gyroscope turns Apple-centered lifestyle and biometric data into a visual daily report and coaching membership. Murph turns authorized health context into a continuing conversation and practical follow-up. Gyroscope is stronger as a polished dashboard; Murph is designed to reduce the need to manage health through one.",
         question: "What is the biggest difference between Gyroscope and Murph?",
       },
       {
@@ -433,17 +457,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Gyroscope documents direct Oura support and an Apple Health based path for WHOOP, with some fields or historical data potentially unavailable. It also markets support for sources such as Apple Watch, Garmin, and Dexcom. Users should check the specific metric and connection path before choosing it for one device.",
+          "Gyroscope has a direct Oura connection. WHOOP is not direct: it reaches Gyroscope through Apple Health, which omits WHOOP HRV, Strain, Recovery, and full sleep-stage detail. Apple Watch, Garmin, Fitbit, Dexcom, and other sources are also marketed, but each metric can take a different route. If WHOOP's proprietary scores are the reason you use WHOOP, keep the WHOOP app and verify exactly what Gyroscope receives.",
         question: "Which wearables work with Gyroscope?",
       },
     ],
-    headline: "Murph vs Gyroscope: health conversation or visual dashboard?",
-    lastVerified: "2026-08-30",
+    headline: "Health conversation or visual dashboard?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Gyroscope on AI coaching, Daily Reports, Apple Health, wearables, food logging, platforms, membership prices, and ideal users.",
+      "Gyroscope is an iPhone-first visual dashboard with AI and optional human coaching; Murph is a personal health assistant centered on conversation and follow-through.",
     name: "Gyroscope",
     overview:
-      "Gyroscope is an iPhone-first health dashboard that combines Apple Health data with sleep, workouts, food photos, mood, places, productivity, and biomarkers. It uses visual Daily Reports and a Health Score, then adds AI or human coaching depending on the plan. Murph is organized around a continuing private conversation and practical follow-through rather than a dashboard and membership program.",
+      "Gyroscope is compelling if a polished daily dashboard is part of the motivation: Apple Health data, sleep, workouts, food photos, mood, places, productivity, and biomarkers become Daily Reports and a Health Score, with AI or human coaching depending on plan. Murph is not an alternative visual scorecard or human-coaching membership. It is a private-by-default, continuing conversation for working through context and keeping the next step from disappearing after the report.",
     relationship: "alternative",
     slug: "gyroscope",
     sources: [
@@ -463,58 +487,65 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         label: "Gyroscope WHOOP integration",
         url: "https://gyrosco.pe/integrations/whoop/",
       },
+      {
+        label: "Gyroscope terms and health disclaimers",
+        url: "https://gyrosco.pe/terms/",
+      },
     ],
     tradeoffs: [
-      "Gyroscope offers a rich visual dashboard, but the consumer app is limited to Apple's mobile ecosystem.",
-      "Its higher coaching tiers cost substantially more than its limited free experience.",
-      "Connection depth varies by source, and indirect Apple Health routes can omit fields or historical data.",
+      "Gyroscope is more purpose-built for people motivated by visual scores, photo food logs, and optional human accountability. Murph does not reproduce that dashboard or human-coaching program.",
+      "Gyroscope's consumer app is limited to Apple's mobile ecosystem, while Murph does not require a proprietary device and also provides a web experience.",
+      "Basic is limited to 30 days of storage and five daily tokens. One costs $1 per day and Max costs $3 to $8 per day, with higher token and storage allowances and human coaching available only through Max.",
+      "WHOOP data reaches Gyroscope indirectly through Apple Health and omits WHOOP HRV, Strain, Recovery, and full sleep-stage detail.",
+      "Gyroscope's terms say AI responses may be inaccurate, outdated, or inappropriate for an individual's situation, and that its Health Score is an estimate rather than a clinical diagnosis.",
+      "Murph keeps explanation and follow-up in conversation, which may suit people who tire of dashboards; people who enjoy inspecting a designed daily report may prefer Gyroscope's format.",
     ],
   },
   {
     bestFor:
-      "People who want mobile HRV, stress, energy, recovery, sleep, and activity analysis with automated wellness recommendations and an optional experimental AI Coach through ChatGPT.",
+      "People whose main questions are about HRV, stress, energy, recovery, sleep, and activity, and who want automated mobile feedback from those signals.",
     bottomLine:
-      "Welltory is the specialist for mobile HRV and wellness scoring, with an experimental AI Coach delivered through ChatGPT. Murph is the broader ongoing assistant for connecting health context with decisions and continued support.",
+      "Choose Welltory for frequent HRV measurement and score-driven wellness feedback. Choose Murph when the score is only one part of a broader health question that needs discussion, a decision, and follow-up.",
     category: "health-data",
     chooseCompetitor:
-      "Choose Welltory if you mainly want camera or wearable HRV measurements, stress and energy scores, sleep and workout analysis, automated reports, and optional experimental coaching through ChatGPT.",
+      "Choose Welltory if camera or wearable HRV readings, stress and energy scores, sleep and workout reports, and automated measurement-led recommendations are the experience you want.",
     chooseMurph:
-      "Choose Murph if you want to explore health questions in a continuing conversation, include wider personal context, and turn insights into practical experiments, reminders, check-ins, and tasks.",
+      "Choose Murph if an HRV or recovery signal usually leads to a wider question about symptoms, meals, training, labs, records, or daily life, and you want the discussion to continue into an experiment or check-in.",
     competitor: {
       clinicalRole:
         "A consumer wellness analytics app focused on HRV, stress, energy, recovery, sleep, and activity. Welltory states that it is not a medical app.",
       followThrough:
         "Lifestyle recommendations, breathing and measurement routines, personal experiments, activity guidance, automated health reports, and an experimental AI Coach delivered through ChatGPT.",
       format:
-        "A score-driven mobile app with camera or wearable measurements, charts, report cards, and a personalized data feed, plus an experimental AI Coach accessed through ChatGPT.",
+        "iOS and Android apps built around HRV readings, a data feed, charts, and automated reports; the experimental AI Coach runs through ChatGPT rather than as the app's main interface.",
       hardware:
-        "A phone camera can take HRV readings. Supported watches, heart-rate sensors, scales, blood-pressure devices, and health platforms can add data.",
+        "A phone camera can take HRV readings. Apple Watch, Samsung Watch, Pixel Watch 2 or later, and compatible Bluetooth heart-rate monitors can provide HRV measurements; many other trackers contribute activity data only.",
       inputs:
         "HRV, heart rate, blood pressure, sleep, workouts, activity, weight, body measurements, lifestyle factors, weather, and data from supported apps and devices.",
       insightStyle:
-        "Automated Stress, Energy, and Health scores plus personalized reports and recommendations. Welltory also offers an experimental open-ended AI Coach through ChatGPT; access to personal Welltory data requires Welltory Premium and ChatGPT Plus.",
+        "HRV-derived wellness scores plus sleep, activity, workout, and personalized reports, with names and availability differing by platform. The separate ChatGPT-based AI Coach is an experimental beta, and personalized data access requires Welltory Premium plus ChatGPT Plus.",
       platforms:
-        "iOS and Android mobile apps, with available features and device routes differing by phone ecosystem.",
+        "iOS 16 or later and Android 9 or later. Welltory recommends using one phone platform because using the same account across both can make reports inaccurate; features and device routes also differ by ecosystem.",
       pricing:
-        "A limited free version is available. Welltory Premium is listed at $99 per year, and a lifetime purchase is listed at $599.",
+        "Welltory lists Premium at $99 billed annually or $599 lifetime. In the free tier, feed data older than 30 days is deleted. Full AI Coach access to personal Welltory data also requires ChatGPT Plus.",
       primaryJob:
         "Translate HRV and connected wellness signals into understandable daily stress, energy, recovery, and lifestyle feedback.",
     },
     competitorEvidence: {
-      clinicalRole: [2, 5],
+      clinicalRole: [3, 5],
       followThrough: [1, 2, 5],
-      format: [2, 5],
-      hardware: [2, 3],
+      format: [2, 4, 5],
+      hardware: [2, 3, 4],
       inputs: [2, 3],
       insightStyle: [2, 5],
       platforms: [4],
-      pricing: [1],
+      pricing: [1, 2, 5],
       primaryJob: [2],
     },
     faqs: [
       {
         answer:
-          "Welltory specializes in HRV measurements, wellness scores, and automated reports, and offers an experimental AI Coach through ChatGPT. Murph centers the product on an ongoing conversation that can connect broader authorized context and help with decisions, plans, experiments, and follow-through.",
+          "Welltory is stronger when you want the measurement routine itself: HRV readings become scores, reports, and automated guidance. Murph is stronger when an existing signal raises a wider question and you want the answer to carry into a decision and later follow-up.",
         question: "How is Welltory different from Murph?",
       },
       {
@@ -524,17 +555,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Welltory can aggregate data through Apple Health, Health Connect, and Samsung Health, and it documents direct connections including Fitbit, Garmin, Oura, Withings, Strava, and others. Its support guidance recommends avoiding duplicate routes because duplicated data can distort reports.",
+          "Welltory receives data through Apple Health, Health Connect, and Samsung Health and documents direct routes for services including Fitbit, Garmin, Oura, Withings, and Strava. Its current direct-connection table does not list WHOOP, so WHOOP users should verify the indirect route and exact fields. Welltory also warns against connecting the same source both directly and through an aggregator because that can create duplicate data.",
         question: "What can Welltory connect to?",
       },
     ],
-    headline: "Murph vs Welltory: ongoing assistant or HRV analytics?",
-    lastVerified: "2026-08-30",
+    headline: "Ongoing assistant or HRV analytics?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and Welltory for HRV, stress and energy scores, wearable integrations, Welltory AI Coach, mobile platforms, pricing, and limitations.",
+      "Welltory turns HRV and connected signals into wellness scores; Murph is a personal health assistant helping place those signals in context and decide what comes next.",
     name: "Welltory",
     overview:
-      "Welltory is a mobile wellness app that turns HRV, sleep, activity, workouts, blood pressure, and other signals into stress, energy, and health reports. Its recommendations are highly automated and measurement-driven, and it offers an experimental open-ended AI Coach through ChatGPT. Murph works as a broader ongoing conversation that can help explain personal context and support action over time.",
+      "Welltory is a specialist measurement product: it turns HRV, sleep, activity, workouts, blood pressure, and other signals into stress, energy, and health reports, with an experimental AI Coach available through ChatGPT. Murph does not try to replace that score feed or HRV routine. It is useful when someone wants to place a signal beside other authorized health context, talk through uncertainty, and revisit the action over time.",
     relationship: "alternative",
     slug: "welltory",
     sources: [
@@ -560,27 +591,29 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Welltory's HRV specialization can be useful for wellness trends, but its scores are not medical diagnoses.",
-      "The free version limits history and analysis, while personalized AI Coach access is experimental and requires both Welltory Premium and ChatGPT Plus.",
+      "Welltory is more purpose-built for repeated HRV measurements and automated stress and energy scores. Murph should not be chosen for a comparable scoring engine.",
+      "Welltory's specialization can be useful for wellness trends, but its scores are not medical diagnoses.",
+      "Welltory says free-tier feed data older than 30 days is deleted, while personalized AI Coach access is experimental and requires both Welltory Premium and ChatGPT Plus.",
       "Phone ecosystems and connection routes differ, and sending the same metric through multiple sources can create duplicates.",
+      "Murph can discuss a wider mix of context and maintain follow-up, but users who mainly want a fast measurement ritual and automatic score may prefer Welltory's narrower workflow.",
     ],
   },
   {
     aliases: ["Fitness Syncer"],
     bestFor:
-      "People who need to copy, normalize, archive, chart, or route fitness and wellness data across many otherwise separate services.",
+      "People whose immediate problem is copying, normalizing, archiving, charting, or routing fitness and wellness data across separate services.",
     bottomLine:
-      "FitnessSyncer is primarily a dashboard and data-sync utility. Murph is an ongoing health assistant, so the choice is usually about data plumbing versus conversation, interpretation, and follow-through.",
+      "Choose FitnessSyncer to make data move between services. Choose Murph to make sense of available health context and decide what to do next. Neither replaces the other's primary job.",
     category: "health-data",
     chooseCompetitor:
-      "Choose FitnessSyncer if your main problem is moving fitness and health data among apps, maintaining an archive, or building custom charts from many supported services.",
+      "Choose FitnessSyncer if you need read and write routes among fitness services, archival history, or custom charts assembled from many supported sources.",
     chooseMurph:
-      "Choose Murph if your main need is a private conversational relationship that explains relevant patterns and helps with plans, reminders, check-ins, experiments, and health tasks.",
+      "Choose Murph if the data is already accessible and the unresolved job is asking questions across it, weighing a practical next step, and returning to that step through reminders or check-ins.",
     competitor: {
       clinicalRole:
-        "A consumer fitness dashboard and data synchronization utility, not a clinician, medical-record wallet, or diagnostic service.",
+        "A consumer service for consolidating, viewing, archiving, and synchronizing fitness and wellness data across supported systems.",
       followThrough:
-        "Scheduled sync tasks, goals, alerts, reports, calendars, records, leaderboards, sharing, and a personal notebook.",
+        "On-demand or scheduled synchronization, goals, alerts, email reports, calendar export, sharing, leaderboards, archival storage, and a personal notebook; some capabilities require Pro.",
       format:
         "A web and mobile data hub with a unified stream, dashboards, custom charts, sync rules, archive tools, and Daily Analyzer.",
       hardware:
@@ -592,14 +625,14 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       platforms:
         "Web, iOS, and Android.",
       pricing:
-        "The free plan supports up to five sources or tasks with daily sync and limited history. Pro is listed at $4.99 per month or $49.99 per year.",
+        "The free plan supports five sources or tasks, once-daily synchronization, one non-customizable dashboard, and 6 to 8 weeks of dashboard data. Pro costs $4.99 per month or $49.99 per year and adds unlimited sources, tasks, and dashboard history.",
       primaryJob:
         "Synchronize and consolidate fitness data across services that do not reliably exchange it on their own.",
     },
     competitorEvidence: {
       clinicalRole: [1],
       followThrough: [1, 3],
-      format: [1, 3],
+      format: [1, 3, 5],
       hardware: [2],
       inputs: [2],
       insightStyle: [1, 4],
@@ -610,27 +643,27 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "FitnessSyncer is designed to move and chart data across fitness services. Murph is designed for an ongoing health conversation, explanation, planning, and follow-through. They solve different primary jobs, and this comparison does not claim a direct product connection.",
+          "FitnessSyncer and Murph solve adjacent jobs rather than substituting for one another. FitnessSyncer moves and charts supported data; Murph helps interpret available context and carry a decision forward. This page does not claim that Murph replaces sync routes or that the products connect directly.",
         question: "Is FitnessSyncer an alternative to Murph?",
       },
       {
         answer:
-          "FitnessSyncer lists more than 50 services, including Apple Health, Health Connect, Fitbit, Garmin, Oura, WHOOP, Withings, Samsung Health, Strava, Suunto, Polar, and Dexcom. Read and write support differs by service and metric, so every intended sync direction should be checked first.",
+          "FitnessSyncer lists more than 50 services, including Apple Health, Health Connect, Fitbit, Garmin, Oura, WHOOP, Withings, Samsung Health, Strava, Suunto, Polar, and Dexcom. Read and write support differs by service and metric. For example, its current WHOOP row is read-only and limited to activity, oxygen, and sleep, so every intended direction and field should be checked first.",
         question: "Which services can FitnessSyncer synchronize?",
       },
       {
         answer:
-          "Not by itself. FitnessSyncer offers charts, Daily Analyzer, rules, and reports. Its MCP server can let compatible external AI clients query authorized data, but that is separate from a built-in health coach.",
+          "The documented chat experience runs in a separately configured AI assistant. FitnessSyncer's MCP server can let compatible clients such as ChatGPT, Claude, or Perplexity read and, when authorized, update selected FitnessSyncer data. It requires separate setup and is not a built-in FitnessSyncer coach.",
         question: "Does FitnessSyncer include an AI coach?",
       },
     ],
-    headline: "Murph vs FitnessSyncer: health assistant or sync utility?",
-    lastVerified: "2026-08-30",
+    headline: "Understand health data or move it between apps?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph with FitnessSyncer for cross-app data syncing, dashboards, supported services, external AI access, pricing, platforms, and best use cases.",
+      "FitnessSyncer moves and charts data across fitness services; Murph is a personal health assistant designed to interpret context and carry a decision forward.",
     name: "FitnessSyncer",
     overview:
-      "FitnessSyncer is a consumer data hub built to synchronize activity and wellness information among more than 50 services. It also provides a unified stream, archival history, custom charts, goals, reports, and an MCP connection for external AI clients. Murph is not a sync utility: it is an ongoing conversational health assistant focused on context, decisions, and follow-through.",
+      "FitnessSyncer does difficult plumbing well: it synchronizes activity and wellness information among more than 50 services, then adds a unified stream, history, custom charts, goals, reports, and an MCP bridge for external AI clients. Murph is not another route or archive. It addresses the later question of what the available context means for one person's decision and how to keep that decision moving.",
     relationship: "different-role",
     slug: "fitnesssyncer",
     sources: [
@@ -656,33 +689,34 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "FitnessSyncer has unusually broad service coverage, but each provider controls which fields can be read or written.",
-      "Its emphasis is fitness and wellness data routing, not clinical-record retrieval or longitudinal coaching.",
-      "The MCP server is a bridge to third-party AI software rather than a native assistant inside FitnessSyncer.",
+      "FitnessSyncer has unusually broad service coverage and offers sync capabilities Murph does not. Each provider still controls which fields can be read or written.",
+      "Configuring sources, destinations, duplicate handling, and metric-specific routes is part of getting value from a sync utility; Murph is not a shortcut around that work.",
+      "FitnessSyncer's emphasis is fitness and wellness data routing, not clinical-record retrieval or longitudinal coaching.",
+      "Its MCP server is a bridge to compatible third-party AI software rather than a native assistant inside FitnessSyncer. Murph integrates the conversation, but is not a replacement for the bridge's data portability.",
     ],
   },
   {
     aliases: ["Heads Up"],
     bestFor:
-      "Concierge, longevity, functional, and preventive-health clinics that need one workspace for many clients, labs, wearables, records, and outcomes.",
+      "Concierge, longevity, functional, and preventive-health practices that need one clinical workspace across many clients, labs, wearables, records, and outcomes.",
     bottomLine:
-      "Heads Up Health is now principally a clinic platform with multi-client clinical intelligence and practice workflows. Murph is principally an individual health assistant, so these products serve different buyers and operating models.",
+      "Choose Heads Up Health for a practice and its client population. Choose Murph for one person's continuing health support. These are different buyers, budgets, and operating models, not close substitutes.",
     category: "health-data",
     chooseCompetitor:
-      "Choose Heads Up Health if you run a health practice and need clinician dashboards, unified client charts, lab and wearable integrations, cohort reporting, alerts, pre-visit briefs, and client communication tools.",
+      "Choose Heads Up Health if clinicians need unified client charts, lab and wearable integrations, cohort reporting, alerts, pre-visit briefs, and communication workflows across a practice.",
     chooseMurph:
-      "Choose Murph if you are an individual seeking a private ongoing health conversation with explanation, planning, reminders, check-ins, experiments, and optional group support rather than a clinic operations platform.",
+      "Choose Murph if you are an individual who wants to discuss personal health context in familiar messaging and carry decisions into reminders, check-ins, or experiments, without buying or operating a clinic platform.",
     competitor: {
       clinicalRole:
-        "A business-to-business clinical intelligence and client-management platform for health practices. Clinicians remain responsible for care decisions.",
+        "A business-to-business clinical intelligence and client-management platform for health practices.",
       followThrough:
-        "Provider alerts, messaging, client protocols, pre-visit preparation, report sharing, outcome tracking, and practice-level workflows.",
+        "Targeted alerts, messaging and notifications, automated pre-visit briefs, client-facing reports, outcome tracking, and practice-level AI workflows.",
       format:
         "A clinician web workspace with unified client charts, lab and wearable dashboards, AI tools, cohort views, reports, and companion client apps.",
       hardware:
-        "No proprietary device is required. The platform aggregates supported wearables, labs, records, forms, and manually entered client data.",
+        "The software aggregates data from supported wearables, labs, EHR connections, diagnostic PDFs, and medical records rather than relying on a Heads Up sensor.",
       inputs:
-        "Labs, wearable metrics, electronic health records, clinical notes, symptoms, questionnaires, lifestyle data, provider documents, and client-entered information.",
+        "Labs and diagnostic PDFs, supported wearable and device data, EHR and medical records, notes, journals and symptoms, medications and supplements, assessments, and activity and nutrition data.",
       insightStyle:
         "Natural-language queries, chart summaries, pre-visit briefs, biomarker trends, health scores, alerts, cohort analysis, and configurable AI workflows.",
       platforms:
@@ -698,15 +732,15 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       format: [1, 2],
       hardware: [1, 3],
       inputs: [1, 2, 3],
-      insightStyle: [1],
-      platforms: [1, 2],
+      insightStyle: [1, 2],
+      platforms: [2],
       pricing: [2],
       primaryJob: [1],
     },
     faqs: [
       {
         answer:
-          "The current Heads Up Health offering is built mainly for clinics and their client populations. Murph is built as an individual ongoing health assistant. A consumer can encounter older Heads Up pages, but those should not be confused with the current clinic platform and AI feature set.",
+          "The current primary Heads Up product is clinic software, not a self-service consumer assistant. The site separately links a Heads Up Legacy app and an older consumer dashboard page. Those legacy plans should not be assumed to include the current clinic platform, AI package, or practice workflows.",
         question: "Is Heads Up Health a consumer app like Murph?",
       },
       {
@@ -716,17 +750,17 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
       {
         answer:
-          "Older Heads Up Health pages still advertise individual plans such as monthly, annual, and lifetime dashboard access. Those legacy prices do not describe the current business-to-business AI clinical platform, onboarding, client limits, or usage charges.",
+          "The live legacy page advertises $9 monthly, $79 yearly, or $199 lifetime for its consumer dashboard. The current pricing page instead sells clinic packages with required onboarding, client limits, and usage charges. The two price sets describe distinct product generations and should always be labeled accordingly.",
         question: "Why do some Heads Up Health pages show consumer pricing?",
       },
     ],
-    headline: "Murph vs Heads Up Health: personal assistant or clinic platform?",
-    lastVerified: "2026-08-30",
+    headline: "Personal assistant or clinic platform?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph with Heads Up Health on individual support versus clinic intelligence, labs and wearables, AI workflows, clients, platforms, and pricing.",
+      "Heads Up Health is clinical-intelligence software for practices; Murph is a personal health assistant supporting one individual's ongoing conversation and follow-through.",
     name: "Heads Up Health",
     overview:
-      "Heads Up Health currently positions itself as AI clinical intelligence for concierge, longevity, functional, and preventive-health practices. It unifies each client's labs, wearables, records, symptoms, and notes, then adds clinician workflows, population views, alerts, and reports. That is a different role from Murph's individual ongoing health conversation. Older Heads Up consumer-dashboard pages remain online, so their prices and claims should not be mixed with the current clinic offering.",
+      "Heads Up Health is a serious practice tool: it unifies each client's labs, wearables, records, symptoms, and notes, then gives clinicians workflows, population views, alerts, reports, and AI tools. Murph does not offer a substitute for those multi-client operations. It gives the individual a continuing place to understand personal context and follow through between decisions. Older Heads Up consumer-dashboard pages remain online, so their prices and claims should not be mixed with the current clinic offering.",
     relationship: "different-role",
     slug: "heads-up-health",
     sources: [
@@ -748,35 +782,36 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Heads Up Health offers powerful multi-client workflows, but its current packages are priced and configured for practices rather than individual self-service use.",
+      "Heads Up Health offers multi-client clinical and practice workflows that Murph does not. Its current packages are consequently priced and configured for practices rather than individual self-service use.",
       "Setup includes onboarding, client limits, and potential AI usage charges that are not comparable to a simple consumer subscription.",
       "Legacy consumer pages remain accessible, so buyers need to distinguish old dashboard plans from the current clinic platform.",
+      "Murph is the more direct fit for an individual's conversation and follow-up, but it should not be used in place of a practice's chart, cohort, alerting, or clinician workflow system.",
     ],
   },
   {
     aliases: ["CommonHealth App"],
     bestFor:
-      "US Android users who want a free, consumer-controlled wallet for provider records and SMART Health Cards.",
+      "US adults with an Android phone who want a free, consumer-controlled wallet for participating-provider records and SMART Health Cards.",
     bottomLine:
-      "CommonHealth is a nonprofit Android health-record wallet. Murph is an ongoing conversational health assistant, making this a record access versus interpretation and follow-through comparison.",
+      "Choose CommonHealth for free Android record access and portable health cards. Choose Murph for a continuing conversation about authorized health context and the next step. The products solve different jobs.",
     category: "health-data",
     chooseCompetitor:
-      "Choose CommonHealth if your main need is to download clinical records from participating providers, store health cards, review structured record categories, and share a patient summary from an Android device.",
+      "Choose CommonHealth if the job is downloading records from participating providers, storing and exporting health cards, or sharing a protected patient summary from Android.",
     chooseMurph:
-      "Choose Murph if you want a continuing private conversation that can explain authorized health context and help with decisions, plans, check-ins, reminders, experiments, and practical tasks.",
+      "Choose Murph if access is not the end of the job and you want to discuss records alongside labs, wearables, symptoms, meals, or workouts, then turn the discussion into a plan or follow-up.",
     competitor: {
       clinicalRole:
-        "A nonprofit consumer personal health record wallet. It gives users access to copies of records but does not provide medical advice, diagnosis, treatment, or emergency care.",
+        "A nonprofit consumer health-record wallet. The Commons Project says it does not provide medical advice or administer diagnostic tests, vaccinations, or other healthcare interventions.",
       followThrough:
-        "Record retrieval, health-card storage, patient-summary sharing, and organized views of medications, conditions, immunizations, labs, procedures, and vitals.",
+        "Provider-record retrieval, encrypted on-device storage, SMART Health Card storage and export, data export, sharing with approved apps or providers, and a temporary passcode-protected Patient Summary.",
       format:
-        "An Android record wallet with provider connections, category and timeline views, SMART Health Cards, and controlled export or sharing.",
+        "An Android record wallet with provider connections, SMART Health Cards, record export, and user-directed sharing. Patient Summaries can be shared through a protected QR code or link.",
       hardware:
         "No proprietary hardware is needed, but a compatible Android device is required for the consumer app.",
       inputs:
-        "Clinical records from supported provider portals and standards-based connections, including medications, allergies, conditions, immunizations, labs, procedures, and vital signs, plus SMART Health Cards.",
+        "Copies of electronic health records from supported provider systems, plus SMART Health Cards.",
       insightStyle:
-        "Record organization and access rather than analysis. CommonHealth does not provide an AI assistant, coaching, correlations, or lifestyle recommendations.",
+        "Record organization and access rather than analysis. CommonHealth's official product materials do not describe AI coaching, correlation analysis, or lifestyle recommendations.",
       platforms:
         "Android only for the CommonHealth consumer app.",
       pricing:
@@ -786,19 +821,19 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     },
     competitorEvidence: {
       clinicalRole: [1, 2],
-      followThrough: [2, 3],
-      format: [2, 3],
-      hardware: [3],
+      followThrough: [1, 2, 3, 4],
+      format: [2, 3, 4],
+      hardware: [2, 3],
       inputs: [2, 3],
-      insightStyle: [1],
+      insightStyle: [1, 2, 3],
       platforms: [2],
-      pricing: [1, 2],
+      pricing: [2],
       primaryJob: [1, 2],
     },
     faqs: [
       {
         answer:
-          "CommonHealth is a free Android wallet for retrieving, organizing, and sharing clinical records and SMART Health Cards. Murph is a conversational assistant for understanding health context and maintaining plans and follow-through.",
+          "CommonHealth gives eligible Android users possession and portability of participating-provider records and SMART Health Cards. Its official materials focus on access, organization, and sharing. Murph addresses the later interpretive step: discussing authorized health context and continuing with a decision. No direct product connection is claimed.",
         question: "What is the difference between CommonHealth and Murph?",
       },
       {
@@ -812,13 +847,13 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
         question: "Which medical records can CommonHealth collect?",
       },
     ],
-    headline: "Murph vs CommonHealth: health assistant or Android record wallet?",
-    lastVerified: "2026-08-30",
+    headline: "Health assistant or Android record wallet?",
+    lastVerified: "2026-08-31",
     metaDescription:
-      "Compare Murph and CommonHealth for clinical records, SMART Health Cards, Android support, AI assistance, provider connections, privacy, pricing, and fit.",
+      "CommonHealth is a free Android wallet for provider records and health cards; Murph is a personal health assistant for discussing authorized context and next steps.",
     name: "CommonHealth",
     overview:
-      "CommonHealth is a free nonprofit personal health record for Android. It connects to participating providers, organizes clinical record categories, stores SMART Health Cards, and lets a user share a patient summary. It is a record-access wallet rather than a broad wellness dashboard or coach. Murph has a different job: maintaining an ongoing conversation around health context, decisions, and follow-through.",
+      "CommonHealth does a narrow, valuable job at no charge: it lets eligible Android users retrieve participating-provider records, store and export SMART Health Cards, and share a protected patient summary. Murph does not replace that wallet or make provider coverage broader. It becomes relevant when possession of the record still leaves questions and the person wants a continuing conversation that can lead to action.",
     relationship: "different-role",
     slug: "commonhealth",
     sources: [
@@ -840,9 +875,12 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "CommonHealth is focused on portable clinical records, not wearable dashboards, symptom correlations, or coaching.",
-      "The consumer app is Android-only and its terms limit the service to eligible US users.",
+      "CommonHealth is free and purpose-built for portable clinical records and SMART Health Cards. Murph should not be chosen as a substitute for that record-wallet workflow.",
+      "The consumer app is Android-only, and its terms limit the service to US residents age 18 or older.",
       "Record coverage depends on provider participation and the data each connected source makes available.",
+      "CommonHealth says records normally stay encrypted on the device, but an encrypted Patient Summary can remain in its AWS cloud for up to 72 hours when a user chooses to share one.",
+      "CommonHealth's terms say user-controlled information in the app is not covered by HIPAA, leaving the user responsible for the privacy and security of information they store and share.",
+      "CommonHealth's official materials focus on access and organization rather than analysis or coaching, which may suit someone who wants a simple wallet. Murph adds conversation and follow-up, but that is a different product commitment.",
     ],
   },
 ]);

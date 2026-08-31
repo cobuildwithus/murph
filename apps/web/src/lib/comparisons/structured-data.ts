@@ -124,7 +124,7 @@ export function createComparisonIndexStructuredData() {
     dateModified: comparisonLibraryLastVerified(),
     datePublished: "2026-08-30",
     description:
-      "Source-backed guides comparing Murph with consumer health wearables, dashboards, lab services, coaching apps, and health assistants.",
+      "Source-backed guides comparing Murph, a personal health assistant, with consumer wearables, health dashboards, lab services, coaching apps, and other health assistants.",
     image: absoluteUrl("/compare/opengraph-image"),
     hasPart: COMPARISONS.map((comparison) => ({
       "@id": `${absoluteUrl(comparisonPath(comparison))}#article`,

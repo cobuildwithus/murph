@@ -12,7 +12,7 @@ import {
 } from "@/src/lib/site-metadata";
 
 const comparisonIndexOgImage = createMurphOgImageRef({
-  alt: "Murph comparison guides",
+  alt: "Murph personal health assistant comparison guides",
   url: "/compare/opengraph-image",
 });
 
@@ -21,7 +21,7 @@ export const metadata: Metadata = createMurphPageMetadata({
     canonical: "/compare",
   },
   description:
-    "Compare Murph with leading health wearables, dashboards, lab services, coaching apps, and AI health assistants using current official sources.",
+    "Source-backed guides comparing Murph, a personal health assistant, with consumer wearables, health dashboards, lab services, coaching apps, and other health assistants.",
   openGraph: {
     images: [comparisonIndexOgImage],
     type: "website",
