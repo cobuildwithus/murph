@@ -1049,6 +1049,226 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
+  test("system mailbox mode converges restored handled progress exactly once without new mailbox rows", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    let snapshotOrdinal = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-progress-convergence-before.bundle.json",
+        vaultRoot,
+      });
+      artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
+      let currentWorkspace = createWorkspaceState({
+        redactedStatus: {
+          hostedMailboxBlockedCount: 0,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 0,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemHandledThroughSeq: "1",
+          hostedMailboxSystemImportedSeq: "1",
+        },
+        snapshotRef: restoredWorkspace.snapshotRef,
+        version: "0",
+      });
+      const workspacePort: HostedRuntimeWorkspacePort = {
+        async checkpoint(request) {
+          events.push("workspace.checkpoint");
+          checkpointRequests.push(request);
+          currentWorkspace = createWorkspaceState({
+            inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+            nextWakeAt: request.nextWakeAt ?? null,
+            nextWakeReason: request.nextWakeReason ?? null,
+            redactedStatus: request.redactedStatus ?? null,
+            snapshotRef: request.snapshotRef,
+            version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+          });
+          return {
+            checkpointed: true,
+            workspace: currentWorkspace,
+          };
+        },
+        async read() {
+          events.push("workspace.read");
+          return {
+            fetchedAt: TEST_NOW,
+            workspace: currentWorkspace,
+          };
+        },
+      };
+      const runSystemMailboxPass = async (attemptId: string) =>
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              assistantExecutionBlocked: true,
+              attemptId,
+              processingMode: "system_mailbox",
+              workspaceVersion: currentWorkspace.version,
+            },
+            resolvedConfig: createDeviceSyncResolvedConfig(),
+          }),
+          {
+            async createCheckpointSnapshot() {
+              snapshotOrdinal += 1;
+              const snapshot = await createVaultSnapshotBundle({
+                key: `users/bundles/member-synthetic/system-mailbox-progress-convergence-${snapshotOrdinal}.bundle.json`,
+                vaultRoot,
+              });
+              artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+              return { snapshotRef: snapshot.snapshotRef };
+            },
+            async importItem() {
+              throw new Error("Restored system mailbox progress must not import a new row.");
+            },
+            platform: createPlatform({
+              artifactBytesByHash,
+              deviceSyncPort,
+              mailboxPort: createMailboxPort({
+                events,
+                fetchRequests,
+                items: [],
+              }),
+              workspacePort,
+            }),
+            async runAssistantPhase() {
+              throw new Error("System mailbox progress convergence must not enter assistant phase.");
+            },
+            vaultRoot,
+          },
+        );
+
+      await runSystemMailboxPass(
+        "attempt_synthetic_system_mailbox_progress_convergence_stabilize",
+      );
+      checkpointRequests.length = 0;
+      events.length = 0;
+      fetchRequests.length = 0;
+      currentWorkspace = {
+        ...currentWorkspace,
+        redactedStatus: {
+          ...currentWorkspace.redactedStatus,
+          hostedMailboxSystemHandledThroughSeq: "0",
+          hostedMailboxSystemImportedSeq: "1",
+        },
+      };
+
+      const firstResult = await runSystemMailboxPass(
+        "attempt_synthetic_system_mailbox_progress_convergence_first",
+      );
+
+      assert.equal(firstResult.status, "idle");
+      assert.equal(
+        checkpointRequests.length,
+        1,
+        JSON.stringify({
+          events,
+          checkpoints: checkpointRequests.map((request) => ({
+            handled: request.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+            imported: request.redactedStatus?.hostedMailboxSystemImportedSeq,
+            nextWakeAt: request.nextWakeAt,
+            nextWakeReason: request.nextWakeReason,
+          })),
+        }),
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      const repairCheckpointLog = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_system_mailbox_progress_convergence_first",
+        spy: consoleInfo,
+      }).find((entry) =>
+        entry.details.runtimePhase === "workspace.checkpoint.idle_shutdown"
+        && entry.details.runtimePhaseStatus === "done"
+        && entry.details.restoredSystemMailboxProgressAheadAtCheckpoint === true
+      );
+      assert.equal(repairCheckpointLog?.details.checkpointed, true);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
+
+      const secondResult = await runSystemMailboxPass(
+        "attempt_synthetic_system_mailbox_progress_convergence_aligned",
+      );
+
+      assert.equal(secondResult.status, "idle");
+      assert.equal(checkpointRequests.length, 1);
+      assert.deepEqual(
+        fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
+        [["system"], ["system"]],
+      );
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+
+      for (const [scenario, importedSeq, handledThroughSeq] of [
+        ["canonical_ahead", "2", "2"],
+        ["crossed", "2", "0"],
+        ["missing_imported", null, "1"],
+        ["malformed_handled", "1", "01"],
+      ] as const) {
+        const redactedStatus = { ...currentWorkspace.redactedStatus };
+        delete redactedStatus.hostedMailboxSystemHandledThroughSeq;
+        delete redactedStatus.hostedMailboxSystemImportedSeq;
+        if (importedSeq !== null) {
+          redactedStatus.hostedMailboxSystemImportedSeq = importedSeq;
+        }
+        if (handledThroughSeq !== null) {
+          redactedStatus.hostedMailboxSystemHandledThroughSeq = handledThroughSeq;
+        }
+        currentWorkspace = {
+          ...currentWorkspace,
+          redactedStatus,
+        };
+
+        const attemptId =
+          `attempt_synthetic_system_mailbox_progress_convergence_${scenario}`;
+        const result = await runSystemMailboxPass(attemptId);
+
+        assert.equal(result.status, "idle", scenario);
+        assert.equal(checkpointRequests.length, 1, scenario);
+        assert.equal(
+          readCapturedRuntimePhaseLogs({ attemptId, spy: consoleInfo }).some((entry) =>
+            entry.details.restoredSystemMailboxProgressAheadAtCheckpoint === true
+          ),
+          false,
+          scenario,
+        );
+      }
+    } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleInfo.mockRestore();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("system mailbox webhook dirty work reaches quiescence without starting provider cadence", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
