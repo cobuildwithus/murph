@@ -209,6 +209,7 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Setup pnpm
@@ -224,6 +225,13 @@ jobs:
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
+
+      - name: Guard cyclomatic complexity regressions
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          MURPH_COMPLEXITY_BASE_SHA: ${{ github.sha }}^1
+          MURPH_COMPLEXITY_HEAD_SHA: ${{ github.sha }}
+        run: pnpm complexity:diff
 
       - name: Validate release metadata
         run: |
