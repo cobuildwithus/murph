@@ -655,10 +655,16 @@ async function countFirstSystemMailboxAdmissionWindow(input: {
 }): Promise<number> {
   const deadline = Date.now() + observationTimeoutMs;
   let firstAdmissionAtMs: number | null = null;
+  const observedAdmissions = new Map<string, RuntimeAdmissionObservation>();
   let admissions: RuntimeAdmissionObservation[] = [];
 
   while (Date.now() < deadline) {
-    admissions = listRuntimeAdmissionsSince(input.notBefore);
+    for (const admission of listRuntimeAdmissionsSince(input.notBefore)) {
+      observedAdmissions.set(admission.orchestrationAttemptId, admission);
+    }
+    admissions = [...observedAdmissions.values()].sort((left, right) =>
+      Date.parse(left.acceptedAt) - Date.parse(right.acceptedAt)
+    );
     const firstAdmission = admissions[0] ?? null;
     if (firstAdmissionAtMs === null && firstAdmission !== null) {
       firstAdmissionAtMs = Date.parse(firstAdmission.acceptedAt);
