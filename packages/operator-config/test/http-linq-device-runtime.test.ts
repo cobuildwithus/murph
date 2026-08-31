@@ -283,8 +283,8 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
 
     if (url.endsWith('/chats/chat-123/messages')) {
       return createJsonResponse({
-        id: 'message-1',
         chat_id: 'chat-123',
+        message: { id: 'message-1' },
       })
     }
 
@@ -354,7 +354,12 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
     ),
     {
       chat_id: 'chat-123',
-      id: 'message-1',
+      message: { id: 'message-1' },
+      providerMessageEffects: [{
+        carriesIntentMedia: true,
+        message: 'hello from Murph',
+        providerMessageId: 'message-1',
+      }],
     },
   )
 
@@ -745,7 +750,7 @@ test('linq runtime serializes reply targets only for marked native replies', asy
     bodies.push(parseJsonRequestBody(init.body))
     return createJsonResponse({
       chat_id: 'chat-123',
-      id: 'message-1',
+      message: { id: 'message-1' },
     })
   })
 
@@ -794,6 +799,46 @@ test('linq runtime serializes reply targets only for marked native replies', asy
     (error) => error instanceof VaultCliError && error.code === 'LINQ_INVALID_INPUT',
   )
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
+test('linq runtime keeps an accepted message without provider identity retryable', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestBody: Record<string, unknown> | null = null
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    requestBody = parseJsonRequestBody(requireStringRequestBody(init.body))
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: {},
+    })
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-123',
+        idempotencyKey: 'reply-key-1',
+        message: 'hello',
+      },
+      { env, fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_API_REQUEST_FAILED'
+      && error.context?.operation === 'send_message'
+      && error.context?.retryable === true
+      && 'deliveryMayHaveSucceeded' in error
+      && error.deliveryMayHaveSucceeded === true,
+  )
+  expect(fetchImplementation).toHaveBeenCalledOnce()
+  assert.deepEqual(requestBody, {
+    message: {
+      idempotency_key: 'reply-key-1',
+      parts: [{ type: 'text', value: 'hello' }],
+    },
+  })
 })
 
 const incompleteTwoPartMessageIdentityCases = [
@@ -1579,7 +1624,7 @@ test('linq runtime omits the text part for media-only messages and rejects empty
     body = parseJsonRequestBody(init.body)
     return createJsonResponse({
       chat_id: 'chat-123',
-      id: 'message-media-only',
+      message: { id: 'message-media-only' },
     })
   })
 
@@ -2806,7 +2851,7 @@ test('linq runtime preserves path-prefixed base urls when building requests', as
         seenUrls.push(url)
         return createJsonResponse({
           chat_id: 'chat:123',
-          id: 'message-1',
+          message: { id: 'message-1' },
         })
       },
     },

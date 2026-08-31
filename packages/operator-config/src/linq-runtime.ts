@@ -457,9 +457,10 @@ export async function sendLinqChatMessage(
     },
     dependencies,
   )
-  const primaryMessageId = requireLinqPrimaryMessageIdForRichLink({
+  const primaryMessageId = requireLinqPrimaryMessageId({
     messageId: primaryResponse.message?.id,
     operation: 'send_message',
+    richLinkFollowUp: true,
   })
   let linkResponse: LinqMessageSendResponse
   try {
@@ -541,9 +542,13 @@ async function sendLinqChatMessageParts(
     replyToMessageId:
       input.nativeReplyRequested === true ? replyToMessageId : null,
   }, dependencies)
+  const providerMessageId = requireLinqPrimaryMessageId({
+    messageId: response.message?.id,
+    operation: 'send_message',
+  })
   const providerMessageEffects = buildLinqProviderMessageEffects({
     body,
-    providerMessageId: response.message?.id,
+    providerMessageId,
   })
   return {
     ...response,
@@ -1214,9 +1219,10 @@ export async function createLinqChat(
     dependencies,
   )
   const chatId = requireLinqCreatedChatIdForRichLink(result)
-  const primaryMessageId = requireLinqPrimaryMessageIdForRichLink({
+  const primaryMessageId = requireLinqPrimaryMessageId({
     messageId: result.messageId,
     operation: 'create_chat',
+    richLinkFollowUp: true,
   })
   let linkResponse: LinqMessageSendResponse
   try {
@@ -1341,9 +1347,10 @@ function requireLinqCreatedChatIdForRichLink(result: CreateLinqChatResult): stri
   )
 }
 
-function requireLinqPrimaryMessageIdForRichLink(input: {
+function requireLinqPrimaryMessageId(input: {
   messageId: unknown
   operation: 'create_chat' | 'send_message'
+  richLinkFollowUp?: boolean
 }): string {
   const messageId = normalizeNullableString(
     typeof input.messageId === 'string' ? input.messageId : null,
@@ -1355,7 +1362,9 @@ function requireLinqPrimaryMessageIdForRichLink(input: {
   throw Object.assign(
     new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
-      'Linq response was missing the primary message identity for a rich-link follow-up.',
+      `Linq response was missing the primary message identity${
+        input.richLinkFollowUp ? ' for a rich-link follow-up' : ''
+      }.`,
       {
         failureStage: 'http',
         operation: input.operation,

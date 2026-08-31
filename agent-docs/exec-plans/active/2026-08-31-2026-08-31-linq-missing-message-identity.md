@@ -6,28 +6,27 @@ Updated: 2026-08-31
 
 ## Goal
 
-- Prevent a successful Linq API response that lacks every provider message
-  identity from being persisted as an accepted direct reply or consuming its
-  answered mailbox input. Preserve the existing idempotent ambiguous-send
-  recovery path so the same delivery can be safely retried.
+- Prevent a successful Linq API response for an existing-chat message that
+  lacks every provider message identity from being persisted as an accepted
+  direct reply or consuming its answered mailbox input. Preserve the existing
+  idempotent ambiguous-send recovery path so the same delivery can be safely
+  retried.
 
 ## Success criteria
 
 - A focused regression fails on the current base by showing that a 2xx Linq
   response without a message identity is returned as accepted.
-- The accepted patch requires one provider message identity for ordinary chat
-  creation and existing-chat sends, without changing rich-link partial-delivery
-  ownership or adding a second retry owner.
-- Focused Linq HTTP, transport, runtime delivery, and affected typecheck proof
-  pass.
+- The accepted patch requires one provider message identity for ordinary
+  existing-chat sends, without changing rich-link partial-delivery ownership or
+  adding a second retry owner.
+- Focused Linq runtime transport and affected typecheck proof pass.
 - The exact pushed head passes repository completion review, required CI, and
   final ReviewGPT review before the ordinary bug-fix PR is handed to a human.
 
 ## Scope
 
-- In scope: Linq client acknowledgement validation, focused regression tests,
-  the durable delivery contract documentation required for this provider
-  boundary, and PR evidence.
+- In scope: hosted-runtime Linq transport acknowledgement validation, focused
+  regression tests, required changelog evidence, and PR evidence.
 - Out of scope: production data repair, replaying or resending historical
   deliveries, provider configuration, receipt ingestion, group receipt policy,
   telemetry backends, device-sync work, and autonomous merge or deployment.
@@ -54,7 +53,7 @@ Updated: 2026-08-31
 
 ## Tasks
 
-1. Record the base failure with a focused Linq HTTP regression.
+1. Record the base failure with a focused hosted-runtime Linq regression.
 2. Send ReviewGPT the privacy-safe root-cause and implementation packet.
 3. Inspect and apply only a scoped, contract-aligned ReviewGPT patch.
 4. Run focused proof, affected typechecks, privacy/static checks, and completion
@@ -73,8 +72,9 @@ Updated: 2026-08-31
 
 ## Verification
 
-- Commands to run: focused `apps/web` Vitest for Linq HTTP and runtime-delivery
-  handling, Web typecheck, focused ESLint, `git diff --check`, repository
-  completion audit commands, required GitHub checks, and final ReviewGPT review.
+- Commands to run: focused `operator-config` Vitest for the Linq runtime
+  transport, affected package typecheck, focused ESLint, `git diff --check`,
+  repository completion audit commands, required GitHub checks, and final
+  ReviewGPT review.
 - Expected outcomes: identity-less 2xx results are ambiguous and nonterminal;
   identity-bearing sends retain current accepted behavior; all checks pass.
