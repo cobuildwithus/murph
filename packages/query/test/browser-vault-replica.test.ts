@@ -511,16 +511,55 @@ test("browser vault replica generation is content-addressed and legacy-readable"
   );
 });
 
-test("cooperative Browser Vault serialization matches JSON and observes cancellation", async () => {
-  const value = {
-    array: [undefined, Number.NaN, "kept"],
-    omitted: undefined,
-    present: {
+test("cooperative Browser Vault serialization matches JSON across bounded chunks", async () => {
+  const shared = {
+    nested: {
       value: 42,
     },
   };
+  const sparse: unknown[] = [];
+  sparse.length = 3;
+  sparse[1] = "middle";
+  const value = {
+    array: [undefined, Number.NaN, () => "omitted", Symbol("omitted"), sparse],
+    escaped: "line one\nline two \"quoted\" ☃",
+    large: "x".repeat(20_000),
+    omitted: undefined,
+    rows: Array.from({ length: 2_500 }, (_entry, index) => ({ index })),
+    sharedFirst: shared,
+    sharedSecond: shared,
+  };
   assert.equal(await stringifyJsonCooperatively(value), JSON.stringify(value));
+});
 
+test("cooperative Browser Vault serialization preserves recursive sorted-key bytes", async () => {
+  assert.equal(
+    await stringifyJsonCooperatively({
+      zebra: {
+        delta: 4,
+        alpha: 1,
+      },
+      alpha: [{ gamma: 3, beta: 2 }],
+    }, { sortKeys: true }),
+    '{"alpha":[{"beta":2,"gamma":3}],"zebra":{"alpha":1,"delta":4}}',
+  );
+});
+
+test("cooperative Browser Vault serialization rejects unsupported roots and cycles", async () => {
+  await assert.rejects(
+    stringifyJsonCooperatively(undefined),
+    new TypeError("Browser Vault replica values must be JSON serializable."),
+  );
+
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  await assert.rejects(
+    stringifyJsonCooperatively(cyclic),
+    new TypeError("Browser Vault replica values must not contain cycles."),
+  );
+});
+
+test("cooperative Browser Vault serialization observes cancellation", async () => {
   const controller = new AbortController();
   const reason = new DOMException("Foreground work took priority.", "AbortError");
   const serialization = stringifyJsonCooperatively(

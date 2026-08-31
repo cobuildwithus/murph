@@ -147,6 +147,7 @@ interface HostedContainerRuntimeDependencies {
   processApi: HostedContainerProcessApi;
   shutdownDrainTimeoutMs: number;
   startupConfig: HostedContainerStartupConfig;
+  stopWarmCodex: HostedContainerHeavyRuntime["stopWarmCodex"];
 }
 
 interface HostedContainerDirectR2PresignedPutSmokeRequest {
@@ -839,6 +840,11 @@ export async function startHostedContainerEntrypoint(input: {
         processApi: runtime.processApi,
       });
 
+      // Codex owns process-local databases under its home. End that process
+      // before any restore path replaces or sanitizes the home it owns.
+      await stopWarmCodexWithLifecycleLog(runtime.stopWarmCodex, {
+        reason: "hosted-workspace-restore",
+      });
       workspaceRestorePreparation = runtime.prepareWorkspaceRestore({
         job,
         signal: invocationAbort.signal,
@@ -1018,7 +1024,7 @@ export async function startHostedContainerEntrypoint(input: {
       return;
     }
     void hydration.then(async (heavyRuntime) => {
-      await stopWarmCodexWithLifecycleLog(heavyRuntime, {
+      await stopWarmCodexWithLifecycleLog(heavyRuntime.stopWarmCodex, {
         failureMessage: "Hosted container entrypoint failed to stop warm Codex on server close.",
         reason: "container-server-close",
       });
@@ -1581,6 +1587,7 @@ function resolveHostedContainerRuntimeDependencies(
       runtime?.shutdownDrainTimeoutMs
       ?? HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS,
     startupConfig,
+    stopWarmCodex: runtime?.stopWarmCodex ?? stopWarmCodexAppServer,
   };
 }
 
@@ -1945,14 +1952,17 @@ async function readHostedRunnerBundleManifestSummary(
 }
 
 async function stopWarmCodexWithLifecycleLog(
-  runtime: HostedContainerHeavyRuntime,
+  stopWarmCodex: HostedContainerHeavyRuntime["stopWarmCodex"],
   input: {
     failureMessage?: string;
-    reason: "container-server-close" | "workspace-invocation-abort";
+    reason:
+      | "container-server-close"
+      | "hosted-workspace-restore"
+      | "workspace-invocation-abort";
   },
 ): Promise<void> {
   try {
-    await runtime.stopWarmCodex(input.reason);
+    await stopWarmCodex(input.reason);
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
