@@ -185,6 +185,10 @@ Updated: 2026-08-30
   - Removed record ids from the transient CurrentState projection because they
     are unnecessary for answering and exact canonical `show` remains required
     before mutation.
+  - Rejected incomplete direct-member evidence as mutation authority. The
+    complete normalized input must fit the existing 2,000-byte bound; an
+    oversized withdrawal remains non-authoritative conversation context, so a
+    truncated prefix cannot silently authorize update or forget.
 - Rejected findings: None.
 - Corrected-diff Product UX verdict: Ready.
 - Corrected-diff code review: PASS, including the final fail-closed channel
@@ -244,14 +248,20 @@ Updated: 2026-08-30
   memory read or other action, no internal-memory wording).
 - Passed: corrected notification-recovery regression for successful maintenance
   forget classification.
+- Passed: 72 focused assistant owner tests after the final authority fix,
+  including exact 2,000-byte multibyte admission and 2,001-byte withdrawal
+  rejection.
+- Passed: the extended real-Codex withdrawal journey. Assistant-only evidence
+  produced `show`, a complete direct-member withdrawal produced guarded
+  `show` then `forget`, and an oversized withdrawal with a later reversal
+  produced only `show` and preserved the record.
 - Passed: changelog page tests (9 tests) and Web typecheck.
 - Passed: `git diff --check` and task-file privacy scan.
 - Passed: Product UX Ready, architecture simplification review, and final
   corrected-diff candidate review with zero findings.
-- Blocked externally: exact-tree real-Codex reruns stopped before inference with
-  `ASSISTANT_CODEX_USAGE_LIMIT` on both correction and withdrawal attempts.
-  Earlier behavioral candidates completed the correction, withdrawal, and
-  CurrentState live journeys; the exact final tree is covered by deterministic
-  owner tests, provider-request capture, and corrected-diff review.
-- Pending: ReviewGPT, CI, final parent review, and plan closure on the exact
-  pushed head.
+- Initial exact-tree live attempts were blocked before inference by local
+  subscription limits. The repository-authorized alternate-home sweep reached
+  an authenticated subscription and completed the extended withdrawal journey
+  successfully.
+- Pending: ReviewGPT remediation review, CI, final parent review, and plan
+  closure on the exact pushed head.

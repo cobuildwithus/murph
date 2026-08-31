@@ -11744,6 +11744,7 @@ describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
 
         const runScenario = async (input: {
           evidenceKind: 'assistant' | 'member'
+          memberAuthorityExpected?: boolean
           evidenceText: string
           suffix: string
         }) => {
@@ -11821,7 +11822,14 @@ describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
             profile: 'member-memory',
             vault: workingDirectory,
           })
-          expect(evidence).toContain(`${input.evidenceKind}: ${input.evidenceText}`)
+          if (
+            input.evidenceKind === 'member'
+            && input.memberAuthorityExpected === false
+          ) {
+            expect(evidence).not.toContain('member:')
+          } else {
+            expect(evidence).toContain(`${input.evidenceKind}: ${input.evidenceText}`)
+          }
 
           const result = await executeRealCodexAppServerTurn({
             approvalPolicy: 'never',
@@ -11914,6 +11922,26 @@ describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
         })
         expect(memberWithdrawal.after.records).toEqual([])
 
+        const oversizedWithdrawal = await runScenario({
+          evidenceKind: 'member',
+          memberAuthorityExpected: false,
+          evidenceText: [
+            'Please forget this exact saved fact: "Prefers morning summaries."',
+            'x'.repeat(2_000),
+            'Actually, keep that preference.',
+          ].join(' '),
+          suffix: 'oversized-member',
+        })
+        expect(oversizedWithdrawal.memoryActions).toHaveLength(1)
+        const [oversizedShowAction] = oversizedWithdrawal.memoryActions
+        if (oversizedShowAction?.kind !== 'dynamic') {
+          throw new Error('Expected one member-memory show call.')
+        }
+        expect(oversizedShowAction.argumentsValue).toEqual({ action: 'show' })
+        expect(oversizedWithdrawal.after.records).toEqual([
+          oversizedWithdrawal.target.record,
+        ])
+
         process.stdout.write(
           `[member-memory-withdrawal-authority-e2e] ${JSON.stringify({
             assistantOnlyCalls: assistantOnly.memoryActions.map((action) =>
@@ -11929,6 +11957,11 @@ describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
             memberForgotExactId:
               forgetAction.argumentsValue.memoryId
               === memberWithdrawal.target.record.id,
+            oversizedMemberCalls: oversizedWithdrawal.memoryActions.map(
+              (action) => action.kind === 'dynamic'
+                ? readString(action.argumentsValue.action)
+                : action.kind,
+            ),
           })}\n`,
         )
       } finally {

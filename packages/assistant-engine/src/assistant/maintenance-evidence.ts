@@ -285,11 +285,15 @@ async function collectAssistantMemberMemoryMutationAuthorityEvidence(input: {
     ) {
       continue
     }
-    const text = limitAssistantConversationHistoryTextBytes(
-      event.content.text?.replace(/\s+/gu, ' ').trim() ?? '',
-      input.maxEntryBytes,
-    )
-    if (!text) {
+    const rawText = event.content.text
+    if (!rawText) {
+      continue
+    }
+    const text = rawText.replace(/\s+/gu, ' ').trim()
+    if (
+      !text
+      || assistantConversationHistoryUtf8Bytes(text) > input.maxEntryBytes
+    ) {
       continue
     }
     messages.push({

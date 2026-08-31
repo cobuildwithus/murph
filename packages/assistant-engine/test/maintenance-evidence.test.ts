@@ -246,6 +246,59 @@ test('labels only raw provider-attested direct member inputs as mutation authori
   )
 })
 
+test('requires the complete normalized member input to fit the mutation authority bound', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-maintenance-member-authority-bound-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const encoder = new TextEncoder()
+  const exactPrefix = 'Correct the exact saved evening-walk preference. '
+  const exactPrefixBytes = encoder.encode(exactPrefix).byteLength
+  const exactBoundary = `${exactPrefix}${'é'.repeat(
+    Math.floor((2_000 - exactPrefixBytes) / 2),
+  )}${'x'.repeat((2_000 - exactPrefixBytes) % 2)}`
+  const oversizedPrefix = 'Forget the exact saved evening-walk preference. '
+  const oversizedSuffix = ' Actually, keep that preference.'
+  const oversizedFixedBytes = encoder.encode(
+    `${oversizedPrefix}${oversizedSuffix}`,
+  ).byteLength
+  const oversizedWithdrawal = `${oversizedPrefix}${'x'.repeat(
+    2_001 - oversizedFixedBytes,
+  )}${oversizedSuffix}`
+
+  expect(encoder.encode(exactBoundary).byteLength).toBe(2_000)
+  expect(encoder.encode(oversizedWithdrawal).byteLength).toBe(2_001)
+
+  await Promise.all([
+    upsertMemberEvidenceInput({
+      channel: 'linq',
+      eventId: 'exact-boundary-linq',
+      text: exactBoundary,
+      vaultRoot,
+    }),
+    upsertMemberEvidenceInput({
+      channel: 'linq',
+      eventId: 'oversized-withdrawal-linq',
+      text: oversizedWithdrawal,
+      vaultRoot,
+    }),
+  ])
+
+  const evidence = await buildAssistantMaintenanceConversationEvidence({
+    includeMemberMemoryMutationAuthority: true,
+    now: new Date('2026-06-30T03:00:00.000Z'),
+    profile: 'member-memory',
+    vault: vaultRoot,
+  })
+
+  expect(evidence).toContain(`member: ${exactBoundary}`)
+  expect(evidence).not.toContain(
+    'member: Forget the exact saved evening-walk preference.',
+  )
+  expect(evidence).not.toContain('Actually, keep that preference.')
+})
+
 test('uses legacy assistant session files for maintenance evidence', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-maintenance-evidence-legacy-repair-',
