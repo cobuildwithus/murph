@@ -1,4 +1,5 @@
 import {
+  isHostedRuntimeShellPrewarmOrchestrationAttemptId,
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
   type HostedRuntimeLatencyPhaseBreakdown,
@@ -58,6 +59,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   const {
     eventId,
     mailboxItemId,
+    runtimeShellPrewarmOrchestrationAttemptId,
     source,
     userId,
     wakeMailboxCheckpoint,
@@ -129,6 +131,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
         onTiming: async (timing) => {
           await recordHostedDirectEnsureWakeTimingBestEffort({
             mailboxItemId,
+            runtimeShellPrewarmOrchestrationAttemptId,
             source: "linq",
             timing,
             userId,
@@ -170,6 +173,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 
 async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   mailboxItemId: string;
+  runtimeShellPrewarmOrchestrationAttemptId?: string;
   source: "linq";
   timing: CloudflareHostedControlRuntimeEnsureProcessingTiming;
   userId: string;
@@ -177,6 +181,12 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
     schemaVersion: 1,
     orchestration: {
+      ...(isHostedRuntimeShellPrewarmOrchestrationAttemptId(
+        timingRecord.runtimeShellPrewarmOrchestrationAttemptId,
+      ) ? {
+        shellPrewarmExpectedOrchestrationAttemptId:
+          timingRecord.runtimeShellPrewarmOrchestrationAttemptId,
+      } : {}),
       tokenAcquireStartedAtEpochMs: timingRecord.timing.tokenAcquireStartedAtEpochMs,
       tokenAcquiredAtEpochMs: timingRecord.timing.tokenAcquiredAtEpochMs,
       directEnsureRequestStartedAtEpochMs:

@@ -117,7 +117,10 @@ function recordRuntimeControlAuthTiming(
   runtimeControlAuthStartedAtEpochMs: number,
   runtimeControlAuthFinishedAtEpochMs: number,
 ): void {
-  if (routeName !== "runtime-ensure-processing") {
+  if (
+    routeName !== "runtime-ensure-processing"
+    && routeName !== "runtime-shell-prewarm"
+  ) {
     return;
   }
 

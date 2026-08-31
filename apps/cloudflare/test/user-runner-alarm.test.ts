@@ -372,19 +372,34 @@ describe("HostedUserRunner execution coordination", () => {
 
     await runner.prewarmRuntimeShellForUser(
       TEST_USER_ID,
-      "linq-typing-started",
+      "linq-message-routing",
+      {
+        shellPrewarmOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+      },
     );
 
     expect(prewarmShell).toHaveBeenCalledWith({
-      source: "linq-typing-started",
+      orchestration: {
+        shellPrewarmAdmissionReadFinishedAtEpochMs: expect.any(Number),
+        shellPrewarmAdmissionReadStartedAtEpochMs: expect.any(Number),
+        shellPrewarmConsentLockAcquiredAtEpochMs: expect.any(Number),
+        shellPrewarmOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+      },
+      source: "linq-message-routing",
       timeoutMs: 20_000,
       userId: TEST_USER_ID,
     });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: {
+          orchestrationAttemptId:
+            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
           shellPrewarmAdmissionOutcome: "scheduled",
-          shellPrewarmSource: "linq-typing-started",
+          shellPrewarmSource: "linq-message-routing",
         },
       }),
     );

@@ -57,6 +57,7 @@ import {
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
   inspectHostedRuntimeMailboxToAssistantTimingSubdivision,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
+  isHostedRuntimeShellPrewarmOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
@@ -6417,6 +6418,7 @@ function requireOptionalShellPrewarmSource(
 ): {
   shellPrewarmSource?:
     | "linq-instant-start"
+    | "linq-message-routing"
     | "linq-typing-started"
     | "unknown";
 } {
@@ -6426,6 +6428,7 @@ function requireOptionalShellPrewarmSource(
   }
   if (
     value !== "linq-instant-start"
+    && value !== "linq-message-routing"
     && value !== "linq-typing-started"
     && value !== "unknown"
   ) {
@@ -6495,6 +6498,18 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureResponseReceivedAtEpochMs", orchestrationLabel),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "directEnsureOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalDirectEnsureOutcome(orchestration, orchestrationLabel),
+      ...requireOptionalShellPrewarmOrchestrationAttemptId(orchestration, "shellPrewarmExpectedOrchestrationAttemptId", orchestrationLabel),
+      ...requireOptionalShellPrewarmOrchestrationAttemptId(orchestration, "shellPrewarmOrchestrationAttemptId", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmRequestStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmRuntimeControlAuthStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmRuntimeControlAuthFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmCloudflareRouteReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmUserRunnerConstructorStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmUserRunnerConstructorFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmUserRunnerRpcStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmConsentLockAcquiredAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmAdmissionReadStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmAdmissionReadFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
@@ -6776,6 +6791,25 @@ function requireOptionalDirectEnsureOrchestrationAttemptId<
   }
   if (!isHostedRuntimeDirectEnsureOrchestrationAttemptId(value)) {
     throw new TypeError(`${label}.${key} must be a direct-wake orchestration attempt id.`);
+  }
+  return { [key]: value } as Record<Key, string>;
+}
+
+function requireOptionalShellPrewarmOrchestrationAttemptId<
+  Key extends
+    | "shellPrewarmExpectedOrchestrationAttemptId"
+    | "shellPrewarmOrchestrationAttemptId",
+>(
+  record: Record<string, unknown>,
+  key: Key,
+  label: string,
+): Partial<Record<Key, string>> {
+  const value = record[key];
+  if (value === undefined) {
+    return {};
+  }
+  if (!isHostedRuntimeShellPrewarmOrchestrationAttemptId(value)) {
+    throw new TypeError(`${label}.${key} must be a shell-prewarm orchestration attempt id.`);
   }
   return { [key]: value } as Record<Key, string>;
 }

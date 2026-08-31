@@ -503,7 +503,7 @@ The hosted Prisma schema keeps ownership sharp and nested:
 
   Canonical account deletion also inserts one foreign-key-free, KMS-encrypted
   external-cleanup receipt in the same transaction before removing member
-  rows. The immediate attempt and existing hourly retention sweep share that
+  rows. The immediate attempt and hourly external-retention cron share that
   idempotent owner for Cloudflare runner/R2, Stripe-customer, and Privy cleanup;
   unconfigured or partial targets stay pending, completed targets are skipped,
   and the receipt is removed only after convergence. Immediate target calls are
@@ -1286,9 +1286,24 @@ Callback auth contract:
   the signature to a null member, rejects a presented member header, consumes
   the nonce under a reserved system owner in the same replay table, and returns
   only the `bindings-v1` Web owner/key identity with `Cache-Control: no-store`.
-- the existing hourly hosted-retention cron removes only strictly expired nonce
+- the dedicated hourly nonce-retention cron removes only strictly expired nonce
   rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
-  account deletion still independently deletes the member's nonce rows
+  it finishes the small browser-assertion nonce lane first so callback catch-up
+  cannot starve that owner;
+  each statement remains capped at 5,000 rows, while callback nonces alone use
+  a 100-times-higher max-batch ceiling to drain sustained control-plane volume.
+  It runs at minute 5 with an explicit 800-second duration, independently of
+  the control-plane, external-provider, and runtime-maintenance crons; a
+  caught-up hour still stops after the first short batch. Account deletion
+  still independently deletes the member's nonce rows
+- the other hourly retention routes are staggered and independently bounded:
+  `/api/internal/hosted-execution/retention/control-plane/cron` at minute 20
+  for ordinary primary-database cleanup,
+  `/api/internal/hosted-execution/retention/external/cron` at minute 35 for
+  account and computer provider cleanup, and
+  `/api/internal/hosted-execution/retention/runtime/cron` at minute 50 for
+  runtime signals followed by best-effort isolated diagnostic-log cleanup. Each has a 300-second
+  duration; none invokes the nonce owner
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
@@ -1456,7 +1471,7 @@ policy, so it remains admissible through the millisecond before
 `(exp + 61) * 1000` and is first invalid exactly at that instant. New nonce
 rows persist that first-invalid horizon, while request admission performs one
 primary-key insert and treats only the exact nonce conflict as replay. The
-bounded hourly hosted-retention owner deletes only rows whose stored
+bounded hourly nonce-retention owner deletes only rows whose stored
 `expiresAt <= now - 61 seconds`; this retains legacy raw-`exp` rows through the
 full acceptance window and deliberately retains new-format rows for an
 additional 61 seconds.
@@ -1848,13 +1863,24 @@ does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
 The production runner first performs route type generation and an explicit
 app-local generated-contract TypeScript check with a 3.5 GiB limit. It marks
-only that prepared check complete before starting Webpack. Compilation then
-runs in the Next CLI process with a 3 GiB old-space limit; the runner preserves
-unrelated inherited Node options while replacing inherited old-space flags.
-These phases are sequential, so their limits do not compose. The same runner is
-used by the Vercel package build and the CI memory-observation lane. Forced-cold
-Standard previews remain the direct acceptance evidence, and a Next upgrade
-must revalidate the heap boundary.
+only that prepared check complete before starting Webpack. The Next CLI parent
+uses a 1 GiB old-space limit and the isolated Webpack worker uses 3 GiB. The
+worker exits and releases compiler memory before static-generation workers
+start. The runner preserves unrelated inherited Node options while replacing
+inherited old-space flags. TypeScript, Webpack compilation, and static
+generation are sequential, so their heap limits do not compose. The same
+runner is used by the Vercel package build and the CI memory-observation lane.
+Forced-cold Standard previews remain the direct acceptance evidence, and a
+Next upgrade must revalidate the parent/worker heap boundary.
+
+The worker boundary is required by measured composed memory, not by the duration
+of an individual route. A cold single-process GitHub build reached 9.11 GB
+immediately before static generation and 11.18 GB when export workers started,
+including 8.06 GB of anonymous memory. Vercel Standard provides 8 GB total and
+the repository reserves 0.8 GB for host overhead, so reducing only page
+concurrency cannot make that single-process shape fit the 7.2 GB build budget.
+The isolated worker preserves the ordinary `next build` output while removing
+compiler residency from the static-generation peak.
 
 Next's static-generation export loop defaults to eight concurrent pages in each
 of the two configured export workers, allowing up to sixteen page renders at
@@ -1865,14 +1891,17 @@ skipping any static output; exact-head Vercel builds remain the duration and
 capacity proof.
 
 Production builds use Next 16.3's supported Webpack fallback. The production
-script passes `--webpack` and enables `webpackMemoryOptimizations`. The Workflow
-integration contributes custom Webpack configuration, so Next's canonical
-default is to compile in the CLI process. Do not force `webpackBuildWorker`:
-that creates a second compiler-process owner and previously left Standard
-deployments stuck inside an opaque worker after compilation stopped making
-progress. The hosted local-development wrapper remains on Turbopack and rejects
-an explicit Webpack flag. The production runner also owns a versioned cache
-epoch inside `.next/cache`.
+runner passes `--webpack`, and the config enables `webpackBuildWorker` and
+`webpackMemoryOptimizations`. The Workflow integration contributes custom
+Webpack configuration, which disables Next's automatic worker selection, so
+the worker must be enabled explicitly. Three consecutive forced-cold Webpack
+previews, a later integration preview, and the final corrected head previously
+completed on the Standard builder with this worker boundary. The later
+single-process simplification is no longer acceptable: an exact-head cgroup
+trace measured 11.18 GB at static generation, and production reproduced the
+same intermittent 70-page stall. The hosted local-development wrapper remains
+on Turbopack and rejects an explicit Webpack flag. The production runner also
+owns a versioned cache epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
 compilation and writes the epoch only after Next succeeds. Production Webpack
 compiles are additionally cold-cache by policy: the runner removes

@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-29
+Last verified: 2026-08-30
 
 ## Current Guardrails
 
@@ -377,7 +377,12 @@ Last verified: 2026-08-29
 - `packages/assistant-engine` owns one resident Codex App Server process and one
   memoized readiness promise on that process. Readiness covers spawn plus the
   App Server initialization handshake; it does not reserve the process for a
-  turn. Matching preparation callers join that same promise, while a matching
+  turn. Its warmth is scoped to one restored workspace: the Cloudflare
+  container invocation boundary synchronously stops the exact engine-owned
+  process before it starts any hosted restore path that validates, replaces,
+  clears, or sanitizes Codex home, so the replacement rebuilds private indexes
+  against the restored home. Matching preparation callers join that same
+  promise, while a matching
   foreground turn synchronously reserves the exact process before joining its
   readiness. Hosted preparation is a one-shot decision from the first fresh
   auto-reply-enabled pre-pass conversation candidate: Linq or Telegram may admit
@@ -647,6 +652,11 @@ Last verified: 2026-08-29
   back settlement without creating a synthetic skipped row. The
   active-member replan still owns route promotion, inbound accounting, and the
   canonical inbound mailbox append before any generated reply can be sent.
+  Ordinary established direct Linq messages use the same authority-free shell
+  hint as soon as pre-transaction routing preparation resolves the eligible
+  active member, before mailbox-root KMS work and transaction entry. This hint may
+  overlap or fail without changing the plan: it creates no fence or mailbox
+  owner, and only the accepted Temporal signal permits the direct ensure.
   A definite route-read or route-projection failure after generation confirms
   that same attempted row was skipped before allowing ordinary-runtime
   fallback; if the skip cannot be confirmed, Web retains ownership and the

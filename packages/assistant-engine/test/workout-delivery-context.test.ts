@@ -29,6 +29,20 @@ describe('Codex workout delivery context', () => {
     expect(tracker.readReferences(1)).toBeUndefined()
   })
 
+  it('recognizes a note-less workout start result', () => {
+    const tracker = createCodexWorkoutDeliveryContextTracker({})
+    observeCommand(tracker, {
+      command: 'vault-cli workout start Current --format json',
+      id: 'start-note-less',
+      output: workoutStartResult(currentWorkoutId, null),
+    })
+
+    expect(tracker.readReferences(0)).toEqual([{
+      entityId: currentWorkoutId,
+      entityKind: 'activity_session',
+    }])
+  })
+
   it('carries an incoming exact workout only through a matching mutation result', () => {
     const tracker = createCodexWorkoutDeliveryContextTracker({
       contextReferences: [{
@@ -316,7 +330,10 @@ function observeCommand(
   })
 }
 
-function workoutStartResult(eventId: string) {
+function workoutStartResult(
+  eventId: string,
+  note: string | null = 'Current workout',
+) {
   return {
     activityType: 'strength-training',
     created: true,
@@ -326,7 +343,7 @@ function workoutStartResult(eventId: string) {
     kind: 'activity_session',
     ledgerFile: '/vault/bank/ledger.md',
     lookupId: eventId,
-    note: 'Current workout',
+    note,
     occurredAt: '2026-08-24T14:00:00.000Z',
     title: 'Current workout',
     vault: '/vault',
