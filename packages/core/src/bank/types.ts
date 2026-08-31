@@ -334,6 +334,7 @@ export type GoalStoredDocument = StoredMarkdownRegistryEntity<GoalEntity>;
 export interface UpsertGoalInput {
   vaultRoot: string;
   goalId?: string;
+  requireExistingGoalId?: boolean;
   slug?: string;
   title?: string;
   status?: GoalStatus;

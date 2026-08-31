@@ -2424,6 +2424,21 @@ can wake one explicit workspace, and caps batch wakes to a tiny window that
 stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
 
+The same surface has a separate facts-only runtime recheck. An operator may
+submit up to three normalized, deduplicated hosted member ids; Web first
+requires an existing workspace, then the signal owner independently rechecks
+active runtime access. The signals run sequentially under one bounded deadline
+and stop on the first unknown result. Each accepted request sends only
+`runtime_recheck_requested`: it appends no mailbox item, changes no usage, and
+grants no new work authority. Signal acceptance proves only that the runtime was
+asked to reread canonical facts, not that recovery completed.
+
+Automatic discovery may seed that same explicit-id control with active
+checkpointed system lanes matching the legacy device-sync stall signature for
+at least 15 minutes. Discovery and effect authority stay separate; manually
+entered ids do not need to match that incident signature, while every mutation
+still passes the workspace and live-access guards above.
+
 An already-dormant workspace that persisted `nextWakeAt = null` before a
 wake-preservation fix cannot self-start merely because the fixed runtime has
 been deployed. Recover it through the same bounded maintenance surface rather
