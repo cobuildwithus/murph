@@ -4987,6 +4987,12 @@ function createHostedAssistantLinqSendDependency(input: {
         throw markHostedDeliveryMayHaveSucceeded(error);
       }
       if (
+        hasVerifiedVaultAttachment
+        && isHostedLinqProviderOutcomeAmbiguous(error)
+      ) {
+        throw markHostedLinqAttachmentReservationMayHaveSucceeded(error);
+      }
+      if (
         hostedDeliveryErrorProvesProviderWasSkipped(error)
         || isHostedLinqProviderOutcomeAmbiguous(error)
       ) {

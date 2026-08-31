@@ -541,6 +541,237 @@ it.each([
   ]);
 });
 
+it("retries an identity-less hosted Linq text acknowledgement with the same body and provider key", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const fixture = await createHostedLinqAttachmentFixture({
+    imageCount: 0,
+    key: "identity-less-text-retry",
+    target: "linq_chat_hosted_identity_less_text_retry",
+  });
+  const requestBodies: string[] = [];
+  let messageAttempt = 0;
+  const providerMessageId = "linq_identity_less_text_retry_sent";
+  const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+    const url = String(request);
+    if (!url.endsWith(`/chats/${fixture.target}/messages`)) {
+      throw new Error(`Unexpected Linq provider request: ${url}`);
+    }
+    requestBodies.push(await readFetchRequestBody(request, init));
+    messageAttempt += 1;
+    return new Response(JSON.stringify({
+      message: messageAttempt === 1 ? {} : { id: providerMessageId },
+    }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const publicInternetFetch = vi.fn<typeof fetch>();
+  const drainInput = buildHostedLinqDrainInput({
+    fixture,
+    providerFetch,
+    publicInternetFetch,
+  });
+
+  const firstOutcomes = await drainHostedPreparedAssistantDeliveries(drainInput);
+
+  expect(firstOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryStatus: "retryable",
+      effectId: fixture.intent.intentId,
+      retryable: true,
+    }),
+  ]);
+  expect(providerFetch).toHaveBeenCalledTimes(1);
+  expect(publicInternetFetch).not.toHaveBeenCalled();
+  const retained = await readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  );
+  expect(retained).toMatchObject({
+    deliveryConfirmationPending: true,
+    lastError: { code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING" },
+    nextAttemptAt: expect.any(String),
+    status: "retryable",
+  });
+  if (!retained?.nextAttemptAt) {
+    throw new Error("Expected the identity-less text delivery to schedule a retry.");
+  }
+
+  vi.setSystemTime(new Date(retained.nextAttemptAt));
+  const retryEffects = await collectHostedAssistantDeliverySideEffects({
+    includeBackgroundDueIntents: true,
+    vaultRoot: fixture.vaultRoot,
+  });
+  expect(retryEffects.map((effect) => effect.effectId)).toEqual([
+    fixture.intent.intentId,
+  ]);
+
+  const retryOutcomes = await drainHostedPreparedAssistantDeliveries({
+    ...drainInput,
+    assistantDeliveryEffects: retryEffects,
+  });
+
+  expect(retryOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryStatus: "sent",
+      effectId: fixture.intent.intentId,
+      providerMessageId,
+      retryable: false,
+    }),
+  ]);
+  expect(requestBodies).toHaveLength(2);
+  const firstRequestBody = requestBodies[0];
+  const retryRequestBody = requestBodies[1];
+  if (!firstRequestBody || !retryRequestBody) {
+    throw new Error("Expected both hosted Linq text request bodies.");
+  }
+  expect(retryRequestBody).toBe(firstRequestBody);
+  const parsedRequestBody = JSON.parse(firstRequestBody) as {
+    message?: { idempotency_key?: string };
+  };
+  expect(parsedRequestBody.message?.idempotency_key).toBe(
+    fixture.intent.deliveryIdempotencyKey
+      ?? `assistant-outbox:${fixture.intent.intentId}`,
+  );
+  expect(publicInternetFetch).not.toHaveBeenCalled();
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    deliveryConfirmationPending: false,
+    status: "sent",
+  });
+});
+
+it("terminalizes an identity-less hosted Linq private-image acknowledgement without a second reservation", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const fixture = await createHostedLinqAttachmentFixture({
+    key: "identity-less-private-image",
+    target: "linq_chat_hosted_identity_less_private_image",
+  });
+  let reservationCount = 0;
+  let messageRequestCount = 0;
+  const requestBodiesByIdempotencyKey = new Map<string, string>();
+  const messageRequestBodies: string[] = [];
+  const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+    const url = String(request);
+    if (url.endsWith("/attachments")) {
+      reservationCount += 1;
+      return new Response(JSON.stringify({
+        attachment_id: `attachment_identity_less_private_${reservationCount}`,
+        expires_at: "2026-08-06T21:00:00.000Z",
+        http_method: "PUT",
+        required_headers: {
+          "content-type": "image/png",
+        },
+        upload_url:
+          `https://uploads.example.test/private/identity-less-${reservationCount}`,
+      }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.endsWith(`/chats/${fixture.target}/messages`)) {
+      messageRequestCount += 1;
+      const requestBody = await readFetchRequestBody(request, init);
+      const parsedRequestBody = JSON.parse(requestBody) as {
+        message?: {
+          idempotency_key?: string;
+          parts?: Array<{ attachment_id?: string }>;
+        };
+      };
+      const idempotencyKey = parsedRequestBody.message?.idempotency_key;
+      if (!idempotencyKey) {
+        throw new Error("Expected the private-image provider idempotency key.");
+      }
+      const priorRequestBody = requestBodiesByIdempotencyKey.get(idempotencyKey);
+      if (priorRequestBody && priorRequestBody !== requestBody) {
+        return new Response(JSON.stringify({ error: "idempotency body conflict" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 409,
+        });
+      }
+      requestBodiesByIdempotencyKey.set(idempotencyKey, requestBody);
+      messageRequestBodies.push(requestBody);
+      return new Response(JSON.stringify({ message: {} }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error(`Unexpected Linq provider request: ${url}`);
+  });
+  const publicInternetFetch = vi.fn<typeof fetch>(async () =>
+    new Response(null, { status: 204 }));
+  const drainInput = buildHostedLinqDrainInput({
+    fixture,
+    providerFetch,
+    publicInternetFetch,
+  });
+
+  const firstOutcomes = await drainHostedPreparedAssistantDeliveries(drainInput);
+
+  expect(firstOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      deliveryStatus: "failed_ambiguous",
+      effectId: fixture.intent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(reservationCount).toBe(1);
+  expect(publicInternetFetch).toHaveBeenCalledTimes(1);
+  expect(messageRequestCount).toBe(1);
+  expect(messageRequestBodies).toHaveLength(1);
+  const firstMessageRequestBody = messageRequestBodies[0];
+  if (!firstMessageRequestBody) {
+    throw new Error("Expected the hosted Linq private-image message request.");
+  }
+  expect(JSON.parse(firstMessageRequestBody)).toMatchObject({
+    message: {
+      idempotency_key:
+        fixture.intent.deliveryIdempotencyKey
+          ?? `assistant-outbox:${fixture.intent.intentId}`,
+      parts: expect.arrayContaining([
+        expect.objectContaining({
+          attachment_id: "attachment_identity_less_private_1",
+        }),
+      ]),
+    },
+  });
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    deliveryConfirmationPending: false,
+    lastError: { code: "ASSISTANT_DELIVERY_AMBIGUOUS" },
+    nextAttemptAt: null,
+    status: "abandoned",
+  });
+
+  vi.setSystemTime(new Date("2026-08-06T20:11:00.000Z"));
+  const laterOutcomes = await drainHostedPreparedAssistantDeliveries({
+    ...drainInput,
+    wake: buildHostedExecutionRuntimeTimerWake({
+      eventId: "evt_hosted_identity_less_private_image_later",
+      occurredAt: "2026-08-06T20:11:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "member_identity_less_private_image",
+    }),
+  });
+
+  expect(laterOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      deliveryStatus: "failed_ambiguous",
+      effectId: fixture.intent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(reservationCount).toBe(1);
+  expect(publicInternetFetch).toHaveBeenCalledTimes(1);
+  expect(messageRequestCount).toBe(1);
+  expect(messageRequestBodies).toHaveLength(1);
+});
+
 it("terminalizes a two-image hosted Linq delivery when a later reservation yields after provider entry", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
@@ -1229,4 +1460,14 @@ function buildHostedLinqDrainInput(input: {
     vaultRoot: input.fixture.vaultRoot,
     wake: input.fixture.wake,
   };
+}
+
+async function readFetchRequestBody(
+  request: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1],
+): Promise<string> {
+  if (typeof init?.body === "string") {
+    return init.body;
+  }
+  return request instanceof Request ? await request.clone().text() : "";
 }
