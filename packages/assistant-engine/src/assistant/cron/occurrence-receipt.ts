@@ -289,6 +289,33 @@ export function projectAssistantAutomationOccurrenceReceipt(
         sent: 'not_reached',
       }
     case 'failed':
+      if (run.reason === 'delivery_failed_not_reached') {
+        return {
+          ...common,
+          delivered: 'not_reached',
+          generated: 'confirmed',
+          outcome: 'failed',
+          sent: 'not_reached',
+        }
+      }
+      if (run.reason === 'delivery_failed_sent') {
+        return {
+          ...common,
+          delivered: 'unconfirmed',
+          generated: 'confirmed',
+          outcome: 'sent',
+          sent: 'confirmed',
+        }
+      }
+      if (run.reason === 'delivery_failed_unknown') {
+        return {
+          ...common,
+          delivered: 'unknown',
+          generated: 'confirmed',
+          outcome: 'failed',
+          sent: 'unknown',
+        }
+      }
       return {
         ...common,
         delivered: 'unknown',

@@ -136,6 +136,10 @@ image-fetch failure after provider acceptance has no retry signal, and the
 raster's VoiceOver behavior is provider/native-extension owned; both remain
 physical rollout gates rather than reasons to put private values in preview
 text.
+Keep production card generation disabled unless the platform-owned
+`MURPH_WEARABLE_TREND_CARDS_ENABLED` value is exactly `1`. Enable it only after
+installed-app, app-absent, macOS, image-failure, and VoiceOver checks pass;
+reader and replay compatibility may ship first with the flag omitted.
 
 V7 outbox compatibility is runner-first and separate from saved-view storage.
 Deploy V7 parsing and replay support to every runner before allowing a producer

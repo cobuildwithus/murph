@@ -119,7 +119,9 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // resolved 290 modules locally and on Linux CI without adding a package.
     // Remeasured 291 modules on 2026-08-28 after the stateless calendar link
     // contract joined the public @murphai/contracts barrel.
-    maxResolvedModules: 291,
+    // Remeasured 292 modules after the canonical wearable saved-view contract
+    // joined the same public contracts barrel; no new CLI dependency was added.
+    maxResolvedModules: 292,
   },
 ]
 

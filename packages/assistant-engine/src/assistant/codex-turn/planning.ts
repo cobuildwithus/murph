@@ -1,6 +1,9 @@
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
-import { isMurphAndroidAppEnabled } from '@murphai/hosted-execution/env'
+import {
+  isMurphAndroidAppEnabled,
+  isMurphWearableTrendCardsEnabled,
+} from '@murphai/hosted-execution/env'
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
 } from '@murphai/hosted-execution/assistant-capabilities'
@@ -557,6 +560,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+  const wearableTrendCardsAvailable =
+    responseCardsAvailable &&
+    isMurphWearableTrendCardsEnabled(input.sharedPlan.cliAccess.env)
   const telegramPresentationResponseCardsAvailable =
     resolvedChannel?.trim().toLowerCase() === 'telegram' &&
     (
@@ -852,6 +858,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantAndroidAppAvailable: isMurphAndroidAppEnabled(
         input.sharedPlan.cliAccess.env,
       ),
+      assistantWearableTrendCardsAvailable: wearableTrendCardsAvailable,
       assistantCliContract: options.assistantCliContract,
       assistantContextSnapshotPrompt,
       assistantDynamicContextPrompts: assistantDynamicContextPrompts,
@@ -1043,6 +1050,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
+        wearableTrendCardsAvailable,
         exerciseRoutineResponseCardsAvailable,
         telegramRichContentResponseCardsAvailable,
         groupChallengeResponseCardsAvailable,

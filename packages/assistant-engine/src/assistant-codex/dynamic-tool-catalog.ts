@@ -1723,6 +1723,7 @@ export interface MurphDynamicToolAvailability {
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
+  wearableTrendCardsAvailable?: boolean | null
   exerciseRoutineResponseCardsAvailable?: boolean | null
   telegramRichContentResponseCardsAvailable?: boolean | null
   groupChallengeResponseCardsAvailable?: boolean | null
@@ -1764,7 +1765,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL, defaultOff((a) =>
-      a.responseCardsAvailable)],
+      a.wearableTrendCardsAvailable)],
     [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>
       a.exerciseRoutineResponseCardsAvailable)],
     [MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL, defaultOff((a) =>

@@ -99,10 +99,10 @@ const EXISTING_MEDIA: AssistantResponseMedia = {
 describe('murph.attach_wearable_trend_card', () => {
   it('offers a selection-only schema on eligible response-card turns', () => {
     const unavailable = resolveMurphDynamicTools({
-      responseCardsAvailable: false,
+      responseCardsAvailable: true,
     })
     const available = resolveMurphDynamicTools({
-      responseCardsAvailable: true,
+      wearableTrendCardsAvailable: true,
     })
 
     expect(unavailable).not.toContain(MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL)

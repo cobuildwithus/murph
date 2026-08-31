@@ -9,7 +9,9 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
   isMurphAndroidAppEnabled,
+  isMurphWearableTrendCardsEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
+  MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   HOSTED_ELEVENLABS_ENV_NAMES,
@@ -347,6 +349,16 @@ export function buildHostedRuntimePlatformEnv(
     if (key === MURPH_ANDROID_APP_ENABLED_ENV) {
       const value = source[key];
       if (isMurphAndroidAppEnabled({
+        [key]: typeof value === "string" ? value : undefined,
+      })) {
+        env[key] = "1";
+      }
+      continue;
+    }
+
+    if (key === MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV) {
+      const value = source[key];
+      if (isMurphWearableTrendCardsEnabled({
         [key]: typeof value === "string" ? value : undefined,
       })) {
         env[key] = "1";

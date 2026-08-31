@@ -41,7 +41,9 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   isMurphAndroidAppEnabled,
+  isMurphWearableTrendCardsEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
+  MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   emitHostedExecutionStructuredLog,
@@ -2015,6 +2017,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ...guardedRuntime.userEnv,
       ...(isMurphAndroidAppEnabled(guardedRuntime.platformEnv)
         ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
+        : {}),
+      ...(isMurphWearableTrendCardsEnabled(guardedRuntime.platformEnv)
+        ? { [MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV]: "1" }
         : {}),
       ...(imageCodexModelCatalogJson
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }

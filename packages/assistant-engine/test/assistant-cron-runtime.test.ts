@@ -11645,7 +11645,7 @@ describe('assistant cron runtime orchestration', () => {
             'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
           finishedAt: '2026-05-04T16:00:20.000Z',
           outcome: 'failed',
-          reason: 'delivery_failed',
+          reason: 'delivery_failed_not_reached',
         }),
       ],
     })

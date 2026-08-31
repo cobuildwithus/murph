@@ -6,6 +6,7 @@ import {
 } from "@murphai/hosted-execution/assistant-capabilities";
 import {
   MURPH_ANDROID_APP_ENABLED_ENV,
+  MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 
 const HOSTED_WORKER_OPTIONAL_PROVIDER_VAR_NAMES =
@@ -60,6 +61,7 @@ export const HOSTED_WORKER_TRIMMED_OPTIONAL_VAR_NAMES = [
 export const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   ...HOSTED_WORKER_TRIMMED_OPTIONAL_VAR_NAMES,
   MURPH_ANDROID_APP_ENABLED_ENV,
+  MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV,
 ] as const;
 
 // Source-controlled defaults applied when the deploy environment leaves an

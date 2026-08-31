@@ -1262,6 +1262,9 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("FFMPEG_COMMAND");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("WHISPER_COMMAND");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("WHISPER_MODEL_PATH");
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toContain(
+      "MURPH_WEARABLE_TREND_CARDS_ENABLED",
+    );
   });
 });
 
@@ -1276,16 +1279,19 @@ describe("hosted private-media platform env", () => {
     });
   });
 
-  it("projects the Android rollout gate only from the exact enabled value", () => {
-    expect(buildHostedRunnerContainerPlatformEnv({
-      MURPH_ANDROID_APP_ENABLED: "1",
-    })).toEqual({
-      MURPH_ANDROID_APP_ENABLED: "1",
-    });
-    for (const disabledValue of ["", "0", "true", " 1 "]) {
+  it("projects app rollout gates only from the exact enabled value", () => {
+    for (const gate of [
+      "MURPH_ANDROID_APP_ENABLED",
+      "MURPH_WEARABLE_TREND_CARDS_ENABLED",
+    ] as const) {
       expect(buildHostedRunnerContainerPlatformEnv({
-        MURPH_ANDROID_APP_ENABLED: disabledValue,
-      })).not.toHaveProperty("MURPH_ANDROID_APP_ENABLED");
+        [gate]: "1",
+      })).toEqual({ [gate]: "1" });
+      for (const disabledValue of ["", "0", "true", " 1 "]) {
+        expect(buildHostedRunnerContainerPlatformEnv({
+          [gate]: disabledValue,
+        })).not.toHaveProperty(gate);
+      }
     }
   });
 });

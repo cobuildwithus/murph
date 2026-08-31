@@ -2823,6 +2823,71 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
+  it('keeps wearable trend cards default-off and enables them only for exact private rollout values', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+
+    const planFor = async (rawValue?: string, scheduled = false) =>
+      await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          ...(scheduled
+            ? {
+                scheduledInvocationAuthority: {
+                  automationId: 'automation_wearable_rollout',
+                  occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+                },
+                scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
+                turnTrigger: 'automation-cron' as const,
+              }
+            : {}),
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-28',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({
+          cliAccess: {
+            env: rawValue === undefined
+              ? {}
+              : { MURPH_WEARABLE_TREND_CARDS_ENABLED: rawValue },
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }),
+      })
+
+    for (const rawValue of [undefined, '', '0', 'true', ' 1 ']) {
+      const plan = await planFor(rawValue)
+      expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+        'attach_wearable_trend_card',
+      )
+      expect(plan.developerInstructions).not.toContain(
+        'murph.attach_wearable_trend_card',
+      )
+    }
+
+    for (const scheduled of [false, true]) {
+      const plan = await planFor('1', scheduled)
+      expect(plan.dynamicTools.map((tool) => tool.name)).toContain(
+        'attach_wearable_trend_card',
+      )
+      expect(plan.developerInstructions).toContain(
+        'murph.attach_wearable_trend_card',
+      )
+    }
+  })
+
   it('offers private semantic cards and Telegram presentation cards to their valid audiences', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',

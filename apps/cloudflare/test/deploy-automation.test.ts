@@ -731,34 +731,37 @@ describe("hosted deploy automation helpers", () => {
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe("telegram,mapbox");
   });
 
-  it("preserves exact Android gate semantics through generated Worker config", () => {
-    for (const [rawValue, expectedValue] of [
-      [undefined, undefined],
-      ["", undefined],
-      ["0", undefined],
-      ["true", undefined],
-      [" 1 ", undefined],
-      ["1 ", undefined],
-      ["\n1", undefined],
-      ["1", "1"],
+  it("preserves exact app rollout gate semantics through generated Worker config", () => {
+    for (const gate of [
+      "MURPH_ANDROID_APP_ENABLED",
+      "MURPH_WEARABLE_TREND_CARDS_ENABLED",
     ] as const) {
-      const environment = readHostedDeployAutomationEnvironment({
-        CF_BUNDLES_BUCKET: "hosted-bundles",
-        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-        CF_WORKER_NAME: "hosted-worker",
-        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-        ...(rawValue === undefined
-          ? {}
-          : { MURPH_ANDROID_APP_ENABLED: rawValue }),
-      });
-      const config = buildHostedWranglerDeployConfig(environment) as {
-        vars: Record<string, string>;
-      };
-      const platformEnv = buildHostedRunnerContainerPlatformEnv(config.vars);
+      for (const [rawValue, expectedValue] of [
+        [undefined, undefined],
+        ["", undefined],
+        ["0", undefined],
+        ["true", undefined],
+        [" 1 ", undefined],
+        ["1 ", undefined],
+        ["\n1", undefined],
+        ["1", "1"],
+      ] as const) {
+        const environment = readHostedDeployAutomationEnvironment({
+          CF_BUNDLES_BUCKET: "hosted-bundles",
+          CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+          CF_WORKER_NAME: "hosted-worker",
+          ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+          ...(rawValue === undefined ? {} : { [gate]: rawValue }),
+        });
+        const config = buildHostedWranglerDeployConfig(environment) as {
+          vars: Record<string, string>;
+        };
+        const platformEnv = buildHostedRunnerContainerPlatformEnv(config.vars);
 
-      expect(environment.workerVars.MURPH_ANDROID_APP_ENABLED).toBe(expectedValue);
-      expect(config.vars.MURPH_ANDROID_APP_ENABLED).toBe(expectedValue);
-      expect(platformEnv.MURPH_ANDROID_APP_ENABLED).toBe(expectedValue);
+        expect(environment.workerVars[gate]).toBe(expectedValue);
+        expect(config.vars[gate]).toBe(expectedValue);
+        expect(platformEnv[gate]).toBe(expectedValue);
+      }
     }
   });
 

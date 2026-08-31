@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-30
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 ## Goal
 
@@ -173,6 +173,13 @@ Updated: 2026-08-30
 - Saved views live in typed preferences and store ordered configuration only.
 - Automation status extends the existing inspect action with a projection; it
   does not add another receipt record or public error surface.
+- Production card planning is exact-value default-off behind
+  `MURPH_WEARABLE_TREND_CARDS_ENABLED=1`. The candidate may land dormant, but
+  enabling remains blocked on the physical installed-app, app-absent, macOS,
+  image-failure, and VoiceOver checks already named above.
+- Terminal delivery reconciliation stores one bounded reason variant in the
+  existing run journal before clearing the outbox pointer, preserving exact
+  non-dispatch, provider-dispatch, and ambiguous evidence without a new store.
 
 ## Scope-anomaly retrospective
 

@@ -38,8 +38,15 @@ describe('assistant response-card defaults', () => {
   })
 
   it('routes compact and saved seven-day wearable views through one trusted card', () => {
-    const directPrompt = buildAssistantSystemPrompt(createPromptInput('direct'))
+    const disabledPrompt = buildAssistantSystemPrompt(createPromptInput('direct'))
+    const directPrompt = buildAssistantSystemPrompt({
+      ...createPromptInput('direct'),
+      assistantWearableTrendCardsAvailable: true,
+    })
     const groupPrompt = buildAssistantSystemPrompt(createPromptInput('group'))
+
+    expect(disabledPrompt).not.toContain('murph.attach_wearable_trend_card')
+    expect(disabledPrompt).not.toContain('wearables view show')
 
     for (const required of [
       'call it exactly once, not an acknowledgment',

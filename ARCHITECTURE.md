@@ -3766,6 +3766,11 @@ definitive pre-acceptance rejection use the complete deterministic text
 recovery through the existing outbox path. Provider acceptance cannot reveal a
 later image-fetch or VoiceOver failure, so physical installed-app, app-absent,
 macOS, image-failure, and VoiceOver proof remains a rollout gate.
+Production turn planning therefore exposes the wearable-card tool and its
+saved-view guidance only when the platform-owned
+`MURPH_WEARABLE_TREND_CARDS_ENABLED` value is exactly `1`; omission and every
+other value keep card production dormant while V7 readers and replay support
+remain available.
 
 The optional tracking reference is one exact canonical event ULID plus a
 canonical UTC snapshot instant. That reference remains in semantic transcript

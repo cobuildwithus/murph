@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import {
   assistantCronJobSchema,
+  assistantOutboxIntentSchema,
   type AssistantCronJob,
   type AssistantCronRunOutcome,
   type AssistantCronRunRecord,
@@ -14,6 +15,10 @@ import {
   getAssistantCronAutomationOccurrenceReceipt,
   projectAssistantAutomationOccurrenceReceipt,
 } from '../src/assistant/cron/occurrence-receipt.ts'
+import {
+  reconcileAssistantCronDeliveryIntent,
+  repairPendingAssistantCronDeliveries,
+} from '../src/assistant/cron/delivery-reconciliation.ts'
 import {
   createAssistantCronCanonicalRuntimeRecord,
   writeAssistantCronCanonicalRuntimeStore,
@@ -237,6 +242,54 @@ describe('assistant automation occurrence receipts', () => {
     expect(projectAssistantAutomationOccurrenceReceipt(
       baseProjectionInput(run),
     )).toEqual(expect.objectContaining(expected))
+  })
+
+  it('preserves exact send evidence after terminal delivery reconciliation clears the outbox pointer', async () => {
+    await expect(reconcileAndReadReceipt({
+      deliveryConfirmationPending: false,
+      status: 'failed',
+    })).resolves.toMatchObject({
+      delivered: 'not_reached',
+      generated: 'confirmed',
+      outcome: 'failed',
+      sent: 'not_reached',
+    })
+
+    await expect(reconcileAndReadReceipt({
+      deliveryConfirmationPending: false,
+      providerDispatchEvidence: true,
+      status: 'failed',
+    })).resolves.toMatchObject({
+      delivered: 'unconfirmed',
+      generated: 'confirmed',
+      outcome: 'sent',
+      sent: 'confirmed',
+    })
+
+    for (const input of [
+      {
+        deliveryConfirmationPending: false,
+        status: 'abandoned' as const,
+      },
+      {
+        deliveryConfirmationPending: true,
+        status: 'failed' as const,
+      },
+    ]) {
+      await expect(reconcileAndReadReceipt(input)).resolves.toMatchObject({
+        delivered: 'unknown',
+        generated: 'confirmed',
+        outcome: 'failed',
+        sent: 'unknown',
+      })
+    }
+
+    await expect(repairMissingDeliveryAndReadReceipt()).resolves.toMatchObject({
+      delivered: 'unknown',
+      generated: 'confirmed',
+      outcome: 'failed',
+      sent: 'unknown',
+    })
   })
 
   it('reads the newest retained canonical run without rewriting its journal', async () => {
@@ -552,6 +605,121 @@ function createOutboxEvidence(
     dispatchConfirmed,
     status,
   }
+}
+
+async function createPendingDeliveryFixture(prefix: string) {
+  const context = await createTempVaultContext(prefix)
+  tempRoots.push(context.parentRoot)
+  const paths = resolveAssistantStatePaths(context.vaultRoot)
+  await appendAssistantCronRun(paths, createRun({
+    notificationDecision: {
+      kind: 'send_message',
+      reasonCode: 'provider_send_message',
+    },
+    outcome: 'delivery_pending',
+  }))
+  const intent = await createAssistantOutboxIntent({
+    automationAuthority: {
+      automationId: AUTOMATION_ID,
+      expectedUpdatedAt: '2026-08-30T11:59:00.000Z',
+    },
+    channel: 'linq',
+    dedupeToken: prefix,
+    explicitTarget: 'chat_synthetic_delivery_reconciliation',
+    identityId: 'identity_synthetic_delivery_reconciliation',
+    media: [{
+      alt: 'Synthetic health card',
+      kind: 'image',
+      source: 'test',
+      url: 'https://cdn.example.test/health-card.png',
+    }],
+    message: 'Synthetic scheduled health card.',
+    scheduledOccurrenceAt: '2026-08-30T12:00:00.000Z',
+    sessionId: 'session_synthetic_delivery_reconciliation',
+    threadId: 'thread_synthetic_delivery_reconciliation',
+    threadIsDirect: true,
+    turnId: 'turn_synthetic_delivery_reconciliation',
+    vault: context.vaultRoot,
+  })
+  const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+    jobId: AUTOMATION_ID,
+    now: '2026-08-30T11:59:00.000Z',
+  })
+  runtimeRecord.state.lastRunAt = '2026-08-30T12:00:00.000Z'
+  runtimeRecord.state.pendingDeliveryIntentId = intent.intentId
+  runtimeRecord.state.pendingOccurrenceAt = '2026-08-30T12:00:00.000Z'
+  await writeAssistantCronCanonicalRuntimeStore(paths, {
+    jobs: [runtimeRecord],
+    version: 1,
+  })
+  return { context, intent, paths }
+}
+
+async function reconcileAndReadReceipt(input: {
+  deliveryConfirmationPending: boolean
+  providerDispatchEvidence?: boolean
+  status: 'abandoned' | 'failed'
+}) {
+  const { context, intent, paths } = await createPendingDeliveryFixture(
+    `assistant-occurrence-reconciled-${input.status}-`,
+  )
+  const providerMessageId = 'provider_synthetic_delivery_reconciliation'
+  const terminalIntent = assistantOutboxIntentSchema.parse({
+    ...intent,
+    delivery: input.providerDispatchEvidence
+      ? {
+          channel: 'linq',
+          idempotencyKey: intent.deliveryIdempotencyKey,
+          messageLength: intent.message.length,
+          providerMessageEffects: [{
+            carriesIntentMedia: true,
+            message: null,
+            providerMessageId,
+          }],
+          providerMessageId,
+          providerMessageIds: [providerMessageId],
+          providerThreadId: intent.threadId,
+          sentAt: '2026-08-30T12:00:30.000Z',
+          target: intent.explicitTarget,
+          targetKind: 'thread',
+        }
+      : null,
+    deliveryConfirmationPending: input.deliveryConfirmationPending,
+    lastAttemptAt: '2026-08-30T12:00:30.000Z',
+    lastError: {
+      code: 'SYNTHETIC_DELIVERY_FAILURE',
+      message: 'Synthetic terminal delivery failure.',
+    },
+    status: input.status,
+    updatedAt: '2026-08-30T12:01:00.000Z',
+  })
+
+  await reconcileAssistantCronDeliveryIntent({
+    intent: terminalIntent,
+    paths,
+    vault: context.vaultRoot,
+  })
+  return await getAssistantCronAutomationOccurrenceReceipt(
+    context.vaultRoot,
+    AUTOMATION_ID,
+  )
+}
+
+async function repairMissingDeliveryAndReadReceipt() {
+  const { context, intent, paths } = await createPendingDeliveryFixture(
+    'assistant-occurrence-reconciled-missing-',
+  )
+  await rm(resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId))
+  await repairPendingAssistantCronDeliveries({
+    missingIntentStaleAfterMs: 0,
+    now: new Date('2026-08-30T12:01:00.000Z'),
+    paths,
+    vault: context.vaultRoot,
+  })
+  return await getAssistantCronAutomationOccurrenceReceipt(
+    context.vaultRoot,
+    AUTOMATION_ID,
+  )
 }
 
 function createRun(input: {

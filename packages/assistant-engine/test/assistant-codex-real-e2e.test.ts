@@ -9984,7 +9984,12 @@ describeRealCodex('real Codex seven-day wearable trend card e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            false,
+            null,
+            [],
+            true,
+          ),
           dynamicTools: [
             MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL,
             MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -25144,6 +25149,7 @@ function buildDirectConversationDeveloperInstructions(
   assistantContextSnapshotPrompt: string | null = null,
   assistantHostedDeviceConnectProviders:
     readonly AssistantHostedDeviceConnectProvider[] = [],
+  assistantWearableTrendCardsAvailable = false,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -25152,6 +25158,7 @@ function buildDirectConversationDeveloperInstructions(
       assistantHostedDeviceConnectProviders.length > 0,
     assistantHostedDeviceConnectProviders,
     assistantKnowledgeToolsAvailable: false,
+    assistantWearableTrendCardsAvailable,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
