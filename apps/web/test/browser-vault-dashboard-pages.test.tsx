@@ -280,8 +280,23 @@ test("JournalPage shows the seven days ending today and disables future dates", 
     { requireButton: false },
   );
 
-  assert.match(rendered.container.innerHTML, /journal-day-2026-08-12/u);
-  assert.match(rendered.container.innerHTML, /journal-day-2026-08-06/u);
+  const visibleDayIds = () =>
+    Array.from(
+      rendered.container.querySelectorAll<HTMLElement>(
+        '[id^="journal-day-"]',
+      ),
+      (element) => element.id,
+    );
+
+  assert.deepEqual(visibleDayIds(), [
+    "journal-day-2026-08-12",
+    "journal-day-2026-08-11",
+    "journal-day-2026-08-10",
+    "journal-day-2026-08-09",
+    "journal-day-2026-08-08",
+    "journal-day-2026-08-07",
+    "journal-day-2026-08-06",
+  ]);
   assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-05/u);
   assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-13/u);
   assert.match(
@@ -300,8 +315,15 @@ test("JournalPage shows the seven days ending today and disables future dates", 
   );
   assert.ok(previousButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => previousButton.click());
-  assert.match(rendered.container.innerHTML, /journal-day-2026-07-30/u);
-  assert.match(rendered.container.innerHTML, /journal-day-2026-08-05/u);
+  assert.deepEqual(visibleDayIds(), [
+    "journal-day-2026-08-05",
+    "journal-day-2026-08-04",
+    "journal-day-2026-08-03",
+    "journal-day-2026-08-02",
+    "journal-day-2026-08-01",
+    "journal-day-2026-07-31",
+    "journal-day-2026-07-30",
+  ]);
   assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-06/u);
 
   await rendered.cleanup();

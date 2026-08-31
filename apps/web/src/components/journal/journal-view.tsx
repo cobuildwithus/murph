@@ -108,7 +108,10 @@ export function JournalViewContent({
       ),
     [selectedWindowStart],
   );
-  const visibleDates = selectedDates;
+  const visibleDates = useMemo(
+    () => [...selectedDates].reverse(),
+    [selectedDates],
+  );
   const visibleInsights = insights.filter(
     (insight) =>
       insight.date >= selectedWindowStart && insight.date <= selectedWindowEnd,
@@ -198,7 +201,7 @@ export function JournalViewContent({
                 selectedWindowEnd={selectedWindowEnd}
                 today={today}
               />
-              <WindowStats dates={visibleDates} daysByDate={daysByDate} />
+              <WindowStats dates={selectedDates} daysByDate={daysByDate} />
               {visibleInsights.length > 0 ? (
                 <WeeklyInsights insights={visibleInsights} />
               ) : null}
