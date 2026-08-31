@@ -217,16 +217,22 @@ type HostedContainerRuntimeWakeNotification = {
 };
 
 function coalescePendingRuntimeWakeProcessingMode(
-  pendingMode: HostedWorkspaceInvocationProcessingMode | null,
-  incomingMode: HostedWorkspaceInvocationProcessingMode | null | undefined,
+  input: {
+    incomingMode: HostedWorkspaceInvocationProcessingMode | null | undefined;
+    pending: boolean;
+    pendingMode: HostedWorkspaceInvocationProcessingMode | null;
+  },
 ): HostedWorkspaceInvocationProcessingMode | null {
-  if (pendingMode !== "system_mailbox") {
-    return pendingMode;
+  if (!input.pending) {
+    return input.incomingMode ?? null;
+  }
+  if (input.pendingMode !== "system_mailbox") {
+    return input.pendingMode;
   }
 
-  return incomingMode === "system_mailbox"
-    ? pendingMode
-    : incomingMode ?? null;
+  return input.incomingMode === "system_mailbox"
+    ? input.pendingMode
+    : input.incomingMode ?? null;
 }
 
 export async function startHostedContainerEntrypoint(input: {
@@ -487,18 +493,15 @@ export async function startHostedContainerEntrypoint(input: {
             if (!activeRuntimeWakePending) {
               activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
               activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
-              activeRuntimeWakePendingRequestedProcessingMode =
-                wakeRequest?.requestedProcessingMode ?? null;
-            } else {
-              if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
-                activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
-              }
-              activeRuntimeWakePendingRequestedProcessingMode =
-                coalescePendingRuntimeWakeProcessingMode(
-                  activeRuntimeWakePendingRequestedProcessingMode,
-                  wakeRequest?.requestedProcessingMode,
-                );
+            } else if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
+              activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
             }
+            activeRuntimeWakePendingRequestedProcessingMode =
+              coalescePendingRuntimeWakeProcessingMode({
+                incomingMode: wakeRequest?.requestedProcessingMode,
+                pending: activeRuntimeWakePending,
+                pendingMode: activeRuntimeWakePendingRequestedProcessingMode,
+              });
             activeRuntimeWakePending = true;
             pending = true;
             accepted = true;

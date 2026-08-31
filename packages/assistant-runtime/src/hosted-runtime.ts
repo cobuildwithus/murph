@@ -2132,20 +2132,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     let systemMailboxPreemptingWakeObserver:
       ((notification: RuntimeWakeNotification) => void) | null = null;
-    const systemMailboxPreemptionWakeSignal = systemMailboxProcessingMode
-      ? createHostedSystemMailboxPreemptionWakeSignal(
-          options.runtimeWakeSignal ?? null,
-          (notification) => {
-            systemMailboxPreemptingWakeObserver?.(notification);
-          },
-        )
-      : null;
-    const initialMailboxRunnerInput = systemMailboxProcessingMode
-      ? {
-          ...baseRunnerInput,
-          runtimeWakeSignal: systemMailboxPreemptionWakeSignal,
-        }
-      : baseRunnerInput;
+    const processingModeRuntimeWakeSignal =
+      resolveHostedRuntimeWakeSignalForProcessingMode({
+        onPreemptingWake: (notification) => {
+          systemMailboxPreemptingWakeObserver?.(notification);
+        },
+        processingMode: input.request.processingMode,
+        runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+      });
+    const initialMailboxRunnerInput = {
+      ...baseRunnerInput,
+      runtimeWakeSignal: processingModeRuntimeWakeSignal,
+    };
     let hostedCodexRuntime: Awaited<
       ReturnType<typeof prepareHostedCodexRuntimeEnvironment>
     > | null = null;
@@ -2359,7 +2357,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const initialMailboxFetchWakeInterruption =
         createHostedRuntimeCheckpointWakeInterruption({
           enabled: true,
-          runtimeWakeSignal: systemMailboxPreemptionWakeSignal,
+          runtimeWakeSignal: processingModeRuntimeWakeSignal,
         });
       const restoreInitialMailboxFetchWake = (
         notification: RuntimeWakeNotification | null,
@@ -2733,7 +2731,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const consumeForegroundWake = (): boolean => {
         const pendingWakeObserved = observeForegroundWake(
           consumePendingRuntimeWakeUnlessShuttingDown({
-            runtimeWakeSignal: systemMailboxPreemptionWakeSignal,
+            runtimeWakeSignal: processingModeRuntimeWakeSignal,
             shutdownSignal: options.shutdownSignal ?? null,
           }),
         );
@@ -2810,7 +2808,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const workSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
-        const runtimeWakeSignal = systemMailboxPreemptionWakeSignal;
+        const runtimeWakeSignal = processingModeRuntimeWakeSignal;
         const waitForOwnedProjectionStage = async <T,>(
           runStage: (signal: AbortSignal) => Promise<T>,
           preemption: "cancel_and_drain" | "retain" = "cancel_and_drain",
@@ -3270,7 +3268,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
           const pendingWakeBeforeExactDelivery =
             consumePendingRuntimeWakeUnlessShuttingDown({
-              runtimeWakeSignal: systemMailboxPreemptionWakeSignal,
+              runtimeWakeSignal: processingModeRuntimeWakeSignal,
               shutdownSignal: options.shutdownSignal ?? null,
             });
           const foregroundWakeBeforeExactDelivery = pendingWakeBeforeExactDelivery
@@ -3318,7 +3316,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }> => {
             const recordWakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
               enabled: true,
-              runtimeWakeSignal: systemMailboxPreemptionWakeSignal,
+              runtimeWakeSignal: processingModeRuntimeWakeSignal,
             });
             const recordSignal = recordWakeInterruption.signal
               ? AbortSignal.any([
@@ -3518,7 +3516,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               force: true,
               generatedAt: new Date().toISOString(),
               platform: foregroundRuntime.platform,
-              runtimeWakeSignal: systemMailboxPreemptionWakeSignal,
+              runtimeWakeSignal: processingModeRuntimeWakeSignal,
               signal: hostAbortSignal
                 ? AbortSignal.any([runtimeAbortController.signal, hostAbortSignal])
                 : runtimeAbortController.signal,
@@ -7623,6 +7621,21 @@ function hostedRuntimePendingWakeMatches(
 ): boolean {
   return left.nextWakeAt === right.nextWakeAt
     && left.nextWakeReason === right.nextWakeReason;
+}
+
+function resolveHostedRuntimeWakeSignalForProcessingMode(input: {
+  onPreemptingWake: (notification: RuntimeWakeNotification) => void;
+  processingMode: HostedWorkspaceInvocationProcessingMode | null | undefined;
+  runtimeWakeSignal: RuntimeWakeSignal | null;
+}): RuntimeWakeSignal | null {
+  if (input.processingMode !== "system_mailbox") {
+    return input.runtimeWakeSignal;
+  }
+
+  return createHostedSystemMailboxPreemptionWakeSignal(
+    input.runtimeWakeSignal,
+    input.onPreemptingWake,
+  );
 }
 
 function consumePendingHostedRuntimeWake(
