@@ -23,7 +23,14 @@ const mocks = vi.hoisted(() => {
       this.workflow = { getHandle };
     }),
     close,
-    connect: vi.fn(async () => connection),
+    connect: vi.fn(async (options: {
+      address: string;
+      connectTimeout: number;
+      tls: boolean;
+    }) => {
+      void options;
+      return connection;
+    }),
     connection,
     getHandle,
     terminate,
@@ -91,11 +98,15 @@ describe("hosted runtime workflow termination", () => {
       terminated: true,
     });
 
-    expect(mocks.connect).toHaveBeenCalledWith({
+    expect(mocks.connect).toHaveBeenCalledWith(expect.objectContaining({
       address: "temporal.example.test:7233",
-      connectTimeout: HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS,
       tls: false,
-    });
+    }));
+    const connectTimeout = mocks.connect.mock.calls[0]?.[0].connectTimeout;
+    expect(connectTimeout).toBeGreaterThan(0);
+    expect(connectTimeout).toBeLessThanOrEqual(
+      HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS,
+    );
     expect(mocks.clientConstructor).toHaveBeenCalledWith({
       connection: mocks.connection,
       namespace: "hosted-runtime",

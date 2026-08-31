@@ -1,6 +1,6 @@
 ALTER TABLE "hosted_account_deletion_cleanup"
   ADD COLUMN "temporal_completed_at" TIMESTAMP(3),
-  ADD COLUMN "temporal_next_runtime_index" INTEGER NOT NULL DEFAULT 0;
+  ADD COLUMN "temporal_next_runtime_index" INTEGER DEFAULT 0;
 
 -- Preserve Temporal cleanup ownership across rolling deploys and emergency
 -- rollback. Older application versions do not know this target and may delete

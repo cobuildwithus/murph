@@ -37,6 +37,10 @@ const temporalCleanupMigrationPath = path.resolve(
   testDirectory,
   "../prisma/migrations/20260830170000_hosted_account_cleanup_temporal/migration.sql",
 );
+const temporalCleanupContractMigrationPath = path.resolve(
+  testDirectory,
+  "../prisma/contract-migrations/20260831060000_require_hosted_account_cleanup_temporal_cursor/migration.sql",
+);
 
 if (
   runPostgresProof
@@ -70,10 +74,12 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       runtimeLogMigration,
       accountCleanupMigration,
       temporalCleanupMigration,
+      temporalCleanupContractMigration,
     ] = await Promise.all([
       readFile(runtimeLogMigrationPath, "utf8"),
       readFile(accountCleanupMigrationPath, "utf8"),
       readFile(temporalCleanupMigrationPath, "utf8"),
+      readFile(temporalCleanupContractMigrationPath, "utf8"),
     ]);
     await pool.query(runtimeLogMigration);
     await pool.query(`
@@ -82,7 +88,104 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       )
     `);
     await pool.query(accountCleanupMigration);
+    const preExpandReceiptId = `cleanup_pre_expand_${randomToken()}`;
+    await pool.query(
+      "INSERT INTO hosted_account_deletion_cleanup (id) VALUES ($1)",
+      [preExpandReceiptId],
+    );
     await pool.query(temporalCleanupMigration);
+
+    const oldWebReceiptId = `cleanup_old_web_${randomToken()}`;
+    await pool.query(
+      "INSERT INTO hosted_account_deletion_cleanup (id) VALUES ($1)",
+      [oldWebReceiptId],
+    );
+    await expect(pool.query<{
+      columnDefault: string | null;
+      isNullable: string;
+    }>(
+      `
+        SELECT
+          column_default AS "columnDefault",
+          is_nullable AS "isNullable"
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'hosted_account_deletion_cleanup'
+          AND column_name = 'temporal_next_runtime_index'
+      `,
+    )).resolves.toMatchObject({
+      rows: [{ columnDefault: expect.stringContaining("0"), isNullable: "YES" }],
+    });
+    await expect(pool.query<{
+      id: string;
+      temporalNextRuntimeIndex: number;
+    }>(
+      `
+        SELECT
+          id,
+          temporal_next_runtime_index AS "temporalNextRuntimeIndex"
+        FROM hosted_account_deletion_cleanup
+        WHERE id = ANY($1::text[])
+        ORDER BY id
+      `,
+      [[oldWebReceiptId, preExpandReceiptId]],
+    )).resolves.toMatchObject({
+      rows: [oldWebReceiptId, preExpandReceiptId]
+        .sort((left, right) => left.localeCompare(right))
+        .map((id) => ({ id, temporalNextRuntimeIndex: 0 })),
+    });
+
+    await pool.query(
+      `
+        UPDATE hosted_account_deletion_cleanup
+        SET temporal_next_runtime_index = NULL
+        WHERE id = $1
+      `,
+      [oldWebReceiptId],
+    );
+    await expect(pool.query(temporalCleanupContractMigration)).rejects.toMatchObject({
+      code: "23514",
+    });
+    await pool.query(
+      `
+        UPDATE hosted_account_deletion_cleanup
+        SET temporal_next_runtime_index = 0
+        WHERE id = $1
+      `,
+      [oldWebReceiptId],
+    );
+    await pool.query(temporalCleanupContractMigration);
+    await expect(pool.query<{ isNullable: string }>(
+      `
+        SELECT is_nullable AS "isNullable"
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'hosted_account_deletion_cleanup'
+          AND column_name = 'temporal_next_runtime_index'
+      `,
+    )).resolves.toMatchObject({ rows: [{ isNullable: "NO" }] });
+    await expect(pool.query(
+      `
+        UPDATE hosted_account_deletion_cleanup
+        SET temporal_next_runtime_index = NULL
+        WHERE id = $1
+      `,
+      [preExpandReceiptId],
+    )).rejects.toMatchObject({ code: "23502" });
+    await pool.query(
+      `
+        UPDATE hosted_account_deletion_cleanup
+        SET
+          runtime_logs_completed_at = CURRENT_TIMESTAMP,
+          temporal_completed_at = CURRENT_TIMESTAMP
+        WHERE id = ANY($1::text[])
+      `,
+      [[oldWebReceiptId, preExpandReceiptId]],
+    );
+    await pool.query(
+      "DELETE FROM hosted_account_deletion_cleanup WHERE id = ANY($1::text[])",
+      [[oldWebReceiptId, preExpandReceiptId]],
+    );
     database = poolDatabase(pool);
   }, 30_000);
 
@@ -181,7 +284,21 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     await postgres.query(
       `
         UPDATE hosted_account_deletion_cleanup
-        SET runtime_logs_completed_at = CURRENT_TIMESTAMP
+        SET temporal_completed_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `,
+      [cleanupId],
+    );
+    await expect(postgres.query(
+      "DELETE FROM hosted_account_deletion_cleanup WHERE id = $1",
+      [cleanupId],
+    )).rejects.toMatchObject({ code: "23514" });
+    await postgres.query(
+      `
+        UPDATE hosted_account_deletion_cleanup
+        SET
+          runtime_logs_completed_at = CURRENT_TIMESTAMP,
+          temporal_completed_at = NULL
         WHERE id = $1
       `,
       [cleanupId],

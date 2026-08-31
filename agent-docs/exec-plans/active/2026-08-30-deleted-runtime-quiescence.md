@@ -63,7 +63,9 @@ Updated: 2026-08-31
    legacy-path machine tests.
 3. Risk: Rolling migration could let old Web code delete an incomplete receipt.
    Mitigation: Add a database deletion guard for the new nullable completion
-   column and test old-code/new-schema behavior.
+   column; expand the cursor nullable with default zero, then require it only in
+   the exact-deployment postdrain contract lane; test old-code/new-schema
+   behavior at both boundaries.
 4. Risk: A large account could exhaust the cleanup attempt window.
    Mitigation: Process deterministic batches of four under the shared deadline,
    persist the first unconfirmed runtime index once per attempt, continue

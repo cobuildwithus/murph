@@ -511,7 +511,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   captured runtime workflow to be terminated or confirmed absent. One
   receipt-owned cursor resumes deterministic batches of four at the first
   unconfirmed runtime; progress is immediately eligible to continue, while
-  attempts with no progress back off. Immediate
+  attempts with no progress back off. Predeploy adds that cursor nullable with
+  a zero default so existing receipts and old-Web inserts remain compatible;
+  after the cursor-aware Web is live and prior functions drain, the contract
+  lane rejects any unexpected null before setting `NOT NULL`. Immediate
   cleanup uses one five-second shared target deadline plus a small
   receipt-settlement margin; hourly retries use a fifteen-second shared target
   deadline and four-receipt concurrency. Cloudflare is

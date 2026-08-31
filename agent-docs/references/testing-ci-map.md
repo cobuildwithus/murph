@@ -232,7 +232,10 @@ removal. `hosted-account-deletion-cleanup.test.ts` proves receipt-bound
 encryption, independent per-target progress, unconfigured-target pending
 state, contiguous Temporal cursor recovery, 1,024-runtime convergence without
 reissuing a confirmed prefix, bounded concurrency, lease-loss handling, retry
-convergence, and batch isolation. The private
+convergence, and batch isolation. Static and real-PostgreSQL migration proof
+cover the nullable/default-zero expansion for existing and old-Web rows, the
+fail-closed postdrain null precondition, final non-null hardening, and both
+receipt deletion guards. The private
 workflow machine and replay suites prove deleted canonical state waits
 signal-only while pre-patch histories retain their original Activity/timer
 ordering. Cloudflare
