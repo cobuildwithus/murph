@@ -1355,13 +1355,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.139')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.140')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.139'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.140'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1371,7 +1371,7 @@ describe('monorepo release flow coverage audit', () => {
     ).toEqual(
       [
         "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
-        "'@cobuild/review-gpt@0.5.139': patches/@cobuild__review-gpt@0.5.139.patch",
+        "'@cobuild/review-gpt@0.5.140': patches/@cobuild__review-gpt@0.5.140.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
       ],
@@ -1381,10 +1381,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(repoToolsPatch).toContain('add -u -- "${tracked_files[@]}"')
     expect(repoToolsPatch).toContain('add -A -- "${untracked_files[@]}"')
     expect(
-      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.139.patch')),
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.140.patch')),
     ).toBe(true)
     expect(
-      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.103.patch')),
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.139.patch')),
     ).toBe(false)
     expect(reviewGptDriver).toContain("const { createHash, randomUUID } = require('crypto');")
     expect(reviewGptDriver).toContain(
@@ -1640,9 +1640,13 @@ describe('monorepo release flow coverage audit', () => {
         '  let ws = initialConnection.ws;',
         '  const { target } = initialConnection;',
         "  const pageTargetId = String(target?.id || '');",
+        '  let captureTargetId = pageTargetId;',
+        '  let acceptedCaptureIdentity = null;',
+        '  let replacementRecoveryAttempted = false;',
+        '  let threadCaptureLibraryPromise = null;',
         '  let ownedTargetId = pageTargetId;',
         '  const closeOwnedTargetOnSignal = async () => {',
-        '    await closeBackgroundTarget(pageTargetId, socketOwner);',
+        '    await closeBackgroundTarget(ownedTargetId, socketOwner);',
         '  };',
         '  ownedTargetSignalCleanup = closeOwnedTargetOnSignal;',
         '  let operationError = null;',
