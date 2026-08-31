@@ -163,8 +163,9 @@ test('device account provider inputs reject public connect targets before daemon
 
     assert.equal(result.envelope.ok, false)
     if (!result.envelope.ok) {
-      assert.match(result.envelope.error.message ?? '', /Unsupported device-sync provider/u)
-      assert.match(result.envelope.error.message ?? '', /junction, oura, whoop, strava/u)
+      assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
+      assert.equal(result.envelope.error.message, 'The command input is invalid.')
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'input')
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -185,7 +186,9 @@ test('device connect rejects Junction as a public connect target', async () => {
 
     assert.equal(result.envelope.ok, false)
     if (!result.envelope.ok) {
-      assert.match(result.envelope.error.message ?? '', /Expected a device connect target/u)
+      assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
+      assert.equal(result.envelope.error.message, 'The command input is invalid.')
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'input')
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

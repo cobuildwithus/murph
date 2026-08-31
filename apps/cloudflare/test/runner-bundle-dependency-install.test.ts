@@ -111,6 +111,7 @@ describe("runner bundle pnpm install config", () => {
         "patchedDependencies:",
         "  '@cobuild/review-gpt@0.5.103': patches/@cobuild__review-gpt@0.5.103.patch",
         "  incur@0.4.5: patches/incur@0.4.5.patch",
+        "  incur@0.5.1: patches/incur@0.5.1.patch",
         "",
       ].join("\n"),
       "utf8",
@@ -124,6 +125,11 @@ describe("runner bundle pnpm install config", () => {
     await writeFile(
       path.join(repoRoot, "patches", "incur@0.4.5.patch"),
       "--- a/dist/Cli.js\n+++ b/dist/Cli.js\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(repoRoot, "patches", "incur@0.5.1.patch"),
+      "--- a/dist/Errors.js\n+++ b/dist/Errors.js\n",
       "utf8",
     );
     await writeFile(
@@ -145,7 +151,10 @@ describe("runner bundle pnpm install config", () => {
         "    resolution: {integrity: sha512-root}",
         "",
         "  'incur@0.4.5':",
-        "    resolution: {integrity: sha512-incur}",
+        "    resolution: {integrity: sha512-incur-045}",
+        "",
+        "  'incur@0.5.1(@synthetic/peer@1.0.0)':",
+        "    resolution: {integrity: sha512-incur-051}",
         "",
         "  'next@16.2.6':",
         "    resolution: {integrity: sha512-web-only}",
@@ -227,8 +236,8 @@ describe("runner bundle pnpm install config", () => {
         "    \"  'jose@6.2.2':\",",
         "    '    resolution: {integrity: sha512-root}',",
         "    '',",
-        "    \"  'incur@0.4.5':\",",
-        "    '    resolution: {integrity: sha512-incur}',",
+        "    \"  'incur@0.5.1(@synthetic/peer@1.0.0)':\",",
+        "    '    resolution: {integrity: sha512-incur-051}',",
         "    '',",
         "    \"  'runtime-wrapper@1.0.0':\",",
         "    '    resolution: {integrity: sha512-runtime-wrapper}',",
@@ -240,7 +249,7 @@ describe("runner bundle pnpm install config", () => {
         "    '',",
         "    \"  'runtime-wrapper@1.0.0':\",",
         "    '    dependencies:',",
-        "    '      incur: 0.4.5',",
+        "    '      incur: 0.5.1',",
         "    '',",
         "  ].join('\\n'), 'utf8');",
         "}",
@@ -351,11 +360,14 @@ describe("runner bundle pnpm install config", () => {
     // a second nested copy would be inlined twice by the vault-cli bundle and
     // split module-level state such as incur's command-registry WeakMaps.
     expect(packageJson.pnpm?.patchedDependencies).toEqual({
-      "incur@0.4.5": "patches/incur@0.4.5.patch",
+      "incur@0.5.1": "patches/incur@0.5.1.patch",
     });
     await expect(
+      readFile(path.join(bundleDir, "patches", "incur@0.5.1.patch"), "utf8"),
+    ).resolves.toBe("--- a/dist/Errors.js\n+++ b/dist/Errors.js\n");
+    await expect(
       readFile(path.join(bundleDir, "patches", "incur@0.4.5.patch"), "utf8"),
-    ).resolves.toBe("--- a/dist/Cli.js\n+++ b/dist/Cli.js\n");
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
       readFile(
         path.join(

@@ -1432,10 +1432,9 @@ test.sequential(
         /requires --protocol-key, --page-revision-id, and --run-spec-revision-id/u,
       )
       assert.equal(invalidRevision.ok, false)
-      assert.match(
-        invalidRevision.error.message ?? '',
-        /sha256: followed by 64 lowercase hexadecimal characters|sha256:<64 lowercase hex>/u,
-      )
+      assert.equal(invalidRevision.error.code, 'VALIDATION_ERROR')
+      assert.equal(invalidRevision.error.message, 'The command input is invalid.')
+      assert.equal(invalidRevision.error.fieldErrors?.[0]?.path, 'input')
       assert.equal(invalidProtocolKey.ok, false)
       assert.match(invalidProtocolKey.error.message ?? '', /protocol_variant key/u)
       assert.equal(invalidMixedEdit.ok, false)
@@ -3709,10 +3708,8 @@ test.sequential(
 
       assert.equal(invalidCalendarDate.ok, false)
       assert.equal(invalidCalendarDate.error?.code, 'VALIDATION_ERROR')
-      assert.equal(
-        invalidCalendarDate.error?.fieldErrors?.some((issue) => issue.path === 'date'),
-        true,
-      )
+      assert.equal(invalidCalendarDate.error?.message, 'The command input is invalid.')
+      assert.equal(invalidCalendarDate.error?.fieldErrors?.[0]?.path, 'input')
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
       assert.equal(requireData(appended).updated, true)
@@ -3728,15 +3725,13 @@ test.sequential(
         /Pass either --event-id or --stream in one command/u,
       )
       assert.equal(commaDelimitedEventLink.ok, false)
-      assert.match(
-        commaDelimitedEventLink.error?.message ?? '',
-        /canonical event id|repeat the flag instead|comma-delimited values are not supported/iu,
-      )
+      assert.equal(commaDelimitedEventLink.error?.code, 'VALIDATION_ERROR')
+      assert.equal(commaDelimitedEventLink.error?.message, 'The command input is invalid.')
+      assert.equal(commaDelimitedEventLink.error?.fieldErrors?.[0]?.path, 'input')
       assert.equal(commaDelimitedStreamLink.ok, false)
-      assert.match(
-        commaDelimitedStreamLink.error?.message ?? '',
-        /supported sample stream|repeat the flag instead|comma-delimited values are not supported/iu,
-      )
+      assert.equal(commaDelimitedStreamLink.error?.code, 'VALIDATION_ERROR')
+      assert.equal(commaDelimitedStreamLink.error?.message, 'The command input is invalid.')
+      assert.equal(commaDelimitedStreamLink.error?.fieldErrors?.[0]?.path, 'input')
       assert.equal(unlinked.ok, true)
       assert.equal(requireData(unlinked).changed, 1)
       assert.deepEqual(requireData(unlinked).eventIds, [firstEventId])

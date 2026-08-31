@@ -146,12 +146,12 @@ async function stageWorkspacePatchedDependencies(
   installRoot: string,
   repoRoot: string,
   patchedDependencies: Record<string, string>,
-  resolvedDependencyNames: ReadonlySet<string>,
+  resolvedDependencySpecs: ReadonlySet<string>,
 ): Promise<Record<string, string>> {
   const staged: Record<string, string> = {};
 
   for (const [dependencySpec, patchPath] of Object.entries(patchedDependencies)) {
-    if (!resolvedDependencyNames.has(readPatchedDependencyPackageName(dependencySpec))) {
+    if (!resolvedDependencySpecs.has(dependencySpec)) {
       continue;
     }
 
@@ -163,10 +163,6 @@ async function stageWorkspacePatchedDependencies(
   }
 
   return staged;
-}
-
-function readPatchedDependencyPackageName(dependencySpec: string): string {
-  return /^(@[^/]+\/[^@]+|[^@]+)@/u.exec(dependencySpec)?.[1] ?? dependencySpec;
 }
 
 function buildWorkspaceTarballOverrides(
@@ -297,14 +293,14 @@ async function installPinnedProductionDependencies(
     env: installEnv,
   });
   const lockfilePath = path.join(installRoot, "pnpm-lock.yaml");
-  const resolvedDependencyNames = extractPnpmLockPackageNames(
+  const resolvedDependencySpecs = extractPnpmLockPackageSpecs(
     await readFile(lockfilePath, "utf8"),
   );
   const stagedPatchedDependencies = await stageWorkspacePatchedDependencies(
     installRoot,
     input.repoRoot,
     input.policy.patchedDependencies,
-    resolvedDependencyNames,
+    resolvedDependencySpecs,
   );
 
   if (Object.keys(stagedPatchedDependencies).length > 0) {
@@ -631,17 +627,17 @@ function extractPnpmLockPackageResolutions(lockfile: string): Map<string, string
   return packages;
 }
 
-function extractPnpmLockPackageNames(lockfile: string): ReadonlySet<string> {
-  const packageNames = new Set<string>();
+function extractPnpmLockPackageSpecs(lockfile: string): ReadonlySet<string> {
+  const packageSpecs = new Set<string>();
 
   for (const packageKey of extractPnpmLockPackageResolutions(lockfile).keys()) {
-    const match = /^(@[^/]+\/[^@]+|[^@]+)@/u.exec(packageKey);
-    if (match) {
-      packageNames.add(match[1]!);
+    const packageSpec = packageKey.split("(", 1)[0]!;
+    if (/^(?:@[^/]+\/[^@]+|[^@]+)@[^:]+$/u.test(packageSpec)) {
+      packageSpecs.add(packageSpec);
     }
   }
 
-  return packageNames;
+  return packageSpecs;
 }
 
 function isLocalRunnerBundlePackageKey(key: string): boolean {

@@ -1,0 +1,1720 @@
+diff --git a/dist/Cli.d.ts b/dist/Cli.d.ts
+index 166d5bef8d52e08f0aa7747a835df7ad3b2e5642..0b5276e64ea44ed5cc2829d64d359141863a9f1e 100644
+--- a/dist/Cli.d.ts
++++ b/dist/Cli.d.ts
+@@ -260,6 +260,8 @@ export declare namespace create {
+             cwd?: string | undefined;
+             /** Default grouping depth for skill files. Overridden by `--depth`. Defaults to `1`. */
+             depth?: number | undefined;
++            /** Canonical full-tree skill hash to use for staleness checks when serving a partial command tree. */
++            expectedHash?: string | undefined;
+             /** Glob patterns for directories containing SKILL.md files to include (e.g. `"skills/*"`, `"my-skill"`). */
+             include?: string[] | undefined;
+             /** Example prompts shown after sync to help users get started. */
+@@ -362,6 +364,8 @@ export declare const toRootDefinition: WeakMap<Root<_args, _options>, CommandDef
+ export declare const toRootOptions: WeakMap<Cli<{}, undefined, undefined, undefined, string>, z.ZodObject<any, z.core.$strip>>;
+ /** @internal Maps CLI instances to whether config file loading is enabled. */
+ export declare const toConfigEnabled: WeakMap<Cli<{}, undefined, undefined, undefined, string>, boolean>;
++/** Computes the deterministic skill-sync hash for a fully registered CLI. */
++export declare function skillHash(cli: Cli): string;
+ /** Descriptor for a CLI's custom global options schema and aliases. */
+ export type GlobalsDescriptor = {
+     schema: z.ZodObject<any>;
+diff --git a/dist/Cli.js b/dist/Cli.js
+index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9acc16940a9 100644
+--- a/dist/Cli.js
++++ b/dist/Cli.js
+@@ -7,7 +7,7 @@ import { estimateTokenCount, sliceByTokens } from 'tokenx';
+ import { z } from 'zod';
+ import * as Binary from './Binary.js';
+ import * as Completions from './Completions.js';
+-import { IncurError, ParseError, ValidationError } from './Errors.js';
++import { IncurError, ParseError, toErrorEnvelope, ValidationError } from './Errors.js';
+ import * as Fetch from './Fetch.js';
+ import * as Filter from './Filter.js';
+ import * as Formatter from './Formatter.js';
+@@ -283,6 +283,15 @@ async function serveImpl(name, commands, argv, options = {}) {
+     function writeln(s) {
+         stdout(s.endsWith('\n') ? s : `${s}\n`);
+     }
++    function writeSafeError(error, format) {
++        const envelope = toErrorEnvelope(error);
++        if (tty && format === undefined) {
++            const hint = envelope.hint ? `\n\nHint: ${envelope.hint}` : '';
++            writeln(`${formatHumanError(envelope)}${hint}`);
++            return;
++        }
++        writeln(Formatter.format(envelope, format ?? 'toon'));
++    }
+     async function writeBanner() {
+         if (!options.banner || help)
+             return;
+@@ -304,11 +313,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+         builtinFlags = extractBuiltinFlags(argv, { configFlag });
+     }
+     catch (error) {
+-        const message = error instanceof Error ? error.message : String(error);
+-        if (human)
+-            writeln(formatHumanError({ code: 'UNKNOWN', message }));
+-        else
+-            writeln(Formatter.format({ code: 'UNKNOWN', message }, 'toon'));
++        writeSafeError(error, requestedOutputFormat(argv));
+         exit(1);
+         return;
+     }
+@@ -334,11 +339,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+             return true;
+         }
+         catch (error) {
+-            const message = error instanceof Error ? error.message : String(error);
+-            if (human)
+-                writeln(formatHumanError({ code: 'UNKNOWN', message }));
+-            else
+-                writeln(Formatter.format({ code: 'UNKNOWN', message }, 'toon'));
++            writeSafeError(error, formatExplicit ? formatFlag : undefined);
+             exit(1);
+             return false;
+         }
+@@ -451,9 +452,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+         if (!isSkillsAdd && !isMcpAdd) {
+             const stored = SyncSkills.readHash(name);
+             if (stored && SyncSkills.hasInstalledSkills(name, { cwd: options.sync?.cwd })) {
+-                const groups = new Map();
+-                const entries = collectSkillCommands(commands, [], groups, options.rootCommand);
+-                if (Skill.hash(entries) !== stored) {
++                const currentHash = options.sync?.expectedHash ?? SyncSkills.commandHash(commands, options.rootCommand);
++                if (currentHash !== stored) {
+                     const command = process.env.npm_config_user_agent || process.env.npm_execpath
+                         ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
+                         : `${displayName} skills add`;
+@@ -554,10 +554,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+             const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : '';
+             const message = `'${skillsSub}' is not a command for '${name} skills'.${didYouMean}`;
+             const ctaCommands = [];
+-            if (suggestion) {
+-                const corrected = argv.map((t) => (t === skillsSub ? suggestion : t));
+-                ctaCommands.push({ command: `${name} ${corrected.join(' ')}` });
+-            }
++            if (suggestion)
++                ctaCommands.push({ command: `${name} skills ${suggestion}` });
+             ctaCommands.push({
+                 command: `${name} skills --help`,
+                 description: 'see all available commands',
+@@ -698,10 +696,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+             const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : '';
+             const message = `'${mcpSub}' is not a command for '${name} mcp'.${didYouMean}`;
+             const ctaCommands = [];
+-            if (suggestion) {
+-                const corrected = argv.map((t) => (t === mcpSub ? suggestion : t));
+-                ctaCommands.push({ command: `${name} ${corrected.join(' ')}` });
+-            }
++            if (suggestion)
++                ctaCommands.push({ command: `${name} mcp ${suggestion}` });
+             ctaCommands.push({ command: `${name} mcp --help`, description: 'see all available commands' });
+             const cta = {
+                 description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
+@@ -1117,10 +1113,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+         const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : '';
+         const message = `'${effective.error}' is not a command for '${parent}'.${didYouMean}`;
+         const ctaCommands = [];
+-        if (suggestion) {
+-            const corrected = argv.map((t) => (t === effective.error ? suggestion : t));
+-            ctaCommands.push({ command: `${name} ${corrected.join(' ')}` });
+-        }
++        if (suggestion)
++            ctaCommands.push({ command: `${parent} ${suggestion}` });
+         ctaCommands.push({ command: helpCmd, description: 'see all available commands' });
+         const cta = {
+             description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
+@@ -1266,10 +1260,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+         catch (error) {
+             write({
+                 ok: false,
+-                error: {
+-                    code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                    message: error instanceof Error ? error.message : String(error),
+-                },
++                error: toErrorEnvelope(error),
+                 meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
+             });
+             exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
+@@ -1302,10 +1293,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+         catch (error) {
+             write({
+                 ok: false,
+-                error: {
+-                    code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                    message: error instanceof Error ? error.message : String(error),
+-                },
++                error: toErrorEnvelope(error),
+                 meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
+             });
+             exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
+@@ -1372,14 +1360,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+         }
+         write({
+             ok: false,
+-            error: {
+-                code: result.error.code,
+-                message: result.error.message,
+-                ...(result.error.retryable !== undefined
+-                    ? { retryable: result.error.retryable }
+-                    : undefined),
+-                ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
+-            },
++            error: result.error,
+             meta: {
+                 command: path,
+                 duration,
+@@ -1630,14 +1611,12 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
+                 commandInputOptions[key] = value;
+         }
+         try {
+-            globals = options.globals.schema.parse(rawGlobals);
++            globals = Parser.zodParse(options.globals.schema, rawGlobals);
+         }
+         catch (error) {
+-            const issues = error?.issues ?? error?.error?.issues ?? [];
+-            const message = issues.map((i) => i.message).join('; ') || 'Validation failed';
+             return jsonResponse({
+                 ok: false,
+-                error: { code: 'VALIDATION_ERROR', message },
++                error: toErrorEnvelope(error),
+                 meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
+             }, 400);
+         }
+@@ -1714,11 +1693,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
+                     controller.enqueue(encoder.encode(Json.stringify({
+                         type: 'error',
+                         ok: false,
+-                        error: {
+-                            code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                            message: error instanceof Error ? error.message : String(error),
+-                            ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
+-                        },
++                        error: toErrorEnvelope(error),
+                         meta: meta(),
+                     }) + '\n'));
+                     controller.close();
+@@ -1734,14 +1709,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
+         const cta = formatCtaBlock(options.name ?? path, result.cta);
+         return jsonResponse({
+             ok: false,
+-            error: {
+-                code: result.error.code,
+-                message: result.error.message,
+-                ...(result.error.retryable !== undefined
+-                    ? { retryable: result.error.retryable }
+-                    : undefined),
+-                ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
+-            },
++            error: result.error,
+             meta: {
+                 command: path,
+                 duration,
+@@ -1896,6 +1864,25 @@ function resolveCommand(commands, tokens) {
+ }
+ /** @internal Extracts built-in flags from argv. */
+ const validFormats = new Set(['toon', 'json', 'yaml', 'md', 'jsonl']);
++function requestedOutputFormat(argv) {
++    let format;
++    for (let i = 0; i < argv.length; i++) {
++        const token = argv[i];
++        if (token === '--json') {
++            format = 'json';
++            continue;
++        }
++        if (token !== '--format')
++            continue;
++        const value = argv[i + 1];
++        if (value !== undefined && validFormats.has(value)) {
++            format = value;
++        }
++        if (value !== undefined)
++            i++;
++    }
++    return format;
++}
+ function extractBuiltinFlags(argv, options = {}) {
+     let fullOutput = false;
+     let llms = false;
+@@ -2466,6 +2453,14 @@ export const toRootDefinition = new WeakMap();
+ export const toRootOptions = new WeakMap();
+ /** @internal Maps CLI instances to whether config file loading is enabled. */
+ export const toConfigEnabled = new WeakMap();
++/** Computes the deterministic skill-sync hash for a fully registered CLI. */
++export function skillHash(cli) {
++    const commands = toCommands.get(cli);
++    if (!commands)
++        throw new Error('No commands registered on this CLI instance');
++    const rootCommand = toRootDefinition.get(cli);
++    return SyncSkills.commandHash(commands, rootCommand);
++}
+ /** @internal Maps CLI instances to their output policy. */
+ const toOutputPolicy = new WeakMap();
+ /** @internal Maps CLI instances to their globals schema and alias map. */
+@@ -2593,17 +2588,10 @@ async function handleStreaming(generator, ctx) {
+                 ctx.writeln(JSON.stringify({
+                     type: 'error',
+                     ok: false,
+-                    error: {
+-                        code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                        message: error instanceof Error ? error.message : String(error),
+-                        ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
+-                    },
++                    error: toErrorEnvelope(error),
+                 }));
+             else
+-                ctx.writeln(formatHumanError({
+-                    code: 'UNKNOWN',
+-                    message: error instanceof Error ? error.message : String(error),
+-                }));
++                ctx.writeln(formatHumanError(toErrorEnvelope(error)));
+             ctx.exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
+         }
+     }
+@@ -2672,11 +2660,7 @@ async function handleStreaming(generator, ctx) {
+         catch (error) {
+             ctx.write({
+                 ok: false,
+-                error: {
+-                    code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                    message: error instanceof Error ? error.message : String(error),
+-                    ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
+-                },
++                error: toErrorEnvelope(error),
+                 meta: {
+                     command: ctx.path,
+                     duration: `${Math.round(performance.now() - ctx.start)}ms`,
+diff --git a/dist/Errors.d.ts b/dist/Errors.d.ts
+index 4e08c9bf0df51b013ad57cfbfd8c27f08c0143b7..2ef87dba1a00b2997e424a6f53c1c15e7fa46992 100644
+--- a/dist/Errors.d.ts
++++ b/dist/Errors.d.ts
+@@ -27,6 +27,10 @@ export declare class IncurError extends BaseError {
+     code: string;
+     /** Actionable hint for the user. */
+     hint: string | undefined;
++    /** Stable operation stage where the error occurred. */
++    stage: string | undefined;
++    /** Per-field repair details while preserving the domain error code. */
++    fieldErrors: FieldError[];
+     /** Whether the operation can be retried. */
+     retryable: boolean;
+     /** Process exit code. When set, `serve()` uses this instead of `1`. */
+@@ -42,6 +46,10 @@ export declare namespace IncurError {
+         message: string;
+         /** Actionable hint for the user. */
+         hint?: string | undefined;
++        /** Stable operation stage where the error occurred. */
++        stage?: string | undefined;
++        /** Per-field repair details while preserving the domain error code. */
++        fieldErrors?: FieldError[] | undefined;
+         /** Whether the operation can be retried. Defaults to `false`. */
+         retryable?: boolean | undefined;
+         /** Process exit code. When set, `serve()` uses this instead of `1`. */
+@@ -50,6 +58,17 @@ export declare namespace IncurError {
+         cause?: Error | undefined;
+     };
+ }
++/** The shared machine error-envelope shape. */
++export type ErrorEnvelope = {
++    code: string;
++    message: string;
++    retryable?: boolean | undefined;
++    hint?: string | undefined;
++    stage?: string | undefined;
++    fieldErrors?: FieldError[] | undefined;
++};
++/** Converts a thrown value to the shared machine error-envelope shape. */
++export declare function toErrorEnvelope(error: unknown): ErrorEnvelope;
+ /** A field-level validation error detail. */
+ export type FieldError = {
+     /** The Zod issue code. */
+diff --git a/dist/Errors.js b/dist/Errors.js
+index a1cbe8c082db54ab086f62ed8ffba8c05b8d0d1c..98ad55a41f22f14acc95b10c88634b04272ca0a9 100644
+--- a/dist/Errors.js
++++ b/dist/Errors.js
+@@ -28,6 +28,10 @@ export class IncurError extends BaseError {
+     code;
+     /** Actionable hint for the user. */
+     hint;
++    /** Stable operation stage where the error occurred. */
++    stage;
++    /** Per-field repair details while preserving the domain error code. */
++    fieldErrors;
+     /** Whether the operation can be retried. */
+     retryable;
+     /** Process exit code. When set, `serve()` uses this instead of `1`. */
+@@ -36,10 +40,62 @@ export class IncurError extends BaseError {
+         super(options.message, options.cause ? { cause: options.cause } : undefined);
+         this.code = options.code;
+         this.hint = options.hint;
++        this.stage = options.stage;
++        this.fieldErrors = options.fieldErrors ?? [];
+         this.retryable = options.retryable ?? false;
+         this.exitCode = options.exitCode;
+     }
+ }
++/** Converts a thrown value to the shared machine error-envelope shape. */
++export function toErrorEnvelope(error) {
++    if (error instanceof ParseError)
++        return {
++            code: 'VALIDATION_ERROR',
++            message: 'The command arguments are invalid.',
++            retryable: false,
++            hint: 'Run the command with --help and correct its arguments or options.',
++            stage: 'validation',
++            fieldErrors: [
++                {
++                    code: 'custom',
++                    path: 'arguments',
++                    expected: '',
++                    received: 'invalid',
++                    message: 'This field is invalid.',
++                },
++            ],
++        };
++    if (error instanceof ValidationError)
++        return {
++            code: 'VALIDATION_ERROR',
++            message: 'The command input is invalid.',
++            retryable: false,
++            hint: 'Check the command schema and correct the invalid input.',
++            stage: 'validation',
++            fieldErrors: [
++                {
++                    code: 'custom',
++                    path: 'input',
++                    expected: '',
++                    received: 'invalid',
++                    message: 'This field is invalid.',
++                },
++            ],
++        };
++    if (!(error instanceof IncurError))
++        return {
++            code: 'UNKNOWN',
++            message: error instanceof Error ? error.message : String(error),
++        };
++    return {
++        code: error.code,
++        message: error.shortMessage,
++        retryable: error.retryable,
++        ...(error.hint ? { hint: error.hint } : undefined),
++        ...(error.stage ? { stage: error.stage } : undefined),
++        ...(error.fieldErrors.length > 0 ? { fieldErrors: error.fieldErrors } : undefined),
++    };
++}
+ /** Validation error with per-field error details. */
+ export class ValidationError extends BaseError {
+     name = 'Incur.ValidationError';
+diff --git a/dist/Fetch.js b/dist/Fetch.js
+index 37aab660515f1efba4ad1f0c7d94423a73e492c4..10969d34504e3635af171e9919b9dec320d26e15 100644
+--- a/dist/Fetch.js
++++ b/dist/Fetch.js
+@@ -1,3 +1,4 @@
++import { ParseError } from './Errors.js';
+ /** Reserved flags consumed by the fetch gateway (not forwarded as query params). */
+ const reservedFlags = new Set(['method', 'body', 'data', 'header']);
+ const reservedShort = { X: 'method', d: 'data', H: 'header' };
+@@ -49,7 +50,9 @@ export function parseArgv(argv) {
+                 const key = token.slice(2);
+                 const value = argv[i + 1];
+                 if (value === undefined)
+-                    throw new Error(`Missing value for --${key}`);
++                    throw new ParseError({
++                        message: `Missing value for --${key}`,
++                    });
+                 if (reservedFlags.has(key))
+                     handleReserved(key, value);
+                 else
+@@ -63,7 +66,9 @@ export function parseArgv(argv) {
+             if (mapped) {
+                 const value = argv[i + 1];
+                 if (value === undefined)
+-                    throw new Error(`Missing value for -${short}`);
++                    throw new ParseError({
++                        message: `Missing value for -${short}`,
++                    });
+                 handleReserved(mapped, value);
+                 i += 2;
+             }
+@@ -87,7 +92,12 @@ export function parseArgv(argv) {
+             if (colonIdx !== -1) {
+                 const name = value.slice(0, colonIdx).trim();
+                 const val = value.slice(colonIdx + 1).trim();
+-                headers.set(name, val);
++                try {
++                    headers.set(name, val);
++                }
++                catch {
++                    throw new ParseError({ message: 'Invalid fetch header.' });
++                }
+             }
+         }
+     }
+@@ -112,7 +122,12 @@ export function buildRequest(input) {
+         if (!input.headers.has('content-type'))
+             input.headers.set('content-type', 'application/json');
+     }
+-    return new Request(url.toString(), init);
++    try {
++        return new Request(url.toString(), init);
++    }
++    catch {
++        throw new ParseError({ message: 'Invalid fetch request options.' });
++    }
+ }
+ /** Returns true if the response body is a stream that should be consumed incrementally. */
+ export function isStreamingResponse(response) {
+diff --git a/dist/Mcp.js b/dist/Mcp.js
+index 3102a678e6c37a08be9e735485e3e1187619ea88..e32df4856ecc6b622da1114dff7072eebab897ca 100644
+--- a/dist/Mcp.js
++++ b/dist/Mcp.js
+@@ -1,5 +1,6 @@
+ import { z } from 'zod';
+ import * as Command from './internal/command.js';
++import { toErrorEnvelope } from './Errors.js';
+ import { formatCtaBlock, renderCtaText } from './internal/cta.js';
+ import * as Json from './internal/json.js';
+ import * as Schema from './Schema.js';
+@@ -80,7 +81,7 @@ export async function callTool(tool, params, options = {}) {
+         }
+         catch (err) {
+             return {
+-                content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }],
++                content: [{ type: 'text', text: Json.stringify(toErrorEnvelope(err)) }],
+                 isError: true,
+             };
+         }
+diff --git a/dist/SyncSkills.d.ts b/dist/SyncSkills.d.ts
+index a870fe0dc17c9ac1f86d195904b3610eaeec21d5..0aa82558cd2294302eeafcd83c2f1c358b9d3872 100644
+--- a/dist/SyncSkills.d.ts
++++ b/dist/SyncSkills.d.ts
+@@ -50,6 +50,8 @@ export declare namespace sync {
+ }
+ /** Lists skills derived from a CLI's command map with install status. */
+ export declare function list(name: string, commands: Map<string, any>, options?: list.Options): Promise<list.Skill[]>;
++/** @internal Computes the exact command-tree hash stored by `sync()`. */
++export declare function commandHash(commands: Map<string, any>, rootCommand?: sync.Options['rootCommand']): string;
+ /** Returns whether any previously synced skills are still installed on disk. */
+ export declare function hasInstalledSkills(name: string, options?: {
+     cwd?: string | undefined;
+diff --git a/dist/SyncSkills.js b/dist/SyncSkills.js
+index 01e3efafd4424035c68d33f06b38a97545bc11fa..8639a4501f3228f8993cf831c872882191eaff4e 100644
+--- a/dist/SyncSkills.js
++++ b/dist/SyncSkills.js
+@@ -60,8 +60,7 @@ export async function sync(name, commands, options = {}) {
+             }
+         }
+         // Write skills hash + names for staleness detection
+-        const hashEntries = collectSkillCommands(commands, [], new Map(), options.rootCommand);
+-        writeMeta(name, Skill.hash(hashEntries), [...currentNames], [...paths, ...agents.map((agent) => agent.path)]);
++        writeMeta(name, commandHash(commands, options.rootCommand), [...currentNames], [...paths, ...agents.map((agent) => agent.path)]);
+         return { skills: skills.sort((a, b) => a.name.localeCompare(b.name)), paths, agents };
+     }
+     finally {
+@@ -113,6 +112,10 @@ export async function list(name, commands, options = {}) {
+     }
+     return skills.sort((a, b) => a.name.localeCompare(b.name));
+ }
++/** @internal Computes the exact command-tree hash stored by `sync()`. */
++export function commandHash(commands, rootCommand) {
++    return Skill.hash(collectSkillCommands(commands, [], new Map(), rootCommand));
++}
+ /** Returns whether any previously synced skills are still installed on disk. */
+ export function hasInstalledSkills(name, options = {}) {
+     return readInstalledSkills(name, options).size > 0;
+diff --git a/dist/internal/command.d.ts b/dist/internal/command.d.ts
+index b937e09010355752b83b37c76b3c697d52c9440c..63968927c39f8cb79f87b7097d14ae786efeca43 100644
+--- a/dist/internal/command.d.ts
++++ b/dist/internal/command.d.ts
+@@ -60,8 +60,10 @@ export declare namespace execute {
+         ok: false;
+         error: {
+             code: string;
++            hint?: string | undefined;
+             message: string;
+             retryable?: boolean | undefined;
++            stage?: string | undefined;
+             fieldErrors?: FieldError[] | undefined;
+         };
+         cta?: CtaBlock | undefined;
+diff --git a/dist/internal/command.js b/dist/internal/command.js
+index 7011ed74f3d71854e57ae8e024bcd4c2459b46ef..5472bfd679625dab99fa23ec38982c7defb59a60 100644
+--- a/dist/internal/command.js
++++ b/dist/internal/command.js
+@@ -1,5 +1,5 @@
+ import { z } from 'zod';
+-import { IncurError, ValidationError } from '../Errors.js';
++import { IncurError, toErrorEnvelope } from '../Errors.js';
+ import * as Parser from '../Parser.js';
+ /** @internal Sentinel symbol for `ok()` and `error()` return values. */
+ const sentinel = Symbol.for('incur.sentinel');
+@@ -168,22 +168,9 @@ export async function execute(command, options) {
+         }
+     }
+     catch (error) {
+-        if (error instanceof ValidationError)
+-            return {
+-                ok: false,
+-                error: {
+-                    code: 'VALIDATION_ERROR',
+-                    message: error.message,
+-                    fieldErrors: error.fieldErrors,
+-                },
+-            };
+         return {
+             ok: false,
+-            error: {
+-                code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                message: error instanceof Error ? error.message : String(error),
+-                ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
+-            },
++            error: toErrorEnvelope(error),
+             ...(error instanceof IncurError && error.exitCode !== undefined
+                 ? { exitCode: error.exitCode }
+                 : undefined),
+diff --git a/src/Cli.test.ts b/src/Cli.test.ts
+index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825024c8583 100644
+--- a/src/Cli.test.ts
++++ b/src/Cli.test.ts
+@@ -71,6 +71,23 @@ async function serve(
+   }
+ }
+ 
++function expectSafeValidationEnvelope(output: string, field: 'arguments' | 'input') {
++  expect(output).toContain('code: VALIDATION_ERROR')
++  expect(output).toContain(
++    field === 'arguments'
++      ? 'message: The command arguments are invalid.'
++      : 'message: The command input is invalid.',
++  )
++  expect(output).toContain('retryable: false')
++  expect(output).toContain('stage: validation')
++  expect(output).toContain(field)
++  expect(output).toContain(
++    field === 'arguments'
++      ? 'Run the command with --help and correct its arguments or options.'
++      : 'Check the command schema and correct the invalid input.',
++  )
++}
++
+ function mockMcpServeResponses(responses: unknown[]) {
+   return vi.spyOn(Mcp, 'serve').mockImplementation(async (_name, _version, _commands, options) => {
+     for (const response of responses)
+@@ -488,13 +505,16 @@ describe('config defaults', () => {
+   })
+ 
+   test('fails when an explicit config file is missing', async () => {
++    const privateMarker = 'private-marker-that-must-not-echo'
+     const { exitCode, output } = await serve(createConfigCli('config'), [
+       'echo',
+       '--config',
+-      'missing.json',
++      `/private/path/${privateMarker}.json`,
+     ])
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Config file not found')
++    expectSafeValidationEnvelope(output, 'arguments')
++    expect(output).not.toContain(privateMarker)
++    expect(output).not.toContain('/private/path')
+   })
+ 
+   test('fails on invalid JSON config files', async () => {
+@@ -502,7 +522,7 @@ describe('config defaults', () => {
+ 
+     const { exitCode, output } = await serve(createConfigCli(), ['echo'])
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Invalid JSON config file')
++    expectSafeValidationEnvelope(output, 'arguments')
+   })
+ 
+   test('fails when the config file top level is not an object', async () => {
+@@ -510,7 +530,7 @@ describe('config defaults', () => {
+ 
+     const { exitCode, output } = await serve(createConfigCli(), ['echo'])
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('expected a top-level object')
++    expectSafeValidationEnvelope(output, 'arguments')
+   })
+ 
+   test('fails when the selected config section is not an object', async () => {
+@@ -518,7 +538,7 @@ describe('config defaults', () => {
+ 
+     const { exitCode, output } = await serve(createConfigCli(), ['echo'])
+     expect(exitCode).toBe(1)
+-    expect(output).toContain("Invalid config section for 'echo'")
++    expectSafeValidationEnvelope(output, 'arguments')
+   })
+ 
+   test('fails validation when config option values are invalid', async () => {
+@@ -788,13 +808,13 @@ describe('config defaults', () => {
+   test('--config without a value produces an error', async () => {
+     const { exitCode, output } = await serve(createConfigCli('config'), ['echo', '--config'])
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Missing value for flag')
++    expectSafeValidationEnvelope(output, 'arguments')
+   })
+ 
+   test('--config= (empty value) produces an error', async () => {
+     const { exitCode, output } = await serve(createConfigCli('config'), ['echo', '--config='])
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Missing value for flag')
++    expectSafeValidationEnvelope(output, 'arguments')
+   })
+ 
+   test('--no-settings works with custom flag name', async () => {
+@@ -1176,10 +1196,10 @@ describe('serve', () => {
+     const { output, exitCode } = await serve(cli, ['greet'])
+     ;(process.stdout as any).isTTY = false
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Error: missing required argument <name>')
++    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
+   })
+ 
+-  test('ValidationError preserves Zod messages in machine output', async () => {
++  test('ValidationError sanitizes Zod messages in machine output', async () => {
+     const cli = Cli.create('test')
+     cli.command('send', {
+       options: z.object({ address: z.string().min(32) }),
+@@ -1190,17 +1210,23 @@ describe('serve', () => {
+ 
+     const { output, exitCode } = await serve(cli, ['send', '--address', 'abc', '--format', 'json'])
+     expect(exitCode).toBe(1)
+-    expect(JSON.parse(output)).toMatchObject({
++    expect(JSON.parse(output)).toEqual({
+       code: 'VALIDATION_ERROR',
++      message: 'The command input is invalid.',
++      retryable: false,
++      hint: 'Check the command schema and correct the invalid input.',
++      stage: 'validation',
+       fieldErrors: [
+         {
+-          code: 'too_small',
+-          message: 'Too small: expected string to have >=32 characters',
+-          missing: false,
+-          path: 'address',
++          code: 'custom',
++          path: 'input',
++          expected: '',
++          received: 'invalid',
++          message: 'This field is invalid.',
+         },
+       ],
+     })
++    expect(output).not.toContain('abc')
+   })
+ 
+   test('ValidationError shows invalid option messages in TTY', async () => {
+@@ -1216,10 +1242,8 @@ describe('serve', () => {
+     const { output, exitCode } = await serve(cli, ['send', '--address', 'abc'])
+     ;(process.stdout as any).isTTY = false
+     expect(exitCode).toBe(1)
+-    expect(output).toContain(
+-      'Error: invalid value for --address: Too small: expected string to have >=32 characters',
+-    )
+-    expect(output).not.toContain('Error: missing required argument <address>')
++    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
++    expect(output).not.toContain('abc')
+   })
+ 
+   test('ValidationError shows missing required options in TTY', async () => {
+@@ -1235,7 +1259,7 @@ describe('serve', () => {
+     const { output, exitCode } = await serve(cli, ['send'])
+     ;(process.stdout as any).isTTY = false
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Error: missing required option --address')
++    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
+   })
+ 
+   test('ValidationError shows invalid enum messages in TTY', async () => {
+@@ -1251,9 +1275,7 @@ describe('serve', () => {
+     const { output, exitCode } = await serve(cli, ['list', '--state', 'invalid'])
+     ;(process.stdout as any).isTTY = false
+     expect(exitCode).toBe(1)
+-    expect(output).toContain(
+-      'Error: invalid value for --state: Invalid option: expected one of "open"|"closed"',
+-    )
++    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
+   })
+ 
+   test('ValidationError shows positional refinement messages in TTY', async () => {
+@@ -1271,7 +1293,8 @@ describe('serve', () => {
+     const { output, exitCode } = await serve(cli, ['get', 'abc'])
+     ;(process.stdout as any).isTTY = false
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Error: invalid value for <id>: must start with x')
++    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
++    expect(output).not.toContain('abc')
+   })
+ 
+   test('agent is true when not TTY', async () => {
+@@ -2897,7 +2920,7 @@ describe('env', () => {
+     const { output, exitCode } = await serve(cli, ['deploy'], { env: {} })
+     ;(process.stdout as any).isTTY = false
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Error: missing required environment variable API_TOKEN')
++    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
+   })
+ 
+   test('env validation error for invalid var shows human message in TTY', async () => {
+@@ -2915,9 +2938,8 @@ describe('env', () => {
+     const { output, exitCode } = await serve(cli, ['deploy'], { env: { API_TOKEN: 'short' } })
+     ;(process.stdout as any).isTTY = false
+     expect(exitCode).toBe(1)
+-    expect(output).toContain(
+-      'Error: invalid value for environment variable API_TOKEN: Too small: expected string to have >=8 characters',
+-    )
++    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
++    expect(output).not.toContain('short')
+   })
+ 
+   test('env with defaults works when var is unset', async () => {
+@@ -5192,17 +5214,15 @@ describe('Command.execute', () => {
+       name: 'split',
+       command: { options: z.object({ name: z.string() }), run: () => ({ ok: true }) },
+       inputOptions: { name: 123 },
+-      path: 'name',
+       parseMode: 'split' as const,
+     },
+     {
+       name: 'flat',
+       command: { args: z.object({ id: z.string() }), run: () => ({ ok: true }) },
+       inputOptions: { id: 123 },
+-      path: 'id',
+       parseMode: 'flat' as const,
+     },
+-  ])('$name mode returns validation fieldErrors for invalid command input', async (c) => {
++  ])('$name mode returns safe validation fields for invalid command input', async (c) => {
+     const result = await Command.execute(c.command, {
+       agent: true,
+       argv: [],
+@@ -5215,15 +5235,21 @@ describe('Command.execute', () => {
+       version: undefined,
+     })
+ 
+-    expect(result).toMatchObject({
++    expect(result).toEqual({
+       ok: false,
+       error: {
+         code: 'VALIDATION_ERROR',
++        message: 'The command input is invalid.',
++        retryable: false,
++        hint: 'Check the command schema and correct the invalid input.',
++        stage: 'validation',
+         fieldErrors: [
+           {
+-            code: 'invalid_type',
+-            missing: false,
+-            path: c.path,
++            code: 'custom',
++            path: 'input',
++            expected: '',
++            received: 'invalid',
++            message: 'This field is invalid.',
+           },
+         ],
+       },
+@@ -5520,8 +5546,22 @@ describe('fetch', () => {
+     const { status, body } = await fetchJson(cli, new Request('http://localhost/users'))
+     expect(status).toBe(400)
+     expect(body.ok).toBe(false)
+-    expect(body.error.code).toBe('VALIDATION_ERROR')
+-    expect(body.error.fieldErrors).toMatchObject([{ missing: true, path: 'id' }])
++    expect(body.error).toEqual({
++      code: 'VALIDATION_ERROR',
++      message: 'The command input is invalid.',
++      retryable: false,
++      hint: 'Check the command schema and correct the invalid input.',
++      stage: 'validation',
++      fieldErrors: [
++        {
++          code: 'custom',
++          path: 'input',
++          expected: '',
++          received: 'invalid',
++          message: 'This field is invalid.',
++        },
++      ],
++    })
+   })
+ 
+   test('validation error includes fieldErrors for body options', async () => {
+@@ -5540,9 +5580,21 @@ describe('fetch', () => {
+     )
+     expect(status).toBe(400)
+     expect(body.ok).toBe(false)
+-    expect(body.error).toMatchObject({
++    expect(body.error).toEqual({
+       code: 'VALIDATION_ERROR',
+-      fieldErrors: [{ code: 'invalid_type', missing: false, path: 'name' }],
++      message: 'The command input is invalid.',
++      retryable: false,
++      hint: 'Check the command schema and correct the invalid input.',
++      stage: 'validation',
++      fieldErrors: [
++        {
++          code: 'custom',
++          path: 'input',
++          expected: '',
++          received: 'invalid',
++          message: 'This field is invalid.',
++        },
++      ],
+     })
+   })
+ 
+@@ -5567,11 +5619,17 @@ describe('fetch', () => {
+       ok: false,
+       error: {
+         code: 'VALIDATION_ERROR',
++        message: 'The command input is invalid.',
++        retryable: false,
++        hint: 'Check the command schema and correct the invalid input.',
++        stage: 'validation',
+         fieldErrors: [
+           {
+-            code: 'invalid_type',
+-            missing: false,
+-            path: 'name',
++            code: 'custom',
++            path: 'input',
++            expected: '',
++            received: 'invalid',
++            message: 'This field is invalid.',
+           },
+         ],
+       },
+@@ -6796,7 +6854,7 @@ describe('globals', () => {
+ 
+     const { output, exitCode } = await serve(cli, ['--limit', 'not-a-number', 'ping'])
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Invalid input')
++    expectSafeValidationEnvelope(output, 'input')
+   })
+ 
+   test('globals position is flexible', async () => {
+@@ -6891,7 +6949,7 @@ describe('globals', () => {
+ 
+     const { output, exitCode } = await serve(cli, ['--rpc-url'])
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Missing value for flag')
++    expectSafeValidationEnvelope(output, 'arguments')
+   })
+ 
+   test('global alias collision with -h throws at create() time', () => {
+@@ -6925,7 +6983,7 @@ describe('globals', () => {
+ 
+     const { output, exitCode } = await serve(cli, ['--limit', 'abc', 'ping'])
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('UNKNOWN')
++    expectSafeValidationEnvelope(output, 'input')
+     ;(process.stdout as any).isTTY = true
+   })
+ 
+@@ -6984,9 +7042,28 @@ test('--token-limit with non-numeric value errors', async () => {
+     run: (c) => c.ok({ message: 'hello world' }),
+   })
+ 
+-  const { exitCode, output } = await serve(cli, ['hello', '--token-limit', 'foo', '--json'])
++  const privateMarker = 'private-marker-that-must-not-echo'
++  const result = await serve(cli, ['hello', '--token-limit', privateMarker, '--json'])
++  const { exitCode, output } = result
+   expect(exitCode).toBe(1)
++  expect(JSON.parse(output)).toEqual({
++    code: 'VALIDATION_ERROR',
++    message: 'The command arguments are invalid.',
++    retryable: false,
++    hint: 'Run the command with --help and correct its arguments or options.',
++    stage: 'validation',
++    fieldErrors: [
++      {
++        code: 'custom',
++        path: 'arguments',
++        expected: '',
++        received: 'invalid',
++        message: 'This field is invalid.',
++      },
++    ],
++  })
+   expect(output).not.toContain('NaN')
++  expect(output).not.toContain(privateMarker)
+ })
+ 
+ test('--token-offset with non-numeric value errors', async () => {
+diff --git a/src/Cli.ts b/src/Cli.ts
+index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4283465eb 100644
+--- a/src/Cli.ts
++++ b/src/Cli.ts
+@@ -9,7 +9,7 @@ import { z } from 'zod'
+ import * as Binary from './Binary.js'
+ import * as Completions from './Completions.js'
+ import type { FieldError } from './Errors.js'
+-import { IncurError, ParseError, ValidationError } from './Errors.js'
++import { IncurError, ParseError, toErrorEnvelope, ValidationError } from './Errors.js'
+ import * as Fetch from './Fetch.js'
+ import * as Filter from './Filter.js'
+ import * as Formatter from './Formatter.js'
+@@ -690,6 +690,8 @@ export declare namespace create {
+           cwd?: string | undefined
+           /** Default grouping depth for skill files. Overridden by `--depth`. Defaults to `1`. */
+           depth?: number | undefined
++          /** Canonical full-tree skill hash to use for staleness checks when serving a partial command tree. */
++          expectedHash?: string | undefined
+           /** Glob patterns for directories containing SKILL.md files to include (e.g. `"skills/*"`, `"my-skill"`). */
+           include?: string[] | undefined
+           /** Example prompts shown after sync to help users get started. */
+@@ -773,6 +775,16 @@ async function serveImpl(
+     stdout(s.endsWith('\n') ? s : `${s}\n`)
+   }
+ 
++  function writeSafeError(error: unknown, format?: Formatter.Format) {
++    const envelope = toErrorEnvelope(error)
++    if (tty && format === undefined) {
++      const hint = envelope.hint ? `\n\nHint: ${envelope.hint}` : ''
++      writeln(`${formatHumanError(envelope)}${hint}`)
++      return
++    }
++    writeln(Formatter.format(envelope, format ?? 'toon'))
++  }
++
+   async function writeBanner() {
+     if (!options.banner || help) return
+     const banner =
+@@ -791,9 +803,7 @@ async function serveImpl(
+   try {
+     builtinFlags = extractBuiltinFlags(argv, { configFlag })
+   } catch (error) {
+-    const message = error instanceof Error ? error.message : String(error)
+-    if (human) writeln(formatHumanError({ code: 'UNKNOWN', message }))
+-    else writeln(Formatter.format({ code: 'UNKNOWN', message }, 'toon'))
++    writeSafeError(error, requestedOutputFormat(argv))
+     exit(1)
+     return
+   }
+@@ -838,9 +848,7 @@ async function serveImpl(
+       filtered = result.rest
+       return true
+     } catch (error) {
+-      const message = error instanceof Error ? error.message : String(error)
+-      if (human) writeln(formatHumanError({ code: 'UNKNOWN', message }))
+-      else writeln(Formatter.format({ code: 'UNKNOWN', message }, 'toon'))
++      writeSafeError(error, formatExplicit ? formatFlag : undefined)
+       exit(1)
+       return false
+     }
+@@ -953,9 +961,9 @@ async function serveImpl(
+     if (!isSkillsAdd && !isMcpAdd) {
+       const stored = SyncSkills.readHash(name)
+       if (stored && SyncSkills.hasInstalledSkills(name, { cwd: options.sync?.cwd })) {
+-        const groups = new Map<string, string>()
+-        const entries = collectSkillCommands(commands, [], groups, options.rootCommand)
+-        if (Skill.hash(entries) !== stored) {
++        const currentHash =
++          options.sync?.expectedHash ?? SyncSkills.commandHash(commands, options.rootCommand)
++        if (currentHash !== stored) {
+           const command =
+             process.env.npm_config_user_agent || process.env.npm_execpath
+               ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
+@@ -1075,10 +1083,7 @@ async function serveImpl(
+       const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : ''
+       const message = `'${skillsSub}' is not a command for '${name} skills'.${didYouMean}`
+       const ctaCommands: FormattedCta[] = []
+-      if (suggestion) {
+-        const corrected = argv.map((t) => (t === skillsSub ? suggestion : t))
+-        ctaCommands.push({ command: `${name} ${corrected.join(' ')}` })
+-      }
++      if (suggestion) ctaCommands.push({ command: `${name} skills ${suggestion}` })
+       ctaCommands.push({
+         command: `${name} skills --help`,
+         description: 'see all available commands',
+@@ -1227,10 +1232,7 @@ async function serveImpl(
+       const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : ''
+       const message = `'${mcpSub}' is not a command for '${name} mcp'.${didYouMean}`
+       const ctaCommands: FormattedCta[] = []
+-      if (suggestion) {
+-        const corrected = argv.map((t) => (t === mcpSub ? suggestion : t))
+-        ctaCommands.push({ command: `${name} ${corrected.join(' ')}` })
+-      }
++      if (suggestion) ctaCommands.push({ command: `${name} mcp ${suggestion}` })
+       ctaCommands.push({ command: `${name} mcp --help`, description: 'see all available commands' })
+       const cta: FormattedCtaBlock = {
+         description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
+@@ -1675,10 +1677,7 @@ async function serveImpl(
+     const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : ''
+     const message = `'${effective.error}' is not a command for '${parent}'.${didYouMean}`
+     const ctaCommands: FormattedCta[] = []
+-    if (suggestion) {
+-      const corrected = argv.map((t) => (t === effective.error ? suggestion : t))
+-      ctaCommands.push({ command: `${name} ${corrected.join(' ')}` })
+-    }
++    if (suggestion) ctaCommands.push({ command: `${parent} ${suggestion}` })
+     ctaCommands.push({ command: helpCmd, description: 'see all available commands' })
+     const cta: FormattedCtaBlock = {
+       description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
+@@ -1834,10 +1833,7 @@ async function serveImpl(
+     } catch (error) {
+       write({
+         ok: false,
+-        error: {
+-          code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-          message: error instanceof Error ? error.message : String(error),
+-        },
++        error: toErrorEnvelope(error),
+         meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
+       })
+       exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
+@@ -1877,10 +1873,7 @@ async function serveImpl(
+     } catch (error) {
+       write({
+         ok: false,
+-        error: {
+-          code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-          message: error instanceof Error ? error.message : String(error),
+-        },
++        error: toErrorEnvelope(error),
+         meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
+       })
+       exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
+@@ -1961,14 +1954,7 @@ async function serveImpl(
+ 
+     write({
+       ok: false,
+-      error: {
+-        code: result.error.code,
+-        message: result.error.message,
+-        ...(result.error.retryable !== undefined
+-          ? { retryable: result.error.retryable }
+-          : undefined),
+-        ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
+-      },
++      error: result.error,
+       meta: {
+         command: path,
+         duration,
+@@ -2340,14 +2326,12 @@ async function executeCommand(
+       else commandInputOptions[key] = value
+     }
+     try {
+-      globals = options.globals.schema.parse(rawGlobals)
+-    } catch (error: any) {
+-      const issues: any[] = error?.issues ?? error?.error?.issues ?? []
+-      const message = issues.map((i: any) => i.message).join('; ') || 'Validation failed'
++      globals = Parser.zodParse(options.globals.schema, rawGlobals)
++    } catch (error) {
+       return jsonResponse(
+         {
+           ok: false,
+-          error: { code: 'VALIDATION_ERROR', message },
++          error: toErrorEnvelope(error),
+           meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
+         },
+         400,
+@@ -2437,11 +2421,7 @@ async function executeCommand(
+               Json.stringify({
+                 type: 'error',
+                 ok: false,
+-                error: {
+-                  code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                  message: error instanceof Error ? error.message : String(error),
+-                  ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
+-                },
++                error: toErrorEnvelope(error),
+                 meta: meta(),
+               }) + '\n',
+             ),
+@@ -2461,14 +2441,7 @@ async function executeCommand(
+     return jsonResponse(
+       {
+         ok: false,
+-        error: {
+-          code: result.error.code,
+-          message: result.error.message,
+-          ...(result.error.retryable !== undefined
+-            ? { retryable: result.error.retryable }
+-            : undefined),
+-          ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
+-        },
++        error: result.error,
+         meta: {
+           command: path,
+           duration,
+@@ -2726,6 +2699,7 @@ declare namespace serveImpl {
+           body?: string | undefined
+           cwd?: string | undefined
+           depth?: number | undefined
++          expectedHash?: string | undefined
+           include?: string[] | undefined
+           suggestions?: string[] | undefined
+         }
+@@ -2740,6 +2714,24 @@ declare namespace serveImpl {
+ /** @internal Extracts built-in flags from argv. */
+ const validFormats = new Set(['toon', 'json', 'yaml', 'md', 'jsonl'] as const)
+ 
++function requestedOutputFormat(argv: string[]): Formatter.Format | undefined {
++  let format: Formatter.Format | undefined
++  for (let i = 0; i < argv.length; i++) {
++    const token = argv[i]
++    if (token === '--json') {
++      format = 'json'
++      continue
++    }
++    if (token !== '--format') continue
++    const value = argv[i + 1]
++    if (value !== undefined && validFormats.has(value as Formatter.Format)) {
++      format = value as Formatter.Format
++    }
++    if (value !== undefined) i++
++  }
++  return format
++}
++
+ function extractBuiltinFlags(argv: string[], options: extractBuiltinFlags.Options = {}) {
+   let fullOutput = false
+   let llms = false
+@@ -3444,6 +3436,14 @@ export const toRootOptions = new WeakMap<Cli, z.ZodObject<any>>()
+ /** @internal Maps CLI instances to whether config file loading is enabled. */
+ export const toConfigEnabled = new WeakMap<Cli, boolean>()
+ 
++/** Computes the deterministic skill-sync hash for a fully registered CLI. */
++export function skillHash(cli: Cli): string {
++  const commands = toCommands.get(cli)
++  if (!commands) throw new Error('No commands registered on this CLI instance')
++  const rootCommand = toRootDefinition.get(cli)
++  return SyncSkills.commandHash(commands, rootCommand)
++}
++
+ /** @internal Maps CLI instances to their output policy. */
+ const toOutputPolicy = new WeakMap<Cli, OutputPolicy>()
+ 
+@@ -3638,20 +3638,10 @@ async function handleStreaming(
+           JSON.stringify({
+             type: 'error',
+             ok: false,
+-            error: {
+-              code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-              message: error instanceof Error ? error.message : String(error),
+-              ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
+-            },
+-          }),
+-        )
+-      else
+-        ctx.writeln(
+-          formatHumanError({
+-            code: 'UNKNOWN',
+-            message: error instanceof Error ? error.message : String(error),
++            error: toErrorEnvelope(error),
+           }),
+         )
++      else ctx.writeln(formatHumanError(toErrorEnvelope(error)))
+       ctx.exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
+     }
+   } else {
+@@ -3722,11 +3712,7 @@ async function handleStreaming(
+     } catch (error) {
+       ctx.write({
+         ok: false,
+-        error: {
+-          code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-          message: error instanceof Error ? error.message : String(error),
+-          ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
+-        },
++        error: toErrorEnvelope(error),
+         meta: {
+           command: ctx.path,
+           duration: `${Math.round(performance.now() - ctx.start)}ms`,
+@@ -4056,10 +4042,14 @@ type Output = OneOf<
+         code: string
+         /** Per-field validation errors. */
+         fieldErrors?: FieldError[] | undefined
++        /** Actionable hint for repairing the error. */
++        hint?: string | undefined
+         /** Human-readable error message. */
+         message: string
+         /** Whether the operation can be retried. */
+         retryable?: boolean | undefined
++        /** Stable operation stage where the error occurred. */
++        stage?: string | undefined
+       }
+       /** Request metadata. */
+       meta: Output.Meta
+diff --git a/src/Errors.test.ts b/src/Errors.test.ts
+index 6e40782545370dbc8cf140e93dbe3f195840e181..fd8d1c53a267a5c3bca0929e09f47a8082b61542 100644
+--- a/src/Errors.test.ts
++++ b/src/Errors.test.ts
+@@ -98,3 +98,96 @@ describe('ParseError', () => {
+     expect(error).toBeInstanceOf(Errors.BaseError)
+   })
+ })
++
++describe('toErrorEnvelope', () => {
++  test('classifies parse errors without exposing tokens, values, paths, or causes', () => {
++    const privateMarker = 'private-marker-that-must-not-echo'
++    const error = new Errors.ParseError({
++      message: `Unknown flag: --${privateMarker}=sensitive-value`,
++      cause: new Error(`/private/path/${privateMarker}`),
++    })
++
++    const envelope = Errors.toErrorEnvelope(error)
++
++    expect(envelope).toEqual({
++      code: 'VALIDATION_ERROR',
++      message: 'The command arguments are invalid.',
++      retryable: false,
++      hint: 'Run the command with --help and correct its arguments or options.',
++      stage: 'validation',
++      fieldErrors: [
++        {
++          code: 'custom',
++          path: 'arguments',
++          expected: '',
++          received: 'invalid',
++          message: 'This field is invalid.',
++        },
++      ],
++    })
++    expect(JSON.stringify(envelope)).not.toContain(privateMarker)
++    expect(JSON.stringify(envelope)).not.toContain('sensitive-value')
++    expect(JSON.stringify(envelope)).not.toContain('/private/path')
++  })
++
++  test('classifies validation errors without exposing their details', () => {
++    const privateMarker = 'private-marker-that-must-not-echo'
++    const error = new Errors.ValidationError({
++      message: privateMarker,
++      cause: new Error(`/private/path/${privateMarker}`),
++      fieldErrors: [
++        {
++          code: 'custom',
++          path: `/private/path/${privateMarker}`,
++          expected: privateMarker,
++          received: privateMarker,
++          message: privateMarker,
++        },
++      ],
++    })
++
++    const envelope = Errors.toErrorEnvelope(error)
++
++    expect(envelope).toEqual({
++      code: 'VALIDATION_ERROR',
++      message: 'The command input is invalid.',
++      retryable: false,
++      hint: 'Check the command schema and correct the invalid input.',
++      stage: 'validation',
++      fieldErrors: [
++        {
++          code: 'custom',
++          path: 'input',
++          expected: '',
++          received: 'invalid',
++          message: 'This field is invalid.',
++        },
++      ],
++    })
++    expect(JSON.stringify(envelope)).not.toContain(privateMarker)
++    expect(JSON.stringify(envelope)).not.toContain('/private/path')
++  })
++
++  test('preserves structured IncurError metadata without exposing its cause', () => {
++    const privateMarker = 'private-marker-that-must-not-echo'
++    const error = new Errors.IncurError({
++      code: 'NOT_READY',
++      message: 'The resource is not ready.',
++      retryable: true,
++      stage: 'read',
++      hint: 'Retry after the resource is ready.',
++      cause: new Error(privateMarker),
++    })
++
++    const envelope = Errors.toErrorEnvelope(error)
++
++    expect(envelope).toEqual({
++      code: 'NOT_READY',
++      message: 'The resource is not ready.',
++      retryable: true,
++      stage: 'read',
++      hint: 'Retry after the resource is ready.',
++    })
++    expect(JSON.stringify(envelope)).not.toContain(privateMarker)
++  })
++})
+diff --git a/src/Errors.ts b/src/Errors.ts
+index 84b0b997a1ccdd02f4a847ee7135805583476224..f379401e4c85fc46852e7c8c1e8ae2e22362f594 100644
+--- a/src/Errors.ts
++++ b/src/Errors.ts
+@@ -39,6 +39,10 @@ export class IncurError extends BaseError {
+   code: string
+   /** Actionable hint for the user. */
+   hint: string | undefined
++  /** Stable operation stage where the error occurred. */
++  stage: string | undefined
++  /** Per-field repair details while preserving the domain error code. */
++  fieldErrors: FieldError[]
+   /** Whether the operation can be retried. */
+   retryable: boolean
+   /** Process exit code. When set, `serve()` uses this instead of `1`. */
+@@ -48,6 +52,8 @@ export class IncurError extends BaseError {
+     super(options.message, options.cause ? { cause: options.cause } : undefined)
+     this.code = options.code
+     this.hint = options.hint
++    this.stage = options.stage
++    this.fieldErrors = options.fieldErrors ?? []
+     this.retryable = options.retryable ?? false
+     this.exitCode = options.exitCode
+   }
+@@ -62,6 +68,10 @@ export declare namespace IncurError {
+     message: string
+     /** Actionable hint for the user. */
+     hint?: string | undefined
++    /** Stable operation stage where the error occurred. */
++    stage?: string | undefined
++    /** Per-field repair details while preserving the domain error code. */
++    fieldErrors?: FieldError[] | undefined
+     /** Whether the operation can be retried. Defaults to `false`. */
+     retryable?: boolean | undefined
+     /** Process exit code. When set, `serve()` uses this instead of `1`. */
+@@ -71,6 +81,70 @@ export declare namespace IncurError {
+   }
+ }
+ 
++/** The shared machine error-envelope shape. */
++export type ErrorEnvelope = {
++  code: string
++  message: string
++  retryable?: boolean | undefined
++  hint?: string | undefined
++  stage?: string | undefined
++  fieldErrors?: FieldError[] | undefined
++}
++
++/** Converts a thrown value to the shared machine error-envelope shape. */
++export function toErrorEnvelope(error: unknown): ErrorEnvelope {
++  if (error instanceof ParseError)
++    return {
++      code: 'VALIDATION_ERROR',
++      message: 'The command arguments are invalid.',
++      retryable: false,
++      hint: 'Run the command with --help and correct its arguments or options.',
++      stage: 'validation',
++      fieldErrors: [
++        {
++          code: 'custom',
++          path: 'arguments',
++          expected: '',
++          received: 'invalid',
++          message: 'This field is invalid.',
++        },
++      ],
++    }
++
++  if (error instanceof ValidationError)
++    return {
++      code: 'VALIDATION_ERROR',
++      message: 'The command input is invalid.',
++      retryable: false,
++      hint: 'Check the command schema and correct the invalid input.',
++      stage: 'validation',
++      fieldErrors: [
++        {
++          code: 'custom',
++          path: 'input',
++          expected: '',
++          received: 'invalid',
++          message: 'This field is invalid.',
++        },
++      ],
++    }
++
++  if (!(error instanceof IncurError))
++    return {
++      code: 'UNKNOWN',
++      message: error instanceof Error ? error.message : String(error),
++    }
++
++  return {
++    code: error.code,
++    message: error.shortMessage,
++    retryable: error.retryable,
++    ...(error.hint ? { hint: error.hint } : undefined),
++    ...(error.stage ? { stage: error.stage } : undefined),
++    ...(error.fieldErrors.length > 0 ? { fieldErrors: error.fieldErrors } : undefined),
++  }
++}
++
+ /** A field-level validation error detail. */
+ export type FieldError = {
+   /** The Zod issue code. */
+diff --git a/src/Fetch.ts b/src/Fetch.ts
+index 2f9b5b7ec400597c2d93e432fd720032772340a7..48b0bc92848cfa4a302e6fd218d5d9e1ba494182 100644
+--- a/src/Fetch.ts
++++ b/src/Fetch.ts
+@@ -1,3 +1,5 @@
++import { ParseError } from './Errors.js'
++
+ /** Structured input parsed from curl-style argv. */
+ export type FetchInput = {
+   body: string | undefined
+@@ -92,7 +94,8 @@ export function parseArgv(argv: string[]): FetchInput {
+       } else {
+         const key = token.slice(2)
+         const value = argv[i + 1]
+-        if (value === undefined) throw new Error(`Missing value for --${key}`)
++        if (value === undefined)
++          throw new ParseError({ message: `Missing value for --${key}` })
+         if (reservedFlags.has(key)) handleReserved(key, value)
+         else query.set(key, value)
+         i += 2
+@@ -102,7 +105,8 @@ export function parseArgv(argv: string[]): FetchInput {
+       const mapped = reservedShort[short]
+       if (mapped) {
+         const value = argv[i + 1]
+-        if (value === undefined) throw new Error(`Missing value for -${short}`)
++        if (value === undefined)
++          throw new ParseError({ message: `Missing value for -${short}` })
+         handleReserved(mapped, value)
+         i += 2
+       } else {
+@@ -123,7 +127,11 @@ export function parseArgv(argv: string[]): FetchInput {
+       if (colonIdx !== -1) {
+         const name = value.slice(0, colonIdx).trim()
+         const val = value.slice(colonIdx + 1).trim()
+-        headers.set(name, val)
++        try {
++          headers.set(name, val)
++        } catch {
++          throw new ParseError({ message: 'Invalid fetch header.' })
++        }
+       }
+     }
+   }
+@@ -152,7 +160,11 @@ export function buildRequest(input: FetchInput): Request {
+     if (!input.headers.has('content-type')) input.headers.set('content-type', 'application/json')
+   }
+ 
+-  return new Request(url.toString(), init)
++  try {
++    return new Request(url.toString(), init)
++  } catch {
++    throw new ParseError({ message: 'Invalid fetch request options.' })
++  }
+ }
+ 
+ /** Returns true if the response body is a stream that should be consumed incrementally. */
+diff --git a/src/Mcp.test.ts b/src/Mcp.test.ts
+index 40a6308362959e0da509a033e15409ebb5caac61..aeabb4d5814e485244f252158b79a461647e151e 100644
+--- a/src/Mcp.test.ts
++++ b/src/Mcp.test.ts
+@@ -486,7 +486,7 @@ describe('Mcp', () => {
+     expect(callRes.result.content).toEqual([{ type: 'text', text: '{"count":2}' }])
+   })
+ 
+-  test('tools/call validation error includes fieldErrors', async () => {
++  test('tools/call validation error includes safe field details', async () => {
+     const tool = Mcp.collectTools(createTestCommands(), []).find((tool) => tool.name === 'echo')!
+     const result = await Mcp.callTool(tool, { message: 123 })
+     expect(result.isError).toBe(true)
+@@ -494,7 +494,11 @@ describe('Mcp', () => {
+     expect(content).toBeDefined()
+     expect(JSON.parse(content!.text)).toMatchObject({
+       code: 'VALIDATION_ERROR',
+-      fieldErrors: [{ code: 'invalid_type', missing: false, path: 'message' }],
++      message: 'The command input is invalid.',
++      retryable: false,
++      hint: 'Check the command schema and correct the invalid input.',
++      stage: 'validation',
++      fieldErrors: [{ code: 'custom', path: 'input', received: 'invalid' }],
+     })
+   })
+ 
+diff --git a/src/Mcp.ts b/src/Mcp.ts
+index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..32b25453406d1db1222275c5b9b75684217c7103 100644
+--- a/src/Mcp.ts
++++ b/src/Mcp.ts
+@@ -3,6 +3,7 @@ import type { Readable, Writable } from 'node:stream'
+ import { z } from 'zod'
+ 
+ import * as Command from './internal/command.js'
++import { toErrorEnvelope } from './Errors.js'
+ import { formatCtaBlock, type FormattedCtaBlock, renderCtaText } from './internal/cta.js'
+ import * as Json from './internal/json.js'
+ import type { Handler as MiddlewareHandler } from './middleware.js'
+@@ -162,7 +163,7 @@ export async function callTool(
+       }
+     } catch (err) {
+       return {
+-        content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }],
++        content: [{ type: 'text', text: Json.stringify(toErrorEnvelope(err)) }],
+         isError: true,
+       }
+     }
+diff --git a/src/SyncSkills.ts b/src/SyncSkills.ts
+index 138dee8673273e410e89bfca48fe6bfbb309c2ed..c8dbf295780609a50c2016480a210741ada33ed4 100644
+--- a/src/SyncSkills.ts
++++ b/src/SyncSkills.ts
+@@ -72,10 +72,9 @@ export async function sync(
+     }
+ 
+     // Write skills hash + names for staleness detection
+-    const hashEntries = collectSkillCommands(commands, [], new Map(), options.rootCommand)
+     writeMeta(
+       name,
+-      Skill.hash(hashEntries),
++      commandHash(commands, options.rootCommand),
+       [...currentNames],
+       [...paths, ...agents.map((agent) => agent.path)],
+     )
+@@ -189,6 +188,14 @@ export async function list(
+   return skills.sort((a, b) => a.name.localeCompare(b.name))
+ }
+ 
++/** @internal Computes the exact command-tree hash stored by `sync()`. */
++export function commandHash(
++  commands: Map<string, any>,
++  rootCommand?: sync.Options['rootCommand'],
++): string {
++  return Skill.hash(collectSkillCommands(commands, [], new Map(), rootCommand))
++}
++
+ /** Returns whether any previously synced skills are still installed on disk. */
+ export function hasInstalledSkills(
+   name: string,
+diff --git a/src/e2e.test.ts b/src/e2e.test.ts
+index 86d4c2dd470cd1a9e936e5f4e969117f890af611..04ca8f46bc4e05ed47f85ac92433ce0ce555d584 100644
+--- a/src/e2e.test.ts
++++ b/src/e2e.test.ts
+@@ -210,7 +210,7 @@ describe('args and options', () => {
+     const { output, exitCode } = await serve(createApp(), ['project', 'list', '--sort', 'invalid'])
+     expect(exitCode).toBe(1)
+     expect(output).toContain('Error')
+-    expect(output).toContain('sort')
++    expect(output).toContain('This field is invalid.')
+   })
+ 
+   test('missing required arg fails validation', async () => {
+@@ -224,28 +224,39 @@ describe('args and options', () => {
+     const { output, exitCode } = await serve(createApp(), ['project', 'get'])
+     ;(process.stdout as any).isTTY = false
+     expect(exitCode).toBe(1)
+-    expect(output).toContain('Error: missing required argument <id>')
++    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
+   })
+ 
+   test('unknown flag returns error', async () => {
+-    const { output, exitCode } = await serve(createApp(), ['ping', '--unknown-flag'])
++    const privateMarker = 'private-marker-that-must-not-echo'
++    const { output, exitCode } = await serve(createApp(), [
++      'ping',
++      `--${privateMarker}=sensitive-value`,
++    ])
+     expect(exitCode).toBe(1)
+-    expect(output).toMatchInlineSnapshot(`
+-      "code: UNKNOWN
+-      message: "Unknown flag: --unknown-flag"
+-      "
+-    `)
++    expect(output).toContain('code: VALIDATION_ERROR')
++    expect(output).toContain('message: The command arguments are invalid.')
++    expect(output).toContain('retryable: false')
++    expect(output).toContain('stage: validation')
++    expect(output).toContain('arguments')
++    expect(output).toContain('Run the command with --help')
++    expect(output).not.toContain(privateMarker)
++    expect(output).not.toContain('sensitive-value')
+   })
+ 
+   test('unknown flag shows human error in TTY', async () => {
++    const privateMarker = 'private-marker-that-must-not-echo'
+     ;(process.stdout as any).isTTY = true
+-    const { output, exitCode } = await serve(createApp(), ['ping', '--unknown-flag'])
++    const { output, exitCode } = await serve(createApp(), [
++      'ping',
++      `--${privateMarker}=sensitive-value`,
++    ])
+     ;(process.stdout as any).isTTY = false
+     expect(exitCode).toBe(1)
+-    expect(output).toMatchInlineSnapshot(`
+-      "Error: Unknown flag: --unknown-flag
+-      "
+-    `)
++    expect(output).toContain('Error: invalid value for <arguments>: This field is invalid.')
++    expect(output).toContain('See below for usage.')
++    expect(output).not.toContain(privateMarker)
++    expect(output).not.toContain('sensitive-value')
+   })
+ })
+ 
+@@ -571,6 +582,7 @@ describe('error handling', () => {
+     expect(json(output)).toMatchInlineSnapshot(`
+       {
+         "code": "QUOTA_EXCEEDED",
++        "hint": "Wait 60 seconds",
+         "message": "Rate limit exceeded",
+         "retryable": true,
+       }
+@@ -632,8 +644,14 @@ describe('error handling', () => {
+     const { output, exitCode } = await serve(createApp(), ['validate-fail', '--format', 'json'])
+     expect(exitCode).toBe(1)
+     const parsed = json(output)
+-    expect(parsed.fieldErrors.length).toBeGreaterThan(0)
+-    expect(parsed.fieldErrors[0].path).toBe('email')
++    expect(parsed).toMatchObject({
++      code: 'VALIDATION_ERROR',
++      message: 'The command input is invalid.',
++      retryable: false,
++      hint: 'Check the command schema and correct the invalid input.',
++      stage: 'validation',
++      fieldErrors: [{ code: 'custom', path: 'input', received: 'invalid' }],
++    })
+   })
+ 
+   test('command not found returns error envelope', async () => {
+diff --git a/src/internal/command.ts b/src/internal/command.ts
+index 01f2c4a12c2a93a3bdbb39b1405327fd033bc840..3605c3fe740b94f6ec20afb4bc8ad24c331693a2 100644
+--- a/src/internal/command.ts
++++ b/src/internal/command.ts
+@@ -1,7 +1,7 @@
+ import { z } from 'zod'
+ 
+ import type { FieldError } from '../Errors.js'
+-import { IncurError, ValidationError } from '../Errors.js'
++import { IncurError, toErrorEnvelope } from '../Errors.js'
+ import type { Context as MiddlewareContext, Handler as MiddlewareHandler } from '../middleware.js'
+ import * as Parser from '../Parser.js'
+ 
+@@ -233,22 +233,9 @@ export async function execute(command: any, options: execute.Options): Promise<e
+       await runCommand()
+     }
+   } catch (error) {
+-    if (error instanceof ValidationError)
+-      return {
+-        ok: false,
+-        error: {
+-          code: 'VALIDATION_ERROR',
+-          message: error.message,
+-          fieldErrors: error.fieldErrors,
+-        },
+-      }
+     return {
+       ok: false,
+-      error: {
+-        code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-        message: error instanceof Error ? error.message : String(error),
+-        ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
+-      },
++      error: toErrorEnvelope(error),
+       ...(error instanceof IncurError && error.exitCode !== undefined
+         ? { exitCode: error.exitCode }
+         : undefined),
+@@ -323,8 +310,10 @@ export declare namespace execute {
+         ok: false
+         error: {
+           code: string
++          hint?: string | undefined
+           message: string
+           retryable?: boolean | undefined
++          stage?: string | undefined
+           fieldErrors?: FieldError[] | undefined
+         }
+         cta?: CtaBlock | undefined

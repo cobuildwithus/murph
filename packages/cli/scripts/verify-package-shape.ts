@@ -128,8 +128,8 @@ assert(
   'package.json bundleDependencies must include @murphai/exercise-library so published installs ship the generated exercise catalog.',
 )
 assert(
-  packageJson.dependencies?.incur === '0.4.5',
-  'package.json must keep incur pinned until the upstream lazy optional dependency fix is released.',
+  packageJson.dependencies?.incur === '0.5.1',
+  'package.json must keep incur pinned to the reviewed runtime with Murph error-envelope and canonical skill-hash patches.',
 )
 assert(
   packageJson.dependencies?.zod === '^4.4.3',
@@ -141,7 +141,8 @@ assert(
 )
 const bundledIncurRuntimeDependencies: Record<string, string> = {
   '@cfworker/json-schema': '^4.1.1',
-  '@modelcontextprotocol/server': '^2.0.0-alpha.2',
+  '@modelcontextprotocol/server': '2.0.0-alpha.4',
+  '@scalar/openapi-types': '^0.8.0',
   '@toon-format/toon': '^2.1.0',
   tokenx: '^1.3.0',
   yaml: '^2.8.2',
@@ -187,7 +188,7 @@ for (const [dependencyName, expectedSpecifier] of Object.entries(bundledInkRunti
 }
 assert(
   packageJson.bundleDependencies?.includes('incur') === true,
-  'package.json bundleDependencies must include incur so published installs ship the patched lazy optional dependency fix.',
+  'package.json bundleDependencies must include incur so published installs ship the reviewed error-envelope and canonical skill-hash patches.',
 )
 assert(
   packageJson.bundleDependencies?.includes('ink') === true,
