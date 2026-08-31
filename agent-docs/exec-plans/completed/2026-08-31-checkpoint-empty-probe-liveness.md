@@ -1,6 +1,6 @@
 # Preserve checkpoint-raced reply liveness
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-08-31
 
@@ -80,6 +80,7 @@ Updated: 2026-08-31
   - Broader foreground-input, checkpoint-wake, collapse, and shutdown controls:
     80/80.
   - Assistant-runtime and Cloudflare typechecks pass.
+  - `pnpm complexity:diff` passes with no changed-file hotspot increase.
 - Hosted-local proof:
   - Foreground reply modes completed in 15.1 seconds, 2.4 seconds, 5.6
     seconds, and 11.0 seconds against a 30-second deadline and a configured
@@ -91,8 +92,13 @@ Updated: 2026-08-31
     full-suite green result but is outside this diff; report it rather than
     weakening either contract.
 
-## Remaining work
+## Completion
 
-1. Run diff/privacy checks and the required completion reviews.
-2. Commit the scoped change, open the PR, and complete the repository review
-   gates.
+- Diff, privacy, architecture, and parent final reviews passed.
+- Exact-head CI passed every fresh required workflow.
+- Final ReviewGPT round 1 passed with no findings after inspecting the full
+  pushed patch. An earlier 79-second response with unknown model evidence was
+  discarded below the repository trust floor and did not count.
+- The scoped source fix is net deletion and adds no scheduler, queue, persisted
+  marker, dependency, or state owner.
+Completed: 2026-08-31
