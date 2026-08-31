@@ -1,8 +1,8 @@
 # Runtime progress review remediation
 
-Status: active
+Status: completed
 Created: 2026-08-30
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 ## Goal
 
@@ -149,3 +149,4 @@ Updated: 2026-08-30
 - The reminder enters the provider once, delivers once while durable device
   backlog remains, and receipt-bounded passes drain all 113 jobs without a
   failed device job.
+Completed: 2026-08-31
