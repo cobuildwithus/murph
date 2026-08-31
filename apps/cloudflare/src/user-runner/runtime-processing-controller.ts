@@ -1065,9 +1065,37 @@ export class RuntimeProcessingController {
       };
     }
 
+    return await this.resolveFreshStandbyAllocation({
+      commandBudget: input.commandBudget,
+      coordinatorNamespace,
+      exactRunnerContainerName: input.exactRunnerContainerName,
+      releaseId,
+      runtimeInput: input.input,
+      standbyContainerNamespace,
+    });
+  }
+
+  private async resolveFreshStandbyAllocation(input: {
+    commandBudget: RuntimeProcessingCommandBudget;
+    coordinatorNamespace: HostedStandbyCoordinatorNamespaceLike;
+    exactRunnerContainerName: string;
+    releaseId: string;
+    runtimeInput: RuntimeProcessingInput;
+    standbyContainerNamespace: HostedStandbyRunnerContainerNamespaceLike;
+  }): Promise<FreshRunnerContainerResolution> {
+    const {
+      commandBudget,
+      coordinatorNamespace,
+      exactRunnerContainerName,
+      releaseId,
+      runtimeInput,
+      standbyContainerNamespace,
+    } = input;
+    const userId = runtimeInput.userId;
+
     const standbyBudget: RuntimeProcessingCommandBudget = {
       deadlineAtMs: Math.min(
-        input.commandBudget.deadlineAtMs,
+        commandBudget.deadlineAtMs,
         Date.now() + HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
       ),
     };
@@ -1093,7 +1121,7 @@ export class RuntimeProcessingController {
     if (claim.kind !== "completed" || claim.value.outcome !== "claimed") {
       return {
         kind: "ready",
-        runnerContainerName: input.exactRunnerContainerName,
+        runnerContainerName: exactRunnerContainerName,
         standbyAllocationOutcome: "fallback",
       };
     }
@@ -1104,7 +1132,7 @@ export class RuntimeProcessingController {
       userId,
     });
     if (!reserved) {
-      return this.createStandbyRetryResolution(input.input);
+      return this.createStandbyRetryResolution(runtimeInput);
     }
     const slot = standbyContainerNamespace.getByName(slotName, {
       locationHint: HOSTED_STANDBY_LOCATION_HINT,
@@ -1134,7 +1162,7 @@ export class RuntimeProcessingController {
       };
     }
     if (bind.kind === "timed_out") {
-      return this.createStandbyRetryResolution(input.input);
+      return this.createStandbyRetryResolution(runtimeInput);
     }
 
     const resolved = await settleStandbyOperationWithinBudget(
@@ -1143,7 +1171,7 @@ export class RuntimeProcessingController {
       HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
     );
     if (resolved.kind !== "completed") {
-      return this.createStandbyRetryResolution(input.input);
+      return this.createStandbyRetryResolution(runtimeInput);
     }
     const binding = resolved.value;
     if (
@@ -1165,7 +1193,7 @@ export class RuntimeProcessingController {
         HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
       );
       if (retired.kind !== "completed") {
-        return this.createStandbyRetryResolution(input.input);
+        return this.createStandbyRetryResolution(runtimeInput);
       }
     }
     const cleared = await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
@@ -1173,11 +1201,11 @@ export class RuntimeProcessingController {
       userId,
     });
     if (!cleared) {
-      return this.createStandbyRetryResolution(input.input);
+      return this.createStandbyRetryResolution(runtimeInput);
     }
     return {
       kind: "ready",
-      runnerContainerName: input.exactRunnerContainerName,
+      runnerContainerName: exactRunnerContainerName,
       standbyAllocationOutcome: "fallback",
     };
   }

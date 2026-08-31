@@ -224,6 +224,10 @@ export async function startHostedContainerEntrypoint(input: {
     runtime.processApi,
     runtime.startupConfig.runnerBundleManifestPath,
   );
+  const cloudflareRegion =
+    runtime.startupConfig.supervisorEnv.CLOUDFLARE_REGION ?? null;
+  const hostedWorkerReleaseId =
+    runtime.startupConfig.supervisorEnv.HOSTED_EXECUTION_WORKER_RELEASE_ID ?? null;
   let containerTerminalExitScheduled = false;
   let hostedContainerTerminalFailureHandled = false;
   const poisonHostedContainerAndScheduleExitOnce = (
@@ -352,14 +356,13 @@ export async function startHostedContainerEntrypoint(input: {
           activeJobCount: activeHostedRunnerJobCount,
           codexShellPreflightCompletedAtEpochMs,
           codexShellPreflightStatus,
-          cloudflareRegion: process.env.CLOUDFLARE_REGION ?? null,
+          cloudflareRegion,
           conversationWarmActivityCompletedAtEpochMs,
           heavyRuntimeHydrationCompletedAtEpochMs,
           heavyRuntimeHydrationStatus,
           hostedRuntimeArchitectureVersion:
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
-          hostedWorkerReleaseId:
-            process.env.HOSTED_EXECUTION_WORKER_RELEASE_ID ?? null,
+          hostedWorkerReleaseId,
           ok: true,
           poisoned: hostedContainerProcessFatalObserved,
           processStartedAtEpochMs: HOSTED_CONTAINER_PROCESS_START_MS,
