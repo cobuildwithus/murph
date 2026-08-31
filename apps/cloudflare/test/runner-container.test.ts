@@ -3535,7 +3535,13 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.beginShellPrewarm({
-      source: "linq-typing-started",
+      orchestration: {
+        shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_788_000_000_030,
+        shellPrewarmOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+      },
+      source: "linq-message-routing",
       timeoutMs: 7_500,
       userId: "member_123",
     })).resolves.toEqual({ accepted: true });
@@ -3562,8 +3568,10 @@ describe("RunnerContainer", () => {
           details: expect.objectContaining({
             shellPrewarmColdStartObserved: true,
             shellPrewarmHintCountAtCompletion: 2,
+            orchestrationAttemptId:
+              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
             shellPrewarmOutcome: "start_issued",
-            shellPrewarmSource: "linq-typing-started",
+            shellPrewarmSource: "linq-message-routing",
           }),
           message: "Hosted runner shell prewarm operation completed.",
         }),
@@ -3588,9 +3596,15 @@ describe("RunnerContainer", () => {
         firstHintAtEpochMs: expect.any(Number),
         finishedAtEpochMs: expect.any(Number),
         hintCount: 3,
+        orchestration: {
+          shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_788_000_000_030,
+          shellPrewarmOrchestrationAttemptId:
+            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+          shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+        },
         operationElapsedMs: expect.any(Number),
         outcome: "cold_start_observed",
-        source: "linq-typing-started",
+        source: "linq-message-routing",
       },
     });
     expect(JSON.stringify(readiness.shellPrewarmObservation))

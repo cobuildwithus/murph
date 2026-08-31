@@ -153,6 +153,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
   const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
   const materializerBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>> = [];
+
   const restoreLastKnownGoodAfterReceiptFailure = async (
     error: unknown,
   ): Promise<HostedWorkspaceRuntimeRestoreResult> => {

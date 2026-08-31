@@ -633,12 +633,38 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
         'The synthetic verification phrase is amber lighthouse.',
         'Reply with that two-word phrase.',
       ].join(' ')
+      const parserResultPath =
+        'derived/inbox/capture-voice-evidence/attachments/attachment-voice-evidence/attempts/0001/result.json'
 
       try {
         await initializeVault({
           timezone: 'America/New_York',
           vaultRoot: workingDirectory,
         })
+        const parserResultAbsolutePath = path.join(
+          workingDirectory,
+          parserResultPath,
+        )
+        await mkdir(path.dirname(parserResultAbsolutePath), { recursive: true })
+        await writeFile(parserResultAbsolutePath, JSON.stringify({
+          artifact: {
+            attachmentId: 'attachment-voice-evidence',
+            captureId: 'capture-voice-evidence',
+            fileName: 'voice-note.m4a',
+            kind: 'audio',
+            mime: 'audio/mp4',
+            storedPath:
+              'raw/inbox/capture-voice-evidence/attachments/voice-note.m4a',
+          },
+          blocks: [],
+          createdAt: '2026-08-26T20:00:01.000Z',
+          markdown: transcript,
+          metadata: {},
+          providerId: 'synthetic-transcription',
+          schema: 'murph.parser-output.v1',
+          tables: [],
+          text: transcript,
+        }))
         const promptInput: AssistantAutoReplyPromptInput = {
           actorIsSelf: false,
           attachmentDescriptors: [{
@@ -651,7 +677,11 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
           attachmentEvidence: {
             attachments: [{
               byteSize: 1_024,
-              derived: null,
+              derived: {
+                allowedRoot: path.posix.dirname(parserResultPath),
+                kind: 'parser-result',
+                resultPath: parserResultPath,
+              },
               descriptorAttachmentId: 'attachment-voice-evidence',
               fileName: 'voice-note.m4a',
               inlineFragments: [{
@@ -708,6 +738,7 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
           throw new Error(`Expected a ready voice memo prompt, received ${prepared.kind}.`)
         }
         expect(prepared.prompt).toContain(transcript)
+        expect(prepared.prompt.split(transcript)).toHaveLength(2)
 
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
@@ -9560,6 +9591,217 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
           ordinaryDirectory,
           ...config.temporaryPaths,
         ])
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex weekly digest emerging behavior e2e', () => {
+  it(
+    'recognizes a repeated new cardio routine and suppresses an ordinary shortfall',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const weeklyHealthDigest = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      )
+      if (!weeklyHealthDigest) {
+        throw new Error('Expected the managed weekly health digest automation.')
+      }
+      const probes = [
+        {
+          expectedKind: 'send_message',
+          kind: 'parked-aspiration',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Recent conversation: on July 27, the member said, "I want to build enough cardio to feel less winded on fall hikes."',
+            '- That statement is a parked onboarding aspiration. The member has not chosen a first step or asked Murph to act on it.',
+            '- No exact active goal, plan, request, regimen, experiment, reminder, check-in, or accountability request exists for that aspiration.',
+            '- Baseline activity from July 14 through July 27 had no structured cardio sessions.',
+            '- Activity from July 28 through August 3 contains three separate, consistently classified easy cycling sessions of 20 to 30 minutes.',
+            '- Physiology, symptoms, tracking quality, and other health context are stable.',
+            '- No unsolicited health note surfaced recently, this thread has not already been acknowledged, and no urgent or sensitive conversation is competing for attention.',
+            '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+          ].join('\n\n'),
+        },
+        {
+          expectedKind: 'send_message',
+          kind: 'neutral-emergence',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Recent conversation and canonical records contain no current goal, intention, aspiration, plan, request, regimen, experiment, reminder, check-in, or accountability request about activity.',
+            '- Baseline activity from July 14 through July 27 had no structured cardio sessions.',
+            '- Activity from July 28 through August 3 contains three separate, consistently classified easy cycling sessions of 20 to 30 minutes.',
+            '- Sleep and recovery stayed within their usual ranges on the ride days and following mornings.',
+            '- Symptoms, tracking quality, and other health context are stable.',
+            '- No unsolicited health note surfaced recently, this pattern has not already been acknowledged, and no urgent or sensitive conversation is competing for attention.',
+            '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+          ].join('\n\n'),
+        },
+        {
+          expectedKind: 'skip',
+          kind: 'ordinary-shortfall',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Recent conversation says the member is already doing cardio for general fitness; there is no exact active goal or plan.',
+            '- The recent baseline is two routine cycling sessions per week. The current week has one routine cycling session.',
+            '- Physiology, symptoms, tracking quality, and other health context are stable.',
+            '- There is no new lever, tradeoff, obstacle, safety issue, current question, tracking problem, emerging behavior, or other decision-relevant change.',
+            '- No unsolicited health note surfaced recently, and no urgent or sensitive conversation is competing for attention.',
+            '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+          ].join('\n\n'),
+        },
+        {
+          expectedKind: 'skip',
+          kind: 'ordinary-sleep-fluctuation',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Sleep was 35 to 45 minutes shorter on two nights this week, but both nights remain inside the member\'s established eight-week variation.',
+            '- There is no durable sleep trend, symptom, daytime impairment, safety issue, current sleep question, sleep goal, plan, new lever, or decision-relevant context.',
+            '- Recovery, behavior, tracking quality, and other health context are stable.',
+            '- No unsolicited health note surfaced recently, and no urgent or sensitive conversation is competing for attention.',
+            '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+          ].join('\n\n'),
+        },
+        {
+          expectedKind: 'skip',
+          kind: 'recent-unanswered-outreach',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- The member has an explicit active hiking-endurance goal and asked Murph to help them notice whether a cardio routine is taking hold.',
+            '- Baseline activity from July 14 through July 27 had no structured cardio sessions.',
+            '- Activity from July 28 through August 3 contains three separate, consistently classified easy cycling sessions of 20 to 30 minutes.',
+            '- Physiology, symptoms, tracking quality, and other health context are stable.',
+            '- Two days ago, a different unsolicited Murph health note about sleep was committed into the conversation and remains unanswered.',
+            '- This cardio observation is not safety-relevant, can wait, and would be better folded into that thread after the member returns.',
+            '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+          ].join('\n\n'),
+        },
+      ] as const
+
+      try {
+        for (const probe of probes) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), `murph-weekly-emerging-${probe.kind}-e2e-`),
+          )
+          const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+          try {
+            const result = await executeRealCodexAppServerTurn({
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildScheduledAutomationDeveloperInstructions('direct', 'none'),
+              dynamicTools: [MURPH_AUTOMATION_TOOL],
+              env: config.env,
+              excludeResumeTurns: true,
+              hostedToolContext: {
+                automationTool: {
+                  request: async (request) => {
+                    automationRequests.push(request)
+                    throw new Error(
+                      'Weekly digest must not create or change an automation.',
+                    )
+                  },
+                },
+                computerToolsAvailable: false,
+                currentHostedDeliveryContext: () => null,
+                currentHostedMailboxItemIds: () => [],
+                sendVaultFile: async () => {
+                  throw new Error('Vault file sends are unavailable in this test.')
+                },
+                vaultFileSendAvailable: false,
+              },
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'read-only',
+              workingDirectory,
+            })
+            const actions = readCapabilityRoutingActions(result.jsonEvents)
+            const automationActions = actions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_AUTOMATION_TOOL.name
+            )
+            const vaultCliActions = actions.filter((action) =>
+              action.kind === 'command'
+              && /\bvault-cli\b/iu.test(action.command)
+            )
+            const decision = parseAssistantNotificationDecision(
+              result.finalMessage,
+            )
+            process.stdout.write(
+              `[weekly-digest-emerging-behavior-e2e] ${JSON.stringify({
+                decision,
+                scenario: probe.kind,
+              })}\n`,
+            )
+
+            expect(automationActions, probe.kind).toHaveLength(0)
+            expect(automationRequests, probe.kind).toHaveLength(0)
+            expect(vaultCliActions, probe.kind).toHaveLength(0)
+
+            if (probe.expectedKind === 'send_message') {
+              expect(decision.kind, probe.kind).toBe('send_message')
+              if (decision.kind !== 'send_message') {
+                throw new Error('Expected emerging cardio behavior to send.')
+              }
+              expect(decision.text, probe.kind).toMatch(/cardio|cycl|rides?/iu)
+              expect(decision.text, probe.kind).toMatch(
+                /\b(?:3|three|several|multiple|repeat(?:ed|ing)?|routine|pattern)\b|part of (?:this|your) week|showing up/iu,
+              )
+              expect(decision.text, probe.kind).not.toMatch(
+                /weekly (?:digest|report)|scheduled|automation|scan(?:ned|ning)?|check[- ]?in/iu,
+              )
+              expect(decision.text, probe.kind).not.toMatch(
+                /you (?:need|have) to|you should|\bmust\b|get back on track|failed|compliance/iu,
+              )
+              expect(decision.text, probe.kind).not.toMatch(
+                /on track|ahead|behind|success|failure|falling short|great job|good job|nice work|love to see|way to go|proud|streak|good sign/iu,
+              )
+              expect(decision.text, probe.kind).not.toMatch(
+                /\b(?:keep (?:it|this|that|them|those|going)|keep up|continue (?:with|doing)|stick with|aim for|try (?:to|adding)|consider (?:adding|increasing|continuing)|add (?:another|more) (?:ride|session|cardio|cycling|volume|minute)|increase (?:your )?(?:ride|session|cardio|cycling|volume|frequency|minute))s?\b/iu,
+              )
+              expect(decision.text, probe.kind).not.toContain('?')
+
+              if (probe.kind === 'parked-aspiration') {
+                expect(decision.text, probe.kind).toMatch(/hik|endurance/iu)
+                expect(decision.text, probe.kind).toMatch(
+                  /aerobic|base|foundation|adapt|less winded|repeatable|consistent/iu,
+                )
+              } else {
+                expect(decision.text, probe.kind).not.toMatch(
+                  /hik|endurance|goal/iu,
+                )
+                expect(decision.text, probe.kind).toMatch(
+                  /recover|recovery|sleep|usual range|stable|without.{0,30}(?:dip|cost)|tolerat/iu,
+                )
+              }
+            } else {
+              expect(decision, probe.kind).toEqual({
+                kind: 'skip',
+                privateSummary:
+                  'No weekly digest cleared the memorability bar.',
+              })
+            }
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
     },
     720_000,

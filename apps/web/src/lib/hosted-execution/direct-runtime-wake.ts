@@ -27,9 +27,16 @@ const HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS = 2;
  * all of those steps.
  */
 export function startHostedRuntimeShellPrewarmBestEffort(input: {
-  source: "linq-instant-start" | "linq-typing-started";
+  orchestrationAttemptId?: string;
+  source:
+    | "linq-instant-start"
+    | "linq-message-routing"
+    | "linq-typing-started";
   userId: string;
 }): Promise<void> {
+  const orchestrationAttemptId = input.orchestrationAttemptId
+    ?? `web-prewarm-${randomUUID()}`;
+  const requestStartedAtEpochMs = Date.now();
   const wakeSource = input.source;
   let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
   try {
@@ -48,24 +55,29 @@ export function startHostedRuntimeShellPrewarmBestEffort(input: {
   try {
     return client
       .prewarmRuntimeShell({
+        orchestrationAttemptId,
+        requestStartedAtEpochMs,
         source: input.source,
         userId: input.userId,
       })
       .then((result) => {
         console.info("Hosted runtime shell prewarm accepted.", {
           accepted: result.accepted,
+          orchestrationAttemptId,
           source: wakeSource,
         });
       })
       .catch((error: unknown) => {
         console.warn("Hosted runtime shell prewarm failed.", {
           errorName: describeHostedExecutionSafeLogErrorCode(error),
+          orchestrationAttemptId,
           source: wakeSource,
         });
       });
   } catch (error) {
     console.warn("Hosted runtime shell prewarm failed.", {
       errorName: describeHostedExecutionSafeLogErrorCode(error),
+      orchestrationAttemptId,
       source: wakeSource,
     });
     return Promise.resolve();
