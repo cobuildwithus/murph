@@ -46,6 +46,17 @@ const hostedLinqParticipantAddedDetailedContext =
 const linqWebhookRunId = Date.now();
 const hostedLinqGroupIsolationGuestUserId =
   `member_local_linq_webhook_group_isolation_guest_${linqWebhookRunId}`;
+const linqWebhookMemberLabels = [
+  "reply",
+  "message-routing-prewarm",
+  "app-card",
+  "typing-prewarm",
+  "rapid",
+  "group-isolation",
+  "pdf",
+  "image",
+] as const;
+type LinqWebhookMemberLabel = (typeof linqWebhookMemberLabels)[number];
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -53,7 +64,7 @@ const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
-const linqWebhookMemberCountersByLabel = new Map<string, number>();
+const linqWebhookMemberCountersByLabel = new Map<LinqWebhookMemberLabel, number>();
 
 interface ActiveLinqWebhookMember {
   chatId: string;
@@ -1357,7 +1368,9 @@ async function activateLinqWebhookMember(userId: string): Promise<ActiveLinqWebh
   };
 }
 
-async function createActiveLinqWebhookMember(label: string): Promise<ActiveLinqWebhookMember> {
+async function createActiveLinqWebhookMember(
+  label: LinqWebhookMemberLabel,
+): Promise<ActiveLinqWebhookMember> {
   const labelCounter = (linqWebhookMemberCountersByLabel.get(label) ?? 0) + 1;
   linqWebhookMemberCountersByLabel.set(label, labelCounter);
   const userId = `member_local_linq_webhook_${label}_${linqWebhookRunId}_${labelCounter}`;
@@ -1414,20 +1427,11 @@ function buildLinqWebhookScenarioEnv(linq: HostedLocalLinqStub): NodeJS.ProcessE
 }
 
 function buildLinqWebhookLocalInboundAllowlist(): string {
-  const memberPhones = [
-    "reply",
-    "app-card",
-    "typing-prewarm",
-    "rapid",
-    "group-isolation",
-    "pdf",
-    "image",
-  ]
-    .map((label) =>
-      buildLinqRecipientPhoneNumber(
-        `member_local_linq_webhook_${label}_${linqWebhookRunId}_1`,
-      )
-    );
+  const memberPhones = linqWebhookMemberLabels.map((label) =>
+    buildLinqRecipientPhoneNumber(
+      `member_local_linq_webhook_${label}_${linqWebhookRunId}_1`,
+    )
+  );
   return [
     ...memberPhones,
     buildLinqRecipientPhoneNumber(hostedLinqGroupIsolationGuestUserId),
