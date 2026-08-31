@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "saved-context-answers-stay-focused",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Saved-context answers stay focused",
+    "summary": "Murph keeps the same relevant saved facts while using a lighter read and names the requested target in clear suitability answers.",
+    "details": "The compact path is read-only. Full CLI detail remains available when requested, and missing-record errors are unchanged.",
+    "relevanceTags": ["assistant", "context", "reliability"],
+    "sourcePullRequests": [2578]
+  }
+}

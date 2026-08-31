@@ -444,6 +444,11 @@ describe("startHostedContainerEntrypoint", () => {
   it("starts workspace restore preparation while one heavy hydration remains pending", async () => {
     const heavyRuntimeHydration = createDeferred<typeof hostedContainerHeavyRuntime>();
     const loadHeavyRuntime = vi.fn(() => heavyRuntimeHydration.promise);
+    const warmCodexStopped = createDeferred();
+    const stopWarmCodex = vi.fn(async (reason?: string) => {
+      expect(reason).toBe("hosted-workspace-restore");
+      await warmCodexStopped.promise;
+    });
     const firstPreparation = createTestHostedWorkspaceRestorePreparation();
     const prepareWorkspaceRestore = vi.fn()
       .mockResolvedValueOnce(firstPreparation)
@@ -453,6 +458,7 @@ describe("startHostedContainerEntrypoint", () => {
       runtime: {
         loadHeavyRuntime,
         prepareWorkspaceRestore,
+        stopWarmCodex,
       },
     });
     servers.push(server);
@@ -477,6 +483,13 @@ describe("startHostedContainerEntrypoint", () => {
         port: address.port,
       });
       expect(health.json).toMatchObject({ activeJobCount: 1 });
+    });
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(prepareWorkspaceRestore).not.toHaveBeenCalled();
+
+    warmCodexStopped.resolve();
+    await vi.waitFor(() => {
+      expect(prepareWorkspaceRestore).toHaveBeenCalledTimes(1);
     });
     expect(prepareWorkspaceRestore).toHaveBeenCalledTimes(1);
     expect(prepareWorkspaceRestore).toHaveBeenCalledWith(expect.objectContaining({
@@ -513,6 +526,36 @@ describe("startHostedContainerEntrypoint", () => {
     expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
     expect(prepareWorkspaceRestore).toHaveBeenCalledTimes(2);
     expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not prepare or run a workspace when warm Codex cannot stop", async () => {
+    const prepareWorkspaceRestore = createTestHostedWorkspaceRestorePreparer();
+    const stopWarmCodex = vi.fn().mockRejectedValueOnce(
+      new Error("synthetic warm Codex stop failure"),
+    );
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: { prepareWorkspaceRestore, stopWarmCodex },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const invocation = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+
+    expect(invocation.status).toBe(500);
+    expect(stopWarmCodex).toHaveBeenCalledWith(
+      "hosted-workspace-restore",
+    );
+    expect(prepareWorkspaceRestore).not.toHaveBeenCalled();
+    expect(mocks.runHostedWorkspaceInvocation).not.toHaveBeenCalled();
   });
 
   it("keeps heavy runtime modules out of the pre-listen static module graph", () => {

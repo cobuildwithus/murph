@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -373,6 +374,264 @@ describe("verification dispatcher", () => {
       "an arbitrary existing lease cannot prove the organization",
     );
   });
+
+  it("retains the last failed Testbox transcript and clears it after success", () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const fakeCrabboxPath = path.join(binDir, "crabbox");
+    const testRepoDir = path.join(tempRoot, "repo");
+    const testScriptsDir = path.join(testRepoDir, "scripts");
+    const failureArtifactPath = path.join(
+      testRepoDir,
+      ".artifacts",
+      "verification",
+      "crabbox-last-failure",
+    );
+    mkdirSync(testScriptsDir, { recursive: true });
+    writeFileSync(
+      path.join(testScriptsDir, "verification-dispatch.mjs"),
+      readFileSync(dispatcherPath, "utf8"),
+      "utf8",
+    );
+    writeFileSync(path.join(testRepoDir, ".gitignore"), "/.artifacts/\n", "utf8");
+    runGit(testRepoDir, ["init", "--quiet"]);
+    runGit(testRepoDir, ["add", ".gitignore", "scripts"]);
+    runGit(testRepoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+    writeExecutable(
+      fakeCrabboxPath,
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        'printf "%s\\n" "delegated exact failing test"',
+        'printf "%s\\n" "delegated exact stderr" >&2',
+        "exit 37",
+      ].join("\n"),
+    );
+    writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
+    const dispatcherUnderTest = realpathSync(
+      path.join(testScriptsDir, "verification-dispatch.mjs"),
+    );
+    const environment = {
+      ...withoutVerificationRoutingEnvironment(process.env),
+      MURPH_ALLOW_TESTBOX_SPEND: "1",
+      MURPH_VERIFY_EXECUTOR: "crabbox",
+      MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
+      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    };
+
+    const failed = spawnSync(
+      process.execPath,
+      [dispatcherUnderTest, "test:diff", "scripts/verification-dispatch.mjs"],
+      { cwd: testRepoDir, encoding: "utf8", env: environment },
+    );
+
+    expect(failed.status).toBe(37);
+    expect(failed.stdout).toContain("delegated exact failing test");
+    expect(failed.stderr).toContain("delegated exact stderr");
+    expect(failed.stderr).toContain(
+      "[verification-dispatch] failure-artifact=.artifacts/verification/crabbox-last-failure",
+    );
+    expect(readFileSync(path.join(failureArtifactPath, "stdout.log"), "utf8")).toContain(
+      "delegated exact failing test",
+    );
+    expect(readFileSync(path.join(failureArtifactPath, "stderr.log"), "utf8")).toContain(
+      "delegated exact stderr",
+    );
+    const runMetadataLines = readFileSync(
+      path.join(failureArtifactPath, "run.txt"),
+      "utf8",
+    ).trimEnd().split("\n");
+    expect(runMetadataLines).toEqual([
+      expect.stringMatching(/^command-argv-json=/u),
+      "executor=crabbox",
+      expect.stringMatching(/^candidate-tree=[a-f0-9]{40}$/u),
+    ]);
+    expect(
+      JSON.parse(
+        runMetadataLines[0]?.slice("command-argv-json=".length) ?? "null",
+      ),
+    ).toEqual(["test:diff", "scripts/verification-dispatch.mjs"]);
+    expect(statSync(failureArtifactPath).mode & 0o777).toBe(0o700);
+    for (const fileName of ["run.txt", "stdout.log", "stderr.log"]) {
+      expect(statSync(path.join(failureArtifactPath, fileName)).mode & 0o777).toBe(
+        0o600,
+      );
+    }
+
+    writeExecutable(
+      fakeCrabboxPath,
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        'printf "%s\\n" "delegated success"',
+      ].join("\n"),
+    );
+    const succeeded = spawnSync(
+      process.execPath,
+      [dispatcherUnderTest, "test:diff", "scripts/verification-dispatch.mjs"],
+      { cwd: testRepoDir, encoding: "utf8", env: environment },
+    );
+
+    expect(succeeded.status, succeeded.stderr).toBe(0);
+    expect(succeeded.stdout).toContain("delegated success");
+    expect(existsSync(failureArtifactPath)).toBe(false);
+  });
+
+  it.each([
+    { closedDestination: "stdout", delegatedStatus: 0 },
+    { closedDestination: "stdout", delegatedStatus: 37 },
+    { closedDestination: "stderr", delegatedStatus: 0 },
+    { closedDestination: "stderr", delegatedStatus: 37 },
+  ] as const)(
+    "reaps Testbox with status $delegatedStatus after a queued $closedDestination EPIPE",
+    async ({ closedDestination, delegatedStatus }) => {
+      const tempRoot = makeTempRoot();
+      const binDir = path.join(tempRoot, "bin");
+      const fakeCrabboxPath = path.join(binDir, "crabbox");
+      const delayedOutputErrorPath = path.join(
+        tempRoot,
+        "delay-output-error.cjs",
+      );
+      const testRepoDir = path.join(tempRoot, "repo");
+      const testScriptsDir = path.join(testRepoDir, "scripts");
+      const childCompletedPath = path.join(tempRoot, "child-completed.txt");
+      const failureArtifactPath = path.join(
+        testRepoDir,
+        ".artifacts",
+        "verification",
+        "crabbox-last-failure",
+      );
+      mkdirSync(testScriptsDir, { recursive: true });
+      writeFileSync(
+        path.join(testScriptsDir, "verification-dispatch.mjs"),
+        readFileSync(dispatcherPath, "utf8"),
+        "utf8",
+      );
+      writeFileSync(
+        path.join(testRepoDir, ".gitignore"),
+        "/.artifacts/\n",
+        "utf8",
+      );
+      writeFileSync(
+        delayedOutputErrorPath,
+        [
+          "const destination = process[process.env.MURPH_TEST_DELAY_OUTPUT_ERROR];",
+          "const originalEmit = destination.emit;",
+          "let delayed = false;",
+          "destination.emit = function (event, ...args) {",
+          "  const error = args[0];",
+          '  if (!delayed && event === "error" && error?.code === "EPIPE") {',
+          "    delayed = true;",
+          "    setTimeout(() => originalEmit.call(destination, event, ...args), 100);",
+          "    return false;",
+          "  }",
+          "  return originalEmit.call(destination, event, ...args);",
+          "};",
+        ].join("\n"),
+        "utf8",
+      );
+      runGit(testRepoDir, ["init", "--quiet"]);
+      runGit(testRepoDir, ["add", ".gitignore", "scripts"]);
+      runGit(testRepoDir, [
+        "-c",
+        "user.name=Crabbox Test",
+        "-c",
+        "user.email=crabbox-test@users.noreply.github.com",
+        "commit",
+        "--quiet",
+        "-m",
+        "initial",
+      ]);
+      writeExecutable(
+        fakeCrabboxPath,
+        [
+          "#!/bin/sh",
+          'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+          'printf "%s\\n" "delegated stdout before close"',
+          'printf "%s\\n" "delegated stderr before close" >&2',
+          "sleep 0.1",
+          'printf "%s\\n" "delegated stdout after close"',
+          'printf "%s\\n" "delegated stderr after close" >&2',
+          `printf "%s\\n" "completed" > ${shellQuote(childCompletedPath)}`,
+          'printf "%s\\n" "delegated stderr after close" >&2',
+          `exit ${delegatedStatus}`,
+        ].join("\n"),
+      );
+      writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
+      const dispatcher = spawn(
+        process.execPath,
+        [
+          realpathSync(path.join(testScriptsDir, "verification-dispatch.mjs")),
+          "test:diff",
+          "scripts/verification-dispatch.mjs",
+        ],
+        {
+          cwd: testRepoDir,
+          env: {
+            ...withoutVerificationRoutingEnvironment(process.env),
+            MURPH_ALLOW_TESTBOX_SPEND: "1",
+            MURPH_TEST_DELAY_OUTPUT_ERROR: closedDestination,
+            MURPH_VERIFY_EXECUTOR: "crabbox",
+            MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
+            NODE_OPTIONS: `--require=${delayedOutputErrorPath}`,
+            PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const stderrChunks: Buffer[] = [];
+      const stdoutChunks: Buffer[] = [];
+      dispatcher.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+      dispatcher.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+      const closedChunks = closedDestination === "stdout"
+        ? stdoutChunks
+        : stderrChunks;
+      try {
+        await waitForCondition(
+          () => Buffer.concat(closedChunks).toString("utf8").includes(
+            `delegated ${closedDestination} before close`,
+          ),
+          `delegated ${closedDestination} output before destination close`,
+          15_000,
+        );
+      } catch (error) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}\n${Buffer.concat(stderrChunks).toString("utf8")}`,
+        );
+      }
+      dispatcher[closedDestination].destroy();
+
+      const result = await waitForChild(dispatcher);
+
+      expect(result).toEqual({ code: delegatedStatus, signal: null });
+      expect(readFileSync(childCompletedPath, "utf8")).toBe("completed\n");
+      if (delegatedStatus === 0) {
+        expect(existsSync(failureArtifactPath)).toBe(false);
+      } else {
+        expect(
+          readFileSync(path.join(failureArtifactPath, "stdout.log"), "utf8"),
+        ).toContain("delegated stdout after close");
+        expect(
+          readFileSync(path.join(failureArtifactPath, "stderr.log"), "utf8"),
+        ).toContain("delegated stderr after close");
+        const survivingChunks = closedDestination === "stdout"
+          ? stderrChunks
+          : stdoutChunks;
+        expect(Buffer.concat(survivingChunks).toString("utf8")).toContain(
+          "[verification-dispatch] failure-artifact=.artifacts/verification/crabbox-last-failure",
+        );
+      }
+    },
+  );
 
   it("uses one isolated, secret-free static macOS workspace per local worktree", () => {
     const tempRoot = makeTempRoot();

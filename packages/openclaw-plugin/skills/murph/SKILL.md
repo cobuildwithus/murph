@@ -36,7 +36,7 @@ Read-command chooser:
 - `vault-cli list ...` for structured filters.
 - `vault-cli search query "<query>"` for fuzzy recall. `--text "<query>"` remains valid for explicit callers.
 - `vault-cli timeline ...` for chronological questions.
-- `vault-cli memory show` plus `vault-cli knowledge ...` reads for saved user context.
+- `vault-cli memory show --compact --format json` plus `vault-cli knowledge ...` reads for saved user context.
 - For common wearable questions, prefer the normalized first reads first: `vault-cli wearables latest`, `vault-cli wearables metric latest <metric>`, `vault-cli wearables metric trend <metric>`, and `vault-cli wearables drift`. Use `vault-cli wearables day ...` or other `wearables ... list` commands when the question is date-specific or you need one summary family in more detail.
 - family `manifest` commands such as `capture manifest`, `meal manifest`, `document manifest`, `intake manifest`, and `workout manifest` for immutable import provenance.
 
@@ -62,7 +62,7 @@ Useful commands:
 - `vault-cli commons protocol show <protocol key or slug> --format json` so you can read `protocol`, `safety`, `testPlans`, `experimentOnboarding`, and `revision.{pageRevisionId,runSpecRevisionId}` before asking setup questions.
 - `vault-cli commons protocol list --format json` when the user names a category or approximate protocol rather than one exact page.
 - `vault-cli experiment list --status active --format json` before starting, so Murph can preserve the one-meaningful-experiment default.
-- `vault-cli memory show --format json` for current saved context.
+- `vault-cli memory show --compact --format json` for current saved context.
 - `vault-cli search query "<protocol-relevant context>" --format json` for conditions, medications, prior symptoms, injuries, recent workouts, or previous experiment notes.
 - `vault-cli timeline ... --format json` for chronological context when timing matters.
 - `vault-cli wearables latest --format json`, `vault-cli wearables metric latest <metric> --format json`, `vault-cli wearables metric trend <metric> --format json`, `vault-cli wearables drift --format json`, `vault-cli wearables sources list --format json`, and `vault-cli wearables day <YYYY-MM-DD> --format json` when wearable measurement or baseline quality matters.

@@ -86,6 +86,7 @@ export function projectAttachmentEvidenceForModel(input: {
     sources: input.sources,
   })
   const fragments: ModelEvidenceFragment[] = []
+  const seenSourceTexts = new Set<string>()
 
   for (const source of input.sources) {
     const text = normalizeModelEvidenceText(source.text)
@@ -114,6 +115,11 @@ export function projectAttachmentEvidenceForModel(input: {
     ) {
       continue
     }
+
+    if (seenSourceTexts.has(text)) {
+      continue
+    }
+    seenSourceTexts.add(text)
 
     const clamped = clampText(text, maxFragmentChars)
     fragments.push({

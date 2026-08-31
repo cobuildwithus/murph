@@ -344,6 +344,10 @@ describe("hosted deploy automation helpers", () => {
         name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
       },
       {
+        class_name: "OpenAiAuthorizationAlertDurableObject",
+        name: "OPENAI_AUTHORIZATION_ALERT_MONITOR",
+      },
+      {
         class_name: "RunnerContainer",
         name: "RUNNER_CONTAINER",
       },
@@ -378,6 +382,10 @@ describe("hosted deploy automation helpers", () => {
       {
         new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
         tag: "v5",
+      },
+      {
+        new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
+        tag: "v6",
       },
     ]);
     expect(config).toMatchObject({

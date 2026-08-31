@@ -107,6 +107,10 @@ If no welcome or prior onboarding is visible, run one bounded resume check:
 vault-cli assistant onboarding resume-context --format json
 ```
 
+A non-retryable `memory_document_invalid` memory surface is terminal: do not
+read, write, or advance. Reply with its hint, keeping file, line, and field;
+stop until repaired.
+
 Treat every useful saved fact in the snapshot as known evidence for the open
 health threads and foundation checkpoints. Never re-ask it.
 Missing evidence is unresolved unless the visible conversation shows that the
@@ -135,7 +139,7 @@ historical ordering or replay the park.
 Do not fan the snapshot out into separate memory, goal, regimen, supplement,
 condition, allergy, experiment, or device commands. Make one targeted owning
 read only when the checkpoint needed now is omitted, truncated, or errored in
-the snapshot. In particular, use `vault-cli memory show --format json` when
+the snapshot. In particular, use `vault-cli memory show --compact --format json` when
 relevant memory evidence is truncated and `vault-cli blood-test list --format
 json` before asking the lab checkpoint when recent lab evidence is otherwise
 unknown. If visible and saved evidence satisfies every completion rule in

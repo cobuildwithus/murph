@@ -167,6 +167,11 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
+const OPENAI_AUTHORIZATION_ALERT_SINGLETON_NAME = "production";
+const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_CODE =
+  "openai_authorization_alert_report_failed";
+const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_MESSAGE =
+  "OpenAI authorization alert report failed.";
 const DEFAULT_EXA_API_BASE_URL = "https://api.exa.ai";
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -1508,6 +1513,53 @@ async function maybeHandleCustomInferenceRequest(input: {
   }
 }
 
+function reportOpenAiAuthorizationFailureSafely(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  status: 401 | 403;
+}): Promise<void> | undefined {
+  let failureLogged = false;
+  const logFailure = (): void => {
+    if (failureLogged) {
+      return;
+    }
+    failureLogged = true;
+    console.warn(OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_MESSAGE, {
+      failureCode: OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_CODE,
+    });
+  };
+
+  try {
+    const namespace = input.env.OPENAI_AUTHORIZATION_ALERT_MONITOR;
+    if (!namespace) {
+      logFailure();
+      return;
+    }
+    const reportPromise = namespace
+      .getByName(OPENAI_AUTHORIZATION_ALERT_SINGLETON_NAME)
+      .reportFailure({
+        observedAtMs: Date.now(),
+        status: input.status,
+      })
+      .then(() => undefined)
+      .catch(() => {
+        logFailure();
+      });
+    if (typeof input.ctx?.waitUntil === "function") {
+      try {
+        input.ctx.waitUntil(reportPromise);
+        return;
+      } catch {
+        logFailure();
+      }
+    }
+    return reportPromise;
+  } catch {
+    logFailure();
+    return;
+  }
+}
+
 async function maybeHandleOpenAiRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -1626,6 +1678,16 @@ async function maybeHandleOpenAiRequest(input: {
     upstreamFetchImpl: input.upstreamFetchImpl,
     url: input.url,
   });
+  if (response.status === 401 || response.status === 403) {
+    const reportPromise = reportOpenAiAuthorizationFailureSafely({
+      ctx: input.ctx,
+      env: input.env,
+      status: response.status,
+    });
+    if (reportPromise) {
+      await reportPromise;
+    }
+  }
   if (diagnosticPromise && typeof input.ctx?.waitUntil !== "function") {
     await diagnosticPromise;
   }

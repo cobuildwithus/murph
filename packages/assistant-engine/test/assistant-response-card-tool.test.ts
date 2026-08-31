@@ -1020,7 +1020,7 @@ describe('murph.attach_response_card', () => {
       'A routine card with complete accepted goals needs no repeated screening unless new context raises a concern.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'run vault-cli memory show --format json once for the canonical Identity, Preferences, Instructions, and Context record',
+      'run vault-cli memory show --compact --format json once for the canonical Identity, Preferences, Instructions, and Context record',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Do not re-ask or recite established categories.',
@@ -1030,6 +1030,9 @@ describe('murph.attach_response_card', () => {
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'If suitability is clear, proceed and state only the request-relevant outcome.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'For a clear request-relevant suitability outcome, explicitly name the requested target or metric.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Otherwise ask one compact question covering every unresolved category',
@@ -1063,7 +1066,7 @@ describe('murph.attach_response_card', () => {
     )
     expect(
       MURPH_ATTACH_RESPONSE_CARD_TOOL.description.split(
-        'vault-cli memory show --format json',
+        'vault-cli memory show --compact --format json',
       ).length - 1,
     ).toBe(1)
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toMatch(

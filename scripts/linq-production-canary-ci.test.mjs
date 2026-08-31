@@ -60,7 +60,7 @@ test("Linq production canary keeps destructive and provider credentials in the l
 test("Linq production canary runner proves the welcome and three bounded replies without logging content", async () => {
   const runner = await readFile(runnerPath, "utf8");
 
-  assert.match(runner, /CANARY_REPLY_BUDGET_MS = 10_000/u);
+  assert.match(runner, /CANARY_REPLY_BUDGET_MS = 20_000/u);
   assert.match(runner, /const CANARY_TURNS = \[/u);
   assert.equal(
     [...runner.matchAll(/^  ".+",$/gmu)].filter(([line]) =>

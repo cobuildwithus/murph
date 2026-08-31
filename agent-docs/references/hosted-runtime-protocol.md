@@ -147,13 +147,17 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 ### Resident Codex And Detached Enrichment Boundary
 
 The container owns one resident Codex App Server and keeps it warm across
-ordinary turns and ordinary workspace invocations. Turn completion, invocation
-completion, and invocation-scoped credential rotation do not replace it. An
-explicit workspace invocation abort or preemption is different: the container
+ordinary turns while one restored workspace remains active. Turn completion,
+invocation completion, and invocation-scoped credential rotation do not by
+themselves replace it. Before any restore path validates, replaces, clears, or
+sanitizes Codex home, the runtime synchronously stops the exact process so a
+fresh process can rebuild private indexes against the restored home. An explicit
+workspace invocation abort or preemption is also a stop boundary: the container
 interrupts the active background-work boundary and synchronously stops the exact
 owned App Server before it releases the job slot for another invocation. A stop
-failure poisons the container rather than allowing a replacement invocation to
-reuse ambiguous process state.
+failure at the pre-restore boundary fails that invocation before restore starts;
+any later invocation must pass the same stop gate before it can prepare or run
+the workspace.
 
 After restore and final Codex config/auth preparation, only the first fresh
 auto-reply-enabled conversation candidate staged during the pre-pass may decide
@@ -1658,8 +1662,19 @@ therefore relinquishes the existing lifecycle boundary without leaving a stale
 hint or partially initialized start ahead of foreground work. If a Worker
 version changes before authoritative start, the `UserRunner` destroys and
 clears a different pending versioned target before binding the current fence.
-The existing Web helper carries its bounded `linq-instant-start` or
-`linq-typing-started` source through the same request and RPC. During additive
+For an ordinary established direct Linq message, pre-transaction routing
+preparation may fire that same request immediately after it resolves an active
+member, before root KMS work and transaction entry. It threads
+one UUID-shaped attempt id through Web, the authenticated route, UserRunner
+activation and admission, and the container's first coalesced observation. The
+final wake carries the same id as expected evidence; the latency report treats
+the hint as causal only when the consumed observation matches it exactly. No
+attempt id is authority, and a retry that resolves another member starts a new
+hint while the planner remains authoritative.
+
+The existing Web helper carries its bounded `linq-instant-start`,
+`linq-message-routing`, or `linq-typing-started` source through the same request
+and RPC. During additive
 rollout an empty legacy request remains accepted and is recorded as `unknown`;
 unknown is never assumed to mean typing. Cloudflare logs one bounded admission outcome (`scheduled`,
 `skipped_consent_busy`, `skipped_admission_unavailable`,
@@ -1673,8 +1688,9 @@ do not imply port or health readiness.
 
 The container also consumes its in-memory hint observation on the next
 authoritative `ensureReadyForProcessing` call. One observation belongs to one
-shell-prewarm operation and carries its triggering source, first causal hint
-timestamp, completion time and duration, coalesced hint count, and one terminal
+shell-prewarm operation and carries its triggering source, bounded
+orchestration attempt and phase timestamps, first causal hint timestamp,
+completion time and duration, coalesced hint count, and one terminal
 outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
 After that operation settles, later hints may only increment its bounded hint
 count until readiness consumes it; they cannot launch a second operation or
@@ -1683,12 +1699,12 @@ leaves into the existing orchestration latency phase breakdown; it adds no
 request, persisted state owner, awaited reporting step, or work on the
 message-ingress path. A stop, explicit destroy, or Durable Object eviction may
 erase the optional observation, so an absent observation means `no observed
-prewarm`, not proof that no typing hint occurred. The aggregate cold-start
-report includes only typing-sourced, chronology-safe, uniquely matched
-Web-direct traces whose reply belongs to the same runtime attempt. It omits
-instant-start, unknown-source, ambiguous, backlog, and attempt-handoff rows
-rather than guessing, and returns no member, mailbox, trace, delivery, or
-runtime-attempt identifiers.
+prewarm`, not proof that no hint occurred. The aggregate cold-start report
+includes chronology-safe typing hints and exact-id-matched message-routing
+hints on uniquely matched Web-direct traces whose reply belongs to the same
+runtime attempt. It omits instant-start, unknown-source, ambiguous, backlog,
+and attempt-handoff rows rather than guessing, and returns no member, mailbox,
+trace, delivery, or runtime-attempt identifiers.
 The signal
 reconciles both the foreground conversation lane and the already-durable
 activation item. Web then
@@ -3802,6 +3818,20 @@ four container-local stages are `lifecycle_lock_or_state_read`,
 `warm_health_or_cleanup`, `cold_start_or_ports`, and
 `cold_health_or_finalization`. The cleanup boolean overlays the stage that
 triggered cleanup instead of replacing it.
+
+A non-OK Web workspace read also retains one failure-only Worker diagnostic
+without changing its caller-visible exception or retry behavior. The Durable
+Object throws the same plain HTTP-status error immediately and schedules a
+bounded inspection of a cloned response under its existing `waitUntil` owner.
+`Hosted workspace read failure classified.` carries only HTTP status, whether
+the response had the existing forwarded-Web header, a typed retryable boolean
+when present, a closed workspace-route error-code allowlist or `unknown`, and a
+fixed envelope outcome. Inspection is capped at 4 KiB and one second. Unknown,
+missing, malformed, oversized, timed-out, or unreadable bodies collapse to
+fixed buckets; response messages, details, arbitrary codes, request or member
+identifiers, payloads, credentials, and headers other than the forwarded-Web
+boolean never enter the log. The diagnostic adds no retry, request, persisted
+state, provider interaction, or user-visible behavior.
 
 The existing UserRunner startup-confirmation warnings add the same bounded
 elapsed field and one of two caller-owned stages. `rpc_unattributed` means the

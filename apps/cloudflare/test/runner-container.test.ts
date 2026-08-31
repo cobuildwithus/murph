@@ -1971,6 +1971,314 @@ describe("RunnerContainer", () => {
     ).toHaveLength(0);
   });
 
+  it("replaces one stale rollout image before cold readiness succeeds", async () => {
+    let healthChecks = 0;
+    const events: string[] = [];
+    const replacementProcessStartedAtEpochMs = Date.parse("2026-08-29T20:00:01.000Z");
+    const replacementServerListeningAtEpochMs = Date.parse("2026-08-29T20:00:02.000Z");
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "expected-bundle",
+        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "expected-source",
+      },
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        events.push(healthChecks === 1 ? "health-stale" : "health-current");
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          ...(healthChecks === 1 ? {} : {
+            processStartedAtEpochMs: replacementProcessStartedAtEpochMs,
+            serverListeningAtEpochMs: replacementServerListeningAtEpochMs,
+          }),
+          runnerBundle: {
+            bundleFingerprint: healthChecks === 1
+              ? "stale-bundle"
+              : "expected-bundle",
+            sourceFingerprint: healthChecks === 1
+              ? "stale-source"
+              : "expected-source",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    const result = await container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_123",
+    });
+    expect(result).toMatchObject({
+      action: "started",
+      kind: "ready",
+    });
+    if (result.kind !== "ready" || !result.coldStartTiming) {
+      throw new Error("Expected replacement cold readiness timing.");
+    }
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(["health-stale", "health-current"]);
+    expect(result.coldStartTiming.processStartedAtEpochMs)
+      .toBe(replacementProcessStartedAtEpochMs);
+    expect(result.coldStartTiming.serverListeningAtEpochMs)
+      .toBe(replacementServerListeningAtEpochMs);
+  });
+
+  it("fails after one replacement when two cold rollout images are stale", async () => {
+    let healthChecks = 0;
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "expected-bundle",
+        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "expected-source",
+      },
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          runnerBundle: {
+            bundleFingerprint: "stale-bundle",
+            sourceFingerprint: "stale-source",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_123",
+    })).rejects.toThrow("Hosted runner container bundle fingerprint mismatch.");
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    expect(destroy).toHaveBeenCalledTimes(2);
+    expect(healthChecks).toBe(2);
+  });
+
+  it("does not retry an ordinary cold health failure", async () => {
+    let healthChecks = 0;
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        return new Response(JSON.stringify({ error: "runner unavailable" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_123",
+    })).rejects.toThrow("Hosted runner container health check returned HTTP 503.");
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(healthChecks).toBe(1);
+  });
+
+  it("does not restart a stale rollout image when cleanup remains unsettled", async () => {
+    vi.useFakeTimers();
+    const fixedNowMs = Date.parse("2026-08-29T20:00:00.000Z");
+    vi.setSystemTime(new Date(fixedNowMs));
+
+    try {
+      let healthChecks = 0;
+      let containerRef: RunnerContainer | null = null;
+      let status: "running" | "stopped" = "stopped";
+      const destroyStarted = createDeferred<void>();
+      const destroy = vi.fn(async () => {
+        destroyStarted.resolve(undefined);
+      });
+      const startAndWaitForPorts = vi.fn(async () => {
+        status = "running";
+        containerRef?.onStart();
+      });
+      const { container } = createContainerDouble({
+        destroy,
+        env: {
+          HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "expected-bundle",
+          HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "expected-source",
+        },
+        getState: vi.fn(async () => ({
+          lastChange: fixedNowMs,
+          status,
+        })),
+        startAndWaitForPorts,
+        containerFetch: vi.fn(async (url: string) => {
+          if (!url.endsWith("/health")) {
+            throw new Error(`Unexpected runner request URL: ${url}`);
+          }
+          healthChecks += 1;
+          return new Response(JSON.stringify({
+            ...createRunnerHealthResult(),
+            runnerBundle: {
+              bundleFingerprint: "stale-bundle",
+              sourceFingerprint: "stale-source",
+            },
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+      containerRef = container;
+
+      const readiness = container.ensureReadyForProcessing({
+        timeoutMs: 15_000,
+        userId: "member_123",
+      });
+      await destroyStarted.promise;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(readiness).resolves.toEqual({ kind: "cleanup_unsettled" });
+      expect(healthChecks).toBe(1);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not restart a stale rollout image after the caller deadline aborts during cleanup", async () => {
+    const readinessDeadline = new AbortController();
+    const originalAbortSignalTimeout = AbortSignal.timeout;
+    const timeout = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementationOnce(() => readinessDeadline.signal)
+      .mockImplementation((timeoutMs: number) => originalAbortSignalTimeout(timeoutMs));
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    let containerRef: RunnerContainer | null = null;
+    let lastChange = Date.now();
+    let status: "running" | "stopped" = "stopped";
+    let healthChecks = 0;
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+      lastChange = Date.now();
+      containerRef?.onStart();
+    });
+    const destroy = vi.fn(async () => {
+      destroyStarted.resolve(undefined);
+      await releaseDestroy.promise;
+      status = "stopped";
+      lastChange = Date.now();
+      containerRef?.onStop({ exitCode: 0, reason: "exit" });
+    });
+    const getState = vi.fn(async () => ({
+      lastChange,
+      status,
+    }));
+    const { container } = createContainerDouble({
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "expected-bundle",
+        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "expected-source",
+      },
+      getState,
+      startAndWaitForPorts,
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          runnerBundle: {
+            bundleFingerprint: "stale-bundle",
+            sourceFingerprint: "stale-source",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+    containerRef = container;
+
+    try {
+      const readiness = container.ensureReadyForProcessing({
+        timeoutMs: 15_000,
+        userId: "member_123",
+      });
+      await destroyStarted.promise;
+      readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+
+      releaseDestroy.resolve(undefined);
+      await expect(readiness).rejects.toMatchObject({ name: "TimeoutError" });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(healthChecks).toBe(1);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("does not replace a newer container generation after stale rollout health", async () => {
+    let containerRef: RunnerContainer | null = null;
+    let healthChecks = 0;
+    const destroy = vi.fn(async () => {
+      containerRef?.onStart();
+    });
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "expected-bundle",
+        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "expected-source",
+      },
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          runnerBundle: {
+            bundleFingerprint: "stale-bundle",
+            sourceFingerprint: "stale-source",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+    containerRef = container;
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_123",
+    })).rejects.toThrow("Hosted runner container bundle fingerprint mismatch.");
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(healthChecks).toBe(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(Reflect.get(container, "currentContainerStart")).not.toBeNull();
+  });
+
   it("keeps cold readiness compatible with health responses that omit startup timestamps", async () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
@@ -3230,7 +3538,13 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.beginShellPrewarm({
-      source: "linq-typing-started",
+      orchestration: {
+        shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_788_000_000_030,
+        shellPrewarmOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+      },
+      source: "linq-message-routing",
       timeoutMs: 7_500,
       userId: "member_123",
     })).resolves.toEqual({ accepted: true });
@@ -3257,8 +3571,10 @@ describe("RunnerContainer", () => {
           details: expect.objectContaining({
             shellPrewarmColdStartObserved: true,
             shellPrewarmHintCountAtCompletion: 2,
+            orchestrationAttemptId:
+              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
             shellPrewarmOutcome: "start_issued",
-            shellPrewarmSource: "linq-typing-started",
+            shellPrewarmSource: "linq-message-routing",
           }),
           message: "Hosted runner shell prewarm operation completed.",
         }),
@@ -3283,9 +3599,15 @@ describe("RunnerContainer", () => {
         firstHintAtEpochMs: expect.any(Number),
         finishedAtEpochMs: expect.any(Number),
         hintCount: 3,
+        orchestration: {
+          shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_788_000_000_030,
+          shellPrewarmOrchestrationAttemptId:
+            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+          shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+        },
         operationElapsedMs: expect.any(Number),
         outcome: "cold_start_observed",
-        source: "linq-typing-started",
+        source: "linq-message-routing",
       },
     });
     expect(JSON.stringify(readiness.shellPrewarmObservation))

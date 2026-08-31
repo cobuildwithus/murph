@@ -479,7 +479,7 @@ export const workoutAddResultSchema = z.object({
   durationMinutes: z.number().int().positive(),
   distanceKm: z.number().nonnegative().nullable(),
   workout: workoutSessionResultSchema.nullable(),
-  note: z.string().min(1),
+  note: z.string().min(1).nullable(),
 })
 
 export const captureResultItemSchema = z.object({
@@ -530,6 +530,16 @@ export const workoutUnitPreferencesResultSchema = z.object({
   updated: z.boolean(),
   recordedAt: isoTimestampSchema.nullable(),
   unitPreferences: workoutUnitPreferenceValuesResultSchema,
+})
+
+export const workoutCapturePreferencesResultSchema = z.object({
+  vault: pathSchema,
+  preferencesPath: pathSchema,
+  updated: z.boolean(),
+  recordedAt: isoTimestampSchema.nullable(),
+  captureDefaults: z.object({
+    durationMinutes: z.number().int().positive().max(24 * 60).nullable(),
+  }),
 })
 
 export const workoutImportInspectResultSchema = z.object({

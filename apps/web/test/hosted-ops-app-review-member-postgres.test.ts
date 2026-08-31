@@ -358,6 +358,7 @@ describe.skipIf(!runPostgresProof)(
             privyCompletedAt: cleanupCompletedAt,
             runtimeLogsCompletedAt: cleanupCompletedAt,
             stripeCompletedAt: cleanupCompletedAt,
+            temporalCompletedAt: cleanupCompletedAt,
           },
           where: { id: cleanup.id },
         });

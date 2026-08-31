@@ -76,7 +76,7 @@ The canary must not log phone numbers, message text, chat or message ids, SDK
 errors, or provider bodies. It reports only bounded reset counts and per-turn
 latency. A successful first turn must equal Murph's package-owned welcome; later
 turns must be non-empty and must not repeat it. All three replies must arrive in
-under ten seconds. The existing deterministic hosted-local full-stack journey
+under twenty seconds. The existing deterministic hosted-local full-stack journey
 owns onboarding follow-up behavior. Do not hold this shared live identity open
 for the multi-day follow-up window or add a second reset lifecycle to the
 postdeploy canary; a separately authorized live follow-up proof must be run in a

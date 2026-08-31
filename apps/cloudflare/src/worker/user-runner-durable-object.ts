@@ -67,8 +67,16 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   async prewarmRuntimeShellForUser(
     userId: string,
     source?: Parameters<HostedUserRunner["prewarmRuntimeShellForUser"]>[1],
+    orchestration?: Parameters<HostedUserRunner["prewarmRuntimeShellForUser"]>[2],
   ): ReturnType<HostedUserRunner["prewarmRuntimeShellForUser"]> {
-    return this.runner.prewarmRuntimeShellForUser(userId, source);
+    return this.runner.prewarmRuntimeShellForUser(userId, source, {
+      ...(orchestration ?? {}),
+      shellPrewarmUserRunnerConstructorFinishedAtEpochMs:
+        this.activationTiming.userRunnerConstructorFinishedAtEpochMs,
+      shellPrewarmUserRunnerConstructorStartedAtEpochMs:
+        this.activationTiming.userRunnerConstructorStartedAtEpochMs,
+      shellPrewarmUserRunnerRpcStartedAtEpochMs: Date.now(),
+    });
   }
 
   async publishHostedPrivateMedia(

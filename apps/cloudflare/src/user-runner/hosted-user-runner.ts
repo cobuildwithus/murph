@@ -2,6 +2,7 @@ import {
   type HostedHealthDataConsentState,
   type HostedRunnerStatusResponse,
   type HostedRuntimeHealthDataAdmissionResponse,
+  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceState,
@@ -14,6 +15,7 @@ import type {
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   emitHostedExecutionStructuredLog,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   parseHostedRuntimeHealthDataAdmissionResponse,
@@ -36,6 +38,12 @@ import {
   type HostedPrivateMediaPublishResult,
 } from "../private-media.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
+import {
+  HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
+} from "../runner-outbound/headers.ts";
+import {
+  readHostedWebControlPlaneResponseText,
+} from "../runtime-platform/web-control-transport.ts";
 import { withSerializedLock } from "../serialized-lock.js";
 import type {
   WorkerAnalyticsEngineDatasetLike,
@@ -97,11 +105,49 @@ const HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS = 60_000;
 // The retained hint measured a 693 ms provider-start p50 gain. Abandon its
 // optional admission before it can consume even half of that useful overlap.
 const HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS = 250;
+const HOSTED_WORKSPACE_READ_FAILURE_BODY_MAX_BYTES = 4 * 1_024;
+const HOSTED_WORKSPACE_READ_FAILURE_BODY_TIMEOUT_MS = 1_000;
+const HOSTED_WORKSPACE_READ_FAILURE_CODES = [
+  "HOSTED_CLOUDFLARE_CALLBACK_REPLAYED",
+  "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+  "HOSTED_CUSTOM_CHAT_COMPLETIONS_UNAVAILABLE",
+  "HOSTED_CUSTOM_INFERENCE_CONSUMER_UNSUPPORTED",
+  "HOSTED_CUSTOM_INFERENCE_UNAVAILABLE",
+  "HOSTED_EXECUTION_USER_ID_REQUIRED",
+  "HOSTED_INFERENCE_CONNECTION_INVALID",
+  "HOSTED_INFERENCE_CONNECTION_REVERIFICATION_REQUIRED",
+  "INTERNAL_ERROR",
+  "INVALID_JSON",
+  "INVALID_REQUEST",
+  "REQUEST_BODY_TOO_LARGE",
+] as const;
+
+type HostedWorkspaceReadFailureCode =
+  | (typeof HOSTED_WORKSPACE_READ_FAILURE_CODES)[number]
+  | "unknown";
+
+type HostedWorkspaceReadFailureEnvelopeOutcome =
+  | "body_read_failed"
+  | "body_too_large"
+  | "body_unavailable"
+  | "classified"
+  | "code_missing"
+  | "code_unknown"
+  | "invalid_envelope";
+
+type HostedWorkspaceReadFailureDetails = HostedExecutionStructuredLogDetails & {
+  workspaceReadFailureCode: HostedWorkspaceReadFailureCode;
+  workspaceReadFailureEnvelopeOutcome: HostedWorkspaceReadFailureEnvelopeOutcome;
+  workspaceReadFailureForwardedFromWeb: boolean;
+  workspaceReadFailureRetryable: boolean | null;
+  workspaceReadFailureStatus: number;
+};
 
 export class HostedUserRunner {
   protected readonly stateStore: RunnerStateStore;
   protected readonly runtimeInvocation: RuntimeInvocationService;
   protected readonly runtimeProcessing: RuntimeProcessingController;
+  private readonly state: DurableObjectStateLike;
   private readonly userDataDeletionInput: HostedRunnerUserDataDeletionServiceInput;
   private readonly workspaceSnapshotSessions: WorkspaceSnapshotSessionService;
   private readonly runnerStoreCache: RunnerStoreCache;
@@ -127,6 +173,7 @@ export class HostedUserRunner {
     // Keep this first. The schema floor must reject an older Worker before it
     // can construct any service capable of waking a runner or reading a workspace.
     this.stateStore = new RunnerStateStore(state);
+    this.state = state;
     this.privateMediaBucket = bucket;
     this.privateMediaCapabilitySecret =
       readHostedPrivateMediaCapabilitySecret(runnerRuntimeEnvSource);
@@ -376,12 +423,18 @@ export class HostedUserRunner {
   async prewarmRuntimeShellForUser(
     userId: string,
     source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   ): Promise<void> {
+    const orchestrationAttemptId =
+      orchestration?.shellPrewarmOrchestrationAttemptId;
     if (this.runtimeConsentMutationLock) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           shellPrewarmAdmissionOutcome: "skipped_consent_busy",
+          ...(orchestrationAttemptId === undefined
+            ? {}
+            : { orchestrationAttemptId }),
           shellPrewarmSource: source ?? "unknown",
         },
         message: "Hosted runner shell prewarm admission decided.",
@@ -391,6 +444,8 @@ export class HostedUserRunner {
       return;
     }
     await this.withRuntimeConsentMutationLock(async () => {
+      const shellPrewarmConsentLockAcquiredAtEpochMs = Date.now();
+      const shellPrewarmAdmissionReadStartedAtEpochMs = Date.now();
       let admission: HostedRuntimeHealthDataAdmissionResponse;
       try {
         admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
@@ -402,6 +457,9 @@ export class HostedUserRunner {
           component: "hosted.runner",
           details: {
             shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
+            ...(orchestrationAttemptId === undefined
+              ? {}
+              : { orchestrationAttemptId }),
             shellPrewarmSource: source ?? "unknown",
           },
           level: "warn",
@@ -411,11 +469,15 @@ export class HostedUserRunner {
         });
         return;
       }
+      const shellPrewarmAdmissionReadFinishedAtEpochMs = Date.now();
       if (!admission.processingAllowed) {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           details: {
             shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+            ...(orchestrationAttemptId === undefined
+              ? {}
+              : { orchestrationAttemptId }),
             shellPrewarmSource: source ?? "unknown",
           },
           message: "Hosted runner shell prewarm admission decided.",
@@ -424,7 +486,16 @@ export class HostedUserRunner {
         });
         return;
       }
-      await this.runtimeProcessing.beginShellPrewarmForUser(userId, source);
+      await this.runtimeProcessing.beginShellPrewarmForUser(
+        userId,
+        source,
+        orchestration === undefined ? undefined : {
+          ...orchestration,
+          shellPrewarmAdmissionReadFinishedAtEpochMs,
+          shellPrewarmAdmissionReadStartedAtEpochMs,
+          shellPrewarmConsentLockAcquiredAtEpochMs,
+        },
+      );
     });
   }
 
@@ -747,7 +818,7 @@ export class HostedUserRunner {
     return admission;
   }
 
-  private async readHostedWorkspaceFromWeb(
+  protected async readHostedWorkspaceFromWeb(
     userId: string,
     input: { timeoutMs?: number } = {},
   ): Promise<HostedWorkspaceReadResponse> {
@@ -764,10 +835,22 @@ export class HostedUserRunner {
     });
 
     if (!response.ok) {
+      this.scheduleHostedWorkspaceReadFailureTelemetry(response);
       throw new Error(`Hosted workspace read failed with HTTP ${response.status}.`);
     }
 
     return parseHostedWorkspaceReadResponse(await response.json());
+  }
+
+  private scheduleHostedWorkspaceReadFailureTelemetry(response: Response): void {
+    try {
+      const telemetry = emitHostedWorkspaceReadFailureTelemetry(response.clone())
+        .catch(() => undefined);
+      this.state.waitUntil(telemetry);
+    } catch {
+      // Observability must never replace or delay the authoritative workspace
+      // read failure that the caller already owns.
+    }
   }
 
   private assertWorkspaceBelongsToRunnerUser(
@@ -782,6 +865,122 @@ export class HostedUserRunner {
   private readHostedWebControlBaseUrl(): string {
     return this.env.hostedWebBaseUrl;
   }
+}
+
+async function emitHostedWorkspaceReadFailureTelemetry(
+  response: Response,
+): Promise<void> {
+  emitHostedExecutionStructuredLog({
+    component: "hosted.runner",
+    details: await buildHostedWorkspaceReadFailureDetails(response),
+    level: "warn",
+    message: "Hosted workspace read failure classified.",
+    phase: "runtime.starting",
+  });
+}
+
+async function buildHostedWorkspaceReadFailureDetails(
+  response: Response,
+): Promise<HostedWorkspaceReadFailureDetails> {
+  const base = {
+    workspaceReadFailureForwardedFromWeb:
+      response.headers.get(HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER) === "1",
+    workspaceReadFailureStatus: response.status,
+  };
+  const contentLengthText = response.headers.get("content-length")?.trim() ?? "";
+  const contentLength = /^\d+$/u.test(contentLengthText)
+    ? Number(contentLengthText)
+    : null;
+  if (
+    contentLength !== null
+    && Number.isSafeInteger(contentLength)
+    && contentLength > HOSTED_WORKSPACE_READ_FAILURE_BODY_MAX_BYTES
+  ) {
+    return buildUnknownHostedWorkspaceReadFailureDetails(base, "body_too_large");
+  }
+  if (!response.body) {
+    return buildUnknownHostedWorkspaceReadFailureDetails(base, "body_unavailable");
+  }
+
+  let body: string;
+  try {
+    body = await readHostedWebControlPlaneResponseText({
+      description: "Hosted workspace read failure telemetry",
+      maxBytes: HOSTED_WORKSPACE_READ_FAILURE_BODY_MAX_BYTES,
+      response,
+      signal: null,
+      timeoutMs: HOSTED_WORKSPACE_READ_FAILURE_BODY_TIMEOUT_MS,
+    });
+  } catch {
+    return buildUnknownHostedWorkspaceReadFailureDetails(base, "body_read_failed");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return buildUnknownHostedWorkspaceReadFailureDetails(base, "invalid_envelope");
+  }
+  const record = readHostedWorkspaceFailureRecord(parsed);
+  const error = readHostedWorkspaceFailureRecord(record?.error);
+  if (!error) {
+    return buildUnknownHostedWorkspaceReadFailureDetails(base, "invalid_envelope");
+  }
+
+  const rawCode = typeof error.code === "string" ? error.code.trim() : "";
+  const retryable = typeof error.retryable === "boolean" ? error.retryable : null;
+  if (!rawCode) {
+    return {
+      ...base,
+      workspaceReadFailureCode: "unknown",
+      workspaceReadFailureEnvelopeOutcome: "code_missing",
+      workspaceReadFailureRetryable: retryable,
+    };
+  }
+  if (!isHostedWorkspaceReadFailureCode(rawCode)) {
+    return {
+      ...base,
+      workspaceReadFailureCode: "unknown",
+      workspaceReadFailureEnvelopeOutcome: "code_unknown",
+      workspaceReadFailureRetryable: retryable,
+    };
+  }
+
+  return {
+    ...base,
+    workspaceReadFailureCode: rawCode,
+    workspaceReadFailureEnvelopeOutcome: "classified",
+    workspaceReadFailureRetryable: retryable,
+  };
+}
+
+function buildUnknownHostedWorkspaceReadFailureDetails(
+  base: Pick<
+    HostedWorkspaceReadFailureDetails,
+    "workspaceReadFailureForwardedFromWeb" | "workspaceReadFailureStatus"
+  >,
+  outcome: Exclude<HostedWorkspaceReadFailureEnvelopeOutcome, "classified" | "code_missing" | "code_unknown">,
+): HostedWorkspaceReadFailureDetails {
+  return {
+    ...base,
+    workspaceReadFailureCode: "unknown",
+    workspaceReadFailureEnvelopeOutcome: outcome,
+    workspaceReadFailureRetryable: null,
+  };
+}
+
+function readHostedWorkspaceFailureRecord(
+  value: unknown,
+): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function isHostedWorkspaceReadFailureCode(
+  value: string,
+): value is Exclude<HostedWorkspaceReadFailureCode, "unknown"> {
+  return HOSTED_WORKSPACE_READ_FAILURE_CODES.some((code) => code === value);
 }
 
 function withRuntimeOrchestration(

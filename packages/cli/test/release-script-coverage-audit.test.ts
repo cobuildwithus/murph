@@ -1274,6 +1274,10 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'pnpm-workspace.yaml'),
       'utf8',
     )
+    const repoToolsPatch = readFileSync(
+      path.join(repoRoot, 'patches', '@cobuild__repo-tools@0.1.17.patch'),
+      'utf8',
+    )
     const reviewGptConfig = readFileSync(
       path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
       'utf8',
@@ -1360,10 +1364,19 @@ describe('monorepo release flow coverage audit', () => {
         .map((line) => line.trim()),
     ).toEqual(
       [
+        "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
+        "'@cobuild/review-gpt@0.5.139': patches/@cobuild__review-gpt@0.5.139.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
       ],
     )
+    expect(repoToolsPatch).toContain('tracked_files=()')
+    expect(repoToolsPatch).toContain('untracked_files=()')
+    expect(repoToolsPatch).toContain('add -u -- "${tracked_files[@]}"')
+    expect(repoToolsPatch).toContain('add -A -- "${untracked_files[@]}"')
+    expect(
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.139.patch')),
+    ).toBe(true)
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.103.patch')),
     ).toBe(false)
