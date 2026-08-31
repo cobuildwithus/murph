@@ -2201,6 +2201,22 @@ Optional smoke env:
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
+## Linq message shell-prewarm rollout
+
+This additive telemetry cutover is Web-first. Deploy Web with the expanded
+latency parser and the best-effort message-routing producer, then deploy the
+Cloudflare Worker/runner reader. During that short window the old Worker may
+reject the new optional request shape; the authoritative post-Temporal ensure
+and message path are unchanged. After Cloudflare converges, verify a synthetic
+established-direct-message trace has matching expected/observed prewarm attempt
+ids and the request, auth, UserRunner, admission, and container-hint phase stamps.
+
+There is no persisted-state rollback floor. Rolling Web back first stops the
+new producer; rolling Cloudflare back first merely makes remaining hints fail
+best-effort. A Web version without the expanded parser may drop only the
+optional phase breakdown from a newer Worker, never the core latency milestones
+or runtime work.
+
 ## Container Operator Access
 
 ## Operator task rollout

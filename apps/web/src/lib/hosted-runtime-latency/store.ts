@@ -1030,6 +1030,10 @@ function buildHostedIngressLatencySanitizedJsonObjectSql(
             THEN jsonb_typeof(leaf.value) = 'string'
               AND (leaf.value #>> '{}')
                 ~ '^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+            WHEN 'shell_prewarm_attempt_id'
+            THEN jsonb_typeof(leaf.value) = 'string'
+              AND (leaf.value #>> '{}')
+                ~ '^web-prewarm-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
             WHEN 'opaque_identifier'
             THEN jsonb_typeof(leaf.value) = 'string'
               AND length(leaf.value #>> '{}') <= 192

@@ -1816,6 +1816,9 @@ describe('assistant skill assets', () => {
     expect(root).toContain(
       'vault-cli assistant onboarding resume-context --format json',
     )
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'A non-retryable `memory_document_invalid` memory surface is terminal: do not read, write, or advance. Reply with its hint, keeping file, line, and field; stop until repaired.',
+    )
     expect(root).toContain('## The immediate need wins')
     expect(root).toContain('## Relationship promise')
     expect(root).toContain('### 2. Minimal identity')

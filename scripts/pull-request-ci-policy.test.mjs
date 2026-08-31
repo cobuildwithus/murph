@@ -237,6 +237,15 @@ test("runtime-heavy jobs skip only an affirmative trusted Markdown result", asyn
   }
 });
 
+test("release app verification stays bounded and serial across app owners", async () => {
+  const host = await workflow("host-support.yml");
+  const appVerification = jobBlock(host, "release-app-verification-linux");
+
+  assert.match(appVerification, /^    timeout-minutes: 45$/mu);
+  assert.match(appVerification, /^      MURPH_APP_VERIFY_PARALLEL: "0"$/mu);
+  assert.match(appVerification, /^      MURPH_VERIFY_STEP_PARALLEL: "1"$/mu);
+});
+
 test("Host Support runs one exact merge-candidate documentation proof", async () => {
   const source = await workflow("host-support.yml");
   const docsProof = jobBlock(source, "markdown-docs-proof");
@@ -454,6 +463,38 @@ test("only documented lightweight PR workflows retain synchronize", async () => 
   );
   assert.deepEqual(triggerTypes(await workflow("pr-evidence.yml")), ["opened", "synchronize", "reopened", "edited"]);
   assert.deepEqual(triggerTypes(await workflow("pr-head-change.yml")), ["synchronize"]);
+});
+
+test("complexity evidence and exact-candidate regression guards remain required", async () => {
+  const host = await workflow("host-support.yml");
+  const build = jobBlock(host, "release-build-typecheck-linux");
+  assert.match(
+    build,
+    /uses: actions\/checkout@[^\n]+\n        with:\n          fetch-depth: 2\n          persist-credentials: false/u,
+  );
+  assert.match(
+    build,
+    /- name: Guard cyclomatic complexity regressions\n        if: \$\{\{ github\.event_name == 'pull_request' \}\}\n        env:\n          MURPH_COMPLEXITY_BASE_SHA: \$\{\{ github\.sha \}\}\^1\n          MURPH_COMPLEXITY_HEAD_SHA: \$\{\{ github\.sha \}\}\n        run: pnpm complexity:diff/u,
+  );
+
+  const evidence = await workflow("pr-evidence.yml");
+  assert.match(
+    evidence,
+    /node --test[\s\S]*scripts\/check-pr-complexity-summary\.test\.mjs/u,
+  );
+  assert.match(
+    evidence,
+    /- name: Require complexity impact summary\n        run: node scripts\/check-pr-complexity-summary\.mjs\n        env:\n          MURPH_GITHUB_TOKEN: \$\{\{ github\.token \}\}\n          MURPH_PR_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}\n          MURPH_PR_BODY: \$\{\{ github\.event\.pull_request\.body \}\}\n          MURPH_PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u,
+  );
+
+  const template = await readFile(
+    path.join(REPO_ROOT, ".github", "pull_request_template.md"),
+    "utf8",
+  );
+  assert.match(template, /^## Complexity impact$/mu);
+  for (const label of ["Guard", "Hotspots", "Agent judgment"]) {
+    assert.match(template, new RegExp(`^- ${escapeRegExp(label)}:`, "mu"));
+  }
 });
 
 test("synchronize observer is read-only and never checks out candidate code", async () => {

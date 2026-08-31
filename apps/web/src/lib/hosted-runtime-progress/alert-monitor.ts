@@ -46,11 +46,18 @@ type HostedRuntimeProgressPrismaClient =
 
 export interface HostedRuntimeProgressHealthRow {
   chronologyInvalid: boolean;
+  headKind: string;
   lane: string;
+  nextDefaultProcessingWakeAt: Date | null;
+  nextDefaultProcessingWakeReason: string | null;
+  nextWakeAt: Date | null;
+  nextWakeReason: string | null;
   pendingCount: bigint;
   progressOriginAt: Date;
   runtimeKey: string;
+  systemMailboxProgressGeneration: bigint | null;
   usageBlocked: boolean;
+  workspaceCheckpointedAt: Date | null;
 }
 
 type HostedRuntimeProgressQueryRow = HostedRuntimeProgressHealthRow;
@@ -68,6 +75,17 @@ export interface HostedRuntimeProgressHealth {
   stalledRuntimeCount: number;
   stalledSystemLaneCount: number;
   thresholdMs: number;
+}
+
+export interface HostedRuntimeStalledRecheckCandidate {
+  pendingItemCount: string;
+  stalledSince: string;
+  userId: string;
+}
+
+export interface HostedRuntimeStalledRecheckCandidateScan {
+  candidates: HostedRuntimeStalledRecheckCandidate[];
+  scanTruncated: boolean;
 }
 
 export type HostedRuntimeProgressAlertMonitorOutcome =
@@ -155,6 +173,85 @@ export async function readHostedRuntimeProgressHealth(input: {
 } = {}): Promise<HostedRuntimeProgressHealth> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
+  const observation = await readHostedRuntimeProgressObservation({ now, prisma });
+
+  return summarizeHostedRuntimeProgressRows({
+    activeRuntimeKeys: [
+      ...new Set(observation.alertableRows.map((row) => row.runtimeKey)),
+    ],
+    excludedInactiveLaneCount: observation.excludedInactiveLaneCount,
+    excludedUsageBlockedConversationLaneCount:
+      observation.excludedUsageBlockedConversationLaneCount,
+    now,
+    rows: observation.alertableRows,
+    scanTruncated: observation.scanTruncated,
+  });
+}
+
+export async function readHostedRuntimeStalledRecheckCandidates(input: {
+  now?: Date;
+  prisma?: Pick<
+    PrismaClient,
+    "$queryRaw" | "hostedMember" | "hostedThreadContainerParticipant"
+  >;
+} = {}): Promise<HostedRuntimeStalledRecheckCandidateScan> {
+  const now = input.now ?? new Date();
+  const prisma = input.prisma ?? getPrisma();
+  const stalledBefore = new Date(
+    now.getTime() - HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
+  );
+  const observation = await readHostedRuntimeProgressObservation({ now, prisma });
+  const candidates = observation.alertableRows
+    .filter((row) => (
+      classifyHostedRuntimeProgressRow(row, now) === "stalled"
+      && row.lane === "system"
+      && row.headKind === "device-sync.wake"
+      && row.nextWakeAt !== null
+      && row.nextWakeAt <= stalledBefore
+      && row.nextWakeReason === "device-sync.reconcile"
+      && row.nextDefaultProcessingWakeAt === null
+      && row.nextDefaultProcessingWakeReason === null
+      && row.systemMailboxProgressGeneration === null
+      && row.workspaceCheckpointedAt !== null
+    ))
+    .map((row) => ({
+      pendingItemCount: row.pendingCount.toString(),
+      stalledSince: row.progressOriginAt.toISOString(),
+      userId: row.runtimeKey,
+    }))
+    .sort(compareHostedRuntimeRecheckCandidates);
+
+  return {
+    candidates,
+    scanTruncated: observation.scanTruncated,
+  };
+}
+
+interface HostedRuntimeProgressObservation {
+  alertableRows: HostedRuntimeProgressQueryRow[];
+  excludedInactiveLaneCount: number;
+  excludedUsageBlockedConversationLaneCount: number;
+  scanTruncated: boolean;
+}
+
+function compareHostedRuntimeRecheckCandidates(
+  left: HostedRuntimeStalledRecheckCandidate,
+  right: HostedRuntimeStalledRecheckCandidate,
+): number {
+  if (left.userId < right.userId) {
+    return -1;
+  }
+  return left.userId > right.userId ? 1 : 0;
+}
+
+async function readHostedRuntimeProgressObservation(input: {
+  now: Date;
+  prisma: Pick<
+    PrismaClient,
+    "$queryRaw" | "hostedMember" | "hostedThreadContainerParticipant"
+  >;
+}): Promise<HostedRuntimeProgressObservation> {
+  const { now, prisma } = input;
   const stalledBefore = new Date(
     now.getTime() - HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
   );
@@ -227,14 +324,12 @@ export async function readHostedRuntimeProgressHealth(input: {
 
   const scanTruncated =
     candidateRowCount > HOSTED_RUNTIME_PROGRESS_READ_LIMIT;
-  return summarizeHostedRuntimeProgressRows({
-    activeRuntimeKeys: [...new Set(alertableRows.map((row) => row.runtimeKey))],
+  return {
+    alertableRows,
     excludedInactiveLaneCount,
     excludedUsageBlockedConversationLaneCount,
-    now,
-    rows: alertableRows,
     scanTruncated,
-  });
+  };
 }
 
 interface HostedRuntimeProgressReadCursor {
@@ -330,7 +425,15 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     workspace_evidence AS (
       SELECT
         lagging_lane.*,
+        workspace.checkpointed_at AS workspace_checkpointed_at,
+        workspace.next_default_processing_wake_at
+          AS workspace_next_default_processing_wake_at,
+        workspace.next_default_processing_wake_reason
+          AS workspace_next_default_processing_wake_reason,
         workspace.next_wake_at AS workspace_next_wake_at,
+        workspace.next_wake_reason AS workspace_next_wake_reason,
+        workspace.system_mailbox_progress_generation
+          AS workspace_system_mailbox_progress_generation,
         CASE
           WHEN jsonb_typeof(
             workspace.redacted_status_json
@@ -429,8 +532,15 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     progress_lane AS (
       SELECT
         progress_evidence.user_id,
+        progress_evidence.head_kind,
         progress_evidence.lane,
         progress_evidence.pending_count,
+        progress_evidence.workspace_checkpointed_at,
+        progress_evidence.workspace_next_default_processing_wake_at,
+        progress_evidence.workspace_next_default_processing_wake_reason,
+        progress_evidence.workspace_next_wake_at,
+        progress_evidence.workspace_next_wake_reason,
+        progress_evidence.workspace_system_mailbox_progress_generation,
         CASE
           WHEN progress_evidence.lane = 'system'
             AND progress_evidence.head_kind = 'device-sync.wake'
@@ -487,11 +597,21 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     )
     SELECT
       progress_lane.chronology_invalid AS "chronologyInvalid",
+      progress_lane.head_kind AS "headKind",
       progress_lane.lane,
+      progress_lane.workspace_next_default_processing_wake_at
+        AS "nextDefaultProcessingWakeAt",
+      progress_lane.workspace_next_default_processing_wake_reason
+        AS "nextDefaultProcessingWakeReason",
+      progress_lane.workspace_next_wake_at AS "nextWakeAt",
+      progress_lane.workspace_next_wake_reason AS "nextWakeReason",
       progress_lane.pending_count AS "pendingCount",
       progress_lane.progress_origin_at AS "progressOriginAt",
       progress_lane.user_id AS "runtimeKey",
-      progress_lane.usage_blocked AS "usageBlocked"
+      progress_lane.workspace_system_mailbox_progress_generation
+        AS "systemMailboxProgressGeneration",
+      progress_lane.usage_blocked AS "usageBlocked",
+      progress_lane.workspace_checkpointed_at AS "workspaceCheckpointedAt"
     FROM progress_lane
     WHERE (
       progress_lane.chronology_invalid
@@ -532,30 +652,20 @@ export function summarizeHostedRuntimeProgressRows(input: {
       excludedInactiveLaneCount += 1;
       continue;
     }
-    if (row.chronologyInvalid) {
+    const disposition = classifyHostedRuntimeProgressRow(row, input.now);
+    if (disposition === "invalid") {
       invalidRowCount += 1;
       continue;
     }
-    if (row.usageBlocked && row.lane === "conversation") {
+    if (disposition === "usage_blocked") {
       excludedUsageBlockedConversationLaneCount += 1;
       continue;
     }
+    if (disposition === "fresh") {
+      continue;
+    }
+
     const progressOriginAtMs = row.progressOriginAt.getTime();
-    if (
-      !Number.isFinite(progressOriginAtMs)
-      || progressOriginAtMs > input.now.getTime()
-      || row.pendingCount <= 0n
-      || (row.lane !== "conversation" && row.lane !== "system")
-    ) {
-      invalidRowCount += 1;
-      continue;
-    }
-    if (
-      input.now.getTime() - progressOriginAtMs
-        < HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS
-    ) {
-      continue;
-    }
 
     stalledLaneCount += 1;
     stalledRuntimeKeys.add(row.runtimeKey);
@@ -586,6 +696,38 @@ export function summarizeHostedRuntimeProgressRows(input: {
     stalledSystemLaneCount,
     thresholdMs: HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
   };
+}
+
+type HostedRuntimeProgressRowDisposition =
+  | "fresh"
+  | "invalid"
+  | "stalled"
+  | "usage_blocked";
+
+function classifyHostedRuntimeProgressRow(
+  row: HostedRuntimeProgressHealthRow,
+  now: Date,
+): HostedRuntimeProgressRowDisposition {
+  if (row.chronologyInvalid) {
+    return "invalid";
+  }
+  if (row.usageBlocked && row.lane === "conversation") {
+    return "usage_blocked";
+  }
+
+  const progressOriginAtMs = row.progressOriginAt.getTime();
+  if (
+    !Number.isFinite(progressOriginAtMs)
+    || progressOriginAtMs > now.getTime()
+    || row.pendingCount <= 0n
+    || (row.lane !== "conversation" && row.lane !== "system")
+  ) {
+    return "invalid";
+  }
+  return now.getTime() - progressOriginAtMs
+      >= HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS
+    ? "stalled"
+    : "fresh";
 }
 
 function buildHostedRuntimeProgressAlertDetails(input: {

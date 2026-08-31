@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "current-time-answers-stay-local",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Current-time answers stay local",
+    "summary": "When your timezone is known, Murph now uses the current local clock for time-sensitive answers instead of treating UTC as your time.",
+    "details": "If a trustworthy local timezone is unavailable, Murph keeps the answer in UTC and says local time is unknown rather than guessing.",
+    "relevanceTags": ["assistant", "timezones", "reliability"],
+    "sourcePullRequests": [2638]
+  }
+}

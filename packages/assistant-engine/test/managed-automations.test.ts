@@ -1377,7 +1377,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(digestRecord?.instructions).toContain('New data or a decline alone is not substance')
     expect(digestRecord?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
     expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
-    expect(digestRecord?.instructions).toContain('what was probably noise')
+    expect(digestRecord?.instructions).toContain(
+      'Choose one primary conversational job',
+    )
     expect(digestRecord?.instructions).toContain(
       'An official weather alert alone never clears the proactive send bar',
     )

@@ -553,7 +553,9 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     args: z.object({
       query: z
         .string()
+        .trim()
         .min(1)
+        .max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH)
         .describe('Food product, brand, USDA FDC id, UPC, or generic ingredient search text.'),
     }),
     description: 'Search the hosted food label database from hosted assistant runtime without writing records.',
@@ -615,13 +617,13 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         },
       },
     ],
-    hint: 'Repeat --query for each food. For USDA FDC ids or UPCs, use `food search-labels` with one query. Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
+    hint: 'Repeat --query for each food. Each query may be food search text, a USDA FDC id, or a UPC. Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
     options: z.object({
       query: z
         .array(z.string().min(1).max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH))
         .min(1)
         .max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES)
-        .describe('Food product, brand, or generic ingredient search text. Repeat --query for multiple values.'),
+        .describe('Food product, brand, USDA FDC id, UPC, or generic ingredient search text. Repeat --query for multiple values.'),
       limit: z
         .number()
         .int()
