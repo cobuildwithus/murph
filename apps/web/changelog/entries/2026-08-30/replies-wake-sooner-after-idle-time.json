@@ -5,10 +5,10 @@
     "id": "replies-wake-sooner-after-idle-time",
     "kind": "improvement",
     "priority": 2,
-    "title": "Replies wake sooner after idle time",
-    "summary": "When an established private conversation needs a cold hosted assistant, Murph now starts waking it earlier while safely preparing your message.",
-    "details": "The earlier wake is best-effort; message acceptance and reply processing keep their existing durable path if it is unavailable.",
+    "title": "Replies recover cleanly after idle time",
+    "summary": "After an idle period, Murph now wakes sooner and keeps established conversations ready to continue.",
+    "details": "When a full workspace restore is needed, Murph opens the restored state with a fresh assistant process so replies do not wait on stale local state.",
     "relevanceTags": ["assistant", "performance", "reliability"],
-    "sourcePullRequests": [2584]
+    "sourcePullRequests": [2584, 2617]
   }
 }

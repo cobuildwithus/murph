@@ -521,6 +521,67 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
   });
 
+  it("bounds generated-image cleanup by the remaining canonical receipt capacity", async () => {
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      generatedImageRetentionMaxCaptures: 7,
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      pendingWork: false,
+      providerName: "hosted-openai",
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runGeneratedImageCaptureRetention).toHaveBeenCalledWith(
+      expect.objectContaining({ maxCaptures: 7 }),
+    );
+  });
+
+  it("defers generated-image cleanup when no canonical receipt admission remains", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+    const persistGeneratedImageRetention = vi.fn();
+
+    try {
+      await expect(runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        generatedImageRetentionMaxCaptures: 0,
+        memberId: "member_1",
+        model: "gpt-5.6-terra",
+        pendingWork: false,
+        persistGeneratedImageRetention,
+        providerName: "hosted-openai",
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/vault",
+        wakeSignal: null,
+      })).resolves.toMatchObject({
+        nextWakeAt: "2026-07-05T00:00:00.000Z",
+        nextWakeReason: "inbox_media_retention",
+      });
+      expect(runGeneratedImageCaptureRetention).not.toHaveBeenCalled();
+      expect(persistGeneratedImageRetention).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("runs inbox text retention and wakes at the earlier of the two retention passes", async () => {
     runInboxMediaRetention.mockResolvedValue({
       expiredAttachments: 0,
