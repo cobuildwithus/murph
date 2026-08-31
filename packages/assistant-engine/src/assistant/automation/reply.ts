@@ -3288,14 +3288,28 @@ function mergeAssistantUserMessageContent(
 function buildAssistantInputCandidateTranscriptText(
   candidate: AssistantInputCandidate,
 ): string | null {
-  const text = (candidate.event.userMessageContent ?? [])
+  const messageText = (candidate.event.userMessageContent ?? [])
     .map((part) =>
       part.type === 'text' ? normalizeNullableString(part.text) : null,
     )
     .filter((partText): partText is string => partText !== null)
     .join('\n\n')
-  if (text) {
-    return text
+  const attachmentTranscripts = candidate.event.attachmentEvidence.attachments
+    .flatMap((attachment) =>
+      attachment.inlineFragments.flatMap((fragment) => {
+        const text = fragment.kind === 'attachment_transcript'
+          ? normalizeNullableString(fragment.text)
+          : null
+        return text
+          ? [`Attachment ${attachment.ordinal} transcript:\n${text}`]
+          : []
+      }),
+    )
+  const transcriptText = [messageText, ...attachmentTranscripts]
+    .filter((part) => part.length > 0)
+    .join('\n\n')
+  if (transcriptText) {
+    return transcriptText
   }
 
   const fallbackText = normalizeNullableString(

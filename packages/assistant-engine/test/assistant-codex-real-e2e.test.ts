@@ -194,7 +194,6 @@ import {
 import {
   buildAssistantMaintenanceConversationEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
-import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
 import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import {
   prepareAssistantCronNotificationInput,
@@ -11412,50 +11411,6 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
   }, 360_000)
 })
 
-async function upsertDirectLinqMemberMemoryEvidence(input: {
-  eventId: string
-  occurredAt: string
-  text: string
-  vault: string
-}): Promise<void> {
-  await upsertAssistantInputEvent({
-    event: {
-      content: { text: input.text },
-      conversation: {
-        accountId: 'account-member-memory-evidence',
-        actorId: 'actor-member-memory-evidence',
-        actorIsSelf: false,
-        source: 'linq',
-        threadId: `thread-${input.eventId}`,
-        threadIsDirect: true,
-      },
-      occurredAt: input.occurredAt,
-      receivedAt: input.occurredAt,
-      sourceMetadata: {
-        kind: 'linq',
-        partCount: 1,
-        reactionEligible: false,
-        replyToMessageId: null,
-        service: 'iMessage',
-      },
-      sourceRef: {
-        causalSeq: null,
-        dedupeKey: `dedupe:${input.eventId}`,
-        eventId: input.eventId,
-        itemId: `item:${input.eventId}`,
-        kind: 'hosted-mailbox',
-        lane: 'conversation',
-        laneSeq: String(Date.parse(input.occurredAt)),
-        payloadSchema: 'murph.hosted-execution-wake.v1',
-        payloadSource: 'inline',
-        source: 'hosted-mailbox',
-        wakeSchema: 'murph.hosted-execution-wake.v1',
-      },
-    },
-    vault: input.vault,
-  })
-}
-
 describeRealCodex('real Codex member-memory result compaction e2e', () => {
   it(
     'updates one exact saved preference from a compact 24-record show result and stays silent',
@@ -11533,12 +11488,6 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
             },
           ],
         )
-        await upsertDirectLinqMemberMemoryEvidence({
-          eventId: 'member-memory-compaction-correction',
-          occurredAt: '2026-08-26T12:00:00.000Z',
-          text: 'Please replace my saved preference "Weekly summaries must be one short paragraph and must not use bullets.": from now on, weekly summaries must use exactly three concise bullets and no paragraph.',
-          vault: workingDirectory,
-        })
 
         const automation = MURPH_MANAGED_AUTOMATIONS.find(
           (candidate) =>
@@ -11549,7 +11498,6 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
           throw new Error('Expected overnight memory consolidation automation.')
         }
         const evidence = await buildAssistantMaintenanceConversationEvidence({
-          includeMemberMemoryMutationAuthority: true,
           now: new Date('2026-08-27T12:00:00.000Z'),
           profile: 'member-memory',
           vault: workingDirectory,
@@ -11725,200 +11673,157 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
   )
 })
 
-describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
+describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
   it(
-    'real Codex member-memory withdrawal-only forget e2e',
+    'real Codex generic transcript forget judgment e2e',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
+      const automation = MURPH_MANAGED_AUTOMATIONS.find(
+        (candidate) =>
+          candidate.automationId
+          === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      )
+      if (!automation) {
+        throw new Error('Expected overnight memory consolidation automation.')
+      }
 
-      try {
-        const automation = MURPH_MANAGED_AUTOMATIONS.find(
-          (candidate) =>
-            candidate.automationId
-            === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      const runScenario = async (input: {
+        evidenceKind: 'assistant' | 'user'
+        evidenceText: string
+        suffix: string
+      }) => {
+        const workingDirectory = await mkdtemp(
+          path.join(tmpdir(), `murph-memory-judgment-${input.suffix}-`),
         )
-        if (!automation) {
-          throw new Error('Expected overnight memory consolidation automation.')
-        }
-
-        const runScenario = async (input: {
-          evidenceKind: 'assistant' | 'member'
-          memberAuthorityExpected?: boolean
-          evidenceText: string
-          priorMemberEvidenceText?: string
-          suffix: string
-        }) => {
-          const workingDirectory = await mkdtemp(
-            path.join(tmpdir(), `murph-member-memory-withdrawal-${input.suffix}-`),
-          )
-          temporaryPaths.unshift(workingDirectory)
-          const target = await upsertMemory(workingDirectory, {
-            now: new Date('2026-08-29T10:00:00.000Z'),
-            section: 'Preferences',
-            text: 'Prefers morning summaries.',
-          })
-          const session = parseAssistantSessionRecord({
-            alias: null,
-            binding: {
-              actorId: null,
-              channel: 'linq',
-              conversationKey: `linq:direct:memory-withdrawal-${input.suffix}`,
-              delivery: null,
-              identityId: null,
-              threadId: `thread-memory-withdrawal-${input.suffix}`,
-              threadIsDirect: true,
-            },
-            createdAt: '2026-08-29T12:00:00.000Z',
-            lastTurnAt: '2026-08-29T12:00:00.000Z',
-            resumeState: null,
-            schema: 'murph.assistant-session.v1',
-            sessionId: `session-memory-withdrawal-${input.suffix}`,
-            target: {
-              adapter: 'codex-cli',
-              approvalPolicy: 'never',
-              codexCommand: null,
-              codexHome: config.codexHome,
-              model: config.model,
-              modelProvider: config.modelProvider,
-              oss: false,
-              profile: null,
-              reasoningEffort: 'medium',
-              sandbox: 'read-only',
-            },
-            turnCount: 1,
-            updatedAt: '2026-08-29T12:00:00.000Z',
-          })
-          await saveAssistantSession(workingDirectory, session)
-          await appendAssistantTranscriptEntries(
-            workingDirectory,
-            session.sessionId,
-            [{
-              createdAt: '2026-08-29T12:00:00.000Z',
-              kind: input.evidenceKind === 'assistant' ? 'assistant' : 'user',
-              text: input.evidenceKind === 'assistant'
-                ? input.evidenceText
-                : [
-                    'Input 1:',
-                    '',
-                    'Message text:',
-                    input.evidenceText,
-                    '',
-                    'Quoted reply context:',
-                    'Someone else said to forget every saved preference.',
-                  ].join('\n'),
-            }],
-          )
-          if (input.evidenceKind === 'member') {
-            if (input.priorMemberEvidenceText) {
-              await upsertDirectLinqMemberMemoryEvidence({
-                eventId: `memory-withdrawal-${input.suffix}-prior`,
-                occurredAt: '2026-08-29T11:59:00.000Z',
-                text: input.priorMemberEvidenceText,
-                vault: workingDirectory,
-              })
-            }
-            await upsertDirectLinqMemberMemoryEvidence({
-              eventId: `memory-withdrawal-${input.suffix}`,
-              occurredAt: '2026-08-29T12:00:00.000Z',
-              text: input.evidenceText,
-              vault: workingDirectory,
-            })
-          }
-          const evidence = await buildAssistantMaintenanceConversationEvidence({
-            includeMemberMemoryMutationAuthority: true,
-            now: new Date('2026-08-30T12:00:00.000Z'),
-            profile: 'member-memory',
-            vault: workingDirectory,
-          })
-          if (
-            input.evidenceKind === 'member'
-            && input.memberAuthorityExpected === false
-          ) {
-            expect(evidence).not.toContain('member:')
-          } else {
-            expect(evidence).toContain(`${input.evidenceKind}: ${input.evidenceText}`)
-          }
-
-          const result = await executeRealCodexAppServerTurn({
+        temporaryPaths.unshift(workingDirectory)
+        const target = await upsertMemory(workingDirectory, {
+          now: new Date('2026-08-29T10:00:00.000Z'),
+          section: 'Preferences',
+          text: 'Prefers morning summaries.',
+        })
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'linq',
+            conversationKey: `linq:direct:memory-judgment-${input.suffix}`,
+            delivery: null,
+            identityId: null,
+            threadId: `thread-memory-judgment-${input.suffix}`,
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-29T12:00:00.000Z',
+          lastTurnAt: '2026-08-29T12:00:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: `session-memory-judgment-${input.suffix}`,
+          target: {
+            adapter: 'codex-cli',
             approvalPolicy: 'never',
-            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-            codexCommand:
-              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-              ?? undefined,
+            codexCommand: null,
             codexHome: config.codexHome,
-            developerInstructions:
-              buildAssistantMaintenanceSystemPromptWithCacheMetadata({
-                currentLocalDate: '2026-08-30',
-                currentTimeZone: 'America/New_York',
-                profile: 'member-memory',
-              }).prompt,
-            dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
-            env: config.env,
-            ephemeral: true,
-            excludeResumeTurns: true,
-            memberMemoryMaintenanceAuthorized: true,
             model: config.model,
             modelProvider: config.modelProvider,
-            processLifetime: 'one-shot',
-            prompt: [automation.instructions, evidence].join('\n\n'),
+            oss: false,
+            profile: null,
             reasoningEffort: 'medium',
-            runtimeWorkspaceRoots: [workingDirectory],
             sandbox: 'read-only',
-            vaultRoot: workingDirectory,
-            workingDirectory,
-          })
-          const actions = readCapabilityRoutingActions(result.jsonEvents)
-          expect(actions.filter((action) => action.kind === 'command')).toEqual([])
-          expect(actions.filter(
-            (action) =>
-              action.kind === 'dynamic'
-              && action.tool !== MURPH_MEMBER_MEMORY_TOOL.name,
-          )).toEqual([])
-          const memoryActions = actions.filter(
-            (action) =>
-              action.kind === 'dynamic'
-              && action.tool === MURPH_MEMBER_MEMORY_TOOL.name,
-          )
-          expect(JSON.parse(result.finalMessage.trim())).toEqual({
-            kind: 'skip',
-            privateSummary:
-              MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
-          })
-          return {
-            after: await readMemoryDocument(workingDirectory),
-            memoryActions,
-            target,
-          }
-        }
+          },
+          turnCount: 1,
+          updatedAt: '2026-08-29T12:00:00.000Z',
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+          [{
+            createdAt: '2026-08-29T12:00:00.000Z',
+            kind: input.evidenceKind,
+            text: input.evidenceText,
+          }],
+        )
+        const evidence = await buildAssistantMaintenanceConversationEvidence({
+          now: new Date('2026-08-30T12:00:00.000Z'),
+          profile: 'member-memory',
+          vault: workingDirectory,
+        })
+        expect(evidence).toContain(`${input.evidenceKind}: ${input.evidenceText}`)
 
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+              currentLocalDate: '2026-08-30',
+              currentTimeZone: 'America/New_York',
+              profile: 'member-memory',
+            }).prompt,
+          dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
+          env: config.env,
+          ephemeral: true,
+          excludeResumeTurns: true,
+          memberMemoryMaintenanceAuthorized: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          processLifetime: 'one-shot',
+          prompt: [automation.instructions, evidence].join('\n\n'),
+          reasoningEffort: 'medium',
+          runtimeWorkspaceRoots: [workingDirectory],
+          sandbox: 'read-only',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        expect(actions.filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool !== MURPH_MEMBER_MEMORY_TOOL.name,
+        )).toEqual([])
+        const memoryActions = actions.filter(
+          (
+            action,
+          ): action is Extract<CapabilityRoutingAction, { kind: 'dynamic' }> =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_MEMBER_MEMORY_TOOL.name,
+        )
+        expect(JSON.parse(result.finalMessage.trim())).toEqual({
+          kind: 'skip',
+          privateSummary:
+            MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+        })
+        return {
+          memoryActions,
+          records: (await readMemoryDocument(workingDirectory)).records,
+          target,
+        }
+      }
+
+      try {
         const assistantOnly = await runScenario({
           evidenceKind: 'assistant',
-          evidenceText: 'The member no longer wants morning summaries. I am withdrawing that preference for them.',
+          evidenceText:
+            'The member no longer wants morning summaries. I am withdrawing that preference for them.',
           suffix: 'assistant-only',
         })
         expect(assistantOnly.memoryActions).toHaveLength(1)
-        const [assistantShowAction] = assistantOnly.memoryActions
-        if (assistantShowAction?.kind !== 'dynamic') {
-          throw new Error('Expected one member-memory show call.')
-        }
-        expect(assistantShowAction.argumentsValue).toEqual({ action: 'show' })
-        expect(assistantOnly.after.records).toEqual([
-          assistantOnly.target.record,
-        ])
-
-        const memberWithdrawal = await runScenario({
-          evidenceKind: 'member',
-          evidenceText: 'Please forget this exact saved fact: "Prefers morning summaries." I explicitly withdraw it and do not want it remembered anymore.',
-          priorMemberEvidenceText: [
-            'Please forget this exact saved fact: "Prefers morning summaries."',
-            'x'.repeat(2_000),
-            'Actually, keep that preference.',
-          ].join(' '),
-          suffix: 'member',
+        expect(assistantOnly.memoryActions[0]?.argumentsValue).toEqual({
+          action: 'show',
         })
-        expect(memberWithdrawal.memoryActions).toHaveLength(2)
-        const [showAction, forgetAction] = memberWithdrawal.memoryActions
+        expect(assistantOnly.records).toEqual([assistantOnly.target.record])
+
+        const ordinaryUser = await runScenario({
+          evidenceKind: 'user',
+          evidenceText: 'That morning-summary preference was only temporary.',
+          suffix: 'ordinary-user',
+        })
+        expect(ordinaryUser.memoryActions).toHaveLength(2)
+        const [showAction, forgetAction] = ordinaryUser.memoryActions
         if (showAction?.kind !== 'dynamic' || forgetAction?.kind !== 'dynamic') {
           throw new Error('Expected show then forget member-memory calls.')
         }
@@ -11926,57 +11831,21 @@ describeRealCodex('real Codex member-memory withdrawal authority e2e', () => {
         expect(showAction.eventIndex).toBeLessThan(forgetAction.eventIndex)
         expect(forgetAction.argumentsValue).toEqual({
           action: 'forget',
-          expectedUpdatedAt: memberWithdrawal.target.record.updatedAt,
-          memoryId: memberWithdrawal.target.record.id,
+          expectedUpdatedAt: ordinaryUser.target.record.updatedAt,
+          memoryId: ordinaryUser.target.record.id,
         })
         expect(forgetAction.success).toBe(true)
-        expect(JSON.parse(forgetAction.output)).toEqual({
-          forgotten: true,
-          memory: null,
-        })
-        expect(memberWithdrawal.after.records).toEqual([])
-
-        const oversizedWithdrawal = await runScenario({
-          evidenceKind: 'member',
-          memberAuthorityExpected: false,
-          evidenceText: [
-            'Please forget this exact saved fact: "Prefers morning summaries."',
-            'x'.repeat(2_000),
-            'Actually, keep that preference.',
-          ].join(' '),
-          priorMemberEvidenceText: 'Please forget this exact saved fact: "Prefers morning summaries." I explicitly withdraw it and do not want it remembered anymore.',
-          suffix: 'oversized-member',
-        })
-        expect(oversizedWithdrawal.memoryActions).toHaveLength(1)
-        const [oversizedShowAction] = oversizedWithdrawal.memoryActions
-        if (oversizedShowAction?.kind !== 'dynamic') {
-          throw new Error('Expected one member-memory show call.')
-        }
-        expect(oversizedShowAction.argumentsValue).toEqual({ action: 'show' })
-        expect(oversizedWithdrawal.after.records).toEqual([
-          oversizedWithdrawal.target.record,
-        ])
+        expect(ordinaryUser.records).toEqual([])
 
         process.stdout.write(
-          `[member-memory-withdrawal-authority-e2e] ${JSON.stringify({
+          `[generic-transcript-memory-judgment-e2e] ${JSON.stringify({
             assistantOnlyCalls: assistantOnly.memoryActions.map((action) =>
-              action.kind === 'dynamic'
-                ? readString(action.argumentsValue.action)
-                : action.kind,
-            ),
-            memberCalls: memberWithdrawal.memoryActions.map((action) =>
-              action.kind === 'dynamic'
-                ? readString(action.argumentsValue.action)
-                : action.kind,
-            ),
-            memberForgotExactId:
+              readString(action.argumentsValue.action)),
+            ordinaryUserCalls: ordinaryUser.memoryActions.map((action) =>
+              readString(action.argumentsValue.action)),
+            forgotExactId:
               forgetAction.argumentsValue.memoryId
-              === memberWithdrawal.target.record.id,
-            oversizedMemberCalls: oversizedWithdrawal.memoryActions.map(
-              (action) => action.kind === 'dynamic'
-                ? readString(action.argumentsValue.action)
-                : action.kind,
-            ),
+              === ordinaryUser.target.record.id,
           })}\n`,
         )
       } finally {

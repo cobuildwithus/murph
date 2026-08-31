@@ -18,6 +18,9 @@ Updated: 2026-08-31
 - Maintenance updates and retirements require that value and fail without a
   write when the canonical record changed after the read.
 - Retirements reuse the existing audited exact-ID forget operation.
+- Accepted voice-memo transcripts are written into the ordinary durable user
+  transcript, so maintenance sees what the member said instead of an attachment
+  receipt summary.
 - Private direct turns receive a deterministic, bounded selection of current
   memory alongside the existing bounded goal/regimen snapshot.
 - Missing, malformed, or unreadable memory omits only that memory block; it
@@ -33,6 +36,8 @@ Updated: 2026-08-31
   - Optimistic concurrency for core memory update/forget using existing
     `updatedAt` metadata.
   - A maintenance-only exact-ID forget action with narrow retirement rules.
+  - Reusing durable attachment transcripts in the ordinary conversation
+    transcript consumed by maintenance.
   - A transient bounded memory projection composed into the existing
     private-direct-turn context.
   - Focused contract/core/assistant tests and prompt guidance.
@@ -78,12 +83,12 @@ Updated: 2026-08-31
 4. Risk: Saved instructions are mistaken for permission.
    Mitigation: Label the projection as context only and retain the existing
    authority hierarchy in the system prompt.
-5. Risk: Composed transcript text or a group participant silently corrects or
-   retires the member's memory.
-   Mitigation: Only raw direct-member events from the existing hosted input
-   owner receive the `member:` authority label. Conflicting upsert/update and
-   forget require that label; transcript, assistant, email, group, self, and
-   ambiguous-route evidence remain context only.
+5. Risk: Assistant prose is mistaken for the member's intent, or natural member
+   language is ignored because it does not use memory terminology.
+   Mitigation: Keep one model instruction at the maintenance prompt owner: a
+   `user:` entry may initiate correction or retirement in ordinary language;
+   `assistant:` entries may provide context but cannot initiate it. The model
+   judges the full chronological conversation and skips uncertain changes.
 
 ## Tasks
 
@@ -102,12 +107,14 @@ Updated: 2026-08-31
   existing state and require a migration.
 - Use update as correction and the existing hard delete plus audit entry as
   retirement. Tombstones would retain private text and multiply filtering rules.
-- Use the existing durable hosted input-event spine only to distinguish raw
-  direct-member text from composed transcript context. Do not add an evidence
-  table, provenance graph, or new persisted authority state.
-- Do not add semantic provenance until maintenance evidence has a trusted,
-  stable canonical evidence identifier; free-text provenance would be dead or
-  unverifiable metadata.
+- Reuse the existing chronological `user:` / `assistant:` maintenance transcript
+  and trust the model to interpret quotes, corrections, reversals, and ordinary
+  language. Do not add a second authority view, channel-specific provenance,
+  evidence barriers, or another persisted state owner.
+- Keep attachment transcripts durable in the existing input event's
+  `attachmentEvidence`. When an input is accepted, render its transcript into
+  the ordinary durable `user` transcript that maintenance already consumes.
+  Do not add a separate memory-authority stream.
 - Extend the existing bounded context snapshot at read time instead of adding a
   persisted `CurrentState` owner or dirty/rebuild lifecycle.
 - Leave automations out of this projection. Due-state belongs to the scheduler,
@@ -127,15 +134,17 @@ Updated: 2026-08-31
   - Established members can receive a context-aware reply without an extra
     memory lookup.
   - New or sparse-memory members keep the existing behavior.
-  - Explicit correction or withdrawal can update or forget exactly one
-    unchanged record.
+  - Ordinary correction or withdrawal language can update or forget exactly
+    one unchanged record without requiring memory terminology or an exact quote.
+  - A voice memo contributes its accepted transcript to the same conversation
+    history as typed input rather than only an attachment receipt summary.
   - Group, maintenance-delivery, and other non-private-direct turns do not
     receive the personal current-state block.
 - Challenge and resolution: Current input and canonical reads outrank the
   bounded projection; omitted detail can be read exactly on demand; and a
-  stale maintenance mutation fails without changing the newer record. An
-  oversized newer fact stops that section instead of exposing older facts
-  behind it, and retirement requires explicit withdrawal or revocation.
+  stale maintenance mutation fails without changing the newer record. The model
+  uses the complete supplied conversation to distinguish a useful replacement
+  from a fact that was temporary and should simply be retired.
 - Walkthrough evidence:
   - A live private journey used the saved preference in the natural reply,
     `A short waterside walk at an easy pace sounds like a good fit tonight.`,
@@ -145,14 +154,16 @@ Updated: 2026-08-31
   - A live maintenance journey performed only `show` then `update`, copied the
     exact record id and `updatedAt` from a compact 24-record result, and ended
     silently.
-  - A live withdrawal journey kept the record for assistant-only withdrawal
-    text, then performed only `show` and exact guarded `forget` for a raw direct
-    member withdrawal and ended silently.
+  - A live retirement journey kept the record for assistant-only prose, then
+    performed only `show` and exact guarded `forget` for the ordinary user line
+    `That morning-summary preference was only temporary.` and ended silently.
   - Deterministic tests prove stale update and forget attempts leave the newer
     canonical record unchanged.
-- Verdict: Ready after corrected-diff review. The final projection contains no
-  record ids, and the maintenance boundary admits only production-shaped raw
-  direct-member evidence for contradictory replacement or retirement.
+  - A deterministic accepted-input regression proves an attachment transcript
+    becomes the ordinary user transcript text used by subsequent history reads.
+- Verdict: Ready pending corrected-diff review. The final projection contains no
+  record ids, and maintenance uses one chronological transcript plus one plain
+  model rule rather than a second evidence-authority pipeline.
 
 ## Candidate review
 
@@ -170,42 +181,33 @@ Updated: 2026-08-31
     dispatcher and checked it immediately before every canonical operation, so
     an accepted maintenance request cannot mutate after foreground preemption.
 - Accepted preliminary specialist findings:
-  - Prevented assistant-authored evidence from authorizing retirement.
+  - Prevented assistant-authored evidence from independently initiating a
+    correction or retirement through one maintenance-prompt rule.
   - Strengthened the live CurrentState journey to prove current-input and
     effect-authority precedence, not merely fact recall.
 - Accepted corrected-candidate findings:
-  - Kept mutation policy out of generic read-only evidence and centralized the
-    maintenance-only rule in one dependency-light policy module.
-  - Stopped treating composed `user:` transcript entries or email routing as
-    member authorship; raw authority now comes from the existing hosted input
-    event owner.
-  - Required raw member authority for any conflicting upsert, contradictory
-    update, or forget so assistant-only evidence cannot rewrite by choosing a
-    different mutation verb.
-  - Matched real direct-channel provenance: direct Linq requires its persisted
-    actor; ordinary direct Telegram intentionally has no actor or metadata.
-    Both reject group-only route authority, including legacy ambiguous
-    directness.
   - Removed record ids from the transient CurrentState projection because they
     are unnecessary for answering and exact canonical `show` remains required
     before mutation.
-  - Rejected incomplete direct-member evidence as mutation authority. The
-    complete normalized input must fit the existing 2,000-byte bound; an
-    oversized withdrawal remains non-authoritative conversation context, so a
-    truncated prefix cannot silently authorize update or forget.
-  - Made direct-member mutation authority a contiguous newest suffix. The first
-    eligible oversized input is a barrier to older authority, while complete
-    newer inputs remain usable, so a later reversal cannot expose an older
-    correction or withdrawal behind it.
-- Rejected findings: None.
+  - Forwarded foreground cancellation to the existing member-memory dispatcher
+    so preempted maintenance cannot begin a canonical operation.
+- ReviewGPT rounds 2 and 3 found bugs in the review-induced mutation-authority
+  collector's truncation and ordering rules. The user-approved complexity
+  collapse removed that collector, its `member:` role, its channel provenance,
+  and all special completeness and barrier logic instead of retaining the
+  mechanism.
+- ReviewGPT round 5 found that an attachment-only fallback could bypass the same
+  collector. Accepted as a real flaw in that mechanism; resolved by deleting the
+  mechanism rather than adding an attachment barrier. Accepted attachment
+  transcripts now flow into the existing durable user transcript, so generic
+  maintenance evidence sees the voice memo without a second evidence policy.
+- Rejected remediation: another attachment-specific authority barrier, because
+  the model can judge the generic chronological transcript and the removed
+  collector no longer exists.
 - Corrected-diff Product UX verdict: Ready.
-- Corrected-diff code review: PASS, including the final fail-closed channel
-  provenance narrowing.
-- Architecture simplification review: PASS; no index, evidence schema,
-  deduplication layer, cache, or second CurrentState owner is justified.
-- ReviewGPT round 4: accepted one High finding that the member-memory dispatcher
-  dropped the existing turn cancellation signal. The narrow signal-threading
-  remediation and its three boundary regressions await round-5 review.
+- Architecture simplification verdict: Ready; optimistic version checking and
+  abort propagation remain because they protect canonical concurrency that the
+  model cannot observe, while semantic judgment stays in one prompt.
 
 ## Provider-input impact
 
@@ -249,9 +251,10 @@ Updated: 2026-08-31
 ## Verification
 
 - Passed: focused core memory tests (11 tests).
-- Passed: exact corrected assistant owner suite (349 tests across current state,
-  maintenance, notification recovery, planning, managed automations, model
-  behavior, evidence admission, and read-only Assistant Ask).
+- Passed: final focused assistant owner suite (588 tests across generic
+  maintenance evidence, prompt composition, managed automations, current state,
+  member-memory execution, dynamic-tool dispatch, cron preemption, and accepted
+  attachment-transcript persistence).
 - Passed: core and assistant-engine typechecks and package builds.
 - Passed: real-Codex guarded correction journey (`show` then exact guarded
   `update`, no unrelated tools, silent completion).
@@ -259,30 +262,23 @@ Updated: 2026-08-31
   memory read or other action, no internal-memory wording).
 - Passed: corrected notification-recovery regression for successful maintenance
   forget classification.
-- Passed: 335 focused assistant owner tests after the newest-suffix authority
-  barrier, including exact 2,000-byte multibyte admission, suppression of an
-  older correction and withdrawal behind a 2,001-byte reversal, and admission
-  of complete newer authority after an older oversized input.
-- Passed: the extended real-Codex withdrawal journey. Assistant-only evidence
-  produced `show`; an older oversized input followed by a complete direct-member
-  withdrawal produced guarded `show` then `forget`; and an older withdrawal
-  followed by a newer oversized reversal produced only `show` and preserved
-  the record.
-- Passed: 231 focused assistant tests for direct cancellation admission, an
-  already accepted App Server memory request, cron preemption between `show`
-  and `forget`, and the surrounding memory/dynamic-tool/cron owners.
-- Passed: assistant-engine typecheck and package build after cancellation
-  remediation.
-- Passed: the same-home real-Codex withdrawal retry after one stochastic model
-  miss; the passing run produced `show`, `show` then exact `forget`, and `show`
-  across the three authority scenarios.
+- Passed: 156 final prompt and managed-automation tests after removing the
+  duplicated scheduled-job policy wording.
+- Passed: the focused accepted-input regression proving a durable voice-memo
+  transcript replaces the generic attachment fallback in conversation history.
+- Passed: assistant-engine typecheck and package build after the final prompt
+  composition.
+- Passed: the final same-home real-Codex generic-transcript journey. The
+  assistant-only scenario produced `show`; the ordinary user line saying the
+  preference was only temporary produced exact guarded `show` then `forget`.
+  An earlier run usefully exposed `show` then `update` for a natural but
+  replacement-like phrase; the prompt now distinguishes a useful lasting
+  replacement from a temporary fact without requiring deletion terminology.
 - Passed: changelog page tests (9 tests) and Web typecheck.
 - Passed: `git diff --check` and task-file privacy scan.
-- Passed: Product UX Ready, architecture simplification review, and final
-  corrected-diff candidate review with zero findings.
-- Initial exact-tree live attempts were blocked before inference by local
-  subscription limits. The repository-authorized alternate-home sweep reached
-  an authenticated subscription and completed the extended withdrawal journey
-  successfully.
-- Pending: ReviewGPT remediation review, CI, final parent review, and plan
-  closure on the exact pushed head.
+- Passed: Product UX Ready and the parent architecture simplification review.
+- Earlier exact-tree live attempts were blocked before inference by local
+  subscription limits; the repository-authorized alternate-home sweep reached
+  an authenticated subscription. The final simplified journey passed through
+  the current local subscription route.
+- Pending: ReviewGPT round 6, exact-head CI, final parent review, and plan closure.

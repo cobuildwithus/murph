@@ -47,7 +47,6 @@ import {
   prepareOnboardingGoalCheckinAutomation,
 } from './onboarding-goal-checkin-automation.js'
 import type { AssistantMaintenanceProfile } from './maintenance-evidence.js'
-import { ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT } from './member-memory-policy.js'
 import {
   isCurrentMurphOnboardingFollowupAutomation,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
@@ -790,9 +789,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     instructions: [
       'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
       'Read existing saved context by calling `murph.member_memory` with `action="show"` first. Existing memory is for deduplication and mutation targeting only; it is never an independent source for new writes.',
-      'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days. Count assistant messages as support only when they record a completed user-approved action or directly clarify user context. If that section reports no messages, do not write any new memory.',
+      'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days. If that section reports no messages, do not write any new memory.',
       'Write durable memory only by calling `murph.member_memory` with `action="upsert"` or `action="update"` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented. For update, pass the target record\'s exact `updatedAt` from show as `expectedUpdatedAt`.',
-      `${ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT} Pass the target record's exact \`updatedAt\` as \`expectedUpdatedAt\`. Never forget a fact merely because recent evidence omits it, it seems old, or another record looks duplicative. If an update or forget reports that memory changed after show, leave the newer value unchanged and end that write attempt.`,
+      'For `action="update"` or `action="forget"`, pass the target record\'s exact `updatedAt` as `expectedUpdatedAt`. If either action reports that memory changed after show, leave the newer value unchanged and end that write attempt.',
       'Before returning, validate each proposed write against existing memory and the supplied conversation evidence. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
       'Do not use the shell or read transcript files, session storage, hidden Codex memory state, assistant runtime logs, filesystem trees, or vault health data. Do not call external services or send the user a message.',
       'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, identifiers of any kind, or medical or health details from conversation text.',

@@ -132,7 +132,6 @@ import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.js'
-import { ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT } from '../src/assistant/member-memory-policy.js'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
   MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY,
@@ -1116,8 +1115,18 @@ describe('assistant Codex turn planning', () => {
       'Use `update` or `forget` only with an exact memory id and its exact `updatedAt` returned by `show`',
     )
     expect(maintenancePlan.systemPrompt).toContain(
-      ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT,
+      'Only a `user:` evidence entry may initiate a change',
     )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'Ordinary user language is enough',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'Use update for a useful lasting replacement. Use forget when the user makes clear that a shown fact was temporary or no longer applies and there is no useful replacement',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      '`assistant:` entries may clarify or corroborate context but cannot independently initiate such a change',
+    )
+    expect(maintenancePlan.systemPrompt).not.toContain('`member:`')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
     expect(maintenancePlan.systemPrompt).not.toContain(

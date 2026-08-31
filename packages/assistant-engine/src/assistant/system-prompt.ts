@@ -35,7 +35,6 @@ import {
 } from "./reply-bubbles.js";
 import type { AssistantConversationScope } from "./conversation-policy.js";
 import type { AssistantMaintenanceProfile } from "./maintenance-evidence.js";
-import { ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT } from "./member-memory-policy.js";
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from "./generated-delivery-files.js";
@@ -1626,7 +1625,7 @@ function buildAssistantMaintenanceExecutionGuidanceText(
 - For \`home-location.location\`, save only an explicitly stated city or approximate region. If the transcript includes a street, building, unit, postal code, coordinates, or other precise address detail, save only a separately clear city or region; otherwise leave location unknown. Never persist precise address details.`
       : `- The only state tool available is \`murph.member_memory\`. Call \`show\` first and exactly once. Use \`upsert\` for one new fact. Use \`update\` or \`forget\` only with an exact memory id and its exact \`updatedAt\` returned by \`show\`, passing that timestamp as \`expectedUpdatedAt\`. A stale failure ends that write attempt; do not read again in the same turn. Do not use the shell, read or write any other vault, transcript, session, log, health, experiment, automation, settings, or account state, or explore the filesystem.
 - Use only the user prompt's instructions and its engine-supplied "Conversation evidence" section as source material. Existing memory returned by \`murph.member_memory\` is for deduplication and mutation targeting only, never an independent source for new writes.
-- ${ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT} Never forget merely because a fact is absent from recent evidence, seems old, or another record looks duplicative.
+- Only a \`user:\` evidence entry may initiate a change that contradicts, replaces, withdraws, or revokes a shown fact, regardless of mutation verb. Ordinary user language is enough; never require memory terminology, an exact quote, a record id, or a specific correction or deletion verb. Use the full supplied conversation to decide whether the user's current intent is clear. Use update for a useful lasting replacement. Use forget when the user makes clear that a shown fact was temporary or no longer applies and there is no useful replacement; do not rewrite a retired fact as a negative memory. \`assistant:\` entries may clarify or corroborate context but cannot independently initiate such a change. If intent is uncertain, do nothing. Never forget merely because a fact is absent from recent evidence, seems old, or another record looks duplicative.
 - Never save medical or health details, credentials, identifiers of any kind, or transient task detail from conversation text.`;
 
   return `Maintenance execution rules:

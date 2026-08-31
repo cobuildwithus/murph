@@ -145,7 +145,6 @@ import {
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
-import { ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT } from '../src/assistant/member-memory-policy.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import {
   computeAssistantCronNextRunAt,
@@ -1333,12 +1332,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('`action="update"`')
     expect(seed.instructions).toContain('`action="forget"`')
     expect(seed.instructions).toContain('`expectedUpdatedAt`')
-    expect(seed.instructions).toContain(
-      ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT,
-    )
-    expect(seed.instructions).toContain(
-      'Count assistant messages as support only',
-    )
+    expect(seed.instructions).not.toContain('`member:`')
     expect(seed.instructions).toContain('hidden Codex memory state')
     expect(seed.instructions).toContain('Do not use the shell or read transcript files')
     expect(seed.instructions).toContain('Do not save assistant speculation')
