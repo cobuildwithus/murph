@@ -155,6 +155,10 @@ export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
 export const MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID =
   'automation_01M0A7T3RN5VPD8C2K4V6X9ZBQ'
+export const MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID =
+  'automation_01M1J7C8M0RN1NGC0NT3XT7D2A'
+export const MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID =
+  'automation_01M1J7C8AFT3RN00NC0NT3XT7A'
 export const MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID =
   'automation_01K2WKKY3F8Q4R5S6T7V8W9XAB'
 export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
@@ -398,6 +402,56 @@ const MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY = [
 
 export const MURPH_MANAGED_AUTOMATIONS = [
   {
+    automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+    slug: 'journal-connected-context-morning',
+    title: 'Journal connected context morning pass',
+    summary: 'Checks new calendar plans and narrow email travel context.',
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '08:00',
+    },
+    continuityPolicy: 'fresh',
+    ownerScope: 'member',
+    hostedRuntimeOnly: true,
+    tags: ['murph-managed:journal-connected-context'],
+    instructions: [
+      'Run the private Journal connected-context morning pass.',
+      '',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its connection-notice check, calendar pass, email travel pass, and due follow-up checks. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      '',
+      'A newly sent connection notice is a hard stop for this occurrence. Persist its ledger state, then end the run without reading any connected account content.',
+      '',
+      'This scheduled run may read connected calendar and email only through that skill. It must never send email, create provider calendar events, or use group context.',
+      '',
+      'If the skill finds nothing user-facing, return `{"kind":"skip","privateSummary":"No new connected Journal context required attention."}`.',
+    ].join('\n'),
+  },
+  {
+    automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+    slug: 'journal-connected-context-afternoon',
+    title: 'Journal connected context afternoon pass',
+    summary: 'Checks the next 36 hours of relevant calendar plans.',
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '16:00',
+    },
+    continuityPolicy: 'fresh',
+    ownerScope: 'member',
+    hostedRuntimeOnly: true,
+    tags: ['murph-managed:journal-connected-context'],
+    instructions: [
+      'Run the private Journal connected-context afternoon pass.',
+      '',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run only its connection-notice check, calendar pass, and due follow-up checks. Do not run the email travel pass. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      '',
+      'A newly sent connection notice is a hard stop for this occurrence. Persist its ledger state, then end the run without reading any connected account content.',
+      '',
+      'This scheduled run may read connected calendars only through that skill. It must never create provider calendar events or use group context.',
+      '',
+      'If the skill finds nothing user-facing, return `{"kind":"skip","privateSummary":"No new calendar Journal context required attention."}`.',
+    ].join('\n'),
+  },
+  {
     automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
     slug: 'personal-patterns-update',
     title: 'Personal Patterns update',
@@ -419,13 +473,14 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'On this scheduled run, check whether Personal Patterns contains a factor-and-outcome result that this member has not seen before. Send at most one compact message for the run. Never send one message per result.',
       '',
       '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date.',
-      '- Read `vault-cli knowledge show personal-pattern-notifications`. If missing, treat this report as the initial baseline. Record the current identities, but keep the first import quiet.',
+      '- Read `vault-cli knowledge show personal-pattern-notifications` and `vault-cli wearables sources list` exactly once each. A missing ledger is expected; do not retry or search for it another way. If the ledger is missing, do not assume the first report is complete. Treat it as complete only when every contributing wearable source covers the full report window, or trusted device status explicitly says its initial import completed. If completion cannot be proved, write the current identities as pending import state and return skip without messaging.',
+      '- On the first report whose import completion is proved, send one compact first digest with at most three grade A-D highlights. Describe A-C as patterns and D as early signals. State each grade and evidence count, never imply cause, then mark the initial digest sent. If there are no grade A-D results, mark it sent and stay quiet.',
       '- A result identity is `factorId + outcomeId + comparisonBasis + outcome lagDays`. Direction, effect size, grade, and classification can change without creating a new result.',
-      '- Only a previously unseen grade A-D identity after the initial baseline can trigger a message. Describe A-C as patterns and D as an early signal. Grade E observations stay quiet. Always state the grade and evidence count. Never imply cause.',
+      '- After the initial digest is sent, only a previously unseen grade A-D identity can trigger a message. Describe A-C as patterns and D as an early signal. Grade E observations stay quiet. Always state the grade and evidence count. Never imply cause.',
       '- Honor muted factors and result identities in the ledger. Record them as seen, but do not mention them.',
       '- If several eligible results are new, combine at most three highlights into one short summary. Lead with the strongest or most useful result and say that the rest are available on `/patterns`. Do not list a large import one by one.',
       '- Rewrite `personal-pattern-notifications` with `vault-cli knowledge upsert --slug personal-pattern-notifications --title "Personal Pattern notifications" --page-type ledger --body <markdown>`. Pass the Markdown directly as the `--body` value; do not rely on a shell environment variable. Preserve shared and muted entries, then add all current graded identities before sending. Keep only ids, first-shared date, last-seen grade, and mute state. Do not copy health values or user text into this ledger.',
-      '- If this is the initial baseline, or no eligible identity is new, return `{"kind":"skip","privateSummary":"No new Personal Pattern result appeared."}`. Grade changes belong in the weekly health insight, not a separate notification.',
+      '- If the initial import is still pending, the first complete report has no grade A-D result, or no later eligible identity is new, return `{"kind":"skip","privateSummary":"No new Personal Pattern result appeared."}`. Grade changes belong in the weekly health insight, not a separate notification.',
       '- If new identities exist, give their structured report to Murph and send one natural message. Do not mention the ledger, scheduled run, model, or internal calculation.',
     ].join('\n'),
   },

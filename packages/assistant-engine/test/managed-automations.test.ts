@@ -131,6 +131,8 @@ import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -1390,7 +1392,7 @@ describe('applyMurphManagedAutomations', () => {
       'Grade changes belong in the weekly health insight',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
-      'keep the first import quiet',
+      'first digest with at most three grade A-D highlights',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
       'Grade E observations stay quiet',
@@ -1733,6 +1735,30 @@ describe('applyMurphManagedAutomations', () => {
     ).toBe(false)
   })
 
+  it('defines hosted Journal context passes at 08:00 and 16:00 local time', () => {
+    const morning = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) =>
+        seed.automationId ===
+        MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+    )
+    const afternoon = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) =>
+        seed.automationId ===
+        MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+    )
+
+    expect(morning).toMatchObject({
+      hostedRuntimeOnly: true,
+      schedule: { kind: 'dailyLocal', localTime: '08:00' },
+      slug: 'journal-connected-context-morning',
+    })
+    expect(afternoon).toMatchObject({
+      hostedRuntimeOnly: true,
+      schedule: { kind: 'dailyLocal', localTime: '16:00' },
+      slug: 'journal-connected-context-afternoon',
+    })
+  })
+
   it('creates the hosted overnight memory consolidation automation in hosted runtime', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute,
@@ -1745,7 +1771,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 7,
+      created: 9,
       skipped: 0,
       updated: 0,
     })

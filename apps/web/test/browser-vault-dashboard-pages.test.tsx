@@ -252,9 +252,12 @@ test("JournalPage renders the derived private health timeline", () => {
   assert.doesNotMatch(markup, /No data/u);
 });
 
-test("JournalPage hides future days and shows one state for a future week", async () => {
+test("JournalPage shows the seven days ending today and disables future dates", async () => {
   const journal = {
-    days: [{ date: "2026-08-12", events: [] }],
+    days: [
+      { date: "2026-08-12", events: [] },
+      { date: "2026-07-30", events: [] },
+    ],
     eventCount: 0,
     recordCount: 0,
     weeks: [
@@ -278,6 +281,8 @@ test("JournalPage hides future days and shows one state for a future week", asyn
   );
 
   assert.match(rendered.container.innerHTML, /journal-day-2026-08-12/u);
+  assert.match(rendered.container.innerHTML, /journal-day-2026-08-06/u);
+  assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-05/u);
   assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-13/u);
   assert.match(
     rendered.container.innerHTML,
@@ -288,16 +293,16 @@ test("JournalPage hides future days and shows one state for a future week", asyn
     'button[aria-label="Monday, August 17, 2026"]',
   );
   assert.ok(futureDateButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    futureDateButton.click();
-  });
+  assert.equal(futureDateButton.disabled, true);
 
-  assert.match(rendered.container.innerHTML, /Nothing to show yet/u);
-  assert.match(
-    rendered.container.innerHTML,
-    /Journal will fill in as this week happens\./u,
+  const previousButton = rendered.container.querySelector(
+    'button[aria-label="Previous 7 days"]',
   );
-  assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-17/u);
+  assert.ok(previousButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => previousButton.click());
+  assert.match(rendered.container.innerHTML, /journal-day-2026-07-30/u);
+  assert.match(rendered.container.innerHTML, /journal-day-2026-08-05/u);
+  assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-06/u);
 
   await rendered.cleanup();
 });

@@ -148,8 +148,11 @@ start a calculation. It reads the latest Browser Vault report.
 ## Proactive messages
 
 The managed Personal Patterns automation checks each day at 13:00 local time.
-It sends at most one private message per run. The first report becomes a quiet
-baseline. Later new results become one summary with at most three highlights.
+It sends at most one private message per run. Partial initial imports stay
+quiet. When source coverage proves the first report is complete, Murph sends
+one first digest with at most three grade A-D highlights. If that report has no
+grade A-D result, it marks the digest complete and stays quiet. Later new
+results become one summary with at most three highlights.
 
 The hosted runtime emits a privacy-safe internal email alert when this managed
 run fails or when its occurrence starts too late and expires. Alert delivery

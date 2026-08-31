@@ -51,7 +51,7 @@ import {
 } from "@/src/components/ui/tooltip";
 import { cn } from "@/src/lib/utils";
 
-const WEEK_DAY_COUNT = 7;
+const JOURNAL_WINDOW_DAYS = 7;
 
 export interface JournalInsight {
   date: string;
@@ -81,9 +81,9 @@ export function JournalViewContent({
 }) {
   const headingId = useId();
   const today = asOfDate ?? new Date().toISOString().slice(0, 10);
-  const latestWeekStart = startOfIsoWeek(today);
-  const earliestWeekStart = journal.weeks.at(-1)?.startDate ?? latestWeekStart;
-  const [selectedWeekStart, setSelectedWeekStart] = useState(latestWeekStart);
+  const latestWindowEnd = today;
+  const earliestDate = journal.days.at(-1)?.date ?? latestWindowEnd;
+  const [selectedWindowEnd, setSelectedWindowEnd] = useState(latestWindowEnd);
   const todayGreeting = useSyncExternalStore(
     subscribeToClock,
     currentGreeting,
@@ -97,23 +97,21 @@ export function JournalViewContent({
     () => buildSleepMetricBaselines(journal.days),
     [journal.days],
   );
+  const selectedWindowStart = addDays(
+    selectedWindowEnd,
+    -(JOURNAL_WINDOW_DAYS - 1),
+  );
   const selectedDates = useMemo(
     () =>
-      Array.from({ length: WEEK_DAY_COUNT }, (_, index) =>
-        addDays(selectedWeekStart, index),
+      Array.from({ length: JOURNAL_WINDOW_DAYS }, (_, index) =>
+        addDays(selectedWindowStart, index),
       ),
-    [selectedWeekStart],
+    [selectedWindowStart],
   );
-  const visibleDates = useMemo(
-    () => selectedDates.filter((date) => date <= today),
-    [selectedDates, today],
-  );
-  const isFutureWeek = visibleDates.length === 0;
-  const week =
-    journal.weeks.find((entry) => entry.startDate === selectedWeekStart) ??
-    null;
+  const visibleDates = selectedDates;
   const visibleInsights = insights.filter(
-    (insight) => startOfIsoWeek(insight.date) === selectedWeekStart,
+    (insight) =>
+      insight.date >= selectedWindowStart && insight.date <= selectedWindowEnd,
   );
 
   return (
@@ -156,13 +154,19 @@ export function JournalViewContent({
               </Button>
             ) : null}
             <WeekControls
-              canGoNext={selectedWeekStart < latestWeekStart}
-              canGoPrevious={selectedWeekStart > earliestWeekStart}
-              onNext={() => setSelectedWeekStart(addDays(selectedWeekStart, 7))}
-              onPrevious={() =>
-                setSelectedWeekStart(addDays(selectedWeekStart, -7))
+              canGoNext={selectedWindowEnd < latestWindowEnd}
+              canGoPrevious={selectedWindowStart > earliestDate}
+              onNext={() =>
+                setSelectedWindowEnd((current) =>
+                  minDate(addDays(current, JOURNAL_WINDOW_DAYS), latestWindowEnd),
+                )
               }
-              onToday={() => setSelectedWeekStart(latestWeekStart)}
+              onPrevious={() =>
+                setSelectedWindowEnd((current) =>
+                  addDays(current, -JOURNAL_WINDOW_DAYS),
+                )
+              }
+              onToday={() => setSelectedWindowEnd(latestWindowEnd)}
             />
           </div>
         ) : null}
@@ -175,36 +179,26 @@ export function JournalViewContent({
           <div className="grid items-start gap-12 lg:grid-cols-[minmax(0,1fr)_21.375rem] lg:gap-16">
             <section className="min-w-0" aria-label="Journal timeline">
               <div className="flex flex-col">
-                {isFutureWeek ? (
-                  <JournalFutureWeekState />
-                ) : (
-                  visibleDates.map((date) => (
-                    <JournalDaySection
-                      date={date}
-                      events={daysByDate.get(date)?.events ?? []}
-                      isToday={date === today}
-                      key={date}
-                      sleepBaselines={sleepBaselines}
-                      todayGreeting={todayGreeting}
-                    />
-                  ))
-                )}
+                {visibleDates.map((date) => (
+                  <JournalDaySection
+                    date={date}
+                    events={daysByDate.get(date)?.events ?? []}
+                    isToday={date === today}
+                    key={date}
+                    sleepBaselines={sleepBaselines}
+                    todayGreeting={todayGreeting}
+                  />
+                ))}
               </div>
             </section>
 
             <aside className="flex flex-col gap-[1.875rem] lg:sticky lg:top-6">
               <MiniCalendar
-                onSelectDate={(date) =>
-                  setSelectedWeekStart(startOfIsoWeek(date))
-                }
-                selectedWeekStart={selectedWeekStart}
+                onSelectDate={setSelectedWindowEnd}
+                selectedWindowEnd={selectedWindowEnd}
                 today={today}
               />
-              <WeekStats
-                dates={visibleDates}
-                daysByDate={daysByDate}
-                week={week}
-              />
+              <WindowStats dates={visibleDates} daysByDate={daysByDate} />
               {visibleInsights.length > 0 ? (
                 <WeeklyInsights insights={visibleInsights} />
               ) : null}
@@ -492,19 +486,6 @@ function JournalEmptyState({
   );
 }
 
-function JournalFutureWeekState() {
-  return (
-    <section className="max-w-xl py-10">
-      <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-        Nothing to show yet
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        Journal will fill in as this week happens.
-      </p>
-    </section>
-  );
-}
-
 function WeekControls({
   canGoNext,
   canGoPrevious,
@@ -521,10 +502,10 @@ function WeekControls({
   return (
     <nav
       className="flex items-center gap-3"
-      aria-label="Journal week navigation"
+      aria-label="Journal seven-day navigation"
     >
       <Button
-        aria-label="Previous week"
+        aria-label="Previous 7 days"
         disabled={!canGoPrevious}
         onClick={onPrevious}
         className="size-[38px] rounded-full"
@@ -542,7 +523,7 @@ function WeekControls({
         Today
       </Button>
       <Button
-        aria-label="Next week"
+        aria-label="Next 7 days"
         disabled={!canGoNext}
         onClick={onNext}
         className="size-[38px] rounded-full"
@@ -1052,14 +1033,14 @@ function GenericJournalPopoverPresentation({
 
 function MiniCalendar({
   onSelectDate,
-  selectedWeekStart,
+  selectedWindowEnd,
   today,
 }: {
   onSelectDate: (date: string) => void;
-  selectedWeekStart: string;
+  selectedWindowEnd: string;
   today: string;
 }) {
-  const monthDate = addDays(selectedWeekStart, 3);
+  const monthDate = selectedWindowEnd;
   const monthStart = `${monthDate.slice(0, 7)}-01`;
   const calendarStart = addDays(monthStart, -mondayIndex(monthStart));
   const calendarDayCount =
@@ -1067,7 +1048,10 @@ function MiniCalendar({
   const dates = Array.from({ length: calendarDayCount }, (_, index) =>
     addDays(calendarStart, index),
   );
-  const selectedWeekEnd = addDays(selectedWeekStart, 6);
+  const selectedWindowStart = addDays(
+    selectedWindowEnd,
+    -(JOURNAL_WINDOW_DAYS - 1),
+  );
 
   return (
     <section
@@ -1088,8 +1072,9 @@ function MiniCalendar({
         ))}
         {dates.map((date) => {
           const inMonth = date.slice(0, 7) === monthDate.slice(0, 7);
-          const inSelectedWeek =
-            date >= selectedWeekStart && date <= selectedWeekEnd;
+          const inSelectedWindow =
+            date >= selectedWindowStart && date <= selectedWindowEnd;
+          const isFutureDate = date > today;
           return (
             <button
               aria-current={date === today ? "date" : undefined}
@@ -1097,10 +1082,12 @@ function MiniCalendar({
               className={cn(
                 "flex h-[30px] w-full items-center justify-center text-[11px] text-foreground transition-colors hover:bg-muted focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 !inMonth && "text-muted-foreground",
-                inSelectedWeek && "bg-primary/10",
-                date === selectedWeekStart && "rounded-l-full",
-                date === selectedWeekEnd && "rounded-r-full",
+                inSelectedWindow && "bg-primary/10",
+                date === selectedWindowStart && "rounded-l-full",
+                date === selectedWindowEnd && "rounded-r-full",
+                isFutureDate && "cursor-default opacity-35 hover:bg-transparent",
               )}
+              disabled={isFutureDate}
               key={date}
               onClick={() => onSelectDate(date)}
               type="button"
@@ -1130,54 +1117,55 @@ interface WeekStat {
   value: string;
 }
 
-function WeekStats({
+function WindowStats({
   dates,
   daysByDate,
-  week,
 }: {
   dates: string[];
   daysByDate: Map<string, JournalView["days"][number]>;
-  week: JournalView["weeks"][number] | null;
 }) {
   const stats: WeekStat[] = [];
-  if (
-    week?.averageSleepMinutes !== null &&
-    week?.averageSleepMinutes !== undefined
-  ) {
+  const sleepMinutes = buildWeekMetricPoints(
+    dates,
+    daysByDate,
+    "sleep-duration",
+  );
+  const sleepScores = buildWeekMetricPoints(dates, daysByDate, "sleep-score");
+  const activityMinutes = buildWeekMetricPoints(dates, daysByDate, "activity");
+  if (sleepMinutes.length > 0) {
     stats.push({
       label: "Sleep time",
       popoverTitle: "Avg sleep time",
-      points: buildWeekMetricPoints(dates, daysByDate, "sleep-duration"),
+      points: sleepMinutes,
       valueFormatter: (value) => formatDuration(Math.round(value)),
-      value: formatDuration(week.averageSleepMinutes),
+      value: formatDuration(averageMetric(sleepMinutes)),
     });
   }
-  if (
-    week?.averageSleepScore !== null &&
-    week?.averageSleepScore !== undefined
-  ) {
+  if (sleepScores.length > 0) {
     stats.push({
       label: "Sleep score",
       popoverTitle: "Avg sleep score",
-      points: buildWeekMetricPoints(dates, daysByDate, "sleep-score"),
+      points: sleepScores,
       valueFormatter: (value) => String(Math.round(value)),
-      value: String(Math.round(week.averageSleepScore)),
+      value: String(averageMetric(sleepScores)),
     });
   }
-  if (week && week.activityMinutes > 0) {
+  if (activityMinutes.length > 0) {
     stats.push({
       label: "Activity",
       popoverTitle: "Total activity time",
-      points: buildWeekMetricPoints(dates, daysByDate, "activity"),
+      points: activityMinutes,
       valueFormatter: (value) => formatDuration(Math.round(value)),
-      value: formatDuration(week.activityMinutes),
+      value: formatDuration(
+        activityMinutes.reduce((total, point) => total + point.value, 0),
+      ),
     });
   }
 
   if (stats.length === 0) return null;
 
   return (
-    <section aria-label="Week at a glance">
+    <section aria-label="Seven days at a glance">
       <div className="grid grid-cols-3 gap-4 px-1">
         {stats.map((stat) => (
           <WeekStatPopover key={stat.label} stat={stat} />
@@ -1381,6 +1369,12 @@ function buildWeekMetricPoints(
     const value = readJournalDayMetric(events, metric);
     return value === null ? [] : [{ date, value }];
   });
+}
+
+function averageMetric(points: readonly { value: number }[]): number {
+  return Math.round(
+    points.reduce((total, point) => total + point.value, 0) / points.length,
+  );
 }
 
 function readJournalDayMetric(
@@ -1743,10 +1737,6 @@ function serverGreeting(): string {
   return "Welcome back.";
 }
 
-function startOfIsoWeek(date: string): string {
-  return addDays(date, -mondayIndex(date));
-}
-
 function mondayIndex(date: string): number {
   const day = new Date(`${date}T12:00:00.000Z`).getUTCDay();
   return day === 0 ? 6 : day - 1;
@@ -1756,4 +1746,8 @@ function addDays(date: string, amount: number): string {
   const value = new Date(`${date}T00:00:00.000Z`);
   value.setUTCDate(value.getUTCDate() + amount);
   return value.toISOString().slice(0, 10);
+}
+
+function minDate(left: string, right: string): string {
+  return left < right ? left : right;
 }

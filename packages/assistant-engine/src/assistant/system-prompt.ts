@@ -1546,6 +1546,7 @@ function buildAssistantJournalCaptureGuidanceText(): string {
 - On request, run \`vault-cli wearables patterns --date <local-date> --format json\` exactly once; prove refresh.
 - Corrections: tell users to ask Murph; never claim web controls. Edit/delete events and unused plans on request.
 - Mute \`personal-pattern-notifications\`; stop proactive questions when asked.
+- For connected calendar or email Journal capture and opt-outs, read \`journal-connected-context\`.
 - Group consent: call \`set_journal_capture\` before saves.
 - Explain capture, fixes, and refresh.
 - Never expose it in groups.`

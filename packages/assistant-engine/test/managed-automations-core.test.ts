@@ -1331,7 +1331,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 7,
+      created: 9,
       skipped: 0,
       updated: 0,
     })

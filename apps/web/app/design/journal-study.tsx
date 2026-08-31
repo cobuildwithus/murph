@@ -14,8 +14,6 @@ import {
 } from "@/src/components/journal/journal-view";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
-const STUDY_WEEK_START = "2026-06-08";
-
 const STUDY_CONTACT_OPTION: MurphContactOption = {
   href: "sms:+15555550100?body=Tell%20me%20about%20Journal.",
   kind: "text",
@@ -121,9 +119,17 @@ const JOURNAL_STUDY_DATA: JournalView = {
         timing: "night",
       }),
     ]),
+    day("2026-06-07", [
+      journalEvent("sleep-sun", "sleep", "Sleep", "2026-06-07T07:25:00.000Z", {
+        details: ["86% efficiency", "HRV 52 ms", "readiness 73"],
+        source: "Oura",
+        summary: "7 h 03 · sleep score 77",
+        timing: "night",
+      }),
+    ]),
   ],
-  eventCount: 13,
-  recordCount: 29,
+  eventCount: 14,
+  recordCount: 30,
   weeks: [
     {
       activityMinutes: 264,
@@ -131,7 +137,7 @@ const JOURNAL_STUDY_DATA: JournalView = {
       averageSleepScore: 79,
       endDate: "2026-06-14",
       sleepNights: 6,
-      startDate: STUDY_WEEK_START,
+      startDate: "2026-06-08",
     },
   ],
   windowDays: 120,

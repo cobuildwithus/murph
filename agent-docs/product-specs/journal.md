@@ -1,6 +1,6 @@
 # Journal
 
-Last verified: 2026-08-27
+Last verified: 2026-08-31
 
 ## Product boundary
 
@@ -31,9 +31,33 @@ important fact is unclear. A clear correction from the member wins. If a plan
 did not happen, Murph removes the plan and can save an explicit absence for the
 factor.
 
-Automatic capture is private-chat only in this version. It never exposes
-private Journal or Patterns data in a group. Group capture waits for the
-separate group-to-person privacy rules and explicit group consent.
+Automatic capture always writes to the member's private Journal. An
+authenticated group can propose a clear fact about its sender after the member
+accepts one private global choice. Unclear facts get one private question. A
+member can exclude one group or all groups. The group never receives private
+Journal or Patterns data.
+
+Environment remains the owner of current Environment values. Each real value
+change also creates one idempotent canonical `journal-context` event. Journal
+therefore shows when the context changed without keeping a second Environment
+history.
+
+New calendar and email connections are eligible for automatic context only
+after one private notice. Existing connections become a silent baseline and
+remain unchanged. The member can stop all automatic capture or one category
+without disconnecting the account.
+
+At 08:00 and 16:00 local time, calendar capture reads only the next 36 hours.
+It includes clear training, matches, races, sauna, recovery, long travel,
+flights, and outdoor plans. It excludes medical care, dental care, therapy,
+tests, procedures, work, and private social events. It reconciles a moved or
+removed source event into the same Journal plan.
+
+The 08:00 pass also uses narrow transport and lodging confirmation searches.
+Its first pass looks back at most 90 days for future travel. It groups one trip
+into one normalized itinerary and stores no message body, price, booking code,
+attachment, exact address, or other traveler. Calendar events and trips get at
+most one follow-up after passive evidence is checked first.
 
 ## Read model
 
@@ -59,8 +83,8 @@ records and total-sleep metrics already represented by a sleep session. When
 two providers expose the same daily score, Journal uses the provider's product
 term, such as Oura Readiness or Whoop Recovery, without showing a duplicate.
 
-Weekly sleep averages use main sleep only. Weekly activity uses the grouped
-source sessions once.
+Seven-day sleep averages use main sleep only. Seven-day activity uses the
+grouped source sessions once.
 
 The old `journal_day` surface stays untouched. The new Journal view does not
 depend on it.
@@ -71,27 +95,25 @@ start a new analysis.
 
 ## Web experience
 
-`/journal` shows one week as a calm timeline. Day bands separate the days.
+`/journal` shows the seven days ending on the selected day as a calm timeline.
+`Today` ends the window today. Previous and next move the full window by seven
+days, so Monday still includes the prior Tuesday through Sunday. Day bands
+separate the days.
 Main sleep uses `Night`, naps use their time, and context can span a full day.
 Event text is readable without opening a detail view. Source labels stay
 available as secondary hover and screen-reader detail. A record with a canonical
 time zone keeps its local event time during travel.
 
-The right rail shows a small calendar, weekly sleep and activity statistics,
+The right rail shows a small calendar, seven-day sleep and activity statistics,
 and a current Personal Pattern when one is ready. A Pattern is an insight about
 the week, not a health event, so it does not appear on the daily timeline. The
 page supports loading, unavailable, empty, error, and ready states.
 
 The web does not provide edit or add controls. A member asks Murph to add,
-correct, or remove an entry. Calendar follow-ups and email travel capture are
-later features.
-
-Those later capture paths must write the same canonical records that Journal
-already reads. Calendar and email need one approved owner for normalized event
-writes and consent. The Environment recorder continues to own Environment
-state. Environment history also needs a canonical change event instead of a
-second Journal-only copy. Do not infer these records from page state or store
-them in the Journal projection.
+correct, or remove an entry. Calendar, email travel, Environment, private chat,
+and approved group capture all write the same canonical events that Journal
+already reads. They do not infer records from page state or store facts in the
+Journal projection.
 
 ## Ownership
 
