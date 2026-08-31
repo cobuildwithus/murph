@@ -765,7 +765,7 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
-  it("keeps due sequence-less dense raw retention on the default owner", async () => {
+  it("keeps due sequence-less dense raw retention on the model-free owner", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     const dueAt = "2026-04-08T00:00:00.000Z";
 
@@ -782,8 +782,87 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: dueAt,
-        executionClass: "default_owned",
+        executionClass: "model_free",
         reason: "device-sync.reconcile",
+      });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => dueAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: dueAt,
+          executionClass: "model_free",
+          reason: "device-sync.reconcile",
+        },
+      });
+
+      const defaultOwnedAt = "2026-04-08T00:05:00.000Z";
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: [
+          ...state.pending,
+          {
+            ...buildPendingSystemMailboxItem({
+              itemId: "pending_default_owned_after_dense_raw_retention",
+              mailboxLaneSeq: "1",
+            }),
+            nextAttemptAt: defaultOwnedAt,
+          },
+        ],
+      }));
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => dueAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: defaultOwnedAt,
+          reason: "assistant",
+        },
+        next: {
+          at: dueAt,
+          executionClass: "model_free",
+          reason: "device-sync.reconcile",
+        },
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps legacy sequence-less model-free kinds on the default owner", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const dueAt = "2026-04-27T00:00:00.000Z";
+
+    try {
+      const legacyMaintenanceItem = {
+        ...buildPendingRuntimeControlMailboxItem({
+          itemId: "pending_legacy_sequence_less_maintenance",
+          mailboxDedupeKey: "runtime-control:maintenance:legacy-sequence-less",
+          mailboxLaneSeq: "1",
+          wakeKind: "runtime.maintenance-requested",
+        }),
+        mailboxLaneSeq: null,
+      };
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [legacyMaintenanceItem],
+      }));
+
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => dueAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: dueAt,
+          reason: "mailbox",
+        },
+        next: {
+          at: dueAt,
+          executionClass: "default_owned",
+          reason: "mailbox",
+        },
       });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });

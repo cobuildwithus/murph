@@ -496,7 +496,10 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
 function resolveHostedSystemMailboxItemExecutionClass(
   item: HostedSystemMailboxPendingItem,
 ): "default_owned" | "model_free" {
-  return item.mailboxLaneSeq !== null
+  return (
+      item.mailboxLaneSeq !== null
+      || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
+    )
       && isHostedSystemMailboxModelFreeFrontierItem(item)
     ? "model_free"
     : "default_owned";

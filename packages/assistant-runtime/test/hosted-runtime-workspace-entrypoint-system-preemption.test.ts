@@ -116,6 +116,7 @@ import {
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   readHostedSystemMailboxState,
+  setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
@@ -2017,6 +2018,12 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       });
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
+        vaultRoot,
+      });
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: now,
+        now: () => staleDeviceSyncWakeAt,
+        userId: TEST_USER_ID,
         vaultRoot,
       });
       const importState = createEmptyHostedMailboxImportState();

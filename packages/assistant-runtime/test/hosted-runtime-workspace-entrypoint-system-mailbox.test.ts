@@ -2779,7 +2779,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode immediately rechecks when browser refresh defers to a runtime wake", async () => {
+  test("system mailbox mode schedules retained model-free work when browser refresh defers to a runtime wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -2871,7 +2871,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         },
       );
 
-      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.immediateRecheckRequested, undefined);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
