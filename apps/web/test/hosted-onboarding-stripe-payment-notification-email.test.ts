@@ -26,7 +26,6 @@ describe("hosted Stripe payment notification email", () => {
     (billingReason, expectedCategory) => {
       expect(resolveHostedStripePaymentNotificationCandidate({
         event: makeInvoicePaidEvent({ billingReason }),
-        subscriptionCycleNotificationEligible: false,
         usageCreditEventHandled: false,
       })).toMatchObject({
         amountMinor: 800,
@@ -40,23 +39,11 @@ describe("hosted Stripe payment notification email", () => {
     },
   );
 
-  it("ignores a subscription cycle without a billing transition", () => {
+  it("ignores a paid subscription renewal", () => {
     expect(resolveHostedStripePaymentNotificationCandidate({
       event: makeInvoicePaidEvent({ billingReason: "subscription_cycle" }),
-      subscriptionCycleNotificationEligible: false,
       usageCreditEventHandled: false,
     })).toBeNull();
-  });
-
-  it("accepts a subscription cycle with a billing transition", () => {
-    expect(resolveHostedStripePaymentNotificationCandidate({
-      event: makeInvoicePaidEvent({ billingReason: "subscription_cycle" }),
-      subscriptionCycleNotificationEligible: true,
-      usageCreditEventHandled: false,
-    })).toMatchObject({
-      category: "subscription_cycle",
-      eventType: "invoice.paid",
-    });
   });
 
   it.each([0, -1, null])(
@@ -64,7 +51,6 @@ describe("hosted Stripe payment notification email", () => {
     (amountPaid) => {
       expect(resolveHostedStripePaymentNotificationCandidate({
         event: makeInvoicePaidEvent({ amountPaid }),
-        subscriptionCycleNotificationEligible: false,
         usageCreditEventHandled: false,
       })).toBeNull();
     },
@@ -84,7 +70,6 @@ describe("hosted Stripe payment notification email", () => {
 
     expect(resolveHostedStripePaymentNotificationCandidate({
       event,
-      subscriptionCycleNotificationEligible: false,
       usageCreditEventHandled: true,
     })).toMatchObject({
       amountMinor: 1000,
@@ -93,7 +78,6 @@ describe("hosted Stripe payment notification email", () => {
     });
     expect(resolveHostedStripePaymentNotificationCandidate({
       event,
-      subscriptionCycleNotificationEligible: false,
       usageCreditEventHandled: false,
     })).toBeNull();
     expect(resolveHostedStripePaymentNotificationCandidate({
@@ -104,7 +88,6 @@ describe("hosted Stripe payment notification email", () => {
         mode: "payment",
         payment_status: "unpaid",
       }, "checkout.session.completed", "evt_checkout_unpaid_123"),
-      subscriptionCycleNotificationEligible: false,
       usageCreditEventHandled: true,
     })).toBeNull();
   });
@@ -119,7 +102,6 @@ describe("hosted Stripe payment notification email", () => {
 
     expect(resolveHostedStripePaymentNotificationCandidate({
       event,
-      subscriptionCycleNotificationEligible: false,
       usageCreditEventHandled: true,
     })).toMatchObject({
       amountMinor: 2500,
@@ -128,7 +110,6 @@ describe("hosted Stripe payment notification email", () => {
     });
     expect(resolveHostedStripePaymentNotificationCandidate({
       event,
-      subscriptionCycleNotificationEligible: false,
       usageCreditEventHandled: false,
     })).toBeNull();
   });
@@ -142,7 +123,6 @@ describe("hosted Stripe payment notification email", () => {
         customer: "cus_private_customer",
         customerEmail: "private-member@example.com",
       }),
-      subscriptionCycleNotificationEligible: false,
       usageCreditEventHandled: false,
     });
     expect(candidate).not.toBeNull();
@@ -179,7 +159,6 @@ describe("hosted Stripe payment notification email", () => {
     await expect(sendHostedStripePaymentNotificationEmail({
       candidate: resolveHostedStripePaymentNotificationCandidate({
         event: makeInvoicePaidEvent(),
-        subscriptionCycleNotificationEligible: false,
         usageCreditEventHandled: false,
       })!,
       env: {},

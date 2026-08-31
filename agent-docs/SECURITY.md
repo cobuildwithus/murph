@@ -1471,12 +1471,10 @@ locally readable.
 - Resend-backed positive Stripe payment notifications must use that same
   environment-owned operational sender, recipient allowlist, and API key. They
   may be emitted only after the verified receipt owner accepts a positive
-  `invoice.paid` amount whose billing reason is not `subscription_cycle`,
-  accepts a cycle whose canonical billing result reports a paid-service or
-  usage-plan transition, or fulfills a usage-credit Checkout or saved-card
-  PaymentIntent. The plain-text body is limited to amount and currency, a
-  bounded payment category, event type and time, live/test mode, and the opaque
-  Stripe event id. It must not
+  `invoice.paid` amount whose billing reason is not `subscription_cycle`, or
+  fulfills a usage-credit Checkout or saved-card PaymentIntent. The plain-text
+  body is limited to amount and currency, a bounded payment category, event
+  type and time, live/test mode, and the opaque Stripe event id. It must not
   read or include member/customer identity,
   contact details, checkout contents, invoice line items, raw provider objects,
   or webhook payloads. The receipt-local sent timestamp is an operational

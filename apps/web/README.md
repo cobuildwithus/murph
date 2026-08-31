@@ -1417,10 +1417,8 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   `checkout.session.async_payment_failed`, `payment_intent.payment_failed`,
   `invoice.payment_failed`, and `invoice.finalization_failed`. Positive
   `invoice.paid` events with `billing_reason: subscription_cycle` still drive
-  billing reconciliation. They intentionally skip the positive-payment
-  notification only when canonical reconciliation reports no paid-service or
-  usage-plan transition; accepted paid trial conversions and other meaningful
-  cycle transitions remain eligible. Checkout action owners cover mandatory
+  billing reconciliation but intentionally do not send a positive-payment
+  notification. Checkout action owners cover mandatory
   price reads, customer provisioning, saved-card preparation, and Checkout
   Session create/resume. Paid-plan upgrades, paid-trial transitions, and
   scheduled plan switches use the same complete-action ownership. An owner
