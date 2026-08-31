@@ -71,15 +71,15 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     const mode = readHostedStandbyMode(this.environment);
     if (mode !== "allocate") {
       this.startBackgroundWork();
-      return { claimId: request.claimId, outcome: "disabled" };
+      return { outcome: "disabled" };
     }
     if (!releaseId || releaseId !== request.releaseId) {
       this.startBackgroundWork();
-      return { claimId: request.claimId, outcome: "stale_release" };
+      return { outcome: "stale_release" };
     }
     if (request.deadlineAtEpochMs <= Date.now()) {
       this.startBackgroundWork();
-      return { claimId: request.claimId, outcome: "deadline_expired" };
+      return { outcome: "deadline_expired" };
     }
 
     const slotName = this.transactionSync(() => {
@@ -92,13 +92,10 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     this.startBackgroundWork();
     return slotName
       ? {
-          claimId: request.claimId,
           outcome: "claimed",
-          releaseId,
-          region: request.region,
           slotName,
         }
-      : { claimId: request.claimId, outcome: "no_ready_slot" };
+      : { outcome: "no_ready_slot" };
   }
 
   ensureReadyStandby(input: {

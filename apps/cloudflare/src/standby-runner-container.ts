@@ -37,7 +37,6 @@ interface StandbySlotRow extends Record<string, DurableObjectSqlValue> {
   claim_id: string | null;
   release_id: string;
   region: string;
-  retired_at: string | null;
   slot_name: string;
   state: string;
   user_id: string | null;
@@ -301,8 +300,7 @@ class StandbyRunnerSlotStore {
         region TEXT NOT NULL,
         state TEXT NOT NULL,
         claim_id TEXT,
-        user_id TEXT,
-        retired_at TEXT
+        user_id TEXT
       )
     `);
   }
@@ -325,8 +323,8 @@ class StandbyRunnerSlotStore {
     }
     this.sql.exec(
       `INSERT INTO standby_slot_meta (
-        singleton, slot_name, release_id, region, state, claim_id, user_id, retired_at
-      ) VALUES (1, ?, ?, ?, 'unbound', NULL, NULL, NULL)`,
+        singleton, slot_name, release_id, region, state, claim_id, user_id
+      ) VALUES (1, ?, ?, ?, 'unbound', NULL, NULL)`,
       input.slotName,
       input.releaseId,
       input.region,
@@ -416,9 +414,8 @@ class StandbyRunnerSlotStore {
     }
     this.sql.exec(
       `UPDATE standby_slot_meta
-       SET state = 'retired', claim_id = NULL, user_id = NULL, retired_at = ?
+       SET state = 'retired', claim_id = NULL, user_id = NULL
        WHERE singleton = 1 AND state = 'retiring'`,
-      new Date().toISOString(),
     );
   }
 
@@ -441,7 +438,7 @@ class StandbyRunnerSlotStore {
 
   private select(): StandbySlotRow | null {
     return this.sql.exec<StandbySlotRow>(
-      `SELECT slot_name, release_id, region, state, claim_id, user_id, retired_at
+      `SELECT slot_name, release_id, region, state, claim_id, user_id
        FROM standby_slot_meta
        WHERE singleton = 1`,
     ).toArray()[0] ?? null;

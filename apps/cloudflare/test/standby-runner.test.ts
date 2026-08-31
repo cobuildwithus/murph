@@ -275,7 +275,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
       releaseId: RELEASE_ID,
       region: HOSTED_STANDBY_REGION,
     });
-    expect(first).toMatchObject({ claimId: firstClaimId, outcome: "claimed" });
+    expect(first).toMatchObject({ outcome: "claimed" });
     expect(concurrent.outcome).toBe("no_ready_slot");
     await flushBackgroundWork(pending);
 

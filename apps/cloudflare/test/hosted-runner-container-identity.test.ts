@@ -39,6 +39,7 @@ import type {
 import {
   createHostedRunnerContainerNamespaceRouter,
   HOSTED_STANDBY_REGION,
+  type HostedStandbyClaimRequest,
   type HostedStandbyCoordinatorNamespaceLike,
   type HostedStandbyRunnerContainerNamespaceLike,
   type HostedStandbySlotBinding,
@@ -888,11 +889,8 @@ describe("hosted runner container identity", () => {
       exactUser: createRunnerContainerNamespace({}),
       standby: standby.namespace,
     });
-    const claimReadyStandby = vi.fn(async (request) => ({
-      claimId: request.claimId,
+    const claimReadyStandby = vi.fn(async (_request: HostedStandbyClaimRequest) => ({
       outcome: "claimed" as const,
-      releaseId: request.releaseId,
-      region: request.region,
       slotName,
     }));
     const coordinatorNamespace: HostedStandbyCoordinatorNamespaceLike = {

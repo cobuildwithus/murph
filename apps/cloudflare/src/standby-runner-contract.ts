@@ -21,14 +21,10 @@ export interface HostedStandbyClaimRequest {
 
 export type HostedStandbyClaimResult =
   | {
-      claimId: string;
       outcome: "claimed";
-      releaseId: string;
-      region: typeof HOSTED_STANDBY_REGION;
       slotName: string;
     }
   | {
-      claimId: string;
       outcome: "deadline_expired" | "disabled" | "no_ready_slot" | "stale_release";
     };
 
