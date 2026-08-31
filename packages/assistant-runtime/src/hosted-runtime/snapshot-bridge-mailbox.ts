@@ -15,6 +15,9 @@ import {
 import {
   importHostedReportedDailyMetricMailboxItem,
 } from "./reported-daily-metric-import.ts";
+import {
+  importHostedGroupJournalFactMailboxItem,
+} from "./group-journal-fact-import.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
 } from "./platform.ts";
@@ -246,6 +249,34 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   if (
     input.item.route.action === "import-vault-share-revoke"
     || wake.kind === "vault-share.revoke"
+  ) {
+    return {
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
+    };
+  }
+
+  if (
+    input.item.route.action === "import-group-journal-fact"
+    && wake.kind === "journal.group-fact.recorded"
+  ) {
+    const outcome = await importHostedGroupJournalFactMailboxItem({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+    if (outcome.status !== "imported") return outcome;
+    return await enqueueHostedSystemMailboxItem({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+  }
+
+  if (
+    input.item.route.action === "import-group-journal-fact"
+    || wake.kind === "journal.group-fact.recorded"
   ) {
     return {
       reasonCode: "payload.decode_mismatch",

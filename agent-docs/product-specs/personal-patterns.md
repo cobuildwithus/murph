@@ -1,6 +1,6 @@
 # Personal Patterns
 
-Last verified: 2026-08-29
+Last verified: 2026-08-31
 
 ## Product boundary
 
@@ -40,6 +40,30 @@ states:
 Missing data stays unknown. Silence does not prove absence. A provider record
 can prove that something happened, but an absent provider record does not prove
 that it did not happen.
+
+## Group-derived Journal facts
+
+An authenticated group can propose a fact only for the sender of the selected
+accepted message. The web checks that current-sender authority again before it
+queues any private work. The group runtime receives only a handled or
+unavailable result. It does not receive the member's consent state or private
+Journal data.
+
+The first clear fact asks for one global choice in the member's direct chat.
+After consent, later clear facts save without another question. One useful
+ambiguity causes one private question. Weak claims, jokes, quotes, facts about
+another person, and unclear dates do not save. A member can disable capture for
+one group or for all groups and can change either choice later.
+
+The private member runtime remains the only writer. It imports the encrypted
+mailbox item through the normal Journal note path. Factor and context notes get
+the same stable `key-*` tag as direct Journal input, so the next deterministic
+Patterns report can use them. Plans stay marked `planned` and remain excluded.
+
+Deploy the mailbox consumer before the web producer. Recycle older warm member
+runtimes before the web starts emitting the new mailbox item. Then apply the
+web schema migration and deploy the web action. This order prevents an older
+runtime from rejecting a new private Journal item.
 
 Independent facts use independent notes. One message can therefore create more
 than one note. A multi-day trip, illness, or holiday uses one `episode-*` tag so

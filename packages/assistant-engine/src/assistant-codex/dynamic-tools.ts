@@ -14,6 +14,9 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES,
 } from '@murphai/hosted-execution/contracts'
 import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
@@ -577,6 +580,43 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .max(HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH)
         .regex(/^[A-Za-z0-9._/%-]+$/u),
       value: z.number(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('record_current_sender_journal_fact'),
+      confidence: z.enum(['high', 'medium']),
+      date: z.string().refine(isStrictIsoDate, {
+        message: 'date must be a valid YYYY-MM-DD calendar date',
+      }),
+      factIndex: z.number().int().min(1).max(8),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
+      note: z.string().trim().min(1).max(
+        HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+      ),
+      noteType: z.enum(HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES),
+      privateQuestion: groupQuestionSchema,
+      title: z.string().trim().min(1).max(
+        HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('set_current_sender_journal_capture'),
+      enabled: z.boolean(),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
+      scope: z.enum(['global', 'group']),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('set_journal_capture'),
+      enabled: z.boolean(),
     })
     .strict(),
   z
@@ -1206,6 +1246,8 @@ type MurphGroupToolRequest =
           | 'handoff'
           | 'ask_current_sender'
           | 'record_current_sender_daily_metric'
+          | 'record_current_sender_journal_fact'
+          | 'set_current_sender_journal_capture'
           | 'ask_member'
           | 'create_join_link'
           | 'create_signup_referral_link'
@@ -1252,6 +1294,25 @@ type MurphGroupToolRequest =
         value: number
       }
       messageRef: string
+    }
+  | {
+      action: 'record_current_sender_journal_fact'
+      confidence: 'high' | 'medium'
+      journalFact: {
+        date: string
+        factIndex: number
+        note: string
+        noteType: 'journal-context' | 'journal-factor' | 'journal-outcome' | 'journal-plan'
+        title: string
+      }
+      messageRef: string
+      privateQuestion: string
+    }
+  | {
+      action: 'set_current_sender_journal_capture'
+      enabled: boolean
+      messageRef: string
+      scope: 'global' | 'group'
     }
   | {
       action: 'ask_member'
@@ -5283,6 +5344,56 @@ async function executeGroupTool(input: {
         sessionId: userActionScope.originSessionId,
       },
     }
+  } else if (
+    input.request.action === 'record_current_sender_journal_fact'
+    || input.request.action === 'set_current_sender_journal_capture'
+  ) {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (
+      userActionScope?.conversationScope !== 'group'
+      || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+    ) {
+      return toolTextResult(
+        false,
+        'current-sender Journal action requires the selected accepted message in this group turn',
+      )
+    }
+    request = input.request.action === 'record_current_sender_journal_fact'
+      ? {
+          action: input.request.action,
+          confidence: input.request.confidence,
+          journalFact: input.request.journalFact,
+          origin: {
+            assistantInputId: input.request.messageRef,
+            kind: 'accepted_input',
+            sessionId: userActionScope.originSessionId,
+          },
+          privateQuestion: input.request.privateQuestion,
+        }
+      : {
+          action: input.request.action,
+          enabled: input.request.enabled,
+          origin: {
+            assistantInputId: input.request.messageRef,
+            kind: 'accepted_input',
+            sessionId: userActionScope.originSessionId,
+          },
+          scope: input.request.scope,
+        }
+  } else if (input.request.action === 'set_journal_capture') {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (
+      userActionScope?.conversationScope !== 'direct'
+      || userActionScope.acceptedInputIds.length === 0
+    ) {
+      return toolTextResult(
+        false,
+        'Journal capture settings require fresh user input in a personal direct conversation',
+      )
+    }
+    request = input.request
   } else if (input.request.action === 'ask_member') {
     if (!invocationScope) {
       return toolTextResult(
@@ -7323,6 +7434,38 @@ function parseGroupArguments(
         messageRef: parsed.data.message_ref,
       },
     }
+  }
+  if (parsed.data.action === 'record_current_sender_journal_fact') {
+    return {
+      ok: true,
+      request: {
+        action: parsed.data.action,
+        confidence: parsed.data.confidence,
+        journalFact: {
+          date: parsed.data.date,
+          factIndex: parsed.data.factIndex,
+          note: parsed.data.note,
+          noteType: parsed.data.noteType,
+          title: parsed.data.title,
+        },
+        messageRef: parsed.data.message_ref,
+        privateQuestion: parsed.data.privateQuestion,
+      },
+    }
+  }
+  if (parsed.data.action === 'set_current_sender_journal_capture') {
+    return {
+      ok: true,
+      request: {
+        action: parsed.data.action,
+        enabled: parsed.data.enabled,
+        messageRef: parsed.data.message_ref,
+        scope: parsed.data.scope,
+      },
+    }
+  }
+  if (parsed.data.action === 'set_journal_capture') {
+    return { ok: true, request: parsed.data }
   }
   if (parsed.data.action === 'read_shared') {
     return {

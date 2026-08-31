@@ -755,6 +755,9 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "cancel_next_group":
     case "revoke_own_email_share":
     case "prepare_email":
+    case "record_current_sender_journal_fact":
+    case "set_current_sender_journal_capture":
+    case "set_journal_capture":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },

@@ -112,6 +112,11 @@ import {
   recordHostedGroupCurrentSenderDailyMetric,
 } from "./group-current-sender-daily-metric";
 import {
+  recordHostedGroupCurrentSenderJournalFact,
+  setHostedGroupCurrentSenderJournalCapture,
+  setHostedMemberGroupJournalCapture,
+} from "./group-current-sender-journal";
+import {
   admitHostedGroupDisclosurePermissionAppendTx,
   canonicalizeHostedGroupDisclosurePermissionText,
   createHostedGroupDisclosurePermissionProviderIdempotencyKey,
@@ -286,6 +291,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   handoff: "personal_active",
   ask_current_sender: "participant_aware",
   record_current_sender_daily_metric: "participant_aware",
+  record_current_sender_journal_fact: "participant_aware",
   ask_member: "participant_aware",
   arm_usage_referral: "participant_aware",
   cancel_usage_referral: "participant_aware",
@@ -309,6 +315,8 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_usage_referral: "participant_aware",
   read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
+  set_current_sender_journal_capture: "participant_aware",
+  set_journal_capture: "personal_active",
   set_chat_avatar: "owner_active",
   share_contact_card: "owner_active",
   update_display_name: "owner_active",
@@ -400,6 +408,53 @@ export async function handleHostedRuntimeGroupTool(input: {
     return {
       action: "record_current_sender_daily_metric",
       result: admission.result,
+    };
+  }
+  if (input.request.action === "record_current_sender_journal_fact") {
+    const admission = await recordHostedGroupCurrentSenderJournalFact({
+      confidence: input.request.confidence,
+      groupRuntimeMemberId: input.memberId,
+      journalFact: input.request.journalFact,
+      origin: input.request.origin,
+      privateQuestion: input.request.privateQuestion,
+    });
+    if (admission.mailboxWake) {
+      try {
+        await input.scheduleMailboxWake?.(admission.mailboxWake);
+      } catch (error) {
+        (input.logger ?? console).warn(
+          "Hosted group Journal handoff failed; the mailbox recovery sweep will retry it.",
+          sanitizeHostedOnboardingStructuredLogDetails({
+            errorName: deriveHostedOnboardingTimingErrorName(error),
+            outcome: "post_commit_handoff_failed",
+          }),
+        );
+      }
+    }
+    return {
+      action: "record_current_sender_journal_fact",
+      result: admission.result,
+    };
+  }
+  if (input.request.action === "set_current_sender_journal_capture") {
+    const admission = await setHostedGroupCurrentSenderJournalCapture({
+      enabled: input.request.enabled,
+      groupRuntimeMemberId: input.memberId,
+      origin: input.request.origin,
+      scope: input.request.scope,
+    });
+    return {
+      action: "set_current_sender_journal_capture",
+      result: admission.result,
+    };
+  }
+  if (input.request.action === "set_journal_capture") {
+    return {
+      action: "set_journal_capture",
+      result: await setHostedMemberGroupJournalCapture({
+        enabled: input.request.enabled,
+        memberId: input.memberId,
+      }),
     };
   }
   if (input.request.action === "ask_member") {

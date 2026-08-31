@@ -98,6 +98,7 @@ import {
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_CHAT_TOOL,
+  MURPH_GROUP_DATA_TOOL,
   MURPH_GROUP_MEMBERSHIP_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_USAGE_TOOL,
@@ -11014,6 +11015,273 @@ describeRealCodex('real Codex Journal and Patterns help e2e', () => {
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex private group Journal capture e2e', () => {
+  it('routes high and medium confidence privately and ignores low confidence', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const messageRef = `ain_${'7'.repeat(32)}`
+    const workingDirectories: string[] = []
+    const scenarios = [
+      {
+        expectedConfidence: 'high' as const,
+        expectedFactPatterns: [/\bleg(?:s| soreness)?\b/iu, /\bcoffee\b/iu],
+        expectedMinimumRequests: 2,
+        label: 'clear current-sender facts',
+        prompt: [
+          'Visible group exchange:',
+          'Sam: Yesterday\'s football game was great.',
+          `Accepted message from the current sender, ref ${messageRef}: It was. My legs are still sore after playing yesterday. I also drank coffee at 4 pm yesterday.`,
+          'Handle private Journal capture under the group policy. Do not discuss it in the group.',
+        ].join('\n'),
+      },
+      {
+        expectedConfidence: 'medium' as const,
+        label: 'explicit private clarification',
+        prompt: [
+          'Visible group exchange:',
+          `Accepted message from the current sender, ref ${messageRef}: Murph, yesterday I said my heart was racing. I may mean it literally or figuratively. Ask me privately which one before recording anything.`,
+          'Handle private Journal capture under the group policy. Do not discuss it in the group.',
+        ].join('\n'),
+      },
+      {
+        expectedConfidence: null,
+        label: 'third-party joke',
+        prompt: [
+          'Visible group exchange:',
+          'Sam: Alex says his knee is wrecked.',
+          `Accepted message from the current sender, ref ${messageRef}: lol classic Alex`,
+          'Handle private Journal capture under the group policy. Do not discuss it in the group.',
+        ].join('\n'),
+      },
+    ]
+
+    try {
+      for (const scenario of scenarios) {
+        const workingDirectory = await mkdtemp(
+          path.join(tmpdir(), 'murph-group-journal-capture-e2e-'),
+        )
+        workingDirectories.push(workingDirectory)
+        const requests: Array<{
+          action: string
+          confidence?: string
+          factIndex?: number
+          privateQuestion?: string
+        }> = []
+        const result = await executeRealCodexAppServerTurn({
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildGroupPointOfViewDeveloperInstructions({
+            hostedRuntime: true,
+          }),
+          dynamicTools: [
+            MURPH_GROUP_DATA_TOOL,
+            MURPH_FINISH_WITHOUT_REPLY_TOOL,
+          ],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef],
+              conversationId: 'conversation-group-journal',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox-group-journal'],
+              originSessionId: 'session-group-journal',
+              recipientKey: 'recipient-group-journal',
+            }),
+            groupTool: {
+              request: async (request) => {
+                requests.push({
+                  action: request.action,
+                  ...('confidence' in request
+                    ? { confidence: request.confidence }
+                    : {}),
+                  ...(request.action === 'record_current_sender_journal_fact'
+                    ? {
+                        factIndex: request.journalFact.factIndex,
+                        privateQuestion: request.privateQuestion,
+                      }
+                    : {}),
+                })
+                if (request.action !== 'record_current_sender_journal_fact') {
+                  throw new Error(`Unexpected group Journal action: ${request.action}`)
+                }
+                return {
+                  action: request.action,
+                  result: { status: 'handled' },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: scenario.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        process.stdout.write(
+          `[real-codex] group Journal ${scenario.label}: ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            requests,
+          })}\n`,
+        )
+        const journalRequests = requests.filter(
+          (request) => request.action === 'record_current_sender_journal_fact',
+        )
+        if (scenario.expectedConfidence === null) {
+          expect(journalRequests).toHaveLength(0)
+        } else {
+          expect(journalRequests.length).toBeGreaterThanOrEqual(
+            scenario.expectedMinimumRequests ?? 1,
+          )
+          expect(journalRequests.every(
+            (request) => request.confidence === scenario.expectedConfidence,
+          )).toBe(true)
+          if (scenario.expectedFactPatterns) {
+            const firstQuestion = journalRequests.find(
+              (request) => request.factIndex === 1,
+            )?.privateQuestion
+            expect(firstQuestion).toBeTruthy()
+            for (const pattern of scenario.expectedFactPatterns) {
+              expect(firstQuestion).toMatch(pattern)
+            }
+          }
+        }
+        expect(result.finalMessage.trim()).toBe('')
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        ...workingDirectories,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 720_000)
+
+  it('accepts private consent and saves every fact named in the question', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-group-journal-consent-e2e-'),
+    )
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'journal-commands.log')
+    const groupRequests: unknown[] = []
+
+    try {
+      await mkdir(binDirectory, { recursive: true })
+      const executablePath = path.join(binDirectory, 'vault-cli')
+      await writeFile(
+        executablePath,
+        [
+          '#!/bin/sh',
+          `printf '%s\\n' "$*" >> ${JSON.stringify(commandLogPath)}`,
+          'printf \'%s\\n\' \'{"ok":true}\'',
+          '',
+        ].join('\n'),
+        { encoding: 'utf8', mode: 0o700 },
+      )
+      await chmod(executablePath, 0o700)
+
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [
+          MURPH_GROUP_MEMBERSHIP_TOOL,
+          MURPH_FINISH_WITHOUT_REPLY_TOOL,
+        ],
+        env: {
+          ...config.env,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        },
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: ['input_group_journal_consent'],
+            conversationId: 'conversation_group_journal_consent',
+            conversationScope: 'direct',
+            inboundMailboxItemIds: ['mailbox_group_journal_consent'],
+            originSessionId: 'session_group_journal_consent',
+            recipientKey: 'recipient_group_journal_consent',
+          }),
+          groupTool: {
+            request: async (request) => {
+              groupRequests.push(request)
+              if (request.action !== 'set_journal_capture') {
+                throw new Error(`Unexpected private consent action: ${request.action}`)
+              }
+              return {
+                action: request.action,
+                result: { enabled: request.enabled, status: 'updated' },
+              }
+            },
+          },
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Private conversation context:',
+          'Murph asked: May I save these private Journal facts from your group: sore legs after football yesterday, and coffee at 4 pm yesterday?',
+          'Accepted current message: Yes.',
+          'Handle this consent answer and the named facts now.',
+        ].join('\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      process.stdout.write(
+        `[real-codex] private group Journal consent: ${JSON.stringify({
+          actions,
+          finalMessage: result.finalMessage,
+          groupRequests,
+        })}\n`,
+      )
+      expect(groupRequests).toEqual([{
+        action: 'set_journal_capture',
+        enabled: true,
+      }])
+      const journalCommands = (await readFile(commandLogPath, 'utf8'))
+        .split('\n')
+        .filter((command) => command && !command.endsWith('--help'))
+      expect(journalCommands).toHaveLength(2)
+      expect(journalCommands.every((command) =>
+        command.includes('event note add')
+      )).toBe(true)
+      expect(journalCommands.join('\n')).toMatch(/leg/iu)
+      expect(journalCommands.join('\n')).toMatch(/coffee/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
     }
   }, 720_000)
 })

@@ -477,6 +477,14 @@ async function executeHostedSystemWake(input: {
         mailboxLane: "runtime-control",
         postCheckpointRecord: { kind: "vault-share.projection" },
       });
+    case "journal.group-fact.recorded":
+      // The private Journal note landed during mailbox import. The ordinary
+      // workspace checkpoint publishes it to the member's browser replica.
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        postCheckpointRecord: null,
+      });
   }
 
   const exhaustiveWake: never = input.wake;

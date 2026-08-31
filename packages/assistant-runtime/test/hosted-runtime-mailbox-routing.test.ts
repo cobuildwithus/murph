@@ -78,6 +78,11 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
+        action: "import-group-journal-fact",
+        kind: "journal.group-fact.recorded",
+        lane: "system",
+      },
+      {
         action: "import-reported-daily-metric",
         kind: "health.daily-metric.reported",
         lane: "system",

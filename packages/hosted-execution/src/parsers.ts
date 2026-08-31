@@ -40,6 +40,9 @@ import {
 import {
   parseHostedExecutionDailyMetricReportedPayload,
 } from "./daily-metric.ts";
+import {
+  parseHostedExecutionGroupJournalFactPayload,
+} from "./group-journal-fact.ts";
 
 import type {
   HostedExecutionAssistantAskCompletedEvent,
@@ -108,6 +111,7 @@ import {
   buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionDailyMetricReportedWake,
+  buildHostedExecutionGroupJournalFactRecordedWake,
   buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionRequestedWake,
@@ -521,6 +525,21 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
       return buildHostedExecutionDailyMetricReportedWake({
         ...dailyMetric,
         eventId,
+        memberId: wireUserId,
+        occurredAt,
+      });
+    }
+    case "journal.group-fact.recorded": {
+      assertExactHostedExecutionKeys(record, [
+        "eventId",
+        "journalFact",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution journal.group-fact.recorded wake");
+      return buildHostedExecutionGroupJournalFactRecordedWake({
+        eventId,
+        journalFact: parseHostedExecutionGroupJournalFactPayload(record.journalFact),
         memberId: wireUserId,
         occurredAt,
       });
