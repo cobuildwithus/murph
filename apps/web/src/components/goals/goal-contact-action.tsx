@@ -1,4 +1,5 @@
 import { ArrowRight } from "lucide-react";
+import Image from "next/image";
 
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
@@ -12,11 +13,19 @@ export function GoalContactAction({
 }) {
   return (
     <MurphContactLink
-      actionLabel="Do this with Murph"
+      actionLabel="Build my plan with Murph"
       className={cn(buttonVariants({ size: "xl" }), "w-full sm:w-auto")}
       option={option}
     >
-      Do this with Murph
+      <Image
+        alt=""
+        aria-hidden="true"
+        className="h-6 w-auto brightness-0 invert"
+        height={24}
+        src="/icons/murph-mark.svg"
+        width={36}
+      />
+      Build my plan
       <ArrowRight data-icon="inline-end" aria-hidden="true" />
     </MurphContactLink>
   );

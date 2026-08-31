@@ -47,6 +47,32 @@ const fixtureChild: GoalIndexEntryModel = {
   title: "Improve My Overnight Resting Heart Rate",
 };
 
+const fixtureGrandchild: GoalIndexEntryModel = {
+  aliases: ["steady overnight rhr"],
+  category: "biomarkers",
+  goalPhrase: "stabilize my overnight resting heart rate",
+  key: "goal_template:stable-overnight-resting-heart-rate",
+  outcomeKind: "biomarker",
+  parentGoalKey: fixtureChild.key,
+  routeId: "stabilize-overnight-resting-heart-rate",
+  startPrompt: "Hey Murph, help me stabilize my overnight resting heart rate.",
+  summary: "Build a steadier routine around overnight heart-rate trends.",
+  title: "Stabilize My Overnight Resting Heart Rate",
+};
+
+const fixtureStandalone: GoalIndexEntryModel = {
+  aliases: ["improve blood pressure"],
+  category: "biomarkers",
+  goalPhrase: "improve my blood pressure",
+  key: "goal_template:improve-blood-pressure",
+  outcomeKind: "biomarker",
+  parentGoalKey: null,
+  routeId: "improve-blood-pressure",
+  startPrompt: "Hey Murph, help me improve my blood pressure.",
+  summary: "Build habits that support a healthier blood-pressure trend.",
+  title: "Improve My Blood Pressure",
+};
+
 const mocks = vi.hoisted(() => ({
   getHostedMurphContactContext: vi.fn(),
   listHealthCommonsGoalRouteParams: vi.fn(),
@@ -118,12 +144,16 @@ describe("public goal pages", () => {
     });
     mocks.listHealthCommonsGoalRouteParams.mockReset();
     mocks.listHealthCommonsGoalRouteParams.mockReturnValue([
+      { goalId: fixtureStandalone.routeId },
       { goalId: fixtureGoal.routeId },
       { goalId: fixtureChild.routeId },
+      { goalId: fixtureGrandchild.routeId },
     ]);
     mocks.listHealthCommonsGoalsByCategory.mockReset();
     mocks.listHealthCommonsGoalsByCategory.mockImplementation((category: string) =>
-      category === "biomarkers" ? [fixtureGoal, fixtureChild] : []
+      category === "biomarkers"
+        ? [fixtureStandalone, fixtureGoal, fixtureChild, fixtureGrandchild]
+        : []
     );
     mocks.notFound.mockClear();
     mocks.permanentRedirect.mockClear();
@@ -175,7 +205,10 @@ describe("public goal pages", () => {
     expect(markup).toContain("A practical plan");
     expect(markup).toContain("A quick note");
     expect(markup).toContain("American Heart Association");
-    expect(markup.match(/aria-label="Do this with Murph in /gu)).toHaveLength(1);
+    expect(markup.match(/aria-label="Build my plan with Murph in /gu)).toHaveLength(1);
+    expect(markup).toContain("Build my plan");
+    expect(markup).toContain("/icons/murph-mark.svg");
+    expect(markup).not.toContain("Do this with Murph");
     expect(markup).toContain(
       `sms:+15550100001?body=${encodeURIComponent(fixtureGoal.startPrompt)}`,
     );
@@ -213,7 +246,7 @@ describe("public goal pages", () => {
     const markup = renderToStaticMarkup(element);
 
     expect(markup).toContain("https://t.me/withmurph_bot?text=");
-    expect(markup).toContain("Do this with Murph in Telegram");
+    expect(markup).toContain("Build my plan with Murph in Telegram");
     expect(markup).not.toContain("choose an app");
   });
 
@@ -229,15 +262,31 @@ describe("public goal pages", () => {
     expect(markup).not.toContain("Reviewed by");
   });
 
-  it("groups more specific goals under their parent on category pages", async () => {
+  it("groups specific goals without repeated taxonomy icons or labels", async () => {
     const element = await GoalOrCategoryPage({
       params: Promise.resolve({ goalId: "biomarkers" }),
     });
     const markup = renderToStaticMarkup(element);
 
     expect(markup).toContain("Biomarkers goals");
-    expect(markup).toContain("Related to Lower My Resting Heart Rate");
+    expect(markup).toContain('data-goal-family="lower-resting-heart-rate"');
+    expect(markup).toContain("Specific goals");
+    expect(markup).toContain("Improve My Blood Pressure");
     expect(markup).toContain("Improve My Overnight Resting Heart Rate");
+    expect(markup).toContain("Stabilize My Overnight Resting Heart Rate");
+    expect(markup).toContain('data-goal-depth="1"');
+    expect(markup).toContain('data-goal-depth="2"');
+    expect(markup).not.toContain("Related to");
+    expect(markup).not.toContain("data-goal-outcome-visual");
+    expect(markup.match(/href="\/goals\/lower-resting-heart-rate"/gu)).toHaveLength(1);
+    expect(markup.match(/href="\/goals\/improve-overnight-resting-heart-rate"/gu)).toHaveLength(1);
+    expect(markup.match(/href="\/goals\/stabilize-overnight-resting-heart-rate"/gu)).toHaveLength(1);
+    expect(markup.indexOf("Improve My Blood Pressure"))
+      .toBeLessThan(markup.indexOf("Lower My Resting Heart Rate"));
+    expect(markup.indexOf("Lower My Resting Heart Rate"))
+      .toBeLessThan(markup.indexOf("Improve My Overnight Resting Heart Rate"));
+    expect(markup.indexOf("Improve My Overnight Resting Heart Rate"))
+      .toBeLessThan(markup.indexOf("Stabilize My Overnight Resting Heart Rate"));
   });
 
   it("permanently redirects generated route aliases", async () => {

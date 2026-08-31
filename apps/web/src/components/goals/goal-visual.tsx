@@ -2,7 +2,7 @@ import {
   Activity,
   Flag,
   Gauge,
-  Repeat2,
+  ListChecks,
   Sparkles,
   Stethoscope,
   Trophy,
@@ -67,7 +67,7 @@ const CATEGORY_VISUALS: Record<GoalCategorySlug, GoalCategoryVisual> = {
 };
 
 const OUTCOME_ICONS: Record<GoalOutcomeKind, LucideIcon> = {
-  behavior: Repeat2,
+  behavior: ListChecks,
   biomarker: Activity,
   capacity: Gauge,
   event: Flag,
