@@ -1,6 +1,6 @@
 # Quiesce deleted hosted runtimes
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-31
 
@@ -110,3 +110,4 @@ Updated: 2026-08-31
   - Incomplete Temporal cleanup remains durable and retryable through rolling
     deployment; a 1,024-runtime receipt advances across bounded attempts, and
     successful/not-found cleanup releases the receipt.
+Completed: 2026-08-31
