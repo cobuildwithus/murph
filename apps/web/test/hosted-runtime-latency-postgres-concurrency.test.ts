@@ -807,12 +807,6 @@ describe.skipIf(!runPostgresProof)(
           schemaVersion: 1,
         });
         expect(requireJsonRecord(providerRows[1]?.phaseBreakdownJson)).toEqual({
-          orchestration: {
-            shellPrewarmExpectedOrchestrationAttemptId:
-              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-            shellPrewarmOrchestrationAttemptId:
-              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-          },
           preProvider: { outboxScanPerformed: true },
           provider: { sessionResolveMs: 10 },
           schemaVersion: 1,
@@ -912,7 +906,7 @@ describe.skipIf(!runPostgresProof)(
         ]);
 
         const ordinaryRows = await observer.hostedIngressLatencyTrace.findMany({
-          select: { phaseBreakdownJson: true },
+          select: { assistantInputId: true, phaseBreakdownJson: true },
           where: { assistantInputId: { in: assistantInputIds } },
         });
         for (const row of ordinaryRows) {
@@ -928,12 +922,16 @@ describe.skipIf(!runPostgresProof)(
             ).getTime(),
             progressUpdateAcceptedAtEpochMs: earliestProgressAt.getTime(),
           });
-          expect(requireJsonRecord(phaseBreakdown.orchestration)).toMatchObject({
-            shellPrewarmExpectedOrchestrationAttemptId:
-              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-            shellPrewarmOrchestrationAttemptId:
-              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-          });
+          if (row.assistantInputId === assistantInputIds[0]) {
+            expect(requireJsonRecord(phaseBreakdown.orchestration)).toMatchObject({
+              shellPrewarmExpectedOrchestrationAttemptId:
+                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+              shellPrewarmOrchestrationAttemptId:
+                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+            });
+          } else {
+            expect(phaseBreakdown.orchestration).toBeUndefined();
+          }
         }
 
         const terminalAt = new Date("2026-08-09T12:01:00.000Z");
@@ -1286,9 +1284,9 @@ async function createLatencySetWriteFixture(
           ? {
               orchestration: {
                 shellPrewarmExpectedOrchestrationAttemptId:
-                  "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+                  "web-prewarm-not-a-uuid",
                 shellPrewarmOrchestrationAttemptId:
-                  "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+                  "web-prewarm-123e4567-e89b-12d3-a456-426614174000",
                 shellPrewarmOutcome: "wrong-type",
               },
               schemaVersion: 1,
