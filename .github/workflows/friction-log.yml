@@ -90,7 +90,7 @@ jobs:
             ## Evidence
 
             - Direct: The Frog reconciliation workflow reports the linked issue and pull-request state.
-            - Coverage: The workflow guard checks the generated body, deployment disposition, and changelog declaration.
+            - Coverage: The workflow guard checks the generated body, complexity judgment, deployment disposition, and changelog declaration.
 
             ## Non-obvious affected surfaces
 
@@ -102,6 +102,12 @@ jobs:
             - New logic: The pull request only reconciles committed developer-friction metadata with its linked GitHub issues.
             - New abstractions: None; the existing Frog workflow remains the sole synchronization owner.
             - Complexity intentionally avoided: No product runtime, second reconciliation system, direct-main write, approval, or merge automation is added.
+
+            ## Complexity impact
+
+            - Guard: not applicable — Frog reconciliation changes only developer-friction metadata, not authored JavaScript or TypeScript source.
+            - Hotspots: No authored source changes, so there are no changed-file complexity hotspots.
+            - Agent judgment: No behavior-preserving source simplification applies to metadata-only reconciliation.
 
             ## Hot reply path impact
 
