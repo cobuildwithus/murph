@@ -1,8 +1,8 @@
 # One-slot ENAM warm-standby experiment
 
-Status: active
+Status: completed
 Created: 2026-08-30
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 ## Goal
 
@@ -178,3 +178,4 @@ Updated: 2026-08-30
     exact stop targeting, release-scoped readiness, and replenishment off-path.
   - Operational rollout remains gated on shadow evidence and production metrics;
     local proof does not claim the latency or cost acceptance gates themselves.
+Completed: 2026-08-31
