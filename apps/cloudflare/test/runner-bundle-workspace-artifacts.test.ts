@@ -7,7 +7,14 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { assertRunnerBundleHealthCommonsArtifacts } from "../scripts/deploy-artifacts.js";
+import {
+  assertPreparedRunnerBundle,
+  writeRunnerBundleManifest,
+} from "../scripts/deploy-artifacts.js";
+import {
+  hostedRunnerRuntimePackageName,
+  resolveHostedRunnerWorkspacePackageNames,
+} from "../scripts/runner-bundle-contract.js";
 import {
   buildHostedRunnerWorkspaceArtifacts,
   buildHostedRunnerWorkspaceArtifactPlan,
@@ -486,9 +493,51 @@ describe("runner bundle runtime artifact staging", () => {
       installedHealthCommonsDir,
       "--strip-components=1",
     ]);
+    await prepareRunnerBundleValidationFixture(validatorBundleDir);
     await expect(
-      assertRunnerBundleHealthCommonsArtifacts(validatorBundleDir),
-    ).resolves.toBeUndefined();
+      assertPreparedRunnerBundle({
+        appDir: path.join(repoRoot, "apps", "cloudflare"),
+        repoRoot,
+        runnerBundleDir: validatorBundleDir,
+      }),
+    ).resolves.toMatchObject({
+      buildSkipped: false,
+      includeBundleOnlyDependencies: true,
+    });
+
+    const generatedWebDir = path.join(
+      installedHealthCommonsDir,
+      "generated",
+      "web",
+    );
+    const obsoleteRoutesDir = path.join(generatedWebDir, "routes");
+    await mkdir(obsoleteRoutesDir, { recursive: true });
+    await writeFile(path.join(obsoleteRoutesDir, "index.json"), "{}\n", "utf8");
+    await expect(
+      assertPreparedRunnerBundle({
+        appDir: path.join(repoRoot, "apps", "cloudflare"),
+        repoRoot,
+        runnerBundleDir: validatorBundleDir,
+      }),
+    ).rejects.toThrow(
+      "must not ship unexpected Health Commons generated web artifact generated/web/routes",
+    );
+
+    await rm(obsoleteRoutesDir, { recursive: true });
+    await writeFile(
+      path.join(generatedWebDir, "browse", "experiments.json"),
+      "{}\n",
+      "utf8",
+    );
+    await expect(
+      assertPreparedRunnerBundle({
+        appDir: path.join(repoRoot, "apps", "cloudflare"),
+        repoRoot,
+        runnerBundleDir: validatorBundleDir,
+      }),
+    ).rejects.toThrow(
+      "must not ship unexpected Health Commons generated web artifact generated/web/browse/experiments.json",
+    );
 
     const extractDir = path.join(tarballsDir, "health-commons-extract");
     await mkdir(extractDir, { recursive: true });
@@ -951,6 +1000,89 @@ async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): 
     })}\n`,
     "utf8",
   );
+}
+
+async function prepareRunnerBundleValidationFixture(bundleDir: string): Promise<void> {
+  const nodeModulesDir = path.join(bundleDir, "node_modules");
+  const workspacePackageNames = resolveHostedRunnerWorkspacePackageNames({
+    includeBundleOnlyDependencies: true,
+  });
+
+  await mkdir(path.join(bundleDir, "dist"), { recursive: true });
+  await mkdir(path.join(bundleDir, "dist-bundled"), { recursive: true });
+  await mkdir(path.join(nodeModulesDir, ".bin"), { recursive: true });
+  await writeFile(
+    path.join(bundleDir, "package.json"),
+    `${JSON.stringify({
+      name: hostedRunnerRuntimePackageName,
+      version: "1.0.0",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(bundleDir, "dist", "container-entrypoint.js"),
+    "export {};\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(bundleDir, "dist-bundled", "container-entrypoint.js"),
+    "export {};\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(bundleDir, "dist", "index.js"),
+    "export {};\n",
+    "utf8",
+  );
+
+  for (const packageName of workspacePackageNames) {
+    if (
+      packageName === hostedRunnerRuntimePackageName
+      || packageName === "@murphai/health-commons"
+    ) {
+      continue;
+    }
+
+    const packageDir = path.join(nodeModulesDir, ...packageName.split("/"));
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(
+      path.join(packageDir, "package.json"),
+      `${JSON.stringify({ name: packageName, version: "1.0.0" })}\n`,
+      "utf8",
+    );
+  }
+
+  const assistantEngineDir = path.join(
+    nodeModulesDir,
+    "@murphai",
+    "assistant-engine",
+  );
+  await mkdir(path.join(assistantEngineDir, "skills"), { recursive: true });
+  await mkdir(path.join(assistantEngineDir, "dist", "assistant"), {
+    recursive: true,
+  });
+  await writeFile(
+    path.join(
+      assistantEngineDir,
+      "dist",
+      "assistant",
+      "cli-surface-contract.generated.json",
+    ),
+    "{}\n",
+    "utf8",
+  );
+  await writeFile(path.join(nodeModulesDir, ".bin", "murph"), "#!/bin/sh\n", "utf8");
+  await writeFile(
+    path.join(nodeModulesDir, ".bin", "vault-cli"),
+    "#!/bin/sh\n",
+    "utf8",
+  );
+
+  await writeRunnerBundleManifest(bundleDir, {
+    appDir: path.join(repoRoot, "apps", "cloudflare"),
+    releaseSha: "0123456789abcdef0123456789abcdef01234567",
+    repoRoot,
+  });
 }
 
 function findProtocolArtifactEntry(artifact: unknown, key: string): Record<string, unknown> | null {
