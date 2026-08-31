@@ -206,6 +206,7 @@ import {
 import {
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
+  buildAssistantSystemPromptLayers,
 } from '../src/assistant/system-prompt.ts'
 import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
@@ -3877,6 +3878,98 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
       }
     },
     480_000,
+  )
+})
+
+describeRealCodex('real Codex member-local current clock e2e', () => {
+  it(
+    'uses the trusted member-local current clock',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-member-local-clock-e2e-'),
+      )
+
+      try {
+        const layers = buildAssistantSystemPromptLayers({
+          assistantCliContract: null,
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentInstant: '2027-02-14T07:17:05.678Z',
+          currentLocalDate: '2027-02-13',
+          currentTimeZone: 'America/Los_Angeles',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        })
+        const developerInstructions = [
+          layers.staticCacheableCorePrompt,
+          layers.stableRouteCapabilityPrompt,
+          layers.threadContextPrompt,
+        ].filter((section) => section.length > 0).join('\n\n')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions,
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools: [],
+            prompt: 'Give my current local clock time in one sentence.',
+            providerConfig: normalizeAssistantProviderConfig({
+              provider: 'codex-cli',
+            }),
+            turnContextPrompt: layers.dynamicTurnContextPrompt,
+            workingDirectory,
+          }),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+
+        process.stdout.write(
+          `[member-local-clock-e2e] ${JSON.stringify({
+            actionCount: actions.length,
+            reply: result.finalMessage,
+          })}\n`,
+        )
+
+        expect(actions).toEqual([])
+        expect(result.finalMessage).toMatch(/\b11:17\b/iu)
+        expect(result.finalMessage).toMatch(
+          /p\.?m\.?|Pacific|PST|America\/Los_Angeles/iu,
+        )
+        expect(result.finalMessage).not.toMatch(/\b0?7:17\b/iu)
+        expect(result.finalMessage).not.toMatch(/\bUTC\b/iu)
+        expect(
+          result.finalMessage.trim().split(/\s+/u).length,
+        ).toBeLessThanOrEqual(24)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 })
 
@@ -11614,6 +11707,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           prompt,
           promptTimeContext: {
             canonicalTimeZoneAvailable: true,
+            currentInstant: '2026-08-27T16:00:00.000Z',
             currentLocalDate: '2026-08-27',
             currentTimeZone: 'America/New_York',
           },
