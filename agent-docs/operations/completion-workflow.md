@@ -1,56 +1,32 @@
 # Completion Workflow
 
-Last verified: 2026-08-27
+Last verified: 2026-08-31
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
 Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful verification command set.
-Product UX, prompt, frontend, and coverage audits run together in one preliminary
-`completion-specialists` ReviewGPT pass against an exact pushed PR head. That
-pass applies the relevant lenses before the parent's final review. When a
-separate final ReviewGPT gate also
-applies, final round 1 may start concurrently with the specialist pass against
-the same exact pushed candidate head.
+Product UX planning, prompt inspection, rendered frontend proof, and executable
+coverage are implementation and evidence responsibilities owned directly by the
+parent agent. They do not require a preliminary specialist audit, ReviewGPT
+pass, or local subagent.
 
-The preliminary pass is review-only. ReviewGPT never creates artifacts, mutates
-the checkout, commits, or pushes; the parent owns every correction and its
-verification.
-
-The fallback `deep-review` remains the only routed local audit subagent pass.
-This workflow and `AGENTS.md` are standing permission to spawn that pass when
-its trigger applies and the final ReviewGPT gate will not run. It defaults to
-high reasoning and uses xhigh for large, complex, high-risk, multi-owner,
-architecture, or trust-boundary reviews.
-
-**One cross-cutting gate.** ReviewGPT-eligible work uses the final PR-lane loop
-as the sole cross-cutting merge-readiness gate; do not also run local
-`deep-review`. When the final ReviewGPT gate will not run and the cross-cutting
-trigger applies, use local `deep-review` instead. After focused local proof and
-the parent's candidate review, the final gate may establish its immutable
-round-one baseline concurrently with the preliminary specialist pass on the
-same exact pushed head. If either stage finds an accepted issue, later final
-rounds verify the combined remediation delta without resetting that baseline.
-
-Final review is not a spawned subagent pass. The parent runs an explicit local
-final review after all accepted preliminary and final-gate findings are
-resolved.
+Complex or sensitive PRs use the proportional final ReviewGPT gate as the sole
+required cross-cutting review. Local `deep-review` remains available only when
+the user explicitly requests it; it is not a fallback completion requirement.
+The parent runs an explicit local final review after accepted final-gate findings
+are resolved.
 Removed 2026-06-12: the `simplify` and `task-finish-review` subagent passes. June 2026 transcript mining across Codex/Claude sessions and `audit-packages/` artifacts showed `simplify` produced no accepted findings, and `task-finish-review` produced mostly low-severity polish while the specialized passes caught the real local bugs and the post-completion PR ReviewGPT loop caught what the entire local stack missed. The parent-owned scope-and-shape check (step 2) owns simplification; `/simplify` remains available on demand. Removed 2026-07-14: the standalone `security-privacy-review` pass; security-sensitive changes trigger the one cross-cutting review gate instead.
-Replaced 2026-07-22: the separate local `prompt-review`, `frontend-review`, and
-write-capable `coverage-write` workers. Their lenses now run together in the
-preliminary `completion-specialists` ReviewGPT pass. The coverage lens is now a
-review-only proof audit rather than a write-capable worker.
-Replaced 2026-07-29: the separate local product-experience worker. Product UX
-planning, walkthrough, and review rules now live in
-`agent-docs/operations/product-ux.md` and run as one conditional lens in that
-same preliminary exact-head ReviewGPT pass.
+Removed 2026-08-31: the mandatory preliminary specialist pass and its local
+subagent replacement. Product UX, prompt, frontend, and coverage proof remain
+parent-owned completion responsibilities; the risk-routed final ReviewGPT gate
+and parent final review remain intact.
 
 ## Outcome and Completion Bar
 
 The outcome is the requested behavior or documentation change, landed at the
 smallest correct ownership boundary with truthful proof and no unresolved
-accepted review finding. Completion requires the routed verification, the
-preliminary specialist ReviewGPT pass when any lens applies, parent final
-review, plan closure, and scoped commit. User-facing frontend UI work also
+accepted review finding. Completion requires the routed verification, parent
+final review, plan closure, and scoped commit. User-facing frontend UI work also
 requires a repository-owned, reviewer-openable representation of the production
 component, consent surface, or composed section plus risk-matched design proof;
 PR-lane work additionally requires green CI and, when the change is eligible,
@@ -87,7 +63,8 @@ every PR. Skip it
 when the meaningful diff is low-risk and limited to one or more of:
 
 - docs or process text;
-- prompt-primary changes covered by the preliminary specialist ReviewGPT pass;
+- prompt-primary changes whose scope stays inside prompt text, assembly, and
+  focused prompt regression proof;
 - tests, fixtures, or developer tooling that do not change production behavior;
 - static copy or content; or
 - frontend-only `apps/web` changes whose meaningful production diff stays in
@@ -100,9 +77,8 @@ middleware, shared backend package, persistence or schema, authorization or
 permission logic, billing, health-safety logic, external ingress or egress,
 runtime or deploy behavior, production configuration, or a cross-owner
 protocol. A UI may change its user workflow or local display state and still
-qualify; the preliminary Product UX and frontend lenses own those frontend
-concerns, with the coverage lens added only for a distinct material proof
-boundary.
+qualify; Product UX planning, rendered evidence, accessibility proof, and
+focused frontend checks remain parent-owned requirements.
 
 The exemption applies only when the change does not affect auth, privacy,
 security, billing, health-safety, irreversible-effect, or other trust-boundary
@@ -122,15 +98,13 @@ is `routine` only when none of those conditions apply. The packager treats a
 missing, malformed, or duplicate declaration as `undeclared` and re-sends the
 full guarded snapshot rather than assuming the PR is routine.
 
-Skipping the final ReviewGPT gate does not skip the preliminary specialist
-ReviewGPT pass, a required local `deep-review`, the parent final review, scoped
-verification, CI, merge-conflict proof, or the normal commit and PR
-requirements.
+Skipping the final ReviewGPT gate does not skip the parent final review, scoped
+verification, CI, merge-conflict proof, or the normal commit and PR requirements.
 
-## Product and Rendered Review Admission
+## Product and Rendered Evidence
 
-Route specialist review by the dimension changed, before evaluating final
-ReviewGPT eligibility. A product-owned dimension is semantic user-facing copy;
+Classify the changed dimension before evaluating final ReviewGPT eligibility. A
+product-owned dimension is semantic user-facing copy;
 user-visible action purpose, count, or priority; required interaction steps; UI
 state selection and visible feedback or progress; user-visible element or
 screen existence; asynchronous continuation or wake ownership; or the
@@ -140,20 +114,18 @@ Before implementation, user-facing work also follows
 `agent-docs/operations/product-ux.md`. Classify it as a Patch, Product change,
 or Feature. Plan the affected people at the matching depth. After
 implementation, complete the Product UX Walkthrough before candidate review.
-The Product UX lens checks that plan and walkthrough inside the existing
-preliminary pass.
+The parent verifies that plan and walkthrough during candidate and final review.
 
-| Changed dimension | Product-decision owner | Rendered-implementation route |
+| Changed dimension | Product-decision owner | Required evidence |
 | --- | --- | --- |
-| Any product-owned dimension, including one changed through a prompt | Run the Product UX lens in the preliminary specialist ReviewGPT pass | Add the prompt lens when prompt-primary; add the frontend lens when `apps/web` presentation changes |
-| Prompt-primary change with no product-owned dimension | No product-decision review | Run the preliminary prompt lens only |
-| Meaning-preserving tiny static-copy correction | No product-decision review | Use the tiny copy-only fast path |
-| Implementation-only presentation with no product-owned dimension | No product-decision review | Run the preliminary frontend lens |
+| Any product-owned dimension, including one changed through a prompt | Product UX plan, walkthrough, and parent review | Direct journey proof; add rendered proof when `apps/web` presentation changes |
+| Prompt-primary change with no product-owned dimension | Parent prompt review | Focused prompt regression proof and assembled-prompt inspection |
+| Meaning-preserving tiny static-copy correction | Parent readback | Use the tiny copy-only fast path |
+| Implementation-only presentation with no product-owned dimension | Parent frontend review | Rendered, responsive, and accessibility evidence proportionate to the change |
 
-Final ReviewGPT eligibility is independent and evaluated afterward. An
-exemption never waives an applicable preliminary lens. The preliminary
-frontend lens and final ReviewGPT gate never become fallback
-product-decision owners.
+Final ReviewGPT eligibility is independent and evaluated afterward. An exemption
+never waives the parent-owned Product UX, prompt, frontend, or proof obligations.
+The final ReviewGPT gate never becomes a fallback product-decision owner.
 
 ## Sequence
 
@@ -194,17 +166,15 @@ product-decision owners.
    acknowledgement, and distinguish raw-field exclusion or deterministic
    pattern scrubbing from semantic removal of all private or health meaning.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
-4. Decide the audit path required by the routed task class:
-   - docs/process-only work normally skips completion audits unless the user explicitly asks for them
+4. Decide the evidence and final-gate path required by the routed task class:
+   - docs/process-only work normally skips external review unless the user explicitly asks for it
    - meaning-preserving `apps/web` typo, punctuation, grammar, or equivalent localization corrections may use the tiny copy-only fast path
-   - prompt-primary changes activate the prompt lens in the preliminary specialist ReviewGPT pass; when the prompt also changes a product-owned dimension, activate the Product UX lens too
-   - user-facing `apps/web` UI changes outside the copy-only fast path activate
-     the frontend lens and require enough redacted rendered evidence to judge
-     each material visual, state, interaction, and responsive claim
-   - the coverage lens applies only when tests, fixtures, or direct-proof infrastructure are a primary PR outcome, or the changed behavior makes a material proof claim that ordinary focused owner tests cannot establish at a stable boundary; executable or proof-file changes alone do not activate it, and the final gate owns ordinary correctness and test adequacy when it runs
+   - prompt-primary changes require assembled-prompt inspection and focused regression proof; when the prompt also changes a product-owned dimension, complete the Product UX plan and walkthrough too
+   - user-facing `apps/web` UI changes outside the copy-only fast path require enough redacted rendered evidence to judge each material visual, state, interaction, and responsive claim
+   - tests, fixtures, or direct-proof infrastructure that are a primary PR outcome require parent review of whether the proof establishes the material behavior at a stable boundary
    - for behavior composed across multiple owners, map the complete production path and prefer one stable composed or end-to-end proof of the invariant; seam-level unit tests may localize failures but do not replace proof that the owners work together
-   - any product-owned dimension activates the Product UX lens, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
-   - when the cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
+   - any product-owned dimension requires Product UX planning and walkthrough, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
+   - when the cross-cutting conditions apply, run the final ReviewGPT gate unless the user explicitly opts out
 5. Once implementation is stable, run the focused local proof selected from the
    verification doc. Record the exact commands and outcomes. For PR-bound work,
    broad coverage remains pending until exact-head CI completes; for a direct
@@ -257,19 +227,48 @@ product-decision owners.
    Inspect each selected image at native resolution, keep it ignored and
    redacted under `.artifacts/review-gpt/`, and remove a one-off capture spec
    after proof unless it adds durable regression value.
-7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the outcome, Product UX result, direct evidence, non-obvious surfaces, architecture and reuse, hot reply path impact, provider-input impact, deployment and changelog decisions, the change-shape breakdown, and applicable design proof required below.
-8. Prepare exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant Product UX, prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not four audits.
-9. When the final ReviewGPT gate is selected, establish its immutable round-one baseline on the same exact pushed candidate head and launch the preliminary pass and final round 1 concurrently. When the final gate does not apply, launch the preliminary pass by itself. The candidate must already have focused local proof and a parent candidate review, but preliminary findings, plan closure, and the parent's final review do not need to finish before both ReviewGPT jobs start. Run both jobs concurrently with CI and keep their outputs and state separate.
-10. Triage every finding from both ReviewGPT stages locally, then complete `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition Boundary for every substantive specialist result and final `FINDINGS` result. Report the model result and the parent's evidence-backed accept/reject judgment for every finding; rejected findings require no fix or reviewer withdrawal, and the user may override that judgment. After a preliminary specialist report, continue with accepted remediation within the existing task authority without ending the turn or asking for separate user permission. A final `ROUND_OUTCOME: FINDINGS` still pauses all candidate mutation until the user resumes, including pending specialist remediation, unless that section's behavior-preserving `Complexity Collapse` or `Non-Production Remediation` exception applies. A validated final `ROUND_OUTCOME: PASS` proceeds without a user-resume pause. Implement accepted findings in the parent, rerun focused proof, commit, and push one combined corrected candidate. When accepted Product UX remediation materially changes a product-owned dimension, the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to that corrected pushed head and updated direct journey evidence, then record the refreshed product purpose verdict. This is a bounded parent revalidation, not another subagent or ReviewGPT invocation. Do not rerun the preliminary pass after a substantive result; use the final gate's next substantive round to verify all behavior-bearing remediation, including specialist-driven fixes. The final-gate packager chooses a fresh full audit for a sensitive, undeclared, or large current PR and a same-thread correction delta only for an explicitly routine PR below both size cutoffs.
-11. Enter the review-resolution loop below. Completion means there are no unresolved accepted/actionable findings and every required disposition boundary and final-stage pause is complete, not merely that both jobs ran. The applicable one-pass specialist result is resolved by `SPECIALIST_OUTCOME: PASS`, zero accepted findings with evidence-backed dispositions, or verified remediation of every accepted finding. The final gate is resolved by `ROUND_OUTCOME: PASS` or `ROUND_OUTCOME: FINDINGS` with zero accepted findings.
-12. Rerun the focused local checks affected by remediation, then push so required CI evaluates the exact new PR head. If CI fails, diagnose from the narrowest reproducer outward. For a direct shared-default push, rerun `pnpm verify:acceptance` against the final reconciled candidate.
-13. Run the final review locally as the parent agent after findings from both ReviewGPT stages are resolved: re-read the full diff with fresh eyes, walk changed call paths, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent. If that review causes a behavior-bearing change, push it and run the required next final-gate round.
-14. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. Include every public-safe Frog entry created or modified during the task in that same scoped commit; do not finish with a task-owned entry untracked, unstaged, or omitted. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, preserve the Frog entry, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
-15. For PR-lane work, fetch the latest `main` or configured base and run `git merge-tree --write-tree HEAD origin/<base>` before final handoff. Green required CI on the PR-authored head plus a clean current-base merge-tree is sufficient preparation; do not merge or rebase only to chase a base that can move again while CI runs. If the merge-tree reports conflicts during preparation, update the branch normally, resolve and inspect them, rerun affected proof and required CI, and push. At an authorized merge boundary, wait only for routed review gates and required GitHub checks. If strict up-to-date checks block the merge, prefer the repository merge queue; otherwise perform at most one normal base update for the unchanged reviewed patch, inspect conflicts, run affected proof, and let required CI gate that head. If the base advances again after it is green, never perform a second base update or restart CI: rerun the merge-tree and use an already-authorized non-refresh merge path when clean, or report `moving-base race` and stop with the PR and worktree active. Do not start repeated base-refresh/CI loops during preparation. Follow the ReviewGPT loop's exact terminal, base-update, and patch-change rules.
-16. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, run `scripts/retire-worktree <path>` from another checkout before final handoff. The command is the mandatory task-worktree retirement gate defined in `agent-docs/operations/agent-workflow-routing.md`; preserve and report the checkout when it fails closed.
-17. Final handoff must report required-check results, direct scenario evidence,
-    the preliminary specialist lens verdicts, Product UX purpose
-    verdict when that lens applies, and all audit findings accepted, fixed, or
+7. Commit and push the review candidate from the task worktree, open or update
+   the PR, and keep any active plan open. For plan-bearing work this is
+   an intermediate scoped commit, not the final task commit;
+   `scripts/finish-task` still owns plan closure later. Ensure the PR body
+   contains the outcome, Product UX result, direct evidence, non-obvious
+   surfaces, architecture and reuse, hot reply path impact, provider-input
+   impact, deployment and changelog decisions, the change-shape breakdown, and
+   applicable design proof required below.
+8. When the final ReviewGPT gate is selected, establish its immutable round-one
+   baseline on the exact pushed candidate head. The candidate must already have
+   focused local proof and a parent candidate review. Run final ReviewGPT
+   concurrently with CI.
+9. Triage every finding from the final ReviewGPT gate locally. Report the model
+    result and the parent's evidence-backed accept/reject judgment for every
+    finding; rejected findings require no fix or reviewer withdrawal, and the
+    user may override that judgment. Complete
+    `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition Boundary
+    for every final `FINDINGS` result. A final
+    `ROUND_OUTCOME: FINDINGS` still pauses all candidate mutation until the user
+    resumes unless that section's
+    behavior-preserving `Complexity Collapse` or `Non-Production Remediation`
+    exception applies. A validated final `ROUND_OUTCOME: PASS` proceeds without
+    a user-resume pause. Implement accepted findings in the parent, rerun focused
+    proof, commit, and push one combined corrected candidate. When accepted
+    Product UX remediation materially changes a product-owned dimension, the
+    parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership
+    to the corrected candidate and updated direct journey evidence, then record
+    the refreshed product purpose verdict. This is bounded parent revalidation.
+    Use the parent final review plus the final gate's next substantive round when
+    applicable.
+10. Enter the review-resolution loop below. Completion means there are no
+    unresolved accepted/actionable findings and every required final-stage
+    disposition boundary and pause is complete. The final gate is resolved by
+    `ROUND_OUTCOME: PASS` or
+    `ROUND_OUTCOME: FINDINGS` with zero accepted findings.
+11. Rerun the focused local checks affected by remediation, then push so required CI evaluates the exact new PR head. If CI fails, diagnose from the narrowest reproducer outward. For a direct shared-default push, rerun `pnpm verify:acceptance` against the final reconciled candidate.
+12. Run the final review locally as the parent agent after final-gate findings are resolved: re-read the full diff with fresh eyes, walk changed call paths, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent. If that review causes a behavior-bearing change, push it and run the required next final-gate round.
+13. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. Include every public-safe Frog entry created or modified during the task in that same scoped commit; do not finish with a task-owned entry untracked, unstaged, or omitted. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, preserve the Frog entry, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
+14. For PR-lane work, fetch the latest `main` or configured base and run `git merge-tree --write-tree HEAD origin/<base>` before final handoff. Green required CI on the PR-authored head plus a clean current-base merge-tree is sufficient preparation; do not merge or rebase only to chase a base that can move again while CI runs. If the merge-tree reports conflicts during preparation, update the branch normally, resolve and inspect them, rerun affected proof and required CI, and push. At an authorized merge boundary, wait only for routed review gates and required GitHub checks. If strict up-to-date checks block the merge, prefer the repository merge queue; otherwise perform at most one normal base update for the unchanged reviewed patch, inspect conflicts, run affected proof, and let required CI gate that head. If the base advances again after it is green, never perform a second base update or restart CI: rerun the merge-tree and use an already-authorized non-refresh merge path when clean, or report `moving-base race` and stop with the PR and worktree active. Do not start repeated base-refresh/CI loops during preparation. Follow the ReviewGPT loop's exact terminal, base-update, and patch-change rules.
+15. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, run `scripts/retire-worktree <path>` from another checkout before final handoff. The command is the mandatory task-worktree retirement gate defined in `agent-docs/operations/agent-workflow-routing.md`; preserve and report the checkout when it fails closed.
+16. Final handoff must report required-check results, direct scenario evidence,
+    the Product UX purpose verdict when it applies, and all review findings accepted, fixed, or
     rejected with reasons. Green required checks remain the
     default completion bar; if a required check failed for a credibly unrelated
     pre-existing reason, name the command, failing target, and why the current
@@ -350,9 +349,9 @@ Every PR includes:
   interaction, and responsive risks, and `Coverage:` naming the states and
   viewports checked. A reasoned walkthrough is valid when an image adds no
   proof; there is no screenshot quota. The pull-request evidence guard validates
-  only the rendered fields and supported absolute-link shape; the preliminary
-  frontend review owns repository origin, reachability, currentness, and whether
-  the linked representation covers the changed state.
+  only the rendered fields and supported absolute-link shape; the parent review
+  owns repository origin, reachability, currentness, and whether the linked
+  representation covers the changed state.
 - **Change-shape breakdown.** Report added and deleted lines from the
   base-to-head diff, classified as source, tests/fixtures, docs,
   config/tooling, and generated/other. State the classification rule, note
@@ -386,10 +385,10 @@ Complete this launch preflight before starting PR gates:
    ReviewGPT metadata required for this task are present before launching
    ReviewGPT. An incomplete body is a launch blocker, not a finding to repair
    after a review has started.
-4. Start applicable ReviewGPT passes concurrently with CI immediately after
-   this preflight. Do not wait for CI to finish. Later PR-body-only edits
-   retrigger Pull Request Evidence but do not change the reviewed commit
-   baseline.
+4. Start the final ReviewGPT gate concurrently with CI when it applies,
+   immediately after this preflight. Do not wait for CI to finish. Later
+   PR-body-only edits retrigger Pull Request Evidence but do not change the
+   reviewed commit baseline.
 
 Use this form when the changelog changed:
 
@@ -471,8 +470,8 @@ or a repeated list of review lenses into every PR.
 
 ## Review-Resolution Loop
 
-Audit outputs are advisory until the parent implementation agent verifies them.
-For every finding from a required audit pass:
+Review outputs are advisory until the parent implementation agent verifies them.
+For every final-gate or explicitly requested review finding:
 
 1. Read the real code path, adjacent files, and relevant tests before accepting the finding. When a finding depends on external behavior, check the dependency's docs, source, or types instead of guessing.
 2. Classify the finding as accepted/actionable, rejected, or out of scope. Reject speculative risks, unrealistic edge cases, broad rewrites, and fixes that add more complexity than the bug justifies.
@@ -485,69 +484,47 @@ For every finding from a required audit pass:
    rollback/skew window, reject the finding or document the deployment note
    instead of adding repair paths, shims, migrations, queues, or reconciliation
    code.
-3. Complete the parent-owned Finding Disposition Boundary after every substantive specialist result and every final `FINDINGS` result. For a preliminary specialist result, report every evidence-backed disposition as a progress update, then continue accepted remediation within the existing task authority without ending the turn or asking for separate permission. For a final `FINDINGS` result, end the active task turn before any mutation and continue only after the user resumes, unless the result qualifies for the behavior-preserving `Complexity Collapse` or `Non-Production Remediation` exception. A concurrent final `FINDINGS` result also blocks pending specialist remediation. A validated final `ROUND_OUTCOME: PASS` proceeds without this pause. A rejected finding is terminal and does not require model agreement.
+3. Complete `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition
+   Boundary for every final `FINDINGS` result: end the active task turn before any
+   mutation and continue only after
+   the user resumes, unless the result qualifies for the behavior-preserving
+   `Complexity Collapse` or `Non-Production Remediation` exception. A validated
+   final `ROUND_OUTCOME: PASS` proceeds without this pause.
+   A rejected finding is terminal and does not require model agreement.
 4. For accepted/actionable findings, fix the smallest correct surface at the right ownership boundary. If repeated findings cluster around one mechanism, pause tactical patching and simplify the mechanism, split or abandon the PR, or explicitly reject the collapse finding.
 5. After any review-driven code, test, config, or docs change, rerun the focused verification that proves the changed surface.
-6. Rerun an affected local or final-gate pass when the fix materially changes its risk surface:
+6. Rerun the final gate when the fix materially changes its risk surface:
    - when accepted Product UX remediation materially changes a product-owned dimension, push the corrected candidate and have the parent reapply `agent-docs/operations/product-ux.md` § Review Ownership to that head and updated direct journey evidence, recording a refreshed product purpose verdict; this is required corrected-head revalidation, not a local subagent or another ReviewGPT run
-   - rerun the already selected cross-cutting gate when an accepted correctness or security finding drives a broad, cross-owner, state-machine, trust-boundary, or concrete exposure fix that materially changes its risk surface; never add or switch to the other cross-cutting gate
-   - do not rerun the preliminary specialist ReviewGPT pass for substantive findings; it is intentionally one combined pass, and the parent final review plus any applicable final ReviewGPT full-patch gate review the resulting correction
-   - retry the preliminary specialist pass only when it returned `SPECIALIST_OUTCOME: INVALID` because its exact-head, source, attachment, or rendered evidence was unusable
+   - rerun the selected final ReviewGPT gate when an accepted correctness or security finding drives a broad, cross-owner, state-machine, trust-boundary, or concrete exposure fix that materially changes its risk surface
 7. Do not rerun an audit solely for rejected findings, tiny wording changes, isolated test-only proof additions, or to obtain a cleaner final sentence.
 
-Stop the loop when every required audit finding is either fixed/proven or consciously rejected/out of scope with a concise reason, and no unresolved accepted/actionable findings remain.
-
-## Preliminary Specialist Applicability
-
-The preliminary `completion-specialists` ReviewGPT pass applies at least one
-of four lenses. Product-owned work activates the Product UX lens under
-`Product and Rendered Review Admission`. Prompt-primary work activates the
-prompt lens when all of the following are true:
-
-1. The meaningful behavior change is prompt text, system/developer instructions, agent workflow prompts, tool descriptions, prompt assembly guidance, or regression tests that prove prompt content.
-2. Any non-prompt code changes are only mechanical support for prompt assembly, prompt export, or prompt regression proof.
-3. The change does not independently alter runtime behavior, schemas, persisted state, app/package APIs, auth/session authority, external ingress/egress, deploy surfaces, billing, frontend layout/interaction, or trust boundaries outside the prompt itself.
-
-Prompt-primary classification never suppresses `Product and Rendered Review
-Admission`: a prompt that changes a product-owned dimension also activates the
-Product UX lens in the same preliminary pass. Merely mentioning
-sensitive topics, user-facing behavior, tools, retrieval, or validation does
-not activate the Product UX, frontend, or coverage lenses or the final
-cross-cutting gate. The preliminary prompt lens owns prompt-level privacy,
-security, safety, evidence, validation, simplicity, clarity, and
-instruction-conflict concerns.
-
-If the change is mixed, activate every preliminary lens and final gate whose
-trigger independently applies. The prompt lens is not a substitute for
-reviewing real runtime, UI, persisted-state, deploy, or trust-boundary changes.
+Stop the loop when every review finding is either fixed/proven or consciously
+rejected/out of scope with a concise reason, and no unresolved
+accepted/actionable findings remain.
 
 ## When To Run Cross-Cutting Review
 
-Require one cross-cutting review when the change is complex or sensitive
-enough that the preliminary specialist pass may miss production bugs. Use the
-final ReviewGPT gate when eligible; otherwise use local `deep-review`. These
-routes are mutually exclusive for the same completed change.
+Require the final ReviewGPT gate when the change is complex or sensitive enough
+to benefit from an independent cross-cutting review.
 
 Require the cross-cutting gate when one or more of these conditions apply:
 
 1. The change spans multiple owners, apps, packages, or runtime boundaries and correctness depends on their interaction.
 2. The change alters state machines, ordering, idempotency, retries, concurrency, migrations, persisted-state ownership, or fail-closed behavior.
 3. The change materially touches sensitive health data, auth/session authority, secrets, billing, external ingress/egress, public APIs/routes, hosted execution, Cloudflare, Temporal, persisted/uploaded/user-facing data exposure, or another trust-boundary surface.
-4. The implementation is a large or high-risk refactor where a first-principles bug hunt is likely to find edge cases that the preliminary coverage or frontend lens may not catch.
-5. The user explicitly asks for deep review, a final bug hunt, or a production edge-case sweep as part of completion.
+4. The implementation is a large or high-risk refactor where a first-principles bug hunt is likely to find edge cases that focused owner proof may not catch.
+5. The user explicitly asks for final ReviewGPT, a final bug hunt, or a production edge-case sweep as part of completion.
 
-If the final ReviewGPT gate is selected, an explicit request for deep review or
-a final bug hunt is satisfied by that gate and does not add local
-`deep-review`. If the final gate is opted out or unavailable and a condition
-above applies, use local `deep-review` instead and report the route change. Do
-not use either cross-cutting route as a replacement for the preliminary
-specialist pass. If none of the conditions above apply, skip the later
-cross-cutting review.
+If the user explicitly opts out of the final gate, record that disposition and
+continue with parent review and direct proof; do not substitute a mandatory local
+subagent. An explicit request for local `deep-review` may still add that
+review-only pass, but it is user-requested work rather than a completion gate. If
+none of the conditions above apply, skip cross-cutting review.
 
 ## Tiny Copy-Only Fast Path
 
-Skip the preliminary specialist ReviewGPT pass for very small `apps/web`
-copy-only edits when all of the following are true:
+Use the lightweight proof route for very small `apps/web` copy-only edits when
+all of the following are true:
 
 1. The diff only changes static user-facing text.
 2. The correction preserves meaning and is limited to a typo, punctuation,
@@ -562,87 +539,16 @@ copy-only edits when all of the following are true:
 Use focused component/page tests, typecheck, `git diff --check`, and stale-string
 searches as appropriate. Semantic copy—including CTA, helper, onboarding,
 empty, error, success, permission, confirmation, or explanatory copy—leaves
-this fast path and activates the Product UX lens. If the copy change
+this fast path and requires the ordinary Product UX plan and walkthrough. If the copy change
 touches claims about security, billing, medical outcomes, or product
 guarantees, use the normal review workflow.
-
-## Audit Worker Rules
-
-- Codex-native agents spawn a local subagent only for a required fallback
-  `deep-review` pass. Do not use `codex exec` from Codex to satisfy it.
-- Claude and other non-Codex parents run that required local pass on Codex
-  `gpt-5.6-sol` through the local Codex CLI with high reasoning, using xhigh for
-  large, complex, high-risk, multi-owner, architecture, or trust-boundary work.
-  If the exact model, CLI, or auth is unavailable, report the limitation and use
-  the explicitly documented parent-model fallback rather than silently selecting
-  an older model.
-- `deep-review` is the review-only cross-cutting fallback when the separate final
-  ReviewGPT gate will not run. It uses `murph-deep-review`, loads
-  `feynman-auditor`, and follows changed files plus directly affected call paths.
-- The preliminary Product UX, prompt, frontend, and coverage lenses are
-  not local subagent passes. Run them together only through the managed-browser
-  `completion-specialists` ReviewGPT preset on an exact pushed head.
-- Every audit reports evidence-backed findings and has a valid zero-finding stop
-  state. The parent verifies every finding against the real path and owns the
-  final synthesis.
-- Review-mode local audit subagents must not edit files, commit, push, create or
-  switch worktrees, or widen their authority.
-- Prefer a fresh non-forked handoff packet and one fresh subagent per required
-  local pass. Close it promptly after return, timeout, or a proven stuck state.
-- If a Codex-native parent cannot spawn a required local subagent, stop and
-  report the tooling blocker; parent self-review does not satisfy that pass.
-
-## Audit Handoff Packet
-
-For each required local audit subagent, provide:
-
-- What changed and why at the behavior level.
-- Why the chosen implementation fits the existing system, especially when it introduces or extends abstractions.
-- Invariants or assumptions that must still hold.
-- Links to active execution plans when present.
-- Verification evidence already run, including commands and outcomes.
-- Any direct scenario proof already run, or the exact gap if it still needs human verification.
-- Current working-tree context and explicit review boundaries.
-- The declared review-only action mode. No audit worker may edit files, run
-  commit helpers, or create commits.
-- Instruction to stay within the declared task and review boundaries and avoid unrelated worktree changes.
-
-For the required `deep-review` pass, also provide:
-
-- The exact files, packages, commits, or call paths in scope.
-- The condition from `When To Run Cross-Cutting Review` that made the pass required and confirmation that ReviewGPT will not run for the same completed change.
-- Any state-machine, ordering, idempotency, retry, owner-boundary, persisted-state, or sensitive-boundary assumptions the implementation relies on.
-- An explicit instruction to use `murph-deep-review`, load `feynman-auditor`, keep the pass review-only, and answer: "What final bugs or edge cases could still break this change in production?"
-- Any direct scenario proof already gathered, or the exact gap if production-risk proof remains incomplete.
-
-## Preliminary ReviewGPT Packet
-
-The preliminary specialist pass receives one exact pushed-head packet through
-`agent-docs/operations/pr-reviewgpt-loop.md`:
-
-- the PR intent contract and full current PR diff;
-- Product UX, prompt, frontend, and coverage marked `applicable` or
-  `not applicable` with one reason each;
-- the intended user outcome, initiating and receiving actors, entry point,
-  timing class, feedback, continuation owner, terminal destination, permission
-  boundary, recovery contract, and direct journey evidence or exact gap when
-  the Product UX lens applies;
-- the exact focused local proof and current exact-head CI status;
-- the affected prompt stack and tool descriptions when the prompt lens applies;
-- selected redacted rendered evidence for every material frontend state,
-  interaction, and viewport claim when the frontend lens applies;
-- direct scenario evidence or the exact remaining gap;
-- the Product UX owner plus applicable prompt, frontend, and coverage lens
-  references; and
-- explicit instruction that the pass is review-only and returns no artifacts.
 
 ## Safety Rules
 
 - Do not overwrite, discard, or revert unrelated working-tree edits in the current checkout.
-- Audit workers use the parent-selected checkout or worktree. They must not create
-  or switch branches, create helper worktrees, commit, push, or widen their
-  declared authority. The parent follows the task-class worktree and commit route
-  in `agent-docs/operations/agent-workflow-routing.md`.
-- Do not use reset or checkout cleanup commands to prepare audit passes.
-- If an audit suggestion conflicts with pre-existing edits, leave the file untouched and escalate in handoff notes.
+- Follow the task-class worktree and commit route in
+  `agent-docs/operations/agent-workflow-routing.md`.
+- Do not use reset or checkout cleanup commands to prepare review candidates.
+- If a review suggestion conflicts with pre-existing edits, leave the file
+  untouched and escalate in handoff notes.
 - Treat green checks as necessary but not sufficient when the changed behavior has a user-visible or operational boundary; require direct proof or call out the missing proof explicitly.

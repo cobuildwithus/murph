@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
-review_gpt_completion_specialists_prompt_max_bytes=6500
 review_gpt_toolchain_install_lock_wait_seconds=300
 
 usage() {
@@ -228,9 +227,6 @@ review_gpt_require_pr_head() {
 
 review_gpt_phase_for_preset() {
   case "$1" in
-    completion-specialists | completion-review | specialist-review | prompt-frontend-coverage)
-      printf 'preliminary\n'
-      ;;
     pr-review | pr-deep-review | deep-pr-review | pr-bugs-and-architecture)
       printf 'final\n'
       ;;
@@ -311,7 +307,6 @@ review_gpt_detect_pr_phase() {
   local phase
   local positional_preset_seen=0
   local preset_token
-  local preset_token_count=0
   local preset_value
 
   while (( index < ${#arguments[@]} )); do
@@ -349,118 +344,15 @@ review_gpt_detect_pr_phase() {
     if [[ -n "$preset_value" ]]; then
       while IFS= read -r preset_token; do
         [[ -z "$preset_token" ]] && continue
-        preset_token_count=$((preset_token_count + 1))
         phase="$(review_gpt_phase_for_preset "$preset_token")"
         [[ -z "$phase" ]] && continue
-        if [[ -n "$detected_phase" && "$detected_phase" != "$phase" ]]; then
-          echo "Error: preliminary and final PR ReviewGPT presets cannot run together." >&2
-          return 64
-        fi
         detected_phase="$phase"
       done < <(printf '%s\n' "$preset_value" | tr ',' '\n')
     fi
     index=$((index + 1))
   done
 
-  if [[ "$detected_phase" == "preliminary" ]] \
-    && [[ "$preset_token_count" != "1" ]]; then
-    echo "Error: completion-specialists must run as the only preset so its assembled prompt budget is complete." >&2
-    return 64
-  fi
-
   printf '%s\n' "$detected_phase"
-}
-
-review_gpt_trimmed_prompt_file_bytes() {
-  local prompt_file="$1"
-
-  if [[ "$prompt_file" != /* ]]; then
-    prompt_file="$ROOT_DIR/$prompt_file"
-  fi
-  if [[ ! -f "$prompt_file" ]]; then
-    echo "Error: cannot measure missing completion-specialists prompt file: $1" >&2
-    return 1
-  fi
-  node -e \
-    'const fs = require("node:fs"); process.stdout.write(String(Buffer.byteLength(fs.readFileSync(process.argv[1], "utf8").trimEnd())));' \
-    "$prompt_file"
-}
-
-review_gpt_require_completion_specialists_prompt_budget() {
-  local argument
-  local assembled_bytes=0
-  local part_bytes
-  local part_count=0
-  local pending_prompt_part=""
-  local prompt_file_value
-  local -a prompt_part_bytes
-
-  if ! command -v node >/dev/null 2>&1; then
-    echo "Error: node is required to measure the assembled completion-specialists prompt." >&2
-    return 127
-  fi
-
-  part_bytes="$(
-    review_gpt_trimmed_prompt_file_bytes \
-      "scripts/chatgpt-review-presets/completion-specialists.md"
-  )" || return
-  prompt_part_bytes=("$part_bytes")
-
-  for argument in "$@"; do
-    if [[ -n "$pending_prompt_part" ]]; then
-      if [[ "$pending_prompt_part" == "file" ]]; then
-        part_bytes="$(review_gpt_trimmed_prompt_file_bytes "$argument")" || return
-      else
-        part_bytes="$(printf '%s' "$argument" | LC_ALL=C wc -c | tr -d '[:space:]')"
-      fi
-      prompt_part_bytes+=("$part_bytes")
-      pending_prompt_part=""
-      continue
-    fi
-
-    case "$argument" in
-      --prompt)
-        pending_prompt_part="inline"
-        ;;
-      --prompt=*)
-        part_bytes="$(
-          printf '%s' "${argument#--prompt=}" | LC_ALL=C wc -c | tr -d '[:space:]'
-        )"
-        prompt_part_bytes+=("$part_bytes")
-        ;;
-      --prompt-file | --promptFile)
-        pending_prompt_part="file"
-        ;;
-      --prompt-file=* | --promptFile=*)
-        prompt_file_value="${argument#*=}"
-        part_bytes="$(
-          review_gpt_trimmed_prompt_file_bytes "$prompt_file_value"
-        )" || return
-        prompt_part_bytes+=("$part_bytes")
-        ;;
-    esac
-  done
-
-  if [[ -n "$pending_prompt_part" ]]; then
-    echo "Error: --prompt and --prompt-file require a value." >&2
-    return 64
-  fi
-
-  for part_bytes in "${prompt_part_bytes[@]}"; do
-    if [[ "$part_bytes" == "0" ]]; then
-      continue
-    fi
-    if (( part_count > 0 )); then
-      assembled_bytes=$((assembled_bytes + 2))
-    fi
-    assembled_bytes=$((assembled_bytes + part_bytes))
-    part_count=$((part_count + 1))
-  done
-
-  if (( assembled_bytes > review_gpt_completion_specialists_prompt_max_bytes )); then
-    echo "Error: assembled completion-specialists prompt is ${assembled_bytes} bytes; the canonical budget is ${review_gpt_completion_specialists_prompt_max_bytes}. Keep --prompt to target/head metadata and remove duplicated PR or lens text." >&2
-    return 1
-  fi
 }
 
 review_gpt_run() {
@@ -474,9 +366,6 @@ review_gpt_run() {
     if [[ -n "$explicit_phase" && "$explicit_phase" != "$detected_phase" ]]; then
       echo "Error: REVIEW_GPT_REVIEW_PHASE=$explicit_phase conflicts with the selected $detected_phase PR review preset." >&2
       exit 64
-    fi
-    if [[ "$detected_phase" == "preliminary" ]]; then
-      review_gpt_require_completion_specialists_prompt_budget "$@"
     fi
     if [[ -z "$pr_ref" ]]; then
       if ! command -v gh >/dev/null 2>&1; then
