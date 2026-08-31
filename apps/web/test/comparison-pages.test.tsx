@@ -11,6 +11,7 @@ import {
 import { metadata as comparisonIndexMetadata } from "../app/compare/page";
 import { PublicComparisonTableStudy } from "../app/design/public-comparison-table-study";
 import { ComparisonArticle } from "../src/components/comparisons/comparison-page";
+import { ComparisonDirectory } from "../src/components/comparisons/comparison-directory";
 import {
   comparisonPath,
   COMPARISONS,
@@ -59,6 +60,23 @@ function humanCopy(comparison: (typeof COMPARISONS)[number]): string[] {
 }
 
 describe("comparison catalog", () => {
+  it("keeps every guide browsable while client-only search is disabled in server HTML", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ComparisonDirectory, {
+        comparisons: COMPARISONS,
+      }),
+    );
+    const searchInput = markup.match(/<input[^>]*id="comparison-search"[^>]*>/u)?.[0];
+
+    assert.ok(searchInput, "Comparison directory needs a search input.");
+    assert.match(searchInput, /\sdisabled(?:=""|(?=\s|>))/u);
+    assert.match(searchInput, /placeholder:text-\[#736a58\]/u);
+    assert.equal(
+      (markup.match(/href="\/compare\/murph-vs-/gu) ?? []).length,
+      COMPARISONS.length,
+    );
+  });
+
   it("publishes a substantial, unique, source-backed catalog", () => {
     expect(COMPARISONS.length).toBeGreaterThanOrEqual(60);
 

@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
+import { COMPARISONS } from "../src/lib/comparisons/catalog";
+
 const PAGES = [
   { name: "index", route: "/compare" },
   { name: "whoop", route: "/compare/murph-vs-whoop" },
@@ -29,6 +31,35 @@ async function preparePage(page: Page): Promise<void> {
       route.abort();
     }
   });
+}
+
+function colorChannels(value: string): [number, number, number] {
+  const channels = value.match(/[\d.]+/gu)?.slice(0, 3).map(Number);
+  if (!channels || channels.length !== 3) {
+    throw new Error(`Expected an RGB color, received ${value}.`);
+  }
+  return channels as [number, number, number];
+}
+
+function relativeLuminance([red, green, blue]: [number, number, number]): number {
+  const linearize = (channel: number) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  return 0.2126 * linearize(red)
+    + 0.7152 * linearize(green)
+    + 0.0722 * linearize(blue);
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const foregroundLuminance = relativeLuminance(colorChannels(foreground));
+  const backgroundLuminance = relativeLuminance(colorChannels(background));
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
 async function capturePages({
@@ -105,6 +136,27 @@ async function capturePages({
         const search = page.locator("#comparison-search");
         await expect(directory).toBeVisible();
         await expect(search).toHaveAccessibleName("Find your comparison");
+        await expect(search).toBeEnabled();
+        const searchColors = await search.evaluate((input) => {
+          let paintedBackground = "";
+          let current: Element | null = input;
+          while (current) {
+            const candidate = getComputedStyle(current).backgroundColor;
+            if (candidate !== "rgba(0, 0, 0, 0)" && candidate !== "transparent") {
+              paintedBackground = candidate;
+              break;
+            }
+            current = current.parentElement;
+          }
+          return {
+            background: paintedBackground,
+            placeholder: getComputedStyle(input, "::placeholder").color,
+          };
+        });
+        expect(
+          contrastRatio(searchColors.placeholder, searchColors.background),
+          "search placeholder should meet WCAG AA contrast",
+        ).toBeGreaterThanOrEqual(4.5);
         await directory.screenshot({
           animations: "disabled",
           caret: "initial",
@@ -188,4 +240,35 @@ test("capture comparison library design proof", async ({ browser }) => {
     suffix: "mobile",
     width: 390,
   });
+});
+
+test("comparison directory stays browsable without JavaScript", async ({
+  browser,
+}, testInfo) => {
+  const baseURL = testInfo.project.use.baseURL;
+  if (typeof baseURL !== "string") {
+    throw new Error("Comparison no-JavaScript proof requires a Playwright baseURL.");
+  }
+
+  const context = await browser.newContext({
+    baseURL,
+    javaScriptEnabled: false,
+    viewport: { height: 844, width: 390 },
+  });
+  const page = await context.newPage();
+
+  try {
+    await preparePage(page);
+    const response = await page.goto("/compare", { waitUntil: "load" });
+    expect(response?.status()).toBe(200);
+    await expect(page.locator("#comparison-search")).toBeDisabled();
+    await expect(
+      page.locator('[data-comparison-directory] a[href^="/compare/murph-vs-"]'),
+    ).toHaveCount(COMPARISONS.length);
+    await expect(
+      page.getByRole("navigation", { name: "Comparison categories" }),
+    ).toBeVisible();
+  } finally {
+    await context.close();
+  }
 });

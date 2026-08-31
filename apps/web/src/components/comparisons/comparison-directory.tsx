@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import {
   COMPARISON_CATEGORIES,
@@ -20,11 +20,20 @@ function normalizeSearchValue(value: string) {
   return value.trim().toLowerCase();
 }
 
+const subscribeToHydration = () => () => undefined;
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
+
 export function ComparisonDirectory({
   comparisons,
 }: {
   comparisons: readonly ComparisonDirectoryItem[];
 }) {
+  const isHydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const normalizedQuery = normalizeSearchValue(query);
@@ -76,7 +85,8 @@ export function ComparisonDirectory({
             </svg>
             <input
               autoComplete="off"
-              className="min-w-0 flex-1 bg-transparent font-serif text-[clamp(1.35rem,3vw,2rem)] font-semibold tracking-[-0.025em] text-[#2d3436] outline-none placeholder:text-[#9a927f] [&::-webkit-search-cancel-button]:appearance-none"
+              className="min-w-0 flex-1 bg-transparent font-serif text-[clamp(1.35rem,3vw,2rem)] font-semibold tracking-[-0.025em] text-[#2d3436] outline-none placeholder:text-[#736a58] disabled:cursor-not-allowed [&::-webkit-search-cancel-button]:appearance-none"
+              disabled={!isHydrated}
               id="comparison-search"
               onChange={(event) => setQuery(event.target.value)}
               placeholder="WHOOP, Oura, Apple Health..."
