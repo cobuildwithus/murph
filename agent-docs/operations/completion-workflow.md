@@ -170,6 +170,14 @@ product-decision owners.
    while it runs, do not restart full acceptance solely because the base moved;
    follow the one-rebase direct-push rule in `verification-and-runtime.md`.
 2. Run a scope and shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, any new persisted state is explicitly classified and versioned, and any architecture/API/trust-boundary change is documented or split into an explicit plan. This check owns simplification: delete dead code, cut speculative structure, and collapse needless indirection yourself; there is no separate simplify subagent pass.
+   Run `pnpm complexity:diff` during this check for every PR. Inspect each
+   changed-file hotspot it reports above the threshold and decide whether a
+   smaller behavior-preserving shape is justified. A passing ratchet means the
+   PR did not increase complexity debt or concentrate complexity; it does not
+   prove that an existing hotspot is already well-shaped. Simplify when the
+   current task can do so proportionally, otherwise record the concrete reason
+   in the PR's `Complexity impact` section. Do not split cohesive policy owners,
+   add generic machinery, or change behavior merely to lower the metric.
    During this check, invoke `$write-changelog` and classify the change. Add a
    same-PR changelog item for every member-visible outcome, or record the
    concrete internal-only reason that makes the changelog not applicable. Keep
@@ -257,7 +265,7 @@ product-decision owners.
    Inspect each selected image at native resolution, keep it ignored and
    redacted under `.artifacts/review-gpt/`, and remove a one-off capture spec
    after proof unless it adds durable regression value.
-7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the outcome, Product UX result, direct evidence, non-obvious surfaces, architecture and reuse, hot reply path impact, provider-input impact, deployment and changelog decisions, the change-shape breakdown, and applicable design proof required below.
+7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the outcome, Product UX result, direct evidence, non-obvious surfaces, architecture and reuse, complexity impact, hot reply path impact, provider-input impact, deployment and changelog decisions, the change-shape breakdown, and applicable design proof required below.
 8. Prepare exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant Product UX, prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not four audits.
 9. When the final ReviewGPT gate is selected, establish its immutable round-one baseline on the same exact pushed candidate head and launch the preliminary pass and final round 1 concurrently. When the final gate does not apply, launch the preliminary pass by itself. The candidate must already have focused local proof and a parent candidate review, but preliminary findings, plan closure, and the parent's final review do not need to finish before both ReviewGPT jobs start. Run both jobs concurrently with CI and keep their outputs and state separate.
 10. Triage every finding from both ReviewGPT stages locally, then complete `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition Boundary for every substantive specialist result and final `FINDINGS` result. Report the model result and the parent's evidence-backed accept/reject judgment for every finding; rejected findings require no fix or reviewer withdrawal, and the user may override that judgment. After a preliminary specialist report, continue with accepted remediation within the existing task authority without ending the turn or asking for separate user permission. A final `ROUND_OUTCOME: FINDINGS` still pauses all candidate mutation until the user resumes, including pending specialist remediation, unless that section's behavior-preserving `Complexity Collapse` or `Non-Production Remediation` exception applies. A validated final `ROUND_OUTCOME: PASS` proceeds without a user-resume pause. Implement accepted findings in the parent, rerun focused proof, commit, and push one combined corrected candidate. When accepted Product UX remediation materially changes a product-owned dimension, the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to that corrected pushed head and updated direct journey evidence, then record the refreshed product purpose verdict. This is a bounded parent revalidation, not another subagent or ReviewGPT invocation. Do not rerun the preliminary pass after a substantive result; use the final gate's next substantive round to verify all behavior-bearing remediation, including specialist-driven fixes. The final-gate packager chooses a fresh full audit for a sensitive, undeclared, or large current PR and a same-thread correction delta only for an explicitly routine PR below both size cutoffs.
@@ -311,6 +319,16 @@ Every PR includes:
   explain which existing contract is sufficient instead of using a bare
   placeholder. The pull-request evidence guard validates this section on every
   PR.
+- **Complexity impact.** Run `pnpm complexity:diff` against the PR base and
+  complete three concrete bullets labeled `Guard`, `Hotspots`, and `Agent
+  judgment`. `Guard` records the passing command, or a concrete not-applicable
+  reason only when no authored JavaScript or TypeScript changed. `Hotspots`
+  names changed-file functions above 20 and their disposition, or explains that
+  none remain. `Agent judgment` states whether further behavior-preserving
+  simplification is justified. The guard ratchets per-file debt above 20 and
+  per-function maximum complexity; unchanged legacy debt does not fail an
+  unrelated PR. Exact-head CI reruns the comparison, and the pull-request
+  evidence guard validates this section.
 - **Hot reply path impact.** State whether the PR changes the `Foreground Reply
   Critical Path` defined in `docs/contracts/00-invariants.md`: durable
   acceptance of a current conversation message through provider start and
