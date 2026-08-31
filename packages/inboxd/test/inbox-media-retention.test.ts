@@ -7,8 +7,10 @@ import { test, vi } from "vitest";
 import {
   appendJsonlRecord,
   archiveClosedEventLedgerShards,
+  importDocument,
   initializeVault,
   readJsonlRecords,
+  recordInboxDocumentDefaultPromotion,
   validateVault,
 } from "@murphai/core";
 import {
@@ -18,6 +20,7 @@ import {
   persistCanonicalInboxCapture,
   rebuildRuntimeFromVault,
   runInboxMediaRetention,
+  runInboxTextRetention,
 } from "../src/index.ts";
 import { listTransientInboxVideoStoredPaths } from "../src/retention.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
@@ -286,6 +289,593 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
   } finally {
     runtime.close();
   }
+});
+
+test("runInboxMediaRetention expires only old documents with an exact default promotion", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-document-retention");
+  const occurredAt = "2026-06-01T00:00:00.000Z";
+  const now = "2026-07-05T00:00:00.000Z";
+  await initializeVault({ vaultRoot, createdAt: occurredAt });
+
+  const promotedBytes = Buffer.from("%PDF-1.7\nsynthetic promoted document\n");
+  const unpromotedBytes = Buffer.from("%PDF-1.7\nsynthetic unpromoted document\n");
+  const promotedCapture = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_promoted_document",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2XA",
+    storedAt: occurredAt,
+    input: {
+      source: "telegram",
+      externalId: "msg-promoted-document",
+      thread: {
+        id: "thread-promoted-document",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt,
+      receivedAt: "2026-06-01T00:00:05.000Z",
+      text: "Promoted document context",
+      attachments: [
+        {
+          kind: "document",
+          mime: "application/pdf",
+          fileName: "promoted.pdf",
+          data: promotedBytes,
+        },
+        {
+          kind: "document",
+          mime: "application/pdf",
+          fileName: "unpromoted.pdf",
+          data: unpromotedBytes,
+        },
+      ],
+      raw: {},
+    },
+  });
+  const promotedPath = promotedCapture.stored.attachments[0]?.storedPath ?? "";
+  const unpromotedPath = promotedCapture.stored.attachments[1]?.storedPath ?? "";
+  assert.ok(promotedPath);
+  assert.ok(unpromotedPath);
+  const promotedDocument = await importDocument({
+    vaultRoot,
+    sourcePath: path.join(vaultRoot, promotedPath),
+    occurredAt,
+    title: "promoted.pdf",
+    note: "Promoted document context",
+    source: "import",
+  });
+  await recordInboxDocumentDefaultPromotion({
+    attachmentId: promotedCapture.stored.attachments[0]!.attachmentId,
+    captureId: promotedCapture.stored.captureId,
+    documentId: promotedDocument.documentId,
+    vaultRoot,
+  });
+
+  const mismatchedCapture = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_mismatched_document",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2XB",
+    storedAt: occurredAt,
+    input: {
+      source: "telegram",
+      externalId: "msg-mismatched-document",
+      thread: {
+        id: "thread-mismatched-document",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt,
+      receivedAt: "2026-06-01T00:00:05.000Z",
+      text: "Promoted document context",
+      attachments: [
+        {
+          kind: "document",
+          mime: "application/pdf",
+          fileName: "promoted.pdf",
+          data: promotedBytes,
+        },
+      ],
+      raw: {},
+    },
+  });
+  const mismatchedPath = mismatchedCapture.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(mismatchedPath);
+
+  const first = await runInboxMediaRetention({ now, vaultRoot });
+  assert.equal(first.expiredAttachments, 1);
+  assert.equal(first.hasMoreEligibleAttachments, false);
+  assert.deepEqual(first.records.map((record) => record.storedPath), [promotedPath]);
+  assert.equal(first.records[0]?.schemaVersion, "murph.inbox-attachment-retention.v2");
+  assert.equal(first.records[0]?.kind, "document");
+  assert.equal(first.records[0]?.reason, "inbox_document_copy_retention");
+  assert.equal(first.records[0]?.byteSize, promotedBytes.byteLength);
+  assert.equal(await fileExists(vaultRoot, promotedPath), false);
+  assert.equal(await fileExists(vaultRoot, unpromotedPath), true);
+  assert.equal(await fileExists(vaultRoot, mismatchedPath), true);
+
+  const second = await runInboxMediaRetention({ now, vaultRoot });
+  assert.equal(second.expiredAttachments, 0);
+  assert.equal(second.hasMoreEligibleAttachments, false);
+  assert.equal(await fileExists(vaultRoot, mismatchedPath), true);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+    const retained = runtime.getCapture(promotedCapture.stored.captureId);
+    assert.ok(retained);
+    assert.equal(retained.attachments[0]?.storedPath, null);
+    assert.equal(retained.attachments[0]?.contentStatus, "retention_expired");
+    assert.equal(retained.attachments[1]?.storedPath, unpromotedPath);
+    assert.equal(retained.attachments[1]?.contentStatus, "available");
+  } finally {
+    runtime.close();
+  }
+});
+
+test("runInboxMediaRetention retires a correlated document after out-of-line text is retired", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-document-retention-redacted-text");
+  const receivedAt = "2026-06-01T00:00:00.000Z";
+  const recordedAt = "2026-06-02T00:00:00.000Z";
+  const documentBytes = Buffer.from("%PDF-1.7\nsynthetic redacted-text document\n");
+  const fullText = `full document context ${"x".repeat(20_001)}`;
+  await initializeVault({ vaultRoot, createdAt: receivedAt });
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_redacted_document",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2XK",
+    storedAt: recordedAt,
+    input: {
+      source: "telegram",
+      externalId: "msg-redacted-document",
+      thread: { id: "thread-redacted-document", isDirect: true },
+      actor: { isSelf: false },
+      occurredAt: recordedAt,
+      receivedAt,
+      text: fullText,
+      attachments: [{
+        kind: "document",
+        mime: "application/pdf",
+        fileName: "redacted.pdf",
+        data: documentBytes,
+      }],
+      raw: {},
+    },
+  });
+  const inboxPath = persisted.stored.attachments[0]?.storedPath ?? "";
+  const textPath = "textContent" in persisted.capture.record
+    ? persisted.capture.record.textContent?.storedPath ?? ""
+    : "";
+  assert.ok(inboxPath);
+  assert.ok(textPath);
+  const imported = await importDocument({
+    vaultRoot,
+    sourcePath: path.join(vaultRoot, inboxPath),
+    occurredAt: recordedAt,
+    title: "redacted.pdf",
+    note: fullText.slice(0, 4_000),
+    source: "import",
+  });
+  await recordInboxDocumentDefaultPromotion({
+    attachmentId: persisted.stored.attachments[0]!.attachmentId,
+    captureId: persisted.stored.captureId,
+    documentId: imported.documentId,
+    vaultRoot,
+  });
+
+  const earlyMedia = await runInboxMediaRetention({
+    now: "2026-06-15T00:00:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(earlyMedia.expiredAttachments, 0);
+  const textRetention = await runInboxTextRetention({
+    now: "2026-06-15T00:00:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(textRetention.expiredCaptures, 1);
+  assert.equal(await fileExists(vaultRoot, textPath), false);
+  assert.equal(await fileExists(vaultRoot, inboxPath), true);
+
+  const documentRetention = await runInboxMediaRetention({
+    now: "2026-06-16T00:00:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(documentRetention.expiredAttachments, 1);
+  assert.equal(await fileExists(vaultRoot, inboxPath), false);
+  assert.equal(await fileExists(vaultRoot, imported.raw.relativePath), true);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
+test("runInboxMediaRetention continues a bounded correlated capture after text retirement", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-document-retention-bounded-redacted");
+  const occurredAt = "2026-06-01T00:00:00.000Z";
+  const now = "2026-06-15T00:00:00.000Z";
+  await initializeVault({ vaultRoot, createdAt: occurredAt });
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_bounded_redacted",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2XJ",
+    storedAt: occurredAt,
+    input: {
+      source: "telegram",
+      externalId: "msg-bounded-redacted",
+      thread: { id: "thread-bounded-redacted", isDirect: true },
+      actor: { isSelf: false },
+      occurredAt,
+      receivedAt: occurredAt,
+      text: "Context shared by two promoted documents",
+      attachments: [1, 2].map((index) => ({
+        kind: "document" as const,
+        mime: "application/pdf",
+        fileName: `bounded-redacted-${index}.pdf`,
+        data: Buffer.from(`%PDF-1.7\nbounded redacted ${index}\n`),
+      })),
+      raw: {},
+    },
+  });
+  const inboxPaths = persisted.stored.attachments.map((attachment) => attachment.storedPath ?? "");
+  assert.equal(inboxPaths.every(Boolean), true);
+  for (const attachment of persisted.stored.attachments) {
+    const imported = await importDocument({
+      vaultRoot,
+      sourcePath: path.join(vaultRoot, attachment.storedPath ?? ""),
+      occurredAt,
+      title: attachment.fileName ?? undefined,
+      note: "Context shared by two promoted documents",
+      source: "import",
+    });
+    await recordInboxDocumentDefaultPromotion({
+      attachmentId: attachment.attachmentId,
+      captureId: persisted.stored.captureId,
+      documentId: imported.documentId,
+      vaultRoot,
+    });
+  }
+
+  const first = await runInboxMediaRetention({ maxAttachments: 1, now, vaultRoot });
+  assert.equal(first.expiredAttachments, 1);
+  assert.equal(first.hasMoreEligibleAttachments, true);
+  assert.equal(await fileExists(vaultRoot, inboxPaths[0] ?? ""), false);
+  assert.equal(await fileExists(vaultRoot, inboxPaths[1] ?? ""), true);
+
+  const textRetention = await runInboxTextRetention({ now, vaultRoot });
+  assert.equal(textRetention.expiredCaptures, 1);
+  const second = await runInboxMediaRetention({ maxAttachments: 1, now, vaultRoot });
+  assert.equal(second.expiredAttachments, 1);
+  assert.equal(second.hasMoreEligibleAttachments, false);
+  assert.equal(await fileExists(vaultRoot, inboxPaths[1] ?? ""), false);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
+test("runInboxMediaRetention skips an earlier mismatch and accepts any matching exact owner", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-document-retention-multiple-owners");
+  const occurredAt = "2026-06-01T00:00:00.000Z";
+  const documentBytes = Buffer.from("%PDF-1.7\nsynthetic shared document\n");
+  await initializeVault({ vaultRoot, createdAt: occurredAt });
+
+  const mismatched = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_mismatch_first",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2XD",
+    storedAt: occurredAt,
+    input: {
+      source: "telegram",
+      externalId: "msg-mismatch-first",
+      thread: { id: "thread-mismatch-first", isDirect: true },
+      actor: { isSelf: false },
+      occurredAt,
+      text: "Mismatched context",
+      attachments: [{
+        kind: "document",
+        mime: "application/pdf",
+        fileName: "mismatch.pdf",
+        data: documentBytes,
+      }],
+      raw: {},
+    },
+  });
+  const matching = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_matching_second",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2XE",
+    storedAt: occurredAt,
+    input: {
+      source: "telegram",
+      externalId: "msg-matching-second",
+      thread: { id: "thread-matching-second", isDirect: true },
+      actor: { isSelf: false },
+      occurredAt,
+      text: "Matching context",
+      attachments: [{
+        kind: "document",
+        mime: "application/pdf",
+        fileName: "matching.pdf",
+        data: documentBytes,
+      }],
+      raw: {},
+    },
+  });
+  const mismatchedPath = mismatched.stored.attachments[0]?.storedPath ?? "";
+  const matchingPath = matching.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(mismatchedPath);
+  assert.ok(matchingPath);
+
+  await importDocument({
+    vaultRoot,
+    sourcePath: path.join(vaultRoot, matchingPath),
+    occurredAt,
+    title: "another-owner.pdf",
+    note: "Another canonical owner",
+    source: "import",
+  });
+  const matchingDocument = await importDocument({
+    vaultRoot,
+    sourcePath: path.join(vaultRoot, matchingPath),
+    occurredAt,
+    title: "matching.pdf",
+    note: "Matching context",
+    source: "import",
+  });
+  await recordInboxDocumentDefaultPromotion({
+    attachmentId: matching.stored.attachments[0]!.attachmentId,
+    captureId: matching.stored.captureId,
+    documentId: matchingDocument.documentId,
+    vaultRoot,
+  });
+
+  const result = await runInboxMediaRetention({
+    maxAttachments: 1,
+    now: "2026-07-05T00:00:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(result.expiredAttachments, 1);
+  assert.deepEqual(result.records.map((record) => record.storedPath), [matchingPath]);
+  assert.equal(await fileExists(vaultRoot, mismatchedPath), true);
+  assert.equal(await fileExists(vaultRoot, matchingPath), false);
+});
+
+test("runInboxMediaRetention materializes exact document evidence before deleting the inbox copy", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-document-retention-materialize");
+  const occurredAt = "2026-06-01T00:00:00.000Z";
+  const now = "2026-07-05T00:00:00.000Z";
+  await initializeVault({ vaultRoot, createdAt: occurredAt });
+  const documentBytes = Buffer.from("%PDF-1.7\nsynthetic lazy document\n");
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_lazy_document",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2XC",
+    storedAt: occurredAt,
+    input: {
+      source: "telegram",
+      externalId: "msg-lazy-document",
+      thread: {
+        id: "thread-lazy-document",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt,
+      text: "Lazy document context",
+      attachments: [
+        {
+          kind: "document",
+          mime: "application/pdf",
+          fileName: "lazy.pdf",
+          data: documentBytes,
+        },
+      ],
+      raw: {},
+    },
+  });
+  const inboxPath = persisted.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(inboxPath);
+  const imported = await importDocument({
+    vaultRoot,
+    sourcePath: path.join(vaultRoot, inboxPath),
+    occurredAt,
+    title: "lazy.pdf",
+    note: "Lazy document context",
+    source: "import",
+  });
+  await recordInboxDocumentDefaultPromotion({
+    attachmentId: persisted.stored.attachments[0]!.attachmentId,
+    captureId: persisted.stored.captureId,
+    documentId: imported.documentId,
+    vaultRoot,
+  });
+
+  const materializedBytes = new Map<string, Buffer>();
+  for (const relativePath of [inboxPath, imported.manifestPath, imported.raw.relativePath]) {
+    materializedBytes.set(relativePath, await fs.readFile(path.join(vaultRoot, relativePath)));
+    await fs.unlink(path.join(vaultRoot, relativePath));
+  }
+
+  const materializedPaths: string[][] = [];
+  const missingResult = await runInboxMediaRetention({
+    materializeCandidatePaths: async (storedPaths) => {
+      materializedPaths.push([...storedPaths]);
+      return { missingStoredPaths: [inboxPath, imported.manifestPath] };
+    },
+    now,
+    vaultRoot,
+  });
+  assert.equal(missingResult.expiredAttachments, 0);
+  assert.equal(missingResult.records.length, 0);
+
+  const result = await runInboxMediaRetention({
+    materializeCandidatePaths: async (storedPaths) => {
+      materializedPaths.push([...storedPaths]);
+      for (const storedPath of storedPaths) {
+        const bytes = materializedBytes.get(storedPath);
+        assert.ok(bytes);
+        await writeVaultBytes(vaultRoot, storedPath, bytes);
+      }
+    },
+    now,
+    vaultRoot,
+  });
+
+  assert.equal(materializedPaths.length, 2);
+  assert.deepEqual(
+    new Set(materializedPaths[1]),
+    new Set([inboxPath, imported.manifestPath, imported.raw.relativePath]),
+  );
+  assert.equal(result.expiredAttachments, 1);
+  assert.equal(await fileExists(vaultRoot, inboxPath), false);
+  assert.equal(await fileExists(vaultRoot, imported.manifestPath), true);
+  assert.equal(await fileExists(vaultRoot, imported.raw.relativePath), true);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
+test("runInboxMediaRetention bounds lazy promoted documents to one complete proof per pass", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-document-retention-bounded-lazy");
+  const occurredAt = "2026-06-01T00:00:00.000Z";
+  const now = "2026-07-05T00:00:00.000Z";
+  await initializeVault({ vaultRoot, createdAt: occurredAt });
+
+  const materializedBytes = new Map<string, Buffer>();
+  const proofPaths: string[][] = [];
+  const inboxPaths: string[] = [];
+  for (const index of [1, 2]) {
+    const documentBytes = Buffer.from(`%PDF-1.7\nsynthetic bounded lazy document ${index}\n`);
+    const persisted = await persistCanonicalInboxCapture({
+      vaultRoot,
+      captureId: `cap_retention_bounded_lazy_${index}`,
+      eventId: index === 1
+        ? "evt_01HQW7K0M9N8P7Q6R5S4T3V2XG"
+        : "evt_01HQW7K0M9N8P7Q6R5S4T3V2XH",
+      storedAt: occurredAt,
+      input: {
+        source: "telegram",
+        externalId: `msg-bounded-lazy-${index}`,
+        thread: { id: "thread-bounded-lazy", isDirect: true },
+        actor: { isSelf: false },
+        occurredAt,
+        text: `Bounded lazy document ${index}`,
+        attachments: [{
+          kind: "document",
+          mime: "application/pdf",
+          fileName: `bounded-lazy-${index}.pdf`,
+          data: documentBytes,
+        }],
+        raw: {},
+      },
+    });
+    const inboxPath = persisted.stored.attachments[0]?.storedPath ?? "";
+    assert.ok(inboxPath);
+    const imported = await importDocument({
+      vaultRoot,
+      sourcePath: path.join(vaultRoot, inboxPath),
+      occurredAt,
+      title: `bounded-lazy-${index}.pdf`,
+      note: `Bounded lazy document ${index}`,
+      source: "import",
+    });
+    await recordInboxDocumentDefaultPromotion({
+      attachmentId: persisted.stored.attachments[0]!.attachmentId,
+      captureId: persisted.stored.captureId,
+      documentId: imported.documentId,
+      vaultRoot,
+    });
+    const paths = [inboxPath, imported.manifestPath, imported.raw.relativePath];
+    inboxPaths.push(inboxPath);
+    proofPaths.push(paths);
+    for (const relativePath of paths) {
+      materializedBytes.set(relativePath, await fs.readFile(path.join(vaultRoot, relativePath)));
+      await fs.unlink(path.join(vaultRoot, relativePath));
+    }
+  }
+
+  const requestedPaths: string[][] = [];
+  const runPass = async () => runInboxMediaRetention({
+    materializeCandidatePaths: async (storedPaths) => {
+      requestedPaths.push([...storedPaths]);
+      for (const storedPath of storedPaths) {
+        const bytes = materializedBytes.get(storedPath);
+        assert.ok(bytes);
+        await writeVaultBytes(vaultRoot, storedPath, bytes);
+      }
+    },
+    maxAttachments: 1,
+    now,
+    vaultRoot,
+  });
+
+  const first = await runPass();
+  assert.equal(first.expiredAttachments, 1);
+  assert.equal(first.hasMoreEligibleAttachments, true);
+  assert.deepEqual(new Set(requestedPaths[0]), new Set(proofPaths[0]));
+  assert.deepEqual(first.records.map((record) => record.storedPath), [inboxPaths[0]]);
+
+  const second = await runPass();
+  assert.equal(second.expiredAttachments, 1);
+  assert.equal(second.hasMoreEligibleAttachments, false);
+  assert.deepEqual(new Set(requestedPaths[1]), new Set(proofPaths[1]));
+  assert.deepEqual(second.records.map((record) => record.storedPath), [inboxPaths[1]]);
+  assert.equal(requestedPaths.length, 2);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
+test("runInboxMediaRetention keeps the inbox document when canonical proof is damaged", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-document-retention-damaged-proof");
+  const occurredAt = "2026-06-01T00:00:00.000Z";
+  const documentBytes = Buffer.from("%PDF-1.7\nsynthetic damaged proof\n");
+  await initializeVault({ vaultRoot, createdAt: occurredAt });
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_retention_damaged_document",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2XF",
+    storedAt: occurredAt,
+    input: {
+      source: "telegram",
+      externalId: "msg-damaged-document",
+      thread: { id: "thread-damaged-document", isDirect: true },
+      actor: { isSelf: false },
+      occurredAt,
+      text: "Damaged proof context",
+      attachments: [{
+        kind: "document",
+        mime: "application/pdf",
+        fileName: "damaged.pdf",
+        data: documentBytes,
+      }],
+      raw: {},
+    },
+  });
+  const inboxPath = persisted.stored.attachments[0]?.storedPath ?? "";
+  assert.ok(inboxPath);
+  const imported = await importDocument({
+    vaultRoot,
+    sourcePath: path.join(vaultRoot, inboxPath),
+    occurredAt,
+    title: "damaged.pdf",
+    note: "Damaged proof context",
+    source: "import",
+  });
+  await recordInboxDocumentDefaultPromotion({
+    attachmentId: persisted.stored.attachments[0]!.attachmentId,
+    captureId: persisted.stored.captureId,
+    documentId: imported.documentId,
+    vaultRoot,
+  });
+  await fs.unlink(path.join(vaultRoot, imported.manifestPath));
+
+  const result = await runInboxMediaRetention({
+    now: "2026-07-05T00:00:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(result.expiredAttachments, 0);
+  assert.equal(result.records.length, 0);
+  assert.equal(await fileExists(vaultRoot, inboxPath), true);
 });
 
 test("runInboxMediaRetention applies the cutoff and exact path protections", async () => {
@@ -1319,7 +1909,7 @@ test("runInboxMediaRetention bounds missing legacy materialization and tombstone
   assert.equal(thirdPass.records[0]?.storedPath, paths[2]);
 });
 
-test("runInboxMediaRetention finishes deleting committed tombstones after wake aborts", async () => {
+test("runInboxMediaRetention finishes guarded deletes after wake aborts", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-delete-abort");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const imageBytes = await createPngBytes();
@@ -1364,14 +1954,21 @@ test("runInboxMediaRetention finishes deleting committed tombstones after wake a
   assert.ok(secondPath);
 
   const controller = new AbortController();
-  const originalUnlink = fs.unlink.bind(fs);
-  let unlinkCount = 0;
-  const unlinkSpy = vi.spyOn(fs, "unlink").mockImplementation(async (...args) => {
-    unlinkCount += 1;
-    if (unlinkCount === 1) {
-      controller.abort(new Error("foreground wake"));
+  const absoluteAttachmentPaths = new Set([
+    path.join(vaultRoot, firstPath),
+    path.join(vaultRoot, secondPath),
+  ]);
+  const originalRename = fs.rename.bind(fs);
+  let guardedDeleteCount = 0;
+  const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (...args) => {
+    const sourcePath = String(args[0]);
+    if (absoluteAttachmentPaths.has(sourcePath)) {
+      guardedDeleteCount += 1;
+      if (guardedDeleteCount === 1) {
+        controller.abort(new Error("foreground wake"));
+      }
     }
-    await originalUnlink(...args);
+    await originalRename(...args);
   });
 
   try {
@@ -1383,12 +1980,12 @@ test("runInboxMediaRetention finishes deleting committed tombstones after wake a
 
     assert.equal(controller.signal.aborted, true);
     assert.equal(result.expiredAttachments, 2);
-    assert.equal(unlinkCount, 2);
+    assert.equal(guardedDeleteCount, 2);
     assert.equal(await fileExists(vaultRoot, firstPath), false);
     assert.equal(await fileExists(vaultRoot, secondPath), false);
     assert.equal((await validateVault({ vaultRoot })).valid, true);
   } finally {
-    unlinkSpy.mockRestore();
+    renameSpy.mockRestore();
   }
 });
 

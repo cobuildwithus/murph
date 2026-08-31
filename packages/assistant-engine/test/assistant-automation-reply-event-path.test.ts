@@ -6152,6 +6152,7 @@ function createInboxServices(
     showAttachmentStatus: unreachable,
     show: unreachable,
     search: unreachable,
+    preserveDocumentAttachment: unreachable,
     preserveDocumentAttachments: unreachable,
     promoteMeal: unreachable,
     promoteDocument: unreachable,
