@@ -1,6 +1,6 @@
 # Codex cold restore lifecycle
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-30
 
@@ -54,3 +54,4 @@ Updated: 2026-08-30
 
 - Commands to run: focused assistant-runtime/Cloudflare Vitest coverage, affected package typechecks, production-image cold-restore journey, PR checks, and post-deploy runtime/latency queries.
 - Expected outcomes: teardown precedes cold filesystem replacement and warm sanitization, warm reuse skips R2 restore, preserved rollout resumes on a freshly initialized Codex process, and production shows no matching runtime database error or delayed reply backlog.
+Completed: 2026-08-30
