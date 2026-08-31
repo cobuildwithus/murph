@@ -793,7 +793,11 @@ describe.skipIf(!runPostgresProof)(
           orchestration: {
             runtimeInvocationOrchestrationAttemptId:
               "web-ingress-123e4567-e89b-42d3-a456-426614174000",
+            shellPrewarmExpectedOrchestrationAttemptId:
+              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
             shellPrewarmFirstHintAtEpochMs: 1_775_908_800_001,
+            shellPrewarmOrchestrationAttemptId:
+              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
             shellPrewarmOutcome: "start_issued_warm",
             shellPrewarmSource: "linq-typing-started",
             triggeredByWebDirect: true,
@@ -803,6 +807,12 @@ describe.skipIf(!runPostgresProof)(
           schemaVersion: 1,
         });
         expect(requireJsonRecord(providerRows[1]?.phaseBreakdownJson)).toEqual({
+          orchestration: {
+            shellPrewarmExpectedOrchestrationAttemptId:
+              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+            shellPrewarmOrchestrationAttemptId:
+              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+          },
           preProvider: { outboxScanPerformed: true },
           provider: { sessionResolveMs: 10 },
           schemaVersion: 1,
@@ -906,9 +916,8 @@ describe.skipIf(!runPostgresProof)(
           where: { assistantInputId: { in: assistantInputIds } },
         });
         for (const row of ordinaryRows) {
-          const assistant = requireJsonRecord(
-            requireJsonRecord(row.phaseBreakdownJson).assistant,
-          );
+          const phaseBreakdown = requireJsonRecord(row.phaseBreakdownJson);
+          const assistant = requireJsonRecord(phaseBreakdown.assistant);
           expect(assistant).toMatchObject({
             firstCodexOutputObservedAtEpochMs: firstOutputAt.getTime(),
             linqTypingAcceptedAtEpochMs: new Date(
@@ -918,6 +927,12 @@ describe.skipIf(!runPostgresProof)(
               "2026-08-09T12:00:50.000Z",
             ).getTime(),
             progressUpdateAcceptedAtEpochMs: earliestProgressAt.getTime(),
+          });
+          expect(requireJsonRecord(phaseBreakdown.orchestration)).toMatchObject({
+            shellPrewarmExpectedOrchestrationAttemptId:
+              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+            shellPrewarmOrchestrationAttemptId:
+              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
           });
         }
 
@@ -1250,7 +1265,11 @@ async function createLatencySetWriteFixture(
               directEnsureOrchestrationAttemptId: "wrong-type",
               runtimeInvocationOrchestrationAttemptId:
                 "web-ingress-123e4567-e89b-42d3-a456-426614174000",
+              shellPrewarmExpectedOrchestrationAttemptId:
+                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
               shellPrewarmFirstHintAtEpochMs: 1_775_908_800_001,
+              shellPrewarmOrchestrationAttemptId:
+                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
               shellPrewarmOutcome: "start_issued_warm",
               shellPrewarmSource: "linq-typing-started",
               triggeredByWebDirect: true,
@@ -1265,7 +1284,13 @@ async function createLatencySetWriteFixture(
           }
         : index === 1
           ? {
-              orchestration: { shellPrewarmOutcome: "wrong-type" },
+              orchestration: {
+                shellPrewarmExpectedOrchestrationAttemptId:
+                  "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+                shellPrewarmOrchestrationAttemptId:
+                  "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+                shellPrewarmOutcome: "wrong-type",
+              },
               schemaVersion: 1,
             }
           : undefined,
