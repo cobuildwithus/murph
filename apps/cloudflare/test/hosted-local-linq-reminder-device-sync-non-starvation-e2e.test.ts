@@ -311,10 +311,6 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         observationTimeoutMs,
         "recurring reminder provider request",
       );
-      await expectPendingDirtyResourceCount(
-        seed.connectionId,
-        firstPassRemainingCount,
-      );
       expect(countReminderProviderRequestsSince(providerRequestBaseline)).toBe(1);
       expect(activeLinqStub.countObservedSends(
         reminderPath,

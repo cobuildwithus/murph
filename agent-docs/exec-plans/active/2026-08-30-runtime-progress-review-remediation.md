@@ -16,6 +16,9 @@ Updated: 2026-08-30
   default-owned mailbox wake from one local-state read.
 - Temporal retains unsuccessful system retry ownership in the existing
   progress backoff before any interruptible return or wait.
+- A persisted future device-sync deadline preempts a closed progress fuse once,
+  survives continue-as-new, follows canonical reschedules, and re-arms after
+  the admitted pass.
 - A facts-only reconciliation signal cannot duplicate an already-accepted
   default pass across continue-as-new, while real mailbox/provider signals
   retain their existing prompt handoff behavior.
@@ -100,6 +103,15 @@ Updated: 2026-08-30
 - Bound a retained accepted default owner by its recommended recheck horizon;
   reconciliation failure preserves ownership only while that horizon remains
   in the future.
+- Treat the third integration run's remaining non-starvation timeout as two
+  separate issues: the public scenario held the runtime while waiting for a
+  post-checkpoint dirty acknowledgement, and the private progress fuse slept
+  past its own earlier canonical device-sync deadline.
+- Arm that future canonical device deadline inside the existing persisted
+  progress backoff without shortening the underlying fuse. Update or clear the
+  arm when reconciliation reschedules or removes the wake, consume it once at
+  maturity, and let the accepted or unsuccessful result re-arm the ordinary
+  backoff.
 
 ## Verification
 

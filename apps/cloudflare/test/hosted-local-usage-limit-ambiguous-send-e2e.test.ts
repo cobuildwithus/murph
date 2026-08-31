@@ -855,7 +855,10 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       handoffOwnerUserId,
     );
     expect(privateCompleted.lastErrorCode ?? null).toBeNull();
-    await requireScenario().waitForHostedCompletion(containerMemberId);
+    const containerCompleted = await requireScenario().waitForHostedIdle(
+      containerMemberId,
+    );
+    expect(containerCompleted.lastErrorCode ?? null).toBeNull();
 
     const handoffProviderRequests = findAssistantResponseRequestsContainingAll([
       handoffContext,
