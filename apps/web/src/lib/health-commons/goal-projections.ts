@@ -127,6 +127,7 @@ function toGoalIndexEntryModel(
     category: entry.category,
     goalPhrase: entry.goalPhrase,
     key: entry.key,
+    outcomeKind: entry.outcomeKind,
     parentGoalKey: entry.parentGoalKey,
     routeId: entry.routeId,
     startPrompt: entry.startPrompt,

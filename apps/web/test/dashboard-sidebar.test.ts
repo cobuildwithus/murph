@@ -223,16 +223,18 @@ test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {
   );
 });
 
-test("Sidebar renders an active Goals tab for public goal guides", () => {
+test("Sidebar keeps public Goal guides out of authenticated dashboard navigation", () => {
   mocks.usePathname.mockReturnValue("/goals/lower-resting-heart-rate");
 
-  const markup = renderToStaticMarkup(createElement(Sidebar));
+  const markup = renderToStaticMarkup(createElement(Sidebar, {
+    initialAuth: {
+      authenticated: true,
+      label: null,
+    },
+  }));
 
-  assert.match(markup, /href="\/goals"/);
-  assert.match(
-    markup,
-    /data-active="true">\s*<a[^>]*href="\/goals"[^>]*>[\s\S]*Goals<\/a>/,
-  );
+  assert.doesNotMatch(markup, /href="\/goals"/);
+  assert.doesNotMatch(markup, />Goals<\/a>/);
 });
 
 test("Sidebar does not render research-only Age navigation", () => {

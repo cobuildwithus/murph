@@ -26,6 +26,7 @@ Seek medical care for a sudden change with concerning symptoms.
   goalPhrase: "lower my resting heart rate",
   indexable: true,
   key: "goal_template:lower-resting-heart-rate",
+  outcomeKind: "biomarker",
   parentGoalKey: null,
   routeId: "lower-resting-heart-rate",
   startPrompt: "Hey Murph, help me lower my resting heart rate.",
@@ -38,6 +39,7 @@ const fixtureChild: GoalIndexEntryModel = {
   category: "biomarkers",
   goalPhrase: "improve my overnight resting heart rate",
   key: "goal_template:overnight-resting-heart-rate",
+  outcomeKind: "biomarker",
   parentGoalKey: fixtureGoal.key,
   routeId: "improve-overnight-resting-heart-rate",
   startPrompt: "Hey Murph, help me improve my overnight resting heart rate.",
@@ -46,7 +48,7 @@ const fixtureChild: GoalIndexEntryModel = {
 };
 
 const mocks = vi.hoisted(() => ({
-  fetchHeroContactInfo: vi.fn(),
+  getHostedMurphContactContext: vi.fn(),
   listHealthCommonsGoalRouteParams: vi.fn(),
   listHealthCommonsGoalsByCategory: vi.fn(),
   notFound: vi.fn(() => {
@@ -55,7 +57,7 @@ const mocks = vi.hoisted(() => ({
   permanentRedirect: vi.fn((href: string) => {
     throw new Error(`NEXT_REDIRECT:${href}`);
   }),
-  resolvePublicGoalContactOptions: vi.fn(),
+  resolveGoalContactOption: vi.fn(),
   resolveHealthCommonsGoalPage: vi.fn(),
 }));
 
@@ -64,20 +66,20 @@ vi.mock("next/navigation", () => ({
   permanentRedirect: mocks.permanentRedirect,
 }));
 
-vi.mock("@/src/lib/hero-contact-info", () => ({
-  fetchHeroContactInfo: mocks.fetchHeroContactInfo,
+vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
+  getHostedMurphContactContext: mocks.getHostedMurphContactContext,
 }));
 
 vi.mock("@/src/lib/goals/goal-contact", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@/src/lib/goals/goal-contact")
   >();
-  mocks.resolvePublicGoalContactOptions.mockImplementation(
-    actual.resolvePublicGoalContactOptions,
+  mocks.resolveGoalContactOption.mockImplementation(
+    actual.resolveGoalContactOption,
   );
   return {
     ...actual,
-    resolvePublicGoalContactOptions: mocks.resolvePublicGoalContactOptions,
+    resolveGoalContactOption: mocks.resolveGoalContactOption,
   };
 });
 
@@ -104,11 +106,15 @@ import GoalMethodologyPage, {
 
 describe("public goal pages", () => {
   beforeEach(() => {
-    mocks.fetchHeroContactInfo.mockReset();
-    mocks.fetchHeroContactInfo.mockResolvedValue({
-      phone: "+15550100001",
-      phoneConfigured: true,
-      telegram: "withmurph_bot",
+    mocks.getHostedMurphContactContext.mockReset();
+    mocks.getHostedMurphContactContext.mockResolvedValue({
+      initialContactChannels: {
+        email: false,
+        telegram: false,
+        text: true,
+      },
+      murphEmailAddress: null,
+      murphPhoneNumber: "+15550100001",
     });
     mocks.listHealthCommonsGoalRouteParams.mockReset();
     mocks.listHealthCommonsGoalRouteParams.mockReturnValue([
@@ -121,7 +127,7 @@ describe("public goal pages", () => {
     );
     mocks.notFound.mockClear();
     mocks.permanentRedirect.mockClear();
-    mocks.resolvePublicGoalContactOptions.mockClear();
+    mocks.resolveGoalContactOption.mockClear();
     mocks.resolveHealthCommonsGoalPage.mockReset();
     mocks.resolveHealthCommonsGoalPage.mockImplementation((routeId: string) => {
       if (routeId !== fixtureGoal.routeId && routeId !== "lower-rhr") {
@@ -169,17 +175,46 @@ describe("public goal pages", () => {
     expect(markup).toContain("A practical plan");
     expect(markup).toContain("A quick note");
     expect(markup).toContain("American Heart Association");
-    expect(markup.match(/Do this with Murph/gu)).toHaveLength(1);
-    expect(markup).toContain(fixtureGoal.startPrompt);
-    expect(mocks.resolvePublicGoalContactOptions).toHaveBeenCalledWith({
-      contactInfo: expect.any(Object),
+    expect(markup.match(/aria-label="Do this with Murph in /gu)).toHaveLength(1);
+    expect(markup).toContain(
+      `sms:+15550100001?body=${encodeURIComponent(fixtureGoal.startPrompt)}`,
+    );
+    expect(mocks.resolveGoalContactOption).toHaveBeenCalledWith({
+      murphPhoneNumber: "+15550100001",
       startPrompt: fixtureGoal.startPrompt,
+      textAvailable: true,
     });
+    expect(markup).not.toContain("Review or edit this message");
+    expect(markup).not.toContain("choose an app");
+    expect(markup).not.toContain("Nothing is sent automatically");
+    expect(markup).toContain("[&amp;_a:hover]:decoration-primary");
+    expect(markup).not.toContain("hover:[&amp;_a]:decoration-primary");
     expect(markup).toContain("Created by Murph Health Commons");
     expect(markup).toContain('href="/goals/methodology"');
     expect(markup).toContain('"@type":"Article"');
     expect(markup).toContain('"@type":"BreadcrumbList"');
     expect(markup).toContain('"name":"Murph Health Commons"');
+  });
+
+  it("falls back directly to Telegram when no assigned text line is available", async () => {
+    mocks.getHostedMurphContactContext.mockResolvedValue({
+      initialContactChannels: {
+        email: false,
+        telegram: false,
+        text: false,
+      },
+      murphEmailAddress: null,
+      murphPhoneNumber: null,
+    });
+
+    const element = await GoalOrCategoryPage({
+      params: Promise.resolve({ goalId: fixtureGoal.routeId }),
+    });
+    const markup = renderToStaticMarkup(element);
+
+    expect(markup).toContain("https://t.me/withmurph_bot?text=");
+    expect(markup).toContain("Do this with Murph in Telegram");
+    expect(markup).not.toContain("choose an app");
   });
 
   it("publishes an honest methodology page for the goal library", () => {

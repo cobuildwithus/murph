@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
+import { ArrowRight, Search } from "lucide-react";
 import Link from "next/link";
 
 import { GoalBrowseCard } from "@/src/components/goals/goal-browse-card";
+import { GoalCategoryArtwork } from "@/src/components/goals/goal-visual";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
-import { PageHeader } from "@/src/components/ui/page-header";
 import {
   GOAL_CATEGORIES,
   getGoalCategory,
@@ -48,31 +49,48 @@ export default async function GoalsPage({
   const matches = query ? searchHealthCommonsGoals(query) : [];
 
   return (
-    <div className="flex flex-col gap-10 pb-12">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <PageHeader
-          eyebrow="Guides"
-          title="Goals"
-          description="Choose an outcome you care about. Every guide gives you a practical plan you can use on your own or carry out with Murph."
-        />
-        <form action="/goals" className="flex w-full gap-2 sm:w-auto" role="search">
-          <Input
-            aria-label="Search goals"
-            defaultValue={query}
-            name="q"
-            placeholder="Search goals"
-            className="min-w-0 flex-1 sm:w-64"
-          />
-          <Button type="submit" variant="outline">
+    <div className="flex flex-col gap-12 pb-12">
+      <header className="border-b border-[#c4a882]/35 pb-10">
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#736a58]">
+          Health guides
+        </span>
+        <h1 className="mt-3 max-w-[12ch] font-serif text-[clamp(3rem,7vw,5rem)] font-semibold leading-[0.96] tracking-[-0.04em] text-balance text-[#2d3436]">
+          Goals
+        </h1>
+        <p className="mt-5 max-w-[62ch] text-base/7 text-pretty text-[#635a48] sm:text-lg/8">
+          Choose an outcome you care about. Every guide gives you a practical
+          plan you can use on your own or carry out with Murph.
+        </p>
+        <form
+          action="/goals"
+          className="mt-8 flex w-full flex-col gap-3 sm:flex-row"
+          data-goal-search="full-width"
+          role="search"
+        >
+          <div className="relative min-w-0 flex-1">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-5 top-1/2 z-10 size-5 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              aria-label="Search goals"
+              className="border-[#c4a882]/45 bg-[#fffdf8] pl-13 shadow-[0_1px_2px_rgba(45,52,54,0.03)]"
+              defaultValue={query}
+              inputSize="xl"
+              name="q"
+              placeholder="Search goals"
+            />
+          </div>
+          <Button className="sm:min-w-32" size="xl" type="submit">
             Search
           </Button>
         </form>
-      </div>
+      </header>
 
       {query ? (
         <GoalSearchResults goals={matches} query={query} />
       ) : (
-        <div className="flex flex-col gap-12">
+        <div className="flex flex-col gap-16">
           {GOAL_CATEGORIES.map((category) => {
             const categoryGoals = listHealthCommonsGoalsByCategory(category.slug);
             const featuredGoals = selectCategoryPreviewGoals(
@@ -85,39 +103,57 @@ export default async function GoalsPage({
             }
 
             return (
-              <section key={category.slug} className="flex flex-col gap-5">
-                <div className="flex items-end justify-between gap-4 border-b border-border/70 pb-4">
-                  <div>
-                    <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-                      <Link
-                        href={`/goals/${category.slug}`}
-                        className="transition-colors hover:text-primary"
-                      >
-                        {category.label}
-                      </Link>
-                    </h2>
-                    <p className="mt-1 max-w-2xl text-sm/6 text-pretty text-muted-foreground">
-                      {category.description}
-                    </p>
+              <section
+                className="flex scroll-mt-28 flex-col gap-6"
+                id={category.slug}
+                key={category.slug}
+              >
+                <div className="flex items-end justify-between gap-5 border-b border-[#c4a882]/30 pb-5">
+                  <div className="flex min-w-0 items-center gap-4 sm:gap-5">
+                    <GoalCategoryArtwork
+                      category={category.slug}
+                      className="size-16 rounded-xl sm:size-20 sm:rounded-2xl"
+                    />
+                    <div className="min-w-0">
+                      <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+                        <Link
+                          href={`/goals/${category.slug}`}
+                          className="transition-colors hover:text-primary"
+                        >
+                          {category.label}
+                        </Link>
+                      </h2>
+                      <p className="mt-1 max-w-2xl text-sm/6 text-pretty text-muted-foreground">
+                        {category.description}
+                      </p>
+                    </div>
                   </div>
                   <Link
                     href={`/goals/${category.slug}`}
-                    className="hidden shrink-0 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline"
+                    className="group hidden shrink-0 items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
                   >
                     View all {categoryGoals.length}
+                    <ArrowRight
+                      aria-hidden="true"
+                      className="size-4 transition-transform motion-safe:group-hover:translate-x-1"
+                    />
                   </Link>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <ul className="grid gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
                   {featuredGoals.map((goal) => (
-                    <GoalBrowseCard
-                      key={goal.key}
-                      categoryLabel={category.label}
-                      href={`/goals/${goal.routeId}`}
-                      summary={goal.summary}
-                      title={goal.title}
-                    />
+                    <li className="min-w-0" key={goal.key}>
+                      <GoalBrowseCard
+                        category={category.slug}
+                        categoryLabel={category.label}
+                        className="h-full"
+                        href={`/goals/${goal.routeId}`}
+                        outcomeKind={goal.outcomeKind}
+                        summary={goal.summary}
+                        title={goal.title}
+                      />
+                    </li>
                   ))}
-                </div>
+                </ul>
                 <Link
                   href={`/goals/${category.slug}`}
                   className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:hidden"
@@ -159,20 +195,24 @@ function GoalSearchResults({
         </Link>
       </div>
       {goals.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <ul className="grid gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
           {goals.map((goal) => {
             const category = getGoalCategory(goal.category);
             return (
-              <GoalBrowseCard
-                key={goal.key}
-                categoryLabel={category?.label ?? goal.category}
-                href={`/goals/${goal.routeId}`}
-                summary={goal.summary}
-                title={goal.title}
-              />
+              <li className="min-w-0" key={goal.key}>
+                <GoalBrowseCard
+                  category={goal.category}
+                  categoryLabel={category?.label ?? goal.category}
+                  className="h-full"
+                  href={`/goals/${goal.routeId}`}
+                  outcomeKind={goal.outcomeKind}
+                  summary={goal.summary}
+                  title={goal.title}
+                />
+              </li>
             );
           })}
-        </div>
+        </ul>
       ) : (
         <div className="rounded-2xl border border-dashed border-border p-8 text-center">
           <h3 className="font-serif text-xl font-semibold text-foreground">

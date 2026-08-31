@@ -1,10 +1,15 @@
+import type { HealthCommonsWebGoalIndexEntry } from "@murphai/health-commons/runtime";
+
 import type { GoalCategorySlug } from "./goal-categories";
+
+export type GoalOutcomeKind = HealthCommonsWebGoalIndexEntry["outcomeKind"];
 
 export interface GoalIndexEntryModel {
   aliases: string[];
   category: GoalCategorySlug;
   goalPhrase: string;
   key: string;
+  outcomeKind: GoalOutcomeKind;
   parentGoalKey: string | null;
   routeId: string;
   startPrompt: string;

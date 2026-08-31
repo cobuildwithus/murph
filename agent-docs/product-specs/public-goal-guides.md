@@ -61,7 +61,7 @@ Every indexable guide includes:
 - one or more observable success signals;
 - current supporting source keys;
 - a workflow kind and one to four existing owner skill ids;
-- the exact editable start prompt `Hey Murph, help me <goalPhrase>.`;
+- the exact start prompt `Hey Murph, help me <goalPhrase>.`;
 - proportional safety metadata;
 - a substantive article with `What to do`, `A simple plan`, `How to know it is
   working`, `If you get stuck`, `A quick note`, and `Sources` sections.
@@ -79,15 +79,14 @@ review claim unless that review actually occurred and its owner is recorded.
 
 The primary action is `Do this with Murph`.
 
-- The action opens a compact review dialog with the editable guide-owned start
-  prompt and the person's available native Messages or Telegram routes.
-- Email is intentionally excluded because the public email bootstrap cannot
-  reliably preserve the exact intent-bearing editable draft.
-- Choosing a route opens that native messaging app with the draft when the
-  platform supports it; the dialog keeps an exact copy fallback.
-- Nothing is sent and no private record is created until the person acts in
-  their messaging app and later accepts Murph's proposed setup.
-- Public UI explains the review-before-send boundary in one short sentence.
+- The action is one ordinary link, not a review dialog or channel chooser.
+- A signed-in member with a verified phone and resolved assigned Murph line
+  opens native Messages directly with the guide-owned start prompt prefilled.
+- Every other state opens Telegram directly with the same prefilled prompt.
+- Email, clipboard mutation, programmatic navigation, and line assignment are
+  intentionally excluded from the public handoff.
+- Nothing is sent and no private record is created until the person sends the
+  message and later accepts Murph's proposed setup.
 
 ## Private Setup Workflow
 
@@ -149,7 +148,7 @@ Before the first lineage-bearing Goal write, the preceding runner remains a
 safe rollback. After that write, the compatible reader is the rollback floor
 for the affected workspace. Recover with a forward fix or a release that
 retains the reader; do not roll that workspace back to the preceding strict
-schema. The Web library and editable messaging handoff create no private state
+schema. The Web library and direct messaging handoff create no private state
 and can roll back independently.
 
 ## Verification
@@ -160,7 +159,7 @@ Shipping changes require:
 - duplicate key, slug, title, prompt, and parent-cycle checks;
 - owner-skill and source-key resolution checks;
 - public browse, canonical routing, metadata, sitemap, structured-data, and
-  contact-draft tests;
+  direct contact-link tests;
 - private Goal lineage persistence tests;
 - deterministic assistant workflow tests plus one focused real-Codex journey;
 - desktop and phone visual proof for the real browse and detail routes.

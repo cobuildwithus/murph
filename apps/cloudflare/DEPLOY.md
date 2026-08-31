@@ -728,7 +728,7 @@ rollback floor for the affected workspace because the preceding strict core
 parser rejects `commonsGoalRef`; its assistant context snapshot can omit the
 Goal, and core Goal mutations fail until a compatible reader returns. Forward-
 fix on this bundle or newer instead of rolling back below the floor. The public
-Web pages and editable messaging handoff do not write private state and can be
+Web pages and direct messaging handoff do not write private state and can be
 rolled back independently. Monitor bounded hosted-runtime error aggregates for
 `VAULT_INVALID_GOAL` and rejected Goal commands after convergence.
 

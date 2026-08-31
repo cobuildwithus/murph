@@ -15,6 +15,9 @@ const ROUTES = [
   "/",
   "/clubs",
   "/search",
+  "/goals",
+  "/goals/sleep",
+  "/goals/lower-resting-heart-rate",
   "/security",
   "/pitch",
   "/changelog",
@@ -243,6 +246,9 @@ test("calendar links wrap maximum unbroken event text", async ({ page }) => {
 for (const route of ROUTES) {
   for (const width of WIDTHS) {
     test(`no horizontal overflow: ${route} @ ${width}px`, async ({ page }) => {
+      if (route.startsWith("/goals")) {
+        test.slow();
+      }
       await page.setViewportSize({ width, height: 900 });
 
       // Measure the real, production-relevant page: drop every non-loopback
@@ -288,6 +294,60 @@ for (const route of ROUTES) {
     });
   }
 }
+
+test("Goal library search fills its content column", async ({ page }) => {
+  test.slow();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto("/goals", { waitUntil: "load" });
+  expect(response?.status()).toBe(200);
+  const widths = await page.locator('[data-goal-search="full-width"]').evaluate(
+    (form) => ({
+      form: form.getBoundingClientRect().width,
+      parent: form.parentElement?.getBoundingClientRect().width ?? 0,
+    }),
+  );
+
+  expect(Math.abs(widths.form - widths.parent)).toBeLessThanOrEqual(
+    OVERFLOW_TOLERANCE_PX,
+  );
+});
+
+test("Goal guide source hover changes only the hovered source", async ({ page }) => {
+  test.slow();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto("/goals/lower-resting-heart-rate", {
+    waitUntil: "load",
+  });
+  expect(response?.status()).toBe(200);
+  const sources = page.locator("article a[href^='http']:not([aria-label])");
+  await expect(sources).toHaveCount(4);
+  const before = await sources.evaluateAll((links) =>
+    links.slice(0, 2).map((link) => getComputedStyle(link).textDecorationColor),
+  );
+  await sources.first().hover();
+  const after = await sources.evaluateAll((links) =>
+    links.slice(0, 2).map((link) => getComputedStyle(link).textDecorationColor),
+  );
+
+  expect(after[0]).not.toBe(before[0]);
+  expect(after[1]).toBe(before[1]);
+});
 
 test("homepage footer link columns stay separate at the sm breakpoint", async ({
   page,

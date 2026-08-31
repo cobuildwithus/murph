@@ -15,8 +15,8 @@ import {
   listHealthCommonsGoalsByCategory,
   resolveHealthCommonsGoalPage,
 } from "@/src/lib/health-commons/goal-projections";
-import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
-import { resolvePublicGoalContactOptions } from "@/src/lib/goals/goal-contact";
+import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
+import { getHostedMurphContactContext } from "@/src/lib/hosted-onboarding/hosted-contact-context";
 import { serializeStructuredData } from "@/src/lib/public-agent-content";
 import {
   createMurphPageMetadata,
@@ -97,10 +97,11 @@ export default async function GoalOrCategoryPage({
     notFound();
   }
 
-  const contactInfo = await fetchHeroContactInfo();
-  const contactOptions = resolvePublicGoalContactOptions({
-    contactInfo,
+  const contactContext = await getHostedMurphContactContext();
+  const contactOption = resolveGoalContactOption({
+    murphPhoneNumber: contactContext.murphPhoneNumber,
     startPrompt: resolved.goal.startPrompt,
+    textAvailable: contactContext.initialContactChannels.text,
   });
   const structuredData = buildGoalStructuredData({
     category: goalCategory,
@@ -118,7 +119,7 @@ export default async function GoalOrCategoryPage({
       ))}
       <GoalGuide
         category={goalCategory}
-        contactOptions={contactOptions}
+        contactOption={contactOption}
         goal={resolved.goal}
       />
     </>

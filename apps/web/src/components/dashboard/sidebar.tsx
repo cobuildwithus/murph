@@ -8,7 +8,6 @@ import {
   FlaskConical,
   Home,
   Leaf,
-  Target,
 } from "lucide-react";
 import {
   useEffect,
@@ -78,7 +77,6 @@ const navItems: {
     matchPrefix: "/biomarkers",
     icon: Activity,
   },
-  { label: "Goals", href: "/goals", matchPrefix: "/goals", icon: Target },
   { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];
 

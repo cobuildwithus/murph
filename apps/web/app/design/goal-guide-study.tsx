@@ -33,6 +33,7 @@ A sudden change with chest pain, fainting, or severe shortness of breath needs m
   goalPhrase: "lower my resting heart rate",
   indexable: true,
   key: "goal_template:lower-resting-heart-rate",
+  outcomeKind: "biomarker" as const,
   parentGoalKey: null,
   routeId: "lower-resting-heart-rate",
   startPrompt: "Hey Murph, help me lower my resting heart rate.",
@@ -40,20 +41,11 @@ A sudden change with chest pain, fainting, or severe shortness of breath needs m
   title: "Lower My Resting Heart Rate",
 };
 
-const DESIGN_CONTACT_OPTIONS = [
-  {
-    href: "sms:+15550100001?body=Hey%20Murph%2C%20help%20me%20lower%20my%20resting%20heart%20rate.",
-    kind: "text" as const,
-    label: "Messages",
-  },
-  {
-    href: "https://t.me/withmurph_bot?text=Hey+Murph%2C+help+me+lower+my+resting+heart+rate.",
-    kind: "telegram" as const,
-    label: "Telegram",
-    rel: "noopener noreferrer",
-    target: "_blank",
-  },
-];
+const DESIGN_CONTACT_OPTION = {
+  href: "sms:+15550100001?body=Hey%20Murph%2C%20help%20me%20lower%20my%20resting%20heart%20rate.",
+  kind: "text" as const,
+  label: "Messages",
+};
 
 export function GoalGuideStudy() {
   return (
@@ -86,7 +78,7 @@ export function GoalGuideStudy() {
               label: "Biomarkers",
               slug: "biomarkers",
             }}
-            contactOptions={DESIGN_CONTACT_OPTIONS}
+            contactOption={DESIGN_CONTACT_OPTION}
             goal={DESIGN_GOAL}
           />
         </div>

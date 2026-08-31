@@ -88,6 +88,7 @@ test("footer ownership stays on explicit public surfaces", () => {
 
   assertOwnsFooter("app/page.tsx");
   assertOwnsFooter("app/security/page.tsx");
+  assertOwnsFooter("app/goals/layout.tsx");
   assertOwnsFooter(
     "app/design/page.tsx",
     /<SiteFooter vitalsMode="synthetic" \/>/u,
@@ -96,11 +97,18 @@ test("footer ownership stays on explicit public surfaces", () => {
   assertOwnsFooter("src/components/legal/legal-policy-page.tsx");
 
   const rootLayoutSource = readAppFile("app/layout.tsx");
+  const goalsLayoutSource = readAppFile("app/goals/layout.tsx");
   const designPageSource = readAppFile("app/design/page.tsx");
   const designComponentsSource = readAppFile("app/design/components-content.tsx");
   const inputOtpSource = readAppFile("src/components/ui/input-otp.tsx");
   const subprocessorsPageSource = readAppFile("app/subprocessors/page.tsx");
   assert.doesNotMatch(rootLayoutSource, /SiteFooter/u);
+  assert.match(goalsLayoutSource, /<StickyNav/u);
+  assert.match(goalsLayoutSource, /getHostedPageAuthSnapshot/u);
+  assert.match(goalsLayoutSource, /href="#goal-content"/u);
+  assert.match(goalsLayoutSource, /id="goal-content"/u);
+  assert.match(goalsLayoutSource, /tabIndex=\{-1\}/u);
+  assert.doesNotMatch(goalsLayoutSource, /DashboardShell|SidebarAuth/u);
   assert.doesNotMatch(designPageSource, /HostedPrivyBoundary/u);
   assert.match(
     designComponentsSource,
