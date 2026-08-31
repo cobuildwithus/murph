@@ -8,9 +8,11 @@ import {
   dailyNutritionResponseCardV2Schema,
   challengeStandingsResponseCardV1Schema,
   parseCompactTableAppCardEnvelope,
+  wearableTrendResponseCardV1Schema,
   type ChallengeStandingsResponseCardV1,
   type CompactTablePresentationCardV1,
   type DailyNutritionResponseCard,
+  type WearableTrendResponseCardV1,
 } from "@murphai/contracts";
 import { ImageResponse } from "next/og";
 
@@ -31,6 +33,10 @@ import {
   ChallengeStandingsCardImage,
   getChallengeStandingsCardImageSize,
 } from "@/src/components/imessage/challenge-standings-card-image";
+import {
+  getWearableTrendCardImageSize,
+  WearableTrendCardImage,
+} from "@/src/components/imessage/wearable-trend-card-image";
 
 export const dynamic = "force-dynamic";
 
@@ -71,14 +77,18 @@ export async function GET(
     ? IMESSAGE_NUTRITION_CARD_IMAGE_SIZE
     : card.kind === "compact_table"
       ? getCompactTableCardImageSize(card)
-      : getChallengeStandingsCardImageSize(card);
+      : card.kind === "challenge_standings"
+        ? getChallengeStandingsCardImageSize(card)
+        : getWearableTrendCardImageSize(card);
 
   return new ImageResponse(
     card.kind === "daily_nutrition"
       ? <NutritionCardImage card={card} logoSrc={logoSrc} />
       : card.kind === "compact_table"
         ? <CompactTableCardImage card={card} logoSrc={logoSrc} />
-        : <ChallengeStandingsCardImage card={card} logoSrc={logoSrc} />,
+        : card.kind === "challenge_standings"
+          ? <ChallengeStandingsCardImage card={card} logoSrc={logoSrc} />
+          : <WearableTrendCardImage card={card} logoSrc={logoSrc} />,
     {
       ...size,
       fonts: [
@@ -96,6 +106,7 @@ function parseResponseCardPayload(
   | DailyNutritionResponseCard
   | CompactTablePresentationCardV1
   | ChallengeStandingsResponseCardV1
+  | WearableTrendResponseCardV1
   | null {
   if (!segment.endsWith(IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX)) {
     return null;
@@ -135,6 +146,10 @@ function parseResponseCardPayload(
   }
   if (parsed.schemaVersion === 5) {
     const result = challengeStandingsResponseCardV1Schema.safeParse(parsed.card);
+    return result.success ? result.data : null;
+  }
+  if (parsed.schemaVersion === 7) {
+    const result = wearableTrendResponseCardV1Schema.safeParse(parsed.card);
     return result.success ? result.data : null;
   }
   return parseCompactTableAppCardEnvelope(parsed);

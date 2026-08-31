@@ -6,6 +6,7 @@ import type {
   ChallengeStandingsResponseCardV1,
   CompactTablePresentationCardV1,
   DailyNutritionResponseCardV2,
+  WearableTrendResponseCardV1,
 } from "@murphai/contracts";
 import { test } from "vitest";
 
@@ -145,6 +146,60 @@ const WORKOUT_COMPARISON_CARD: CompactTablePresentationCardV1 = {
   footer: null,
 };
 
+const WEARABLE_TREND_DATES = [
+  "2026-08-24",
+  "2026-08-25",
+  "2026-08-26",
+  "2026-08-27",
+  "2026-08-28",
+  "2026-08-29",
+  "2026-08-30",
+] as const;
+
+const SPARSE_FIVE_METRIC_WEARABLE_CARD: WearableTrendResponseCardV1 = {
+  kind: "wearable_trend",
+  version: 1,
+  localDates: [...WEARABLE_TREND_DATES],
+  metrics: [
+    {
+      metricKey: "steps",
+      values: [6_800, null, 9_400, 8_700, 10_200, null, 9_800],
+      trend: "higher",
+    },
+    {
+      metricKey: "total-sleep-minutes",
+      values: [479, 438, null, 441, 435, null, 434],
+      trend: "steady",
+    },
+    {
+      metricKey: "resting-heart-rate",
+      values: [58, 57, null, 56, 58, null, 55],
+      trend: "steady",
+    },
+    {
+      metricKey: "hrv-rmssd",
+      values: [37, null, 39, 45, null, 44, 50],
+      trend: "higher",
+    },
+    {
+      metricKey: "hrv-sdnn",
+      values: [null, 48, null, 52, null, 49, null],
+      trend: "not_enough_data",
+    },
+  ],
+};
+
+const ALL_MISSING_WEARABLE_CARD: WearableTrendResponseCardV1 = {
+  ...SPARSE_FIVE_METRIC_WEARABLE_CARD,
+  metrics: SPARSE_FIVE_METRIC_WEARABLE_CARD.metrics.slice(0, 3).map(
+    (metric) => ({
+      ...metric,
+      values: [null, null, null, null, null, null, null],
+      trend: "not_enough_data",
+    }),
+  ),
+};
+
 function getMaximumStackedCard(
   columnCount: number,
 ): CompactTablePresentationCardV1 {
@@ -255,6 +310,72 @@ test("real-font route keeps a short workout comparison compact", async () => {
   assert.ok(bounds.left >= 20);
   assert.ok(bounds.right <= 1_155);
   assert.ok(bounds.bottom <= image.height - 40);
+});
+
+test("real-font wearable trend contains the sparse five-metric maximum density", async () => {
+  const image = await renderCard({
+    schemaVersion: 7,
+    card: SPARSE_FIVE_METRIC_WEARABLE_CARD,
+  });
+  assert.deepEqual([image.width, image.height], [1_200, 1_200]);
+
+  const bounds = findNonBackgroundBounds(image);
+  assert.ok(bounds !== null);
+  assert.ok(bounds.left >= 20);
+  assert.ok(
+    bounds.right <= 1_155,
+    `Expected wearable card content within the right inset: ${JSON.stringify(bounds)}`,
+  );
+  assert.ok(bounds.bottom <= image.height - 42);
+  assert.equal(
+    hasDarkPixel(image, {
+      left: 45,
+      right: 1_155,
+      top: 988,
+      bottom: 1_158,
+    }),
+    true,
+  );
+  assert.equal(
+    hasDarkPixel(image, {
+      left: 1_040,
+      right: 1_155,
+      top: 308,
+      bottom: 1_158,
+    }),
+    true,
+  );
+});
+
+test("real-font wearable trend contains all-missing slots without zero filling", async () => {
+  const image = await renderCard({
+    schemaVersion: 7,
+    card: ALL_MISSING_WEARABLE_CARD,
+  });
+  assert.deepEqual([image.width, image.height], [1_200, 860]);
+
+  const bounds = findNonBackgroundBounds(image);
+  assert.ok(bounds !== null);
+  assert.ok(bounds.right <= 1_155);
+  assert.ok(bounds.bottom <= image.height - 42);
+  assert.equal(
+    hasDarkPixel(image, {
+      left: 373,
+      right: 486,
+      top: 308,
+      bottom: 818,
+    }),
+    true,
+  );
+  assert.equal(
+    hasDarkPixel(image, {
+      left: 1_040,
+      right: 1_155,
+      top: 308,
+      bottom: 818,
+    }),
+    true,
+  );
 });
 
 test("real-font route keeps positive-kerning text above the stacked-row divider", async () => {

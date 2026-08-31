@@ -3447,6 +3447,17 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'Before making any relative-date claim about an existing automation, call `action: inspect` and answer from its authoritative schedule and verified next occurrence without mutating it',
     )
+    for (const receiptBoundary of [
+      'latestOccurrence is bounded retained evidence',
+      'not_observed does not prove no run',
+      'unavailable supports no claim',
+      'sent means provider dispatch, not handset delivery',
+      'delivered=unconfirmed means delivery unconfirmed',
+      'Keep schedule/generation/send/delivery distinct',
+      'never upgrade other outcomes',
+    ]) {
+      expect(prompt).toContain(receiptBoundary)
+    }
     expect(prompt).toContain(
       'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
     )

@@ -266,12 +266,29 @@ export type AssistantAutomationOccurrenceProjection =
       status: 'unavailable'
     }
 
+export type AssistantAutomationOccurrenceReceipt =
+  | {
+      history: 'not_observed' | 'unavailable'
+    }
+  | {
+      delivered: 'not_reached' | 'unconfirmed' | 'unknown'
+      finishedAt: string | null
+      generated: 'confirmed' | 'not_reached' | 'unknown'
+      history: 'observed'
+      outcome: 'failed' | 'no_message' | 'pending' | 'sent' | 'skipped' | 'unknown'
+      scheduledAt: string | null
+      sent: 'confirmed' | 'not_reached' | 'pending' | 'unknown'
+      startedAt: string
+      trigger: 'manual' | 'scheduled' | 'unknown'
+    }
+
 export type AssistantHostedAutomationToolResponse =
   | {
       action: 'inspect'
       automationId: string
       contextReferences?: readonly AutomationContextReference[]
       effectiveTimeZone: string | null
+      latestOccurrence: AssistantAutomationOccurrenceReceipt
       lookupId: string
       occurrenceProjection: AssistantAutomationOccurrenceProjection
       routeBinding: 'preserved'

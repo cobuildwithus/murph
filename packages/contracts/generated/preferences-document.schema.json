@@ -151,6 +151,49 @@
         "desiredProviders"
       ],
       "additionalProperties": false
+    },
+    "savedHealthViews": {
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "savedViewId": {
+            "type": "string",
+            "pattern": "^hview_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^(?![hH][vV][iI][eE][wW]_[0-9A-Za-z]{26}$)(?!\\s)[^\\u0000-\\u001F\\u007F]*\\S$"
+          },
+          "metricKeys": {
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "steps",
+                "total-sleep-minutes",
+                "resting-heart-rate",
+                "hrv-rmssd",
+                "hrv-sdnn"
+              ]
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "savedViewId",
+          "name",
+          "metricKeys"
+        ],
+        "additionalProperties": false
+      },
+      "description": "Saved health view ids and case-insensitive normalized names must be unique.",
+      "uniqueItems": true
     }
   },
   "required": [

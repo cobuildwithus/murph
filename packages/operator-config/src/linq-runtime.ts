@@ -714,6 +714,7 @@ export async function sendLinqIMessageAppCard(
     input.idempotencyKey,
     'iMessage app card idempotency key',
   )
+  const isStaticLayout = input.card.kind === 'wearable_trend'
   const body: MessageSendParams = {
     message: {
       preferred_service: 'iMessage',
@@ -727,8 +728,10 @@ export async function sendLinqIMessageAppCard(
           team_id: 'G9DJH2XUMK',
           bundle_id: 'ai.withmurph.app.messages',
         },
-        interactive: true,
-        url: buildLinqIMessageAppCardUrl(input.card),
+        interactive: !isStaticLayout,
+        ...(isStaticLayout
+          ? {}
+          : { url: buildLinqIMessageAppCardUrl(input.card) }),
         fallback_text: buildLinqIMessageAppFallbackText(input.card),
         layout: buildLinqIMessageAppLayout(input.card),
       }],

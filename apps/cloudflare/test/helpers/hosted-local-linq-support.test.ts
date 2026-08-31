@@ -158,6 +158,96 @@ describe("hosted local Linq provider stub", () => {
     }
   });
 
+  it("accepts a static iMessage app layout without an interactive URL", async () => {
+    const stub = await startHostedLocalLinqStub();
+    const expectedPath = "/chats/chat_static_card/messages";
+
+    try {
+      const response = await fetch(`${stub.baseUrl}${expectedPath}`, {
+        body: JSON.stringify({
+          message: {
+            parts: [{
+              app: {
+                bundle_id: "ai.withmurph.app.messages",
+                name: "Murph",
+                team_id: "G9DJH2XUMK",
+              },
+              fallback_text: "Your health trend.",
+              interactive: false,
+              layout: {
+                caption: "7-day health",
+                image_url: "https://www.withmurph.ai/imessage/card/v1/test.png",
+              },
+              type: "imessage_app",
+            }],
+          },
+        }),
+        headers: {
+          authorization: "Bearer hosted-local",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      expect(stub.countAcceptedSends(expectedPath)).toBe(1);
+      expect(stub.readObservedMessageAppCard(
+        stub.acceptedSendRequests[0]!,
+      )).toMatchObject({
+        fallback_text: "Your health trend.",
+        interactive: false,
+        type: "imessage_app",
+      });
+      expect(stub.readObservedMessageAppCard(
+        stub.acceptedSendRequests[0]!,
+      )).not.toHaveProperty("url");
+    } finally {
+      await stub.stop();
+    }
+  });
+
+  it("rejects empty or non-HTTPS static iMessage app layouts", async () => {
+    const stub = await startHostedLocalLinqStub();
+    const expectedPath = "/chats/chat_invalid_static_card/messages";
+
+    try {
+      for (const layout of [
+        {},
+        {
+          caption: "7-day health",
+          image_url: "http://example.test/card.png",
+        },
+      ]) {
+        const response = await fetch(`${stub.baseUrl}${expectedPath}`, {
+          body: JSON.stringify({
+            message: {
+              parts: [{
+                app: {
+                  bundle_id: "ai.withmurph.app.messages",
+                  name: "Murph",
+                  team_id: "G9DJH2XUMK",
+                },
+                fallback_text: "Your health trend.",
+                interactive: false,
+                layout,
+                type: "imessage_app",
+              }],
+            },
+          }),
+          headers: {
+            authorization: "Bearer hosted-local",
+            "content-type": "application/json",
+          },
+          method: "POST",
+        });
+        expect(response.status).toBe(400);
+      }
+      expect(stub.countAcceptedSends(expectedPath)).toBe(0);
+    } finally {
+      await stub.stop();
+    }
+  });
+
   it("fails one matching logical send before provider acceptance", async () => {
     const stub = await startHostedLocalLinqStub();
     const expectedPath = "/chats/chat_retry/messages";

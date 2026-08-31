@@ -9,18 +9,26 @@ import {
   assistantPreferenceMutationStateDocumentSchema,
   assistantPreferenceMutationStateRelativePath,
   preferencesDocumentSchema,
+  SAVED_HEALTH_VIEW_MAX_COUNT,
 } from "@murphai/contracts";
 
 import {
+  createSavedHealthView,
+  deleteSavedHealthView,
   initializeVault,
+  listSavedHealthViews,
+  patchSavedHealthView,
   readJsonlRecords,
   readPreferencesDocument,
+  readSavedHealthView,
+  readSavedHealthViewSnapshot,
   resolvePreferencesDocumentPath,
   updateAssistantPreferences,
   updateWearablePreferences,
   updateWorkoutCapturePreferences,
   updateWorkoutUnitPreferences,
   validateVault,
+  VaultError,
 } from "../src/index.ts";
 import { resolveAuditShardPath } from "../src/audit.ts";
 
@@ -29,6 +37,8 @@ const createdVaultRoots: string[] = [];
 function asAuditLikeRecord(value: unknown): {
   action?: string;
   commandName?: string;
+  summary?: string;
+  targetIds?: string[];
   changes?: Array<{
     path?: string;
   }>;
@@ -36,6 +46,8 @@ function asAuditLikeRecord(value: unknown): {
   return (typeof value === "object" && value !== null ? value : {}) as {
     action?: string;
     commandName?: string;
+    summary?: string;
+    targetIds?: string[];
     changes?: Array<{
       path?: string;
     }>;
@@ -167,6 +179,171 @@ test("reads and writes canonical workout unit preferences from the singleton pre
 
   const validation = await validateVault({ vaultRoot });
   assert.equal(validation.valid, true);
+});
+
+test("creates, resolves, edits, and deletes saved health views with stable ids", async () => {
+  const vaultRoot = await createTempVault();
+  assert.deepEqual(await listSavedHealthViews(vaultRoot), []);
+
+  const created = await createSavedHealthView({
+    vaultRoot,
+    name: "Daily basics",
+    metricKeys: ["steps", "total-sleep-minutes", "hrv-rmssd"],
+    updatedAt: "2026-08-30T10:00:00.000Z",
+  });
+  assert.match(created.view.savedViewId, /^hview_[0-9A-HJKMNP-TV-Z]{26}$/u);
+  assert.deepEqual(created.view.metricKeys, [
+    "steps",
+    "total-sleep-minutes",
+    "hrv-rmssd",
+  ]);
+  assert.deepEqual(await listSavedHealthViews(vaultRoot), [created.view]);
+  assert.deepEqual(
+    await readSavedHealthView({ vaultRoot, lookup: "DAILY BASICS" }),
+    created.view,
+  );
+  assert.deepEqual(
+    await readSavedHealthView({ vaultRoot, lookup: created.view.savedViewId }),
+    created.view,
+  );
+  const snapshot = await readSavedHealthViewSnapshot({
+    vaultRoot,
+    lookup: "daily basics",
+  });
+  assert.deepEqual(snapshot.view, created.view);
+  assert.equal(snapshot.document.updatedAt, "2026-08-30T10:00:00.000Z");
+  assert.deepEqual(snapshot.document.savedHealthViews, [created.view]);
+
+  await assert.rejects(
+    () => createSavedHealthView({
+      vaultRoot,
+      name: "daily BASICS",
+      metricKeys: ["steps"],
+    }),
+    (error: unknown) =>
+      error instanceof VaultError
+      && error.code === "SAVED_HEALTH_VIEW_NAME_CONFLICT",
+  );
+  await assert.rejects(
+    () => patchSavedHealthView({
+      vaultRoot,
+      savedViewId: "Daily basics" as never,
+      name: "Unsafe lookup",
+    }),
+    (error: unknown) =>
+      error instanceof VaultError
+      && error.code === "SAVED_HEALTH_VIEW_ID_INVALID",
+  );
+
+  const edited = await patchSavedHealthView({
+    vaultRoot,
+    savedViewId: created.view.savedViewId,
+    name: "Morning",
+    metricKeys: ["resting-heart-rate", "steps"],
+    updatedAt: "2026-08-30T10:05:00.000Z",
+  });
+  assert.equal(edited.updated, true);
+  assert.equal(edited.view.savedViewId, created.view.savedViewId);
+  assert.deepEqual(edited.view.metricKeys, ["resting-heart-rate", "steps"]);
+
+  const unchanged = await patchSavedHealthView({
+    vaultRoot,
+    savedViewId: created.view.savedViewId,
+    name: "Morning",
+    metricKeys: ["resting-heart-rate", "steps"],
+    updatedAt: "2026-08-30T10:06:00.000Z",
+  });
+  assert.equal(unchanged.updated, false);
+  assert.equal(unchanged.document.updatedAt, "2026-08-30T10:05:00.000Z");
+
+  const deleted = await deleteSavedHealthView({
+    vaultRoot,
+    savedViewId: created.view.savedViewId,
+    updatedAt: "2026-08-30T10:10:00.000Z",
+  });
+  assert.equal(deleted.deleted, true);
+  assert.deepEqual(deleted.document.savedHealthViews, []);
+  await assert.rejects(
+    () => readSavedHealthView({ vaultRoot, lookup: created.view.savedViewId }),
+    (error: unknown) =>
+      error instanceof VaultError
+      && error.code === "SAVED_HEALTH_VIEW_NOT_FOUND",
+  );
+});
+
+test("bounds saved health views and audits only the stable id", async () => {
+  const vaultRoot = await createTempVault();
+  const first = await createSavedHealthView({
+    vaultRoot,
+    name: "Private daily view",
+    metricKeys: ["steps", "hrv-sdnn"],
+    updatedAt: "2026-08-30T11:00:00.000Z",
+  });
+  for (let index = 1; index < SAVED_HEALTH_VIEW_MAX_COUNT; index += 1) {
+    await createSavedHealthView({
+      vaultRoot,
+      name: `View ${index}`,
+      metricKeys: ["steps"],
+    });
+  }
+  await assert.rejects(
+    () => createSavedHealthView({
+      vaultRoot,
+      name: "One too many",
+      metricKeys: ["steps"],
+    }),
+    (error: unknown) =>
+      error instanceof VaultError
+      && error.code === "SAVED_HEALTH_VIEW_LIMIT_REACHED",
+  );
+
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: resolveAuditShardPath("2026-08-30T11:00:00.000Z"),
+  });
+  const audit = auditRecords
+    .map(asAuditLikeRecord)
+    .find((record) => record.commandName === "core.createSavedHealthView");
+  assert.deepEqual(audit?.targetIds, [first.view.savedViewId]);
+  const serializedAudit = JSON.stringify(audit);
+  assert.doesNotMatch(serializedAudit, /Private daily view/u);
+  assert.doesNotMatch(serializedAudit, /steps|hrv-sdnn/u);
+});
+
+test("every existing preference writer preserves saved health views", async () => {
+  const vaultRoot = await createTempVault();
+  const created = await createSavedHealthView({
+    vaultRoot,
+    name: "Daily",
+    metricKeys: ["steps", "total-sleep-minutes"],
+  });
+  const assertPreserved = async () => {
+    assert.deepEqual(
+      (await readPreferencesDocument(vaultRoot)).savedHealthViews,
+      [created.view],
+    );
+  };
+
+  await updateWorkoutCapturePreferences({
+    vaultRoot,
+    preferences: { defaultDurationMinutes: 45 },
+  });
+  await assertPreserved();
+  await updateWorkoutUnitPreferences({
+    vaultRoot,
+    preferences: { weight: "kg" },
+  });
+  await assertPreserved();
+  await updateWearablePreferences({
+    vaultRoot,
+    preferences: { desiredProviders: ["oura"] },
+  });
+  await assertPreserved();
+  await updateAssistantPreferences({
+    vaultRoot,
+    preferences: { tone: "casual" },
+  });
+  await assertPreserved();
 });
 
 test("sets and clears the canonical workout capture duration default", async () => {

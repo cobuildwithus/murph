@@ -1,6 +1,10 @@
 import * as z from "./zod-runtime.ts";
 
 import { withContractMetadata } from "./schema-metadata.ts";
+import {
+  wearableTrendMetricKeySchema,
+  type WearableTrendMetricKey,
+} from "./wearable-trend-card.ts";
 
 export const preferencesDocumentRelativePath = "bank/preferences.json";
 export const preferencesDocumentSchemaVersion = 1;
@@ -468,6 +472,65 @@ export const wearablePreferencesSchema = z
   })
   .strict();
 
+export const SAVED_HEALTH_VIEW_MAX_COUNT = 8;
+export const SAVED_HEALTH_VIEW_MAX_METRICS = 5;
+
+export const savedHealthViewIdSchema = z
+  .string()
+  .regex(/^hview_[0-9A-HJKMNP-TV-Z]{26}$/u);
+export const savedHealthViewNameSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(
+    /^(?![hH][vV][iI][eE][wW]_[0-9A-Za-z]{26}$)(?!\s)[^\u0000-\u001F\u007F]*\S$/u,
+    "Saved health view names must be canonical text and must not look like an id.",
+  );
+
+export function normalizeSavedHealthViewName(value: unknown): string | null {
+  return typeof value === "string"
+    ? value.trim().normalize("NFKC").toLowerCase()
+    : null;
+}
+
+export const savedHealthViewSchema = z
+  .object({
+    savedViewId: savedHealthViewIdSchema,
+    name: savedHealthViewNameSchema,
+    metricKeys: z
+      .array(wearableTrendMetricKeySchema)
+      .min(1)
+      .max(SAVED_HEALTH_VIEW_MAX_METRICS)
+      .meta({ uniqueItems: true })
+      .refine(
+        (metricKeys) => new Set(metricKeys).size === metricKeys.length,
+        "Saved health view metrics must be unique.",
+      ),
+  })
+  .strict();
+
+export const savedHealthViewsSchema = z
+  .array(savedHealthViewSchema)
+  .max(SAVED_HEALTH_VIEW_MAX_COUNT)
+  .describe(
+    "Saved health view ids and case-insensitive normalized names must be unique.",
+  )
+  .meta({ uniqueItems: true })
+  .refine(
+    (views) => new Set(views.map((view) => view.savedViewId)).size === views.length,
+    "Saved health view ids must be unique.",
+  )
+  .refine(
+    (views) => {
+      const normalizedNames = views.map((view) =>
+        normalizeSavedHealthViewName(view.name)
+      );
+      return normalizedNames.every((name) => name !== null)
+        && new Set(normalizedNames).size === views.length;
+    },
+    "Saved health view names must be unique ignoring case.",
+  );
+
 export const assistantPreferencesSchema = z
   .object({
     persona: assistantPersonaIdSchema.optional(),
@@ -486,6 +549,7 @@ export const preferencesDocumentSchema = withContractMetadata(
       workoutCapturePreferences: workoutCapturePreferencesSchema.optional(),
       workoutUnitPreferences: workoutUnitPreferencesSchema.default({}),
       wearablePreferences: wearablePreferencesSchema,
+      savedHealthViews: savedHealthViewsSchema.optional(),
     })
     .strict(),
   "@murphai/contracts/preferences-document.schema.json",
@@ -496,6 +560,10 @@ export type WorkoutUnitPreferences = z.infer<typeof workoutUnitPreferencesSchema
 export type WorkoutCapturePreferences = z.infer<typeof workoutCapturePreferencesSchema>;
 export type WearablePreferenceProvider = z.infer<typeof wearablePreferenceProviderSchema>;
 export type WearablePreferences = z.infer<typeof wearablePreferencesSchema>;
+export type SavedHealthViewId = z.infer<typeof savedHealthViewIdSchema>;
+export type SavedHealthView = z.infer<typeof savedHealthViewSchema> & {
+  metricKeys: WearableTrendMetricKey[];
+};
 export type AssistantTonePreference = z.infer<typeof assistantTonePreferenceSchema>;
 export type AssistantVoiceOptionId = z.infer<typeof assistantVoiceOptionIdSchema>;
 export type AssistantVoiceGender = z.infer<typeof assistantVoiceGenderSchema>;

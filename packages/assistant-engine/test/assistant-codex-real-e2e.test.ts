@@ -50,7 +50,10 @@ import {
   VAULT_CLI_BATCH_RESULT_SCHEMA,
   vaultCliBatchResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import { readVaultRawTolerant } from '@murphai/query'
+import {
+  readVaultRawTolerant,
+  summarizeWearableSevenDaySnapshotRuntime,
+} from '@murphai/query'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import {
   logLiveWorkoutSet,
@@ -84,6 +87,7 @@ import {
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+  MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
@@ -9800,6 +9804,307 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
   )
 })
 
+describeRealCodex('real Codex seven-day wearable trend card e2e', () => {
+  it(
+    'attaches one trusted seven-day wearable trend card in the requested metric order',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-seven-day-wearable-card-e2e-'),
+      )
+
+      try {
+        await initializeVault({
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        const now = new Date()
+        const today = new Date(now)
+        today.setUTCHours(12, 0, 0, 0)
+        const dayKeys = Array.from({ length: 18 }, (_, index) => {
+          const day = new Date(today)
+          day.setUTCDate(day.getUTCDate() - 15 + index)
+          return day.toISOString().slice(0, 10)
+        })
+        const metricValuesByDay = new Map<string, {
+          hrv: number
+          sleep: number
+          steps: number
+        }>()
+        const eventsByMonth = new Map<string, Record<string, unknown>[]>()
+        for (const [index, dayKey] of dayKeys.entries()) {
+          const monthKey = dayKey.slice(0, 7)
+          const dateId = dayKey.replaceAll('-', '_')
+          const values = {
+            hrv: 40 + index,
+            sleep: 390 + index * 3,
+            steps: 7_000 + index * 100,
+          }
+          metricValuesByDay.set(dayKey, values)
+          const events = eventsByMonth.get(monthKey) ?? []
+          for (const metric of [
+            {
+              key: 'steps',
+              resourceType: 'daily-summary',
+              system: 'garmin',
+              title: 'Steps',
+              unit: 'count',
+              value: values.steps,
+            },
+            {
+              key: 'hrv',
+              resourceType: 'recovery',
+              system: 'oura',
+              title: 'HRV',
+              unit: 'ms',
+              value: values.hrv,
+            },
+          ]) {
+            const id = `evt_${metric.key.replaceAll('-', '_')}_weekly_strip_${dateId}`
+            events.push({
+              dayKey,
+              externalRef: {
+                resourceId: `${id}-resource`,
+                resourceType: metric.resourceType,
+                system: metric.system,
+              },
+              id,
+              kind: 'observation',
+              metric: metric.key,
+              observationGrain: 'daily-summary',
+              occurredAt: `${dayKey}T12:00:00.000Z`,
+              recordedAt: `${dayKey}T12:05:00.000Z`,
+              schemaVersion: 'murph.event.v1',
+              source: 'device',
+              title: metric.title,
+              unit: metric.unit,
+              value: metric.value,
+            })
+          }
+          const nominalSleepEndAt = `${dayKey}T07:00:00.000Z`
+          const sleepEndAt = Date.parse(nominalSleepEndAt) <= now.getTime()
+            ? nominalSleepEndAt
+            : `${dayKey}T00:00:00.000Z`
+          const nominalSleepRecordedAt = `${dayKey}T07:05:00.000Z`
+          const sleepRecordedAt = Date.parse(nominalSleepRecordedAt) <= now.getTime()
+            ? nominalSleepRecordedAt
+            : sleepEndAt
+          const sleepStartAt = new Date(
+            Date.parse(sleepEndAt) - values.sleep * 60_000,
+          ).toISOString()
+          const sleepId = `evt_sleep_session_weekly_strip_${dateId}`
+          events.push({
+            dayKey,
+            durationMinutes: values.sleep,
+            endAt: sleepEndAt,
+            externalRef: {
+              resourceId: `${sleepId}-resource`,
+              resourceType: 'sleep',
+              system: 'oura',
+            },
+            id: sleepId,
+            kind: 'sleep_session',
+            occurredAt: sleepStartAt,
+            recordedAt: sleepRecordedAt,
+            schemaVersion: 'murph.event.v1',
+            sleepType: 'main_sleep',
+            source: 'device',
+            startAt: sleepStartAt,
+            title: 'Oura overnight sleep',
+          })
+          events.push({
+            dayKey,
+            externalRef: {
+              resourceId: `${sleepId}-summary`,
+              resourceType: 'sleep_summary',
+              system: 'oura',
+            },
+            id: `evt_sleep_total_weekly_strip_${dateId}`,
+            kind: 'observation',
+            metric: 'sleep-total-minutes',
+            observationGrain: 'daily-summary',
+            occurredAt: sleepEndAt,
+            recordedAt: sleepRecordedAt,
+            schemaVersion: 'murph.event.v1',
+            source: 'device',
+            title: 'Oura total sleep',
+            unit: 'minutes',
+            value: values.sleep,
+          })
+          eventsByMonth.set(monthKey, events)
+        }
+        for (const [monthKey, events] of eventsByMonth) {
+          const year = monthKey.slice(0, 4)
+          const directory = path.join(workingDirectory, 'ledger/events', year)
+          await mkdir(directory, { recursive: true })
+          await writeFile(
+            path.join(directory, `${monthKey}.jsonl`),
+            `${events.map((event) => JSON.stringify(event)).join('\n')}\n`,
+            'utf8',
+          )
+        }
+
+        const seededSnapshot =
+          await summarizeWearableSevenDaySnapshotRuntime(workingDirectory, {
+            metricKeys: [
+              'steps',
+              'total-sleep-minutes',
+              'hrv-rmssd',
+            ],
+            now: now.toISOString(),
+          })
+        expect(seededSnapshot.metrics.map((metric) => ({
+          metricKey: metric.metricKey,
+          values: metric.values,
+        }))).toEqual([
+          {
+            metricKey: 'steps',
+            values: seededSnapshot.days.map((date) =>
+              metricValuesByDay.get(date)?.steps ?? null
+            ),
+          },
+          {
+            metricKey: 'total-sleep-minutes',
+            values: seededSnapshot.days.map((date) =>
+              metricValuesByDay.get(date)?.sleep ?? null
+            ),
+          },
+          {
+            metricKey: 'hrv-rmssd',
+            values: seededSnapshot.days.map((date) =>
+              metricValuesByDay.get(date)?.hrv ?? null
+            ),
+          },
+        ])
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [
+            MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL,
+            MURPH_ATTACH_RESPONSE_CARD_TOOL,
+            MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+          ],
+          env: config.env,
+          groupConversation: false,
+          hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Use this exact compact seven-day wearable template for Steps, Sleep, and RMSSD HRV:',
+            'each metric is one block with its average, a brief trend label, seven daily values, and a seven-character sparkline.',
+            'Show it now. Do not just acknowledge the template.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+
+        const attempts = readDynamicToolAttempts(result.jsonEvents)
+        const trendAttempts = attempts.filter((attempt) =>
+          attempt.tool === MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL.name
+        )
+        const completedActions = readCapabilityRoutingActions(
+          result.jsonEvents,
+        )
+        const trendActions = completedActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL.name
+        )
+        const commands = completedActions.filter((action) =>
+          action.kind === 'command'
+        )
+        const finalMessagesAfterCard = readCompletedAgentMessages(
+          result.jsonEvents,
+        ).filter((message) =>
+          message.eventIndex > (trendAttempts[0]?.eventIndex ?? -1)
+        )
+
+        expect(trendAttempts).toHaveLength(1)
+        expect(trendAttempts[0]?.argumentsValue).toEqual({
+          metricKeys: ['steps', 'total-sleep-minutes', 'hrv-rmssd'],
+        })
+        expect(trendActions).toHaveLength(1)
+        expect(trendActions[0]).toMatchObject({ success: true })
+        expect(attempts.filter((attempt) =>
+          attempt.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name
+        )).toEqual([])
+        expect(attempts.filter((attempt) =>
+          attempt.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+        )).toEqual([])
+        expect(commands).toEqual([])
+
+        if (result.responseCard?.kind !== 'wearable_trend') {
+          throw new Error('Expected the trusted wearable trend card.')
+        }
+        const expectedValues = result.responseCard.localDates.map((date) => {
+          const values = metricValuesByDay.get(date)
+          if (!values) {
+            throw new Error(`Missing seeded wearable values for ${date}.`)
+          }
+          return values
+        })
+        expect(result.responseCard).toEqual({
+          kind: 'wearable_trend',
+          localDates: result.responseCard.localDates,
+          metrics: [
+            {
+              metricKey: 'steps',
+              trend: 'higher',
+              values: expectedValues.map((values) => values.steps),
+            },
+            {
+              metricKey: 'total-sleep-minutes',
+              trend: 'higher',
+              values: expectedValues.map((values) => values.sleep),
+            },
+            {
+              metricKey: 'hrv-rmssd',
+              trend: 'higher',
+              values: expectedValues.map((values) => values.hrv),
+            },
+          ],
+          version: 1,
+        })
+        expect(result.responseCard.localDates).toHaveLength(7)
+        expect(result.responseMedia).toEqual([])
+        expect(result.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+        expect(result.finalMessage).toBe(
+          renderAssistantResponseCardText(result.responseCard),
+        )
+        expect(result.finalMessage).toMatch(/steps/iu)
+        expect(result.finalMessage).toMatch(/sleep/iu)
+        expect(result.finalMessage).toMatch(/HRV/iu)
+        expect(result.finalMessage).not.toMatch(
+          /template|layout|acknowledg|unavailable/iu,
+        )
+        expect(finalMessagesAfterCard).toEqual([])
+        expect(result.runtimeIssueInputs).toEqual([])
+
+        process.stdout.write(
+          `[wearable-trend-card-e2e] ${JSON.stringify({
+            arguments: trendAttempts[0]?.argumentsValue ?? null,
+            cardKind: result.responseCard.kind,
+            reply: result.finalMessage,
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   it(
     'maps private preferences and keeps unsupported, group, and stale-only turns quiet',
@@ -17235,6 +17540,110 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         )
         expect(reply).not.toMatch(
           /could not verify|couldn't verify|unable to verify/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'reports a sent automation occurrence without claiming handset delivery',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-automation-occurrence-receipt-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'inspect') {
+                  throw new Error('Expected an automation inspection request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'inspect',
+                  automationId: 'automation-receipt-evening',
+                  effectiveTimeZone: 'America/New_York',
+                  latestOccurrence: {
+                    delivered: 'unconfirmed',
+                    finishedAt: '2026-08-29T23:00:12.000Z',
+                    generated: 'confirmed',
+                    history: 'observed',
+                    outcome: 'sent',
+                    scheduledAt: '2026-08-29T23:00:00.000Z',
+                    sent: 'confirmed',
+                    startedAt: '2026-08-29T23:00:01.000Z',
+                    trigger: 'scheduled',
+                  },
+                  lookupId: 'evening-reminder',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: '2026-08-30T23:00:00.000Z',
+                    status: 'resolved',
+                  },
+                  routeBinding: 'preserved',
+                  schedule: {
+                    kind: 'dailyLocal',
+                    localTime: '19:00',
+                    timeZone: 'America/New_York',
+                  },
+                  status: 'active',
+                  updatedAt: '2026-08-29T23:00:12.000Z',
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Check automation ID automation-receipt-evening without changing it.',
+            'Did its latest occurrence run, and was the message delivered?',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toEqual([{
+          action: 'inspect',
+          lookup: 'automation-receipt-evening',
+        }])
+        const reply = result.finalMessage.trim()
+        process.stdout.write(
+          `[automation-occurrence-receipt-e2e] ${JSON.stringify({ reply })}\n`,
+        )
+        expect(reply).toMatch(/sent|dispatch(?:ed)?|provider/iu)
+        expect(reply).toMatch(
+          /deliver(?:y|ed).*(?:unconfirmed|not confirmed|cannot confirm|can't confirm)|(?:unconfirmed|not confirmed|cannot confirm|can't confirm).*deliver(?:y|ed)/iu,
+        )
+        expect(reply).not.toMatch(
+          /(?:was|is|has been) delivered|delivered successfully|delivery (?:is )?confirmed/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([

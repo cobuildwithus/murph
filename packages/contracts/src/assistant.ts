@@ -16,6 +16,10 @@ import {
   telegramRichContentResponseCardV1Schema,
   type TelegramRichContentResponseCardV1,
 } from "./telegram-rich-content-card.ts";
+import {
+  wearableTrendResponseCardV1Schema,
+  type WearableTrendResponseCardV1,
+} from "./wearable-trend-card.ts";
 
 export const MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE = `Hey, I'm Murph.
 
@@ -113,7 +117,8 @@ export type AssistantResponseCard =
   | CompactTableResponseCardV1
   | ExerciseRoutineResponseCardV1
   | TelegramRichContentResponseCardV1
-  | ChallengeStandingsResponseCardV1;
+  | ChallengeStandingsResponseCardV1
+  | WearableTrendResponseCardV1;
 
 export function assistantResponseCardMatchesConversationAudience(input: {
   card: AssistantResponseCard;
@@ -402,6 +407,7 @@ export const assistantResponseCardSchema: z.ZodType<AssistantResponseCard> =
     exerciseRoutineResponseCardV1Schema,
     telegramRichContentResponseCardV1Schema,
     challengeStandingsResponseCardV1Schema,
+    wearableTrendResponseCardV1Schema,
   ]);
 
 function isValidLocalCalendarDate(value: string): boolean {

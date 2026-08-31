@@ -1,6 +1,4 @@
-import {
-  isValidIanaTimeZone,
-} from "@murphai/contracts";
+import { isValidIanaTimeZone } from "@murphai/contracts";
 import {
   selectMetricGoalProgress,
   selectMetricValue,
@@ -94,6 +92,12 @@ import {
   readWearableSummaryRows,
 } from "./projection/wearable-summary-store.ts";
 import { resolveWearableSleepPatternReadFilters } from "./wearables/sleep-pattern.ts";
+import {
+  buildWearableSevenDaySnapshot,
+  resolveWearableSevenDaySnapshotWindow,
+  type WearableSevenDaySnapshot,
+  type WearableSevenDaySnapshotFilters,
+} from "./wearables/seven-day-snapshot.ts";
 import { createVaultReadModel } from "./read-model.ts";
 import {
   buildPersonalPatternReportFromWearableBundleAndMetricPoints,
@@ -311,6 +315,65 @@ export async function summarizeWearableSleepPatternRuntime(
       : vaultTimeZone
         ? "vault_metadata"
         : undefined,
+  });
+}
+
+export async function summarizeWearableSevenDaySnapshotRuntime(
+  vaultRoot: string,
+  filters: WearableSevenDaySnapshotFilters = {},
+): Promise<WearableSevenDaySnapshot> {
+  if (filters.timeZone !== undefined && !isValidIanaTimeZone(filters.timeZone)) {
+    throw new RangeError(`Invalid IANA reporting time zone: ${filters.timeZone}`);
+  }
+
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const metadata = filters.timeZone === undefined
+    ? readStoredVaultMetadata(location)
+    : null;
+  const vaultTimeZone = typeof metadata?.timezone === "string"
+    && isValidIanaTimeZone(metadata.timezone)
+    ? metadata.timezone
+    : undefined;
+  const now = filters.now ?? new Date().toISOString();
+  const resolvedFilters: WearableSevenDaySnapshotFilters = {
+    ...filters,
+    now,
+    ...(filters.timeZone === undefined && vaultTimeZone
+      ? { timeZone: vaultTimeZone }
+      : {}),
+  };
+  const window = resolveWearableSevenDaySnapshotWindow(resolvedFilters);
+  const readFilters = resolveWearableSleepPatternReadFilters({
+    from: window.priorFrom,
+    now: window.asOfInstant,
+    timeZone: window.reportingTimeZone ?? "UTC",
+    to: window.to,
+  });
+  const bundle = composePublicWearableSummaryBundleFromStoredRows(
+    readWearableSummaryRows(location, {
+      ...readFilters,
+      summaryKinds: ["activity", "recovery", "sleep"],
+    }),
+    readFilters,
+  );
+  const metricPoints = resolvedFilters.metricKeys?.includes("hrv-sdnn")
+    ? listStoredMetricPoints(location, normalizeMetricPointFilters({
+        from: window.priorFrom,
+        limit: null,
+        metricKey: "hrv-sdnn",
+        to: window.to,
+      }))
+    : [];
+
+  return buildWearableSevenDaySnapshot({
+    bundle,
+    filters: resolvedFilters,
+    metricPoints,
+    reportingTimeZoneSource: filters.timeZone !== undefined
+      ? "user_filter"
+      : vaultTimeZone
+        ? "vault_metadata"
+        : "none",
   });
 }
 

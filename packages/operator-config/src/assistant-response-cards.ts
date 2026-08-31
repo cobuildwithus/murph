@@ -10,6 +10,7 @@ import {
   assistantResponseCardV1Bounds,
   assistantResponseCardSchema,
   assistantResponseCardMatchesConversationAudience,
+  buildWearableTrendAppCardEnvelopeV7,
   buildWorkoutSessionAppCardEnvelopeV4,
   buildWorkoutSessionAppCardEnvelopeV6,
   challengeStandingsResponseCardV1Schema,
@@ -20,8 +21,14 @@ import {
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
   exerciseRoutineResponseCardV1Schema,
+  formatWearableTrendDateRange,
+  formatWearableTrendDirection,
+  formatWearableTrendMetricAverage,
+  formatWearableTrendMetricValue,
+  formatWearableTrendWeekdayLabels,
   renderExerciseRoutineResponseCardTextV1,
   renderTelegramRichContentResponseCardTextV1,
+  renderWearableTrendSparkline,
   telegramRichContentCardV1Bounds,
   telegramRichContentResponseCardV1Schema,
   nutritionCardGoalStatusLabels,
@@ -29,6 +36,8 @@ import {
   workoutSessionCardStateValues,
   workoutSessionCardV1Bounds,
   workoutSessionSetStatusValues,
+  wearableTrendMetricDisplayByKey,
+  wearableTrendResponseCardV1Schema,
   type AssistantResponseCard,
   type ChallengeStandingsEntryV1,
   type ChallengeStandingsResponseCardV1,
@@ -47,6 +56,8 @@ import {
   type WorkoutSessionDetailV1,
   type WorkoutSessionEditorProjectionV1,
   type WorkoutSessionPresentationV1,
+  type WearableTrendAppCardEnvelopeV7,
+  type WearableTrendResponseCardV1,
 } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 
@@ -130,6 +141,16 @@ export {
   telegramRichContentResponseCardV1Schema,
   nutritionCardGoalStatusValues,
   rankedChallengeStandingsResponseCardV1Schema,
+  wearableTrendAppCardEnvelopeV7Schema,
+  wearableTrendCardRequestV1Schema,
+  wearableTrendDirectionLabelByValue,
+  wearableTrendDirectionSchema,
+  wearableTrendDirectionValues,
+  wearableTrendMetricDisplayByKey,
+  wearableTrendMetricKeySchema,
+  wearableTrendMetricKeyValues,
+  wearableTrendMetricV1Schema,
+  wearableTrendResponseCardV1Schema,
   type ChallengeStandingsCoverage,
   type ChallengeStandingsCoverageCountsV1,
   type ChallengeStandingsEntryV1,
@@ -165,6 +186,12 @@ export {
   type WorkoutSessionExerciseV1,
   type WorkoutSessionSetStatus,
   type WorkoutSessionSetV1,
+  type WearableTrendAppCardEnvelopeV7,
+  type WearableTrendCardRequestV1,
+  type WearableTrendDirection,
+  type WearableTrendMetricKey,
+  type WearableTrendMetricV1,
+  type WearableTrendResponseCardV1,
 } from '@murphai/contracts'
 
 export const assistantResponseCardAuthoringSchema: z.ZodType<
@@ -217,6 +244,8 @@ export function renderAssistantResponseCardText(
       return renderTelegramRichContentResponseCardTextV1(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
+    case 'wearable_trend':
+      return renderWearableTrendResponseCardText(parsed)
   }
 }
 
@@ -258,6 +287,8 @@ export function renderAssistantResponseCardTranscriptText(
       return renderTelegramRichContentResponseCardTextV1(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
+    case 'wearable_trend':
+      return renderWearableTrendResponseCardText(parsed)
   }
 }
 
@@ -282,6 +313,8 @@ export function buildTelegramRichMessage(
       return { html: parsed.html, skip_entity_detection: true }
     case 'challenge_standings':
       return { html: renderTelegramChallengeStandingsCardHtml(parsed) }
+    case 'wearable_trend':
+      return { html: renderTelegramWearableTrendCardHtml(parsed) }
   }
 }
 
@@ -292,6 +325,7 @@ export function buildLinqIMessageAppFallbackText(
   | 'Exercise routine.'
   | 'Your Murph guide.'
   | 'Your daily nutrition.'
+  | 'Your health trend.'
   | 'Your Murph summary.'
   | 'Your workout.' {
   const parsed = assistantResponseCardSchema.parse(card)
@@ -313,6 +347,8 @@ export function buildLinqIMessageAppFallbackText(
       return 'Exercise routine.'
     case 'telegram_rich_content':
       return 'Your Murph guide.'
+    case 'wearable_trend':
+      return 'Your health trend.'
   }
 }
 
@@ -329,6 +365,12 @@ export function buildLinqIMessageAppLayout(
     throw new TypeError(
       'Telegram rich content cards do not have a native iMessage layout.',
     )
+  }
+  if (parsed.kind === 'wearable_trend') {
+    return {
+      caption: '7-day health',
+      image_url: buildLinqIMessageAppCardImageUrl(parsed),
+    }
   }
   if (parsed.kind === 'compact_table') {
     const imageUrl = buildLinqIMessageAppCardImageUrl(parsed)
@@ -381,9 +423,11 @@ export function buildLinqIMessageAppCardImageUrl(
     ? encodeDailyNutritionAppCardPayload(parsed)
     : parsed.kind === 'compact_table'
       ? encodeCompactTableAppCardPayload(parsed, false)
-      : encodeChallengeStandingsAppCardPayload(
-          buildIdentityFreeChallengeStandingsImageCard(parsed),
-        )
+      : parsed.kind === 'wearable_trend'
+        ? encodeWearableTrendAppCardPayload(parsed)
+        : encodeChallengeStandingsAppCardPayload(
+            buildIdentityFreeChallengeStandingsImageCard(parsed),
+          )
   if (encoded.length > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
     throw new TypeError('The encoded app card image payload is too large.')
   }
@@ -407,6 +451,10 @@ export function buildLinqIMessageAppCardUrl(
       return encodeCompactTableAppCardUrl(parsed)
     case 'challenge_standings':
       return encodeChallengeStandingsAppCardUrl(parsed)
+    case 'wearable_trend':
+      throw new TypeError(
+        'Wearable trend response cards use a static iMessage layout.',
+      )
     case 'exercise_routine':
       throw new TypeError(
         'Exercise routine response cards do not have a native iMessage app URL.',
@@ -525,6 +573,15 @@ function encodeChallengeStandingsAppCardPayload(
   return encodeAppCardEnvelopePayload(envelope)
 }
 
+function encodeWearableTrendAppCardPayload(
+  card: WearableTrendResponseCardV1,
+): string {
+  const parsed = wearableTrendResponseCardV1Schema.parse(card)
+  return encodeAppCardEnvelopePayload(
+    buildWearableTrendAppCardEnvelopeV7(parsed),
+  )
+}
+
 function buildIdentityFreeChallengeStandingsImageCard(
   card: ChallengeStandingsResponseCardV1,
 ): ChallengeStandingsResponseCardV1 {
@@ -579,11 +636,37 @@ function encodeAppCardEnvelopePayload(
     | AppCardEnvelopeV2
     | AppCardEnvelopeV3
     | AppCardEnvelopeV5
+    | WearableTrendAppCardEnvelopeV7
     | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>
     | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV6>,
 ): string {
   return Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')
+}
+
+function renderWearableTrendResponseCardText(
+  card: WearableTrendResponseCardV1,
+): string {
+  const blocks = card.metrics.flatMap((metric, index) => {
+    const display = wearableTrendMetricDisplayByKey[metric.metricKey]
+    return [
+      ...(index === 0 ? [] : ['']),
+      `${display.compactLabel} · ${
+        formatWearableTrendMetricAverage(metric.metricKey, metric.values)
+      } · ${formatWearableTrendDirection(metric.trend)}`,
+      metric.values.map((value) =>
+        formatWearableTrendMetricValue(metric.metricKey, value)
+      ).join(' · '),
+      renderWearableTrendSparkline(metric.values),
+    ]
+  })
+  return [
+    `7-day health · ${formatWearableTrendDateRange(card.localDates)}`,
+    `Days: ${formatWearableTrendWeekdayLabels(card.localDates).join(' · ')}`,
+    'Avg · trend vs prior 7d',
+    '',
+    ...blocks,
+  ].join('\n')
 }
 
 function encodeAppCardEnvelopeUrl(encoded: string): string {
@@ -924,6 +1007,35 @@ function renderTelegramChallengeStandingsCardHtml(
     note,
     footer,
   ].join('')
+}
+
+function renderTelegramWearableTrendCardHtml(
+  card: WearableTrendResponseCardV1,
+): string {
+  const heading = `7-day health · ${
+    formatWearableTrendDateRange(card.localDates)
+  }`
+  const weekdays = `Days: ${
+    formatWearableTrendWeekdayLabels(card.localDates).join(' · ')
+  }`
+  const summaryAxis = 'Avg · trend vs prior 7d'
+  const metrics = card.metrics.map((metric) => {
+    const display = wearableTrendMetricDisplayByKey[metric.metricKey]
+    const summary = `${display.compactLabel} · ${
+      formatWearableTrendMetricAverage(metric.metricKey, metric.values)
+    } · ${formatWearableTrendDirection(metric.trend)}`
+    const values = metric.values.map((value) =>
+      formatWearableTrendMetricValue(metric.metricKey, value)
+    ).join(' · ')
+    return `<p><b>${escapeTelegramRichHtml(summary)}</b><br>${
+      escapeTelegramRichHtml(values)
+    }<br><code>${
+      escapeTelegramRichHtml(renderWearableTrendSparkline(metric.values))
+    }</code></p>`
+  }).join('')
+  return `<h2>${escapeTelegramRichHtml(heading)}</h2><p>${
+    escapeTelegramRichHtml(weekdays)
+  }<br>${escapeTelegramRichHtml(summaryAxis)}</p>${metrics}`
 }
 
 function renderTelegramExerciseRoutineCardHtml(

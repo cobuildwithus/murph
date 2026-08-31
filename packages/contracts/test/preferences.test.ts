@@ -16,7 +16,138 @@ import {
   isAssistantPersonalitySettingId,
   preferencesDocumentSchema,
   resolveAssistantPersonalityScores,
+  SAVED_HEALTH_VIEW_MAX_COUNT,
+  savedHealthViewSchema,
+  savedHealthViewsSchema,
 } from "../src/preferences.ts";
+import { toJSONSchema } from "../src/zod-runtime.ts";
+
+const savedHealthViewFixture = {
+  savedViewId: "hview_00000000000123456789ABCDEF",
+  name: "Daily basics",
+  metricKeys: ["steps", "total-sleep-minutes", "hrv-rmssd"],
+} as const;
+
+describe("saved health view preference contracts", () => {
+  it("returns validation failures instead of throwing for invalid nested names", () => {
+    for (const name of [null, 42, "", "   ", " Daily ", "line\nbreak"]) {
+      let result: ReturnType<typeof savedHealthViewSchema.safeParse> | undefined;
+      expect(() => {
+        result = savedHealthViewSchema.safeParse({
+          ...savedHealthViewFixture,
+          name,
+        });
+      }).not.toThrow();
+      expect(result?.success).toBe(false);
+    }
+
+    let collectionResult:
+      | ReturnType<typeof savedHealthViewsSchema.safeParse>
+      | undefined;
+    expect(() => {
+      collectionResult = savedHealthViewsSchema.safeParse([
+        { ...savedHealthViewFixture, name: "   " },
+      ]);
+    }).not.toThrow();
+    expect(collectionResult?.success).toBe(false);
+  });
+
+  it("rejects names that could be mistaken for opaque ids", () => {
+    for (const name of [
+      "hview_00000000000123456789ABCDEF",
+      "HVIEW_00000000000123456789abcdef",
+      "hViEw_00000000000123456789AbCdEf",
+    ]) {
+      expect(
+        savedHealthViewSchema.safeParse({ ...savedHealthViewFixture, name }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("preserves ordered method-specific metrics", () => {
+    expect(savedHealthViewSchema.parse(savedHealthViewFixture)).toEqual(
+      savedHealthViewFixture,
+    );
+    expect(
+      savedHealthViewSchema.safeParse({
+        ...savedHealthViewFixture,
+        metricKeys: ["steps", "steps"],
+      }).success,
+    ).toBe(false);
+    expect(
+      savedHealthViewSchema.safeParse({
+        ...savedHealthViewFixture,
+        metricKeys: ["hrv"],
+      }).success,
+    ).toBe(false);
+    expect(
+      savedHealthViewSchema.safeParse({
+        ...savedHealthViewFixture,
+        metricKeys: [
+          "steps",
+          "total-sleep-minutes",
+          "resting-heart-rate",
+          "hrv-rmssd",
+          "hrv-sdnn",
+          "steps",
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("bounds views and rejects duplicate ids or case-insensitive names", () => {
+    const views = Array.from({ length: SAVED_HEALTH_VIEW_MAX_COUNT }, (_, index) => ({
+      ...savedHealthViewFixture,
+      savedViewId: `hview_${String(index).padStart(26, "0")}`,
+      name: `View ${index}`,
+    }));
+    expect(savedHealthViewsSchema.parse(views)).toEqual(views);
+    expect(
+      savedHealthViewsSchema.safeParse([
+        views[0]!,
+        { ...views[1]!, savedViewId: views[0]!.savedViewId },
+      ]).success,
+    ).toBe(false);
+    expect(
+      savedHealthViewsSchema.safeParse([
+        views[0]!,
+        { ...views[1]!, name: "vIeW 0" },
+      ]).success,
+    ).toBe(false);
+    expect(
+      savedHealthViewsSchema.safeParse([
+        ...views,
+        {
+          ...savedHealthViewFixture,
+          savedViewId: "hview_00000000000000000000000008",
+          name: "View 8",
+        },
+      ]).success,
+    ).toBe(false);
+  });
+
+  it("publishes representable canonical-name and uniqueness constraints", () => {
+    const jsonSchema = toJSONSchema(preferencesDocumentSchema) as {
+      properties?: {
+        savedHealthViews?: {
+          description?: string;
+          uniqueItems?: boolean;
+          items?: {
+            properties?: {
+              name?: { pattern?: string };
+              metricKeys?: { uniqueItems?: boolean };
+            };
+          };
+        };
+      };
+    };
+    const savedViews = jsonSchema.properties?.savedHealthViews;
+    expect(savedViews?.uniqueItems).toBe(true);
+    expect(savedViews?.description).toMatch(/case-insensitive normalized names/u);
+    expect(savedViews?.items?.properties?.name?.pattern).toContain("[hH][vV]");
+    expect(savedViews?.items?.properties?.metricKeys?.uniqueItems).toBe(true);
+  });
+});
 
 describe("assistant personality preference contracts", () => {
   it("publishes the fixed setting catalog and product defaults", () => {
@@ -146,6 +277,8 @@ describe("assistant personality preference contracts", () => {
     expect(preferencesDocumentSchema.parse(oldDocument)).toEqual(oldDocument);
     expect(createEmptyPreferencesDocument(new Date("2026-08-29T00:00:00.000Z")))
       .not.toHaveProperty("workoutCapturePreferences");
+    expect(createEmptyPreferencesDocument(new Date("2026-08-29T00:00:00.000Z")))
+      .not.toHaveProperty("savedHealthViews");
     expect(
       preferencesDocumentSchema.parse({
         ...oldDocument,

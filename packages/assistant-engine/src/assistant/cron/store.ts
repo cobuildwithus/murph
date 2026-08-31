@@ -73,9 +73,7 @@ export async function readAssistantCronStore(
   let raw: string | null = null
   try {
     raw = await readFile(paths.cronJobsPath, 'utf8')
-    return normalizeAssistantCronStore(
-      assistantCronStoreSchema.parse(JSON.parse(raw)),
-    )
+    return parseAssistantCronStore(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
       return createEmptyAssistantCronStore()
@@ -97,6 +95,10 @@ export async function writeAssistantCronStore(
   store: AssistantCronStore,
 ): Promise<void> {
   await writeJsonFileAtomic(paths.cronJobsPath, sanitizeAssistantCronStoreForPersistence(store))
+}
+
+export function parseAssistantCronStore(value: unknown): AssistantCronStore {
+  return normalizeAssistantCronStore(assistantCronStoreSchema.parse(value))
 }
 
 export async function readAssistantCronRuns(

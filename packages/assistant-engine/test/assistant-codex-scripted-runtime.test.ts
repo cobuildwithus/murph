@@ -3883,6 +3883,7 @@ text(JSON.stringify(result));
               action: 'inspect',
               automationId: 'automation-central-evening',
               effectiveTimeZone: 'America/Chicago',
+              latestOccurrence: { history: 'not_observed' },
               lookupId: 'evening-reminder',
               occurrenceProjection: {
                 nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
@@ -6534,6 +6535,7 @@ text(JSON.stringify(result));
             return {
               action: 'inspect' as const,
               ...response,
+              latestOccurrence: { history: 'not_observed' as const },
             }
           },
         },

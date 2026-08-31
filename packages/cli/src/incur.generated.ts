@@ -319,6 +319,11 @@ declare module 'incur' {
       'wearables sleep list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep pattern': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; timeZone?: string; windowDays: number } }
       'wearables sources list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
+      'wearables view delete': { args: { lookup: string }; options: { requestId?: string } }
+      'wearables view edit': { args: { lookup: string }; options: { requestId?: string; name?: string; metric?: ("steps" | "total-sleep-minutes" | "resting-heart-rate" | "hrv-rmssd" | "hrv-sdnn")[] } }
+      'wearables view list': { args: {}; options: { requestId?: string } }
+      'wearables view save': { args: { name: string }; options: { requestId?: string; metric: ("steps" | "total-sleep-minutes" | "resting-heart-rate" | "hrv-rmssd" | "hrv-sdnn")[] } }
+      'wearables view show': { args: { lookup: string }; options: { requestId?: string } }
       'workout add': { args: { text?: string }; options: { requestId?: string; note?: string; title?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[]; workoutSourceApp?: string; workoutSourceWorkoutId?: string; workoutStartedAt?: string; workoutEndedAt?: string; workoutRoutineId?: string; workoutRoutineName?: string; workoutSessionNote?: string; workoutMedia?: string[]; workoutExercise?: string[]; workoutSet?: string[] } }
       'workout defaults set': { args: {}; options: { requestId?: string; duration?: number; clearDuration?: boolean; recordedAt?: string } }
       'workout defaults show': { args: {}; options: { requestId?: string } }

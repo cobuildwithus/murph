@@ -175,7 +175,7 @@ function createEmptyAssistantCronCanonicalRuntimeStore(): AssistantCronCanonical
   }
 }
 
-function normalizeAssistantCronCanonicalRuntimeStore(
+export function normalizeAssistantCronCanonicalRuntimeStore(
   value: unknown,
   policy?: AssistantCronCanonicalRuntimeNormalizationPolicy,
 ): AssistantCronCanonicalRuntimeStore {

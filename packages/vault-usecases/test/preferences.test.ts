@@ -10,12 +10,18 @@ import {
   assistantPreferenceMutationStateRelativePath,
 } from "@murphai/contracts";
 import { initializeVault, readPreferencesDocument } from "@murphai/core";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
+  deleteSavedHealthView,
+  editSavedHealthView,
+  listSavedHealthViews,
   resetAllAssistantPersonalitySettings,
   resetAssistantPersonalitySetting,
   setAssistantPersonalitySetting,
   setWearablePreferences,
+  saveSavedHealthView,
   showAssistantPersonality,
+  showSavedHealthView,
   showWearablePreferences,
 } from "../src/preferences.ts";
 
@@ -102,6 +108,65 @@ test("wearable preference usecases show and set canonical desired providers", as
   assert.deepEqual(stillEmpty.wearablePreferences, {
     desiredProviders: [],
   });
+});
+
+test("saved health view usecases expose the explicit CRUD lifecycle", async () => {
+  const vaultRoot = await createTempVault();
+  const initial = await listSavedHealthViews(vaultRoot);
+  assert.equal(initial.preferencesPath, "bank/preferences.json");
+  assert.equal(initial.recordedAt, null);
+  assert.equal(initial.count, 0);
+  assert.deepEqual(initial.views, []);
+
+  const created = await saveSavedHealthView({
+    vault: vaultRoot,
+    name: "Daily",
+    metricKeys: ["steps", "total-sleep-minutes", "hrv-rmssd"],
+    recordedAt: "2026-08-30T12:00:00.000Z",
+  });
+  assert.equal(created.created, true);
+  assert.deepEqual(created.view.metricKeys, [
+    "steps",
+    "total-sleep-minutes",
+    "hrv-rmssd",
+  ]);
+
+  const shown = await showSavedHealthView({
+    vault: vaultRoot,
+    lookup: "dAiLy",
+  });
+  assert.deepEqual(shown.view, created.view);
+
+  await assert.rejects(
+    () => saveSavedHealthView({
+      vault: vaultRoot,
+      name: "DAILY",
+      metricKeys: ["steps"],
+    }),
+    (error: unknown) =>
+      error instanceof VaultCliError && error.code === "conflict",
+  );
+
+  const edited = await editSavedHealthView({
+    vault: vaultRoot,
+    savedViewId: created.view.savedViewId,
+    name: "Morning",
+    metricKeys: ["resting-heart-rate", "steps"],
+  });
+  assert.equal(edited.updated, true);
+  assert.deepEqual(edited.view.metricKeys, ["resting-heart-rate", "steps"]);
+
+  const deleted = await deleteSavedHealthView({
+    vault: vaultRoot,
+    savedViewId: created.view.savedViewId,
+  });
+  assert.equal(deleted.deleted, true);
+  assert.equal((await listSavedHealthViews(vaultRoot)).count, 0);
+  await assert.rejects(
+    () => showSavedHealthView({ vault: vaultRoot, lookup: "Morning" }),
+    (error: unknown) =>
+      error instanceof VaultCliError && error.code === "not_found",
+  );
 });
 
 test("assistant personality usecases expose defaults and preserve explicit default intent", async () => {

@@ -102,6 +102,14 @@ export {
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 }
+export {
+  getAssistantCronAutomationOccurrenceReceipt,
+  projectAssistantAutomationOccurrenceReceipt,
+} from './cron/occurrence-receipt.ts'
+export type {
+  AssistantAutomationOccurrenceReceiptProjectionInput,
+  AssistantAutomationOccurrenceReceiptReadOptions,
+} from './cron/occurrence-receipt.ts'
 export { listAssistantCronPendingDeliveryIntentIds } from './cron/delivery-reconciliation.ts'
 export {
   resolveAssistantCronDefaultTimeZone,

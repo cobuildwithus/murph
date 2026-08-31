@@ -2643,6 +2643,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         schedule: expect.objectContaining({ kind: "deviceActivity" }),
         status: "active",
       }));
+      mocks.getAssistantCronAutomationOccurrenceReceipt.mockClear();
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: nextWorkout.automationId,
+      })).resolves.toMatchObject({
+        action: "inspect",
+        automationId: nextWorkout.automationId,
+        latestOccurrence: { history: "not_observed" },
+      });
+      expect(
+        mocks.getAssistantCronAutomationOccurrenceReceipt,
+      ).toHaveBeenLastCalledWith(vaultRoot, nextWorkout.automationId, {
+        deviceActivitySchedule: {
+          activityKind: "workout",
+          after: "2026-08-01T12:00:00.000Z",
+          kind: "deviceActivity",
+          source: "whoop",
+        },
+      });
 
       const dailyEveningReminder = await requestAutomation({
         action: "save",
@@ -2915,6 +2934,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
       }
       const recordPath = path.join(vaultRoot, beforeInspect.relativePath);
       const recordBytesBeforeInspect = await readFile(recordPath, "utf8");
+      mocks.getAssistantCronAutomationOccurrenceReceipt.mockResolvedValueOnce({
+        delivered: "unconfirmed",
+        finishedAt: "2026-08-10T00:31:00.000Z",
+        generated: "confirmed",
+        history: "observed",
+        outcome: "sent",
+        scheduledAt: "2026-08-10T00:30:00.000Z",
+        sent: "confirmed",
+        startedAt: "2026-08-10T00:30:01.000Z",
+        trigger: "scheduled",
+      });
       await expect(requestAutomation({
         action: "inspect",
         lookup: "daily-evening-reminder",
@@ -2923,6 +2953,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         automationId: beforeInspect.automationId,
         contextReferences: [],
         effectiveTimeZone: "America/Chicago",
+        latestOccurrence: {
+          delivered: "unconfirmed",
+          finishedAt: "2026-08-10T00:31:00.000Z",
+          generated: "confirmed",
+          history: "observed",
+          outcome: "sent",
+          scheduledAt: "2026-08-10T00:30:00.000Z",
+          sent: "confirmed",
+          startedAt: "2026-08-10T00:30:01.000Z",
+          trigger: "scheduled",
+        },
         lookupId: "daily-evening-reminder",
         occurrenceProjection: {
           nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
@@ -2940,6 +2981,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
       await expect(readFile(recordPath, "utf8")).resolves.toBe(
         recordBytesBeforeInspect,
       );
+      expect(
+        mocks.getAssistantCronAutomationOccurrenceReceipt,
+      ).toHaveBeenLastCalledWith(vaultRoot, beforeInspect.automationId);
       await expect(showAutomation({
         slug: "daily-evening-reminder",
         vaultRoot,

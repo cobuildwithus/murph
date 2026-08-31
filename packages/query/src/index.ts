@@ -24,6 +24,10 @@ import type {
   WearableSleepReportingTimeZoneSource,
   WearableSummaryFilters,
 } from "./wearables.ts";
+import type {
+  WearableSevenDaySnapshot,
+  WearableSevenDaySnapshotFilters,
+} from "./wearables/seven-day-snapshot.ts";
 
 export {
   createVaultReadModel,
@@ -91,6 +95,20 @@ export {
 export {
   resolveWearablePublicSourceProvider,
 } from "./wearables/origin.ts";
+export {
+  buildWearableSevenDaySnapshot,
+  DEFAULT_WEARABLE_SEVEN_DAY_METRIC_KEYS,
+  resolveWearableSevenDaySnapshotWindow,
+  WEARABLE_SEVEN_DAY_METRIC_KEYS,
+  WEARABLE_SEVEN_DAY_SNAPSHOT_SCHEMA_VERSION,
+  type WearableSevenDayReportingTimeZoneSource,
+  type WearableSevenDaySnapshot,
+  type WearableSevenDaySnapshotBundle,
+  type WearableSevenDaySnapshotFilters,
+  type WearableSevenDaySnapshotMetric,
+  type WearableSevenDaySnapshotTrend,
+  type WearableSevenDaySnapshotWindow,
+} from "./wearables/seven-day-snapshot.ts";
 export type {
   DeviceActivityCoverageCursor,
   DeviceActivityCoverageKey,
@@ -619,6 +637,14 @@ export async function summarizeWearableSleepPatternRuntime(
 ): Promise<WearableSleepPatternSummary> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableSleepPatternRuntime(vaultRoot, filters);
+}
+
+export async function summarizeWearableSevenDaySnapshotRuntime(
+  vaultRoot: string,
+  filters: WearableSevenDaySnapshotFilters = {},
+): Promise<WearableSevenDaySnapshot> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableSevenDaySnapshotRuntime(vaultRoot, filters);
 }
 
 export async function buildPersonalPatternReportRuntime(

@@ -6437,6 +6437,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-song' ||
     request.kind === 'attach-group-challenge-response-card' ||
     request.kind === 'attach-response-card' ||
+    request.kind === 'attach-wearable-trend-card' ||
     request.kind === 'response-card-envelope-too-large' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'send-vault-file' ||
@@ -6465,6 +6466,7 @@ function isResponseAttachmentDynamicToolRequest(
 ): boolean {
   return request.kind === 'attach-group-challenge-response-card' ||
     request.kind === 'attach-response-card' ||
+    request.kind === 'attach-wearable-trend-card' ||
     request.kind === 'response-card-envelope-too-large' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'generate-image' ||
