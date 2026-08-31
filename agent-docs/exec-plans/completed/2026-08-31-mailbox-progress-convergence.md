@@ -1,6 +1,6 @@
 # Converge canonical system mailbox progress
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-08-31
 
@@ -93,3 +93,15 @@ Updated: 2026-08-31
 - After deployment, compare equal bounded windows: no-op system-mailbox attempts
   and `/reconciliation-facts` traffic should collapse after one convergence
   checkpoint per affected runtime, with no warning/error increase.
+
+## Results
+
+- Reused the existing system-mailbox checkpoint when restored local imported
+  and handled-through progress componentwise dominates canonical progress.
+- Added fixed-boolean phase telemetry on the existing checkpoint log so the
+  repair can be proven without logging cursors or creating another log row.
+- Proved one repair checkpoint and subsequent quiescence, plus fail-closed
+  equal, canonical-ahead, crossed, missing, and malformed cases.
+- Verified the complete 50-test system-mailbox owner file, assistant-runtime
+  typecheck, changelog rendering test, Web typecheck, and diff/privacy checks.
+Completed: 2026-08-31
