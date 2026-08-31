@@ -229,7 +229,7 @@ jobs:
       - name: Guard cyclomatic complexity regressions
         if: ${{ github.event_name == 'pull_request' }}
         env:
-          MURPH_COMPLEXITY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MURPH_COMPLEXITY_BASE_SHA: ${{ github.sha }}^1
           MURPH_COMPLEXITY_HEAD_SHA: ${{ github.sha }}
         run: pnpm complexity:diff
 

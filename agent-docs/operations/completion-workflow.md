@@ -327,8 +327,9 @@ Every PR includes:
   none remain. `Agent judgment` states whether further behavior-preserving
   simplification is justified. The guard ratchets per-file debt above 20 and
   per-function maximum complexity; unchanged legacy debt does not fail an
-  unrelated PR. Required CI reruns the comparison against GitHub's exact
-  synthetic merge candidate, and the pull-request evidence guard validates
+  unrelated PR. Required CI compares GitHub's exact synthetic merge candidate
+  with that merge commit's first parent, so an event-payload base race cannot
+  widen or invalidate the comparison. The pull-request evidence guard validates
   this section.
 - **Hot reply path impact.** State whether the PR changes the `Foreground Reply
   Critical Path` defined in `docs/contracts/00-invariants.md`: durable

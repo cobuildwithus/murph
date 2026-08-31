@@ -361,7 +361,7 @@ describe("cyclomatic complexity CLI composition", () => {
       const exactCandidate = runComplexityCli(
         repository,
         "--base",
-        eventBase,
+        `${mergeCandidate}^1`,
         "--head",
         mergeCandidate,
         "--",
@@ -384,7 +384,7 @@ describe("cyclomatic complexity CLI composition", () => {
       const inverseCandidate = runComplexityCli(
         repository,
         "--base",
-        eventBase,
+        `${mergeCandidate}^1`,
         "--head",
         mergeCandidate,
         "--",
@@ -395,7 +395,7 @@ describe("cyclomatic complexity CLI composition", () => {
       const pathShapes = runComplexityCli(
         repository,
         "--base",
-        eventBase,
+        `${mergeCandidate}^1`,
         "--head",
         mergeCandidate,
         "--",
@@ -425,7 +425,7 @@ describe("cyclomatic complexity CLI composition", () => {
       const immutableCandidate = runComplexityCli(
         repository,
         "--base",
-        eventBase,
+        `${mergeCandidate}^1`,
         "--head",
         mergeCandidate,
         "--",
