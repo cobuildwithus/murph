@@ -5,6 +5,7 @@ import {
   commonsGoalRefSchema,
 } from "@murphai/contracts";
 import type { upsertGoal } from "@murphai/core";
+import { getGeneratedHealthCommonsWebGoalIndex } from "@murphai/health-commons/runtime";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
@@ -79,6 +80,34 @@ function buildCommonsGoalRef(input: {
     );
   }
 
+  let index: ReturnType<typeof getGeneratedHealthCommonsWebGoalIndex>;
+  try {
+    index = getGeneratedHealthCommonsWebGoalIndex();
+  } catch {
+    throw new VaultCliError(
+      "commons_goal_artifact_unavailable",
+      "Health Commons goal guides are unavailable; regenerate the packaged Health Commons artifacts and retry.",
+    );
+  }
+
+  const current = index.goals.find((goal) => goal.key === parsed.data.key);
+  if (!current) {
+    throw new VaultCliError(
+      "commons_goal_not_found",
+      `Health Commons goal ${parsed.data.key} is not available. Show the goal again before saving.`,
+    );
+  }
+
+  if (
+    current.revision.pageRevisionId !== parsed.data.pageRevisionId ||
+    current.revision.workflowSpecRevisionId !== parsed.data.workflowSpecRevisionId
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      `Health Commons goal ${parsed.data.key} changed after this setup was prepared. Show the goal again and reopen any changed setup before saving.`,
+    );
+  }
+
   return parsed.data;
 }
 
@@ -97,7 +126,7 @@ function buildGoalSaveInput(input: {
   startAt?: string;
   status?: z.infer<typeof goalStatusSchema>;
   targetAt?: string;
-  title: string;
+  title?: string;
   vault: string;
 }): Parameters<typeof upsertGoal>[0] {
   return {
@@ -148,7 +177,7 @@ export function registerGoalCommands(
 
   goal.command("save", {
     args: z.object({
-      title: z.string().min(1).max(160).describe("Goal title or name."),
+      title: z.string().min(1).max(160).optional().describe("Goal title or name."),
     }),
     description: "Create or update one goal from typed command fields.",
     examples: [
@@ -223,6 +252,12 @@ export function registerGoalCommands(
     }),
     output: goalSaveResultSchema,
     async run(context) {
+      if (context.args.title === undefined && context.options.id === undefined) {
+        throw new VaultCliError(
+          "invalid_option",
+          "A goal title is required when creating a goal. Omit the title only when updating an existing goal with --id.",
+        );
+      }
       const { upsertGoal } = await import("@murphai/core");
       const result = await upsertGoal(
         buildGoalSaveInput({

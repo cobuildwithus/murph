@@ -31,6 +31,9 @@ type CommonsProtocolEntity =
   | HealthCommonsProtocolIndexEntry
   | HealthCommonsProtocolRunSpec;
 type ProtocolEntity = HealthCommonsProtocolIndexEntry;
+type CommonsGoalIndexEntry = ReturnType<
+  typeof getGeneratedHealthCommonsWebGoalIndex
+>["goals"][number];
 
 const revisionSchema = z.object({
   pageRevisionId: z.string().min(1),
@@ -258,21 +261,19 @@ export function registerCommonsCommands(cli: Cli.Cli) {
       }
 
       const query = options.query?.trim() || null;
-      const normalizedQuery = query?.toLocaleLowerCase() ?? null;
+      const normalizedQuery = query === null ? null : normalizeCommonsGoalText(query);
       const categories = options.category ?? [];
       const goals = index.goals
         .filter((entry) => categories.length === 0 || categories.includes(entry.category))
         .filter((entry) => {
-          if (!normalizedQuery) {
+          if (normalizedQuery === null) {
             return true;
           }
-          return [
-            entry.title,
-            entry.goalPhrase,
-            entry.summary,
-            entry.category,
-            ...entry.aliases,
-          ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+          if (!normalizedQuery) {
+            return false;
+          }
+          return commonsGoalSearchValues(entry)
+            .some((value) => normalizeCommonsGoalText(value).includes(normalizedQuery));
         });
 
       return {
@@ -311,11 +312,14 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         );
       }
 
-      const normalizedLookup = args.key.toLocaleLowerCase();
-      const match = index.goals.find((entry) =>
-        [entry.key, entry.slug, entry.routeId, ...entry.aliases]
-          .some((value) => value.toLocaleLowerCase() === normalizedLookup)
-      );
+      const normalizedLookup = normalizeCommonsGoalText(args.key);
+      const matches = normalizedLookup
+        ? index.goals.filter((entry) =>
+            commonsGoalLookupValues(entry)
+              .some((value) => normalizeCommonsGoalText(value) === normalizedLookup)
+          )
+        : [];
+      const match = matches.length === 1 ? matches[0] : null;
       if (!match) {
         throw new VaultCliError(
           "commons_goal_not_found",
@@ -549,7 +553,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
 }
 
 function toGoalSummary(
-  entry: ReturnType<typeof getGeneratedHealthCommonsWebGoalIndex>["goals"][number],
+  entry: CommonsGoalIndexEntry,
 ) {
   return {
     aliases: entry.aliases,
@@ -575,6 +579,40 @@ function toGoalSummary(
     title: entry.title,
     workflow: entry.workflow,
   };
+}
+
+function commonsGoalLookupValues(entry: CommonsGoalIndexEntry): readonly string[] {
+  return [
+    entry.key,
+    entry.slug,
+    entry.routeId,
+    entry.title,
+    entry.goalPhrase,
+    entry.startPrompt,
+    ...entry.aliases,
+  ];
+}
+
+function commonsGoalSearchValues(entry: CommonsGoalIndexEntry): readonly string[] {
+  return [
+    ...commonsGoalLookupValues(entry),
+    entry.summary,
+    entry.category,
+  ];
+}
+
+function normalizeCommonsGoalText(value: string): string {
+  const words = value
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]+/gu);
+
+  return (words ?? [])
+    .join(" ")
+    .replace(/\b(?:v o 2|vo 2)\b/gu, "vo2")
+    .replace(/\b(?:r h r|rhr)\b/gu, "resting heart rate")
+    .replace(/\biron man\b/gu, "ironman");
 }
 
 function toEntitySummary(entity: CommonsProtocolEntity) {

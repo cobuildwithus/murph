@@ -367,6 +367,52 @@ test("goal upserts preserve Health Commons goal lineage", async () => {
   assert.match(read.document.markdown, /goal_template:lower-resting-heart-rate/);
 });
 
+test("goal upserts reject malformed Health Commons lineage without changing the goal or audit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-invalid-commons-lineage");
+  await initializeVault({ vaultRoot });
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Improve my deep sleep",
+    commonsGoalRef: {
+      key: "goal_template:improve-deep-sleep",
+      pageRevisionId: `sha256:${"a".repeat(64)}`,
+      workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+    },
+  });
+  const goalMarkdownBefore = created.record.document.markdown;
+  const auditBefore = await readJsonlRecords({
+    vaultRoot,
+    relativePath: created.auditPath,
+  });
+
+  await assert.rejects(
+    () =>
+      upsertGoal({
+        vaultRoot,
+        goalId: created.record.entity.goalId,
+        commonsGoalRef: invalidTestValue({
+          key: "goal_template:improve-deep-sleep",
+          pageRevisionId: "sha256:not-a-digest",
+          workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "commonsGoalRef must be a valid Health Commons goal reference.",
+  );
+
+  const unchanged = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+  assert.equal(unchanged.document.markdown, goalMarkdownBefore);
+  assert.deepEqual(
+    await readJsonlRecords({ vaultRoot, relativePath: created.auditPath }),
+    auditBefore,
+  );
+});
+
 test("goal upserts merge concurrent partial updates with the latest record", async () => {
   const vaultRoot = await makeTempDirectory("murph-goal-concurrent-upsert");
   await initializeVault({ vaultRoot });

@@ -1,7 +1,9 @@
 import {
+  commonsGoalRefSchema,
   extractHealthEntityRegistryLinks,
   goalRegistryEntityDefinition,
   goalUpsertPatchPayloadSchema,
+  type CommonsGoalRef,
   type GoalFrontmatter,
 } from "@murphai/contracts";
 
@@ -81,6 +83,19 @@ function normalizeGoalMetricTargets(value: unknown, fieldName: string): GoalMetr
   }
 
   return result.data.metricTargets;
+}
+
+function normalizeCommonsGoalRef(value: unknown): CommonsGoalRef {
+  const result = commonsGoalRefSchema.safeParse(value);
+
+  if (!result.success) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "commonsGoalRef must be a valid Health Commons goal reference.",
+    );
+  }
+
+  return result.data;
 }
 
 function parseGoalFrontmatter(attributes: FrontmatterObject): GoalFrontmatter {
@@ -485,7 +500,7 @@ async function upsertGoalWithLatestRecord(input: UpsertGoalInput): Promise<Upser
           commonsGoalRef: resolveOptionalUpsertValue(
             input.commonsGoalRef,
             existingEntity?.commonsGoalRef,
-            (value) => value,
+            normalizeCommonsGoalRef,
           ),
           domains: resolveOptionalUpsertValue(input.domains, existingEntity?.domains, (value) =>
             normalizeDomainList(value, "domains"),

@@ -456,6 +456,13 @@ test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops"
 
 test("next.config traces generated Health Commons route files without the monolithic catalog", () => {
   assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/goals"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+      "../../packages/health-commons/generated/web/routes/index.json",
+    ],
+  );
+  assert.deepEqual(
     productionNextConfig.outputFileTracingIncludes?.["/measurement-methods/[measurementMethodId]"],
     [
       "../../packages/health-commons/generated/web/routes/index.json",

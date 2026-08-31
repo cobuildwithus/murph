@@ -248,8 +248,9 @@ resolves, or cases where one clearly indicated direct action makes comparison
 unnecessary. A proposal never authorizes a run, reminder, check-in, or tracking
 plan; each requires its own applicable authorization.
 An authored knowledge page can support this lookup without a protocol or UI.
-Hosted runner packaging must include that compact direction projection and the
-knowledge index without shipping the web artifact tree. A missing direction
+Hosted runner packaging must include that compact direction projection, the
+knowledge index, and the compact public Goal index without shipping the rest of
+the web artifact tree. A missing direction
 projection is auxiliary availability loss: progress cards remain available with
 neutral mover sentiment
 and a visible caveat on the private card itself. Raster delivery preserves the

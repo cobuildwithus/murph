@@ -119,6 +119,19 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     expect(severePain.safety?.text).toMatch(/emergency assessment/iu);
   });
 
+  it("keeps real goal titles from taking ownership of evidence-backed topics", () => {
+    const result = search("improve my deep sleep", "What does the evidence say");
+
+    expect(result.topic).toEqual({
+      key: "biomarker:deep-sleep-minutes",
+      title: "Deep Sleep",
+    });
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.items.every((item) => item.entityKey !== "goal_template:improve-deep-sleep"))
+      .toBe(true);
+    expect(result.items.every((item) => item.sources.length > 0)).toBe(true);
+  });
+
   it("returns recovery-modality comparisons without unrelated safety", () => {
     const result = search("foam rolling", "Does it improve recovery");
 

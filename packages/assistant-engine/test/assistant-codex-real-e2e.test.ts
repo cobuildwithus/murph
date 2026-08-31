@@ -11784,64 +11784,58 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
   )
 })
 
+const PUBLIC_GOAL_SETUP_KEY = 'goal_template:improve-deep-sleep'
+
+interface PublicGoalSetupRecord {
+  goalPhrase: string
+  key: string
+  pageRevisionId: string
+  workflowSpecRevisionId: string
+}
+
 describeRealCodex('real Codex public goal setup e2e', () => {
   it(
-    'resolves an exact plain-language goal and previews support without writing',
+    'persists one accepted Goal package, replays it idempotently, and fails closed after cold reconstruction',
     async () => {
       const config = await resolveRealCodexE2eConfig()
+      const publicGoal = await readPublicGoalSetupRecord()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-public-goal-setup-e2e-'),
       )
       const skillsRoot = path.join(workingDirectory, 'skills')
       const binDirectory = path.join(workingDirectory, 'bin')
+      const vaultRoot = path.join(workingDirectory, 'vault')
       const commandLogPath = path.join(workingDirectory, 'goal-commands.log')
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
 
       try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot,
+        })
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'goal-setup' }),
           materializeAssistantSkill({ skillsRoot, slug: 'sleep-improvement' }),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'behavior-followthrough',
+          }),
           materializePublicGoalSetupVaultCli({
             binDirectory,
             commandLogPath,
+            vaultRoot,
           }),
         ])
         const inheritedPath = normalizeEnvString(config.env.PATH)
-        const result = await executeRealCodexAppServerTurn({
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions: buildAssistantSystemPrompt({
-            assistantCliContract: [
-              'Use vault-cli for canonical member data.',
-              '- `commons goal list`: options --query=string, --category=repeatable, --limit=integer, --format=json.',
-              '- `commons goal show`: args <key-or-slug>; options --format=json.',
-              '- `goal list`: options optional --status=string, --limit=integer, --format=json.',
-              '- `goal show`: args <goal-id>; options --format=json.',
-              '- `goal save`: canonical Goal mutation; do not call before acceptance.',
-              '- `memory show`: options --compact, --format=json.',
-              '- `wearables sleep pattern`: options --format=json.',
-            ].join('\n'),
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
-            assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
-            channel: 'linq',
-            cliAccess: {
-              rawCommand: 'vault-cli',
-              setupCommand: 'murph',
-            },
-            conversationScope: 'direct',
-            currentLocalDate: '2026-08-30',
-            currentTimeZone: 'America/New_York',
-            hostedRuntime: true,
-            modelBehaviorProfile: 'gpt5-agentic',
-            onboardingGuidance: false,
-            ordinaryInboundTurn: true,
-            turnTrigger: null,
-          }),
+          developerInstructions: buildPublicGoalSetupDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -11850,23 +11844,44 @@ describeRealCodex('real Codex public goal setup e2e', () => {
               : binDirectory,
           },
           excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                automationRequests.push(request)
+                throw new Error(
+                  'No reminder or check-in was accepted in this goal package.',
+                )
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
           model: config.model,
           modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }
+        const result = await executeRealCodexAppServerTurn({
+          ...commonInput,
           prompt: [
             'Hey Murph, help me improve my deep sleep.',
             'My watch has shown low deep sleep for two weeks, I average about six hours total sleep, and I wake tired.',
+            'A feasible starting lever is moving bedtime 30 minutes earlier while keeping wake time steady.',
             'I do not snore, gasp, have morning headaches, or have dangerous daytime sleepiness.',
             'Show me a simple plan before anything is saved or scheduled.',
           ].join(' '),
-          reasoningEffort: 'medium',
-          sandbox: 'workspace-write',
-          workingDirectory,
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const commandLog = (await readFile(commandLogPath, 'utf8'))
-          .split('\n')
-          .map((command) => command.trim())
-          .filter(Boolean)
+        const previewCommands = readGoalSetupVaultCommands(actions)
+        const previewCommandAttempts = readGoalSetupVaultCommands(actions, {
+          successfulOnly: false,
+        })
         const reply = result.finalMessage.trim()
         process.stdout.write(
           `[public-goal-setup-e2e] ${JSON.stringify({
@@ -11874,44 +11889,261 @@ describeRealCodex('real Codex public goal setup e2e', () => {
             scenario: 'improve-deep-sleep-preview',
           })}\n`,
         )
-        const skillRead = actions.find((action) =>
-          action.kind === 'command'
-          && action.command.includes('goal-setup/SKILL.md')
-          && action.output.includes('# Goal setup')
-        )
-        const domainRead = actions.find((action) =>
-          action.kind === 'command'
-          && action.command.includes('sleep-improvement/SKILL.md')
-          && action.output.includes('# Sleep Improvement')
-        )
-
-        expect(skillRead, 'goal-setup skill read').toBeDefined()
-        expect(domainRead, 'sleep domain skill read').toBeDefined()
-        expect(commandLog.some((command) =>
+        expect(previewCommands.some((command) =>
           command.startsWith('commons goal list --query ')
         )).toBe(true)
-        expect(commandLog.some((command) =>
-          command === 'commons goal show goal_template:improve-deep-sleep --format json'
-          || command === 'commons goal show improve-deep-sleep --format json'
+        expect(previewCommands.some((command) =>
+          command.startsWith(
+            'commons goal show goal_template:improve-deep-sleep --format json',
+          )
+          || command.startsWith(
+            'commons goal show improve-deep-sleep --format json',
+          )
         )).toBe(true)
-        expect(commandLog.some((command) =>
-          /^goal list (?:--status active )?--limit 200 --format json$/u
-            .test(command)
-        )).toBe(true)
-        expect(commandLog).toContain('memory show --compact --format json')
-        expect(commandLog.some((command) =>
-          /^(?:goal (?:save|import-json)|experiment start|automation )/u
-            .test(command)
-        )).toBe(false)
+        expect(previewCommandAttempts.some(isGoalSetupMutationCommand)).toBe(
+          false,
+        )
+        const previewVault = await readVaultRawTolerant(vaultRoot)
+        expect(previewVault.goals).toHaveLength(0)
+        expect(previewVault.regimens).toHaveLength(0)
 
         expect(reply).toMatch(/deep[-\s]sleep/iu)
         expect(reply).toMatch(/six|6|total sleep|sleep opportunity/iu)
+        expect(reply).toMatch(/30\s*minutes?/iu)
         expect(reply).toMatch(/review|week|night/iu)
         expect(reply).toMatch(/want me to|would you like me to|save (?:this|that)/iu)
         expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
         expect(reply).not.toContain('goal_template:')
         expect(reply).not.toContain('sha256:')
         expect(reply).not.toMatch(/experiment/iu)
+        expect(automationRequests).toHaveLength(0)
+
+        const accepted = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Yes. Save exactly the plan you just previewed as one Goal and one linked habit regimen.',
+            'I explicitly decline reminders, check-ins, experiments, and every other support action.',
+            'Read each saved owner back before telling me it exists.',
+          ].join(' '),
+          resumeSessionId: result.sessionId,
+        })
+        const acceptedActions = readCapabilityRoutingActions(
+          accepted.jsonEvents,
+        )
+        const acceptedCommands = readGoalSetupVaultCommands(acceptedActions)
+        const acceptedCommandAttempts = readGoalSetupVaultCommands(
+          acceptedActions,
+          { successfulOnly: false },
+        )
+        const acceptedVault = await readVaultRawTolerant(vaultRoot)
+        expect(acceptedVault.goals).toHaveLength(1)
+        const savedGoal = acceptedVault.goals[0]
+        if (!savedGoal) {
+          throw new Error('Expected one lineage-bearing deep-sleep Goal.')
+        }
+        expect(readString(savedGoal.attributes.title)?.toLowerCase()).toBe(
+          publicGoal.goalPhrase,
+        )
+        expect(savedGoal.attributes.status).toBe('active')
+        expect(savedGoal.attributes.commonsGoalRef).toEqual({
+          key: PUBLIC_GOAL_SETUP_KEY,
+          pageRevisionId: publicGoal.pageRevisionId,
+          workflowSpecRevisionId: publicGoal.workflowSpecRevisionId,
+        })
+
+        expect(acceptedVault.regimens).toHaveLength(1)
+        const savedRegimen = acceptedVault.regimens[0]
+        if (!savedRegimen) {
+          throw new Error('Expected one linked active habit regimen.')
+        }
+        const savedRegimenData = regimenFrontmatterSchema.parse(
+          savedRegimen.attributes,
+        )
+        const savedPlanText = [
+          savedRegimenData.schedule,
+          savedRegimenData.note,
+        ].filter((value): value is string => typeof value === 'string').join(' ')
+        expect(savedRegimenData).toMatchObject({
+          kind: 'habit',
+          relatedGoalIds: [savedGoal.entityId],
+          status: 'active',
+        })
+        expect(savedPlanText).toMatch(/30\s*minutes?/iu)
+        expect(savedPlanText).toMatch(/bedtime/iu)
+        expect(savedPlanText).toMatch(/wake/iu)
+
+        const acceptedPublicShow = requireSuccessfulGoalSetupCommand(
+          acceptedActions,
+          'revision re-show before write',
+          ['commons goal show', 'improve-deep-sleep'],
+        )
+        const acceptedGoalSave = requireSuccessfulGoalSetupCommand(
+          acceptedActions,
+          'lineage-bearing Goal save',
+          ['goal save', PUBLIC_GOAL_SETUP_KEY],
+        )
+        const acceptedRegimenSave = requireSuccessfulGoalSetupCommand(
+          acceptedActions,
+          'linked habit regimen save',
+          ['regimen save', savedGoal.entityId],
+        )
+        const acceptedGoalInventoryRead = acceptedActions.find((action) =>
+          action.kind === 'command'
+          && action.ok
+          && action.command.includes('goal list --limit 200 --format json')
+        )
+        const acceptedMemoryRead = acceptedActions.find((action) =>
+          action.kind === 'command'
+          && action.ok
+          && action.command.includes('memory show --compact --format json')
+        )
+        const inventoryReadBeforeWrite = previewCommands.some((command) =>
+          command.startsWith('goal list --limit 200 --format json')
+        ) || (
+          acceptedGoalInventoryRead !== undefined
+          && acceptedActions.indexOf(acceptedGoalInventoryRead)
+            < acceptedActions.indexOf(acceptedGoalSave)
+        )
+        const memoryReadBeforeWrite = previewCommands.some((command) =>
+          command.startsWith('memory show --compact --format json')
+        ) || (
+          acceptedMemoryRead !== undefined
+          && acceptedActions.indexOf(acceptedMemoryRead)
+            < acceptedActions.indexOf(acceptedGoalSave)
+        )
+        expect(
+          inventoryReadBeforeWrite,
+          'Goal inventory read before Goal write',
+        ).toBe(true)
+        expect(memoryReadBeforeWrite, 'memory read before Goal write').toBe(true)
+
+        expect(acceptedGoalSave.command).toContain(
+          `--commons-page-revision-id ${publicGoal.pageRevisionId}`,
+        )
+        expect(acceptedGoalSave.command).toContain(
+          `--commons-workflow-revision-id ${publicGoal.workflowSpecRevisionId}`,
+        )
+        const acceptedOwnerOrder = [
+          acceptedPublicShow,
+          acceptedGoalSave,
+          acceptedRegimenSave,
+        ].map((action) => acceptedActions.indexOf(action))
+        expect(acceptedOwnerOrder).toEqual(
+          [...acceptedOwnerOrder].sort((left, right) => left - right),
+        )
+        expect(new Set(acceptedOwnerOrder).size).toBe(acceptedOwnerOrder.length)
+        expect(acceptedCommands.filter((command) =>
+          /^(?:goal save|regimen save)/u.test(command)
+        )).toHaveLength(2)
+        expect(acceptedCommandAttempts.filter(isGoalSetupMutationCommand))
+          .toHaveLength(2)
+        expect(acceptedCommandAttempts.some((command) =>
+          /^(?:goal import-json|regimen import-json|experiment start|automation )/u
+            .test(command)
+        )).toBe(false)
+        expect(automationRequests).toHaveLength(0)
+        expect(accepted.finalMessage).toMatch(/saved|set up|active|ready/iu)
+        expect(accepted.finalMessage).toMatch(/30\s*minutes?|bedtime/iu)
+        expect(accepted.finalMessage).toMatch(/review|week|night/iu)
+        expect(accepted.finalMessage).toMatch(
+          /no (?:reminder|check-in)|without (?:a )?(?:reminder|check-in)|did not schedule|didn't schedule|declined/iu,
+        )
+        expectNoScheduledGoalAutomationClaim(accepted.finalMessage)
+        expect(accepted.finalMessage).not.toContain(PUBLIC_GOAL_SETUP_KEY)
+        expect(accepted.finalMessage).not.toContain('sha256:')
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply: accepted.finalMessage.trim(),
+            scenario: 'improve-deep-sleep-accepted',
+          })}\n`,
+        )
+
+        const replay = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'My last acceptance may have been delivered twice.',
+            'Reconcile the exact same accepted deep-sleep package now, but do not create a second Goal, habit plan, reminder, check-in, or experiment.',
+          ].join(' '),
+          resumeSessionId: accepted.sessionId,
+        })
+        const replayActions = readCapabilityRoutingActions(replay.jsonEvents)
+        const replayCommands = readGoalSetupVaultCommands(replayActions)
+        const replayCommandAttempts = readGoalSetupVaultCommands(
+          replayActions,
+          { successfulOnly: false },
+        )
+        const replayVault = await readVaultRawTolerant(vaultRoot)
+        expect(replayVault.goals).toHaveLength(1)
+        expect(replayVault.regimens).toHaveLength(1)
+        expect(replayVault.goals).toEqual(acceptedVault.goals)
+        expect(replayVault.regimens).toEqual(acceptedVault.regimens)
+        expect(replayCommands.some((command) => command.startsWith(
+          `goal show ${savedGoal.entityId} --format json`,
+        ))).toBe(true)
+        expect(replayCommandAttempts.some(isGoalSetupMutationCommand)).toBe(
+          false,
+        )
+        expect(automationRequests).toHaveLength(0)
+        expect(replay.finalMessage).toMatch(/already|same|one|kept|exists/iu)
+        expect(replay.finalMessage).not.toMatch(
+          /(?:created|added|saved|set up).{0,30}(?:another|duplicate|new|second).{0,20}(?:goal|plan|regimen)/iu,
+        )
+        expectNoScheduledGoalAutomationClaim(replay.finalMessage)
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply: replay.finalMessage.trim(),
+            scenario: 'improve-deep-sleep-replay',
+          })}\n`,
+        )
+
+        const coldVaultRoot = path.join(workingDirectory, 'cold-vault')
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: coldVaultRoot,
+        })
+        await materializePublicGoalSetupVaultCli({
+          binDirectory,
+          commandLogPath,
+          vaultRoot: coldVaultRoot,
+        })
+        const cold = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Earlier Murph showed me this plan, but I no longer have that chat open:',
+            'move bedtime 30 minutes earlier, keep wake time steady, track total sleep and whether I wake rested for 14 nights, then review it on September 13.',
+            'There was no reminder, check-in, or experiment in the plan. Yes, save it now.',
+          ].join(' '),
+        })
+        const coldActions = readCapabilityRoutingActions(cold.jsonEvents)
+        const coldCommands = readGoalSetupVaultCommands(coldActions)
+        const coldCommandAttempts = readGoalSetupVaultCommands(coldActions, {
+          successfulOnly: false,
+        })
+        const coldVault = await readVaultRawTolerant(coldVaultRoot)
+        expect(coldCommands.some((command) =>
+          command.includes('commons goal show')
+          && command.includes('improve-deep-sleep')
+        )).toBe(true)
+        expect(coldCommandAttempts.some(isGoalSetupMutationCommand)).toBe(
+          false,
+        )
+        expect(coldVault.goals).toHaveLength(0)
+        expect(coldVault.regimens).toHaveLength(0)
+        expect(automationRequests).toHaveLength(0)
+        expect(cold.finalMessage).toMatch(/30\s*minutes?/iu)
+        expect(cold.finalMessage).toMatch(/confirm|want me to save|should I save/iu)
+        expect(cold.finalMessage).toMatch(
+          /before I (?:save|write)|(?:not|nothing|haven't|hasn't|won't).{0,30}(?:save|saved|write|written)|(?:saved|written).{0,30}(?:not|nothing)/iu,
+        )
+        expectNoScheduledGoalAutomationClaim(cold.finalMessage)
+        expect(cold.finalMessage).not.toContain(PUBLIC_GOAL_SETUP_KEY)
+        expect(cold.finalMessage).not.toContain('sha256:')
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply: cold.finalMessage.trim(),
+            scenario: 'improve-deep-sleep-cold-confirmation-required',
+          })}\n`,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -11919,52 +12151,140 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         ])
       }
     },
-    360_000,
+    720_000,
   )
+
 })
+
+function buildPublicGoalSetupDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: [
+      'Use vault-cli for canonical member data.',
+      '- `commons goal list`: options --query=string, --category=repeatable, --limit=integer, --format=json.',
+      '- `commons goal show`: args <key-or-slug>; options --format=json.',
+      '- `goal list`: options optional --status=string, --limit=integer, --format=json.',
+      '- `goal show`: args <goal-id>; options --format=json.',
+      '- `goal save`: optional arg [title], required for creation and omitted for status-only --id updates; options --id=string, --status=active|paused|completed|abandoned, --horizon=short_term|medium_term|long_term|ongoing, repeat --domain=string, --commons-goal-key=string, --commons-page-revision-id=string, --commons-workflow-revision-id=string, --format=json. This is the canonical Goal mutation; do not call it before acceptance.',
+      '- `regimen list`: options optional --status=string, --limit=integer, --format=json.',
+      '- `regimen show`: args <regimen-id>; options --format=json.',
+      '- `regimen save`: args <title>; options --id=string, --kind=medication|supplement|therapy|habit, --status=active|paused|completed|stopped, --schedule=string, --note=string, repeat --related-goal-id=string, --format=json. Do not call it before acceptance.',
+      '- `memory show`: options --compact, --format=json.',
+      '- `wearables sleep pattern`: options --format=json.',
+    ].join('\n'),
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-30',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    ordinaryInboundTurn: true,
+    turnTrigger: null,
+  })
+}
+
+async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
+  const artifactPath = fileURLToPath(new URL(
+    '../../health-commons/generated/web/browse/goals.json',
+    import.meta.url,
+  ))
+  const artifact = readRecord(JSON.parse(await readFile(artifactPath, 'utf8')))
+  const goals = Array.isArray(artifact?.goals) ? artifact.goals : []
+  const goal = goals
+    .map((value) => readRecord(value))
+    .find((value) => value?.key === PUBLIC_GOAL_SETUP_KEY)
+  const revision = readRecord(goal?.revision)
+  const goalPhrase = readString(goal?.goalPhrase)
+  const pageRevisionId = readString(revision?.pageRevisionId)
+  const workflowSpecRevisionId = readString(
+    revision?.workflowSpecRevisionId,
+  )
+  if (
+    !goal
+    || !goalPhrase
+    || !pageRevisionId
+    || !workflowSpecRevisionId
+  ) {
+    throw new Error(
+      `Generated Goal index is missing ${PUBLIC_GOAL_SETUP_KEY}.`,
+    )
+  }
+
+  return {
+    goalPhrase,
+    key: PUBLIC_GOAL_SETUP_KEY,
+    pageRevisionId,
+    workflowSpecRevisionId,
+  }
+}
+
+function readGoalSetupVaultCommands(
+  actions: readonly CapabilityRoutingAction[],
+  options: { successfulOnly?: boolean } = {},
+): string[] {
+  return actions.flatMap((action) => {
+    if (
+      action.kind !== 'command'
+      || (options.successfulOnly !== false && !action.ok)
+    ) return []
+    const vaultCliIndex = action.command.indexOf('vault-cli ')
+    return [vaultCliIndex >= 0
+      ? action.command.slice(vaultCliIndex + 'vault-cli '.length)
+      : action.command]
+  })
+}
+
+function isGoalSetupMutationCommand(command: string): boolean {
+  return /^(?:goal (?:save|import-json)|regimen (?:save|import-json)|experiment start|automation )/u
+    .test(command)
+}
+
+function requireSuccessfulGoalSetupCommand(
+  actions: readonly CapabilityRoutingAction[],
+  label: string,
+  needles: readonly string[],
+): Extract<CapabilityRoutingAction, { kind: 'command' }> {
+  const action = actions.find((candidate) =>
+    candidate.kind === 'command'
+    && candidate.ok
+    && needles.every((needle) => candidate.command.includes(needle))
+  )
+  expect(action, label).toBeDefined()
+  if (action?.kind !== 'command') {
+    throw new Error(`Expected successful command: ${label}.`)
+  }
+  return action
+}
+
+function expectNoScheduledGoalAutomationClaim(message: string): void {
+  expect(message).not.toMatch(
+    /(?:(?:I|we)(?:'ve| have)?\s+(?:also\s+)?(?:scheduled|created|added|set up).{0,30}(?:reminder|check-in)|(?:reminder|check-in).{0,30}(?:is|was|has been)\s+scheduled)/iu,
+  )
+}
 
 async function materializePublicGoalSetupVaultCli(input: {
   binDirectory: string
   commandLogPath: string
+  vaultRoot: string
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const publicGoal = {
-    aliases: ['Improve deep sleep'],
-    category: 'sleep',
-    evidenceSourceKeys: ['source_artifact:synthetic-sleep-guidance'],
-    goalPhrase: 'Improve my deep sleep',
-    indexable: true,
-    key: 'goal_template:improve-deep-sleep',
-    outcomeKind: 'biomarker',
-    parentGoalKey: null,
-    quality: 'reviewed',
-    revision: {
-      pageRevisionId: 'sha256:synthetic-goal-page-revision',
-      workflowSpecRevisionId: 'sha256:synthetic-goal-workflow-revision',
-    },
-    routeId: 'improve-deep-sleep',
-    safetyTier: 'low',
-    slug: 'improve-deep-sleep',
-    startPrompt: 'Hey Murph, help me improve my deep sleep.',
-    status: 'reviewed',
-    successSignals: [
-      { id: 'total-sleep', kind: 'biomarker', label: 'Total sleep time' },
-      { id: 'rested', kind: 'symptom', label: 'Wake feeling rested' },
-    ],
-    summary: 'A synthetic guide for improving sleep depth and restfulness.',
-    title: 'Improve my deep sleep',
-    workflow: {
-      kind: 'habit_plan',
-      ownerSkillIds: ['sleep-improvement'],
-    },
-  }
-  const emptyGoals = {
-    count: 0,
-    items: [],
-    nextCursor: null,
-    vault: 'synthetic-vault',
-  }
+  const tsxLoaderPath = path.resolve(
+    path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
+    '../tsx/dist/loader.mjs',
+  )
+  const tsconfigPath = path.resolve(
+    path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT),
+    '../../../tsconfig.base.json',
+  )
   const emit = (value: unknown) =>
     `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
   await writeFile(
@@ -11973,29 +12293,8 @@ async function materializePublicGoalSetupVaultCli(input: {
       '#!/bin/sh',
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      `export TSX_TSCONFIG_PATH=${quoteNutritionShellLiteral(tsconfigPath)}`,
       'case "$*" in',
-      `  commons\\ goal\\ list\\ --query*) ${emit({
-        catalogHash: 'sha256:synthetic-goal-catalog',
-        filters: {
-          categories: [],
-          limit: 10,
-          query: 'improve my deep sleep',
-        },
-        goals: [publicGoal],
-        total: 1,
-      })} ;;`,
-      `  "commons goal show goal_template:improve-deep-sleep --format json") ${emit({
-        catalogHash: 'sha256:synthetic-goal-catalog',
-        goal: publicGoal,
-        lookup: 'goal_template:improve-deep-sleep',
-      })} ;;`,
-      `  "commons goal show improve-deep-sleep --format json") ${emit({
-        catalogHash: 'sha256:synthetic-goal-catalog',
-        goal: publicGoal,
-        lookup: 'improve-deep-sleep',
-      })} ;;`,
-      `  "goal list --status active --limit 200 --format json") ${emit(emptyGoals)} ;;`,
-      `  "goal list --limit 200 --format json") ${emit(emptyGoals)} ;;`,
       `  "memory show --compact --format json") ${emit({
         document: {
           exists: true,
@@ -12017,8 +12316,9 @@ async function materializePublicGoalSetupVaultCli(input: {
           notes: ['Consumer sleep stages are estimates.'],
         },
       })} ;;`,
-      '  goal\\ save*|goal\\ import-json*|experiment\\ start*|automation\\ *) printf \'%s\\n\' \'Mutation forbidden before acceptance\' >&2; exit 17 ;;',
-      '  *) printf \'unsupported public goal setup fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+      '  *)',
+      `    exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
+      '    ;;',
       'esac',
       '',
     ].join('\n'),

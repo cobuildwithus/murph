@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { assertRunnerBundleHealthCommonsArtifacts } from "../scripts/deploy-artifacts.js";
 import {
   buildHostedRunnerWorkspaceArtifacts,
   buildHostedRunnerWorkspaceArtifactPlan,
@@ -469,6 +470,25 @@ describe("runner bundle runtime artifact staging", () => {
       ),
     ).toEqual(["package/generated/web/browse/goals.json"]);
     expect(entries.some((entry) => entry.startsWith("package/content/"))).toBe(false);
+
+    const validatorBundleDir = path.join(tarballsDir, "validator-bundle");
+    const installedHealthCommonsDir = path.join(
+      validatorBundleDir,
+      "node_modules",
+      "@murphai",
+      "health-commons",
+    );
+    await mkdir(installedHealthCommonsDir, { recursive: true });
+    await execFileAsync("tar", [
+      "-xzf",
+      healthCommonsTarball,
+      "-C",
+      installedHealthCommonsDir,
+      "--strip-components=1",
+    ]);
+    await expect(
+      assertRunnerBundleHealthCommonsArtifacts(validatorBundleDir),
+    ).resolves.toBeUndefined();
 
     const extractDir = path.join(tarballsDir, "health-commons-extract");
     await mkdir(extractDir, { recursive: true });

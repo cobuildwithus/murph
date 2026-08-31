@@ -128,7 +128,7 @@ export function writeHealthCommonsKnowledgeIndex(filePath: string, catalog: Heal
     database.exec("BEGIN");
     const entitiesByKey = new Map(catalog.entities.map((entity) => [entity.key, entity]));
     for (const entity of catalog.entities) {
-      if (entity.entityType !== "source_artifact") {
+      if (canOwnKnowledgeTopic(entity)) {
         for (const [index, phrase] of [entity.title, ...(entity.aliases ?? [])].entries()) {
           if (index === 0 && hasSameTitleParent(entity, entitiesByKey)) {
             continue;
@@ -438,6 +438,9 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
   const chunks: KnowledgeChunk[] = [];
 
   for (const entity of catalog.entities) {
+    if (entity.entityType === "goal_template") {
+      continue;
+    }
     const entityTopic = entityTopicText(entity);
     for (const [claimIndex, claim] of (entity.claims ?? []).entries()) {
       chunks.push({
@@ -553,9 +556,13 @@ function sourceFindingTargets(
       continue;
     }
     const target = entitiesByKey.get(targetKeys[0] ?? "");
-    return target && target.entityType !== "source_artifact" ? [target] : [];
+    return target && canOwnKnowledgeTopic(target) ? [target] : [];
   }
   return [];
+}
+
+function canOwnKnowledgeTopic(entity: HealthCommonsCatalogEntity): boolean {
+  return entity.entityType !== "source_artifact" && entity.entityType !== "goal_template";
 }
 
 const QUESTION_GRAMMAR_TERMS = new Set([

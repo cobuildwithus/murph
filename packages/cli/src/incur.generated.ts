@@ -165,7 +165,7 @@ declare module 'incur' {
       'genetics show': { args: { id: string }; options: { requestId?: string } }
       'goal import-json': { args: {}; options: { requestId?: string; input: string } }
       'goal list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
-      'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; commonsGoalKey?: string; commonsPageRevisionId?: string; commonsWorkflowRevisionId?: string; domain?: string[] } }
+      'goal save': { args: { title?: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; commonsGoalKey?: string; commonsPageRevisionId?: string; commonsWorkflowRevisionId?: string; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
       'habitat catalog': { args: { aspect?: string }; options: {} }

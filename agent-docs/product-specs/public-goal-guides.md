@@ -25,6 +25,10 @@ of existing private primitives.
   Markdown remains the source of truth.
 - One `goal-setup` assistant skill coordinates the private workflow. Do not add
   one skill or plugin per public guide.
+- Typed `goal save` is the only production caller that may supply public
+  lineage. The lower-level core writer is a trusted storage primitive that
+  validates lineage shape but does not load the public catalog; do not expose
+  it as a lineage-binding surface without the same current-revision check.
 
 ## Information Architecture
 
@@ -75,11 +79,12 @@ review claim unless that review actually occurred and its owner is recorded.
 
 The primary action is `Do this with Murph`.
 
-- The action resolves the person's available Messages, Telegram, or email
-  route using the shared Murph contact routing layer.
-- One available route opens directly. Multiple connected routes use the shared
-  compact chooser.
-- The destination receives the editable guide-owned start prompt.
+- The action opens a compact review dialog with the editable guide-owned start
+  prompt and the person's available native Messages or Telegram routes.
+- Email is intentionally excluded because the public email bootstrap cannot
+  reliably preserve the exact intent-bearing editable draft.
+- Choosing a route opens that native messaging app with the draft when the
+  platform supports it; the dialog keeps an exact copy fallback.
 - Nothing is sent and no private record is created until the person acts in
   their messaging app and later accepts Murph's proposed setup.
 - Public UI explains the review-before-send boundary in one short sentence.
@@ -105,9 +110,9 @@ setup. It must not silently bind a private Goal to a different workflow.
 ## Search And Indexing
 
 - Publish one canonical URL for each real outcome.
-- Treat alternate phrasings as aliases that resolve or redirect to the
-  canonical guide. Do not publish indexable keyword variants with duplicate
-  advice.
+- Treat alternate phrasings as browse-search aliases that resolve to the
+  canonical guide. Do not publish alias routes or indexable keyword variants
+  with duplicate advice.
 - Include canonical guide and category URLs in the generated sitemap.
 - Use truthful Article and Breadcrumb structured data when present. Do not add
   deprecated HowTo or broad FAQ rich-result markup.
@@ -126,6 +131,9 @@ Generated goal artifacts carry:
 
 The private Goal stores the public key and both exact goal revisions under
 `commonsGoalRef`. It does not copy the public article into the private vault.
+Only typed `goal save` flags may bind that lineage after checking it against
+the packaged public index. Generic `goal import-json` accepts private Goal
+fields but rejects `commonsGoalRef`.
 
 ## Deployment And Rollback
 
@@ -151,7 +159,7 @@ Shipping changes require:
 - Health Commons contract, catalog, generated-artifact, and exact-count checks;
 - duplicate key, slug, title, prompt, and parent-cycle checks;
 - owner-skill and source-key resolution checks;
-- public browse, canonical redirect, metadata, sitemap, structured-data, and
+- public browse, canonical routing, metadata, sitemap, structured-data, and
   contact-draft tests;
 - private Goal lineage persistence tests;
 - deterministic assistant workflow tests plus one focused real-Codex journey;

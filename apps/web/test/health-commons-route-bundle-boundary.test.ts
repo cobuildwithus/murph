@@ -283,9 +283,11 @@ function isHealthCommonsRouteTrace(filePath: string, source: string): boolean {
   return (
     normalizedPath.includes("/experiments/") ||
     normalizedPath.includes("/biomarkers/") ||
+    normalizedPath.includes("/goals/") ||
     normalizedPath.includes("/measurement-methods/") ||
     source.includes("experiment-detail") ||
     source.includes("biomarker-detail") ||
+    source.includes("goal-projections") ||
     source.includes("measurement-method-detail")
   );
 }

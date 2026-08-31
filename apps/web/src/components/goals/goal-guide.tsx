@@ -44,10 +44,14 @@ export function GoalGuide({
           {goal.summary}
         </p>
         <div className="mt-7 flex flex-col items-start gap-3">
-          <GoalContactAction options={contactOptions} />
+          <GoalContactAction
+            options={contactOptions}
+            startPrompt={goal.startPrompt}
+          />
           <p className="max-w-xl text-xs/5 text-muted-foreground">
-            Opens an editable draft: <q>{goal.startPrompt}</q> Nothing is sent
-            until you send it.
+            Review or edit this message, then choose an app:{" "}
+            <q>{goal.startPrompt}</q> It is copied so you can paste it if the
+            app drops the draft. Nothing is sent automatically.
           </p>
         </div>
       </header>

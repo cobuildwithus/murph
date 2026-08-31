@@ -369,6 +369,7 @@ export function buildHostedWebNextConfig(
       ],
       "/goals": [
         "../../packages/health-commons/generated/web/browse/goals.json",
+        "../../packages/health-commons/generated/web/routes/index.json",
       ],
       "/goals/[goalId]": [
         "../../packages/health-commons/generated/web/browse/goals.json",

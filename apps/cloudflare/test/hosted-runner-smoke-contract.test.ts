@@ -4,6 +4,7 @@ import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
@@ -48,6 +49,7 @@ const validHostedRunnerSmokeResult = {
   codexHostedShellVaultCliLlmsBytes: 4096,
   codexVersion: "codex-cli 0.125.0",
   healthCommonsCatalogHash: "sha256:catalog",
+  healthCommonsCliGoalProofCount: HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
   healthCommonsCliProtocolListBytes: 768,
   healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
   healthCommonsRuntimeProtocolHitKeys: [
@@ -137,6 +139,8 @@ describe("parseHostedRunnerSmokeResult", () => {
       ripgrepVersion: "ripgrep 13.0.0",
       schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
       healthCommonsCatalogHash: "sha256:catalog",
+      healthCommonsCliGoalProofCount:
+        HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
       healthCommonsCliProtocolListBytes: 768,
       healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
       reportedVaultIdMatchesExpected: true,
@@ -162,6 +166,22 @@ describe("parseHostedRunnerSmokeResult", () => {
       healthCommonsRuntimeSearchHitKeys: [],
     })).toThrow(
       "Hosted runner smoke result.healthCommonsRuntimeSearchHitKeys must be a non-empty array.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      healthCommonsCliGoalProofCount:
+        HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT - 1,
+    })).toThrow(
+      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be an integer of at least ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      healthCommonsCliGoalProofCount:
+        HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT + 0.5,
+    })).toThrow(
+      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be an integer of at least ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
     );
   });
 

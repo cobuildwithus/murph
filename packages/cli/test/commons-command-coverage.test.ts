@@ -379,6 +379,86 @@ test("commons goal list and show expose an outcome guide with exact lineage", as
   assert.equal(Object.hasOwn(shown, "sourceSnippets"), false);
 });
 
+test("commons goal search normalizes understandable goal phrases without fuzzy show matches", async () => {
+  const cli = createCommonsSliceCli();
+  const cases = [
+    ["run an iron man", "goal_template:run-ironman"],
+    ["lower RHR", "goal_template:lower-resting-heart-rate"],
+    ["improve deep sleep", "goal_template:improve-deep-sleep"],
+    ["improve my VO2 max", "goal_template:improve-vo2-max"],
+  ] as const;
+
+  for (const [query, expectedKey] of cases) {
+    const listResult = await runInProcessJsonCli<{
+      goals: Array<{ key: string }>;
+      total: number;
+    }>(cli, ["commons", "goal", "list", "--query", query, "--limit", "20"]);
+
+    assert.equal(listResult.envelope.ok, true, query);
+    const list = requireData(listResult.envelope);
+    assert.ok(list.total > 0, query);
+    assert.ok(list.goals.some((goal) => goal.key === expectedKey), query);
+
+    const showResult = await runInProcessJsonCli<{
+      goal: { key: string };
+    }>(cli, ["commons", "goal", "show", query]);
+
+    assert.equal(showResult.envelope.ok, true, query);
+    assert.equal(requireData(showResult.envelope).goal.key, expectedKey, query);
+  }
+
+  const normalizedSurfaceCases = [
+    ["RUN an Iron—Man?!", "goal_template:run-ironman"],
+    ["lower R.H.R.!!!", "goal_template:lower-resting-heart-rate"],
+    ["impróve—deep   sleep?!", "goal_template:improve-deep-sleep"],
+    ["Improve My V.O.₂ Max.", "goal_template:improve-vo2-max"],
+    ["get more deep-sleep!", "goal_template:improve-deep-sleep"],
+    [
+      "Hey Murph—help me improve my deep sleep!",
+      "goal_template:improve-deep-sleep",
+    ],
+  ] as const;
+
+  for (const [lookup, expectedKey] of normalizedSurfaceCases) {
+    const listResult = await runInProcessJsonCli<{
+      goals: Array<{ key: string }>;
+    }>(cli, ["commons", "goal", "list", "--query", lookup, "--limit", "20"]);
+
+    assert.equal(listResult.envelope.ok, true, lookup);
+    assert.ok(
+      requireData(listResult.envelope).goals.some((goal) => goal.key === expectedKey),
+      lookup,
+    );
+
+    const showResult = await runInProcessJsonCli<{
+      goal: { key: string };
+    }>(cli, ["commons", "goal", "show", lookup]);
+
+    assert.equal(showResult.envelope.ok, true, lookup);
+    assert.equal(requireData(showResult.envelope).goal.key, expectedKey, lookup);
+  }
+
+  const partialShow = await runInProcessJsonCli(cli, [
+    "commons",
+    "goal",
+    "show",
+    "deep sleep",
+  ]);
+  assert.equal(partialShow.exitCode, 1);
+  assert.equal(partialShow.envelope.ok, false);
+  if (!partialShow.envelope.ok) {
+    assert.equal(partialShow.envelope.error.code, "commons_goal_not_found");
+  }
+
+  const punctuationOnlyList = await runInProcessJsonCli<{
+    goals: unknown[];
+    total: number;
+  }>(cli, ["commons", "goal", "list", "--query", "!!!"]);
+  assert.equal(punctuationOnlyList.envelope.ok, true);
+  assert.equal(requireData(punctuationOnlyList.envelope).total, 0);
+  assert.deepEqual(requireData(punctuationOnlyList.envelope).goals, []);
+});
+
 test("commons protocol list and show expose protocol revisions distinctly from private protocol commands", async () => {
   const cli = createCommonsSliceCli();
 

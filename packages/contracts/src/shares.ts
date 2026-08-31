@@ -21,7 +21,6 @@ import {
 import {
   foodNutritionSchema,
   familyConditionHistoryEntrySchema,
-  commonsGoalRefSchema,
   goalMetricTargetSchema,
   workoutTemplateSchema,
   FAMILY_MEMBER_LIMITS,
@@ -269,7 +268,6 @@ export const goalUpsertPayloadSchema = withContractMetadata(
       links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).optional(),
       domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
       metricTargets: uniqueArray(goalMetricTargetSchema, { maxItems: 20, uniqueItems: true }).optional(),
-      commonsGoalRef: commonsGoalRefSchema.optional(),
     })
     .strict(),
   "@murphai/contracts/goal-upsert-payload.schema.json",
@@ -300,7 +298,6 @@ export const goalUpsertPatchPayloadSchema = withContractMetadata(
       links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
       domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
       metricTargets: uniqueArray(goalMetricTargetSchema, { maxItems: 20, uniqueItems: true }).optional(),
-      commonsGoalRef: commonsGoalRefSchema.optional(),
     })
     .strict(),
   "@murphai/contracts/goal-upsert-patch-payload.schema.json",

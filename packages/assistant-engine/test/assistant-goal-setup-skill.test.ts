@@ -71,9 +71,11 @@ describe('assistant goal setup skill', () => {
     expect(prompt).toContain(
       'Hey Murph, help me improve my deep sleep',
     )
-    expect(prompt).toContain('must first read goal-setup')
     expect(prompt).toContain(
-      'Goal setup previews one plan and requires acceptance before writes.',
+      'routes through goal-setup and the existing domain owner',
+    )
+    expect(prompt).toContain(
+      'Preview one plan and require acceptance before writes.',
     )
     expect(prompt).toContain('a Goal is not an experiment')
   })
@@ -106,6 +108,15 @@ describe('assistant goal setup skill', () => {
     )
     expect(compact).toContain('one unique exact title, `goalPhrase`, or alias match')
     expect(compact).toContain(
+      'read every registered owner named by `goal.workflow.ownerSkillIds` completely before previewing or writing',
+    )
+    expect(compact).toContain(
+      'continue through successive windows until EOF rather than stopping after the first 240 lines',
+    )
+    expect(compact).toContain(
+      'never interpolate an unknown returned value into a command',
+    )
+    expect(compact).toContain(
       'Do not choose a fuzzy, related, parent, featured, or first-ranked result as exact.',
     )
     expect(compact).toContain('If `total` exceeds the returned list length')
@@ -127,6 +138,9 @@ describe('assistant goal setup skill', () => {
     expect(raw).toContain('vault-cli goal list --limit 200 --format json')
     expect(raw).toContain('bounded all-status Goal inventory')
     expect(raw).not.toContain('goal list --status active')
+    expect(compact).toContain(
+      'if it returns exactly 200 records, do not create from apparent absence.',
+    )
     expect(compact).toContain('If the equivalent Goal is active, continue or adjust it')
     expect(compact).toContain('If it is paused, propose resuming the same Goal')
     expect(compact).toContain('A completed or abandoned equivalent is useful')
@@ -153,6 +167,11 @@ describe('assistant goal setup skill', () => {
     )
     expect(compact).toContain('For an explicit, unambiguous pause or resume request')
     expect(raw).toContain('goal save --id <goal-id>')
+    expect(raw).toContain('so the latest stored title is preserved')
+    expect(compact).toContain(
+      'If that original tuple is unavailable after a cold-thread reconstruction, do not assume it is unchanged',
+    )
+    expect(compact).toContain('ask for confirmation again before any write')
     expect(compact).toContain('preview any changed plan or')
     expect(compact).toContain('Public guide updates never silently rewrite')
     expect(raw).toContain('A Goal is not an experiment.')

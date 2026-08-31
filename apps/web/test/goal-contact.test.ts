@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { resolvePublicGoalContactOptions } from "@/src/lib/goals/goal-contact";
+import {
+  resolvePublicGoalContactOptions,
+  withPublicGoalContactDraft,
+} from "@/src/lib/goals/goal-contact";
 import { MURPH_CONTACT_EMAIL } from "@/src/lib/murph-contact-routing";
 
 describe("goal contact routing", () => {
-  it("prefills the authored prompt unchanged in every usable public messaging channel", () => {
+  it("provides best-effort draft links while the UI owns the copy fallback", () => {
     const body = "Hey Murph, help me lower my resting heart rate.";
     const options = resolvePublicGoalContactOptions({
       contactInfo: {
@@ -19,11 +22,16 @@ describe("goal contact routing", () => {
       "text",
       "telegram",
     ]);
+    expect(new URL(options[0]!.href).searchParams.get("body")).toBe(body);
+    expect(new URL(options[1]!.href).searchParams.get("text")).toBe(body);
 
-    for (const option of options) {
-      const parameter = option.kind === "telegram" ? "text" : "body";
-      expect(new URL(option.href).searchParams.get(parameter)).toBe(body);
-    }
+    const editedBody = "Hey Murph, help me lower my RHR & improve my 10K.";
+    const editedText = withPublicGoalContactDraft(options[0]!, editedBody);
+    const editedTelegram = withPublicGoalContactDraft(options[1]!, editedBody);
+    expect(editedText.href).toBe(
+      `sms:+15550100001?body=${encodeURIComponent(editedBody)}`,
+    );
+    expect(new URL(editedTelegram.href).searchParams.get("text")).toBe(editedBody);
   });
 
   it("uses Telegram alone when no public phone is configured", () => {
@@ -37,9 +45,7 @@ describe("goal contact routing", () => {
     });
 
     expect(options.map((option) => option.kind)).toEqual(["telegram"]);
-    expect(
-      options.every((option) => option.href.startsWith("https://t.me/")),
-    ).toBe(true);
+    expect(options[0]?.href).toContain("https://t.me/withmurph_bot?text=");
   });
 
   it("never routes an intent-bearing draft through the public email bootstrap", () => {
