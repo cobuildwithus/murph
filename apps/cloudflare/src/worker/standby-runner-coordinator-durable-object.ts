@@ -170,8 +170,11 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
   ): Promise<void> {
     const slotName = this.transactionSync(() => {
       const state = this.store.readState();
-      if (state.readySlotName || state.provisioningSlotName) {
+      if (state.readySlotName) {
         return null;
+      }
+      if (state.provisioningSlotName) {
+        return state.provisioningSlotName;
       }
       const candidate = createHostedStandbySlotName(releaseId);
       this.store.beginProvisioning(candidate);

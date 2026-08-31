@@ -300,6 +300,61 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
       .toBe("retired");
     expect(coordinator.readStandbyCoordinatorState().readySlotName).toBeNull();
   });
+
+  it("retries the exact persisted provisioning target after preparation and cleanup fail", async () => {
+    const pending: Promise<unknown>[] = [];
+    const state = createDurableObjectState(new DatabaseSync(":memory:"), pending);
+    const requestedSlotNames: string[] = [];
+    let slot: HostedStandbyRunnerContainerStubLike | null = null;
+    const prepareStandbySlot = vi.fn<
+      HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]
+    >();
+    prepareStandbySlot
+      .mockRejectedValueOnce(new Error("preparation unavailable"))
+      .mockImplementation(async (input) => ({ prepared: true, ...input }));
+    const readStandbySlotCoordinatorState = vi.fn<
+      HostedStandbyRunnerContainerStubLike["readStandbySlotCoordinatorState"]
+    >();
+    readStandbySlotCoordinatorState
+      .mockRejectedValueOnce(new Error("cleanup unavailable"));
+    const getByName = vi.fn((name: string) => {
+      requestedSlotNames.push(name);
+      slot ??= {
+        ...createSlotStub(name),
+        prepareStandbySlot,
+        readStandbySlotCoordinatorState,
+      };
+      return slot;
+    });
+    const coordinator = new StandbyRunnerCoordinatorDurableObject(state, {
+      CF_VERSION_METADATA: { id: RELEASE_ID },
+      HOSTED_EXECUTION_STANDBY_MODE: "shadow",
+      STANDBY_RUNNER_CONTAINER: { getByName },
+    });
+
+    coordinator.ensureReadyStandby({
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+    });
+    await flushBackgroundWork(pending);
+    const provisioning = coordinator.readStandbyCoordinatorState();
+    expect(provisioning).toMatchObject({
+      provisioningSlotName: expect.stringMatching(/^standby--v-release_1--/u),
+      readySlotName: null,
+    });
+
+    coordinator.alarm();
+    await flushBackgroundWork(pending);
+
+    expect(new Set(requestedSlotNames)).toEqual(
+      new Set([provisioning.provisioningSlotName]),
+    );
+    expect(prepareStandbySlot).toHaveBeenCalledTimes(2);
+    expect(coordinator.readStandbyCoordinatorState()).toMatchObject({
+      provisioningSlotName: null,
+      readySlotName: provisioning.provisioningSlotName,
+    });
+  });
 });
 
 describe("standby scheduled bootstrap", () => {

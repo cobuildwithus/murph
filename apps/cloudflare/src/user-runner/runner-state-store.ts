@@ -315,11 +315,7 @@ export class RunnerStateStore {
     record: RunnerStateRecord;
   }> {
     const meta = this.requireMetaRowSync();
-    if (!this.clearWriteFenceTokenSync(meta, input.token, {
-      preserveRunnerContainerName: isHostedStandbySlotName(
-        input.token.runnerContainerName,
-      ),
-    })) {
+    if (!this.clearWriteFenceTokenSync(meta, input.token)) {
       return {
         completed: false,
         record: this.readStateFromMetaSync(meta),
@@ -358,11 +354,7 @@ export class RunnerStateStore {
       };
     }
 
-    this.clearActiveRunMetaSync(meta, {
-      preserveRunnerContainerName: isHostedStandbySlotName(
-        meta.active_runner_container_name,
-      ),
-    });
+    this.clearActiveRunMetaSync(meta);
     meta.last_invocation_at = input.finishedAt ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
     return {
@@ -804,27 +796,23 @@ export class RunnerStateStore {
   private clearWriteFenceTokenSync(
     meta: RunnerMetaRow,
     token: RunnerWriteFenceToken,
-    options: { preserveRunnerContainerName?: boolean } = {},
   ): boolean {
     if (!this.hasWriteFenceTokenSync(meta, token)) {
       return false;
     }
 
-    this.clearActiveRunMetaSync(meta, options);
+    this.clearActiveRunMetaSync(meta);
     return true;
   }
 
-  private clearActiveRunMetaSync(
-    meta: RunnerMetaRow,
-    options: { preserveRunnerContainerName?: boolean } = {},
-  ): void {
+  private clearActiveRunMetaSync(meta: RunnerMetaRow): void {
     meta.active_attempt_id = null;
     meta.active_kind = null;
     meta.active_provider_egress_token_hash = null;
     meta.active_custom_inference_envelope = null;
     meta.active_platform_ai_allowed = null;
     meta.active_reason = null;
-    if (!options.preserveRunnerContainerName) {
+    if (!isHostedStandbySlotName(meta.active_runner_container_name)) {
       meta.active_runner_container_name = null;
     }
     meta.active_started_at = null;
@@ -838,6 +826,8 @@ export class RunnerStateStore {
     return meta.active_attempt_id === token.attemptId
       && normalizeNonNegativeInteger(meta.active_generation).toString() === token.generation
       && readWriteFenceKind(meta.active_kind) === token.kind
+      && normalizeRunnerContainerNameOrNull(meta.active_runner_container_name)
+        === normalizeRunnerContainerNameOrNull(token.runnerContainerName)
       && meta.user_id === token.userId;
   }
 
