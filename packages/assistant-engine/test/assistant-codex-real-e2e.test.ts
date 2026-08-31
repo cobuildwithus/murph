@@ -144,6 +144,7 @@ import {
 } from '../src/assistant/service.ts'
 import {
   appendAssistantTranscriptEntries,
+  listAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
 import type {
@@ -475,9 +476,9 @@ const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
   groupConversation: false,
 } as const satisfies Pick<CodexAppServerTurnInput, 'groupConversation'>
 
-describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
+describeRealCodex('real Codex direct route planning e2e', () => {
   it(
-    'answers from an early detail retained across sixty committed messages',
+    'answers once from an early detail retained across sixty committed messages',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -512,6 +513,7 @@ describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
             ],
       ).flat()
       const userPrompt = 'Which folder did we pick for the train tickets?'
+      let providerRequestCount = 0
 
       try {
         await initializeVault({
@@ -576,6 +578,9 @@ describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
           includeEarlySessionOnboarding: false,
           model: config.model,
           modelProvider: config.modelProvider,
+          onProviderRequestStarted: () => {
+            providerRequestCount += 1
+          },
           persistUserPromptOnFailure: false,
           prompt: userPrompt,
           provider: 'codex-cli',
@@ -591,17 +596,32 @@ describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
           vault: workingDirectory,
           workingDirectory,
         })
+        const transcript = await listAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+        )
+        const completedTurn = transcript.slice(-2)
 
         process.stdout.write(
-          `[cold-conversation-reconstruction-e2e] ${JSON.stringify({
+          `[direct-route-planning-e2e] ${JSON.stringify({
             historyBytes,
             historyMessages: conversationHistoryMessages.length,
+            providerRequestCount,
             reply: result.response.trim(),
+            transcriptEffects: completedTurn.map((entry) => entry.kind),
           })}\n`,
         )
+        expect(providerRequestCount).toBe(1)
+        expect(transcript).toHaveLength(conversationHistoryMessages.length + 2)
+        expect(completedTurn.map((entry) => entry.kind)).toEqual([
+          'user',
+          'assistant',
+        ])
+        expect(completedTurn[0]?.text).toBe(userPrompt)
+        expect(completedTurn[1]?.text).toBe(result.response)
         expect(result.response).toMatch(/cobalt/iu)
         expect(result.response).not.toMatch(
-          /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
+          /do not (?:know|remember)|don't (?:know|remember)|no context|which folder|tool call|internal/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -11260,7 +11280,19 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         'Send the separately requested workout reminder for today.',
       scenario: 'skips when current evidence proves the occurrence already happened',
     },
-  ])('$scenario', async ({ context, expectedKind, savedInstructions }) => {
+    {
+      context: [
+        'Current occurrence evidence:',
+        '- An unrelated health-device maintenance pass completed before this scheduled occurrence.',
+        '- There is no delivery or completion evidence for this occurrence.',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      expectedText: /mobility/iu,
+      savedInstructions:
+        'Send a brief cue: Time for today\'s mobility routine.',
+      scenario: 'keeps a scheduled mobility reminder deliverable after unrelated device maintenance',
+    },
+  ])('$scenario', async ({ context, expectedKind, expectedText, savedInstructions }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-independent-reminder-e2e-'),
@@ -11294,6 +11326,14 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         result.finalMessage,
       )
       expect(decision.kind).toBe(expectedKind)
+      if (decision.kind === 'send_message') {
+        if (expectedText) {
+          expect(decision.text).toMatch(expectedText)
+        }
+        console.info(
+          `[real-codex independent reminder] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}`,
+        )
+      }
     } finally {
       await removeRealCodexTemporaryPaths([
         workingDirectory,

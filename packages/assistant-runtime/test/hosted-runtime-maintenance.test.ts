@@ -6494,6 +6494,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       parserProcessed: 0,
       postCheckpointRecord: null,
     });
+    assert.equal(Object.hasOwn(result, "systemProgressed"), false);
     expect(drainWorker).toHaveBeenCalledWith(
       HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
       "local_scheduled_account",
@@ -6635,6 +6636,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       listJobTimingDiagnostics: vi.fn(() => elapsedMsByClaim.map((elapsedMs) => ({
         at: "2026-04-08T00:00:45.000Z",
         attempts: 1,
+        canonicalProgressCommitted: true as const,
         connectionSourceReadCount: 0,
         connectionSourceReadElapsedMs: 0,
         credentialRefreshCount: 0,
@@ -6663,7 +6665,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       runSchedulerOnce: vi.fn(async () => undefined),
     });
 
-    await runHostedDeviceSyncWakeLane({
+    const result = await runHostedDeviceSyncWakeLane({
       deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
       resolvedConfig: {
         deviceSync: DEVICE_SYNC_CONFIG,
@@ -6688,6 +6690,8 @@ describe("runHostedDeviceSyncWakeLane", () => {
       },
     });
     await drainHostedRuntimeLogWritesBestEffort();
+
+    assert.equal(result.systemProgressed, true);
 
     const finishedEntry = logRequests
       .flatMap((request) => request.entries)
@@ -6717,6 +6721,66 @@ describe("runHostedDeviceSyncWakeLane", () => {
     expect(() => parseHostedRuntimeLogRequest({
       entries: [finishedEntry],
     })).not.toThrow();
+  });
+
+  it("does not report canonical system progress for local queue commits alone", async () => {
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      listPendingJobsForAccount: vi.fn(() => []),
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close: vi.fn(),
+      drainWorker: vi.fn().mockResolvedValue(1),
+      getNextJobWakeAt: () => "2026-04-08T00:30:00.000Z",
+      getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
+      listAccounts: vi.fn(() => []),
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listJobTimingDiagnostics: vi.fn(() => [{
+        at: "2026-04-08T00:00:45.000Z",
+        attempts: 1,
+        connectionSourceReadCount: 0,
+        connectionSourceReadElapsedMs: 0,
+        credentialRefreshCount: 0,
+        credentialRefreshElapsedMs: 0,
+        durableProgressCommitted: true,
+        elapsedMs: 1,
+        jobCount: 1,
+        jobKind: "resource",
+        outcome: "completed",
+        provider: "junction",
+        providerExecutionElapsedMs: 1,
+        providerInventoryRequestCount: 0,
+        providerInventoryRequestElapsedMs: 0,
+        providerResourceRequestCount: 0,
+        providerResourceRequestElapsedMs: 0,
+        providerUnattributedElapsedMs: 1,
+        snapshotImportCount: 0,
+        snapshotImportElapsedMs: 0,
+        snapshotCanonicalCoreElapsedMs: 0,
+        snapshotCanonicalWriteElapsedMs: 0,
+        snapshotEventIdentityIndexCacheHitCount: 0,
+        snapshotEventIdentityIndexElapsedMs: 0,
+        snapshotNormalizationElapsedMs: 0,
+      }]),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    });
+
+    const result = await runHostedDeviceSyncWakeLane({
+      deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+      resolvedConfig: {
+        deviceSync: DEVICE_SYNC_CONFIG,
+      },
+      timeoutMs: 45_000,
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_device_sync_local_progress",
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "reconcile_due",
+        userId: "member_123",
+      },
+    });
+
+    assert.equal(Object.hasOwn(result, "systemProgressed"), false);
   });
 
   it("retains queue snapshots when the worker drain yields to its timeout", async () => {
@@ -6880,6 +6944,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       expect(result.deviceSyncSkipped).toBe(false);
       expect(result.nextWakeAt).toBe("2026-04-08T00:30:00.000Z");
       expect(result.nextWakeReason).toBe("device-sync.reconcile");
+      expect(Object.hasOwn(result, "systemProgressed")).toBe(false);
       expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledTimes(1);
       expect(drainWorker).toHaveBeenCalled();
       expect(logRequests.flatMap((request) => request.entries).map((entry) =>
