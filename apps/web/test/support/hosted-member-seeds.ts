@@ -180,6 +180,7 @@ export interface HostedJunctionDeviceSyncReplayDrainStatus {
   historicalBackfillEvidence: string | null;
   historicalBackfillLastEmptyAt: string | null;
   historicalBackfillStatus: string | null;
+  pendingDirtyResourceCount: number;
 }
 
 export interface HostedAppSessionForTestInput {
@@ -377,6 +378,10 @@ interface HostedLinqDailyStateModule {
 }
 
 interface HostedDeviceSyncControlPlaneStore {
+  getDirtyConnection(input: {
+    connectionId: string;
+    userId: string;
+  }): Promise<{ dirtyResources: Record<string, unknown> } | null>;
   getStoredConnectionAccountForUser(
     userId: string,
     connectionId: string,
@@ -1048,10 +1053,15 @@ export async function readHostedJunctionDeviceSyncReplayDrainStatus(
         hasPendingDirtyConnection,
         hasPendingDirtyConnectionForUser,
         account,
+        dirtyConnection,
       ] = await Promise.all([
         store.hasPendingDirtyConnection(input.connectionId),
         store.hasPendingDirtyConnectionForUser(input.memberId),
         store.getStoredConnectionAccountForUser(input.memberId, input.connectionId),
+        store.getDirtyConnection({
+          connectionId: input.connectionId,
+          userId: input.memberId,
+        }),
       ]);
       const metadata = account?.metadata ?? {};
       const historicalBackfillEmptyAttempts =
@@ -1084,6 +1094,8 @@ export async function readHostedJunctionDeviceSyncReplayDrainStatus(
           typeof historicalBackfillStatus === "string"
             ? historicalBackfillStatus
             : null,
+        pendingDirtyResourceCount:
+          Object.keys(dirtyConnection?.dirtyResources ?? {}).length,
       };
     } finally {
       await prisma.$disconnect();

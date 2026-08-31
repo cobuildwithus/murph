@@ -162,6 +162,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await compactHostedPendingAssistantInputIds({ vaultRoot });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -272,6 +273,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await compactHostedPendingAssistantInputIds({ vaultRoot });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({

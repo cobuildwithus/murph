@@ -255,6 +255,11 @@ describe("hosted local Temporal orchestration e2e", () => {
     });
     const retainedState = await waitForWorkflowBlockedState({
       env: activeScenario.runtimeEnv,
+      expectedMailboxPointer: {
+        lane: "system",
+        laneSeq: retainedAppend.wake.seq,
+        mailboxItemId: retainedAppend.wake.id,
+      },
       workflowId: retainedSignal.workflowId,
     });
     expect(retainedState.latestMailboxPointer).toEqual({
@@ -392,6 +397,11 @@ describe("hosted local Temporal orchestration e2e", () => {
     });
     const defaultOwnedState = await waitForWorkflowBlockedState({
       env: activeScenario.runtimeEnv,
+      expectedMailboxPointer: {
+        lane: "system",
+        laneSeq: defaultOwnedAppend.wake.seq,
+        mailboxItemId: defaultOwnedAppend.wake.id,
+      },
       workflowId: defaultOwnedSignal.workflowId,
     });
     expect(defaultOwnedState.lastExecutionAt).toBeNull();
@@ -442,6 +452,7 @@ async function seedEngagementPausedFrontierMember(
   );
   await activeScenario.waitForHostedCompletion(userId);
   await seedHostedWorkspaceWakeForTest({
+    defaultProcessingWake: true,
     environment: activeScenario.runtimeEnv,
     userId,
     wakeAt: new Date(Date.now() - 60_000),
@@ -516,6 +527,7 @@ async function waitForWorkflowExecutionState(input: {
 
 async function waitForWorkflowBlockedState(input: {
   env: NodeJS.ProcessEnv;
+  expectedMailboxPointer: HostedRuntimeMailboxPointer;
   workflowId: string;
 }): Promise<ObservedHostedRuntimeWorkflowState> {
   const deadline = Date.now() + 180_000;
@@ -531,9 +543,18 @@ async function waitForWorkflowBlockedState(input: {
           workflowId: input.workflowId,
         }),
       );
+      const pointer = latestState.latestMailboxPointer;
       if (
         latestState.lastReconciliationBlockedReason
           === "automation_engagement_paused"
+        && latestState.currentWaitReason === "blocked_retry"
+        && latestState.lastExecutionAt === null
+        && latestState.lastExecutionErrorCode === null
+        && latestState.lastExecutionKind === null
+        && pointer !== null
+        && pointer.lane === input.expectedMailboxPointer.lane
+        && pointer.laneSeq === input.expectedMailboxPointer.laneSeq
+        && pointer.mailboxItemId === input.expectedMailboxPointer.mailboxItemId
       ) {
         return latestState;
       }
@@ -572,6 +593,7 @@ function isExecutionAtOrAfter(
 }
 
 interface ObservedHostedRuntimeWorkflowState {
+  currentWaitReason: string | null;
   lastExecutionAt: string | null;
   lastExecutionErrorCode: string | null;
   lastExecutionKind: string | null;
@@ -587,6 +609,7 @@ function readObservedHostedRuntimeWorkflowState(
     throw new TypeError("Hosted runtime Workflow query returned a non-object.");
   }
   const record = value as Record<string, unknown>;
+  const currentWaitReason = readNullableString(record.currentWaitReason);
   const lastExecutionAt = readNullableString(record.lastExecutionAt);
   const lastExecutionErrorCode = readNullableString(
     record.lastExecutionErrorCode,
@@ -603,6 +626,7 @@ function readObservedHostedRuntimeWorkflowState(
   }
 
   return {
+    currentWaitReason,
     lastExecutionAt,
     lastExecutionErrorCode,
     lastExecutionKind,

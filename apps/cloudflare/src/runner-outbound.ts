@@ -115,6 +115,9 @@ import {
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "./web-control-plane.ts";
+import {
+  matchesRequestedHostedSystemProgressProjection,
+} from "./runtime-platform/workspace-progress-projection.ts";
 
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
@@ -1615,10 +1618,15 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
+  const checkpointRequestWithoutSnapshotRef = parseHostedWorkspaceCheckpointRequest({
+    ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
+    snapshotRef: null,
+  });
 
   if (Date.parse(session.expiresAt) <= Date.now()) {
     const alreadyCurrentResponse = await completeExpiredCurrentWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
+      checkpointRequest: checkpointRequestWithoutSnapshotRef,
       env: input.env,
       environment: input.environment,
       request: input.request,
@@ -1756,7 +1764,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot object metadata does not match its ref.", 409);
   }
   const checkpointRequest = parseHostedWorkspaceCheckpointRequest({
-    ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
+    ...checkpointRequestWithoutSnapshotRef,
     snapshotRef,
   });
   if (checkpointRequest.reason !== "idle_shutdown") {
@@ -1887,6 +1895,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (!checkpoint.checkpointed) {
     const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotResponse({
       attemptId: writeFence.attemptId,
+      checkpointRequest,
       checkpoint,
       env: input.env,
       leaseGeneration: writeFence.generation,
@@ -2109,6 +2118,7 @@ async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
 
 async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
   attemptId: string;
+  checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest>;
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
   env: RunnerOutboundEnvironmentSource;
   leaseGeneration: string;
@@ -2122,6 +2132,12 @@ async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
     !hostedWorkspaceSnapshotV2RefsMatch(currentSnapshotRef, input.snapshotRef)
   ) {
     return null;
+  }
+  if (!matchesRequestedHostedSystemProgressProjection({
+    request: input.checkpointRequest,
+    workspace: input.checkpoint.workspace,
+  })) {
+    return jsonError("Hosted workspace snapshot checkpoint state mismatch.", 409);
   }
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
   await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
@@ -2148,6 +2164,7 @@ async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
 
 async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
   bucket: WorkspaceSnapshotR2BucketLike | null;
+  checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest>;
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
@@ -2177,6 +2194,12 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     }))
   ) {
     return null;
+  }
+  if (!matchesRequestedHostedSystemProgressProjection({
+    request: input.checkpointRequest,
+    workspace: currentWorkspace,
+  })) {
+    return jsonError("Hosted workspace snapshot checkpoint state mismatch.", 409);
   }
 
   if (
