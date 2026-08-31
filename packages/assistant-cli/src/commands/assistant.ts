@@ -2,6 +2,10 @@ import path from 'node:path'
 import { access } from 'node:fs/promises'
 import { Cli, z } from 'incur'
 import {
+  MemoryDocumentParseError,
+  memoryDocumentRelativePath,
+} from '@murphai/contracts'
+import {
   assistantAskResultSchema,
   assistantChannelNameSchema,
   assistantChatResultSchema,
@@ -527,7 +531,6 @@ type AssistantVaultServices = VaultServices &
   AssistantOnboardingDeviceAccountServices
 
 const assistantOnboardingResumeContextDefaultLimit = 3
-const assistantOnboardingMemoryDocumentPath = 'bank/memory.md'
 
 function normalizeAssistantOnboardingResumeContextLimit(limit: number): number {
   return Math.min(Math.max(limit, 1), 50)
@@ -585,17 +588,20 @@ function buildAssistantOnboardingResumeContextErrorSurface(
 function buildAssistantOnboardingResumeContextMemoryErrorSurface(
   error: unknown,
 ): AssistantOnboardingResumeContextFailureSurface {
-  const repair = readAssistantOnboardingMemoryDocumentRepair(error)
-  if (!repair) {
+  if (
+    !(error instanceof MemoryDocumentParseError)
+    || error.details.sourcePath !== memoryDocumentRelativePath
+  ) {
     return buildAssistantOnboardingResumeContextErrorSurface(error)
   }
 
-  const location = repair.lineNumber === undefined
-    ? assistantOnboardingMemoryDocumentPath
-    : `${assistantOnboardingMemoryDocumentPath}:${repair.lineNumber}`
-  const hint = repair.field === undefined
+  const { field, lineNumber } = error.details
+  const location = lineNumber === undefined
+    ? memoryDocumentRelativePath
+    : `${memoryDocumentRelativePath}:${lineNumber}`
+  const hint = field === undefined
     ? `Repair ${location} before continuing onboarding.`
-    : `Repair ${location} by fixing the invalid ${repair.field} field before continuing onboarding.`
+    : `Repair ${location} by fixing the invalid ${field} field before continuing onboarding.`
 
   return {
     status: 'error',
@@ -604,48 +610,6 @@ function buildAssistantOnboardingResumeContextMemoryErrorSurface(
     retryable: false,
     hint,
   }
-}
-
-function readAssistantOnboardingMemoryDocumentRepair(
-  error: unknown,
-): {
-  field?: string
-  lineNumber?: number
-} | null {
-  if (
-    !isAssistantOnboardingErrorRecord(error)
-    || error.name !== 'MemoryDocumentParseError'
-    || error.code !== 'MEMORY_DOCUMENT_INVALID'
-    || !isAssistantOnboardingErrorRecord(error.details)
-    || error.details.sourcePath !== assistantOnboardingMemoryDocumentPath
-    || typeof error.details.issue !== 'string'
-    || !/^(?:frontmatter_contract_invalid|frontmatter_invalid|memory_section_invalid|record_invalid|record_metadata_invalid|record_metadata_missing)$/u.test(
-      error.details.issue,
-    )
-  ) {
-    return null
-  }
-
-  const lineNumber = Number.isSafeInteger(error.details.lineNumber)
-    && typeof error.details.lineNumber === 'number'
-    && error.details.lineNumber > 0
-    ? error.details.lineNumber
-    : undefined
-  const field = typeof error.details.field === 'string'
-    && /^[A-Za-z_][A-Za-z0-9_.-]{0,79}$/u.test(error.details.field)
-    ? error.details.field
-    : undefined
-
-  return {
-    ...(field === undefined ? {} : { field }),
-    ...(lineNumber === undefined ? {} : { lineNumber }),
-  }
-}
-
-function isAssistantOnboardingErrorRecord(
-  value: unknown,
-): value is Record<PropertyKey, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 function buildAssistantOnboardingResumeContextUnavailableSurface():
