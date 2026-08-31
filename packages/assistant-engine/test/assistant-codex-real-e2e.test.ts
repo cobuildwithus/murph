@@ -9560,7 +9560,7 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
 
 describeRealCodex('real Codex weekly digest emerging behavior e2e', () => {
   it(
-    'connects repeated new activity to conversation without nagging or inventing support',
+    'recognizes a repeated new cardio routine and suppresses an ordinary shortfall',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const weeklyHealthDigest = MURPH_MANAGED_AUTOMATIONS.find(
@@ -9654,11 +9654,17 @@ describeRealCodex('real Codex weekly digest emerging behavior e2e', () => {
             )
             const mutatingCliActions = actions.filter((action) =>
               action.kind === 'command'
-              && /\bvault-cli\s+(?:automation|experiment|goal|regimen)\s+(?:add|archive|create|delete|patch|save|set|set-status|start|stop|update|upsert)\b/iu
+              && /\bvault-cli\s+(?:automation|experiment|goal|plan|regimen)\s+(?:add|archive|create|delete|patch|save|set|set-status|start|stop|update|upsert)\b/iu
                 .test(action.command)
             )
             const decision = parseAssistantNotificationDecision(
               result.finalMessage,
+            )
+            process.stdout.write(
+              `[weekly-digest-emerging-behavior-e2e] ${JSON.stringify({
+                decision,
+                scenario: probe.kind,
+              })}\n`,
             )
 
             expect(automationActions, probe.kind).toHaveLength(0)
