@@ -714,6 +714,7 @@ function listRuntimeAdmissionsSince(
       || Date.parse(parsed.time) < notBefore.getTime()
       || !isRecord(parsed.details)
       || typeof parsed.details.orchestrationAttemptId !== "string"
+      || parsed.details.orchestrationAttemptId.startsWith("hosted-local-wake:")
       || typeof parsed.details.runtimeProcessingAction !== "string"
     ) {
       continue;
