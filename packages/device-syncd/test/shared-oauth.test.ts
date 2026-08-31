@@ -929,7 +929,8 @@ test("shared oauth adapter exposes nested oauthAdapter and routes refresh and re
       provider: "demo",
       displayName: "Demo",
       transportModes: ["oauth_callback"],
-      oauth: {
+      connection: {
+        kind: "oauth2",
         callbackPath: "/oauth/demo/callback",
         defaultScopes: ["offline"],
       },
@@ -1027,7 +1028,8 @@ test("shared oauth adapter omits revokeAccess when it is not supplied", () => {
       provider: "demo",
       displayName: "Demo",
       transportModes: ["oauth_callback"],
-      oauth: {
+      connection: {
+        kind: "oauth2",
         callbackPath: "/oauth/demo/callback",
         defaultScopes: ["offline"],
       },

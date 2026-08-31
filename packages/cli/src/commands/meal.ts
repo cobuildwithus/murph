@@ -50,6 +50,7 @@ import {
   commonListLimitOptionSchema,
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { publicValidationIssue } from './public-validation-issue.js'
 
 const mealIngredientsSchema = z
   .array(z.string().trim().min(1).max(4000))
@@ -84,7 +85,7 @@ const mealInputPayloadSchema = z
     ingredients: mealIngredientsSchema,
     nutrition: mealNutritionSchema.optional(),
   })
-  .passthrough()
+  .strict()
 
 type StructuredMealPayload = {
   photo?: string
@@ -106,14 +107,72 @@ const mealInputPayloadShapeDescription = [
 ].join(' ')
 
 function formatSchemaIssues(
-  issues: readonly { path: PropertyKey[]; message: string }[],
+  issues: readonly { code: string; path: PropertyKey[]; message: string }[],
 ): string {
   return issues
     .map((issue) => {
       const path = issue.path.length > 0 ? issue.path.join('.') : 'value'
-      return `${path}: ${issue.message}`
+      const message = issue.code === 'unrecognized_keys' && issue.path.length === 0
+        ? 'contains an unsupported field'
+        : issue.message
+      return `${path}: ${message}`
     })
     .join('; ')
+}
+
+function mealPayloadIssuePublicPath(
+  path: readonly PropertyKey[],
+): readonly (string | number)[] {
+  return path.every(
+    (segment): segment is string | number =>
+      typeof segment === 'string' ||
+      (typeof segment === 'number' &&
+        Number.isSafeInteger(segment) &&
+        segment >= 0),
+  )
+    ? path
+    : []
+}
+
+function throwMealPathAliasConflict(
+  canonicalField: 'audio' | 'photo',
+  aliasField: 'audioPath' | 'photoPath',
+): never {
+  throw new VaultCliError(
+    'invalid_payload',
+    `Meal payload is not valid. ${canonicalField} and ${aliasField} must match when both are provided.`,
+    {
+      hint: `Use either ${canonicalField} or ${aliasField}, or pass the same path in both fields. No meal was written.`,
+      issues: [
+        publicValidationIssue({ code: 'custom' }, [canonicalField]),
+        publicValidationIssue({ code: 'custom' }, [aliasField]),
+      ],
+      retryable: false,
+      stage: 'validation',
+    },
+  )
+}
+
+function assertMatchingMealPathAliases(payload: {
+  audio?: string
+  audioPath?: string
+  photo?: string
+  photoPath?: string
+}): void {
+  if (
+    payload.photo !== undefined &&
+    payload.photoPath !== undefined &&
+    payload.photo !== payload.photoPath
+  ) {
+    throwMealPathAliasConflict('photo', 'photoPath')
+  }
+  if (
+    payload.audio !== undefined &&
+    payload.audioPath !== undefined &&
+    payload.audio !== payload.audioPath
+  ) {
+    throwMealPathAliasConflict('audio', 'audioPath')
+  }
 }
 
 function hasMeaningfulMealNutrition(nutrition: MealNutrition | undefined): boolean {
@@ -242,11 +301,28 @@ async function loadStructuredMealPayload(inputFile: string): Promise<StructuredM
   const parsed = mealInputPayloadSchema.safeParse(payload)
 
   if (!parsed.success) {
+    const unsupportedFieldHint = parsed.error.issues.some(
+      (issue) => issue.code === 'unrecognized_keys',
+    )
+      ? ` ${mealInputPayloadShapeDescription}`
+      : ''
     throw new VaultCliError(
       'invalid_payload',
-      `Meal payload is not valid. ${formatSchemaIssues(parsed.error.issues)}`,
+      `Meal payload is not valid. ${formatSchemaIssues(parsed.error.issues)}${unsupportedFieldHint}`,
+      {
+        issues: parsed.error.issues.map((issue) =>
+          publicValidationIssue(
+            issue,
+            mealPayloadIssuePublicPath(issue.path),
+          )
+        ),
+        retryable: false,
+        stage: 'validation',
+      },
     )
   }
+
+  assertMatchingMealPathAliases(parsed.data)
 
   return {
     photo: parsed.data.photo ?? parsed.data.photoPath,

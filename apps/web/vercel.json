@@ -34,8 +34,20 @@
       "schedule": "*/10 22,23 * * *"
     },
     {
-      "path": "/api/internal/hosted-execution/retention/cron",
-      "schedule": "0 * * * *"
+      "path": "/api/internal/hosted-execution/retention/nonces/cron",
+      "schedule": "5 * * * *"
+    },
+    {
+      "path": "/api/internal/hosted-execution/retention/control-plane/cron",
+      "schedule": "20 * * * *"
+    },
+    {
+      "path": "/api/internal/hosted-execution/retention/external/cron",
+      "schedule": "35 * * * *"
+    },
+    {
+      "path": "/api/internal/hosted-execution/retention/runtime/cron",
+      "schedule": "50 * * * *"
     },
     {
       "path": "/api/internal/hosted-growth/snapshot/cron",

@@ -39,6 +39,8 @@ import {
   upsertAutomation,
   validateVault,
 } from "@murphai/core";
+import { createIntegratedInboxServices } from "@murphai/inbox-services";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 import {
   openInboxRuntime,
   persistCanonicalInboxCapture,
@@ -160,6 +162,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await compactHostedPendingAssistantInputIds({ vaultRoot });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -270,6 +273,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await compactHostedPendingAssistantInputIds({ vaultRoot });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -471,6 +475,221 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       assert.equal(result.nextWakeAt, null);
     } finally {
       await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("a lazy hosted snapshot retires a promoted inbox document and restores its canonical owner", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-promoted-document-retention-proof-"),
+    );
+    const sourceVaultRoot = path.join(workspaceRoot, "source-vault");
+    const liveVaultRoot = path.join(workspaceRoot, "live-vault");
+    const finalVaultRoot = path.join(workspaceRoot, "final-vault");
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const recordedAt = "2026-04-01T00:00:00.000Z";
+    const dueWakeAt = "2026-04-15T00:00:00.000Z";
+    const documentBytes = Buffer.from("%PDF-1.7\nsynthetic hosted promoted document\n");
+
+    try {
+      await initializeVault({ createdAt: recordedAt, vaultRoot: sourceVaultRoot });
+      const persisted = await persistCanonicalInboxCapture({
+        vaultRoot: sourceVaultRoot,
+        captureId: "cap_workspace_promoted_document_retention",
+        eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V3",
+        storedAt: recordedAt,
+        input: {
+          source: "telegram",
+          externalId: "msg-workspace-promoted-document-retention",
+          accountId: "self",
+          thread: {
+            id: "thread-workspace-promoted-document-retention",
+            isDirect: true,
+          },
+          actor: { isSelf: false },
+          occurredAt: recordedAt,
+          receivedAt: recordedAt,
+          text: "Hosted promoted document context",
+          attachments: [{
+            kind: "document",
+            mime: "application/pdf",
+            fileName: "hosted-promoted.pdf",
+            data: documentBytes,
+          }],
+          raw: {},
+        },
+      });
+      const inboxPath = persisted.stored.attachments[0]?.storedPath ?? "";
+      assert.ok(inboxPath);
+      const inboxServices = createIntegratedInboxServices();
+      await inboxServices.init({
+        rebuild: true,
+        rebuildParserJobs: false,
+        requestId: null,
+        vault: sourceVaultRoot,
+      });
+      const imported = await inboxServices.preserveDocumentAttachment({
+        file: inboxPath,
+        requestId: null,
+        vault: sourceVaultRoot,
+      });
+      const importedManifest = await createIntegratedVaultServices().query.showDocumentManifest({
+        id: imported.relatedId,
+        requestId: null,
+        vault: sourceVaultRoot,
+      });
+      const importedRawRef = importedManifest.manifest.artifacts.find(
+        (artifact) => artifact.role === "source_document",
+      )?.relativePath;
+      assert.ok(importedRawRef);
+
+      const baseBundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (file) => {
+          if (!file.path.startsWith("raw/")) {
+            return null;
+          }
+          const sha256 = sha256HostedBundleHex(file.bytes);
+          artifactBytesByHash.set(sha256, file.bytes);
+          return { byteSize: file.bytes.byteLength, sha256 };
+        },
+        kind: "vault",
+        roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      artifactBytesByHash.set(baseHash, baseBundle);
+      const baseSnapshotRef = createBundleRef({
+        hash: baseHash,
+        key: `synthetic/promoted-document-retention/${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_promoted_document_retention",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            const bundle = await snapshotHostedBundleRoots({
+              externalizeFile: async (file) => {
+                if (!file.path.startsWith("raw/")) {
+                  return null;
+                }
+                const sha256 = sha256HostedBundleHex(file.bytes);
+                artifactBytesByHash.set(sha256, file.bytes);
+                return { byteSize: file.bytes.byteLength, sha256 };
+              },
+              kind: "vault",
+              roots: [{
+                root: liveVaultRoot,
+                rootKey: "vault",
+                shouldIncludeRelativePath: (relativePath) =>
+                  relativePath !== resolveHostedMaterializedArtifactStateRelativePath(),
+              }],
+            });
+            assert.ok(bundle);
+            const hash = sha256HostedBundleHex(bundle);
+            artifactBytesByHash.set(hash, bundle);
+            return {
+              snapshotRef: createBundleRef({
+                hash,
+                key: `synthetic/promoted-document-retention/${hash}.bundle`,
+                size: bundle.byteLength,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Retention-only processing must not import mailbox items.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events: [],
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt: dueWakeAt,
+                snapshotRef: baseSnapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Retention-only processing must not enter the assistant phase.");
+          },
+          vaultRoot: liveVaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.reason),
+        ["idle_shutdown"],
+      );
+      assert.equal(checkpointRequests[0]?.inboxMediaRetentionWakeAt, null);
+      const retainedSnapshotRef = checkpointRequests[0]?.snapshotRef ?? null;
+      assert.ok(retainedSnapshotRef);
+      const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createPlatform({
+          artifactBytesByHash,
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState({
+              snapshotRef: retainedSnapshotRef,
+              version: "1",
+            }),
+          }),
+        }),
+        vaultRoot: finalVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: retainedSnapshotRef,
+          version: "1",
+        }),
+      });
+      await restored.materializeWorkspaceArtifacts([
+        importedManifest.manifestFile,
+        importedRawRef,
+      ]);
+
+      await assert.rejects(access(path.join(finalVaultRoot, inboxPath)), { code: "ENOENT" });
+      assert.deepEqual(
+        await readFile(path.join(finalVaultRoot, importedRawRef)),
+        documentBytes,
+      );
+      const runtime = await openInboxRuntime({ vaultRoot: finalVaultRoot });
+      try {
+        await rebuildRuntimeFromVault({
+          enqueueParserJobs: false,
+          runtime,
+          vaultRoot: finalVaultRoot,
+        });
+        const capture = runtime.getCapture(persisted.stored.captureId);
+        assert.ok(capture);
+        assert.equal(capture.attachments[0]?.storedPath, null);
+        assert.equal(capture.attachments[0]?.contentStatus, "retention_expired");
+      } finally {
+        runtime.close();
+      }
+      await repairVault({ vaultRoot: finalVaultRoot });
+      expect(await validateVault({ vaultRoot: finalVaultRoot })).toMatchObject({
+        issues: [],
+        valid: true,
+      });
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(workspaceRoot);
     }
   });
 

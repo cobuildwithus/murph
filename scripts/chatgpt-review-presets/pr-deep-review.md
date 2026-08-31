@@ -428,8 +428,8 @@ PASS`. Omit the section when there are no useful notes.
 When a user-facing frontend change has no readable rendered artifacts inside
 `codebase.zip`, add `Rendered evidence gap: <exact gap>` after the findings and
 before the outcome. The gap is not independently a qualifying finding and does
-not prevent `PASS` because the completed preliminary specialist ReviewGPT pass
-and its applicable frontend and Product UX lenses own rendered proof.
+not prevent `PASS` because the parent-owned Product UX walkthrough and frontend
+evidence own rendered proof.
 Never claim that this final gate independently proved rendered craft.
 
 For `RETROSPECTIVE_REQUIRED`, do not invent tactical fixes. State the trigger,

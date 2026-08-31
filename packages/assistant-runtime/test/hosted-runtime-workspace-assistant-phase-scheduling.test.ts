@@ -1557,6 +1557,47 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("runs due projected default cron work before a model-free mailbox row", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    mocks.getAssistantCronStatus.mockResolvedValue({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: dueAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) => {
+        if (
+          (input?.allowedRouteActions?.length ?? 0) > 0
+          || (input?.allowedWakeKinds?.length ?? 0) > 0
+        ) {
+          return { at: null, executionClass: null, reason: null };
+        }
+        return {
+          at: dueAt,
+          executionClass: "model_free",
+          reason: "mailbox",
+        };
+      },
+    );
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      workspace: {
+        ...createDueAssistantWorkspace({ nextWakeAt: dueAt }),
+        nextDefaultProcessingWakeAt: dueAt,
+        nextDefaultProcessingWakeReason: "assistant",
+        nextWakeReason: "device-sync.reconcile",
+        systemMailboxProgressGeneration: "7",
+      },
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+  });
+
   it("rechecks foreground ownership before handing a due model-free row to the system owner", async () => {
     const dueAt = "2026-04-27T00:00:00.000Z";
     let foregroundConversationWorkObserved = false;

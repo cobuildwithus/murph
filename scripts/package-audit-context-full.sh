@@ -20,7 +20,6 @@ review_gpt_first_reviewed_head="${REVIEW_GPT_FIRST_REVIEWED_HEAD:-}"
 review_gpt_previous_reviewed_head="${REVIEW_GPT_PREVIOUS_REVIEWED_HEAD:-}"
 review_gpt_context_anchor_head="${REVIEW_GPT_CONTEXT_ANCHOR_HEAD:-}"
 review_gpt_rendered_evidence_paths="${REVIEW_GPT_RENDERED_EVIDENCE_PATHS:-}"
-review_gpt_supplemental_evidence_paths="${REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS:-}"
 review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
 review_gpt_context_mode="full_snapshot"
 review_gpt_pr_touches_health_commons=0
@@ -162,83 +161,6 @@ review_gpt_add_rendered_evidence() {
   done <<< "$review_gpt_rendered_evidence_paths"
 }
 
-review_gpt_add_supplemental_evidence() {
-  local evidence_absolute_path
-  local evidence_count=0
-  local evidence_manifest="$review_gpt_pr_context_dir/supplemental-evidence.txt"
-  local evidence_package_dir="$review_gpt_pr_context_dir/supplemental-evidence"
-  local evidence_package_name
-  local evidence_package_path
-  local evidence_path
-  local evidence_size
-  local evidence_total_bytes=0
-
-  rm -rf "$evidence_package_dir"
-  mkdir -p "$evidence_package_dir"
-  : > "$evidence_manifest"
-  while IFS= read -r evidence_path; do
-    [[ -z "$evidence_path" ]] && continue
-    case "$evidence_path" in
-      /* | .. | ../* | */../* | */..)
-        echo "Error: ReviewGPT supplemental evidence paths must be repo-relative and boundary-safe." >&2
-        exit 1
-        ;;
-    esac
-    case "$evidence_path" in
-      .artifacts/review-gpt/* | audit-packages/*) ;;
-      *)
-        echo "Error: ReviewGPT supplemental evidence must stay under .artifacts/review-gpt/ or audit-packages/." >&2
-        exit 1
-        ;;
-    esac
-    case "$evidence_path" in
-      *.md | *.txt | *.json | *.ts | *.tsx | *.js | *.mjs | *.cjs | *.sh) ;;
-      *)
-        echo "Error: ReviewGPT supplemental evidence must be a supported text or code file." >&2
-        exit 1
-        ;;
-    esac
-    if [[ ! -f "$evidence_path" ]] || [[ -L "$evidence_path" ]]; then
-      echo "Error: ReviewGPT supplemental evidence must be a regular non-symlink file: $evidence_path" >&2
-      exit 1
-    fi
-    if ! evidence_absolute_path="$(realpath -q "$evidence_path")"; then
-      echo "Error: ReviewGPT supplemental evidence path could not be resolved: $evidence_path" >&2
-      exit 1
-    fi
-    case "$evidence_absolute_path" in
-      "$review_gpt_repo_root_absolute"/.artifacts/review-gpt/* \
-        | "$review_gpt_repo_root_absolute"/audit-packages/*) ;;
-      *)
-        echo "Error: ReviewGPT supplemental evidence must resolve inside an allowed artifact directory." >&2
-        exit 1
-        ;;
-    esac
-    evidence_count=$((evidence_count + 1))
-    if (( evidence_count > 12 )); then
-      echo "Error: ReviewGPT supplemental evidence is limited to 12 explicit files." >&2
-      exit 1
-    fi
-    evidence_size="$(wc -c < "$evidence_path" | tr -d '[:space:]')"
-    evidence_total_bytes=$((evidence_total_bytes + evidence_size))
-    if (( evidence_total_bytes > 2097152 )); then
-      echo "Error: ReviewGPT supplemental evidence is limited to 2 MiB in total." >&2
-      exit 1
-    fi
-    printf -v evidence_package_name '%02d-%s' \
-      "$evidence_count" \
-      "$(basename "$evidence_path")"
-    evidence_package_path="$evidence_package_dir/$evidence_package_name"
-    cp -- "$evidence_path" "$evidence_package_path"
-    printf '%s\t%s/%s/%s\n' \
-      "$evidence_path" \
-      "$review_gpt_pr_context_archive_dir" \
-      "$(basename "$evidence_package_dir")" \
-      "$evidence_package_name" \
-      >> "$evidence_manifest"
-  done <<< "$review_gpt_supplemental_evidence_paths"
-}
-
 cleanup_review_gpt_pr_context() {
   local exit_status="$?"
   trap - EXIT
@@ -249,23 +171,8 @@ cleanup_review_gpt_pr_context() {
 }
 trap cleanup_review_gpt_pr_context EXIT
 
-case "$review_gpt_review_phase" in
-  preliminary | final) ;;
-  *)
-    echo "Error: REVIEW_GPT_REVIEW_PHASE must be preliminary or final." >&2
-    exit 1
-    ;;
-esac
-
-if [[ "$review_gpt_review_phase" != "preliminary" ]] \
-  && [[ -n "$review_gpt_supplemental_evidence_paths" ]]; then
-  echo "Error: ReviewGPT supplemental evidence is allowed only for the preliminary specialist review." >&2
-  exit 1
-fi
-
-if [[ "$review_gpt_review_phase" == "preliminary" ]] \
-  && [[ -z "$review_gpt_pr_ref" ]]; then
-  echo "Error: the preliminary specialist ReviewGPT pass requires REVIEW_GPT_PR_URL or REVIEW_GPT_PR_REF." >&2
+if [[ "$review_gpt_review_phase" != "final" ]]; then
+  echo "Error: REVIEW_GPT_REVIEW_PHASE must be final." >&2
   exit 1
 fi
 
@@ -320,94 +227,84 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     echo "Error: could not resolve PR base/head SHAs for ReviewGPT PR context." >&2
     exit 1
   fi
-  if [[ "$review_gpt_review_phase" == "preliminary" ]]; then
-    if [[ -n "$review_gpt_round_number" ]] \
-      || [[ -n "$review_gpt_first_reviewed_head" ]] \
-      || [[ -n "$review_gpt_previous_reviewed_head" ]] \
-      || [[ -n "$review_gpt_context_anchor_head" ]]; then
-      echo "Error: preliminary specialist review must not set final ReviewGPT round metadata." >&2
-      exit 1
-    fi
-  else
-    review_gpt_round_number="${review_gpt_round_number:-1}"
-    if [[ ! "$review_gpt_round_number" =~ ^[1-9][0-9]*$ ]]; then
-      echo "Error: REVIEW_GPT_ROUND_NUMBER must be a positive integer." >&2
-      exit 1
-    fi
-    review_gpt_load_pr_shape "$review_gpt_pr_ref" || exit 1
-    if [[ "$review_gpt_pr_head_oid" != "$review_gpt_head_oid" ]]; then
-      echo "Error: PR head changed while ReviewGPT context was being packaged; rerun the same round." >&2
-      exit 1
-    fi
-    review_gpt_recorded_first_head="$(
-      printf '%s\n' "$review_gpt_pr_body" \
-        | sed -nE 's/^ReviewGPT first-reviewed head: ([0-9a-f]{40})$/\1/p'
-    )"
-    review_gpt_require_full_sha \
-      "PR body ReviewGPT first-reviewed head" \
-      "$review_gpt_recorded_first_head"
+  review_gpt_round_number="${review_gpt_round_number:-1}"
+  if [[ ! "$review_gpt_round_number" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: REVIEW_GPT_ROUND_NUMBER must be a positive integer." >&2
+    exit 1
+  fi
+  review_gpt_load_pr_shape "$review_gpt_pr_ref" || exit 1
+  if [[ "$review_gpt_pr_head_oid" != "$review_gpt_head_oid" ]]; then
+    echo "Error: PR head changed while ReviewGPT context was being packaged; rerun the same round." >&2
+    exit 1
+  fi
+  review_gpt_recorded_first_head="$(
+    printf '%s\n' "$review_gpt_pr_body" \
+      | sed -nE 's/^ReviewGPT first-reviewed head: ([0-9a-f]{40})$/\1/p'
+  )"
+  review_gpt_require_full_sha \
+    "PR body ReviewGPT first-reviewed head" \
+    "$review_gpt_recorded_first_head"
 
-    if [[ "$review_gpt_round_number" == "1" ]]; then
+  if [[ "$review_gpt_round_number" == "1" ]]; then
+    if [[ -n "$review_gpt_full_review_reason" ]]; then
+      echo "Error: REVIEW_GPT_FULL_REVIEW_REASON is only valid for round 2 or later." >&2
+      exit 1
+    fi
+    if [[ -n "$review_gpt_previous_reviewed_head" ]]; then
+      echo "Error: REVIEW_GPT_PREVIOUS_REVIEWED_HEAD must be unset for round 1." >&2
+      exit 1
+    fi
+    if [[ -n "$review_gpt_context_anchor_head" ]] \
+      && [[ "$review_gpt_context_anchor_head" != "$review_gpt_head_oid" ]]; then
+      echo "Error: round 1 context anchor must equal the current PR head." >&2
+      exit 1
+    fi
+    if [[ -n "$review_gpt_first_reviewed_head" ]] \
+      && [[ "$review_gpt_first_reviewed_head" != "$review_gpt_head_oid" ]]; then
+      echo "Error: round 1 first-reviewed head must equal the current PR head." >&2
+      exit 1
+    fi
+    if [[ "$review_gpt_recorded_first_head" != "$review_gpt_head_oid" ]]; then
+      echo "Error: round 1 PR body first-reviewed head must equal the current PR head." >&2
+      exit 1
+    fi
+    review_gpt_first_reviewed_head="$review_gpt_recorded_first_head"
+    review_gpt_context_anchor_head="$review_gpt_head_oid"
+  else
+    if [[ -z "$review_gpt_first_reviewed_head" ]] \
+      || [[ -z "$review_gpt_previous_reviewed_head" ]]; then
+      echo "Error: later ReviewGPT rounds require REVIEW_GPT_FIRST_REVIEWED_HEAD and REVIEW_GPT_PREVIOUS_REVIEWED_HEAD." >&2
+      exit 1
+    fi
+    review_gpt_require_full_sha "first-reviewed head" "$review_gpt_first_reviewed_head"
+    if [[ "$review_gpt_first_reviewed_head" == "$review_gpt_head_oid" ]]; then
+      echo "Error: later ReviewGPT rounds must preserve the original first-reviewed head." >&2
+      exit 1
+    fi
+    if [[ "$review_gpt_first_reviewed_head" != "$review_gpt_recorded_first_head" ]]; then
+      echo "Error: REVIEW_GPT_FIRST_REVIEWED_HEAD must match the immutable PR body baseline." >&2
+      exit 1
+    fi
+    if [[ "$review_gpt_previous_reviewed_head" == "$review_gpt_head_oid" ]]; then
+      echo "Error: later ReviewGPT rounds require a new PR head; tooling retries reuse the same round." >&2
+      exit 1
+    fi
+    if [[ -z "$review_gpt_full_review_reason" ]]; then
+      review_gpt_full_review_reason="$(review_gpt_default_full_review_reason)"
       if [[ -n "$review_gpt_full_review_reason" ]]; then
-        echo "Error: REVIEW_GPT_FULL_REVIEW_REASON is only valid for round 2 or later." >&2
-        exit 1
+        export REVIEW_GPT_FULL_REVIEW_REASON="$review_gpt_full_review_reason"
       fi
-      if [[ -n "$review_gpt_previous_reviewed_head" ]]; then
-        echo "Error: REVIEW_GPT_PREVIOUS_REVIEWED_HEAD must be unset for round 1." >&2
-        exit 1
-      fi
+    fi
+    if [[ -z "$review_gpt_full_review_reason" ]]; then
+      review_gpt_context_mode="same_thread_delta"
+      review_gpt_context_anchor_head="${review_gpt_context_anchor_head:-$review_gpt_first_reviewed_head}"
+    else
       if [[ -n "$review_gpt_context_anchor_head" ]] \
         && [[ "$review_gpt_context_anchor_head" != "$review_gpt_head_oid" ]]; then
-        echo "Error: round 1 context anchor must equal the current PR head." >&2
+        echo "Error: a full-snapshot context anchor must equal the current PR head." >&2
         exit 1
       fi
-      if [[ -n "$review_gpt_first_reviewed_head" ]] \
-        && [[ "$review_gpt_first_reviewed_head" != "$review_gpt_head_oid" ]]; then
-        echo "Error: round 1 first-reviewed head must equal the current PR head." >&2
-        exit 1
-      fi
-      if [[ "$review_gpt_recorded_first_head" != "$review_gpt_head_oid" ]]; then
-        echo "Error: round 1 PR body first-reviewed head must equal the current PR head." >&2
-        exit 1
-      fi
-      review_gpt_first_reviewed_head="$review_gpt_recorded_first_head"
       review_gpt_context_anchor_head="$review_gpt_head_oid"
-    else
-      if [[ -z "$review_gpt_first_reviewed_head" ]] \
-        || [[ -z "$review_gpt_previous_reviewed_head" ]]; then
-        echo "Error: later ReviewGPT rounds require REVIEW_GPT_FIRST_REVIEWED_HEAD and REVIEW_GPT_PREVIOUS_REVIEWED_HEAD." >&2
-        exit 1
-      fi
-      review_gpt_require_full_sha "first-reviewed head" "$review_gpt_first_reviewed_head"
-      if [[ "$review_gpt_first_reviewed_head" == "$review_gpt_head_oid" ]]; then
-        echo "Error: later ReviewGPT rounds must preserve the original first-reviewed head." >&2
-        exit 1
-      fi
-      if [[ "$review_gpt_first_reviewed_head" != "$review_gpt_recorded_first_head" ]]; then
-        echo "Error: REVIEW_GPT_FIRST_REVIEWED_HEAD must match the immutable PR body baseline." >&2
-        exit 1
-      fi
-      if [[ "$review_gpt_previous_reviewed_head" == "$review_gpt_head_oid" ]]; then
-        echo "Error: later ReviewGPT rounds require a new PR head; tooling retries reuse the same round." >&2
-        exit 1
-      fi
-      if [[ -z "$review_gpt_full_review_reason" ]]; then
-        review_gpt_full_review_reason="$(review_gpt_default_full_review_reason)"
-        if [[ -n "$review_gpt_full_review_reason" ]]; then
-          export REVIEW_GPT_FULL_REVIEW_REASON="$review_gpt_full_review_reason"
-        fi
-      fi
-      if [[ -z "$review_gpt_full_review_reason" ]]; then
-        review_gpt_context_mode="same_thread_delta"
-        review_gpt_context_anchor_head="${review_gpt_context_anchor_head:-$review_gpt_first_reviewed_head}"
-      else
-        if [[ -n "$review_gpt_context_anchor_head" ]] \
-          && [[ "$review_gpt_context_anchor_head" != "$review_gpt_head_oid" ]]; then
-          echo "Error: a full-snapshot context anchor must equal the current PR head." >&2
-          exit 1
-        fi
-        review_gpt_context_anchor_head="$review_gpt_head_oid"
-      fi
     fi
   fi
 
@@ -443,98 +340,81 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     review_gpt_pr_touches_health_commons=1
   fi
 
-  if [[ "$review_gpt_review_phase" == "preliminary" ]]; then
-    review_gpt_require_available_commit "current reviewed head" "$review_gpt_head_oid"
-    {
-      printf '{\n'
-      printf '  "schemaVersion": 1,\n'
-      printf '  "phase": "preliminary_specialists",\n'
-      printf '  "currentBaseHead": "%s",\n' "$review_gpt_base_oid"
-      printf '  "currentReviewedHead": "%s"\n' "$review_gpt_head_oid"
-      printf '}\n'
-    } > "$review_gpt_pr_context_dir/review-phase.json"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'"$review_gpt_pr_context_dir/review-phase.json"$'\n'"agent-docs/FRONTEND.md"$'\n'"PRODUCT.md"$'\n'"DESIGN.md"$'\n'"agent-docs/operations/product-ux.md"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-review.md"$'\n'".agents/skills/verify-murph-assistant/SKILL.md"
+  review_gpt_require_available_commit "first-reviewed head" "$review_gpt_first_reviewed_head"
+  review_gpt_require_available_commit "context anchor head" "$review_gpt_context_anchor_head"
+  review_gpt_require_available_commit "current reviewed head" "$review_gpt_head_oid"
+  review_gpt_first_head_is_ancestor="$(
+    review_gpt_is_ancestor "$review_gpt_first_reviewed_head" "$review_gpt_head_oid"
+  )"
+  if [[ "$review_gpt_first_head_is_ancestor" != "true" ]]; then
+    echo "Error: first-reviewed head must be an ancestor of the current reviewed head." >&2
+    exit 1
+  fi
+  review_gpt_review_scope="full"
+  review_gpt_previous_head_json="null"
+  review_gpt_previous_head_is_ancestor_json="null"
+  review_gpt_context_anchor_is_ancestor_of_previous_json="null"
+  if [[ "$review_gpt_round_number" == "1" ]]; then
+    : > "$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
+    : > "$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
   else
-    review_gpt_require_available_commit "first-reviewed head" "$review_gpt_first_reviewed_head"
-    review_gpt_require_available_commit "context anchor head" "$review_gpt_context_anchor_head"
-    review_gpt_require_available_commit "current reviewed head" "$review_gpt_head_oid"
-    review_gpt_first_head_is_ancestor="$(
-      review_gpt_is_ancestor "$review_gpt_first_reviewed_head" "$review_gpt_head_oid"
-    )"
-    if [[ "$review_gpt_first_head_is_ancestor" != "true" ]]; then
-      echo "Error: first-reviewed head must be an ancestor of the current reviewed head." >&2
-      exit 1
-    fi
-    review_gpt_review_scope="full"
-    review_gpt_previous_head_json="null"
-    review_gpt_previous_head_is_ancestor_json="null"
-    review_gpt_context_anchor_is_ancestor_of_previous_json="null"
-    if [[ "$review_gpt_round_number" == "1" ]]; then
-      : > "$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
-      : > "$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
-    else
-      review_gpt_require_available_commit "previous-reviewed head" "$review_gpt_previous_reviewed_head"
+    review_gpt_require_available_commit "previous-reviewed head" "$review_gpt_previous_reviewed_head"
+    git diff --no-ext-diff --no-textconv --patch \
+      "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid" -- \
+      > "$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
+    git diff --name-only \
+      "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid" -- \
+      > "$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"
+    if [[ "$review_gpt_context_mode" == "full_snapshot" ]]; then
       git diff --no-ext-diff --no-textconv --patch \
-        "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid" -- \
-        > "$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
-      git diff --name-only \
-        "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid" -- \
-        > "$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"
-      if [[ "$review_gpt_context_mode" == "full_snapshot" ]]; then
-        git diff --no-ext-diff --no-textconv --patch \
-          "$review_gpt_first_reviewed_head" "$review_gpt_head_oid" -- \
-          > "$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
-        printf '%s\n' "$review_gpt_full_review_reason" \
-          > "$review_gpt_pr_context_dir/full-review-reason.txt"
-      fi
-      if [[ "$review_gpt_context_mode" == "full_snapshot" ]]; then
-        review_gpt_review_scope="full"
-      else
-        review_gpt_review_scope="correction"
-      fi
-      review_gpt_previous_head_json="\"$review_gpt_previous_reviewed_head\""
-      review_gpt_previous_head_is_ancestor_json="$(
-        review_gpt_is_ancestor "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid"
+        "$review_gpt_first_reviewed_head" "$review_gpt_head_oid" -- \
+        > "$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
+      printf '%s\n' "$review_gpt_full_review_reason" \
+        > "$review_gpt_pr_context_dir/full-review-reason.txt"
+    fi
+    if [[ "$review_gpt_context_mode" == "full_snapshot" ]]; then
+      review_gpt_review_scope="full"
+    else
+      review_gpt_review_scope="correction"
+    fi
+    review_gpt_previous_head_json="\"$review_gpt_previous_reviewed_head\""
+    review_gpt_previous_head_is_ancestor_json="$(
+      review_gpt_is_ancestor "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid"
+    )"
+    if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then
+      review_gpt_context_anchor_is_ancestor_of_previous_json="$(
+        review_gpt_is_ancestor "$review_gpt_context_anchor_head" "$review_gpt_previous_reviewed_head"
       )"
-      if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then
-        review_gpt_context_anchor_is_ancestor_of_previous_json="$(
-          review_gpt_is_ancestor "$review_gpt_context_anchor_head" "$review_gpt_previous_reviewed_head"
-        )"
-        if [[ "$review_gpt_context_anchor_is_ancestor_of_previous_json" != "true" ]]; then
-          echo "Error: context anchor head must be an ancestor of the previous reviewed head." >&2
-          exit 1
-        fi
+      if [[ "$review_gpt_context_anchor_is_ancestor_of_previous_json" != "true" ]]; then
+        echo "Error: context anchor head must be an ancestor of the previous reviewed head." >&2
+        exit 1
       fi
     fi
+  fi
 
-    {
-      printf '{\n'
-      printf '  "schemaVersion": 1,\n'
-      printf '  "roundNumber": %s,\n' "$review_gpt_round_number"
-      printf '  "reviewScope": "%s",\n' "$review_gpt_review_scope"
-      printf '  "contextMode": "%s",\n' "$review_gpt_context_mode"
-      printf '  "contextSensitivity": "%s",\n' "$review_gpt_context_sensitivity"
-      printf '  "prChangedLines": %s,\n' "$review_gpt_pr_changed_lines"
-      printf '  "prChangedFiles": %s,\n' "$review_gpt_pr_changed_files"
-      printf '  "contextAnchorHead": "%s",\n' "$review_gpt_context_anchor_head"
-      printf '  "currentBaseHead": "%s",\n' "$review_gpt_base_oid"
-      printf '  "firstReviewedHead": "%s",\n' "$review_gpt_first_reviewed_head"
-      printf '  "previousReviewedHead": %s,\n' "$review_gpt_previous_head_json"
-      printf '  "currentReviewedHead": "%s",\n' "$review_gpt_head_oid"
-      printf '  "firstReviewedHeadIsAncestorOfCurrent": %s,\n' "$review_gpt_first_head_is_ancestor"
-      printf '  "previousReviewedHeadIsAncestorOfCurrent": %s,\n' \
-        "$review_gpt_previous_head_is_ancestor_json"
-      printf '  "contextAnchorHeadIsAncestorOfPrevious": %s\n' \
-        "$review_gpt_context_anchor_is_ancestor_of_previous_json"
-      printf '}\n'
-    } > "$review_gpt_pr_context_dir/review-round.json"
-  fi
-  if [[ "$review_gpt_review_phase" == "preliminary" ]] \
-    || [[ -n "$review_gpt_rendered_evidence_paths" ]]; then
+  {
+    printf '{\n'
+    printf '  "schemaVersion": 1,\n'
+    printf '  "roundNumber": %s,\n' "$review_gpt_round_number"
+    printf '  "reviewScope": "%s",\n' "$review_gpt_review_scope"
+    printf '  "contextMode": "%s",\n' "$review_gpt_context_mode"
+    printf '  "contextSensitivity": "%s",\n' "$review_gpt_context_sensitivity"
+    printf '  "prChangedLines": %s,\n' "$review_gpt_pr_changed_lines"
+    printf '  "prChangedFiles": %s,\n' "$review_gpt_pr_changed_files"
+    printf '  "contextAnchorHead": "%s",\n' "$review_gpt_context_anchor_head"
+    printf '  "currentBaseHead": "%s",\n' "$review_gpt_base_oid"
+    printf '  "firstReviewedHead": "%s",\n' "$review_gpt_first_reviewed_head"
+    printf '  "previousReviewedHead": %s,\n' "$review_gpt_previous_head_json"
+    printf '  "currentReviewedHead": "%s",\n' "$review_gpt_head_oid"
+    printf '  "firstReviewedHeadIsAncestorOfCurrent": %s,\n' "$review_gpt_first_head_is_ancestor"
+    printf '  "previousReviewedHeadIsAncestorOfCurrent": %s,\n' \
+      "$review_gpt_previous_head_is_ancestor_json"
+    printf '  "contextAnchorHeadIsAncestorOfPrevious": %s\n' \
+      "$review_gpt_context_anchor_is_ancestor_of_previous_json"
+    printf '}\n'
+  } > "$review_gpt_pr_context_dir/review-round.json"
+  if [[ -n "$review_gpt_rendered_evidence_paths" ]]; then
     review_gpt_add_rendered_evidence
-  fi
-  if [[ -n "$review_gpt_supplemental_evidence_paths" ]]; then
-    review_gpt_add_supplemental_evidence
   fi
 
   if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then

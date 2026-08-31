@@ -25,8 +25,11 @@ export type HostedRuntimeSystemMailboxFrontierClass =
 export interface HostedRuntimeReconciliationFactsWorkspace {
   hostedMailboxSystemHandledThroughSeq?: string;
   inboxMediaRetentionWakeAt: string | null;
+  nextDefaultProcessingWakeAt?: string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  systemMailboxProgressGeneration?: string;
   systemMailboxFrontier?: HostedRuntimeSystemMailboxFrontierClass | null;
   version: string | null;
 }

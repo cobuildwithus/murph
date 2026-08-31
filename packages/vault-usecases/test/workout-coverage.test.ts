@@ -460,14 +460,16 @@ describe("workout-core", () => {
 
 describe("workout", () => {
   test("preserves workout text while typed fields build structured drafts", async () => {
-    assert.throws(
-      () => workoutModule.resolveWorkoutCapture({ text: "" }),
-      {
-        name: "VaultCliError",
-        code: "contract_invalid",
-        message: "Workout text is required.",
-      },
-    );
+    const noteLessCapture = workoutModule.resolveWorkoutCapture({
+      text: "",
+      title: "Morning track session",
+      durationMinutes: 30,
+      activityType: "running",
+    });
+    assert.equal(noteLessCapture.note, undefined);
+    assert.equal(noteLessCapture.title, "Morning track session");
+    assert.equal(noteLessCapture.activityType, "running");
+    assert.equal(noteLessCapture.durationMinutes, 30);
 
     const capture = workoutModule.resolveWorkoutCapture({
       text: "45 minute trail run 3 mi",
@@ -752,6 +754,45 @@ describe("workout", () => {
     const [addActivitySessionInput] = addActivitySessionFirstCall;
     assert.ok(addActivitySessionInput);
     assert.equal(addActivitySessionInput.vaultRoot, "./vault");
+
+    const writesBeforeNoteLessAdd = addActivitySession.mock.calls.length;
+    await workoutModule.addWorkoutRecord({
+      vault: "./vault",
+      title: "Morning track session",
+      source: "manual",
+      durationMinutes: 30,
+      activityType: "running",
+    });
+    assert.equal(
+      addActivitySession.mock.calls.length,
+      writesBeforeNoteLessAdd + 1,
+    );
+    const noteLessAddInput = addActivitySession.mock.calls.at(-1)?.[0] as {
+      draft?: {
+        note?: string;
+        title?: string;
+        workout?: { sessionNote?: string };
+      };
+    } | undefined;
+    assert.equal(noteLessAddInput?.draft?.title, "Morning track session");
+    assert.equal(noteLessAddInput?.draft?.note, undefined);
+    assert.equal(noteLessAddInput?.draft?.workout?.sessionNote, undefined);
+
+    const writesBeforeMissingDuration = addActivitySession.mock.calls.length;
+    await assert.rejects(
+      workoutModule.addWorkoutRecord({
+        vault: "./vault",
+        title: "Missing duration",
+        source: "manual",
+        activityType: "running",
+      }),
+      {
+        name: "VaultCliError",
+        code: "invalid_option",
+        message: "Workout duration is missing. Pass --duration <minutes> to record it explicitly.",
+      },
+    );
+    assert.equal(addActivitySession.mock.calls.length, writesBeforeMissingDuration);
 
     const structuredAdded = await workoutModule.addWorkoutRecord({
       vault: "./vault",
