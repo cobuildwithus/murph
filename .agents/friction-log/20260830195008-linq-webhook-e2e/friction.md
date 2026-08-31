@@ -5,7 +5,7 @@ severity: 'minor'
 
 ## Expected Behavior
 
-Every synthetic Linq webhook member created by the hosted-local scenario is admitted by the scenario's generated local inbound allowlist.
+Every member label accepted by the hosted-local Linq webhook factory is represented in the scenario's generated local inbound allowlist.
 
 ## Current Behavior
 
