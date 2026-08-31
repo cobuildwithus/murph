@@ -360,6 +360,35 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(JSON.stringify(body)).not.toContain("redactedStatus");
     expect(JSON.stringify(body)).not.toContain(UNSAFE_SENTINEL);
     expect(JSON.stringify(body)).not.toMatch(/payload|message|transcript|source/u);
+    expect(facts.workspace).not.toHaveProperty("nextDefaultProcessingWakeAt");
+    expect(facts.workspace).not.toHaveProperty("nextDefaultProcessingWakeReason");
+    expect(facts.workspace).not.toHaveProperty("systemMailboxProgressGeneration");
+  });
+
+  it("returns the capable system progress projection as one reconciliation facts group", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextDefaultProcessingWakeAt: "2026-05-20T12:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    }));
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.workspace).toMatchObject({
+      nextDefaultProcessingWakeAt: "2026-05-20T12:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("logs one metadata-only reconciliation record", async () => {
@@ -385,9 +414,12 @@ describe("hosted orchestration reconciliation facts", () => {
         usageGateStatus: "not_required",
         userIdPresent: true,
         workspaceInboxMediaRetentionWakeAtPresent: false,
+        workspaceNextDefaultProcessingWakeAtPresent: false,
+        workspaceNextDefaultProcessingWakeReason: null,
         workspaceNextWakeAtPresent: false,
         workspaceNextWakeReason: null,
         workspacePresent: true,
+        workspaceSystemMailboxProgressGenerationPresent: false,
       },
     );
     const loggedMetadata = consoleInfoSpy.mock.calls[0]?.[1];
@@ -1372,6 +1404,41 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
+  it("AI-gates a due default-processing wake hidden behind an earlier system wake", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    }));
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildUsageLimitExceededGateDecision(),
+      status: "denied",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked?.reason).toBe("ai_usage_denied");
+    expect(facts.workspace).toMatchObject({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
+  });
+
   it("does not block thread-container runtime facts when an active participant keeps an inactive-owner group alive", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
       billingStatus: "not_started",
@@ -1436,6 +1503,44 @@ describe("hosted orchestration reconciliation facts", () => {
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
+  });
+
+  it("pauses a due default-processing wake hidden behind an earlier system wake", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    }));
+    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
+    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "automation_engagement_paused",
+      retryAt: "2026-05-21T12:00:00.000Z",
+    });
+    expect(facts.workspace).toMatchObject({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    });
+    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+    expect(mocks.hasHostedMailboxMealPhotoCaptureSince).toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("pauses due automation wakes when a Linq thread-container route has no recent inbound day", async () => {
@@ -1984,10 +2089,13 @@ function buildWorkspaceRecord(overrides: Partial<{
   checkpointedAt: string | null;
   createdAt: string;
   inboxMediaRetentionWakeAt: string | null;
+  nextDefaultProcessingWakeAt: string | null;
+  nextDefaultProcessingWakeReason: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
   redactedStatusJson: Record<string, unknown> | null;
   snapshotRef: Record<string, unknown> | null;
+  systemMailboxProgressGeneration: string | null;
   updatedAt: string;
   userId: string;
   version: string;
@@ -1997,6 +2105,8 @@ function buildWorkspaceRecord(overrides: Partial<{
     checkpointedAt: FIXED_NOW,
     createdAt: FIXED_NOW,
     inboxMediaRetentionWakeAt: null,
+    nextDefaultProcessingWakeAt: null,
+    nextDefaultProcessingWakeReason: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: {
@@ -2009,6 +2119,7 @@ function buildWorkspaceRecord(overrides: Partial<{
       size: 128,
       updatedAt: FIXED_NOW,
     },
+    systemMailboxProgressGeneration: null,
     updatedAt: FIXED_NOW,
     userId: MEMBER_ID,
     version: "4",

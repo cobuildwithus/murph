@@ -3828,6 +3828,59 @@ test("importDeviceProviderSnapshot makes operational WHOOP snapshot timestamp ch
   }
 });
 
+test.each([
+  {
+    provider: "whoop",
+    snapshot: {
+      accountId: "empty-whoop-account",
+      cycles: [],
+      recoveries: [],
+      sleeps: [],
+      workouts: [],
+    },
+  },
+  {
+    provider: "strava",
+    snapshot: {
+      accountId: "empty-strava-account",
+      activities: [],
+    },
+  },
+])(
+  "importDeviceProviderSnapshot ignores execution-time importedAt churn for an empty $provider snapshot",
+  async ({ provider, snapshot }) => {
+    const vaultRoot = await makeTempDirectory(`murph-${provider}-empty-snapshot-replay`);
+    try {
+      await coreRuntime.initializeVault({
+        vaultRoot,
+        createdAt: "2026-07-01T00:00:00.000Z",
+        timezone: "UTC",
+      });
+      const importAt = (importedAt: string) =>
+        importDeviceProviderSnapshot<CoreDeviceImportResult>(
+          {
+            provider,
+            vaultRoot,
+            snapshot: { ...snapshot, importedAt },
+          },
+          { corePort: coreRuntime },
+        );
+
+      const first = await importAt("2026-07-01T12:00:00.000Z");
+      const replay = await importAt("2026-07-01T12:01:00.000Z");
+
+      assert.equal(first.applied, true);
+      assert.equal(first.events.length, 0);
+      assert.equal(first.samples.length, 0);
+      assert.equal(first.persistedEvidencePartCount, 1);
+      assert.equal(replay.applied, false);
+      assert.equal(replay.persistedEvidencePartCount, 0);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test("importDeviceProviderSnapshot preserves a WHOOP user edit across later poll identity churn", async () => {
   const vaultRoot = await makeTempDirectory("murph-whoop-user-edit-replay");
   try {

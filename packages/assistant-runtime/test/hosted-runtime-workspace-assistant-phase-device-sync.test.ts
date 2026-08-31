@@ -650,6 +650,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         parserProcessed: 0,
         postCheckpointRecord: null,
         redactedLogEntries: [],
+        systemProgressed: true,
       },
       status: "processed",
     });
@@ -694,6 +695,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       deviceSyncMaintenanceRan: true,
       nextWakeAt: assistantContinuationAt,
       progressed: true,
+      systemMailboxProgressed: true,
     }));
     expect("nextWakeReason" in result).toBe(false);
     await result.afterCheckpoint?.();
@@ -1443,6 +1445,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       nextWakeReason: "device-sync.reconcile",
       parserProcessed: 0,
       postCheckpointRecord: null,
+      systemProgressed: true,
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -1482,6 +1485,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       nextWakeAt,
       nextWakeReason: "device-sync.reconcile",
       progressed: true,
+      systemMailboxProgressed: true,
     }));
   });
 

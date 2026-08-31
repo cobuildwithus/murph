@@ -32,8 +32,16 @@ export const POST = withJsonError(async (request: Request) => {
     ...("inboxMediaRetentionWakeAt" in body
       ? { inboxMediaRetentionWakeAt: body.inboxMediaRetentionWakeAt }
       : {}),
+    // Legacy runtimes omit the capability group. Persist that as an explicit
+    // all-null epoch so a rollback fails open instead of retaining stale gates.
+    nextDefaultProcessingWakeAt:
+      body.nextDefaultProcessingWakeAt ?? null,
+    nextDefaultProcessingWakeReason:
+      body.nextDefaultProcessingWakeReason ?? null,
     reason: body.reason,
     snapshotRef: body.snapshotRef,
+    systemMailboxProgressGeneration:
+      body.systemMailboxProgressGeneration ?? null,
     userId,
     ...("nextWakeAt" in body ? { nextWakeAt: body.nextWakeAt } : {}),
     ...("nextWakeReason" in body ? { nextWakeReason: body.nextWakeReason } : {}),
@@ -75,10 +83,16 @@ export const POST = withJsonError(async (request: Request) => {
       checkpointedAt: result.workspace.checkpointedAt,
       createdAt: result.workspace.createdAt,
       inboxMediaRetentionWakeAt: result.workspace.inboxMediaRetentionWakeAt,
+      nextDefaultProcessingWakeAt:
+        result.workspace.nextDefaultProcessingWakeAt,
+      nextDefaultProcessingWakeReason:
+        result.workspace.nextDefaultProcessingWakeReason,
       nextWakeAt: result.workspace.nextWakeAt,
       nextWakeReason: result.workspace.nextWakeReason,
       redactedStatus: result.workspace.redactedStatusJson,
       snapshotRef: result.workspace.snapshotRef,
+      systemMailboxProgressGeneration:
+        result.workspace.systemMailboxProgressGeneration,
       updatedAt: result.workspace.updatedAt,
       userId: result.workspace.userId,
       version: result.workspace.version,

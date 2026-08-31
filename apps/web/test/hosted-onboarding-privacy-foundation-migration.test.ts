@@ -1179,6 +1179,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260826120000_hosted_group_participant_observation",
       "20260826201500_imessage_mini_app_renewal_credential",
       "20260826230000_hosted_stripe_payment_notification_email",
+      "20260830150000_hosted_system_progress_projection",
       "20260830170000_hosted_account_cleanup_temporal",
       "migration_lock.toml",
     ]);

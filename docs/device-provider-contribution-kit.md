@@ -160,7 +160,7 @@ Define at least:
 - `provider`
 - `displayName`
 - `transportModes`
-- `oauth` and `webhook` metadata when applicable
+- `connection` and `webhook` metadata when applicable
 - `sync` windows and job kinds
 - `normalization.metricFamilies`
 - `sourcePriorityHints`

@@ -1,3 +1,5 @@
+import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
+
 import { resolveConfiguredDeviceSyncProviderManifest } from "./config/provider-manifests.ts";
 
 import type {
@@ -34,7 +36,7 @@ export function resolveDeviceSyncProviderCredentialPolicy(
     return provider.credentialPolicy;
   }
 
-  return provider.descriptor.oauth
+  return resolveDeviceProviderConnectionDescriptor(provider.descriptor).kind === "oauth2"
     ? { kind: "oauth_tokens" }
     : { kind: "none" };
 }
