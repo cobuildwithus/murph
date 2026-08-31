@@ -442,6 +442,7 @@ async function seedEngagementPausedFrontierMember(
   );
   await activeScenario.waitForHostedCompletion(userId);
   await seedHostedWorkspaceWakeForTest({
+    defaultProcessingWake: true,
     environment: activeScenario.runtimeEnv,
     userId,
     wakeAt: new Date(Date.now() - 60_000),

@@ -1574,6 +1574,7 @@ export async function readHostedVaultShareProjectionCiphertextForTest(input: {
 }
 
 export async function seedHostedWorkspaceWakeForTest(input: {
+  defaultProcessingWake?: boolean;
   environment?: NodeJS.ProcessEnv;
   userId: string;
   wakeAt: Date | string;
@@ -1584,6 +1585,12 @@ export async function seedHostedWorkspaceWakeForTest(input: {
       data: {
         nextWakeAt: new Date(input.wakeAt),
         nextWakeReason: input.wakeReason,
+        ...(input.defaultProcessingWake
+          ? {
+              nextDefaultProcessingWakeAt: new Date(input.wakeAt),
+              nextDefaultProcessingWakeReason: input.wakeReason,
+            }
+          : {}),
       },
       where: {
         userId: input.userId,
