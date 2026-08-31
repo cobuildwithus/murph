@@ -503,7 +503,7 @@ The hosted Prisma schema keeps ownership sharp and nested:
 
   Canonical account deletion also inserts one foreign-key-free, KMS-encrypted
   external-cleanup receipt in the same transaction before removing member
-  rows. The immediate attempt and existing hourly retention sweep share that
+  rows. The immediate attempt and hourly external-retention cron share that
   idempotent owner for Cloudflare runner/R2, Stripe-customer, and Privy cleanup;
   unconfigured or partial targets stay pending, completed targets are skipped,
   and the receipt is removed only after convergence. Immediate target calls are
@@ -1286,9 +1286,24 @@ Callback auth contract:
   the signature to a null member, rejects a presented member header, consumes
   the nonce under a reserved system owner in the same replay table, and returns
   only the `bindings-v1` Web owner/key identity with `Cache-Control: no-store`.
-- the existing hourly hosted-retention cron removes only strictly expired nonce
+- the dedicated hourly nonce-retention cron removes only strictly expired nonce
   rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
-  account deletion still independently deletes the member's nonce rows
+  it finishes the small browser-assertion nonce lane first so callback catch-up
+  cannot starve that owner;
+  each statement remains capped at 5,000 rows, while callback nonces alone use
+  a 100-times-higher max-batch ceiling to drain sustained control-plane volume.
+  It runs at minute 5 with an explicit 800-second duration, independently of
+  the control-plane, external-provider, and runtime-maintenance crons; a
+  caught-up hour still stops after the first short batch. Account deletion
+  still independently deletes the member's nonce rows
+- the other hourly retention routes are staggered and independently bounded:
+  `/api/internal/hosted-execution/retention/control-plane/cron` at minute 20
+  for ordinary primary-database cleanup,
+  `/api/internal/hosted-execution/retention/external/cron` at minute 35 for
+  account and computer provider cleanup, and
+  `/api/internal/hosted-execution/retention/runtime/cron` at minute 50 for
+  runtime signals followed by best-effort isolated diagnostic-log cleanup. Each has a 300-second
+  duration; none invokes the nonce owner
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
@@ -1456,7 +1471,7 @@ policy, so it remains admissible through the millisecond before
 `(exp + 61) * 1000` and is first invalid exactly at that instant. New nonce
 rows persist that first-invalid horizon, while request admission performs one
 primary-key insert and treats only the exact nonce conflict as replay. The
-bounded hourly hosted-retention owner deletes only rows whose stored
+bounded hourly nonce-retention owner deletes only rows whose stored
 `expiresAt <= now - 61 seconds`; this retains legacy raw-`exp` rows through the
 full acceptance window and deliberately retains new-format rows for an
 additional 61 seconds.
