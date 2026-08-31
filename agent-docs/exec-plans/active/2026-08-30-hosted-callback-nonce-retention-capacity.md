@@ -25,8 +25,10 @@ runtime signals, or the diagnostic-log database.
   every other retention route remains capped at 300 seconds.
 - An account-deletion or computer/browser provider failure cannot delay or
   prevent callback nonce cleanup.
-- Optional runtime-log cleanup remains failure-isolated from runtime-signal
-  fan-out inside their shared runtime-maintenance domain.
+- The small browser-assertion nonce lane runs before callback catch-up, and
+  runtime-signal fan-out runs before optional runtime-log cleanup, so the
+  extended or best-effort work cannot starve the shorter owner in either shared
+  domain.
 - Account deletion keeps its independent member-scoped nonce deletion.
 
 ## Evidence

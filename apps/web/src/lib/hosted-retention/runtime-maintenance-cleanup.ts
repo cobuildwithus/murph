@@ -32,11 +32,12 @@ export async function runHostedRuntimeMaintenanceCleanup(input: {
   signalRuntimeRecheck?: RuntimeRecheckSignal;
 } = {}): Promise<HostedRuntimeMaintenanceCleanupResult> {
   const now = normalizeHostedRetentionDate(input.now ?? new Date());
-  const oldRuntimeLogsDeleted = await deleteRuntimeLogsBestEffort(now);
   const signalCleanup = await runHostedRuntimeSignalRetentionCleanup({
     ...input,
     now,
   });
+  // Runtime wake delivery owns priority over optional observability cleanup.
+  const oldRuntimeLogsDeleted = await deleteRuntimeLogsBestEffort(now);
 
   return {
     ...signalCleanup,

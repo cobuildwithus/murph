@@ -283,9 +283,9 @@ The dedicated store keeps the existing policy:
 - ordered batches of 5,000, at most four batches per hourly cleanup
 
 The dedicated runtime-maintenance cron runs at minute 50 of each hour. It
-cleans this isolated database serially through the diagnostic pool before its
-bounded runtime-signal fan-out. A diagnostic-database failure is logged and
-contained so runtime signaling still runs. Callback and browser assertion
+performs bounded runtime-signal fan-out before cleaning this isolated database
+serially through the diagnostic pool. A diagnostic-database failure is logged
+and contained. Callback and browser assertion
 nonces belong to a separate primary-database nonce cron at minute 5; its
 callback statements retain the 5,000-row statement cap and use a dedicated
 400-batch catch-up ceiling.

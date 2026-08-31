@@ -75,7 +75,7 @@ describe("hosted retention owner split", () => {
       expiredCallbackRequestNoncesDeleted: 8,
     });
 
-    expect(events).toEqual(["callback", "browser"]);
+    expect(events).toEqual(["browser", "callback"]);
     expect(mocks.deleteExpiredHostedCallbackRequestNonces).toHaveBeenCalledWith({
       prisma,
     });

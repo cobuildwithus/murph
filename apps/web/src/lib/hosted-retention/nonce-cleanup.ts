@@ -20,10 +20,12 @@ export async function runHostedNonceRetentionCleanup(input: {
 } = {}): Promise<HostedNonceRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedRetentionDate(input.now ?? new Date());
-  const expiredCallbackRequestNoncesDeleted =
-    await deleteExpiredHostedCallbackRequestNonces({ prisma });
+  // Finish the small browser-nonce lane before the high-volume callback
+  // catch-up budget so a saturated callback backlog cannot starve it.
   const expiredBrowserAssertionNoncesDeleted =
     await deleteExpiredHostedBrowserAssertionNonces({ now, prisma });
+  const expiredCallbackRequestNoncesDeleted =
+    await deleteExpiredHostedCallbackRequestNonces({ prisma });
 
   return {
     expiredBrowserAssertionNoncesDeleted,

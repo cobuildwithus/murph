@@ -34,7 +34,7 @@ describe("hosted runtime maintenance retention", () => {
     });
   });
 
-  it("cleans the isolated log database before runtime signal fan-out", async () => {
+  it("signals runtimes before cleaning the isolated log database", async () => {
     const events: string[] = [];
     const prisma = {};
     const now = new Date("2026-07-29T00:00:00.000Z");
@@ -62,7 +62,7 @@ describe("hosted runtime maintenance retention", () => {
       oldRuntimeLogsDeleted: 5,
     });
 
-    expect(events).toEqual(["logs", "signals"]);
+    expect(events).toEqual(["signals", "logs"]);
     expect(mocks.deleteExpiredHostedRuntimeLogs).toHaveBeenCalledWith({
       batchSize: 5_000,
       maxBatches: 4,
