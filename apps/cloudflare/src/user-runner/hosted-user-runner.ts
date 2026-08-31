@@ -2,6 +2,7 @@ import {
   type HostedHealthDataConsentState,
   type HostedRunnerStatusResponse,
   type HostedRuntimeHealthDataAdmissionResponse,
+  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceState,
@@ -422,12 +423,18 @@ export class HostedUserRunner {
   async prewarmRuntimeShellForUser(
     userId: string,
     source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   ): Promise<void> {
+    const orchestrationAttemptId =
+      orchestration?.shellPrewarmOrchestrationAttemptId;
     if (this.runtimeConsentMutationLock) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           shellPrewarmAdmissionOutcome: "skipped_consent_busy",
+          ...(orchestrationAttemptId === undefined
+            ? {}
+            : { orchestrationAttemptId }),
           shellPrewarmSource: source ?? "unknown",
         },
         message: "Hosted runner shell prewarm admission decided.",
@@ -437,6 +444,8 @@ export class HostedUserRunner {
       return;
     }
     await this.withRuntimeConsentMutationLock(async () => {
+      const shellPrewarmConsentLockAcquiredAtEpochMs = Date.now();
+      const shellPrewarmAdmissionReadStartedAtEpochMs = Date.now();
       let admission: HostedRuntimeHealthDataAdmissionResponse;
       try {
         admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
@@ -448,6 +457,9 @@ export class HostedUserRunner {
           component: "hosted.runner",
           details: {
             shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
+            ...(orchestrationAttemptId === undefined
+              ? {}
+              : { orchestrationAttemptId }),
             shellPrewarmSource: source ?? "unknown",
           },
           level: "warn",
@@ -457,11 +469,15 @@ export class HostedUserRunner {
         });
         return;
       }
+      const shellPrewarmAdmissionReadFinishedAtEpochMs = Date.now();
       if (!admission.processingAllowed) {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           details: {
             shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+            ...(orchestrationAttemptId === undefined
+              ? {}
+              : { orchestrationAttemptId }),
             shellPrewarmSource: source ?? "unknown",
           },
           message: "Hosted runner shell prewarm admission decided.",
@@ -470,7 +486,16 @@ export class HostedUserRunner {
         });
         return;
       }
-      await this.runtimeProcessing.beginShellPrewarmForUser(userId, source);
+      await this.runtimeProcessing.beginShellPrewarmForUser(
+        userId,
+        source,
+        orchestration === undefined ? undefined : {
+          ...orchestration,
+          shellPrewarmAdmissionReadFinishedAtEpochMs,
+          shellPrewarmAdmissionReadStartedAtEpochMs,
+          shellPrewarmConsentLockAcquiredAtEpochMs,
+        },
+      );
     });
   }
 

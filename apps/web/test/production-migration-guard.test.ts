@@ -1975,12 +1975,12 @@ describe("hosted web production migration guard", () => {
     assert.match(buildScript, /^pnpm public-routes:waf-check/u);
     assert.doesNotMatch(buildScript, /run-with-host-verification-slot/u);
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
-    assert.match(productionNextBuildScript, /build_old_space_mb=3072/u);
-    assert.doesNotMatch(productionNextBuildScript, /build_worker_old_space_mb/u);
+    assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
+    assert.match(productionNextBuildScript, /build_worker_old_space_mb=3072/u);
     assert.match(productionNextBuildScript, /typecheck_old_space_mb=3584/u);
     assert.match(
       productionNextBuildScript,
-      /build_cache_epoch=webpack-next-16\.3-v4-in-process-cold-webpack/u,
+      /build_cache_epoch=webpack-next-16\.3-v5-isolated-worker-cold-webpack/u,
     );
     assert.match(productionNextBuildScript, /webpack_cache_dir=\.next\/cache\/webpack/u);
     assert.match(
@@ -1998,7 +1998,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /node "--max-old-space-size=\$build_old_space_mb" "\$next_bin" build --webpack/u,
+      /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
     assert.match(
       productionNextBuildScript,
@@ -2497,7 +2497,10 @@ fi
 
     assert.deepEqual(cronPaths, [
       "/api/internal/hosted-execution/product-feedback/digest/cron",
-      "/api/internal/hosted-execution/retention/cron",
+      "/api/internal/hosted-execution/retention/control-plane/cron",
+      "/api/internal/hosted-execution/retention/external/cron",
+      "/api/internal/hosted-execution/retention/nonces/cron",
+      "/api/internal/hosted-execution/retention/runtime/cron",
       "/api/internal/hosted-growth/snapshot/cron",
       "/api/internal/hosted-growth/usage-referral/cron",
       "/api/internal/hosted-onboarding/linq/contact-card/cron",
@@ -2505,6 +2508,31 @@ fi
       "/api/internal/hosted-onboarding/stripe/cron",
       "/api/internal/hosted-runtime/latency-alert/cron",
     ]);
+    assert.deepEqual(
+      (vercelJson.crons ?? [])
+        .filter((cron) => cron.path?.includes("/retention/"))
+        .sort((left, right) =>
+          (left.path ?? "").localeCompare(right.path ?? "")
+        ),
+      [
+        {
+          path: "/api/internal/hosted-execution/retention/control-plane/cron",
+          schedule: "20 * * * *",
+        },
+        {
+          path: "/api/internal/hosted-execution/retention/external/cron",
+          schedule: "35 * * * *",
+        },
+        {
+          path: "/api/internal/hosted-execution/retention/nonces/cron",
+          schedule: "5 * * * *",
+        },
+        {
+          path: "/api/internal/hosted-execution/retention/runtime/cron",
+          schedule: "50 * * * *",
+        },
+      ],
+    );
     assert.deepEqual(
       (vercelJson.crons ?? []).find(
         (cron) =>

@@ -77,6 +77,19 @@ Use `scripts/create-worktree`; use `--data-research <reason>` only for genuinely
 large data or research work. Registered worktrees remain visible to the normal
 open-PR, plan, cleanliness, process-CWD, and retirement gates.
 
+When a task needs the standard Codex-managed destination, pass
+`--codex-worktree <safe-leaf>` instead of assembling an absolute path in the
+caller. The helper selects the explicit `CODEX_HOME` when present and otherwise
+uses the current user's standard Codex home. Before branch creation, it requires
+that home to be absolute, current-user-owned, and writable; creates and
+canonicalizes the `worktrees/<repository>` owner directories from the stable
+primary checkout identity; and rejects symlink redirection or any pre-existing
+final target. The existing explicit-path form remains available when an
+established alternate destination has already passed the caller's
+repository-policy preflight. Value-taking options never consume another
+recognized option token, so malformed combined invocations fail through the
+usage boundary before mode selection, storage admission, or branch handling.
+
 The creation helper prepares the shared local exclude rule before registration,
 registers each worktree with checkout materialization suppressed, and writes
 `.metadata_never_index` at the worktree root before tracked files exist. It then

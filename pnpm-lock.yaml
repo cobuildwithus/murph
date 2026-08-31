@@ -412,6 +412,9 @@ importers:
       '@murphai/assistantd':
         specifier: workspace:*
         version: link:../assistantd
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../hosted-execution
