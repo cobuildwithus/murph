@@ -282,12 +282,13 @@ The dedicated store keeps the existing policy:
 - warn/error: 14 days
 - ordered batches of 5,000, at most four batches per hourly cleanup
 
-The normal retention cron first removes strictly expired callback nonces from
-the primary control database under the shared 5,000-row and four-batch ceilings.
-Each statement orders candidates by expiry and nonce hash, locks only that
-bounded set with `FOR UPDATE SKIP LOCKED`, and deletes those exact rows. It then
-runs isolated runtime-log cleanup serially through the diagnostic pool after the
-primary control-database cleanup completes.
+The dedicated runtime-maintenance cron runs at minute 50 of each hour. It
+cleans this isolated database serially through the diagnostic pool before its
+bounded runtime-signal fan-out. A diagnostic-database failure is logged and
+contained so runtime signaling still runs. Callback and browser assertion
+nonces belong to a separate primary-database nonce cron at minute 5; its
+callback statements retain the 5,000-row statement cap and use a dedicated
+400-batch catch-up ceiling.
 
 ## Configuration
 

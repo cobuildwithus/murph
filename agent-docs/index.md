@@ -1,11 +1,17 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-29
+Last verified: 2026-08-30
 
 ## Purpose
 
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists only live architecture, product, verification, and package-boundary docs.
+
+Hosted retention is divided across four authenticated, staggered Web-owned
+Vercel cron routes for callback/browser nonces, ordinary control-plane data,
+external providers, and runtime/log maintenance. The nonce owner alone has the
+extended catch-up budget, and its real-PostgreSQL throughput plus foreground
+insert proof is specified by `agent-docs/references/testing-ci-map.md`.
 
 Current-sender Assistant Ask recovery retains encrypted request content only
 while its system sequence remains ahead of the durable consumed watermark and

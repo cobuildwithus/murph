@@ -2,8 +2,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
 import { getPrisma } from "../prisma";
-import { ComputerUseService } from "../computer-use/service";
-import { PrismaComputerUseStore } from "../computer-use/store";
 import {
   HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
   HOSTED_MAILBOX_RETENTION_MS,
@@ -11,10 +9,6 @@ import {
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
-import {
-  drainHostedAccountDeletionCleanupBatch,
-  type HostedAccountDeletionCleanupBatchResult,
-} from "../hosted-privacy/account-deletion-cleanup";
 
 const DAY_MS = 86_400_000;
 
@@ -56,14 +50,11 @@ type HostedRuntimeRecheckSignal = (input: {
   userId: string;
 }) => Promise<unknown>;
 
-export interface HostedRetentionCleanupResult {
-  accountDeletionCleanup: HostedAccountDeletionCleanupBatchResult;
+export interface HostedControlPlaneRetentionCleanupResult {
   compactedLinqProviderEventDiagnostics: number;
   expiredAssistantRuntimeIssuesDeleted: number;
-  expiredCallbackRequestNoncesDeleted: number;
   expiredClinicalRecordConnectIntentsDeleted: number;
   expiredClinicalRecordOauthSessionsDeleted: number;
-  expiredComputerRunsCleanedUp: number;
   expiredConnectedAppConnectIntentsDeleted: number;
   expiredConversationPolicyNonRepliesRecorded: number;
   expiredDeviceConnectIntentsDeleted: number;
@@ -77,23 +68,20 @@ export interface HostedRetentionCleanupResult {
   expiredMailboxTombstonesDeleted: number;
   expiredSensitiveActionChallengesDeleted: number;
   expiredSignupNotificationContextsRetired: number;
-  inboxMediaRetentionRuntimeSignalFailures: number;
-  inboxMediaRetentionRuntimeSignalsSent: number;
-  oldRuntimeLogsDeleted: number;
   staleWebSessionsDeleted: number;
 }
 
-export async function runHostedRetentionCleanup(input: {
+export interface HostedRuntimeSignalRetentionCleanupResult {
+  inboxMediaRetentionRuntimeSignalFailures: number;
+  inboxMediaRetentionRuntimeSignalsSent: number;
+}
+
+export async function runHostedControlPlaneRetentionCleanup(input: {
   now?: Date | string;
   prisma?: PrismaClient;
-  signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
-} = {}): Promise<HostedRetentionCleanupResult> {
+} = {}): Promise<HostedControlPlaneRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
-  const now = normalizeRetentionDate(input.now ?? new Date());
-  const accountDeletionCleanup = await drainHostedAccountDeletionCleanupBatch({
-    now,
-    prisma,
-  });
+  const now = normalizeHostedRetentionDate(input.now ?? new Date());
   // Serial by design: short-lived control-plane backlog cleanup lives here,
   // never in a member-facing creation transaction. Exact addressed reads may
   // still remove their own expired row while failing closed.
@@ -141,31 +129,12 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  const expiredComputerRunsCleanedUp = await new ComputerUseService({
-    now: () => now,
-    store: new PrismaComputerUseStore(prisma),
-  }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
-  // Run the high-volume catch-up lane last so reaching its dedicated ceiling
-  // cannot delay the other primary-database retention owners, but keep it
-  // before external runtime signals so database cleanup never overlaps signal
-  // fan-out. These background deletes remain serial and do not fan out across
-  // the foreground pool.
-  const expiredCallbackRequestNoncesDeleted =
-    await deleteExpiredHostedCallbackRequestNonces({ prisma });
-  const mediaRetentionSignals = await signalDueInboxMediaRetentionRuntimes({
-    now,
-    prisma,
-    signalRuntimeRecheck: input.signalRuntimeRecheck,
-  });
 
   return {
-    accountDeletionCleanup,
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
-    expiredCallbackRequestNoncesDeleted,
     expiredClinicalRecordConnectIntentsDeleted,
     expiredClinicalRecordOauthSessionsDeleted,
-    expiredComputerRunsCleanedUp,
     expiredConnectedAppConnectIntentsDeleted,
     expiredConversationPolicyNonRepliesRecorded:
       expiredMailboxItems.policyNonReplies,
@@ -180,10 +149,26 @@ export async function runHostedRetentionCleanup(input: {
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     expiredSensitiveActionChallengesDeleted,
     expiredSignupNotificationContextsRetired,
+    staleWebSessionsDeleted,
+  };
+}
+
+export async function runHostedRuntimeSignalRetentionCleanup(input: {
+  now?: Date | string;
+  prisma?: PrismaClient;
+  signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
+} = {}): Promise<HostedRuntimeSignalRetentionCleanupResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = normalizeHostedRetentionDate(input.now ?? new Date());
+  const mediaRetentionSignals = await signalDueInboxMediaRetentionRuntimes({
+    now,
+    prisma,
+    signalRuntimeRecheck: input.signalRuntimeRecheck,
+  });
+
+  return {
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
-    oldRuntimeLogsDeleted: 0,
-    staleWebSessionsDeleted,
   };
 }
 
@@ -997,7 +982,7 @@ async function deleteStaleHostedWebSessions(input: {
   return expired + revoked;
 }
 
-function normalizeRetentionDate(value: Date | string): Date {
+export function normalizeHostedRetentionDate(value: Date | string): Date {
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.getTime())) {

@@ -2497,7 +2497,10 @@ fi
 
     assert.deepEqual(cronPaths, [
       "/api/internal/hosted-execution/product-feedback/digest/cron",
-      "/api/internal/hosted-execution/retention/cron",
+      "/api/internal/hosted-execution/retention/control-plane/cron",
+      "/api/internal/hosted-execution/retention/external/cron",
+      "/api/internal/hosted-execution/retention/nonces/cron",
+      "/api/internal/hosted-execution/retention/runtime/cron",
       "/api/internal/hosted-growth/snapshot/cron",
       "/api/internal/hosted-growth/usage-referral/cron",
       "/api/internal/hosted-onboarding/linq/contact-card/cron",
@@ -2505,6 +2508,31 @@ fi
       "/api/internal/hosted-onboarding/stripe/cron",
       "/api/internal/hosted-runtime/latency-alert/cron",
     ]);
+    assert.deepEqual(
+      (vercelJson.crons ?? [])
+        .filter((cron) => cron.path?.includes("/retention/"))
+        .sort((left, right) =>
+          (left.path ?? "").localeCompare(right.path ?? "")
+        ),
+      [
+        {
+          path: "/api/internal/hosted-execution/retention/control-plane/cron",
+          schedule: "20 * * * *",
+        },
+        {
+          path: "/api/internal/hosted-execution/retention/external/cron",
+          schedule: "35 * * * *",
+        },
+        {
+          path: "/api/internal/hosted-execution/retention/nonces/cron",
+          schedule: "5 * * * *",
+        },
+        {
+          path: "/api/internal/hosted-execution/retention/runtime/cron",
+          schedule: "50 * * * *",
+        },
+      ],
+    );
     assert.deepEqual(
       (vercelJson.crons ?? []).find(
         (cron) =>

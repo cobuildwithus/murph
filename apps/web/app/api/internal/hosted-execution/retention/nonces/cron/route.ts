@@ -1,17 +1,13 @@
 import { requireVercelCronRequest } from "@/src/lib/hosted-execution/vercel-cron";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import {
-  runHostedRetentionCleanupWithRuntimeLogDatabase,
-} from "@/src/lib/hosted-retention/runtime-log-database-cleanup";
+import { runHostedNonceRetentionCleanup } from "@/src/lib/hosted-retention/nonce-cleanup";
 
 export const maxDuration = 800;
 
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
-  const cleanup = await runHostedRetentionCleanupWithRuntimeLogDatabase();
+  const cleanup = await runHostedNonceRetentionCleanup();
 
-  return jsonOk({
-    cleanup,
-  });
+  return jsonOk({ cleanup });
 });

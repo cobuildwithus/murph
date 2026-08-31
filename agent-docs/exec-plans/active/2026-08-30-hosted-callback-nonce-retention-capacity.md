@@ -1,11 +1,12 @@
-# Restore hosted callback nonce retention capacity
+# Split hosted retention owners and restore callback nonce capacity
 
 ## Outcome
 
-Raise only the hourly hosted callback request-nonce cleanup ceiling by 100× so
-the existing Web-owned retention job can drain the production backlog while
-preserving small serial `FOR UPDATE SKIP LOCKED` database statements and
-foreground callback admission priority.
+Replace the catch-all hourly hosted retention invocation with four staggered,
+Web-owned Vercel cron jobs separated by failure domain. Give callback nonce
+retention its own 100× catch-up ceiling so it can drain the production backlog
+without depending on ordinary database cleanup, external browser providers,
+runtime signals, or the diagnostic-log database.
 
 ## Invariants
 
@@ -16,9 +17,16 @@ foreground callback admission priority.
 - Each database statement remains capped at 5,000 rows and cleanup remains
   serial.
 - Unrelated retention categories keep their existing four-batch ceiling.
-- The high-volume catch-up lane runs after the other primary-database retention
-  owners, before external runtime-signal fan-out, and has an explicit
-  route-duration ceiling.
+- No production entrypoint aggregates all retention owners.
+- Ordinary primary-database retention, nonce retention, external provider
+  cleanup, and runtime/log maintenance have distinct authenticated routes and
+  staggered hourly schedules.
+- Only the nonce route receives the explicit 800-second catch-up duration;
+  every other retention route remains capped at 300 seconds.
+- An account-deletion or computer/browser provider failure cannot delay or
+  prevent callback nonce cleanup.
+- Optional runtime-log cleanup remains failure-isolated from runtime-signal
+  fan-out inside their shared runtime-maintenance domain.
 - Account deletion keeps its independent member-scoped nonce deletion.
 
 ## Evidence
@@ -33,9 +41,10 @@ foreground callback admission priority.
 
 ## Scope
 
-- `apps/web/src/lib/hosted-retention/cleanup.ts`
-- `apps/web/test/hosted-retention-cleanup.test.ts`
-- Current architecture/operator documentation for callback nonce retention
+- Hosted retention owner modules and the four internal cron routes
+- `apps/web/vercel.json` and the approved-route guard
+- Focused owner, orchestration, route, and opt-in PostgreSQL capacity tests
+- Current architecture/operator documentation for hosted retention
 
 No schema, callback authentication, Cloudflare, Temporal, or foreground request
 path changes are in scope.
@@ -43,33 +52,41 @@ path changes are in scope.
 ## Implementation
 
 1. Add a nonce-specific max-batch ceiling derived as 100× the shared ceiling.
-2. Let the existing serial retention helper accept that explicit ceiling only
-   for callback nonces.
-3. Run nonce catch-up last and give the cron route an explicit bounded duration.
-4. Extend focused tests to prove the nonce owner reaches the new ceiling while
-   other retention categories remain unchanged.
-5. Align durable architecture and operator documentation with the specialized
-   bounded budget.
+2. Remove the aggregate cleanup runner and route each failure domain through a
+   dedicated owner: control-plane, nonces, external providers, and runtime/logs.
+3. Register the four routes at 5, 20, 35, and 50 minutes past each hour so their
+   normal execution windows do not pile onto the same database minute.
+4. Give only the nonce route an 800-second duration; cap the other routes at
+   300 seconds.
+5. Prove route isolation when external computer cleanup fails and add an
+   opt-in real-PostgreSQL scenario for sustained full nonce batches plus fresh
+   inserts.
+6. Align durable architecture, runtime-log, testing, and Web operator docs.
 
 ## Verification
 
-- Focused hosted retention cleanup Vitest suite.
+- Focused hosted retention owner, route, and Vercel configuration Vitest suite.
+- Opt-in local PostgreSQL capacity/concurrency proof.
 - Web package typecheck and any build required by the public-entrypoint rules.
-- Parent diff review plus the required exact-head preliminary specialist and
-  final ReviewGPT gates, run concurrently with CI.
+- Parent diff review plus the required final ReviewGPT remediation round,
+  concurrent with exact-head CI.
 
 ## Deployment and rollback
 
-- Web-only deployment; no Cloudflare or Temporal compatibility dependency.
-- Monitor primary-database pool pressure, lock waits, cron duration, and nonce
-  backlog after rollout.
+- Web-only deployment replaces one registered Vercel cron with four; no
+  Cloudflare, Temporal, or database migration dependency.
+- Monitor each route independently: status/duration for all four, primary-pool
+  pressure and lock waits for database owners, provider errors for external
+  cleanup, and nonce backlog/storage convergence for the catch-up owner.
 - Roll back the Web change if foreground database health regresses; the prior
-  lower cleanup ceiling remains schema-compatible but allows backlog growth.
+  single route remains schema-compatible but restores the lower nonce ceiling
+  and its cross-domain failure coupling.
 
 ## Status
 
 - [x] Root cause and owning boundary proved.
 - [x] Implement nonce-only capacity increase.
-- [ ] Run focused local proof.
+- [x] Split the catch-all owner into four staggered routes.
+- [x] Run focused local and PostgreSQL proof.
 - [ ] Complete review gates and exact-head CI.
 - [ ] Close the plan and hand off the PR.
