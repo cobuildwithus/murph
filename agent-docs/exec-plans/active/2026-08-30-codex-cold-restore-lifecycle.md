@@ -39,7 +39,7 @@ Updated: 2026-08-30
 
 1. Complete root-cause proof from production lifecycle evidence and production-image A/B runs.
 2. Add the smallest teardown call at the Cloudflare container invocation boundary before it delegates to workspace restore.
-3. Add deterministic boundary coverage and a pinned-Codex cold-restore journey.
+3. Add deterministic boundary coverage and a v2-compatible resident-container real-Codex journey.
 4. Update owning lifecycle documentation and the public outcome changelog.
 5. Run focused tests, typecheck, candidate review, ReviewGPT, and required CI.
 6. Merge, deploy the exact reviewed runner head, and prove post-deploy health and reply recovery.
