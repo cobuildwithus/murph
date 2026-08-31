@@ -394,7 +394,8 @@ describe("container entrypoint abort boundary", () => {
         poisoned: false,
       });
     });
-    expect(stopWarmCodex).not.toHaveBeenCalled();
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(stopWarmCodex).toHaveBeenCalledWith("hosted-workspace-restore");
 
     const replacement = await fetch(
       `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
@@ -408,6 +409,11 @@ describe("container entrypoint abort boundary", () => {
     );
     expect(replacement.status).toBe(200);
     expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+    expect(stopWarmCodex).toHaveBeenCalledTimes(2);
+    expect(stopWarmCodex).toHaveBeenNthCalledWith(
+      2,
+      "hosted-workspace-restore",
+    );
   });
 
   it("releases a preempted invocation without waiting for heavy hydration", async () => {
@@ -508,7 +514,8 @@ describe("container entrypoint abort boundary", () => {
       poisoned: false,
     });
     expect(mocks.runHostedWorkspaceInvocation).not.toHaveBeenCalled();
-    expect(stopWarmCodex).not.toHaveBeenCalled();
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(stopWarmCodex).toHaveBeenCalledWith("hosted-workspace-restore");
   });
 
   it("rejects replacement invocations until an aborted workspace invocation settles", async () => {

@@ -421,6 +421,16 @@ then drains older containers immediately. This contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Hosted Codex process warmth is scoped to one restored workspace. Before a
+restore path validates, replaces, clears, or sanitizes Codex home, the
+Cloudflare container invocation boundary stops the exact resident process; the
+next process rebuilds private indexes from portable rollout state. This
+gate fails the current invocation before restore and must pass again on any
+retry. This contract is jointly specified by
+`ARCHITECTURE.md`, `docs/contracts/00-invariants.md`,
+`agent-docs/RELIABILITY.md`, and
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 The public footer's fixed, bodyless incident.io status-summary read, strict-origin
 transport boundary, display-only authority, and subprocessor disclosure are
 jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
