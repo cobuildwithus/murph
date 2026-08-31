@@ -93,6 +93,10 @@ invocation compares its invocation provider with the live Web-owned preference.
 A mismatch stops that invocation from servicing further wakes, makes its dirty
 workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
 so Cloudflare releases the provider-specific invocation and starts a fresh one.
+When the package invocation settles, Cloudflare closes runtime-wake admission
+and drains the coalesced signal in the same synchronous turn. An already
+accepted wake becomes that same positive immediate-recheck edge; a later wake
+is rejected for the existing outer reconciliation owner.
 A failed best-effort signal
 leaves the durable preference intact; the next invocation and the mandatory
 provider-entry revalidation remain the recovery path. The signal carries no
@@ -218,7 +222,10 @@ preservation and stops heartbeat liveness before detached session cleanup.
 If `/complete` loses its response at the transport boundary, the runtime replays
 that exact completion request at most once under the original heartbeat,
 stored write-fence headers, and remaining commit timeout; non-OK HTTP responses
-and parse/validation failures are terminal. After Web accepts the checkpoint,
+and parse/validation failures are terminal. A queued runtime wake does not veto
+this exact replay because the original publication was already
+non-interruptible; the wake remains available after the canonical result. After
+Web accepts the checkpoint,
 the runtime stops heartbeating and best-effort records completion; a failed
 marker falls back to stale-heartbeat expiry. Absent, mismatched, completed, or
 stale sessions do not delay replacement. This
