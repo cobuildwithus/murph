@@ -29,18 +29,18 @@ import {
   buildIntegrationEvidencePart,
   buildIntegrationIngestRecord,
   findCaptureByLookup,
-  importDocument,
   initializeVault,
   patchAutomation,
   readHabitatAspect,
   readJsonlRecords,
-  recordInboxDocumentDefaultPromotion,
   repairVault,
   runCanonicalWrite,
   showAutomation,
   upsertAutomation,
   validateVault,
 } from "@murphai/core";
+import { createIntegratedInboxServices } from "@murphai/inbox-services";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 import {
   openInboxRuntime,
   persistCanonicalInboxCapture,
@@ -521,20 +521,27 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       });
       const inboxPath = persisted.stored.attachments[0]?.storedPath ?? "";
       assert.ok(inboxPath);
-      const imported = await importDocument({
-        vaultRoot: sourceVaultRoot,
-        sourcePath: path.join(sourceVaultRoot, inboxPath),
-        occurredAt: recordedAt,
-        title: "hosted-promoted.pdf",
-        note: "Hosted promoted document context",
-        source: "import",
+      const inboxServices = createIntegratedInboxServices();
+      await inboxServices.init({
+        rebuild: true,
+        rebuildParserJobs: false,
+        requestId: null,
+        vault: sourceVaultRoot,
       });
-      await recordInboxDocumentDefaultPromotion({
-        attachmentId: persisted.stored.attachments[0]!.attachmentId,
-        captureId: persisted.stored.captureId,
-        documentId: imported.documentId,
-        vaultRoot: sourceVaultRoot,
+      const imported = await inboxServices.preserveDocumentAttachment({
+        file: inboxPath,
+        requestId: null,
+        vault: sourceVaultRoot,
       });
+      const importedManifest = await createIntegratedVaultServices().query.showDocumentManifest({
+        id: imported.relatedId,
+        requestId: null,
+        vault: sourceVaultRoot,
+      });
+      const importedRawRef = importedManifest.manifest.artifacts.find(
+        (artifact) => artifact.role === "source_document",
+      )?.relativePath;
+      assert.ok(importedRawRef);
 
       const baseBundle = await snapshotHostedBundleRoots({
         externalizeFile: async (file) => {
@@ -650,13 +657,13 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         }),
       });
       await restored.materializeWorkspaceArtifacts([
-        imported.manifestPath,
-        imported.raw.relativePath,
+        importedManifest.manifestFile,
+        importedRawRef,
       ]);
 
       await assert.rejects(access(path.join(finalVaultRoot, inboxPath)), { code: "ENOENT" });
       assert.deepEqual(
-        await readFile(path.join(finalVaultRoot, imported.raw.relativePath)),
+        await readFile(path.join(finalVaultRoot, importedRawRef)),
         documentBytes,
       );
       const runtime = await openInboxRuntime({ vaultRoot: finalVaultRoot });

@@ -361,7 +361,10 @@ export async function runInboxMediaRetention(
         }
 
         const records: InboxAttachmentRetentionRecord[] = [];
-        const storedPathsToDelete: string[] = [];
+        const deleteReceiptByStoredPath = new Map<
+          string,
+          { byteLength: number; sha256: string }
+        >();
         let selectedCandidateCount = 0;
 
         for (const candidate of candidates) {
@@ -371,6 +374,10 @@ export async function runInboxMediaRetention(
             alreadyRetainedAttachmentIds.has(candidate.attachment.attachmentId) ||
             alreadyRetainedStoredPaths.has(candidate.storedPath);
           let verifiedByteSize: number | null = null;
+          let verifiedIntegrity: Extract<
+            RetentionCandidateIntegrityResult,
+            { kind: "match" }
+          > | null = null;
           if (
             latestDurableRawInboxRefs.has(candidate.storedPath)
           ) {
@@ -444,6 +451,7 @@ export async function runInboxMediaRetention(
             if (integrity.kind !== "match") {
               continue;
             }
+            verifiedIntegrity = integrity;
             verifiedByteSize = integrity.byteSize;
             if (
               candidate.attachment.kind === "document"
@@ -474,11 +482,17 @@ export async function runInboxMediaRetention(
             );
           }
           if (!isMissingAfterMaterialization) {
-            storedPathsToDelete.push(candidate.storedPath);
+            if (!verifiedIntegrity) {
+              continue;
+            }
+            deleteReceiptByStoredPath.set(candidate.storedPath, {
+              byteLength: verifiedIntegrity.byteSize,
+              sha256: verifiedIntegrity.sha256,
+            });
           }
         }
 
-        if (records.length === 0 && storedPathsToDelete.length === 0) {
+        if (records.length === 0 && deleteReceiptByStoredPath.size === 0) {
           return emptyRetentionResult({
             hasMoreEligibleAttachments,
             nextEligibleAt,
@@ -486,7 +500,7 @@ export async function runInboxMediaRetention(
         }
 
         const expiredBytes = records.reduce((total, record) => total + (record.byteSize ?? 0), 0);
-        if (records.length > 0 || storedPathsToDelete.length > 0) {
+        if (records.length > 0 || deleteReceiptByStoredPath.size > 0) {
           throwIfRetentionAborted(input.signal);
           // Tombstone append and raw-file unlink must commit atomically.
           // Previously the unlink ran after runCanonicalWrite committed, so a
@@ -507,8 +521,11 @@ export async function runInboxMediaRetention(
                   `${JSON.stringify(record)}\n`,
                 );
               }
-              for (const storedPath of storedPathsToDelete) {
-                await batch.stageDelete(storedPath, { allowRaw: true });
+              for (const [storedPath, expectedTargetReceipt] of deleteReceiptByStoredPath) {
+                await batch.stageDelete(storedPath, {
+                  allowRaw: true,
+                  expectedTargetReceipt,
+                });
               }
             },
           });

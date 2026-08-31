@@ -130,7 +130,7 @@ function createCapture(
     text: 'capture note',
     attachments: [],
     raw: {},
-    sourceDirectory: `raw/inbox/email/default/${captureId}`,
+    sourceDirectory: `raw/inbox/email/${captureId}`,
     createdAt: '2026-04-08T11:22:55.000Z',
     ...overrides,
   }
@@ -285,6 +285,12 @@ function createCoreRuntimeModule(
         documentId: 'document-created',
         event: { id: 'document-created' },
       }
+    },
+    async listInboxDocumentDefaultPromotionCorrelations() {
+      return []
+    },
+    async listLiveExactDocumentImportEvidence(input) {
+      return input.sources.map((source) => ({ ...source, evidence: [] }))
     },
     async recordInboxDocumentDefaultPromotion() {
       return { created: true }
@@ -1045,8 +1051,11 @@ test('document preservation and experiment helper branches are deterministic', a
     'raw/inbox/email/capture-preserve/attachments/existing.pdf'
   const newDocumentPath =
     'raw/inbox/email/capture-preserve/attachments/new.pdf'
+  const duplicateDocumentPath =
+    'raw/inbox/email/capture-preserve/attachments/duplicate.pdf'
   await writeTextFile(paths.absoluteVaultRoot, canonicalDocumentPath, 'existing document')
   await writeTextFile(paths.absoluteVaultRoot, newDocumentPath, 'new document')
+  await writeTextFile(paths.absoluteVaultRoot, duplicateDocumentPath, 'new document')
 
   const capture = createCapture('capture-preserve', {
     text: ' preserved note ',
@@ -1061,6 +1070,12 @@ test('document preservation and experiment helper branches are deterministic', a
         ordinal: 2,
         kind: 'document',
         storedPath: newDocumentPath,
+        fileName: ' New.pdf ',
+      }),
+      createAttachment({
+        ordinal: 3,
+        kind: 'document',
+        storedPath: duplicateDocumentPath,
         fileName: ' New.pdf ',
       }),
     ],
@@ -1101,6 +1116,20 @@ test('document preservation and experiment helper branches are deterministic', a
       requestId: null,
     },
     loadCore: async () => createCoreRuntimeModule({
+      async listLiveExactDocumentImportEvidence(input) {
+        return input.sources.map((source) => ({
+          ...source,
+          evidence:
+            source.sha256 === sha256('existing document')
+              ? [{
+                  defaultPromotions: [],
+                  documentId: 'document-existing',
+                  manifestPath: 'raw/documents/existing/manifest.json',
+                  rawRef: 'raw/documents/existing/existing.pdf',
+                }]
+              : [],
+        }))
+      },
       async recordInboxDocumentDefaultPromotion(input) {
         preservedDocumentCorrelations.push(input)
         return { created: true }
@@ -1111,6 +1140,28 @@ test('document preservation and experiment helper branches are deterministic', a
         return {
           async importDocument(input) {
             importedFiles.push(input.filePath)
+            await writeJsonFile(
+              paths.absoluteVaultRoot,
+              'raw/documents/created/manifest.json',
+              {
+                importId: 'document-created',
+                importKind: 'document',
+                importedAt: '2026-04-08T12:00:00.000Z',
+                source: input.source ?? null,
+                artifacts: [
+                  {
+                    role: 'source_document',
+                    sha256: sha256('new document'),
+                  },
+                ],
+                provenance: {
+                  occurredAt: input.occurredAt ?? null,
+                  note: input.note ?? null,
+                  lookupId: 'document-created',
+                  title: input.title ?? null,
+                },
+              },
+            )
             return {
               documentId: 'document-created',
               event: { id: 'document-created' },
@@ -1127,10 +1178,12 @@ test('document preservation and experiment helper branches are deterministic', a
       ),
   })
 
-  assert.equal(result.preservedCount, 2)
+  assert.equal(result.preservedCount, 3)
   assert.equal(result.createdCount, 1)
   assert.equal(result.documents[0]?.created, false)
   assert.equal(result.documents[1]?.lookupId, 'document-created')
+  assert.equal(result.documents[2]?.created, false)
+  assert.equal(result.documents[2]?.lookupId, 'document-created')
   assert.deepEqual(importedFiles, [
     path.join(paths.absoluteVaultRoot, newDocumentPath),
   ])
@@ -1148,6 +1201,11 @@ test('document preservation and experiment helper branches are deterministic', a
       },
       {
         attachmentId: 'attachment-2',
+        captureId: capture.captureId,
+        documentId: 'document-created',
+      },
+      {
+        attachmentId: 'attachment-3',
         captureId: capture.captureId,
         documentId: 'document-created',
       },

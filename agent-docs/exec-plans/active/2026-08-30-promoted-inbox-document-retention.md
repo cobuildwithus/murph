@@ -41,7 +41,8 @@ Updated: 2026-08-30
 1. [x] Trace document promotion, exact-source proof, lazy restore, and retention ownership.
 2. [x] Implement the narrow eligibility extension and focused regression coverage.
 3. [x] Update durable contracts and run focused verification/typecheck.
-4. [ ] Complete required specialist and final review gates, commit, push, and close this plan.
+4. [x] Connect the registered explicit document-save path to exact inbox preservation after the final review found the correlation writer was otherwise unreachable.
+5. [ ] Complete required specialist and final review gates, commit, push, and close this plan.
 
 ## Decisions
 
@@ -52,6 +53,9 @@ Updated: 2026-08-30
 - Keep historical promotions without the stable correlation fail-closed instead of inferring ownership from content that capture retention can truncate or delete.
 - Keep the historical `inbox_media_retention` orchestration mode so this storage cleanup adds no scheduler or runtime state.
 - Admit promoted documents through the existing retention batch limits and verify all admitted byte receipts from one transient audit/event ledger snapshot. This removes repeated vault-wide reads without adding a cache, cursor, index, or persisted state.
+- Route only option-free explicit saves of an exact current `raw/inbox/**` document path through Inbox Services. Resolve capture and attachment identity internally, preserve exactly one attachment under the existing canonical lock, and read back the canonical manifest for the unchanged CLI receipt. Explicit overrides, `--reuse-exact`, and non-inbox sources retain generic import behavior; invalid inbox identity fails closed.
+- Resolve an existing IDs-only correlation and its live exact Core evidence before metadata-derived discovery or import. This keeps retries idempotent after capture-text retention and rejects a deleted or damaged prior owner before a replacement can be written.
+- Carry each admitted byte receipt into the existing write-batch delete precondition so the final filesystem mutation rechecks the same bytes proved under the retention lock.
 
 ## Review round 3 retrospective
 
@@ -60,6 +64,23 @@ Updated: 2026-08-30
 - Product decision: cleanup is prospective for correlation-bearing default promotions. Historical promotions without the stable correlation remain fail-closed because deleted or truncated capture text cannot support a safe backfill. No metadata inference, hash-wide authorization, migration, repair pass, or reconciler is approved.
 - Architecture decision: continue with one indivisible existing-owner design. Inbox Services owns the promotion-boundary write, Core's audit ledger owns the durable correlation and grouped exact proof, and Inboxd's existing retention owner alone admits and deletes. Splitting changes rollout timing without removing a concept; redesigning away from the promotion boundary recreates the expiring-metadata defect.
 - Owner budget: the two narrow Core correlation functions remain public only because sibling packages must use public entrypoints. Further work may delete, reorder, or tighten these owners but may not add another owner, file family, state machine, queue, cache, cursor, index, migration, backfill, repair pass, or reconciliation loop without new production evidence.
+
+## Review round 4 disposition
+
+- Accepted: the registered production `document import` path called the generic importer directly, so ordinary explicit saves never reached either correlation writer and remained retention-ineligible.
+- Root cause proof: the command descriptor and handler carried only file/metadata into `services.importers.importDocument`; both Inbox Services preservation methods had no production CLI caller.
+- Correction: thread the existing Inbox Services instance into the document command, route only an option-free exact current inbox path to a stateless exact-one preservation seam, and reuse the existing canonical match/import/correlation owner. Multi-document captures select by the exact stored path, retries recognize both legacy and current versioned manifest names, and stale or ambiguous paths fail closed.
+- Complexity boundary: no automatic ingestion, new persisted state, index, queue, migration, backfill, repair pass, or model-supplied identity was added.
+
+## Post-round-4 independent audit disposition
+
+- Accepted: final deletion verified bytes during admission but did not pass that receipt to the existing write-batch delete precondition. The final mutation now carries and rechecks the already-computed size and SHA-256 without adding a second mechanism.
+- Accepted: the first production-path test registered the document command directly and would not catch descriptor-wiring regressions. The journey now constructs the CLI through `createVaultCliWithOptions`, which exercises the production command registry.
+- Accepted: attachment path parsing used two inconsistent `attachments` segment rules. Identity now derives from the final attachment directory and the shared validator anchors directly to the capture's current `sourceDirectory`; a valid account segment named `attachments` is covered.
+- Accepted: retry discovery depended on capture text that expires after 14 days, and retained manifests were not sufficient proof that their owners remained live. Preservation now resolves the stable correlation plus Core's live exact evidence before metadata or import; the production-registry journey proves an after-retention retry stays single-owner and a deleted owner fails without another manifest.
+- Accepted: the route classifier resolved relative paths differently from the generic importer. Both now preserve the existing process-working-directory convention.
+- Accepted: one preserve-all batch snapshotted live document IDs before processing, so later byte-identical attachments could not reuse a document created earlier in that batch. One per-receipt in-memory set is now updated after each successful reuse or create; the seam test proves one canonical document with distinct correlations for both attachments.
+- Complexity boundary: all corrections reuse existing Core evidence, Inbox Services ownership, command registry, and write-batch preconditions; no new durable owner, file family, cache, index, queue, scheduler, migration, or repair loop was introduced.
 
 ## Verification
 
@@ -71,3 +92,5 @@ Updated: 2026-08-30
 - Passed: contracts, Core, inbox-services, inboxd, and assistant-runtime typechecks and builds.
 - Passed: completion correctness, security/privacy, simplicity, and coverage audits after accepted remediation.
 - Passed: agent-doc drift and `git diff --check` before the review-candidate commit.
+- Passed after round 4 remediation: Inbox Services full suite (13 files, 67 tests), focused CLI document/meal file (10 tests), hosted retention file (17 tests), and inbox-services/CLI/assistant-runtime typechecks and builds. The production CLI proof covers exact selection from a two-document capture, idempotent retry, override and explicit-reuse non-correlation, and stale-path rejection; the hosted journey uses the same Inbox Services seam before lazy snapshot retention and restore validation.
+- Passed after independent audit remediation: inboxd attachment-retention suite (31 tests), Inbox Services full suite (13 files, 67 tests), focused production-registry CLI file (10 tests), and hosted retention file (17 tests). The CLI proof additionally covers a valid `attachments` account segment, retry after text retention without a second manifest, deleted-owner rejection before import, and unchanged relative-path semantics.

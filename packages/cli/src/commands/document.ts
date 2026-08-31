@@ -1,5 +1,7 @@
+import path from 'node:path'
 import { Cli, z } from 'incur'
 import { eventSourceSchema } from '@murphai/contracts'
+import type { InboxServices } from '@murphai/inbox-services'
 import {
   documentImportResultSchema,
   occurredAtOptionSchema,
@@ -7,6 +9,7 @@ import {
   pathSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
   deleteDocumentRecord,
@@ -54,6 +57,7 @@ function createWorkoutImportStatusCommand(services: VaultServices): AnyFactoryCo
 export function registerDocumentCommands(
   cli: Cli.Cli,
   services: VaultServices,
+  inboxServices: Pick<InboxServices, 'preserveDocumentAttachment'>,
 ) {
   registerArtifactBackedEntityGroup(cli, {
     commandName: 'document',
@@ -84,10 +88,60 @@ export function registerDocumentCommands(
       },
       output: documentImportResultSchema,
       async run({ args, options, requestId }) {
+        const file = String(args.file ?? '')
+        const vault = String(options.vault ?? '')
+        if (
+          isDefaultInboxDocumentImport({
+            file,
+            vault,
+            title: options.title,
+            occurredAt: options.occurredAt,
+            note: options.note,
+            source: options.source,
+            reuseExact: options.reuseExact,
+          })
+        ) {
+          const preserved = await inboxServices.preserveDocumentAttachment({
+            file,
+            vault,
+            requestId,
+          })
+          const manifestResult = await services.query.showDocumentManifest({
+            id: preserved.relatedId,
+            vault,
+            requestId,
+          })
+          const rawFile = manifestResult.manifest.artifacts.find(
+            (artifact) => artifact.role === 'source_document',
+          )?.relativePath
+          const eventId = manifestResult.manifest.provenance.eventId
+          if (
+            typeof rawFile !== 'string' ||
+            typeof eventId !== 'string' ||
+            manifestResult.entityId !== preserved.relatedId
+          ) {
+            throw new VaultCliError(
+              'RAW_MANIFEST_INVALID',
+              'The preserved inbox document is missing its canonical import receipt.',
+            )
+          }
+
+          return {
+            created: preserved.created,
+            vault: manifestResult.vault,
+            sourceFile: file,
+            rawFile,
+            manifestFile: manifestResult.manifestFile,
+            documentId: preserved.relatedId,
+            eventId,
+            lookupId: preserved.relatedId,
+          }
+        }
+
         const sourceResult = eventSourceSchema.safeParse(options.source)
         return services.importers.importDocument({
-          file: String(args.file ?? ''),
-          vault: String(options.vault ?? ''),
+          file,
+          vault,
           requestId,
           title: typeof options.title === 'string' ? options.title : undefined,
           occurredAt: await normalizeOccurredAtOption({
@@ -176,4 +230,41 @@ export function registerDocumentCommands(
       }),
     ],
   })
+}
+
+function isDefaultInboxDocumentImport(input: {
+  file: string
+  vault: string
+  title: unknown
+  occurredAt: unknown
+  note: unknown
+  source: unknown
+  reuseExact: unknown
+}): boolean {
+  if (
+    typeof input.title === 'string' ||
+    typeof input.occurredAt === 'string' ||
+    typeof input.note === 'string' ||
+    typeof input.source === 'string' ||
+    input.reuseExact === true
+  ) {
+    return false
+  }
+
+  const absoluteVaultRoot = path.resolve(input.vault)
+  const absoluteFile = path.isAbsolute(input.file)
+    ? path.resolve(input.file)
+    : path.resolve(input.file)
+  const relativePath = path.relative(absoluteVaultRoot, absoluteFile)
+  if (
+    !relativePath ||
+    relativePath === '..' ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    return false
+  }
+
+  const segments = relativePath.split(path.sep)
+  return segments[0] === 'raw' && segments[1] === 'inbox'
 }

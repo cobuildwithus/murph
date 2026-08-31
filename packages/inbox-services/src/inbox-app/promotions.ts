@@ -7,6 +7,7 @@ import type {
 import {
   documentCanonicalPromotionSpec,
   mealCanonicalPromotionSpec,
+  preserveCanonicalDocumentAttachment,
   preserveCanonicalDocumentAttachments,
   persistPromotionEntry,
   promoteCanonicalAttachmentImport,
@@ -38,6 +39,7 @@ export function createInboxPromotionOps(
   env: InboxAppEnvironment,
 ): Pick<
   InboxServices,
+  | 'preserveDocumentAttachment'
   | 'preserveDocumentAttachments'
   | 'promoteMeal'
   | 'promoteDocument'
@@ -45,6 +47,15 @@ export function createInboxPromotionOps(
   | 'promoteExperimentNote'
 > {
   return {
+    async preserveDocumentAttachment(input) {
+      return preserveCanonicalDocumentAttachment({
+        input,
+        loadCore: env.loadCore,
+        loadImporters: env.loadImporters,
+        loadInbox: env.loadInbox,
+      })
+    },
+
     async preserveDocumentAttachments(input) {
       return preserveCanonicalDocumentAttachments({
         input,

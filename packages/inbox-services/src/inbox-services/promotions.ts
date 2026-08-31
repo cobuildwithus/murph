@@ -18,6 +18,7 @@ import {
   inboxPromotionStoreSchema,
   inboxPreserveDocumentAttachmentsResultSchema,
   type InboxPromotionEntry,
+  type InboxPreservedDocument,
   type InboxPreserveDocumentAttachmentsResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -30,7 +31,9 @@ import type {
   CoreRuntimeModule,
   InboxPaths,
   InboxRuntimeModule,
+  ImportersFactoryRuntimeModule,
   PromoteInput,
+  PreserveDocumentAttachmentInput,
   PromotionStore,
   PromotionTarget,
   QueryRuntimeModule,
@@ -238,29 +241,52 @@ export async function promoteCanonicalAttachmentImport<
   )
 }
 
-export async function preserveCanonicalDocumentAttachments(input: {
-  input: PromoteInput
+interface DocumentPreservationDependencies<TInput> {
+  input: TInput
   loadCore: () => Promise<CoreRuntimeModule>
-  loadImporters: () => Promise<{
-    createImporters(input?: { corePort?: CoreRuntimeModule }): {
-      importDocument(input: {
-        filePath: string
-        vaultRoot: string
-        occurredAt?: string
-        title?: string
-        note?: string
-        source?: string
-      }): Promise<{
-        documentId: string
-        event: {
-          id: string
-        }
-      }>
-    }
-  }>
+  loadImporters: () => Promise<ImportersFactoryRuntimeModule>
   loadInbox: () => Promise<InboxRuntimeModule>
-}): Promise<InboxPreserveDocumentAttachmentsResult> {
+}
+
+export async function preserveCanonicalDocumentAttachments(
+  input: DocumentPreservationDependencies<PromoteInput>,
+): Promise<InboxPreserveDocumentAttachmentsResult> {
+  return preserveCanonicalDocumentAttachmentsInternal(input)
+}
+
+export async function preserveCanonicalDocumentAttachment(
+  input: DocumentPreservationDependencies<PreserveDocumentAttachmentInput>,
+): Promise<InboxPreservedDocument> {
+  const result = await preserveCanonicalDocumentAttachmentsInternal(input)
+  if (result.documents.length !== 1) {
+    throw invalidExactDocumentAttachmentError()
+  }
+  return result.documents[0]!
+}
+
+async function preserveCanonicalDocumentAttachmentsInternal(
+  input: DocumentPreservationDependencies<
+    PromoteInput | PreserveDocumentAttachmentInput
+  >,
+): Promise<InboxPreserveDocumentAttachmentsResult> {
   const paths = await ensureInitialized(input.loadInbox, input.input.vault)
+  let exactStoredPath: string | null = null
+  let captureId: string
+  if ('file' in input.input) {
+    exactStoredPath = normalizeRelativeVaultPath(
+      relativeToVault(
+        paths.absoluteVaultRoot,
+        await resolveAssistantVaultPath(
+          paths.absoluteVaultRoot,
+          input.input.file,
+          'file path',
+        ),
+      ),
+    )
+    captureId = resolveCaptureIdFromAttachmentPath(exactStoredPath)
+  } else {
+    captureId = input.input.captureId
+  }
   const inboxd = await input.loadInbox()
   const core = requireDocumentPromotionCore(await input.loadCore())
   const importers = (await input.loadImporters()).createImporters({ corePort: core })
@@ -270,30 +296,119 @@ export async function preserveCanonicalDocumentAttachments(input: {
 
   try {
     return await withLockedInboxPromotionMutation(paths, { core }, async () => {
-      const capture = requirePromotionCapture(runtime, input.input.captureId)
+      const capture = requirePromotionCapture(runtime, captureId)
       const documents: InboxPreserveDocumentAttachmentsResult['documents'] = []
       const metadata = resolveCanonicalPromotionMetadata({
         capture,
         defaultSource: 'import',
       })
 
-      for (const attachment of capture.attachments.filter(isStoredDocumentAttachment)) {
+      const attachments = capture.attachments.filter(isStoredDocumentAttachment)
+      const selectedAttachments = exactStoredPath
+        ? attachments.filter(
+            (attachment) =>
+              typeof attachment.attachmentId === 'string' &&
+              normalizeAnchoredPromotionAttachmentPath(
+                capture,
+                attachment,
+                attachment.storedPath,
+              ) === exactStoredPath,
+          )
+        : attachments
+      if (exactStoredPath && selectedAttachments.length !== 1) {
+        throw invalidExactDocumentAttachmentError()
+      }
+
+      const attachmentsWithReceipts = await Promise.all(
+        selectedAttachments.map(async (attachment) => ({
+          attachment,
+          receipt: await resolveAttachmentReceipt(
+            paths.absoluteVaultRoot,
+            capture,
+            attachment,
+          ),
+        })),
+      )
+      const [promotionCorrelations, evidenceGroups] = await Promise.all([
+        core.listInboxDocumentDefaultPromotionCorrelations({
+          vaultRoot: paths.absoluteVaultRoot,
+        }),
+        core.listLiveExactDocumentImportEvidence({
+          sources: attachmentsWithReceipts.map(({ receipt }) => receipt),
+          vaultRoot: paths.absoluteVaultRoot,
+        }),
+      ])
+      const evidenceByReceipt = new Map(
+        evidenceGroups.map((group) => [documentReceiptKey(group), group.evidence]),
+      )
+      const liveDocumentIdsByReceipt = new Map(
+        evidenceGroups.map((group) => [
+          documentReceiptKey(group),
+          group.evidence === null
+            ? null
+            : new Set(group.evidence.map((candidate) => candidate.documentId)),
+        ]),
+      )
+
+      for (const { attachment, receipt } of attachmentsWithReceipts) {
+        const attachmentId = attachment.attachmentId
+        if (typeof attachmentId !== 'string') {
+          throw invalidExactDocumentAttachmentError()
+        }
+        const evidence = evidenceByReceipt.get(documentReceiptKey(receipt))
+        const liveDocumentIds = liveDocumentIdsByReceipt.get(
+          documentReceiptKey(receipt),
+        )
+        if (
+          evidence === undefined ||
+          evidence === null ||
+          liveDocumentIds === undefined ||
+          liveDocumentIds === null
+        ) {
+          throw canonicalDocumentPromotionMissingError(capture.captureId)
+        }
+        const priorCorrelation = promotionCorrelations.find(
+          (correlation) =>
+            correlation.captureId === capture.captureId &&
+            correlation.attachmentId === attachmentId,
+        )
+        if (priorCorrelation) {
+          const priorEvidence = evidence.filter(
+            (candidate) =>
+              candidate.documentId === priorCorrelation.documentId &&
+              candidate.defaultPromotions.some(
+                (correlation) =>
+                  correlation.captureId === capture.captureId &&
+                  correlation.attachmentId === attachmentId &&
+                  correlation.documentId === priorCorrelation.documentId &&
+                  correlation.eventId === priorCorrelation.eventId,
+              ),
+          )
+          if (priorEvidence.length !== 1) {
+            throw canonicalDocumentPromotionMissingError(capture.captureId)
+          }
+          documents.push({
+            attachmentId,
+            ordinal: attachment.ordinal,
+            created: false,
+            lookupId: priorCorrelation.documentId,
+            relatedId: priorCorrelation.documentId,
+          })
+          continue
+        }
+
         const title = resolveDocumentAttachmentTitle(attachment)
         const canonicalPromotion = await findCanonicalPromotionMatch({
           captureId: capture.captureId,
           absoluteVaultRoot: paths.absoluteVaultRoot,
           spec: documentCanonicalPromotionSpec,
           context: {
-            documentSha256: await resolveAttachmentSha256(
-              paths.absoluteVaultRoot,
-              capture,
-              attachment,
-            ),
+            documentSha256: receipt.sha256,
             title,
           },
+          liveRelatedIds: liveDocumentIds,
           metadata,
         })
-
         const promotion = canonicalPromotion
           ? {
               created: false,
@@ -316,18 +431,17 @@ export async function preserveCanonicalDocumentAttachments(input: {
               lookupId: result.documentId,
               relatedId: result.documentId,
             }))
+        liveDocumentIds.add(promotion.relatedId)
 
-        if (typeof attachment.attachmentId === 'string') {
-          await core.recordInboxDocumentDefaultPromotion({
-            attachmentId: attachment.attachmentId,
-            captureId: capture.captureId,
-            documentId: promotion.relatedId,
-            vaultRoot: paths.absoluteVaultRoot,
-          })
-        }
+        await core.recordInboxDocumentDefaultPromotion({
+          attachmentId,
+          captureId: capture.captureId,
+          documentId: promotion.relatedId,
+          vaultRoot: paths.absoluteVaultRoot,
+        })
 
         documents.push({
-          attachmentId: attachment.attachmentId ?? null,
+          attachmentId,
           ordinal: attachment.ordinal,
           ...promotion,
         })
@@ -344,6 +458,40 @@ export async function preserveCanonicalDocumentAttachments(input: {
   } finally {
     runtime.close()
   }
+}
+
+function resolveCaptureIdFromAttachmentPath(storedPath: string): string {
+  const attachmentDirectory = path.posix.dirname(storedPath)
+  const captureDirectory = path.posix.dirname(attachmentDirectory)
+  const captureDirectorySegments = captureDirectory.split('/')
+  if (
+    path.posix.basename(attachmentDirectory) !== 'attachments' ||
+    captureDirectorySegments[0] !== 'raw' ||
+    captureDirectorySegments[1] !== 'inbox' ||
+    captureDirectorySegments.length < 3
+  ) {
+    throw invalidExactDocumentAttachmentError()
+  }
+
+  return normalizeOpaquePathSegment(
+    path.posix.basename(captureDirectory),
+    'Capture id',
+  )
+}
+
+function invalidExactDocumentAttachmentError(): VaultCliError {
+  return new VaultCliError(
+    'INBOX_DOCUMENT_ATTACHMENT_INVALID',
+    'The source path is not one exact current inbox document attachment.',
+  )
+}
+
+function canonicalDocumentPromotionMissingError(captureId: string): VaultCliError {
+  return new VaultCliError(
+    'INBOX_PROMOTION_CANONICAL_MISSING',
+    'The prior canonical document owner is no longer live and complete.',
+    { captureId },
+  )
 }
 
 export function requireJournalPromotionCore(
@@ -364,16 +512,33 @@ export function requireDocumentPromotionCore(
   core: CoreRuntimeModule,
 ): CoreRuntimeModule & {
   importDocument: NonNullable<CoreRuntimeModule['importDocument']>
+  listInboxDocumentDefaultPromotionCorrelations: NonNullable<
+    CoreRuntimeModule['listInboxDocumentDefaultPromotionCorrelations']
+  >
+  listLiveExactDocumentImportEvidence: NonNullable<
+    CoreRuntimeModule['listLiveExactDocumentImportEvidence']
+  >
   recordInboxDocumentDefaultPromotion: NonNullable<
     CoreRuntimeModule['recordInboxDocumentDefaultPromotion']
   >
 } {
-  if (!core.importDocument || !core.recordInboxDocumentDefaultPromotion) {
+  if (
+    !core.importDocument ||
+    !core.listInboxDocumentDefaultPromotionCorrelations ||
+    !core.listLiveExactDocumentImportEvidence ||
+    !core.recordInboxDocumentDefaultPromotion
+  ) {
     throw unsupportedPromotion('document')
   }
 
   return core as CoreRuntimeModule & {
     importDocument: NonNullable<CoreRuntimeModule['importDocument']>
+    listInboxDocumentDefaultPromotionCorrelations: NonNullable<
+      CoreRuntimeModule['listInboxDocumentDefaultPromotionCorrelations']
+    >
+    listLiveExactDocumentImportEvidence: NonNullable<
+      CoreRuntimeModule['listLiveExactDocumentImportEvidence']
+    >
     recordInboxDocumentDefaultPromotion: NonNullable<
       CoreRuntimeModule['recordInboxDocumentDefaultPromotion']
     >
@@ -528,9 +693,19 @@ export function requireExperimentPromotionEntry(
 
 export async function resolveAttachmentSha256(
   absoluteVaultRoot: string,
-  capture: Pick<RuntimeCaptureRecord, 'captureId'>,
+  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'sourceDirectory'>,
   attachment: RuntimeAttachmentRecord & { storedPath?: string | null },
 ): Promise<string> {
+  return (
+    await resolveAttachmentReceipt(absoluteVaultRoot, capture, attachment)
+  ).sha256
+}
+
+async function resolveAttachmentReceipt(
+  absoluteVaultRoot: string,
+  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'sourceDirectory'>,
+  attachment: RuntimeAttachmentRecord & { storedPath?: string | null },
+): Promise<{ byteLength: number; sha256: string }> {
   const content = await readFile(
     await resolvePromotionAttachmentFilePath(
       absoluteVaultRoot,
@@ -538,12 +713,19 @@ export async function resolveAttachmentSha256(
       attachment,
     ),
   )
-  return createHash('sha256').update(content).digest('hex')
+  return {
+    byteLength: content.byteLength,
+    sha256: createHash('sha256').update(content).digest('hex'),
+  }
+}
+
+function documentReceiptKey(input: { byteLength: number; sha256: string }): string {
+  return `${input.sha256}:${input.byteLength}`
 }
 
 export async function resolvePromotionAttachmentFilePath(
   absoluteVaultRoot: string,
-  capture: Pick<RuntimeCaptureRecord, 'captureId'>,
+  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'sourceDirectory'>,
   attachment: RuntimeAttachmentRecord & { storedPath?: string | null },
 ): Promise<string> {
   const storedPath = normalizeNullableString(attachment.storedPath)
@@ -579,34 +761,22 @@ export async function resolvePromotionAttachmentFilePath(
 }
 
 function normalizeAnchoredPromotionAttachmentPath(
-  capture: Pick<RuntimeCaptureRecord, 'captureId'>,
+  capture: Pick<RuntimeCaptureRecord, 'sourceDirectory'>,
   _attachment: RuntimeAttachmentRecord,
   storedPath: string,
 ): string | null {
   try {
     const normalizedStoredPath = normalizeRelativeVaultPath(storedPath)
-    return isCaptureAttachmentSubtreePath(normalizedStoredPath, capture.captureId)
+    const attachmentDirectory = path.posix.join(
+      normalizeRelativeVaultPath(capture.sourceDirectory),
+      'attachments',
+    )
+    return path.posix.dirname(normalizedStoredPath) === attachmentDirectory
       ? normalizedStoredPath
       : null
   } catch {
     return null
   }
-}
-
-function isCaptureAttachmentSubtreePath(
-  normalizedStoredPath: string,
-  captureId: string,
-): boolean {
-  const normalizedCaptureId = normalizeOpaquePathSegment(captureId, 'Capture id')
-  const segments = normalizedStoredPath.split('/')
-  const attachmentsIndex = segments.indexOf('attachments')
-  return (
-    segments[0] === 'raw' &&
-    segments[1] === 'inbox' &&
-    attachmentsIndex >= 3 &&
-    attachmentsIndex < segments.length - 1 &&
-    segments[attachmentsIndex - 1] === normalizedCaptureId
-  )
 }
 
 const canonicalMealManifestSchema = z.object({
@@ -829,6 +999,7 @@ async function findCanonicalPromotionMatch<
   captureId: string
   absoluteVaultRoot: string
   context: TContext
+  liveRelatedIds?: ReadonlySet<string>
   metadata: CanonicalPromotionMetadata
   spec: CanonicalPromotionLookupSpec<TManifest, TContext>
 }): Promise<CanonicalPromotionMatch | null> {
@@ -850,6 +1021,12 @@ async function findCanonicalPromotionMatch<
         }
 
         if (!input.spec.matchesManifest(manifest, input.context)) {
+          return null
+        }
+        if (
+          input.liveRelatedIds &&
+          !input.liveRelatedIds.has(manifest.importId)
+        ) {
           return null
         }
         if (normalizeNullableString(manifest.source) !== input.metadata.source) {
@@ -1138,13 +1315,19 @@ async function listCanonicalManifestPaths(
   absoluteVaultRoot: string,
   manifestDirectory: string,
 ): Promise<string[]> {
-  return walkRelativeFiles(absoluteVaultRoot, manifestDirectory, 'manifest.json')
+  return walkRelativeFiles(
+    absoluteVaultRoot,
+    manifestDirectory,
+    (fileName) =>
+      fileName === 'manifest.json' ||
+      (fileName.startsWith('manifest.') && fileName.endsWith('.json')),
+  )
 }
 
 async function walkRelativeFiles(
   absoluteVaultRoot: string,
   relativeDirectory: string,
-  fileName: string,
+  matchesFileName: (fileName: string) => boolean,
 ): Promise<string[]> {
   const absoluteDirectory = path.join(absoluteVaultRoot, relativeDirectory)
   if (!(await fileExists(absoluteDirectory))) {
@@ -1166,7 +1349,7 @@ async function walkRelativeFiles(
         stack.push(absoluteEntry)
         continue
       }
-      if (entry.isFile() && entry.name === fileName) {
+      if (entry.isFile() && matchesFileName(entry.name)) {
         matches.push(relativeToVault(absoluteVaultRoot, absoluteEntry))
       }
     }

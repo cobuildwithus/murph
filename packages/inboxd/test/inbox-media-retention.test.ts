@@ -1909,7 +1909,7 @@ test("runInboxMediaRetention bounds missing legacy materialization and tombstone
   assert.equal(thirdPass.records[0]?.storedPath, paths[2]);
 });
 
-test("runInboxMediaRetention finishes deleting committed tombstones after wake aborts", async () => {
+test("runInboxMediaRetention finishes guarded deletes after wake aborts", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-delete-abort");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const imageBytes = await createPngBytes();
@@ -1954,14 +1954,21 @@ test("runInboxMediaRetention finishes deleting committed tombstones after wake a
   assert.ok(secondPath);
 
   const controller = new AbortController();
-  const originalUnlink = fs.unlink.bind(fs);
-  let unlinkCount = 0;
-  const unlinkSpy = vi.spyOn(fs, "unlink").mockImplementation(async (...args) => {
-    unlinkCount += 1;
-    if (unlinkCount === 1) {
-      controller.abort(new Error("foreground wake"));
+  const absoluteAttachmentPaths = new Set([
+    path.join(vaultRoot, firstPath),
+    path.join(vaultRoot, secondPath),
+  ]);
+  const originalRename = fs.rename.bind(fs);
+  let guardedDeleteCount = 0;
+  const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (...args) => {
+    const sourcePath = String(args[0]);
+    if (absoluteAttachmentPaths.has(sourcePath)) {
+      guardedDeleteCount += 1;
+      if (guardedDeleteCount === 1) {
+        controller.abort(new Error("foreground wake"));
+      }
     }
-    await originalUnlink(...args);
+    await originalRename(...args);
   });
 
   try {
@@ -1973,12 +1980,12 @@ test("runInboxMediaRetention finishes deleting committed tombstones after wake a
 
     assert.equal(controller.signal.aborted, true);
     assert.equal(result.expiredAttachments, 2);
-    assert.equal(unlinkCount, 2);
+    assert.equal(guardedDeleteCount, 2);
     assert.equal(await fileExists(vaultRoot, firstPath), false);
     assert.equal(await fileExists(vaultRoot, secondPath), false);
     assert.equal((await validateVault({ vaultRoot })).valid, true);
   } finally {
-    unlinkSpy.mockRestore();
+    renameSpy.mockRestore();
   }
 });
 
