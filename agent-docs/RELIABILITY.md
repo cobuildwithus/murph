@@ -753,11 +753,14 @@ Last verified: 2026-08-30
 - Account deletion must not discard its only external-cleanup owner. The
   canonical account transaction persists the KMS-encrypted, foreign-key-free
   receipt before deleting the member. The existing hourly retention sweep
-  retries Cloudflare, Stripe-customer, and Privy-user targets independently;
+  retries Cloudflare, isolated runtime-log deletion, Temporal workflow
+  termination, Stripe-customer, and Privy-user targets independently;
   confirmed absence is idempotent success, completed targets are skipped, and
-  unconfigured, timed-out, or ambiguous targets remain pending. The deletion
+  unconfigured, timed-out, or ambiguous targets remain pending. Temporal is
+  complete only after every captured runtime workflow is terminated or
+  confirmed absent. The deletion
   request returns `cleanupPending` immediately after the canonical transaction
-  instead of waiting on those providers. Each retention attempt has a bounded
+  instead of waiting on those targets. Each retention attempt has a bounded
   target deadline, and the bounded batch runs receipts concurrently so one
   stalled vendor does not block unrelated retention work. Because every
   provider delete is idempotent and progress is monotonic, concurrent attempts

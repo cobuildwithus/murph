@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getHostedWebCryptoConfig: vi.fn(),
   kmsDecrypt: vi.fn(),
   kmsEncrypt: vi.fn(),
+  terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-crypto/env", () => ({
@@ -25,6 +26,11 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingStripe: mocks.getHostedOnboardingStripe,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
+  terminateHostedUserRuntimeWorkflowBestEffort:
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/store", () => ({
@@ -69,6 +75,12 @@ beforeEach(() => {
     makeCloudflareDeletionResult({ deleted: true }),
   );
   mocks.deleteHostedRuntimeLogDataForUsers.mockResolvedValue(0);
+  mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
+    configured: true,
+    errorCode: null,
+    notFound: false,
+    terminated: true,
+  });
   mocks.deleteHostedPrivyUser.mockResolvedValue(true);
   mocks.getHostedOnboardingStripe.mockReturnValue({
     customers: {
@@ -147,6 +159,9 @@ describe("hosted account deletion cleanup", () => {
     }));
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
     expect(captured.plaintext?.every((byte) => byte === 0)).toBe(true);
@@ -220,6 +235,7 @@ describe("hosted account deletion cleanup", () => {
       privyCompletedAt: now,
       runtimeLogsCompletedAt: now,
       stripeCompletedAt: now,
+      temporalCompletedAt: now,
     });
     expect(
       JSON.parse(String(mocks.kmsDecrypt.mock.calls[0]?.[0].additionalAuthenticatedData)),
@@ -244,6 +260,16 @@ describe("hosted account deletion cleanup", () => {
       timeoutMs: expect.any(Number),
       userIds: ["member_1"],
     });
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledWith({
+      reason: "account-deleted",
+      timeoutMs: expect.any(Number),
+      userId: "member_1",
+    });
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
   });
@@ -253,6 +279,12 @@ describe("hosted account deletion cleanup", () => {
     const now = new Date("2026-07-26T18:00:00.000Z");
     mocks.getHostedOnboardingStripe.mockReturnValue(null);
     mocks.deleteHostedPrivyUser.mockResolvedValue(false);
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
+      configured: false,
+      errorCode: null,
+      notFound: null,
+      terminated: false,
+    });
     const prepared = await createCleanup(store, now, {
       privyUserId: "privy_user_1",
       stripeCustomerIds: ["cus_1"],
@@ -269,7 +301,10 @@ describe("hosted account deletion cleanup", () => {
         stripeCustomer: { status: "skipped_not_configured" },
       },
     });
-    expect(store.row).not.toBeNull();
+    expect(store.row).toMatchObject({
+      lastErrorCode: "HOSTED_TEMPORAL_NOT_CONFIGURED",
+      temporalCompletedAt: null,
+    });
   });
 
   it("keeps isolated runtime-log deletion pending and retries only that target", async () => {
@@ -304,6 +339,82 @@ describe("hosted account deletion cleanup", () => {
 
     expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(2);
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(1);
+    expect(store.row).toBeNull();
+  });
+
+  it("keeps Temporal termination pending and retries only that target", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort
+      .mockResolvedValueOnce({
+        configured: true,
+        errorCode: "TemporalTransportError",
+        notFound: null,
+        terminated: false,
+      })
+      .mockResolvedValueOnce({
+        configured: true,
+        errorCode: null,
+        notFound: true,
+        terminated: true,
+      });
+    const prepared = await prepareHostedAccountDeletionCleanup({
+      now,
+      privyUserId: null,
+      runtimeMemberIds: ["member_1", "member_2", "member_1"],
+      stripeCustomerIds: [],
+    });
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: prepared,
+      prisma: store.prisma as never,
+    });
+    expect(prepared.runtimeMemberIds).toEqual(["member_1", "member_2"]);
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: true });
+    expect(store.row).toMatchObject({
+      cloudflareCompletedAt: now,
+      lastErrorCode: "TemporalTransportError",
+      runtimeLogsCompletedAt: now,
+      temporalCompletedAt: null,
+    });
+
+    const retryAt = store.row?.nextAttemptAt;
+    expect(retryAt).toBeInstanceOf(Date);
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now: retryAt,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(4);
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(2);
+    expect(store.row).toBeNull();
+  });
+
+  it("completes Temporal cleanup when the workflow is already absent", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
+      configured: true,
+      errorCode: null,
+      notFound: true,
+      terminated: true,
+    });
+    const prepared = await createCleanup(store, now);
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+
     expect(store.row).toBeNull();
   });
 
@@ -366,11 +477,13 @@ describe("hosted account deletion cleanup", () => {
     expect(store.row?.privyCompletedAt).toBeNull();
   });
 
-  it("bounds Cloudflare deletion work with a fixed worker pool", async () => {
+  it("bounds runtime deletion work with fixed worker pools", async () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");
     let active = 0;
     let maxActive = 0;
+    let temporalActive = 0;
+    let temporalMaxActive = 0;
     mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
@@ -378,6 +491,20 @@ describe("hosted account deletion cleanup", () => {
       active -= 1;
       return makeCloudflareDeletionResult({ deleted: true });
     });
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      async () => {
+        temporalActive += 1;
+        temporalMaxActive = Math.max(temporalMaxActive, temporalActive);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        temporalActive -= 1;
+        return {
+          configured: true,
+          errorCode: null,
+          notFound: false,
+          terminated: true,
+        };
+      },
+    );
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
       privyUserId: null,
@@ -397,6 +524,10 @@ describe("hosted account deletion cleanup", () => {
 
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(12);
     expect(maxActive).toBe(4);
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(12);
+    expect(temporalMaxActive).toBe(4);
   });
 
   it("does not report completion after losing the receipt lease", async () => {
@@ -449,6 +580,16 @@ describe("hosted account deletion cleanup", () => {
           deleted: false,
           errorCode: "AbortError",
         })), { once: true });
+      }),
+    );
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      ({ timeoutMs }: { timeoutMs: number }) => new Promise((resolve) => {
+        setTimeout(() => resolve({
+          configured: true,
+          errorCode: "HostedRuntimeWorkflowTerminationTimeoutError",
+          notFound: null,
+          terminated: false,
+        }), timeoutMs);
       }),
     );
     mocks.deleteHostedPrivyUser.mockImplementation(
@@ -555,6 +696,16 @@ describe("hosted account deletion cleanup", () => {
         })), { once: true });
       }),
     );
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(
+      ({ timeoutMs }: { timeoutMs: number }) => new Promise((resolve) => {
+        setTimeout(() => resolve({
+          configured: true,
+          errorCode: "HostedRuntimeWorkflowTerminationTimeoutError",
+          notFound: null,
+          terminated: false,
+        }), timeoutMs);
+      }),
+    );
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
       privyUserId: null,
@@ -581,6 +732,10 @@ describe("hosted account deletion cleanup", () => {
       },
     });
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(4);
+    expect(
+      mocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).toHaveBeenCalledTimes(4);
+    expect(store.row?.temporalCompletedAt).toBeNull();
   });
 });
 
@@ -622,6 +777,7 @@ interface CleanupRow {
   privyUserLookupKey: string | null;
   runtimeLogsCompletedAt: Date | null;
   stripeCompletedAt: Date | null;
+  temporalCompletedAt: Date | null;
   updatedAt: Date;
 }
 

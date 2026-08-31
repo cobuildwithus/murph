@@ -123,6 +123,15 @@ billing restoration for its bounded active roster, and established-member
 Family invite acceptance all signal that exact pointer after commit. The signal
 is a latency hint: the existing bounded mailbox-handoff sweep owns recovery, and
 Stripe receipts retain their exact pointers for replay.
+
+Patch-aware workflows treat `user_not_active` plus an explicitly absent
+workspace as terminal canonical absence for scheduling. They retain any carried
+mailbox pointer for a possible future authoritative reactivation signal, but
+wait signal-only without a processing Activity or retry timer. A late signal
+that races account deletion may recheck Web facts but cannot turn deleted state
+into a self-retrying runtime. Inactive facts with a non-null workspace do not
+use this rule because that workspace can still own retention work.
+
 Workspace-version movement may bypass same-version no-progress backoff, but
 cannot prove that the pointed system item was handled.
 

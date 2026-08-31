@@ -20,13 +20,17 @@ import {
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import {
+  terminateHostedUserRuntimeWorkflowBestEffort,
+  type HostedRuntimeWorkflowTerminationBestEffortResult,
+} from "../hosted-orchestration/workflow-termination";
+import {
   deleteHostedRuntimeLogDataForUsers,
 } from "../hosted-runtime-log/store";
 
 const CLEANUP_SCHEMA = "murph.hosted-account-deletion-cleanup.v1" as const;
 const CLEANUP_BATCH_SIZE = 25;
 const CLEANUP_BATCH_CONCURRENCY = 4;
-const CLEANUP_RUNTIME_DELETE_CONCURRENCY = 4;
+const CLEANUP_RUNTIME_TARGET_CONCURRENCY = 4;
 const CLEANUP_LEASE_MS = 5 * 60_000;
 const CLEANUP_RETRY_BASE_MS = 5 * 60_000;
 const CLEANUP_RETRY_MAX_MS = 24 * 60 * 60_000;
@@ -69,6 +73,7 @@ export interface PreparedHostedAccountDeletionCleanup {
   stripeCustomerIds: readonly string[];
   stripeCompletedAt: Date | null;
   stripeSubscriptionIds: readonly string[];
+  temporalCompletedAt: Date | null;
 }
 
 export interface HostedAccountDeletionCleanupRunResult {
@@ -81,6 +86,11 @@ export interface HostedAccountDeletionCleanupRunResult {
 }
 
 interface HostedRuntimeLogDeletionResult {
+  completed: boolean;
+  errorCode: string | null;
+}
+
+interface HostedTemporalWorkflowTerminationResult {
   completed: boolean;
   errorCode: string | null;
 }
@@ -147,6 +157,7 @@ export async function prepareHostedAccountDeletionCleanup(input: {
     stripeCustomerIds,
     stripeCompletedAt: stripeCustomerIds.length === 0 ? input.now : null,
     stripeSubscriptionIds,
+    temporalCompletedAt: null,
   };
 }
 
@@ -166,6 +177,7 @@ export async function persistHostedAccountDeletionCleanupTx(input: {
       privyUserLookupKey: input.cleanup.privyUserLookupKey,
       runtimeLogsCompletedAt: input.cleanup.runtimeLogsCompletedAt,
       stripeCompletedAt: input.cleanup.stripeCompletedAt,
+      temporalCompletedAt: input.cleanup.temporalCompletedAt,
     },
   });
 }
@@ -230,13 +242,22 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
   try {
     const deadline = createCleanupDeadline(attemptTimeoutMs);
     const payload = await decryptCleanupPayload(cleanup, deadline.signal);
-    const [cloudflare, runtimeLogs, stripeCustomer, privyUser] = await Promise.all([
+    const [
+      cloudflare,
+      runtimeLogs,
+      temporal,
+      stripeCustomer,
+      privyUser,
+    ] = await Promise.all([
       cleanup.cloudflareCompletedAt
         ? completedCloudflareResult()
         : deleteHostedRunnerData(payload.runtimeMemberIds, deadline),
       cleanup.runtimeLogsCompletedAt
         ? completedHostedRuntimeLogDeletionResult()
         : deleteHostedRuntimeLogs(payload.runtimeMemberIds, deadline),
+      cleanup.temporalCompletedAt
+        ? completedHostedTemporalWorkflowTerminationResult()
+        : terminateHostedRuntimeWorkflows(payload.runtimeMemberIds, deadline),
       cleanup.stripeCompletedAt
         ? completedOrSkippedVendorResult(payload.stripeCustomerIds.length > 0)
         : deleteStripeCustomers(payload.stripeCustomerIds, deadline),
@@ -257,9 +278,12 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
       ?? (isTerminalVendorDeletion(privyUser) ? now : null);
     const runtimeLogsCompletedAt = cleanup.runtimeLogsCompletedAt
       ?? (runtimeLogs.completed ? now : null);
+    const temporalCompletedAt = cleanup.temporalCompletedAt
+      ?? (temporal.completed ? now : null);
     let cleanupPending =
       !cloudflareCompletedAt
       || !runtimeLogsCompletedAt
+      || !temporalCompletedAt
       || !stripeCompletedAt
       || !privyCompletedAt;
 
@@ -274,6 +298,7 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
             privyUser,
             runtimeLogs,
             stripeCustomer,
+            temporal,
           }),
           leaseExpiresAt: null,
           leaseToken: null,
@@ -281,12 +306,13 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
           privyCompletedAt,
           runtimeLogsCompletedAt,
           stripeCompletedAt,
+          temporalCompletedAt,
         },
         where: { id: cleanup.id, leaseToken },
       });
     } else {
-      // Persist the isolated target before deleting the receipt. The additive
-      // primary trigger keeps older cleanup code from erasing this retry owner.
+      // Persist every additive target before deleting the receipt. Primary
+      // triggers keep older cleanup code from erasing this retry owner.
       const completed = await input.prisma.hostedAccountDeletionCleanup.updateMany({
         data: {
           cloudflareCompletedAt,
@@ -295,6 +321,7 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
           privyCompletedAt,
           runtimeLogsCompletedAt,
           stripeCompletedAt,
+          temporalCompletedAt,
         },
         where: { id: cleanup.id, leaseToken },
       });
@@ -464,7 +491,7 @@ async function deleteHostedRunnerData(
   const results: HostedRunnerUserDataDeletionBestEffortResult[] = [];
   let nextIndex = 0;
   const workers = Array.from({
-    length: Math.min(CLEANUP_RUNTIME_DELETE_CONCURRENCY, runtimeMemberIds.length),
+    length: Math.min(CLEANUP_RUNTIME_TARGET_CONCURRENCY, runtimeMemberIds.length),
   }, async () => {
     while (!cleanupDeadlineExpired(deadline)) {
       const index = nextIndex;
@@ -633,6 +660,61 @@ function completedHostedRuntimeLogDeletionResult(): HostedRuntimeLogDeletionResu
   return { completed: true, errorCode: null };
 }
 
+async function terminateHostedRuntimeWorkflows(
+  runtimeMemberIds: readonly string[],
+  deadline: CleanupDeadline,
+): Promise<HostedTemporalWorkflowTerminationResult> {
+  // This receipt owns termination retries. The workflow's deleted-member
+  // quiescence remains the defense if a late signal recreates a terminated run.
+  const results: HostedRuntimeWorkflowTerminationBestEffortResult[] = [];
+  let nextIndex = 0;
+  const workers = Array.from({
+    length: Math.min(CLEANUP_RUNTIME_TARGET_CONCURRENCY, runtimeMemberIds.length),
+  }, async () => {
+    while (!cleanupDeadlineExpired(deadline)) {
+      const index = nextIndex;
+      if (index >= runtimeMemberIds.length) {
+        return;
+      }
+      nextIndex += 1;
+      results[index] = await terminateHostedUserRuntimeWorkflowBestEffort({
+        reason: "account-deleted",
+        timeoutMs: remainingCleanupDeadlineMs(deadline),
+        userId: runtimeMemberIds[index]!,
+      });
+    }
+  });
+  await Promise.all(workers);
+
+  if (
+    cleanupDeadlineExpired(deadline)
+    || results.filter((result) => result !== undefined).length
+      < runtimeMemberIds.length
+  ) {
+    return {
+      completed: false,
+      errorCode: CLEANUP_TARGET_TIMEOUT_ERROR_CODE,
+    };
+  }
+
+  const failure = results.find((result) => !result.terminated);
+  if (!failure) {
+    return { completed: true, errorCode: null };
+  }
+  return {
+    completed: false,
+    errorCode: failure.errorCode
+      ?? (failure.configured
+        ? "HOSTED_TEMPORAL_TERMINATION_INCOMPLETE"
+        : "HOSTED_TEMPORAL_NOT_CONFIGURED"),
+  };
+}
+
+function completedHostedTemporalWorkflowTerminationResult():
+  HostedTemporalWorkflowTerminationResult {
+  return { completed: true, errorCode: null };
+}
+
 function mergeCloudflareDeletionResults(
   results: readonly HostedRunnerUserDataDeletionBestEffortResult[],
 ): HostedRunnerUserDataDeletionBestEffortResult {
@@ -747,6 +829,7 @@ function pendingErrorCode(input: {
   privyUser: HostedAccountVendorDeletionResult;
   runtimeLogs: HostedRuntimeLogDeletionResult;
   stripeCustomer: HostedAccountVendorDeletionResult;
+  temporal: HostedTemporalWorkflowTerminationResult;
 }): string | null {
   if (!input.cloudflare.deleted) {
     return input.cloudflare.errorCode
@@ -757,6 +840,10 @@ function pendingErrorCode(input: {
   if (!input.runtimeLogs.completed) {
     return input.runtimeLogs.errorCode
       ?? "HOSTED_RUNTIME_LOG_DELETION_INCOMPLETE";
+  }
+  if (!input.temporal.completed) {
+    return input.temporal.errorCode
+      ?? "HOSTED_TEMPORAL_TERMINATION_INCOMPLETE";
   }
   const vendor = [input.stripeCustomer, input.privyUser]
     .find((result) => !isTerminalVendorDeletion(result));

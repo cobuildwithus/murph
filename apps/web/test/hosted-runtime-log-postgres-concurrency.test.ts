@@ -33,6 +33,10 @@ const accountCleanupMigrationPath = path.resolve(
   testDirectory,
   "../prisma/migrations/20260729010000_hosted_account_cleanup_runtime_logs/migration.sql",
 );
+const temporalCleanupMigrationPath = path.resolve(
+  testDirectory,
+  "../prisma/migrations/20260830170000_hosted_account_cleanup_temporal/migration.sql",
+);
 
 if (
   runPostgresProof
@@ -62,9 +66,14 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       connectionString: postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName),
       max: 8,
     });
-    const [runtimeLogMigration, accountCleanupMigration] = await Promise.all([
+    const [
+      runtimeLogMigration,
+      accountCleanupMigration,
+      temporalCleanupMigration,
+    ] = await Promise.all([
       readFile(runtimeLogMigrationPath, "utf8"),
       readFile(accountCleanupMigrationPath, "utf8"),
+      readFile(temporalCleanupMigrationPath, "utf8"),
     ]);
     await pool.query(runtimeLogMigration);
     await pool.query(`
@@ -73,6 +82,7 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       )
     `);
     await pool.query(accountCleanupMigration);
+    await pool.query(temporalCleanupMigration);
     database = poolDatabase(pool);
   }, 30_000);
 
@@ -134,7 +144,7 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     }
   });
 
-  it("keeps pre-change cleanup receipts until isolated deletion is complete", async () => {
+  it("keeps pre-change receipts until isolated and Temporal cleanup complete", async () => {
     const postgres = requirePool(pool);
     const cleanupId = `cleanup_${randomToken()}`;
     await postgres.query(
@@ -146,21 +156,38 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       "DELETE FROM hosted_account_deletion_cleanup WHERE id = $1",
       [cleanupId],
     )).rejects.toMatchObject({ code: "23514" });
-    await expect(postgres.query<{ runtimeLogsCompletedAt: Date | null }>(
+    await expect(postgres.query<{
+      runtimeLogsCompletedAt: Date | null;
+      temporalCompletedAt: Date | null;
+    }>(
       `
-        SELECT runtime_logs_completed_at AS "runtimeLogsCompletedAt"
+        SELECT
+          runtime_logs_completed_at AS "runtimeLogsCompletedAt",
+          temporal_completed_at AS "temporalCompletedAt"
         FROM hosted_account_deletion_cleanup
         WHERE id = $1
       `,
       [cleanupId],
     )).resolves.toMatchObject({
-      rows: [{ runtimeLogsCompletedAt: null }],
+      rows: [{ runtimeLogsCompletedAt: null, temporalCompletedAt: null }],
     });
 
     await postgres.query(
       `
         UPDATE hosted_account_deletion_cleanup
         SET runtime_logs_completed_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `,
+      [cleanupId],
+    );
+    await expect(postgres.query(
+      "DELETE FROM hosted_account_deletion_cleanup WHERE id = $1",
+      [cleanupId],
+    )).rejects.toMatchObject({ code: "23514" });
+    await postgres.query(
+      `
+        UPDATE hosted_account_deletion_cleanup
+        SET temporal_completed_at = CURRENT_TIMESTAMP
         WHERE id = $1
       `,
       [cleanupId],

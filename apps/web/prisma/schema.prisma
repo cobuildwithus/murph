@@ -1622,6 +1622,7 @@ model HostedAccountDeletionCleanup {
   stripeCompletedAt     DateTime? @map("stripe_completed_at")
   privyCompletedAt      DateTime? @map("privy_completed_at")
   runtimeLogsCompletedAt DateTime? @map("runtime_logs_completed_at")
+  temporalCompletedAt   DateTime? @map("temporal_completed_at")
   attemptCount          Int       @default(0) @map("attempt_count")
   nextAttemptAt         DateTime  @map("next_attempt_at")
   lastAttemptedAt       DateTime? @map("last_attempted_at")

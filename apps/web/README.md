@@ -504,11 +504,14 @@ The hosted Prisma schema keeps ownership sharp and nested:
   Canonical account deletion also inserts one foreign-key-free, KMS-encrypted
   external-cleanup receipt in the same transaction before removing member
   rows. The immediate attempt and existing hourly retention sweep share that
-  idempotent owner for Cloudflare runner/R2, Stripe-customer, and Privy cleanup;
-  unconfigured or partial targets stay pending, completed targets are skipped,
-  and the receipt is removed only after convergence. Immediate target calls are
-  bounded to five seconds plus a small receipt-settlement margin; hourly retries
-  use fifteen-second target bounds and four-receipt concurrency. Cloudflare is
+  idempotent owner for Cloudflare runner/R2, isolated runtime logs, Temporal
+  workflow termination, Stripe-customer, and Privy cleanup; unconfigured or
+  partial targets stay pending, completed targets are skipped, and the receipt
+  is removed only after convergence. Temporal completion requires every
+  captured runtime workflow to be terminated or confirmed absent. Immediate
+  cleanup uses one five-second shared target deadline plus a small
+  receipt-settlement margin; hourly retries use a fifteen-second shared target
+  deadline and four-receipt concurrency. Cloudflare is
   terminal only when the capability-bearing Worker explicitly confirms
   `deleteAllCompleted`, so a legacy response cannot erase retry ownership.
 
