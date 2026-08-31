@@ -113,7 +113,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
   const sessionRuntimeState = new Map<string, {
     headers: Headers;
-    signal: AbortSignal | null;
   }>();
   const sessionHeartbeatStops = new Map<string, () => void>();
   const readSessionWriteFenceHeaders = async (
@@ -251,11 +250,10 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           phase: "session_complete_write_fence_headers",
         });
       }
+      startSessionHeartbeat(snapshotId, headers);
       headers.set("content-type", "application/json; charset=utf-8");
-      // Canonical publication stays non-interruptible once `/complete` starts.
-      // The session signal only prevents replay after foreground cancellation.
-      const sessionCancellationSignal =
-        sessionRuntimeState.get(snapshotId)?.signal ?? null;
+      // Canonical publication and its one exact replay stay non-interruptible
+      // once `/complete` starts.
       const body = JSON.stringify({
         archive: request.ref.archive,
         checkpointRequest: request.checkpointRequest,
@@ -313,13 +311,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         try {
           payload = await complete(Math.max(0, deadlineMs - Date.now()));
         } catch (error) {
-          throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
-            error,
-            sessionCancellationSignal,
-          );
-          if (sessionCancellationSignal?.aborted) {
-            throw error;
-          }
           const replayTimeoutMs = deadlineMs - Date.now();
           if (
             replayTimeoutMs <= 0
@@ -327,15 +318,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           ) {
             throw error;
           }
-          try {
-            payload = await complete(replayTimeoutMs);
-          } catch (replayError) {
-            throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
-              replayError,
-              sessionCancellationSignal,
-            );
-            throw replayError;
-          }
+          payload = await complete(replayTimeoutMs);
         }
       } finally {
         stopSessionHeartbeat(snapshotId);
@@ -821,7 +804,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       }
       sessionRuntimeState.set(started.snapshotId, {
         headers: new Headers(headers),
-        signal: signal ?? null,
       });
       startSessionHeartbeat(started.snapshotId, headers, signal);
       return started;
