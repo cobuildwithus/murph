@@ -101,10 +101,6 @@ export function RuntimeRecheckPanel({
   const hasInvalidInput = parsedInput.invalidEntries.length > 0;
   const queuedCount = parsedInput.userIds.length;
   const nextBatchCount = Math.min(queuedCount, 3);
-  const failedCount = result?.results.filter((entry) => entry.status === "failed").length ?? 0;
-  const signaledCount = result?.results.length
-    ? result.results.length - failedCount
-    : 0;
 
   return (
     <section
@@ -241,140 +237,166 @@ export function RuntimeRecheckPanel({
         </div>
       ) : null}
 
-      {result ? (
-        <div className="mx-5 mt-4 rounded-lg border border-border/70 bg-muted/20">
-          <div className="flex flex-col gap-2 border-b border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="font-serif text-base font-semibold tracking-tight text-foreground">
-                Recheck result
-              </h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Generated {formatDateTime(result.generatedAt)}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge className="tabular-nums" variant="secondary">
-                {formatInteger(signaledCount)} requested
-              </Badge>
-              {failedCount > 0 ? (
-                <Badge className="tabular-nums" variant="destructive">
-                  {formatInteger(failedCount)} failed
-                </Badge>
-              ) : null}
-            </div>
+      <RuntimeRecheckResultPanel result={result} />
+      <RuntimeRecheckDiscovery overview={overview} />
+    </section>
+  );
+}
+
+function RuntimeRecheckResultPanel({
+  result,
+}: {
+  result: HostedRuntimeRecheckResult | null;
+}) {
+  if (!result) {
+    return null;
+  }
+
+  const failedCount = result.results.filter(
+    (entry) => entry.status === "failed",
+  ).length;
+  const signaledCount = result.results.length - failedCount;
+
+  return (
+    <div className="mx-5 mt-4 rounded-lg border border-border/70 bg-muted/20">
+      <div className="flex flex-col gap-2 border-b border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-serif text-base font-semibold tracking-tight text-foreground">
+            Recheck result
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Generated {formatDateTime(result.generatedAt)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge className="tabular-nums" variant="secondary">
+            {formatInteger(signaledCount)} requested
+          </Badge>
+          {failedCount > 0 ? (
+            <Badge className="tabular-nums" variant="destructive">
+              {formatInteger(failedCount)} failed
+            </Badge>
+          ) : null}
+        </div>
+      </div>
+      <div className="divide-y divide-border/70">
+        {result.results.map((entry) => (
+          <div
+            className="grid min-w-0 gap-2 px-4 py-3 text-sm sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.4fr)] sm:items-center"
+            key={`${entry.userId}:${entry.status}`}
+          >
+            <Badge variant={entry.status === "signaled" ? "secondary" : "destructive"}>
+              {entry.status === "signaled" ? (
+                <CheckCircle2Icon data-icon="inline-start" />
+              ) : (
+                <AlertCircleIcon data-icon="inline-start" />
+              )}
+              {entry.status === "signaled" ? "Requested" : "Failed"}
+            </Badge>
+            <span className="min-w-0 break-all font-mono text-xs text-foreground">
+              {entry.userId}
+            </span>
+            <span className="min-w-0 break-words text-xs text-muted-foreground">
+              {entry.status === "signaled"
+                ? "Signal acknowledged; removed from queue"
+                : entry.errorMessage}
+            </span>
           </div>
-          <div className="divide-y divide-border/70">
-            {result.results.map((entry) => (
-              <div
-                className="grid min-w-0 gap-2 px-4 py-3 text-sm sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.4fr)] sm:items-center"
-                key={`${entry.userId}:${entry.status}`}
-              >
-                <Badge variant={entry.status === "signaled" ? "secondary" : "destructive"}>
-                  {entry.status === "signaled" ? (
-                    <CheckCircle2Icon data-icon="inline-start" />
-                  ) : (
-                    <AlertCircleIcon data-icon="inline-start" />
-                  )}
-                  {entry.status === "signaled" ? "Requested" : "Failed"}
-                </Badge>
-                <span className="min-w-0 break-all font-mono text-xs text-foreground">
-                  {entry.userId}
-                </span>
-                <span className="min-w-0 break-words text-xs text-muted-foreground">
-                  {entry.status === "signaled"
-                    ? "Signal acknowledged; removed from queue"
-                    : entry.errorMessage}
-                </span>
+        ))}
+      </div>
+      <div className="border-t border-border/70 px-4 py-3 text-pretty text-xs leading-5 text-muted-foreground">
+        Acknowledged IDs are removed from the queue. Failed and unsent IDs remain. A recheck request is not proof of recovery.
+      </div>
+    </div>
+  );
+}
+
+function RuntimeRecheckDiscovery({
+  overview,
+}: {
+  overview: HostedRuntimeStalledRecheckOverview;
+}) {
+  return (
+    <div className="pt-5">
+      <div className="flex flex-col gap-2 px-5 pb-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chart-5">
+            Automatic discovery
+          </span>
+          <h3 className="mt-1 font-serif text-lg font-semibold tracking-tight text-foreground">
+            Detected legacy device-sync stalls
+          </h3>
+          <p className="mt-1 max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
+            Active runtimes matching the proven legacy signature: a system mailbox head stuck on a device-sync wake for at least 15 minutes.
+          </p>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          “Use detected candidates” adds this captured list to the queue.
+        </span>
+      </div>
+
+      {overview.candidates.length > 0 ? (
+        <>
+          <div className="divide-y divide-border/70 border-t border-border/70 sm:hidden">
+            {overview.candidates.map((candidate) => (
+              <div className="px-5 py-4" key={candidate.userId}>
+                <p className="break-all font-mono text-xs leading-5 text-foreground">
+                  {candidate.userId}
+                </p>
+                <dl className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                      Pending items
+                    </dt>
+                    <dd className="mt-1 font-mono text-xs tabular-nums text-foreground">
+                      {candidate.pendingItemCount}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                      Stalled since
+                    </dt>
+                    <dd className="mt-1 font-mono text-xs text-foreground">
+                      {formatDateTime(candidate.stalledSince)}
+                    </dd>
+                  </div>
+                </dl>
               </div>
             ))}
           </div>
-          <div className="border-t border-border/70 px-4 py-3 text-pretty text-xs leading-5 text-muted-foreground">
-            Acknowledged IDs are removed from the queue. Failed and unsent IDs remain. A recheck request is not proof of recovery.
-          </div>
-        </div>
-      ) : null}
-
-      <div className="pt-5">
-        <div className="flex flex-col gap-2 px-5 pb-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chart-5">
-              Automatic discovery
-            </span>
-            <h3 className="mt-1 font-serif text-lg font-semibold tracking-tight text-foreground">
-              Detected legacy device-sync stalls
-            </h3>
-            <p className="mt-1 max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
-              Active runtimes matching the proven legacy signature: a system mailbox head stuck on a device-sync wake for at least 15 minutes.
-            </p>
-          </div>
-          <span className="text-xs text-muted-foreground">
-            “Use detected candidates” adds this captured list to the queue.
-          </span>
-        </div>
-
-        {overview.candidates.length > 0 ? (
-          <>
-            <div className="divide-y divide-border/70 border-t border-border/70 sm:hidden">
-              {overview.candidates.map((candidate) => (
-                <div className="px-5 py-4" key={candidate.userId}>
-                  <p className="break-all font-mono text-xs leading-5 text-foreground">
-                    {candidate.userId}
-                  </p>
-                  <dl className="mt-3 grid grid-cols-2 gap-3">
-                    <div>
-                      <dt className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                        Pending items
-                      </dt>
-                      <dd className="mt-1 font-mono text-xs tabular-nums text-foreground">
-                        {candidate.pendingItemCount}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                        Stalled since
-                      </dt>
-                      <dd className="mt-1 font-mono text-xs text-foreground">
-                        {formatDateTime(candidate.stalledSince)}
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-              ))}
-            </div>
-            <div className="hidden sm:block">
-              <Table className="text-[13px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="pl-5">User</TableHead>
-                    <TableHead className="text-right">Pending system items</TableHead>
-                    <TableHead className="pr-5">Stalled since</TableHead>
+          <div className="hidden sm:block">
+            <Table className="text-[13px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="pl-5">User</TableHead>
+                  <TableHead className="text-right">Pending system items</TableHead>
+                  <TableHead className="pr-5">Stalled since</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {overview.candidates.map((candidate) => (
+                  <TableRow key={candidate.userId}>
+                    <TableCell className="max-w-[30rem] whitespace-normal break-all pl-5 font-mono text-xs text-foreground">
+                      {candidate.userId}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs tabular-nums">
+                      {candidate.pendingItemCount}
+                    </TableCell>
+                    <TableCell className="pr-5 font-mono text-xs">
+                      {formatDateTime(candidate.stalledSince)}
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {overview.candidates.map((candidate) => (
-                    <TableRow key={candidate.userId}>
-                      <TableCell className="max-w-[30rem] whitespace-normal break-all pl-5 font-mono text-xs text-foreground">
-                        {candidate.userId}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs tabular-nums">
-                        {candidate.pendingItemCount}
-                      </TableCell>
-                      <TableCell className="pr-5 font-mono text-xs">
-                        {formatDateTime(candidate.stalledSince)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </>
-        ) : (
-          <p className="px-5 pb-7 pt-2 text-pretty text-sm leading-6 text-muted-foreground">
-            No active runtimes currently match the legacy stall signature. You can still enter member IDs above.
-          </p>
-        )}
-      </div>
-    </section>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      ) : (
+        <p className="px-5 pb-7 pt-2 text-pretty text-sm leading-6 text-muted-foreground">
+          No active runtimes currently match the legacy stall signature. You can still enter member IDs above.
+        </p>
+      )}
+    </div>
   );
 }
 

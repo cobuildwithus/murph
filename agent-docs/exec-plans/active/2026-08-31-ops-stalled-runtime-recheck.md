@@ -120,6 +120,8 @@ Updated: 2026-08-31
   isolated migrated development database; the database was removed afterward.
 - Passed: Hosted Web typecheck, scoped ESLint, `git diff --check`, and the
   changed-file privacy/identifier scan.
+- Passed: `pnpm complexity:diff`; the new panel adds no complexity debt and its
+  maximum function complexity is 16, below the threshold of 20.
 - Ready: desktop and 390px browser walkthroughs of the production-component
   design study, including populated and partial-failure states. The mobile
   result has no horizontal overflow; the empty and pending/error states are
