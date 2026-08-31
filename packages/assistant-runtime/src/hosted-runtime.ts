@@ -272,6 +272,7 @@ import {
 } from "./hosted-runtime/wake-candidates.ts";
 import {
   consumePendingRuntimeWakeUnlessShuttingDown,
+  createHostedSystemMailboxPreemptionWakeSignal,
 } from "./hosted-runtime/runtime-wake.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -2714,6 +2715,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         || restoredSystemMailboxProgressNeedsCheckpoint;
       let checkpointed = false;
       let foregroundWakeObserved = false;
+      let checkpointReportedConversationInputAhead = false;
       let defaultOwnerWakeObserved = false;
       let assistantCronDeadlineMs: number | null = null;
       const observeForegroundWake = (
@@ -3024,6 +3026,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         systemMailboxProgressedSinceCheckpoint = false;
         currentRedactedStatus = checkpoint.workspace.redactedStatus ?? {};
         if (checkpoint.conversationInputAhead === true) {
+          checkpointReportedConversationInputAhead = true;
           foregroundWakeObserved = true;
         }
         await finishInitialImportEffectsOnce();
@@ -7620,45 +7623,6 @@ function hostedRuntimePendingWakeMatches(
 ): boolean {
   return left.nextWakeAt === right.nextWakeAt
     && left.nextWakeReason === right.nextWakeReason;
-}
-
-function createHostedSystemMailboxPreemptionWakeSignal(
-  runtimeWakeSignal: RuntimeWakeSignal | null,
-  onPreemptingWake: (notification: RuntimeWakeNotification) => void,
-): RuntimeWakeSignal | null {
-  if (!runtimeWakeSignal) {
-    return null;
-  }
-
-  // Exact system-mailbox notifications address this active owner. Every other
-  // classification remains a preemption request for foreground/default work.
-  const preemptsActivePass = (notification: RuntimeWakeNotification): boolean =>
-    notification.requestedProcessingMode !== "system_mailbox";
-
-  return {
-    consumePending() {
-      while (true) {
-        const notification = runtimeWakeSignal.consumePending();
-        if (!notification || preemptsActivePass(notification)) {
-          return notification;
-        }
-      }
-    },
-    notify(input) {
-      runtimeWakeSignal.notify(input);
-    },
-    async wait(signal) {
-      while (true) {
-        const notification = await runtimeWakeSignal.wait(signal);
-        if (preemptsActivePass(notification)) {
-          // wait() consumes the notification before polling consumers can see it.
-          // Stop retained owned work before the wait result crosses another turn.
-          onPreemptingWake(notification);
-          return notification;
-        }
-      }
-    },
-  };
 }
 
 function consumePendingHostedRuntimeWake(

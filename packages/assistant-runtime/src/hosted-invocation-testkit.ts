@@ -16,6 +16,13 @@ export {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
   createHostedWorkspaceRuntimeBridgeJobOptions,
 } from "./hosted-runtime/snapshot-bridge.ts";
+export {
+  createCoalescingRuntimeWakeSignal,
+  createHostedSystemMailboxPreemptionWakeSignal,
+} from "./hosted-runtime/runtime-wake.ts";
+export type {
+  RuntimeWakeNotification,
+} from "./hosted-runtime/runtime-wake.ts";
 export type {
   HostedMailboxPayloadDecodeInput,
   HostedMailboxPayloadDecodeItemRef,

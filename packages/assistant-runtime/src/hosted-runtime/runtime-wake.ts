@@ -22,6 +22,19 @@ export interface RuntimeWakeSignal {
   wait(signal?: AbortSignal | null): Promise<RuntimeWakeNotification>;
 }
 
+function coalesceRuntimeWakeProcessingMode(
+  pendingMode: HostedWorkspaceInvocationProcessingMode | null,
+  incomingMode: HostedWorkspaceInvocationProcessingMode | null | undefined,
+): HostedWorkspaceInvocationProcessingMode | null {
+  if (pendingMode !== "system_mailbox") {
+    return pendingMode;
+  }
+
+  return incomingMode === "system_mailbox"
+    ? pendingMode
+    : incomingMode ?? null;
+}
+
 export function consumePendingRuntimeWakeUnlessShuttingDown(input: {
   runtimeWakeSignal: RuntimeWakeSignal | null | undefined;
   shutdownSignal?: AbortSignal | null;
@@ -31,6 +44,43 @@ export function consumePendingRuntimeWakeUnlessShuttingDown(input: {
   }
 
   return input.runtimeWakeSignal?.consumePending() ?? null;
+}
+
+export function createHostedSystemMailboxPreemptionWakeSignal(
+  runtimeWakeSignal: RuntimeWakeSignal | null,
+  onPreemptingWake: (notification: RuntimeWakeNotification) => void,
+): RuntimeWakeSignal | null {
+  if (!runtimeWakeSignal) {
+    return null;
+  }
+
+  // Exact system-mailbox notifications address this active owner. Every other
+  // classification remains a preemption request for foreground/default work.
+  const preemptsActivePass = (notification: RuntimeWakeNotification): boolean =>
+    notification.requestedProcessingMode !== "system_mailbox";
+
+  return {
+    consumePending() {
+      while (true) {
+        const notification = runtimeWakeSignal.consumePending();
+        if (!notification || preemptsActivePass(notification)) {
+          return notification;
+        }
+      }
+    },
+    notify(input) {
+      runtimeWakeSignal.notify(input);
+    },
+    async wait(signal) {
+      while (true) {
+        const notification = await runtimeWakeSignal.wait(signal);
+        if (preemptsActivePass(notification)) {
+          onPreemptingWake(notification);
+          return notification;
+        }
+      }
+    },
+  };
 }
 
 export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
@@ -101,9 +151,10 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         if (!pendingOrchestration && notification.orchestration) {
           pendingOrchestration = notification.orchestration;
         }
-        pendingRequestedProcessingMode =
-          notification.requestedProcessingMode
-          ?? pendingRequestedProcessingMode;
+        pendingRequestedProcessingMode = coalesceRuntimeWakeProcessingMode(
+          pendingRequestedProcessingMode,
+          notification.requestedProcessingMode,
+        );
       }
       pending = true;
       if (waiters.size > 0 && !flushScheduled) {

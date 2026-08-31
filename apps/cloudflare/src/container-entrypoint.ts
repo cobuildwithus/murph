@@ -216,6 +216,19 @@ type HostedContainerRuntimeWakeNotification = {
   requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
 };
 
+function coalescePendingRuntimeWakeProcessingMode(
+  pendingMode: HostedWorkspaceInvocationProcessingMode | null,
+  incomingMode: HostedWorkspaceInvocationProcessingMode | null | undefined,
+): HostedWorkspaceInvocationProcessingMode | null {
+  if (pendingMode !== "system_mailbox") {
+    return pendingMode;
+  }
+
+  return incomingMode === "system_mailbox"
+    ? pendingMode
+    : incomingMode ?? null;
+}
+
 export async function startHostedContainerEntrypoint(input: {
   port?: number;
   runtime?: HostedContainerRuntimeOptions;
@@ -474,12 +487,18 @@ export async function startHostedContainerEntrypoint(input: {
             if (!activeRuntimeWakePending) {
               activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
               activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
-            } else if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
-              activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
+              activeRuntimeWakePendingRequestedProcessingMode =
+                wakeRequest?.requestedProcessingMode ?? null;
+            } else {
+              if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
+                activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
+              }
+              activeRuntimeWakePendingRequestedProcessingMode =
+                coalescePendingRuntimeWakeProcessingMode(
+                  activeRuntimeWakePendingRequestedProcessingMode,
+                  wakeRequest?.requestedProcessingMode,
+                );
             }
-            activeRuntimeWakePendingRequestedProcessingMode =
-              wakeRequest?.requestedProcessingMode
-              ?? activeRuntimeWakePendingRequestedProcessingMode;
             activeRuntimeWakePending = true;
             pending = true;
             accepted = true;

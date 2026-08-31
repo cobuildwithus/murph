@@ -796,23 +796,37 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("coalesced runtime wakes preserve the latest explicit owner request", () => {
+  test.each([
+    ["default then system", "default", "system_mailbox", "default"],
+    ["media retention then system", "inbox_media_retention", "system_mailbox", "inbox_media_retention"],
+    ["unclassified then system", null, "system_mailbox", null],
+    ["system then default", "system_mailbox", "default", "default"],
+    ["system then media retention", "system_mailbox", "inbox_media_retention", "inbox_media_retention"],
+    ["system then unclassified", "system_mailbox", null, null],
+    ["system then system", "system_mailbox", "system_mailbox", "system_mailbox"],
+  ] as const)("coalesced runtime wakes preserve foreground priority: %s", (
+    _caseName,
+    firstRequestedProcessingMode,
+    secondRequestedProcessingMode,
+    expectedRequestedProcessingMode,
+  ) => {
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
     runtimeWakeSignal.notify({
       notifiedAtEpochMs: Date.parse(TEST_NOW),
-      requestedProcessingMode: "default",
+      requestedProcessingMode: firstRequestedProcessingMode,
     });
-    runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
     runtimeWakeSignal.notify({
-      notifiedAtEpochMs: Date.parse(TEST_NOW) + 2,
-      requestedProcessingMode: "system_mailbox",
+      notifiedAtEpochMs: Date.parse(TEST_NOW) + 1,
+      requestedProcessingMode: secondRequestedProcessingMode,
     });
 
     assert.deepEqual(runtimeWakeSignal.consumePending(), {
-      latestNotifiedAtEpochMs: Date.parse(TEST_NOW) + 2,
+      latestNotifiedAtEpochMs: Date.parse(TEST_NOW) + 1,
       notifiedAtEpochMs: Date.parse(TEST_NOW),
-      requestedProcessingMode: "system_mailbox",
+      ...(expectedRequestedProcessingMode
+        ? { requestedProcessingMode: expectedRequestedProcessingMode }
+        : {}),
     });
   });
 
