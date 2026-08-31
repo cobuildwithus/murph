@@ -376,6 +376,7 @@ jobs:
     needs: markdown-docs-scope
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17
@@ -391,7 +392,7 @@ jobs:
         ports:
           - 5432:5432
     env:
-      MURPH_APP_VERIFY_PARALLEL: "1"
+      MURPH_APP_VERIFY_PARALLEL: "0"
       MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test
       MURPH_VERIFY_STEP_PARALLEL: "1"
     steps:

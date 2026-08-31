@@ -1462,7 +1462,7 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
-- Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state. Before health Q&A or advice beyond it, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns.
+- Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state. Before health Q&A or advice beyond it, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Skip this search only when the request is limited to deterministic exact food-label nutrition facts resolved by food-journal's label database; use that database directly. Health reasoning or advice beyond the returned label facts still requires Commons. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 

@@ -19072,6 +19072,264 @@ async function materializeStrictMealImportVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+describeRealCodex('real Codex food label query recovery e2e', () => {
+  it('repairs one overlong food-label query before completing the lookup', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-food-label-query-recovery-e2e-'),
+    )
+    const syntheticPackageDescription = [
+      'Northstar Foods Hearth-Roasted Chickpea Bowl',
+      'family-size limited seasonal pantry edition with lemon tahini',
+      'toasted sesame herb garnish fire-roasted peppers and brown rice',
+      'refrigerated prepared meal with recyclable sleeve',
+      'chef-inspired weeknight collection batch seven',
+      'serving suggestion with fresh parsley and a squeeze of lemon',
+    ].join(' ')
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'food-commands.log')
+      const queryLogPath = path.join(workingDirectory, 'food-queries.log')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const statePath = path.join(workingDirectory, 'food-search-state.txt')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeFoodLabelQueryRecoveryVaultCli({
+          binDirectory,
+          commandLogPath,
+          queryLogPath,
+          statePath,
+        }),
+        writeFile(commandLogPath, '', 'utf8'),
+        writeFile(queryLogPath, '', 'utf8'),
+        writeFile(statePath, '', 'utf8'),
+      ])
+
+      expect(syntheticPackageDescription.length).toBeGreaterThan(256)
+      const inheritedPath = normalizeEnvString(config.env.PATH)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-30',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: inheritedPath
+            ? `${binDirectory}${path.delimiter}${inheritedPath}`
+            : binDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Look up this food label and tell me the calories and protein per labeled serving.',
+          `Use this exact package description for the lookup: ${syntheticPackageDescription}`,
+          'Do not log a meal or save anything.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      const queries = (await readFile(queryLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const commandText = actions
+        .filter((action) => action.kind === 'command')
+        .map((action) => action.command)
+        .join('\n')
+      const forbiddenVaultCommands = commands.filter((command) =>
+        !command.startsWith('food search-labels ')
+      )
+      const reply = result.finalMessage.trim()
+
+      process.stdout.write(
+        `[food-label-query-recovery-e2e] ${JSON.stringify({
+          lookupAttempts: queries.length,
+          queryLengths: queries.map((query) => query.length),
+          reply,
+        })}\n`,
+      )
+      expect(queries).toHaveLength(2)
+      expect(queries[0]?.length).toBeGreaterThan(256)
+      expect(queries[1]?.length).toBeGreaterThan(0)
+      expect(queries[1]?.length).toBeLessThanOrEqual(256)
+      expect(queries[1]).not.toBe(queries[0])
+      expect(queries[1]).toMatch(/Northstar|chickpea/iu)
+      expect(forbiddenVaultCommands).toEqual([])
+      expect(commandText).toContain('food-journal')
+      expect(commandText).not.toContain('commons knowledge search')
+      expect(commandText).not.toMatch(
+        /\bvault-cli\s+(?:meal\s+(?:add|edit|import-json)|food\s+(?:save|edit|import-json))\b/iu,
+      )
+      expect(commandText).not.toMatch(/\b(?:curl|wget)\b/iu)
+      expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+      expect(reply).toMatch(/420.*calor|calor.*420/iu)
+      expect(reply).toMatch(/18\s*(?:g|grams?).*protein|protein.*18\s*(?:g|grams?)/iu)
+      expect(reply).toMatch(/(?:1|one)\s+bowl/iu)
+      expect(reply).not.toContain(syntheticPackageDescription)
+      expect(reply).not.toMatch(
+        /VALIDATION_ERROR|too_big|expected string|submitted query|query limit|internal error|characters? long/iu,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
+async function materializeFoodLabelQueryRecoveryVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+  queryLogPath: string
+  statePath: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const validationError = {
+    code: 'VALIDATION_ERROR',
+    message: 'Too big: expected string to have <=256 characters',
+    fieldErrors: [{
+      code: 'too_big',
+      expected: '',
+      message: 'Too big: expected string to have <=256 characters',
+      missing: false,
+      path: 'query',
+      received: '',
+    }],
+  }
+  const lookupResult = {
+    genericOnly: false,
+    includeOffMarket: false,
+    items: [{
+      brand: 'Northstar Foods',
+      contaminantSummary: {
+        alertCount: 0,
+        alerts: [],
+        alertsTruncated: false,
+        murphConcernLevel: 'unknown',
+        observationCount: 0,
+        observations: [],
+        observationsTruncated: false,
+        status: 'no_known_product_tests',
+      },
+      dataOrigin: 'synthetic_branded_label',
+      dataOriginId: 'northstar-chickpea-bowl',
+      id: 'label:northstar-chickpea-bowl',
+      label: {
+        calories: 420,
+        carbohydrateGrams: 58,
+        fatGrams: 14,
+        fiberGrams: 12,
+        proteinGrams: 18,
+        servingSize: 1,
+        servingSizeUnit: 'bowl',
+      },
+      name: 'Northstar Foods Hearth-Roasted Chickpea Bowl',
+      offMarket: false,
+      upc: null,
+    }],
+    limit: 1,
+    query: 'Northstar Foods Hearth-Roasted Chickpea Bowl',
+    source: 'murph-data-api',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+  const helpText = [
+    'vault-cli food search-labels — Search the hosted food label database from hosted assistant runtime without writing records.',
+    '',
+    'Usage: vault-cli food search-labels <query> [options]',
+    '',
+    'Arguments:',
+    '  query  Food product, brand, USDA FDC id, UPC, or generic ingredient search text.',
+    '',
+    'Options:',
+    '  --limit <number>      Maximum label matches to return. Defaults to 1.',
+    '  --full-label          Return the complete source label.',
+    '  --generic             Search only USDA generic food rows.',
+    '  --include-off-market  Include labels marked off-market.',
+    '  --format <toon|json|yaml|md|jsonl>  Output format',
+    '  --schema              Show JSON Schema for command',
+  ].join('\n')
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      `  food\\ search-labels\\ --help*) printf '%s\\n' ${quoteNutritionShellLiteral(helpText)} ;;`,
+      '  food\\ search-labels\\ *)',
+      '    query="$3"',
+      `    printf '%s\\n' "$query" >> ${quoteNutritionShellLiteral(input.queryLogPath)}`,
+      `    if grep -q '^completed$' ${quoteNutritionShellLiteral(input.statePath)}; then`,
+      '      printf \'duplicate food label lookup\\n\' >&2',
+      '      exit 65',
+      '    fi',
+      `    if [ ! -s ${quoteNutritionShellLiteral(input.statePath)} ]; then`,
+      '      if [ "${#query}" -le 256 ]; then',
+      '        printf \'first food label query must exceed 256 characters\\n\' >&2',
+      '        exit 66',
+      '      fi',
+      `      printf '%s\\n' rejected > ${quoteNutritionShellLiteral(input.statePath)}`,
+      `      ${emit(validationError)}`,
+      '      exit 1',
+      '    fi',
+      '    if [ "${#query}" -gt 256 ]; then',
+      '      printf \'corrected food label query still exceeds 256 characters\\n\' >&2',
+      '      exit 67',
+      '    fi',
+      '    case "$query" in',
+      '      *Northstar*|*northstar*|*Chickpea*|*chickpea*) ;;',
+      '      *) printf \'corrected query lost the product identity\\n\' >&2; exit 68 ;;',
+      '    esac',
+      `    printf '%s\\n' completed > ${quoteNutritionShellLiteral(input.statePath)}`,
+      `    ${emit(lookupResult)}`,
+      '    ;;',
+      '  *) printf \'unsupported food label recovery fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
   it('resolves an exact menu label before saving a restaurant meal', {
     timeout: 900_000,
