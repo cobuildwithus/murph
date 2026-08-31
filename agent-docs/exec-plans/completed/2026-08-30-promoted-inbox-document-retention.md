@@ -1,8 +1,8 @@
 # Retire Promoted Inbox Document Duplicates
 
-Status: active
+Status: completed
 Created: 2026-08-30
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 ## Goal
 
@@ -42,7 +42,7 @@ Updated: 2026-08-30
 2. [x] Implement the narrow eligibility extension and focused regression coverage.
 3. [x] Update durable contracts and run focused verification/typecheck.
 4. [x] Connect the registered explicit document-save path to exact inbox preservation after the final review found the correlation writer was otherwise unreachable.
-5. [ ] Complete required specialist and final review gates, commit, push, and close this plan.
+5. [x] Complete required specialist and final review gates, commit, push, and close this plan.
 
 ## Decisions
 
@@ -82,6 +82,14 @@ Updated: 2026-08-30
 - Accepted: one preserve-all batch snapshotted live document IDs before processing, so later byte-identical attachments could not reuse a document created earlier in that batch. One per-receipt in-memory set is now updated after each successful reuse or create; the seam test proves one canonical document with distinct correlations for both attachments.
 - Complexity boundary: all corrections reuse existing Core evidence, Inbox Services ownership, command registry, and write-batch preconditions; no new durable owner, file family, cache, index, queue, scheduler, migration, or repair loop was introduced.
 
+## Review round 5 disposition
+
+- Accepted: the CLI classified a process-working-directory-relative inbox source with an absolute path, then passed the original relative string into a vault-relative resolver. With a relative `--vault`, that second interpretation doubled the vault segment and rejected an otherwise valid save.
+- Correction: one command-local resolver now returns either the normalized absolute inbox source or `null`. Inbox Services receives that resolved source, while the unchanged CLI receipt retains the caller's original `sourceFile` string.
+- Proof: the production-registry journey now runs from the vault parent with relative `--vault` and source arguments, then proves the first save, immediate retry, and post-text-retention retry remain exact and idempotent.
+- Review boundary: the user explicitly opted out of another ReviewGPT round after this narrow accepted correction. Parent review, focused local proof, exact-head CI, and merge-conflict proof remain required.
+- Complexity boundary: the correction deletes a redundant path-resolution branch and adds no owner, helper layer, state, dependency, or compatibility path.
+
 ## Verification
 
 - Passed: contracts full package tests and artifact verification (42 files, 347 tests).
@@ -94,3 +102,5 @@ Updated: 2026-08-30
 - Passed: agent-doc drift and `git diff --check` before the review-candidate commit.
 - Passed after round 4 remediation: Inbox Services full suite (13 files, 67 tests), focused CLI document/meal file (10 tests), hosted retention file (17 tests), and inbox-services/CLI/assistant-runtime typechecks and builds. The production CLI proof covers exact selection from a two-document capture, idempotent retry, override and explicit-reuse non-correlation, and stale-path rejection; the hosted journey uses the same Inbox Services seam before lazy snapshot retention and restore validation.
 - Passed after independent audit remediation: inboxd attachment-retention suite (31 tests), Inbox Services full suite (13 files, 67 tests), focused production-registry CLI file (10 tests), and hosted retention file (17 tests). The CLI proof additionally covers a valid `attachments` account segment, retry after text retention without a second manifest, deleted-owner rejection before import, and unchanged relative-path semantics.
+- Passed after round 5 remediation: the exact relative-vault production-registry journey, the full 10-test CLI document/meal file, CLI typecheck and build, agent-doc drift, privacy scan, and `git diff --check`.
+Completed: 2026-08-31

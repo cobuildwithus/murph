@@ -278,11 +278,16 @@ async function createVault(): Promise<string> {
   return vaultRoot
 }
 
-test('document import preserves the exact current inbox attachment through the registered command', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-inbox-document-'))
+test.sequential('document import preserves the exact current inbox attachment through the registered command', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-inbox-document-'))
+  const vaultName = 'member-vault'
+  const vaultRoot = path.join(workspaceRoot, vaultName)
+  const previousWorkingDirectory = process.cwd()
   const inboxServices = createIntegratedInboxServices()
 
   try {
+    await mkdir(vaultRoot, { recursive: true })
+    process.chdir(workspaceRoot)
     await initializeVault({
       vaultRoot,
       createdAt: '2026-08-30T12:00:00.000Z',
@@ -336,6 +341,10 @@ test('document import preserves the exact current inbox attachment through the r
     const secondAttachment = persisted.stored.attachments[1]
     assert.ok(secondAttachment?.storedPath)
     assert.ok(secondAttachment.attachmentId)
+    const secondAttachmentSource = path.join(
+      vaultName,
+      secondAttachment.storedPath,
+    )
     const first = await runInProcessJsonCli<{
       created: boolean
       documentId: string
@@ -344,16 +353,16 @@ test('document import preserves the exact current inbox attachment through the r
     }>(cli, [
       'document',
       'import',
-      path.join(vaultRoot, secondAttachment.storedPath),
+      secondAttachmentSource,
       '--vault',
-      vaultRoot,
+      vaultName,
     ])
     assert.equal(first.exitCode, null)
     const firstResult = requireData(first.envelope)
     assert.equal(firstResult.created, true)
     assert.equal(
       firstResult.sourceFile,
-      path.join(vaultRoot, secondAttachment.storedPath),
+      secondAttachmentSource,
     )
     assert.match(firstResult.rawFile, /^raw\/documents\//u)
 
@@ -363,9 +372,9 @@ test('document import preserves the exact current inbox attachment through the r
     }>(cli, [
       'document',
       'import',
-      path.join(vaultRoot, secondAttachment.storedPath),
+      secondAttachmentSource,
       '--vault',
-      vaultRoot,
+      vaultName,
     ])
     assert.equal(retry.exitCode, null, JSON.stringify(retry.envelope))
     const retryResult = requireData(retry.envelope)
@@ -386,9 +395,9 @@ test('document import preserves the exact current inbox attachment through the r
     }>(cli, [
       'document',
       'import',
-      path.join(vaultRoot, secondAttachment.storedPath),
+      secondAttachmentSource,
       '--vault',
-      vaultRoot,
+      vaultName,
     ])
     assert.equal(
       retainedTextRetry.exitCode,
@@ -450,7 +459,7 @@ test('document import preserves the exact current inbox attachment through the r
       '--title',
       'Explicit title',
       '--vault',
-      vaultRoot,
+      vaultName,
     ])
     assert.equal(overridden.exitCode, null, JSON.stringify(overridden.envelope))
     const overriddenResult = requireData(overridden.envelope)
@@ -465,7 +474,7 @@ test('document import preserves the exact current inbox attachment through the r
       firstAttachmentAbsolutePath,
       '--reuse-exact',
       '--vault',
-      vaultRoot,
+      vaultName,
     ])
     assert.equal(explicitReuse.exitCode, null)
     const explicitReuseResult = requireData(explicitReuse.envelope)
@@ -474,7 +483,7 @@ test('document import preserves the exact current inbox attachment through the r
 
     const staleRelativePath =
       'raw/inbox/telegram/self/2026/08/cap_missing_document/attachments/stale.pdf'
-    const staleAbsolutePath = path.join(vaultRoot, staleRelativePath)
+    const staleAbsolutePath = path.resolve(vaultName, staleRelativePath)
     await mkdir(path.dirname(staleAbsolutePath), { recursive: true })
     await writeFile(staleAbsolutePath, '%PDF stale document', 'utf8')
     const stale = await runInProcessJsonCli(cli, [
@@ -482,9 +491,9 @@ test('document import preserves the exact current inbox attachment through the r
       'import',
       staleAbsolutePath,
       '--vault',
-      vaultRoot,
+      vaultName,
     ])
-    assert.equal(stale.exitCode, 1)
+    assert.equal(stale.exitCode, 1, JSON.stringify(stale.envelope))
     assert.equal(
       stale.envelope.ok ? null : stale.envelope.error.code,
       'INBOX_CAPTURE_NOT_FOUND',
@@ -506,7 +515,8 @@ test('document import preserves the exact current inbox attachment through the r
       }],
     )
   } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
+    process.chdir(previousWorkingDirectory)
+    await rm(workspaceRoot, { recursive: true, force: true })
   }
 })
 

@@ -90,19 +90,18 @@ export function registerDocumentCommands(
       async run({ args, options, requestId }) {
         const file = String(args.file ?? '')
         const vault = String(options.vault ?? '')
-        if (
-          isDefaultInboxDocumentImport({
-            file,
-            vault,
-            title: options.title,
-            occurredAt: options.occurredAt,
-            note: options.note,
-            source: options.source,
-            reuseExact: options.reuseExact,
-          })
-        ) {
+        const inboxDocumentSource = resolveDefaultInboxDocumentImportSource({
+          file,
+          vault,
+          title: options.title,
+          occurredAt: options.occurredAt,
+          note: options.note,
+          source: options.source,
+          reuseExact: options.reuseExact,
+        })
+        if (inboxDocumentSource !== null) {
           const preserved = await inboxServices.preserveDocumentAttachment({
-            file,
+            file: inboxDocumentSource,
             vault,
             requestId,
           })
@@ -232,7 +231,7 @@ export function registerDocumentCommands(
   })
 }
 
-function isDefaultInboxDocumentImport(input: {
+function resolveDefaultInboxDocumentImportSource(input: {
   file: string
   vault: string
   title: unknown
@@ -240,7 +239,7 @@ function isDefaultInboxDocumentImport(input: {
   note: unknown
   source: unknown
   reuseExact: unknown
-}): boolean {
+}): string | null {
   if (
     typeof input.title === 'string' ||
     typeof input.occurredAt === 'string' ||
@@ -248,13 +247,11 @@ function isDefaultInboxDocumentImport(input: {
     typeof input.source === 'string' ||
     input.reuseExact === true
   ) {
-    return false
+    return null
   }
 
   const absoluteVaultRoot = path.resolve(input.vault)
-  const absoluteFile = path.isAbsolute(input.file)
-    ? path.resolve(input.file)
-    : path.resolve(input.file)
+  const absoluteFile = path.resolve(input.file)
   const relativePath = path.relative(absoluteVaultRoot, absoluteFile)
   if (
     !relativePath ||
@@ -262,9 +259,11 @@ function isDefaultInboxDocumentImport(input: {
     relativePath.startsWith(`..${path.sep}`) ||
     path.isAbsolute(relativePath)
   ) {
-    return false
+    return null
   }
 
   const segments = relativePath.split(path.sep)
   return segments[0] === 'raw' && segments[1] === 'inbox'
+    ? absoluteFile
+    : null
 }
