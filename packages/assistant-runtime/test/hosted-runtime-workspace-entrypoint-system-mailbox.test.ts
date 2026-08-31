@@ -180,7 +180,6 @@ import {
 import {
   HostedRuntimeArtifactReadError,
   type HostedRuntimeDeviceSyncPort,
-  type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
   type RuntimeLivenessPort,
   type HostedRuntimeWorkspacePort,
@@ -7183,48 +7182,30 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     {
       defaultOwnedSystemMailboxWakeAt: null,
       dueAssistantWakePending: false,
-      runtimeWakeStage: null,
       scenario: "without a foreground handoff",
     },
     {
       defaultOwnedSystemMailboxWakeAt: null,
-      dueAssistantWakePending: false,
-      runtimeWakeStage: "scope_resolution" as const,
-      scenario: "with a redundant runtime wake during scope resolution",
-    },
-    {
-      defaultOwnedSystemMailboxWakeAt: null,
-      dueAssistantWakePending: false,
-      runtimeWakeStage: "prepare_checkpoint" as const,
-      scenario: "with a redundant runtime wake after its preparation checkpoint",
-    },
-    {
-      defaultOwnedSystemMailboxWakeAt: null,
       dueAssistantWakePending: true,
-      runtimeWakeStage: null,
       scenario: "with assistant work already due",
     },
     {
       defaultOwnedSystemMailboxWakeAt: TEST_NOW,
       dueAssistantWakePending: false,
-      runtimeWakeStage: null,
       scenario: "with a ready default-owned mailbox wake behind the device wake",
     },
     {
       defaultOwnedSystemMailboxWakeAt: "2026-04-27T00:06:00.000Z",
       dueAssistantWakePending: false,
-      runtimeWakeStage: null,
       scenario: "with a future default-owned mailbox retry behind the device wake",
     },
   ])("system mailbox mode preserves successful dirty-ack follow-up wake $scenario", async ({
     defaultOwnedSystemMailboxWakeAt,
     dueAssistantWakePending,
-    runtimeWakeStage,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:dirty-ack-follow-up",
       id: "mailbox_item_system_mailbox_device_dirty_ack_follow_up",
@@ -7256,7 +7237,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     let dirtyAckCalls = 0;
     let browserPublishCalls = 0;
     let browserWriteCalls = 0;
-    let runtimeWakeSent = false;
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       ...baseDeviceSyncPort,
       async ackDirtyStateProcessed(request) {
@@ -7324,21 +7304,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           if (item.itemId === deviceItem.id) {
             return {
                 ...item,
-                postCheckpointRecord: runtimeWakeStage === "prepare_checkpoint"
-                  ? {
-                      kind: "device-sync.dirty-processed-batch" as const,
-                      records: [{
-                        connectionId: "device_sync_connection_synthetic",
-                        processedDirtyPayloadIds: ["dirty_payload_synthetic"],
-                        processedRevision: "7",
-                      }],
-                    }
-                  : {
-                      connectionId: "device_sync_connection_synthetic",
-                      kind: "device-sync.dirty-processed" as const,
-                      processedDirtyPayloadIds: ["dirty_payload_synthetic"],
-                      processedRevision: "7",
-                  },
+                postCheckpointRecord: {
+                  connectionId: "device_sync_connection_synthetic",
+                  kind: "device-sync.dirty-processed" as const,
+                  processedDirtyPayloadIds: ["dirty_payload_synthetic"],
+                  processedRevision: "7",
+                },
                 status: "recording" as const,
               };
           }
@@ -7411,10 +7382,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
               async listActiveProjectionScopes() {
-                if (runtimeWakeStage === "scope_resolution" && !runtimeWakeSent) {
-                  runtimeWakeSent = true;
-                  runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-                }
                 return {
                   generationTokensByProjectionScopeKey: {
                     "sleep-times.v0": "a".repeat(43),
@@ -7428,37 +7395,18 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 return { status: "delivered" };
               },
             },
-            workspacePort: (() => {
-              const workspacePort = createWorkspacePort({
-                checkpointRequests,
-                events,
-                workspace: createWorkspaceState({
-                  snapshotRef: restoredWorkspace.snapshotRef,
-                  version: "0",
-                }),
-              });
-              return {
-                ...workspacePort,
-                async checkpoint(request: HostedWorkspaceCheckpointRequest) {
-                  const response = await workspacePort.checkpoint!(request);
-                  if (
-                    runtimeWakeStage === "prepare_checkpoint"
-                    && !runtimeWakeSent
-                  ) {
-                    runtimeWakeSent = true;
-                    runtimeWakeSignal.notify({
-                      requestedProcessingMode: "system_mailbox",
-                    });
-                  }
-                  return response;
-                },
-              };
-            })(),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
           }),
           async runAssistantPhase() {
             throw new Error("Successful dirty ack must not enter assistant phase.");
           },
-          runtimeWakeSignal,
           vaultRoot,
         },
       );
