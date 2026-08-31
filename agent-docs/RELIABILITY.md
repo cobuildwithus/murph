@@ -966,15 +966,18 @@ Last verified: 2026-08-30
   entitlement outcome. There is no new queue, cursor, retry loop, or persisted
   alert state.
 - Positive Stripe payment email is a receipt-completion obligation, not the
-  best-effort failure-alert projection. A positive `invoice.paid` amount or a
-  fulfilled usage-credit Checkout or saved-card PaymentIntent sends once after
-  canonical reconciliation. The existing receipt remains the only retry owner:
+  best-effort failure-alert projection. A positive `invoice.paid` amount whose
+  billing reason is not `subscription_cycle`, or a fulfilled usage-credit
+  Checkout or saved-card PaymentIntent, sends once after canonical
+  reconciliation. All subscription-cycle invoices complete without a
+  notification attempt. The existing receipt remains the only retry owner:
   missing configuration or provider failure leaves it claimable without
   rolling back billing, entitlement, or usage credit. A receipt-local sent
   marker is written only after provider success, while an event-derived Resend
   idempotency key covers response loss before that marker. Receipt replay after
-  the marker must skip send and finish remaining work. When canonical billing
-  succeeds, the notification and all existing post-canonical effects are
+  the marker must skip send and finish remaining work. Eligible payment
+  categories reproduce their notification candidate on retry. When canonical
+  billing succeeds, the notification and all existing post-canonical effects are
   attempted independently inside the same receipt owner. Both promises start
   before either is awaited, with concurrency bounded to one payment-email
   request plus the existing single post-canonical effect chain. Neither side's
@@ -982,19 +985,19 @@ Last verified: 2026-08-30
   the marker is absent, a direct-paid runtime-recheck failure retains its
   existing persisted retry code even when notification also fails, because
   replay consumes that code to reconstruct the wake; the absent marker retries
-  notification on the same receipt. For other simultaneous failures,
-  notification keeps the receipt retryable even if the other effect would
-  otherwise poison it. Once marked, the other effect keeps its existing retry
-  and poison behavior. When canonical billing commits activation mailbox items,
-  their
-  exact pointers are retained on the receipt in that same transaction. Every
-  positive-payment attempt restores
-  retained pointers and best-effort signals them through the existing
+  any reproducible notification candidate on the same receipt. For other
+  simultaneous failures, notification keeps the receipt retryable if the other
+  effect would otherwise poison it. Once marked, the other effect keeps its
+  existing retry and poison behavior. When canonical billing commits activation
+  mailbox items, their exact pointers are retained on the receipt in that same
+  transaction. Every positive-payment attempt restores retained pointers and
+  best-effort signals them through the existing
   activation-wake owner before notification work, even when provider success
   already wrote the sent marker. A rejected first wake can therefore overlap
   provider, sent-marker, or receipt-completion failure without losing the exact
-  retry target or creating another activation. Zero-dollar invoices and
-  no-charge plan changes complete without notification.
+  retry target or creating another activation. Subscription-cycle renewals,
+  zero-dollar invoices, and no-charge plan changes complete without
+  notification.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.

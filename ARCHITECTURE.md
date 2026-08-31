@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-26
+Last verified: 2026-08-30
 
 ## Accepted-Message Targeting
 
@@ -2379,15 +2379,17 @@ cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.
 
 Positive Stripe payment email is a separate receipt-owned operational
-projection. After canonical reconciliation accepts a positive `invoice.paid`
-amount or fulfills a usage-credit Checkout or saved-card PaymentIntent, the
-same receipt must send one plain-text email before completion. This covers
-subscription creation and renewal, paid plan-change invoices, recurring usage
-invoices, and one-time or automatic usage purchases. Zero-dollar invoices and
-plan changes that collect no money remain silent. A receipt-local sent marker
+projection. After canonical reconciliation accepts a positive non-renewal
+`invoice.paid` amount or fulfills a usage-credit Checkout or saved-card
+PaymentIntent, the same receipt must send one plain-text email before
+completion. This covers subscription creation, paid plan-change invoices,
+recurring usage invoices, and one-time or automatic usage purchases. All
+`subscription_cycle` invoices, zero-dollar invoices, and plan changes
+that collect no money remain silent. A receipt-local sent marker
 and event-derived Resend idempotency key prevent replay after provider success;
 configuration or provider failure leaves that receipt retryable while the
 already-committed billing, entitlement, and usage-credit result remains intact.
+Eligible payment categories reproduce their notification candidate on retry.
 The notification and the receipt's existing post-canonical effects are separate
 attempts inside that one owner: failure of runtime recheck, sponsorship,
 cleanup, or member email work cannot suppress the payment email attempt, and
@@ -2398,8 +2400,9 @@ concurrency is bounded to one payment-email request plus the existing single
 post-canonical effect chain. If both fail while the sent marker is absent,
 the existing runtime-recheck pending code takes precedence because replay
 consumes it to reconstruct a direct-paid wake; the absent sent marker still
-retries notification on that receipt. Other simultaneous failures retain
-notification priority so a poisonable cleanup cannot suppress unmarked email.
+retries any reproducible notification candidate on that receipt. Other
+simultaneous failures retain notification priority so a poisonable cleanup
+cannot suppress unmarked email.
 After the marker exists, the other effect retains its existing retry and poison
 policy.
 

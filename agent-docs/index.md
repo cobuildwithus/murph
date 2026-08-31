@@ -25,10 +25,11 @@ unambiguous combined-option admission, per-worktree Spotlight, and focused proof
 contracts are specified by `agent-docs/operations/local-storage-lifecycle.md` and
 `agent-docs/references/testing-ci-map.md`.
 
-Receipt-owned positive Stripe payment notifications cover subscription starts
-and renewals, paid plan-change and recurring-usage invoices, and fulfilled
-usage-credit payments without exposing member or customer identity. Their
-retry, privacy, configuration, and deploy-skew contracts are specified by
+Receipt-owned positive Stripe payment notifications cover subscription starts,
+paid plan-change and recurring-usage invoices, and fulfilled usage-credit
+payments without exposing member or customer identity. All invoices with
+`billing_reason: subscription_cycle` remain silent. Their retry, privacy,
+configuration, and deploy-skew contracts are specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, `agent-docs/SECURITY.md`,
 `agent-docs/product-specs/hosted-usage-topups.md`, and `apps/web/README.md`.
 
