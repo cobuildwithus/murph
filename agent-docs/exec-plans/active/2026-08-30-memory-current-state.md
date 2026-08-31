@@ -77,6 +77,12 @@ Updated: 2026-08-30
 4. Risk: Saved instructions are mistaken for permission.
    Mitigation: Label the projection as context only and retain the existing
    authority hierarchy in the system prompt.
+5. Risk: Composed transcript text or a group participant silently corrects or
+   retires the member's memory.
+   Mitigation: Only raw direct-member events from the existing hosted input
+   owner receive the `member:` authority label. Conflicting upsert/update and
+   forget require that label; transcript, assistant, email, group, self, and
+   ambiguous-route evidence remain context only.
 
 ## Tasks
 
@@ -95,6 +101,9 @@ Updated: 2026-08-30
   existing state and require a migration.
 - Use update as correction and the existing hard delete plus audit entry as
   retirement. Tombstones would retain private text and multiply filtering rules.
+- Use the existing durable hosted input-event spine only to distinguish raw
+  direct-member text from composed transcript context. Do not add an evidence
+  table, provenance graph, or new persisted authority state.
 - Do not add semantic provenance until maintenance evidence has a trusted,
   stable canonical evidence identifier; free-text provenance would be dead or
   unverifiable metadata.
@@ -128,18 +137,21 @@ Updated: 2026-08-30
   behind it, and retirement requires explicit withdrawal or revocation.
 - Walkthrough evidence:
   - A live private journey used the saved preference in the natural reply,
-    `A short waterside walk would be a good low-effort reset after work.`, with
-    zero actions and no reference to internal memory machinery. The journey
-    used the production-shaped per-turn context path.
+    `A short waterside walk at an easy pace sounds like a good fit tonight.`,
+    with zero actions and no reference to internal memory machinery. Conflicting
+    saved instructions did not override the current request or grant effect
+    authority.
   - A live maintenance journey performed only `show` then `update`, copied the
     exact record id and `updatedAt` from a compact 24-record result, and ended
     silently.
+  - A live withdrawal journey kept the record for assistant-only withdrawal
+    text, then performed only `show` and exact guarded `forget` for a raw direct
+    member withdrawal and ended silently.
   - Deterministic tests prove stale update and forget attempts leave the newer
     canonical record unchanged.
-- Verdict: Ready after resolving four review findings by narrowing behavior:
-  exact withdrawal-only retirement, no older backfill behind an oversized
-  fact, production-shaped live proof, and no read triggered solely by an absent
-  memory block.
+- Verdict: Ready after corrected-diff review. The final projection contains no
+  record ids, and the maintenance boundary admits only production-shaped raw
+  direct-member evidence for contradictory replacement or retirement.
 
 ## Candidate review
 
@@ -153,9 +165,32 @@ Updated: 2026-08-30
 - Accepted code-review finding:
   - Classified successful maintenance `forget` calls as non-replayable writes
     in the existing notification recovery owner, with focused regression proof.
+- Accepted preliminary specialist findings:
+  - Prevented assistant-authored evidence from authorizing retirement.
+  - Strengthened the live CurrentState journey to prove current-input and
+    effect-authority precedence, not merely fact recall.
+- Accepted corrected-candidate findings:
+  - Kept mutation policy out of generic read-only evidence and centralized the
+    maintenance-only rule in one dependency-light policy module.
+  - Stopped treating composed `user:` transcript entries or email routing as
+    member authorship; raw authority now comes from the existing hosted input
+    event owner.
+  - Required raw member authority for any conflicting upsert, contradictory
+    update, or forget so assistant-only evidence cannot rewrite by choosing a
+    different mutation verb.
+  - Matched real direct-channel provenance: direct Linq requires its persisted
+    actor; ordinary direct Telegram intentionally has no actor or metadata.
+    Both reject group-only route authority, including legacy ambiguous
+    directness.
+  - Removed record ids from the transient CurrentState projection because they
+    are unnecessary for answering and exact canonical `show` remains required
+    before mutation.
 - Rejected findings: None.
 - Corrected-diff Product UX verdict: Ready.
-- Corrected-diff code review: Zero findings.
+- Corrected-diff code review: PASS, including the final fail-closed channel
+  provenance narrowing.
+- Architecture simplification review: PASS; no index, evidence schema,
+  deduplication layer, cache, or second CurrentState owner is justified.
 
 ## Provider-input impact
 
@@ -172,14 +207,15 @@ Updated: 2026-08-30
   normalized group request did not enter either changed branch and was
   byte-identical. No reusable repository capture command exists.
 - Private direct, with one synthetic saved preference:
-  - Base: 27,516 tokens / 126,541 UTF-8 bytes.
-  - Head: 27,704 tokens / 127,458 UTF-8 bytes.
-  - Delta: +188 tokens (+0.6832%) / +917 bytes (+0.7247%).
+  - Base: 27,517 tokens / 126,541 UTF-8 bytes.
+  - Head: 27,686 tokens / 127,425 UTF-8 bytes.
+  - Delta: +169 tokens (+0.6142%) / +884 bytes (+0.6986%).
   - Attribution: entirely assembled instructions from the revised memory-read
-    policy and one bounded CurrentState record. Tool, schema, and generated
-    guidance were byte-identical.
+    policy and one bounded CurrentState record. Removing record ids saved 19
+    tokens and 33 bytes relative to the prior candidate. Tool, schema, and
+    generated guidance were byte-identical.
 - Group:
-  - Base and head: 23,769 tokens / 109,332 UTF-8 bytes.
+  - Base and head: 23,769 tokens / 109,331 UTF-8 bytes.
   - Delta: 0 tokens (+0.0000%) / 0 bytes (+0.0000%).
   - Normalized complete requests were byte-identical because the projection and
     direct-memory guidance are private-direct-only. The changed member-memory
@@ -198,9 +234,9 @@ Updated: 2026-08-30
 ## Verification
 
 - Passed: focused core memory tests (11 tests).
-- Passed: focused assistant maintenance/current-state tests (11 tests).
-- Passed: assistant planning, model-behavior, and managed-automation tests (278
-  tests).
+- Passed: exact corrected assistant owner suite (349 tests across current state,
+  maintenance, notification recovery, planning, managed automations, model
+  behavior, evidence admission, and read-only Assistant Ask).
 - Passed: core and assistant-engine typechecks and package builds.
 - Passed: real-Codex guarded correction journey (`show` then exact guarded
   `update`, no unrelated tools, silent completion).
@@ -208,11 +244,14 @@ Updated: 2026-08-30
   memory read or other action, no internal-memory wording).
 - Passed: corrected notification-recovery regression for successful maintenance
   forget classification.
-- Passed: corrected focused suite (230 tests total across core and assistant
-  owners), both package typechecks, and both package builds.
 - Passed: changelog page tests (9 tests) and Web typecheck.
 - Passed: `git diff --check` and task-file privacy scan.
-- Passed: Product UX Ready and corrected-diff candidate review with zero
-  findings.
+- Passed: Product UX Ready, architecture simplification review, and final
+  corrected-diff candidate review with zero findings.
+- Blocked externally: exact-tree real-Codex reruns stopped before inference with
+  `ASSISTANT_CODEX_USAGE_LIMIT` on both correction and withdrawal attempts.
+  Earlier behavioral candidates completed the correction, withdrawal, and
+  CurrentState live journeys; the exact final tree is covered by deterministic
+  owner tests, provider-request capture, and corrected-diff review.
 - Pending: ReviewGPT, CI, final parent review, and plan closure on the exact
   pushed head.

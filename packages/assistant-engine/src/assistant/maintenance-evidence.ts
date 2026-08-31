@@ -81,7 +81,7 @@ const ASSISTANT_GROUP_REACTION_TARGET_TEXT_MAX_CODE_POINTS = 1_000
 
 interface AssistantMaintenanceEvidenceMessage {
   createdAt: string
-  kind: 'assistant' | 'user'
+  kind: 'assistant' | 'member' | 'user'
   text: string
 }
 
@@ -89,11 +89,13 @@ type AssistantGroupReactionTargetTextIndex = ReadonlyMap<string, string>
 
 /**
  * Builds the only conversation evidence a silent maintenance turn may consult.
- * The member-memory profile preserves its historical output and bounds. The
- * group-room-model profile merges committed group transcripts with durable,
- * context-only reaction inputs from the same AssistantInputEvent spine.
+ * The member-memory profile preserves its historical transcript output and
+ * bounds; its explicit authority option adds only raw, provider-attested
+ * direct-member inputs. The group-room-model profile merges committed group
+ * transcripts with durable, context-only reactions from the same input spine.
  */
 export async function buildAssistantMaintenanceConversationEvidence(input: {
+  includeMemberMemoryMutationAuthority?: boolean
   now: Date
   profile?: AssistantMaintenanceProfile
   vault: string
@@ -112,6 +114,9 @@ export async function buildAssistantMaintenanceConversationEvidence(input: {
   try {
     candidates = await collectAssistantMaintenanceEvidenceMessages({
       limits,
+      includeMemberMemoryMutationAuthority:
+        profile === 'member-memory'
+        && input.includeMemberMemoryMutationAuthority === true,
       since,
       until: input.now.getTime(),
       vault: input.vault,
@@ -154,6 +159,7 @@ export async function buildAssistantMaintenanceConversationEvidence(input: {
 }
 
 async function collectAssistantMaintenanceEvidenceMessages(input: {
+  includeMemberMemoryMutationAuthority: boolean
   limits: AssistantMaintenanceEvidenceLimits
   since: number
   until: number
@@ -227,6 +233,15 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
     }
   }
 
+  if (input.includeMemberMemoryMutationAuthority) {
+    messages.push(...await collectAssistantMemberMemoryMutationAuthorityEvidence({
+      maxEntryBytes: input.limits.maxEntryBytes,
+      since: input.since,
+      until: input.until,
+      vault: input.vault,
+    }))
+  }
+
   if (input.limits.includeDurableGroupReactions) {
     messages.push(...await collectAssistantDurableGroupReactionEvidence({
       maxEntryBytes: input.limits.maxEntryBytes,
@@ -240,6 +255,90 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
   return messages.sort((left, right) =>
     compareAssistantTimestampsAscending(left.createdAt, right.createdAt),
   )
+}
+
+async function collectAssistantMemberMemoryMutationAuthorityEvidence(input: {
+  maxEntryBytes: number
+  since: number
+  until: number
+  vault: string
+}): Promise<AssistantMaintenanceEvidenceMessage[]> {
+  let events: AssistantInputEventRecord[]
+  try {
+    events = (await listAssistantInputEvents({
+      limit: Number.MAX_SAFE_INTEGER,
+      skipInvalidRecords: true,
+      vault: input.vault,
+    })).events
+  } catch {
+    return []
+  }
+
+  const messages: AssistantMaintenanceEvidenceMessage[] = []
+  for (const event of events) {
+    const occurredAt = Date.parse(event.occurredAt)
+    if (
+      Number.isNaN(occurredAt)
+      || occurredAt < input.since
+      || occurredAt > input.until
+      || !assistantInputMayAuthorizeMemberMemoryMutation(event)
+    ) {
+      continue
+    }
+    const text = limitAssistantConversationHistoryTextBytes(
+      event.content.text?.replace(/\s+/gu, ' ').trim() ?? '',
+      input.maxEntryBytes,
+    )
+    if (!text) {
+      continue
+    }
+    messages.push({
+      createdAt: event.occurredAt,
+      kind: 'member',
+      text,
+    })
+  }
+  return messages
+}
+
+function assistantInputMayAuthorizeMemberMemoryMutation(
+  event: AssistantInputEventRecord,
+): boolean {
+  if (
+    event.contentRetiredAt
+    || !event.content.text
+    || !event.conversation
+    || event.conversation.actorIsSelf
+    || event.conversation.threadIsDirect !== true
+    || !normalizeNullableString(event.conversation.accountId)
+    || !normalizeNullableString(event.conversation.threadId)
+    || event.sourceRef.kind !== 'hosted-mailbox'
+    || event.sourceRef.lane !== 'conversation'
+  ) {
+    return false
+  }
+
+  const source = normalizeNullableString(event.conversation.source)
+    ?.toLowerCase()
+  if (source === 'linq') {
+    return normalizeNullableString(event.conversation.actorId) !== null
+      && event.sourceMetadata?.kind === 'linq'
+      && event.sourceMetadata.externalThreadRouteAuthorityPresent !== true
+  }
+  if (source === 'telegram') {
+    // Ingress resolves a direct Telegram sender to one member before writing
+    // the hosted conversation event into that member's vault. Direct imports
+    // intentionally carry neither a participant actor nor source metadata for
+    // an ordinary text message.
+    return event.sourceMetadata === null
+      || (
+        event.sourceMetadata.kind === 'telegram'
+        && event.sourceMetadata.externalThreadRouteAuthorityPresent !== true
+      )
+  }
+  // Email route capabilities select a vault but do not prove who authored the
+  // message, so email never crosses this memory mutation gate.
+  return false
 }
 
 async function collectAssistantDurableGroupReactionEvidence(input: {

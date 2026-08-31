@@ -132,6 +132,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.js'
+import { ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT } from '../src/assistant/member-memory-policy.js'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
   MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY,
@@ -1113,6 +1114,9 @@ describe('assistant Codex turn planning', () => {
     )
     expect(maintenancePlan.systemPrompt).toContain(
       'Use `update` or `forget` only with an exact memory id and its exact `updatedAt` returned by `show`',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT,
     )
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')

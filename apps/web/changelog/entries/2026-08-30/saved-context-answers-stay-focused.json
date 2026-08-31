@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Saved-context answers stay focused",
     "summary": "Murph keeps private replies focused by bringing in a small set of relevant saved facts and naming the exact target in suitability answers.",
-    "details": "Your latest message and the current saved record still win. Background cleanup leaves newer corrections untouched and forgets a saved fact only when recent conversation evidence explicitly withdraws it; full detail remains available on demand.",
+    "details": "Your latest message and the current saved record still win. Background cleanup leaves newer corrections untouched and forgets a saved fact only when a recent member message explicitly withdraws it; full detail remains available on demand.",
     "relevanceTags": ["assistant", "context", "reliability"],
     "sourcePullRequests": [2578, 2621]
   }

@@ -55,7 +55,7 @@ export function buildAssistantCurrentStateMemoryPrompt(
 
     return [
       `${section}:`,
-      ...selected.map((record) => `- [${record.id}] ${record.text}`),
+      ...selected.map((record) => `- ${record.text}`),
       omittedCount > 0
         ? `- (${omittedCount} more ${omittedCount === 1 ? 'record' : 'records'} omitted from this bounded view.)`
         : null,

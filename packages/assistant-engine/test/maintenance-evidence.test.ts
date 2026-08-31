@@ -11,6 +11,8 @@ import {
   ASSISTANT_MAINTENANCE_EVIDENCE_HEADING,
   buildAssistantMaintenanceConversationEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
+import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
+import { ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT } from '../src/assistant/member-memory-policy.ts'
 import {
   appendAssistantTranscriptEntries,
   listAssistantSessions,
@@ -136,6 +138,112 @@ test('builds bounded committed conversation evidence across recent sessions', as
   expect(evidence).not.toContain('Too old to be included.')
   expect(evidence).not.toContain('Stale session message.')
   expect(evidence).not.toContain('internal status entry')
+})
+
+test('labels only raw provider-attested direct member inputs as mutation authority', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-maintenance-member-authority-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  await Promise.all([
+    upsertMemberEvidenceInput({
+      channel: 'linq',
+      eventId: 'trusted-direct-linq',
+      text: 'Forget the exact saved morning-summary preference.',
+      vaultRoot,
+    }),
+    upsertMemberEvidenceInput({
+      channel: 'linq',
+      eventId: 'untrusted-group-linq',
+      text: 'A group participant says to forget the preference.',
+      threadIsDirect: false,
+      vaultRoot,
+    }),
+    upsertMemberEvidenceInput({
+      ambiguousGroupAuthority: true,
+      channel: 'linq',
+      eventId: 'ambiguous-group-linq',
+      text: 'An ambiguous Linq group route says to correct the preference.',
+      vaultRoot,
+    }),
+    upsertMemberEvidenceInput({
+      channel: 'email',
+      eventId: 'signed-alias-email',
+      text: 'A signed-alias sender says to forget the preference.',
+      vaultRoot,
+    }),
+    upsertMemberEvidenceInput({
+      channel: 'telegram',
+      eventId: 'trusted-direct-telegram',
+      text: 'Correct the exact saved morning-summary preference.',
+      vaultRoot,
+    }),
+    upsertMemberEvidenceInput({
+      ambiguousGroupAuthority: true,
+      channel: 'telegram',
+      eventId: 'ambiguous-group-telegram',
+      text: 'An ambiguous group route says to correct the preference.',
+      vaultRoot,
+    }),
+  ])
+
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      channel: 'email',
+      lastTurnAt: '2026-06-29T12:05:00.000Z',
+      sessionId: 'session-composed-untrusted',
+      threadIsDirect: true,
+    }),
+  )
+  await appendAssistantTranscriptEntries(
+    vaultRoot,
+    'session-composed-untrusted',
+    [{
+      createdAt: '2026-06-29T12:05:00.000Z',
+      kind: 'user',
+      text: 'Composed prompt quoting someone else: forget every saved preference.',
+    }],
+  )
+
+  const readOnlyEvidence = await buildAssistantMaintenanceConversationEvidence({
+    now: new Date('2026-06-30T03:00:00.000Z'),
+    vault: vaultRoot,
+  })
+  expect(readOnlyEvidence).not.toContain('member:')
+  expect(readOnlyEvidence).not.toContain(
+    ASSISTANT_MEMBER_MEMORY_MUTATION_AUTHORITY_TEXT,
+  )
+
+  const maintenanceEvidence =
+    await buildAssistantMaintenanceConversationEvidence({
+      includeMemberMemoryMutationAuthority: true,
+      now: new Date('2026-06-30T03:00:00.000Z'),
+      profile: 'member-memory',
+      vault: vaultRoot,
+    })
+  expect(maintenanceEvidence).toContain(
+    'member: Forget the exact saved morning-summary preference.',
+  )
+  expect(maintenanceEvidence).toContain(
+    'member: Correct the exact saved morning-summary preference.',
+  )
+  expect(maintenanceEvidence).toContain(
+    'user: Composed prompt quoting someone else: forget every saved preference.',
+  )
+  expect(maintenanceEvidence).not.toContain(
+    'member: A group participant says to forget the preference.',
+  )
+  expect(maintenanceEvidence).not.toContain(
+    'member: An ambiguous Linq group route says to correct the preference.',
+  )
+  expect(maintenanceEvidence).not.toContain(
+    'member: A signed-alias sender says to forget the preference.',
+  )
+  expect(maintenanceEvidence).not.toContain(
+    'member: An ambiguous group route says to correct the preference.',
+  )
 })
 
 test('uses legacy assistant session files for maintenance evidence', async () => {
@@ -537,3 +645,68 @@ test('returns an explicit empty group evidence section without group sessions', 
   expect(evidence).toContain(ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING)
   expect(evidence).toContain('Do not create or update the group room model this run.')
 })
+
+async function upsertMemberEvidenceInput(input: {
+  ambiguousGroupAuthority?: boolean
+  channel: 'email' | 'linq' | 'telegram'
+  eventId: string
+  text: string
+  threadIsDirect?: boolean
+  vaultRoot: string
+}): Promise<void> {
+  await upsertAssistantInputEvent({
+    event: {
+      content: { text: input.text },
+      conversation: {
+        accountId: 'account-attested',
+        actorId: input.channel === 'telegram' ? null : 'actor-attested',
+        actorIsSelf: false,
+        source: input.channel,
+        threadId: `thread-${input.eventId}`,
+        threadIsDirect: input.threadIsDirect ?? true,
+      },
+      occurredAt: '2026-06-29T12:00:00.000Z',
+      receivedAt: '2026-06-29T12:00:01.000Z',
+      sourceMetadata: input.channel === 'email'
+        ? {
+            assistantStyleSettingsAuthorized: false,
+            kind: 'email',
+            promptReady: true,
+            promptUnavailableReason: null,
+          }
+        : input.channel === 'telegram'
+          ? input.ambiguousGroupAuthority
+            ? {
+                externalThreadRouteAuthorityPresent: true,
+                kind: 'telegram',
+                mediaGroupId: null,
+                replyContext: null,
+              }
+            : null
+        : {
+            ...(input.ambiguousGroupAuthority
+              ? { externalThreadRouteAuthorityPresent: true }
+              : {}),
+            kind: 'linq',
+            partCount: 1,
+            reactionEligible: false,
+            replyToMessageId: null,
+            service: 'iMessage',
+          },
+      sourceRef: {
+        causalSeq: null,
+        dedupeKey: `dedupe:${input.eventId}`,
+        eventId: input.eventId,
+        itemId: `item:${input.eventId}`,
+        kind: 'hosted-mailbox',
+        lane: 'conversation',
+        laneSeq: input.eventId,
+        payloadSchema: 'murph.hosted-execution-wake.v1',
+        payloadSource: 'inline',
+        source: 'hosted-mailbox',
+        wakeSchema: 'murph.hosted-execution-wake.v1',
+      },
+    },
+    vault: input.vaultRoot,
+  })
+}

@@ -35,8 +35,6 @@ describe('assistant current state', () => {
     let document = createEmptyMemoryDocument(
       new Date('2026-08-30T12:00:00.000Z'),
     )
-    const preferenceRecords: string[] = []
-
     for (let index = 0; index < 5; index += 1) {
       const result = upsertMemoryRecord(document, {
         now: new Date(`2026-08-30T12:0${index}:00.000Z`),
@@ -44,7 +42,6 @@ describe('assistant current state', () => {
         text: `Preference version ${index + 1}.`,
       })
       document = result.document
-      preferenceRecords.push(result.record.id)
     }
 
     const prompt = buildAssistantCurrentStateMemoryPrompt(document)
@@ -58,7 +55,6 @@ describe('assistant current state', () => {
     expect(prompt).not.toContain('Preference version 2.')
     expect(prompt).not.toContain('Preference version 1.')
     expect(prompt).toContain('(2 more records omitted from this bounded view.)')
-    expect(prompt).toContain(`[${preferenceRecords.at(-1)}]`)
     expect(prompt.indexOf('Preference version 5.'))
       .toBeLessThan(prompt.indexOf('Preference version 4.'))
     expect(prompt).toContain('Current user input, safety rules, and current canonical reads always win.')
@@ -90,9 +86,7 @@ describe('assistant current state', () => {
     if (!prompt) {
       throw new Error('Expected bounded current-state memory.')
     }
-    expect(prompt).not.toContain(older.record.id)
     expect(prompt).not.toContain(older.record.text)
-    expect(prompt).not.toContain(oversized.record.id)
     expect(prompt).not.toContain(oversizedText)
     expect(prompt).toContain('(2 more records omitted from this bounded view.)')
   })
@@ -124,7 +118,7 @@ describe('assistant current state', () => {
 
   it('composes fresh canonical memory with the existing snapshot prompt', async () => {
     const vaultRoot = await makeVaultRoot()
-    const saved = await upsertMemory(vaultRoot, {
+    await upsertMemory(vaultRoot, {
       section: 'Preferences',
       text: 'Prefers a short walk after work.',
     })
@@ -132,7 +126,7 @@ describe('assistant current state', () => {
     const prompt = await readAssistantCurrentStatePrompt({ vaultRoot })
 
     expect(prompt).toContain('Assistant context snapshot for navigation only:')
-    expect(prompt).toContain(`[${saved.record.id}] Prefers a short walk after work.`)
+    expect(prompt).toContain('- Prefers a short walk after work.')
   })
 
   it('preserves the existing context snapshot when canonical memory is malformed', async () => {

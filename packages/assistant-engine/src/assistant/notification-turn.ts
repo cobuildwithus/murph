@@ -318,10 +318,15 @@ export async function sendAssistantNotificationLocal(
   })
   // Built before the turn lock so evidence reads never extend the window in
   // which fresh foreground input waits on lock admission.
-  const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
+  const maintenanceProfile = isAssistantNotificationMaintenanceExactSkip(input)
+    ? requireAssistantNotificationMaintenanceProfile(input)
+    : null
+  const maintenanceEvidence = maintenanceProfile
     ? await buildAssistantMaintenanceConversationEvidence({
+        includeMemberMemoryMutationAuthority:
+          maintenanceProfile === 'member-memory',
         now: new Date(),
-        profile: requireAssistantNotificationMaintenanceProfile(input),
+        profile: maintenanceProfile,
         vault: input.vault,
       })
     : null
