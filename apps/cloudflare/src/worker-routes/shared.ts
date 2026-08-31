@@ -1,5 +1,6 @@
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
+  HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -56,6 +57,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   prewarmRuntimeShellForUser?(
     userId: string,
     source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   ): Promise<void>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;

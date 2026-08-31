@@ -57,6 +57,7 @@ import {
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
   inspectHostedRuntimeMailboxToAssistantTimingSubdivision,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
+  isHostedRuntimeShellPrewarmOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
@@ -76,6 +77,7 @@ import {
   HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+  HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
@@ -6417,6 +6419,7 @@ function requireOptionalShellPrewarmSource(
 ): {
   shellPrewarmSource?:
     | "linq-instant-start"
+    | "linq-message-routing"
     | "linq-typing-started"
     | "unknown";
 } {
@@ -6426,6 +6429,7 @@ function requireOptionalShellPrewarmSource(
   }
   if (
     value !== "linq-instant-start"
+    && value !== "linq-message-routing"
     && value !== "linq-typing-started"
     && value !== "unknown"
   ) {
@@ -6495,6 +6499,18 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureResponseReceivedAtEpochMs", orchestrationLabel),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "directEnsureOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalDirectEnsureOutcome(orchestration, orchestrationLabel),
+      ...requireOptionalShellPrewarmOrchestrationAttemptId(orchestration, "shellPrewarmExpectedOrchestrationAttemptId", orchestrationLabel),
+      ...requireOptionalShellPrewarmOrchestrationAttemptId(orchestration, "shellPrewarmOrchestrationAttemptId", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmRequestStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmRuntimeControlAuthStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmRuntimeControlAuthFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmCloudflareRouteReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmUserRunnerConstructorStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmUserRunnerConstructorFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmUserRunnerRpcStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmConsentLockAcquiredAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmAdmissionReadStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmAdmissionReadFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
@@ -6780,6 +6796,25 @@ function requireOptionalDirectEnsureOrchestrationAttemptId<
   return { [key]: value } as Record<Key, string>;
 }
 
+function requireOptionalShellPrewarmOrchestrationAttemptId<
+  Key extends
+    | "shellPrewarmExpectedOrchestrationAttemptId"
+    | "shellPrewarmOrchestrationAttemptId",
+>(
+  record: Record<string, unknown>,
+  key: Key,
+  label: string,
+): Partial<Record<Key, string>> {
+  const value = record[key];
+  if (value === undefined) {
+    return {};
+  }
+  if (!isHostedRuntimeShellPrewarmOrchestrationAttemptId(value)) {
+    throw new TypeError(`${label}.${key} must be a shell-prewarm orchestration attempt id.`);
+  }
+  return { [key]: value } as Record<Key, string>;
+}
+
 function requireOptionalDirectEnsureOutcome(
   record: Record<string, unknown>,
   label: string,
@@ -6987,6 +7022,33 @@ function parseHostedRuntimeLatencyTraceMilestoneEvent(
 
 export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState {
   const record = requireObject(value, "Hosted workspace state");
+  const progressProjectionKeys = [
+    "nextDefaultProcessingWakeAt",
+    "nextDefaultProcessingWakeReason",
+    "systemMailboxProgressGeneration",
+  ] as const;
+  const progressProjectionKeyCount = progressProjectionKeys.filter((key) =>
+    Object.prototype.hasOwnProperty.call(record, key)
+  ).length;
+  if (
+    progressProjectionKeyCount !== 0
+    && progressProjectionKeyCount !== progressProjectionKeys.length
+  ) {
+    throw new TypeError(
+      "Hosted workspace state system progress projection must include generation, wake, and reason together.",
+    );
+  }
+  if (
+    record.systemMailboxProgressGeneration === null
+    && (
+      record.nextDefaultProcessingWakeAt !== null
+      || record.nextDefaultProcessingWakeReason !== null
+    )
+  ) {
+    throw new TypeError(
+      "Hosted workspace state disabled system progress projection must be entirely null.",
+    );
+  }
 
   return {
     ...(record.browserVaultReplicaRef === undefined
@@ -7014,6 +7076,22 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
             "Hosted workspace state inboxMediaRetentionWakeAt",
           ),
         }),
+    ...(record.nextDefaultProcessingWakeAt === undefined
+      ? {}
+      : {
+          nextDefaultProcessingWakeAt: readNullableString(
+            record.nextDefaultProcessingWakeAt,
+            "Hosted workspace state nextDefaultProcessingWakeAt",
+          ),
+        }),
+    ...(record.nextDefaultProcessingWakeReason === undefined
+      ? {}
+      : {
+          nextDefaultProcessingWakeReason: readNullableString(
+            record.nextDefaultProcessingWakeReason,
+            "Hosted workspace state nextDefaultProcessingWakeReason",
+          ),
+        }),
     ...(record.nextWakeAt === undefined
       ? {}
       : { nextWakeAt: readNullableString(record.nextWakeAt, "Hosted workspace state nextWakeAt") }),
@@ -7038,6 +7116,16 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
       record.snapshotRef === undefined ? null : record.snapshotRef,
       "Hosted workspace state snapshotRef",
     ),
+    ...(record.systemMailboxProgressGeneration === undefined
+      ? {}
+      : {
+          systemMailboxProgressGeneration: record.systemMailboxProgressGeneration === null
+            ? null
+            : requireNonNegativeBigIntString(
+                record.systemMailboxProgressGeneration,
+                "Hosted workspace state systemMailboxProgressGeneration",
+              ),
+        }),
     updatedAt: requireString(record.updatedAt, "Hosted workspace state updatedAt"),
     userId: requireString(record.userId, "Hosted workspace state userId"),
     version: requireNonNegativeBigIntString(record.version, "Hosted workspace state version"),
@@ -7103,6 +7191,22 @@ export function parseHostedWorkspaceCheckpointRequest(
   value: unknown,
 ): HostedWorkspaceCheckpointRequest {
   const record = requireObject(value, "Hosted workspace checkpoint request");
+  const progressProjectionKeys = [
+    "nextDefaultProcessingWakeAt",
+    "nextDefaultProcessingWakeReason",
+    "systemMailboxProgressGeneration",
+  ] as const;
+  const progressProjectionKeyCount = progressProjectionKeys.filter((key) =>
+    Object.prototype.hasOwnProperty.call(record, key)
+  ).length;
+  if (
+    progressProjectionKeyCount !== 0
+    && progressProjectionKeyCount !== progressProjectionKeys.length
+  ) {
+    throw new TypeError(
+      "Hosted workspace checkpoint request system progress projection must include generation, wake, and reason together.",
+    );
+  }
 
   return {
     attemptId: requireString(
@@ -7140,6 +7244,22 @@ export function parseHostedWorkspaceCheckpointRequest(
       record.leaseGeneration,
       "Hosted workspace checkpoint request leaseGeneration",
     ),
+    ...(progressProjectionKeyCount === 0
+      ? {}
+      : {
+          nextDefaultProcessingWakeAt: readNullableString(
+            record.nextDefaultProcessingWakeAt,
+            "Hosted workspace checkpoint request nextDefaultProcessingWakeAt",
+          ),
+          nextDefaultProcessingWakeReason: readNullableString(
+            record.nextDefaultProcessingWakeReason,
+            "Hosted workspace checkpoint request nextDefaultProcessingWakeReason",
+          ),
+          systemMailboxProgressGeneration: requireNonNegativeBigIntString(
+            record.systemMailboxProgressGeneration,
+            "Hosted workspace checkpoint request systemMailboxProgressGeneration",
+          ),
+        }),
     ...(record.inboxMediaRetentionWakeAt === undefined
       ? {}
       : {
@@ -7794,14 +7914,24 @@ function parseHostedWorkspaceInvocationBudget(
   label: string,
 ): HostedWorkspaceInvocationBudget {
   const record = requireObject(value, label);
+  const maxMailboxItems = record.maxMailboxItems === undefined
+    || record.maxMailboxItems === null
+    ? record.maxMailboxItems
+    : requirePositiveInteger(record.maxMailboxItems, `${label}.maxMailboxItems`);
+  if (
+    typeof maxMailboxItems === "number"
+    && maxMailboxItems > HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS
+  ) {
+    throw new TypeError(
+      `${label}.maxMailboxItems must not exceed ${HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS}.`,
+    );
+  }
 
   return {
     ...(record.maxMailboxItems === undefined
       ? {}
       : {
-          maxMailboxItems: record.maxMailboxItems === null
-            ? null
-            : requirePositiveInteger(record.maxMailboxItems, `${label}.maxMailboxItems`),
+          maxMailboxItems: maxMailboxItems ?? null,
         }),
     ...(record.maxRuntimeMs === undefined
       ? {}

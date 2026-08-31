@@ -434,9 +434,12 @@ function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
   now: Date;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): boolean {
+  const defaultProcessingWake = readHostedRuntimeDefaultProcessingWake(
+    input.workspace,
+  );
   if (
-    input.workspace.nextWakeReason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
-    && isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
+    defaultProcessingWake.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+    && isHostedRuntimeWakeDue(defaultProcessingWake.at, input.now)
   ) {
     return false;
   }
@@ -445,8 +448,8 @@ function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
     return true;
   }
 
-  return isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
-    && isHostedRuntimeModelCapableWorkspaceWakeReason(input.workspace.nextWakeReason);
+  return isHostedRuntimeWakeDue(defaultProcessingWake.at, input.now)
+    && isHostedRuntimeModelCapableWorkspaceWakeReason(defaultProcessingWake.reason);
 }
 
 function hostedRuntimeReconciliationNeedsAutomationEngagement(input: {
@@ -454,9 +457,12 @@ function hostedRuntimeReconciliationNeedsAutomationEngagement(input: {
   now: Date;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): boolean {
+  const defaultProcessingWake = readHostedRuntimeDefaultProcessingWake(
+    input.workspace,
+  );
   return !input.freshConversationMailboxLag
-    && isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
-    && isHostedRuntimeModelCapableWorkspaceWakeReason(input.workspace.nextWakeReason);
+    && isHostedRuntimeWakeDue(defaultProcessingWake.at, input.now)
+    && isHostedRuntimeModelCapableWorkspaceWakeReason(defaultProcessingWake.reason);
 }
 
 async function hasHostedMemberEstablishedLinqRoute(input: {
@@ -476,11 +482,14 @@ function resolveHostedRuntimeAiBlockedRetryAt(input: {
   now: Date;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): string | null {
+  const defaultProcessingWake = readHostedRuntimeDefaultProcessingWake(
+    input.workspace,
+  );
   return earliestHostedRuntimeReconciliationTimestamp([
     input.noticeRetryAt?.toISOString() ?? null,
     input.aiRetryAt,
-    input.workspace.nextWakeReason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
-      ? readHostedRuntimeFutureTimestamp(input.workspace.nextWakeAt, input.now)
+    defaultProcessingWake.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+      ? readHostedRuntimeFutureTimestamp(defaultProcessingWake.at, input.now)
       : null,
     readHostedRuntimeFutureTimestamp(input.workspace.inboxMediaRetentionWakeAt, input.now),
   ]);
@@ -723,6 +732,15 @@ function emitHostedRuntimeReconciliationFacts(event: {
     workspaceNextWakeReason: describeHostedRuntimeWakeReasonForLog(
       event.facts.workspace?.nextWakeReason ?? null,
     ),
+    workspaceNextDefaultProcessingWakeAtPresent:
+      event.facts.workspace?.nextDefaultProcessingWakeAt !== null
+        && event.facts.workspace?.nextDefaultProcessingWakeAt !== undefined,
+    workspaceNextDefaultProcessingWakeReason:
+      describeHostedRuntimeWakeReasonForLog(
+        event.facts.workspace?.nextDefaultProcessingWakeReason ?? null,
+      ),
+    workspaceSystemMailboxProgressGenerationPresent:
+      event.facts.workspace?.systemMailboxProgressGeneration !== undefined,
     workspacePresent: event.facts.workspace !== null,
   });
 }
@@ -804,11 +822,35 @@ function projectHostedRuntimeReconciliationWorkspace(
           ? {}
           : { hostedMailboxSystemHandledThroughSeq: handledThroughSeq }),
         inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt,
+        ...(workspace.systemMailboxProgressGeneration === null
+          ? {}
+          : {
+              nextDefaultProcessingWakeAt:
+                workspace.nextDefaultProcessingWakeAt,
+              nextDefaultProcessingWakeReason:
+                workspace.nextDefaultProcessingWakeReason,
+              systemMailboxProgressGeneration:
+                workspace.systemMailboxProgressGeneration,
+            }),
         nextWakeAt: workspace.nextWakeAt,
         nextWakeReason: workspace.nextWakeReason,
         version: workspace.version,
       }
     : null;
+}
+
+function readHostedRuntimeDefaultProcessingWake(
+  workspace: HostedRuntimeReconciliationFactsWorkspace,
+): { at: string | null; reason: string | null } {
+  return workspace.systemMailboxProgressGeneration === undefined
+    ? {
+        at: workspace.nextWakeAt,
+        reason: workspace.nextWakeReason,
+      }
+    : {
+        at: workspace.nextDefaultProcessingWakeAt ?? null,
+        reason: workspace.nextDefaultProcessingWakeReason ?? null,
+      };
 }
 
 async function readHostedRuntimeSystemMailboxFrontier(input: {

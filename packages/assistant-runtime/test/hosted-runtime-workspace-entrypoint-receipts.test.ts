@@ -1,11 +1,13 @@
 import {
   TEST_NOW,
   createBundleRef,
+  createCanonicalReceiptLogArtifacts,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
   createPlatform,
   createSaturatedCanonicalReceiptLogArtifacts,
+  createVaultSnapshotBundle,
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
   createWorkspaceSnapshotV2Ref,
@@ -117,6 +119,7 @@ import {
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
   hostedCanonicalWriteReceiptRecoveryStatusFields,
   readHostedCanonicalWriteReceiptRecoveryWake,
@@ -1266,7 +1269,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
     }
   });
 
-  test("consolidates a saturated restored receipt log before foreground canonical writes", async () => {
+  test("consolidates a restored receipt log at the admission boundary before foreground writes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const artifactGetCalls: string[] = [];
@@ -1281,7 +1284,9 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         receiptHash,
         receiptLogBytes,
         receiptLogHash,
-      } = createSaturatedCanonicalReceiptLogArtifacts();
+      } = createCanonicalReceiptLogArtifacts(
+        HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD,
+      );
       const priorNextWakeAt = "2099-04-28T12:00:00.000Z";
       const initialWorkspace = createWorkspaceState({
         nextWakeAt: priorNextWakeAt,
@@ -1424,6 +1429,153 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
           "utf8",
         ),
         "recovered canonical write\n",
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("yields at the restored receipt admission boundary and resumes after an accepted snapshot", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    let assistantPhaseCalls = 0;
+    let idleCheckpointCalls = 0;
+    let snapshotCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const {
+        artifactBytesByHash,
+        receiptLogBytes,
+        receiptLogHash,
+      } = createCanonicalReceiptLogArtifacts(
+        HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD - 1,
+      );
+      let persistedWorkspace = createWorkspaceState({
+        redactedStatus: {
+          hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+          hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+        },
+        version: "0",
+      });
+      const runInvocation = async (attemptId: string) => {
+        const startingWorkspace = persistedWorkspace;
+        return await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId,
+              workspaceVersion: startingWorkspace.version,
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              snapshotCalls += 1;
+              const snapshot = await createVaultSnapshotBundle({
+                key:
+                  `users/bundles/member-synthetic/receipt-capacity-${snapshotCalls}.bundle.json`,
+                vaultRoot,
+              });
+              artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+              return { snapshotRef: snapshot.snapshotRef };
+            },
+            async importItem() {
+              throw new Error("Receipt capacity test has no mailbox input.");
+            },
+            platform: createPlatform({
+              artifactBytesByHash,
+              events,
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                checkpointResponse(request) {
+                  persistedWorkspace = createWorkspaceState({
+                    inboxMediaRetentionWakeAt:
+                      request.inboxMediaRetentionWakeAt ?? null,
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  });
+                  if (request.reason === "idle_shutdown") {
+                    idleCheckpointCalls += 1;
+                  }
+                  return { checkpointed: true, workspace: persistedWorkspace };
+                },
+                events,
+                workspace: startingWorkspace,
+              }),
+            }),
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              assert.equal(input.shouldYieldBackgroundMaintenance?.(), false);
+              await runCanonicalWrite({
+                vaultRoot: input.restored.vaultRoot,
+                operationType: "hosted_canonical_write_test",
+                summary: "Exercise the hosted receipt admission boundary.",
+                occurredAt: TEST_NOW,
+                mutate: async ({ batch }) => {
+                  await batch.stageTextWrite(
+                    `journal/receipt-capacity-${assistantPhaseCalls}.md`,
+                    `receipt capacity pass ${assistantPhaseCalls}\n`,
+                  );
+                },
+              });
+              assert.equal(
+                input.shouldYieldBackgroundMaintenance?.(),
+                assistantPhaseCalls === 1,
+              );
+              return { progressed: false };
+            },
+            vaultRoot,
+          },
+        );
+      };
+
+      await runInvocation("attempt_receipt_capacity_initial");
+      const result = await runInvocation("attempt_receipt_capacity_follow_up");
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(idleCheckpointCalls, 2);
+      const firstIdleCheckpointIndex = checkpointRequests.findIndex(
+        (request) => request.reason === "idle_shutdown",
+      );
+      assert.notEqual(firstIdleCheckpointIndex, -1);
+      const firstIdleCheckpoint = checkpointRequests[firstIdleCheckpointIndex];
+      assert.equal(
+        firstIdleCheckpoint?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+      const canonicalCheckpoints = checkpointRequests.filter(
+        (request) => request.reason === "canonical_runtime_commit",
+      );
+      assert.ok(canonicalCheckpoints.length >= 2);
+      const receiptLogsBySha = new Map(
+        listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash)
+          .map((log) => [log.sha256, log] as const),
+      );
+      const canonicalEntryCounts = canonicalCheckpoints.map((request) => {
+        const sha = request.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256;
+        return typeof sha === "string"
+          ? receiptLogsBySha.get(sha)?.entryCount ?? null
+          : null;
+      });
+      assert.equal(
+        canonicalEntryCounts[0],
+        HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD,
+      );
+      assert.ok(
+        canonicalEntryCounts.slice(1).some((count) =>
+          count !== null
+          && count > 0
+          && count < HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES
+        ),
+      );
+      assert.equal(
+        result.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
       );
     } finally {
       await removeTempRoot(vaultRoot);

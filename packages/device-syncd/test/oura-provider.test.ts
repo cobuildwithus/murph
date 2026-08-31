@@ -1937,7 +1937,7 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
   const webhookAdmin = requireValue(provider.webhookAdmin);
   const handleWebhookPreflight = requireValue(webhookAdmin.handleWebhookPreflight);
   const fallbackSnapshots: unknown[] = [];
-  const defaultScopes = provider.descriptor.oauth?.defaultScopes ?? [];
+  const defaultScopes = provider.descriptor.connection?.defaultScopes ?? [];
 
   assert.deepEqual(defaultScopes, ["personal", "daily", "workout", "session", "spo2"]);
   assert.equal(defaultScopes.includes("heartrate"), false);
@@ -1956,7 +1956,7 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
     clientSecret: "oura-client-secret",
     scopes: ["personal", "daily", "heartrate", "extapi:heartrate", "workout"],
   });
-  const staleConfiguredScopes = staleScopeProvider.descriptor.oauth?.defaultScopes ?? [];
+  const staleConfiguredScopes = staleScopeProvider.descriptor.connection?.defaultScopes ?? [];
   assert.deepEqual(staleConfiguredScopes, ["personal", "daily", "workout", "session", "spo2"]);
   assert.equal(
     staleScopeProvider.oauthAdapter.buildConnectUrl({

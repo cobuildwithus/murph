@@ -57,6 +57,7 @@ import {
   resolveHostedAiUsageTokenPricingBasis,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
+  sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -719,6 +720,32 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
     );
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      budget: {
+        ...workspaceInvocationRequest.budget,
+        maxMailboxItems: 101,
+      },
+    })).toThrow(
+      "Hosted workspace invocation request budget.maxMailboxItems must not exceed 100.",
+    );
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      budget: {
+        ...workspaceInvocationRequest.budget,
+        maxMailboxItems: 100,
+      },
+    }).budget?.maxMailboxItems).toBe(100);
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      budget: {
+        maxMailboxItems: null,
+      },
+    }).budget).toEqual({ maxMailboxItems: null });
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      budget: {},
+    }).budget).toEqual({});
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       processingMode: "inbox_media_retention",
@@ -1614,6 +1641,20 @@ describe("hosted runtime control contracts", () => {
         directEnsureResultKind: "runtime_processing_accepted",
         directEnsureAction: "woken",
         directEnsureRuntimeAttemptId: "runtime-attempt-direct",
+        shellPrewarmExpectedOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_001,
+        shellPrewarmRuntimeControlAuthStartedAtEpochMs: 1_777_000_000_002,
+        shellPrewarmRuntimeControlAuthFinishedAtEpochMs: 1_777_000_000_003,
+        shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_777_000_000_004,
+        shellPrewarmUserRunnerConstructorStartedAtEpochMs: 1_777_000_000_005,
+        shellPrewarmUserRunnerConstructorFinishedAtEpochMs: 1_777_000_000_006,
+        shellPrewarmUserRunnerRpcStartedAtEpochMs: 1_777_000_000_007,
+        shellPrewarmConsentLockAcquiredAtEpochMs: 1_777_000_000_008,
+        shellPrewarmAdmissionReadStartedAtEpochMs: 1_777_000_000_009,
+        shellPrewarmAdmissionReadFinishedAtEpochMs: 1_777_000_000_010,
         runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
         runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
@@ -1663,7 +1704,7 @@ describe("hosted runtime control contracts", () => {
         shellPrewarmOperationElapsedMs: 2,
         shellPrewarmHintCount: 2,
         shellPrewarmOutcome: "cold_start_observed",
-        shellPrewarmSource: "linq-typing-started",
+        shellPrewarmSource: "linq-message-routing",
         workspaceReadElapsedMs: 30,
         runtimeStoreEnsureElapsedMs: 40,
         runtimeInvocationPreparationElapsedMs: 60,
@@ -1933,6 +1974,8 @@ describe("hosted runtime control contracts", () => {
       { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
       { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
       { directEnsureOrchestrationAttemptId: "web-ingress-not-a-uuid" }, // correlation id must be bounded
+      { shellPrewarmOrchestrationAttemptId: "web-prewarm-not-a-uuid" }, // prewarm correlation ids have their own exact prefix and shape
+      { shellPrewarmExpectedOrchestrationAttemptId: "web-ingress-123e4567-e89b-42d3-a456-426614174000" }, // direct-wake ids cannot enter the prewarm channel
       { directEnsureResultKind: "failed", rawError: "secret" }, // result values and arbitrary error metadata are forbidden
       { directEnsureResultKind: "retry_later", directEnsureRetryReason: "container_rpc_timeout" }, // retry reasons remain in structured logs only
       { directEnsureResultKind: "retry_later", directEnsureAction: "woken" }, // accepted metadata must match the result
@@ -2330,6 +2373,26 @@ describe("hosted runtime control contracts", () => {
     })).toBeNull();
   });
 
+  it("projects shell-prewarm diagnostics onto the narrow correlation schema", () => {
+    expect(sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics({
+      directEnsureRequestStartedAtEpochMs: 1_777_000_000_099,
+      shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_777_000_000_030,
+      shellPrewarmOrchestrationAttemptId:
+        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+      shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_000,
+      shellPrewarmSource: "linq-message-routing",
+    })).toEqual({
+      shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_777_000_000_030,
+      shellPrewarmOrchestrationAttemptId:
+        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+      shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_000,
+    });
+
+    expect(sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics({
+      shellPrewarmOrchestrationAttemptId: "invalid",
+    })).toBeNull();
+  });
+
   it("keeps the direct-wake trigger as a boolean orchestration leaf", () => {
     expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
       cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
@@ -2641,6 +2704,95 @@ describe("hosted runtime control contracts", () => {
       reason: "canonical_runtime_commit",
       snapshotRef: null,
     });
+  });
+
+  it("parses the optional workspace system progress projection atomically", () => {
+    const activeProjection = {
+      nextDefaultProcessingWakeAt: "2026-04-26T08:00:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant",
+      systemMailboxProgressGeneration: "12",
+    };
+    const workspace = createWorkspaceState();
+
+    expect(parseHostedWorkspaceState({
+      ...workspace,
+      ...activeProjection,
+    })).toEqual({
+      ...workspace,
+      ...activeProjection,
+    });
+    expect(parseHostedWorkspaceState({
+      ...workspace,
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: null,
+    })).toEqual({
+      ...workspace,
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: null,
+    });
+
+    const baseCheckpointRequest = {
+      attemptId: "attempt_system_progress",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      reason: "canonical_runtime_commit",
+      snapshotRef: null,
+    };
+    expect(parseHostedWorkspaceCheckpointRequest({
+      ...baseCheckpointRequest,
+      ...activeProjection,
+    })).toEqual({
+      ...baseCheckpointRequest,
+      ...activeProjection,
+    });
+    expect(parseHostedWorkspaceCheckpointRequest({
+      ...baseCheckpointRequest,
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: "12",
+    })).toEqual({
+      ...baseCheckpointRequest,
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: "12",
+    });
+
+    const partialProjections = [
+      { nextDefaultProcessingWakeAt: activeProjection.nextDefaultProcessingWakeAt },
+      { nextDefaultProcessingWakeReason: activeProjection.nextDefaultProcessingWakeReason },
+      { systemMailboxProgressGeneration: activeProjection.systemMailboxProgressGeneration },
+      {
+        nextDefaultProcessingWakeAt: activeProjection.nextDefaultProcessingWakeAt,
+        nextDefaultProcessingWakeReason: activeProjection.nextDefaultProcessingWakeReason,
+      },
+      {
+        nextDefaultProcessingWakeAt: activeProjection.nextDefaultProcessingWakeAt,
+        systemMailboxProgressGeneration: activeProjection.systemMailboxProgressGeneration,
+      },
+      {
+        nextDefaultProcessingWakeReason: activeProjection.nextDefaultProcessingWakeReason,
+        systemMailboxProgressGeneration: activeProjection.systemMailboxProgressGeneration,
+      },
+    ];
+    for (const partialProjection of partialProjections) {
+      expect(() => parseHostedWorkspaceState({
+        ...workspace,
+        ...partialProjection,
+      })).toThrow(/system progress projection must include generation, wake, and reason together/u);
+      expect(() => parseHostedWorkspaceCheckpointRequest({
+        ...baseCheckpointRequest,
+        ...partialProjection,
+      })).toThrow(/system progress projection must include generation, wake, and reason together/u);
+    }
+
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      ...baseCheckpointRequest,
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: null,
+    })).toThrow(/systemMailboxProgressGeneration/u);
   });
 
   it("reserves canonical receipt protocol fields outside the ordinary status budget", () => {

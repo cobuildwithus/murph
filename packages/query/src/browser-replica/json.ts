@@ -21,6 +21,12 @@ interface JsonValueAction {
 
 type JsonStringifyAction = JsonExitAction | JsonTextAction | JsonValueAction;
 
+interface JsonChunkBuffer {
+  completedChunks: string[];
+  currentChunkChars: number;
+  currentChunkParts: string[];
+}
+
 const JSON_CHUNK_TARGET_CHARS = 16 * 1_024;
 
 export async function stringifyJsonCooperatively(
@@ -28,7 +34,11 @@ export async function stringifyJsonCooperatively(
   options: CooperativeJsonStringifyOptions = {},
 ): Promise<string> {
   const activeObjects = new Set<object>();
-  const chunks: string[] = [];
+  const output: JsonChunkBuffer = {
+    completedChunks: [],
+    currentChunkChars: 0,
+    currentChunkParts: [],
+  };
   const stack: JsonStringifyAction[] = [{
     kind: "value",
     location: "root",
@@ -49,7 +59,7 @@ export async function stringifyJsonCooperatively(
       continue;
     }
     if (action.kind === "text") {
-      appendJsonChunk(chunks, action.value);
+      appendJsonChunk(output, action.value);
       continue;
     }
     if (action.kind === "exit") {
@@ -62,12 +72,12 @@ export async function stringifyJsonCooperatively(
       const encoded = JSON.stringify(current);
       if (encoded === undefined) {
         if (action.location === "array") {
-          appendJsonChunk(chunks, "null");
+          appendJsonChunk(output, "null");
           continue;
         }
         throw new TypeError("Browser Vault replica values must be JSON serializable.");
       }
-      appendJsonChunk(chunks, encoded);
+      appendJsonChunk(output, encoded);
       continue;
     }
 
@@ -119,20 +129,29 @@ export async function stringifyJsonCooperatively(
   }
 
   options.signal?.throwIfAborted();
-  return chunks.join("");
+  return finishJsonChunks(output);
 }
 
-function appendJsonChunk(chunks: string[], value: string): void {
-  const previousIndex = chunks.length - 1;
-  const previous = chunks[previousIndex];
-  if (
-    previous !== undefined
-    && previous.length + value.length <= JSON_CHUNK_TARGET_CHARS
-  ) {
-    chunks[previousIndex] = previous + value;
+function appendJsonChunk(output: JsonChunkBuffer, value: string): void {
+  if (output.currentChunkChars + value.length > JSON_CHUNK_TARGET_CHARS) {
+    flushJsonChunk(output);
+  }
+  output.currentChunkParts.push(value);
+  output.currentChunkChars += value.length;
+}
+
+function finishJsonChunks(output: JsonChunkBuffer): string {
+  flushJsonChunk(output);
+  return output.completedChunks.join("");
+}
+
+function flushJsonChunk(output: JsonChunkBuffer): void {
+  if (output.currentChunkParts.length === 0) {
     return;
   }
-  chunks.push(value);
+  output.completedChunks.push(output.currentChunkParts.join(""));
+  output.currentChunkChars = 0;
+  output.currentChunkParts = [];
 }
 
 function isOmittedJsonObjectValue(value: unknown): boolean {

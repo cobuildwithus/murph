@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "replies-wake-sooner-after-idle-time",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Replies recover cleanly after idle time",
+    "summary": "After an idle period, Murph now wakes sooner and keeps established conversations ready to continue.",
+    "details": "When a full workspace restore is needed, Murph opens the restored state with a fresh assistant process so replies do not wait on stale local state.",
+    "relevanceTags": ["assistant", "performance", "reliability"],
+    "sourcePullRequests": [2584, 2617]
+  }
+}
