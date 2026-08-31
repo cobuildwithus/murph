@@ -147,6 +147,7 @@ export interface HostedMailboxEffect {
   nextWakeReason?: string | null;
   postCheckpointRecord?: HostedSystemMailboxPostCheckpointRecord | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
+  systemProgressed?: true;
 }
 
 export interface HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
@@ -248,6 +249,7 @@ export interface HostedMaintenanceMetrics {
   readinessElapsedMs?: number | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
   stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
+  systemProgressed?: true;
   totalElapsedMs?: number | null;
 }
 

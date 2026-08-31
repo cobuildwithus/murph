@@ -20,7 +20,6 @@ const scriptPath = path.join(repoRoot, "scripts", "install-playwright-chromium.s
 const workflowDirectory = path.join(repoRoot, ".github", "workflows");
 const WORKFLOWS_CALLING_SCRIPT = [
   "hosted-stripe-billing.yml",
-  "pr-1498-design-proof-capture.yml",
   "web-viewport-overflow.yml",
 ] as const;
 

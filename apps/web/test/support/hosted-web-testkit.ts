@@ -1574,6 +1574,7 @@ export async function readHostedVaultShareProjectionCiphertextForTest(input: {
 }
 
 export async function seedHostedWorkspaceWakeForTest(input: {
+  defaultProcessingWake?: boolean;
   environment?: NodeJS.ProcessEnv;
   userId: string;
   wakeAt: Date | string;
@@ -1584,14 +1585,23 @@ export async function seedHostedWorkspaceWakeForTest(input: {
       data: {
         nextWakeAt: new Date(input.wakeAt),
         nextWakeReason: input.wakeReason,
+        ...(input.defaultProcessingWake
+          ? {
+              nextDefaultProcessingWakeAt: new Date(input.wakeAt),
+              nextDefaultProcessingWakeReason: input.wakeReason,
+            }
+          : {}),
       },
       where: {
+        ...(input.defaultProcessingWake
+          ? { systemMailboxProgressGeneration: { not: null } }
+          : {}),
         userId: input.userId,
       },
     });
     if (result.count !== 1) {
       throw new Error(
-        "Hosted-local workspace wake seed requires exactly one existing workspace.",
+        "Hosted-local workspace wake seed requires exactly one compatible existing workspace.",
       );
     }
   });

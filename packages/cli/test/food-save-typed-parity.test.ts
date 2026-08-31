@@ -237,6 +237,78 @@ test('food search-labels calls the hosted data API with the hosted provider cred
   }
 })
 
+test('food search-labels accepts a trimmed query at the provider length boundary', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const normalizedQuery = 'x'.repeat(256)
+  const submittedQuery = ` ${normalizedQuery} `
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+    items: [],
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 200,
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli<{
+      query: string
+      items: unknown[]
+    }>(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, null)
+    assert.equal(requireData(result.envelope).query, normalizedQuery)
+    assert.deepEqual(requireData(result.envelope).items, [])
+    assert.equal(fetchMock.mock.calls.length, 1)
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.searchParams.get('q'), normalizedQuery)
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
+test('food search-labels rejects 257 characters locally without echoing the query', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const sentinel = 'PrivateFoodQuerySentinel'
+  const submittedQuery = `${sentinel}${'x'.repeat(257 - sentinel.length)}`
+  const fetchMock = vi.fn<typeof fetch>(async () => {
+    throw new Error('fetch should not run for an invalid query')
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    assert.equal(submittedQuery.length, 257)
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
+      assert.deepEqual(
+        result.envelope.error.fieldErrors?.map(({ code, path }) => ({ code, path })),
+        [{ code: 'too_big', path: 'query' }],
+      )
+    }
+    assert.equal(fetchMock.mock.calls.length, 0)
+    const serialized = JSON.stringify(result.envelope)
+    assert.equal(serialized.includes(sentinel), false)
+    assert.equal(serialized.includes(submittedQuery), false)
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
 test('food search-labels --generic requests USDA generic food rows', async () => {
   const restoreHostedDataApiEnv = setHostedDataApiEnv()
   const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({

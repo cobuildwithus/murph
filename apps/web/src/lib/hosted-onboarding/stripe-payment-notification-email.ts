@@ -14,7 +14,6 @@ export type HostedStripePaymentNotificationCandidate = {
   category:
     | "invoice"
     | "subscription_create"
-    | "subscription_cycle"
     | "subscription_threshold"
     | "subscription_update"
     | "usage_credit";
@@ -36,9 +35,15 @@ export function resolveHostedStripePaymentNotificationCandidate(input: {
 }): HostedStripePaymentNotificationCandidate | null {
   if (input.event.type === "invoice.paid") {
     const invoice = input.event.data.object as Stripe.Invoice;
+    const category = resolveHostedStripeInvoicePaymentCategory(
+      invoice.billing_reason,
+    );
+    if (!category) {
+      return null;
+    }
     return buildHostedStripePaymentNotificationCandidate({
       amountMinor: invoice.amount_paid,
-      category: resolveHostedStripeInvoicePaymentCategory(invoice.billing_reason),
+      category,
       currency: invoice.currency,
       event: input.event,
     });
@@ -158,10 +163,11 @@ function buildHostedStripePaymentNotificationCandidate(input: {
 
 function resolveHostedStripeInvoicePaymentCategory(
   billingReason: Stripe.Invoice["billing_reason"],
-): HostedStripePaymentNotificationCandidate["category"] {
+): HostedStripePaymentNotificationCandidate["category"] | null {
   switch (billingReason) {
-    case "subscription_create":
     case "subscription_cycle":
+      return null;
+    case "subscription_create":
     case "subscription_threshold":
     case "subscription_update":
       return billingReason;
@@ -176,8 +182,6 @@ function formatHostedStripePaymentCategory(
   switch (category) {
     case "subscription_create":
       return "new subscription";
-    case "subscription_cycle":
-      return "recurring subscription";
     case "subscription_threshold":
       return "recurring usage invoice";
     case "subscription_update":

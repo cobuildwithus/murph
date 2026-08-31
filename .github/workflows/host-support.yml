@@ -209,6 +209,7 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Setup pnpm
@@ -224,6 +225,13 @@ jobs:
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
+
+      - name: Guard cyclomatic complexity regressions
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          MURPH_COMPLEXITY_BASE_SHA: ${{ github.sha }}^1
+          MURPH_COMPLEXITY_HEAD_SHA: ${{ github.sha }}
+        run: pnpm complexity:diff
 
       - name: Validate release metadata
         run: |
@@ -368,6 +376,7 @@ jobs:
     needs: markdown-docs-scope
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17
@@ -383,7 +392,7 @@ jobs:
         ports:
           - 5432:5432
     env:
-      MURPH_APP_VERIFY_PARALLEL: "1"
+      MURPH_APP_VERIFY_PARALLEL: "0"
       MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test
       MURPH_VERIFY_STEP_PARALLEL: "1"
     steps:

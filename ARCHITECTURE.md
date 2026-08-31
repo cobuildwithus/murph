@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-26
+Last verified: 2026-08-30
 
 ## Accepted-Message Targeting
 
@@ -1891,8 +1891,9 @@ application code.
 
 ## Trust Boundaries
 
-- Every verified Cloudflare-to-Web execution callback consumes one SHA-256 nonce row with a single primary-Postgres insert. The `nonce_hash` primary key is the replay linearization point: one concurrent exact nonce wins and every exact-nonce conflict replay loses. The insert uses the database clock to refuse a delayed first admission after the callback's inclusive expiry boundary while retaining that row as a replay tombstone. The callback path owns no expiry sweep, transaction callback, or application-visible lock orchestration. The existing hourly hosted-retention owner selects only strictly expired nonce rows in `expires_at`, `nonce_hash` order under the shared batch and max-batch ceilings, locks the bounded candidates with PostgreSQL `FOR UPDATE SKIP LOCKED`, and deletes those exact rows in the same statement. Account deletion independently retains its per-member nonce delete.
-- Short-lived hosted control-plane creation is likewise cleanup-free. Connected-app intents, unbound sensitive-action challenges, device-connect intents, device OAuth sessions, Clinical Records connect intents, and Clinical Records OAuth sessions are created or consumed only through their exact owner rows; an exact expired read or consume fails closed. Device and Clinical Records OAuth consumers lock the exact state row before replay classification and consume, so the retention owner's `SKIP LOCKED` claim cannot turn a first callback into a false replay. Public expiry is not terminal ownership: consumed device OAuth claims remain with exact callback finalization and recovery, while consumed Clinical OAuth claims remain until no incomplete linked connect intent exists. Started connected-app, device-connect, and Clinical Records intents retain their exact completion row for one bounded 30-minute continuation grace. The hourly hosted-retention owner serially claims only owner-dead expired rows from each expiry-indexed table in expiry-and-primary-key order, under a smaller control-artifact batch and max-batch ceiling, with PostgreSQL `FOR UPDATE SKIP LOCKED`. The unbound sensitive-action lane uses a partial expiry-and-token index so durable approval history cannot enlarge its transient claim scan. Overlapping retention runs skip already-claimed mailbox, Linq diagnostic, session, and transient-control rows instead of waiting or repeating work. Approval-backed sensitive-action rows stay outside this transient cleanup because their approval lifecycle remains authoritative.
+- Web owns four authenticated, staggered hourly Vercel retention routes instead of one cross-domain sweep: nonce retention at minute 5, ordinary primary-database retention at minute 20, external account/computer provider cleanup at minute 35, and runtime-signal plus diagnostic-log maintenance at minute 50. Only the nonce route has an 800-second duration; the other three are capped at 300 seconds. No route invokes another owner, so a Kernel/browser, account-provider, runtime-signal, or diagnostic-database failure cannot prevent callback nonce catch-up.
+- Every verified Cloudflare-to-Web execution callback consumes one SHA-256 nonce row with a single primary-Postgres insert. The `nonce_hash` primary key is the replay linearization point: one concurrent exact nonce wins and every exact-nonce conflict replay loses. The insert uses the database clock to refuse a delayed first admission after the callback's inclusive expiry boundary while retaining that row as a replay tombstone. The callback path owns no expiry sweep, transaction callback, or application-visible lock orchestration. The dedicated nonce-retention route finishes the small browser-assertion nonce lane before selecting strictly expired callback nonce rows in `expires_at`, `nonce_hash` order, locking at most 5,000 candidates per statement with PostgreSQL `FOR UPDATE SKIP LOCKED`, and deleting those exact rows in the same statement. Callback nonces alone use a 100-times-higher max-batch ceiling to drain sustained control-plane volume; browser assertion nonces and all ordinary retention categories keep the shared four-batch ceiling. A caught-up hour stops after the first short batch. Account deletion independently retains its per-member nonce delete.
+- Short-lived hosted control-plane creation is likewise cleanup-free. Connected-app intents, unbound sensitive-action challenges, device-connect intents, device OAuth sessions, Clinical Records connect intents, and Clinical Records OAuth sessions are created or consumed only through their exact owner rows; an exact expired read or consume fails closed. Device and Clinical Records OAuth consumers lock the exact state row before replay classification and consume, so the retention owner's `SKIP LOCKED` claim cannot turn a first callback into a false replay. Public expiry is not terminal ownership: consumed device OAuth claims remain with exact callback finalization and recovery, while consumed Clinical OAuth claims remain until no incomplete linked connect intent exists. Started connected-app, device-connect, and Clinical Records intents retain their exact completion row for one bounded 30-minute continuation grace. The ordinary control-plane retention route serially claims only owner-dead expired rows from each expiry-indexed table in expiry-and-primary-key order, under a smaller control-artifact batch and max-batch ceiling, with PostgreSQL `FOR UPDATE SKIP LOCKED`. The unbound sensitive-action lane uses a partial expiry-and-token index so durable approval history cannot enlarge its transient claim scan. Overlapping retention runs skip already-claimed mailbox, Linq diagnostic, session, and transient-control rows instead of waiting or repeating work. Approval-backed sensitive-action rows stay outside this transient cleanup because their approval lifecycle remains authoritative.
 - Canonical vault storage is file-native under the vault root.
 - Human-facing truth lives in Markdown documents such as `CORE.md`, journal pages, and experiment pages.
 - Canonical markdown writes now reduce to one shared `packages/core` document seam with three target shapes only: singleton documents (for example `CORE.md` and `bank/memory.md`), slugged documents (for example `bank/automations/*.md`, `bank/experiments/*.md`, and registry-backed bank records), and dated documents (for example `journal/YYYY/YYYY-MM-DD.md`). Typed singleton JSON documents such as `bank/preferences.json` remain canonical too, but they stay out of the markdown seam on purpose.
@@ -2296,7 +2297,7 @@ millisecond remains admissible, and new nonce rows persist that first-invalid
 instant. Request admission performs one primary-key insert, treats only the
 exact nonce conflict as replay, and uses the database clock to refuse a delayed
 first admission at or after that persisted horizon while retaining the row as a
-replay tombstone. The bounded hourly hosted-retention owner
+replay tombstone. The bounded hourly nonce-retention owner
 removes only stored expiries at least 61 seconds behind `now`, protecting
 legacy raw-`exp` rows while intentionally over-retaining new-format rows for
 61 seconds.
@@ -2378,15 +2379,17 @@ cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.
 
 Positive Stripe payment email is a separate receipt-owned operational
-projection. After canonical reconciliation accepts a positive `invoice.paid`
-amount or fulfills a usage-credit Checkout or saved-card PaymentIntent, the
-same receipt must send one plain-text email before completion. This covers
-subscription creation and renewal, paid plan-change invoices, recurring usage
-invoices, and one-time or automatic usage purchases. Zero-dollar invoices and
-plan changes that collect no money remain silent. A receipt-local sent marker
+projection. After canonical reconciliation accepts a positive non-renewal
+`invoice.paid` amount or fulfills a usage-credit Checkout or saved-card
+PaymentIntent, the same receipt must send one plain-text email before
+completion. This covers subscription creation, paid plan-change invoices,
+recurring usage invoices, and one-time or automatic usage purchases. All
+`subscription_cycle` invoices, zero-dollar invoices, and plan changes
+that collect no money remain silent. A receipt-local sent marker
 and event-derived Resend idempotency key prevent replay after provider success;
 configuration or provider failure leaves that receipt retryable while the
 already-committed billing, entitlement, and usage-credit result remains intact.
+Eligible payment categories reproduce their notification candidate on retry.
 The notification and the receipt's existing post-canonical effects are separate
 attempts inside that one owner: failure of runtime recheck, sponsorship,
 cleanup, or member email work cannot suppress the payment email attempt, and
@@ -2397,8 +2400,9 @@ concurrency is bounded to one payment-email request plus the existing single
 post-canonical effect chain. If both fail while the sent marker is absent,
 the existing runtime-recheck pending code takes precedence because replay
 consumes it to reconstruct a direct-paid wake; the absent sent marker still
-retries notification on that receipt. Other simultaneous failures retain
-notification priority so a poisonable cleanup cannot suppress unmarked email.
+retries any reproducible notification candidate on that receipt. Other
+simultaneous failures retain notification priority so a poisonable cleanup
+cannot suppress unmarked email.
 After the marker exists, the other effect retains its existing retry and poison
 policy.
 
@@ -3192,7 +3196,7 @@ member identifier and adds no provider read or database round trip. The daily
 growth snapshot joins still-live observations to verified member contact
 indexes and first private activation, then sets the existing one-time member
 conversion marker. Retained group-message sender evidence remains a fallback,
-and the hourly retention owner deletes expired observations in bounded serial
+and the hourly control-plane retention owner deletes expired observations in bounded serial
 batches. This evidence never grants identity, membership, access, or product
 authority.
 

@@ -418,7 +418,9 @@ async function expectActivationTargetRetainedAcrossPaymentStageFailure(input: {
       userId: "member_123",
     }],
   });
-  const event = makeInvoicePaidEvent();
+  const event = makeInvoicePaidEvent({
+    billingReason: "subscription_create",
+  });
   const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.stripe.events.retrieve.mockResolvedValue(event);
   mocks.applyStripeInvoicePaid
@@ -822,7 +824,9 @@ describe("hosted Stripe event reconciliation", () => {
 
   it("emails a positive invoice payment before completing its receipt", async () => {
     const prisma = createStripeEventPrismaHarness();
-    const event = makeInvoicePaidEvent();
+    const event = makeInvoicePaidEvent({
+      billingReason: "subscription_create",
+    });
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.sendHostedStripePaymentNotificationEmail.mockResolvedValueOnce("sent");
 
@@ -835,7 +839,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledWith({
       candidate: expect.objectContaining({
         amountMinor: 2000,
-        category: "subscription_cycle",
+        category: "subscription_create",
         eventId: event.id,
         eventType: "invoice.paid",
       }),
@@ -1855,7 +1859,7 @@ describe("hosted Stripe event reconciliation", () => {
         typeof import("@/src/lib/hosted-onboarding/stripe-billing-events")
       >("@/src/lib/hosted-onboarding/stripe-billing-events");
       const event = eventKind === "invoice"
-        ? makeInvoicePaidEvent()
+        ? makeInvoicePaidEvent({ billingReason: "subscription_update" })
         : makeSubscriptionEvent("customer.subscription.created");
       const starterMember: HostedMemberBillingSnapshot = {
         billingRef: {
@@ -2671,7 +2675,9 @@ describe("hosted Stripe event reconciliation", () => {
 
   it("requires support instead of guessing after a partial legacy Family refund", async () => {
     const prisma = createStripeEventPrismaHarness();
-    const event = makeInvoicePaidEvent();
+    const event = makeInvoicePaidEvent({
+      billingReason: "subscription_update",
+    });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mockPartialLegacyFamilyRefundSupportCase();
@@ -2711,7 +2717,9 @@ describe("hosted Stripe event reconciliation", () => {
 
   it("does not poison a legacy cleanup receipt until its payment email is marked", async () => {
     const prisma = createStripeEventPrismaHarness();
-    const event = makeInvoicePaidEvent();
+    const event = makeInvoicePaidEvent({
+      billingReason: "subscription_update",
+    });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mockPartialLegacyFamilyRefundSupportCase();
@@ -2756,7 +2764,7 @@ describe("hosted Stripe event reconciliation", () => {
     }
   });
 
-  it("does not send the Resend welcome when a later paid invoice has no new activation", async () => {
+  it("does not send welcome or payment emails for a later paid subscription renewal", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaidEvent({
       id: "evt_invoice_paid_renewal",
@@ -2787,8 +2795,14 @@ describe("hosted Stripe event reconciliation", () => {
       status: "completed",
     });
 
+    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledOnce();
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
     expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
+    expect(mocks.sendHostedStripePaymentNotificationEmail).not.toHaveBeenCalled();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      paymentNotificationEmailSentAt: null,
+      status: HostedStripeEventStatus.completed,
+    }));
   });
 
   it("uses checkout completion as a welcome candidate so invoice-before-checkout email ordering can recover", async () => {

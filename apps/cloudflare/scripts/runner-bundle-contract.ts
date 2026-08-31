@@ -82,14 +82,15 @@ export function resolveHostedRunnerBuildPackageNames(
   const workspacePackageNames = resolveHostedRunnerWorkspacePackageNames({
     includeBundleOnlyDependencies,
   });
-
-  if (!includeBundleOnlyDependencies) {
-    return workspacePackageNames;
-  }
+  const assistantCliSurfaceBuildPackageNames = workspacePackageNames.includes(
+    "@murphai/assistant-engine",
+  )
+    ? resolveWorkspaceDependencyClosure(["@murphai/murph"])
+    : [];
 
   return sortPackageNames([
     ...workspacePackageNames,
-    ...resolveWorkspaceDependencyClosure(publishedMurphBundledWorkspacePackageNames),
+    ...assistantCliSurfaceBuildPackageNames,
   ]);
 }
 
