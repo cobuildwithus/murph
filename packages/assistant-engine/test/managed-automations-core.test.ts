@@ -565,7 +565,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(record?.instructions).not.toContain('roughly a week or more')
     expect(record?.instructions).toContain('action: connect')
     expect(record?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
-    expect(record?.instructions).toContain('what was probably noise')
+    expect(record?.instructions).toContain(
+      'Choose one primary conversational job',
+    )
     expect(record?.instructions).toContain(
       'An official weather alert alone never clears the proactive send bar',
     )
@@ -583,6 +585,22 @@ describe('applyMurphManagedAutomations core integration', () => {
     )
     expect(record?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
+    )
+    for (const policyFragment of [
+      'still-current, uncontradicted user-stated goal, intention, or plan',
+      'Start with the engine-supplied committed recent conversation, then make targeted reads of active goals',
+      'conservative pacing evidence rather than delivery proof',
+      'A repeated emerging behavior can clear the bar',
+      'One occurrence, generic congratulations, or merely restating the log does not clear it.',
+      'do not silently convert it into a goal, reminder, check-in, plan, experiment, or accountability loop',
+      'never add one solely to provoke engagement',
+      'Do not create or search a separate cross-automation outreach ledger for this pacing check.',
+      'prefer bounded `vault-cli wearables activity list` date ranges',
+    ]) {
+      expect(record?.instructions).toContain(policyFragment)
+    }
+    expect(record?.instructions).not.toContain(
+      "Tie behavioral feedback to the member's exact active goal or plan.",
     )
 
     const insightRecord = await showAutomation({
@@ -776,6 +794,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     expectCronSchedule(researchScoutRecord?.schedule)
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(researchScoutRecord?.instructions).toContain(
+      'Use the engine-supplied committed recent conversation as conservative interruption-cost evidence',
+    )
     expect(researchScoutRecord?.instructions).toContain('On this scheduled weekly run')
     expect(researchScoutRecord?.instructions).not.toContain('Wednesday at 7:30 PM local time')
     expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')

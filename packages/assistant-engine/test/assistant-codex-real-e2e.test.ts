@@ -9558,6 +9558,152 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
   )
 })
 
+describeRealCodex('real Codex weekly digest emerging behavior e2e', () => {
+  it(
+    'connects repeated new activity to conversation without nagging or inventing support',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const weeklyHealthDigest = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      )
+      if (!weeklyHealthDigest) {
+        throw new Error('Expected the managed weekly health digest automation.')
+      }
+      const probes = [
+        {
+          expectedKind: 'send_message',
+          kind: 'emerging-cardio',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Recent conversation: on July 27, the member said, "I want to build enough cardio to feel less winded on fall hikes."',
+            '- No exact active goal, plan, regimen, experiment, reminder, check-in, or accountability request exists for that intention.',
+            '- Baseline activity from July 14 through July 27 had no structured cardio sessions.',
+            '- Activity from July 28 through August 3 contains three separate, consistently classified easy cycling sessions of 20 to 30 minutes.',
+            '- Physiology, symptoms, tracking quality, and other health context are stable.',
+            '- No unsolicited health note surfaced recently, this thread has not already been acknowledged, and no urgent or sensitive conversation is competing for attention.',
+            '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+          ].join('\n\n'),
+        },
+        {
+          expectedKind: 'skip',
+          kind: 'ordinary-shortfall',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Recent conversation says the member is already doing cardio for general fitness; there is no exact active goal or plan.',
+            '- The recent baseline is two routine cycling sessions per week. The current week has one routine cycling session.',
+            '- Physiology, symptoms, tracking quality, and other health context are stable.',
+            '- There is no new lever, tradeoff, obstacle, safety issue, current question, tracking problem, emerging behavior, or other decision-relevant change.',
+            '- No unsolicited health note surfaced recently, and no urgent or sensitive conversation is competing for attention.',
+            '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+          ].join('\n\n'),
+        },
+      ] as const
+
+      try {
+        for (const probe of probes) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), `murph-weekly-emerging-${probe.kind}-e2e-`),
+          )
+          const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+          try {
+            const result = await executeRealCodexAppServerTurn({
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildScheduledAutomationDeveloperInstructions('direct', 'none'),
+              dynamicTools: [MURPH_AUTOMATION_TOOL],
+              env: config.env,
+              excludeResumeTurns: true,
+              hostedToolContext: {
+                automationTool: {
+                  request: async (request) => {
+                    automationRequests.push(request)
+                    throw new Error(
+                      'Weekly digest must not create or change an automation.',
+                    )
+                  },
+                },
+                computerToolsAvailable: false,
+                currentHostedDeliveryContext: () => null,
+                currentHostedMailboxItemIds: () => [],
+                sendVaultFile: async () => {
+                  throw new Error('Vault file sends are unavailable in this test.')
+                },
+                vaultFileSendAvailable: false,
+              },
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'read-only',
+              workingDirectory,
+            })
+            const actions = readCapabilityRoutingActions(result.jsonEvents)
+            const automationActions = actions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_AUTOMATION_TOOL.name
+            )
+            const mutatingCliActions = actions.filter((action) =>
+              action.kind === 'command'
+              && /\bvault-cli\s+(?:automation|experiment|goal|regimen)\s+(?:add|archive|create|delete|patch|save|set|set-status|start|stop|update|upsert)\b/iu
+                .test(action.command)
+            )
+            const decision = parseAssistantNotificationDecision(
+              result.finalMessage,
+            )
+
+            expect(automationActions, probe.kind).toHaveLength(0)
+            expect(automationRequests, probe.kind).toHaveLength(0)
+            expect(mutatingCliActions, probe.kind).toHaveLength(0)
+
+            if (probe.expectedKind === 'send_message') {
+              expect(decision.kind, probe.kind).toBe('send_message')
+              if (decision.kind !== 'send_message') {
+                throw new Error('Expected emerging cardio behavior to send.')
+              }
+              expect(decision.text, probe.kind).toMatch(/hik|endurance/iu)
+              expect(decision.text, probe.kind).toMatch(/cardio|cycl|rides?/iu)
+              expect(decision.text, probe.kind).toMatch(
+                /\b(?:3|three|several|multiple|repeat(?:ed|ing)?|routine|pattern)\b|part of (?:this|your) week|showing up/iu,
+              )
+              expect(decision.text, probe.kind).not.toMatch(
+                /weekly (?:digest|report)|scheduled|automation|scan(?:ned|ning)?|check[- ]?in/iu,
+              )
+              expect(decision.text, probe.kind).not.toMatch(
+                /you (?:need|have) to|you should|\bmust\b|get back on track|failed|compliance/iu,
+              )
+              expect(decision.text, probe.kind).not.toMatch(
+                /on track|ahead|behind|success|failure|falling short/iu,
+              )
+              expect(decision.text, probe.kind).not.toContain('?')
+            } else {
+              expect(decision, probe.kind).toEqual({
+                kind: 'skip',
+                privateSummary:
+                  'No weekly digest cleared the memorability bar.',
+              })
+            }
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    480_000,
+  )
+})
+
 describeRealCodex('real Codex official weather-alert context e2e', () => {
   it(
     'uses one fixed alert read, falls back on failure, and keeps alert-only outreach quiet',
