@@ -8,10 +8,6 @@ import {
 import {
   decodeHostedDeviceRoutingIndexKey,
 } from "../../src/lib/device-sync/routing-index";
-import type {
-  HostedDeviceSyncDirtyConnectionRecord,
-  HostedPrismaTransactionClient,
-} from "../../src/lib/device-sync/prisma-store";
 
 const prismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
 const deviceSyncPrismaStoreModuleSpecifier = new URL(
@@ -385,8 +381,7 @@ interface HostedDeviceSyncControlPlaneStore {
   getDirtyConnection(input: {
     connectionId: string;
     userId: string;
-    tx?: HostedPrismaTransactionClient;
-  }): Promise<HostedDeviceSyncDirtyConnectionRecord | null>;
+  }): Promise<{ dirtyResources: Record<string, unknown> } | null>;
   getStoredConnectionAccountForUser(
     userId: string,
     connectionId: string,
