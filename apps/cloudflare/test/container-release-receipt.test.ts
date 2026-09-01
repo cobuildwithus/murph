@@ -197,13 +197,18 @@ describe("container release receipt", () => {
       )).rejects.toThrow("Cloudflare container application state was incomplete or malformed.");
     });
 
-    it("lists one exact application through a no-cache, filtered Cloudflare request", async () => {
-      const fetchImpl = vi.fn(async (_input: URL, _init: RequestInit) => ({
-        json: async () => ({
-          result: [providerIdentity("exact-app", "id", 4, "image")],
-          result_info: { next_page_token: "", total_count: 1 },
-          success: true,
-        }),
+    it("resolves a stale exact-name list result through current application detail", async () => {
+      const fetchImpl = vi.fn(async (input: URL, _init: RequestInit) => ({
+        json: async () => input.pathname.endsWith("/containers/applications")
+          ? {
+              result: [providerIdentity("exact-app", "id", 4, "stale-image")],
+              result_info: { next_page_token: "", total_count: 1 },
+              success: true,
+            }
+          : {
+              result: providerIdentity("exact-app", "id", 5, "current-image"),
+              success: true,
+            },
         ok: true,
       }));
       const listApplications = createCloudflareContainerApplicationLister({
@@ -213,15 +218,28 @@ describe("container release receipt", () => {
       });
 
       await expect(listApplications("exact-app")).resolves.toEqual([
-        providerIdentity("exact-app", "id", 4, "image"),
+        providerIdentity("exact-app", "id", 5, "current-image"),
       ]);
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
-      const request = fetchImpl.mock.calls[0];
-      expect(request?.[0].toString()).toBe(
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      const listRequest = fetchImpl.mock.calls[0];
+      expect(listRequest?.[0].toString()).toBe(
         "https://api.cloudflare.com/client/v4/accounts/account-fixture/containers/applications"
           + "?name=exact-app",
       );
-      expect(request?.[1]).toEqual({
+      expect(listRequest?.[1]).toEqual({
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          Authorization: "Bearer token-fixture",
+        },
+        method: "GET",
+        signal: expect.any(AbortSignal),
+      });
+      const detailRequest = fetchImpl.mock.calls[1];
+      expect(detailRequest?.[0].toString()).toBe(
+        "https://api.cloudflare.com/client/v4/accounts/account-fixture/containers/applications/id",
+      );
+      expect(detailRequest?.[1]).toEqual({
         cache: "no-store",
         headers: {
           Accept: "application/json",
@@ -271,6 +289,55 @@ describe("container release receipt", () => {
         );
         expect(error.message).not.toMatch(/sensitive|transport|URL/iu);
       }
+    });
+
+    it.each([
+      { result: [], success: true },
+      { result: providerIdentity("wrong-app", "id", 5, "current-image"), success: true },
+      { result: providerIdentity("exact-app", "wrong-id", 5, "current-image"), success: true },
+    ])("rejects malformed or mismatched application detail", async (detailPayload) => {
+      const fetchImpl = vi.fn(async (input: URL) => ({
+        json: async () => input.pathname.endsWith("/containers/applications")
+          ? {
+              result: [providerIdentity("exact-app", "id", 4, "stale-image")],
+              success: true,
+            }
+          : detailPayload,
+        ok: true,
+      }));
+      const listApplications = createCloudflareContainerApplicationLister({
+        accountId: "account-fixture",
+        apiToken: "token-fixture",
+        fetchImpl,
+      });
+
+      await expect(listApplications("exact-app")).rejects.toThrow(
+        "Cloudflare container application state was incomplete or malformed.",
+      );
+    });
+
+    it("redacts transport detail from application-detail failures", async () => {
+      const fetchImpl = vi.fn(async (input: URL) => {
+        if (input.pathname.endsWith("/containers/applications")) {
+          return {
+            json: async () => ({
+              result: [providerIdentity("exact-app", "id", 4, "stale-image")],
+              success: true,
+            }),
+            ok: true,
+          };
+        }
+        throw new Error("sensitive detail transport failure");
+      });
+      const listApplications = createCloudflareContainerApplicationLister({
+        accountId: "sensitive-account-fixture",
+        apiToken: "sensitive-token-fixture",
+        fetchImpl,
+      });
+
+      await expect(listApplications("exact-app")).rejects.toThrow(
+        "Cloudflare container application state was incomplete or malformed.",
+      );
     });
   });
 
@@ -350,6 +417,11 @@ describe("container release receipt", () => {
         actions: modifiedAction,
         after: [identity("app", "id", 2, "new-image")],
         before: [],
+      })).toThrow("Container release evidence did not form an exact provider transition.");
+      expect(() => buildContainerReleaseEntries({
+        actions: modifiedAction,
+        after: [identity("app", "id", 2, "old-image")],
+        before: [identity("app", "id", 2, "old-image")],
       })).toThrow("Container release evidence did not form an exact provider transition.");
 
       expect(buildContainerReleaseEntries({

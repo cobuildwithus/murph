@@ -247,7 +247,7 @@ export function createCloudflareContainerApplicationLister(input: {
     url.searchParams.set("name", applicationName);
 
     try {
-      const response = await fetchImpl(url, {
+      const requestInit = {
         cache: "no-store",
         headers: {
           Accept: "application/json",
@@ -255,11 +255,38 @@ export function createCloudflareContainerApplicationLister(input: {
         },
         method: "GET",
         signal: AbortSignal.timeout(CLOUDFLARE_REQUEST_TIMEOUT_MS),
-      });
+      } as const;
+      const response = await fetchImpl(url, requestInit);
       if (!response.ok) {
         throw invalidProviderState();
       }
-      return readExhaustiveCloudflareResult(await response.json());
+      const listedApplications = readExhaustiveCloudflareResult(
+        await response.json(),
+      );
+
+      return await Promise.all(listedApplications.map(async (listedApplication) => {
+        const reference = parseProviderApplicationReference(listedApplication);
+        const detailUrl = new URL(
+          `${CLOUDFLARE_API_BASE_URL}/accounts/${encodeURIComponent(input.accountId)}`
+            + `/containers/applications/${encodeURIComponent(reference.applicationId)}`,
+        );
+        const detailResponse = await fetchImpl(detailUrl, {
+          ...requestInit,
+          signal: AbortSignal.timeout(CLOUDFLARE_REQUEST_TIMEOUT_MS),
+        });
+        if (!detailResponse.ok) {
+          throw invalidProviderState();
+        }
+        const detail = readCloudflareResultObject(await detailResponse.json());
+        const identity = parseProviderIdentity(detail);
+        if (
+          identity.applicationId !== reference.applicationId
+          || identity.applicationName !== reference.applicationName
+        ) {
+          throw invalidProviderState();
+        }
+        return detail;
+      }));
     } catch {
       throw invalidProviderState();
     }
@@ -304,7 +331,8 @@ export function buildContainerReleaseEntries(input: {
           break;
         case "modified":
           if (!before
-            || before.applicationId !== after.applicationId) {
+            || before.applicationId !== after.applicationId
+            || (before.version === after.version && before.image === after.image)) {
             throw invalidReleaseTransition();
           }
           disposition = "updated";
@@ -357,6 +385,26 @@ function readExhaustiveCloudflareResult(value: unknown): readonly unknown[] {
     throw invalidProviderState();
   }
   return value.result;
+}
+
+function readCloudflareResultObject(value: unknown): Readonly<Record<string, unknown>> {
+  if (!isRecord(value) || value.success !== true || !isRecord(value.result)) {
+    throw invalidProviderState();
+  }
+  return value.result;
+}
+
+function parseProviderApplicationReference(value: unknown): Readonly<{
+  applicationId: string;
+  applicationName: string;
+}> {
+  if (!isRecord(value)) {
+    throw invalidProviderState();
+  }
+  return {
+    applicationId: readRequiredNonemptyString(value, "id", invalidProviderState),
+    applicationName: readRequiredNonemptyString(value, "name", invalidProviderState),
+  };
 }
 
 function parseProviderIdentity(value: unknown): CloudflareContainerApplicationIdentity {
