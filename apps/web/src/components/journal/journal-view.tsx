@@ -921,7 +921,7 @@ function SleepMetricValue({
       <dd
         className={cn(
           "mt-1 inline-flex font-serif font-semibold tracking-[-0.02em] text-foreground",
-          variant === "primary" ? "text-2xl leading-7" : "text-lg leading-6",
+          variant === "primary" ? "text-xl leading-6" : "text-base leading-5",
           sleepMetricToneClass(context),
         )}
       >
