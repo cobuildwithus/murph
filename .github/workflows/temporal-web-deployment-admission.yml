@@ -1,0 +1,90 @@
+name: Temporal Web Deployment Admission
+
+on:
+  push:
+    branches:
+      - main
+
+# Vercel must configure the admission job below as a production Deployment
+# Check. The build may complete while this workflow runs, but the production
+# domains must not move until this exact-main compatibility proof succeeds.
+permissions:
+  contents: read
+
+concurrency:
+  group: temporal-web-deployment-admission
+  cancel-in-progress: true
+
+jobs:
+  producer:
+    name: Build exact production wire fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact public main revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Execute exact production wire projection
+        run: >-
+          node scripts/temporal-compatibility-producer-fixtures.ts
+          --output temporal-compatibility-producer-fixtures.json
+
+      - name: Upload exact production wire fixture
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: temporal-web-deployment-producer-${{ github.sha }}
+          path: temporal-compatibility-producer-fixtures.json
+          if-no-files-found: error
+          retention-days: 1
+
+  admission:
+    name: Temporal Web production admission
+    needs: producer
+    environment: temporal-compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download exact production wire fixture
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: temporal-web-deployment-producer-${{ github.sha }}
+          path: ${{ runner.temp }}/temporal-web-deployment-producer
+
+      - name: Check out exact public main revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Mint private compatibility token
+        id: private-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}
+          private-key: ${{ secrets.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY }}
+          owner: cobuildwithus
+          repositories: murph-cloud
+          permission-actions: write
+          permission-contents: read
+
+      - name: Prove exact public main against every supported Temporal reader
+        env:
+          EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}
+          TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN: ${{ steps.private-app-token.outputs.token }}
+          TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/hosted-orchestration-compatibility.mjs run-main
+          --sha "${GITHUB_SHA}"
+          --fixtures "${RUNNER_TEMP}/temporal-web-deployment-producer/temporal-compatibility-producer-fixtures.json"
+          --request-id "temporal-web-deploy-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"

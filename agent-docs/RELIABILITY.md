@@ -96,8 +96,18 @@ Last verified: 2026-08-31
   exact run is visible, uncertain polling or timeout cancels only that run,
   escalates to force-cancel only if ordinary cancellation does not make it
   terminal, and never searches for or cancels a guessed run.
-  This fixture proof is not deployment admission and does not claim full
-  application integration. Separately, after both revisions reach protected
+  This pull-request fixture proof is candidate evidence, not deployment
+  admission, and does not claim full application integration. After a relevant
+  revision reaches public `main`, the exact-main producer and controller run
+  again in `.github/workflows/temporal-web-deployment-admission.yml`. Vercel
+  must configure its `Temporal Web production admission` job as a production
+  Deployment Check so production domains remain on the prior deployment until
+  the exact public commit passes against the then-current private `main` and
+  live reader set. The public controller re-reads both branches before success;
+  private protected attestation independently re-reads every supported reader.
+  This main-push boundary proves the reconciliation-facts wire contract, not
+  arbitrary Web, Cloudflare, or worker behavior. Separately, after both
+  revisions reach protected
   `main`, private unprivileged full-integration CI checks out the exact resolved
   public `main` revision, never an arbitrary public candidate, and emits an
   exact private-main/public-main candidate receipt. Protected release admission

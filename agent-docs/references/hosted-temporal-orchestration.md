@@ -50,6 +50,18 @@ returned by Temporal Visibility, or canary proof can become a private deploy
 prerequisite. Visibility is eventually consistent, so only the synthetic
 migration corpus is the exhaustive replay contract.
 
+The pull-request status is candidate evidence, not durable production
+authorization. After a relevant revision reaches public `main`,
+`.github/workflows/temporal-web-deployment-admission.yml` repeats the bounded
+wire proof for that exact public commit against the then-current private
+`main` and live reader set. Its `Temporal Web production admission` job must be
+configured as a Vercel production Deployment Check so a completed build cannot
+move production domains before the proof succeeds. The controller re-reads
+both public and private `main` before accepting the result, while the private
+workflow independently re-reads the complete reader set. This boundary proves
+the hosted reconciliation-facts wire contract; private release admission still
+owns full integration, migration replay, production routing, and canary proof.
+
 Temporal decides when to ask Cloudflare to process based on web-owned
 reconciliation facts and pointer-only signals. Cloudflare starts or wakes the
 container. The restored Murph runtime decides what the work means and what wake
@@ -749,7 +761,9 @@ The hard-cut architecture is accepted when:
   silently. Murph Cloud independently owns Workflow bundle and replay-policy
   gates.
 - Relevant public producer, contract, hosted-runtime, harness, and CI-owner
-  changes publish one exact-SHA `Temporal compatibility` status. The public
+  changes publish one exact-SHA `Temporal compatibility` pull-request status.
+  That status is candidate evidence and never becomes production authorization
+  merely because it remains green. The public
   controller validates the pull request's exact base repository and ref; only
   pull requests targeting the default branch may publish that SHA-global
   status, so stacked non-default-branch pull requests cannot overwrite it. The
@@ -764,6 +778,16 @@ The hard-cut architecture is accepted when:
   returning one producer-and-reader proof digest. Public code stores no private
   revision pointer or reader policy. Missing, stale, skipped, canceled,
   duplicated, malformed, or failed proof remains red or pending.
+- Every public `main` push runs the exact-main producer and compatibility
+  controller again in `.github/workflows/temporal-web-deployment-admission.yml`.
+  Vercel must select the `Temporal Web production admission` job as a
+  production Deployment Check; with that external binding in place, production
+  domains stay on the previous deployment until the current public commit,
+  current private `main`, and current live readers produce one accepted proof.
+  The public controller re-reads both branch heads, and the private controller
+  re-reads the supported reader set, before success. This proves the
+  reconciliation-facts wire boundary only; Murph Cloud release admission owns
+  full worker/runtime integration, replay, routing, and canary safety.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration
