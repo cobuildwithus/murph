@@ -21,6 +21,10 @@ import type { DatabaseHealthStoredSample } from "./database-health/store.ts";
 import type {
   DeviceWebhookQueueEnvelopeV1,
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
+import type {
+  HostedStandbyCoordinatorNamespaceLike,
+  HostedStandbyRunnerContainerNamespaceLike,
+} from "./standby-runner-contract.js";
 import type { DeviceWebhookQueueHealthMonitorResult } from "./device-webhook-queue-health/monitor.ts";
 import type {
   DeviceWebhookQueueHealthObservation,
@@ -325,6 +329,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
   HOSTED_EXECUTION_RUNNER_ENV_PROFILES?: string;
+  HOSTED_EXECUTION_STANDBY_MODE?: string;
   HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS?: string;
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID?: string;
   HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;
@@ -367,6 +372,8 @@ export interface WorkerEnvironmentContract<
   RUNNER_CONTAINER_SMOKE?: WorkerRunnerContainerNamespaceLike<
     WorkerDeploySmokeRunnerContainerStubLike
   >;
+  STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
+  STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;

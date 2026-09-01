@@ -2785,7 +2785,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
       const offerVaultShareProjectionBeforeRecording = async (
         projectionMode?: HostedVaultShareProjectionMode,
-        revalidateRecordedDeviceSyncWakeAfterScopeResolution = false,
       ): Promise<
         | { outcome: "completed"; result: HostedVaultShareProjectionOfferResult }
         | { outcome: "preempted" }
@@ -2886,32 +2885,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             signal,
             vaultSharePort,
           });
-        let scopeResolutionResult = await waitForOwnedProjectionStage(
+        const scopeResolutionResult = await waitForOwnedProjectionStage(
           resolveProjectionScopes,
         );
-        while (
-          scopeResolutionResult.kind === "wake"
-          && (
-            revalidateRecordedDeviceSyncWakeAfterScopeResolution
-            && scopeResolutionResult.notification.requestedProcessingMode !== "system_mailbox"
-          )
-        ) {
-          await checkpointSystemMailboxMode(
-            "system_mailbox.checkpoint.revalidate_recorded_device_sync",
-          );
-          if (
-            foregroundWakeObserved
-            || (
-              assistantCronDeadlineMs !== null
-              && Date.now() >= assistantCronDeadlineMs
-            )
-          ) {
-            return { outcome: "preempted" };
-          }
-          scopeResolutionResult = await waitForOwnedProjectionStage(
-            resolveProjectionScopes,
-          );
-        }
         if (scopeResolutionResult.kind === "wake") {
           observeForegroundWake(scopeResolutionResult.notification);
           return { outcome: "preempted" };
@@ -3048,36 +3024,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
         await finishInitialImportEffectsOnce();
         return checkpoint;
-      };
-      const revalidateRecordedDeviceSyncRuntimeWake = async (
-        notification: RuntimeWakeNotification | null,
-      ): Promise<boolean> => {
-        if (checkpointReportedConversationInputAhead) {
-          return true;
-        }
-        try {
-          const foregroundPrefetch = await createHostedForegroundMailboxPrefetch({
-            lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
-            limitPerLane: mailboxBudget.fetchLimitPerLane,
-            requestId: `${requestId}:recorded-device-sync-wake-revalidate`,
-            runnerInput: baseRunnerInput,
-          });
-          const inspection =
-            await inspectHostedPreCheckpointSystemMailboxPrefetch(
-              foregroundPrefetch,
-            );
-          if (inspection.caughtUpToEveryLaneHighWater) {
-            defaultOwnerWakeObserved ||=
-              notification?.requestedProcessingMode === "default";
-            foregroundWakeObserved = false;
-            return false;
-          }
-        } catch {
-          // An uninspectable wake preserves foreground priority.
-        }
-        return notification
-          ? observeForegroundWake(notification)
-          : foregroundWakeObserved;
       };
       const returnSystemMailboxModeResult = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
@@ -3320,15 +3266,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               runtimeWakeSignal: options.runtimeWakeSignal ?? null,
               shutdownSignal: options.shutdownSignal ?? null,
             });
-          const foregroundWakeBeforeExactDelivery = deviceSyncDirtyRecordReady
-            ? pendingWakeBeforeExactDelivery || foregroundWakeObserved
-              ? await revalidateRecordedDeviceSyncRuntimeWake(
-                  pendingWakeBeforeExactDelivery,
-                )
-              : false
-            : pendingWakeBeforeExactDelivery
-              ? observeForegroundWake(pendingWakeBeforeExactDelivery)
-              : foregroundWakeObserved;
+          const foregroundWakeBeforeExactDelivery = pendingWakeBeforeExactDelivery
+            ? observeForegroundWake(pendingWakeBeforeExactDelivery)
+            : foregroundWakeObserved;
           const preemptBeforeExactDelivery =
             (
               !assistantExecutionBlocked
@@ -3532,7 +3472,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               isVaultShareProjectionRecord
                 ? HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
                 : undefined,
-              deviceSyncDirtyRecordReady,
             );
           if (projectionOpportunity.outcome === "preempted") {
             return { preempted: true, prepared: true };

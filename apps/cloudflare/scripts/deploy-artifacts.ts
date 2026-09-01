@@ -431,6 +431,10 @@ function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
     containers,
     "DeploySmokeRunnerContainer",
   );
+  const standbyRunnerContainer = findGeneratedContainerConfig(
+    containers,
+    "StandbyRunnerContainer",
+  );
 
   if (!runnerContainer) {
     throw new Error("Generated Wrangler config is missing the RunnerContainer entry.");
@@ -439,9 +443,13 @@ function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
   if (!deploySmokeContainer) {
     throw new Error("Generated Wrangler config is missing the DeploySmokeRunnerContainer entry.");
   }
+  if (!standbyRunnerContainer) {
+    throw new Error("Generated Wrangler config is missing the StandbyRunnerContainer entry.");
+  }
 
   assertGeneratedContainerUsesPreparedImage(runnerContainer);
   assertGeneratedContainerUsesPreparedImage(deploySmokeContainer);
+  assertGeneratedContainerUsesPreparedImage(standbyRunnerContainer);
 }
 
 function findGeneratedContainerConfig(

@@ -228,6 +228,7 @@ describe("hosted deploy automation helpers", () => {
       };
       containers: Array<{
         class_name: string;
+        constraints?: { regions: string[] };
         image: string;
         image_build_context: string;
         instance_type: string | {
@@ -329,6 +330,17 @@ describe("hosted deploy automation helpers", () => {
         rollout_step_percentage: [100],
         ssh: { enabled: false },
       },
+      {
+        class_name: "StandbyRunnerContainer",
+        constraints: { regions: ["ENAM"] },
+        image: "../../../Dockerfile.cloudflare-hosted-runner",
+        image_build_context: "..",
+        instance_type: "standard-1",
+        max_instances: 250,
+        rollout_active_grace_period: 300,
+        rollout_step_percentage: [10, 25, 50, 100],
+        ssh: { enabled: false },
+      },
     ]);
     expect(config.durable_objects.bindings).toEqual([
       {
@@ -354,6 +366,14 @@ describe("hosted deploy automation helpers", () => {
       {
         class_name: "DeploySmokeRunnerContainer",
         name: "RUNNER_CONTAINER_SMOKE",
+      },
+      {
+        class_name: "StandbyRunnerCoordinatorDurableObject",
+        name: "STANDBY_COORDINATOR",
+      },
+      {
+        class_name: "StandbyRunnerContainer",
+        name: "STANDBY_RUNNER_CONTAINER",
       },
     ]);
     expect(config.analytics_engine_datasets).toEqual([
@@ -386,6 +406,13 @@ describe("hosted deploy automation helpers", () => {
       {
         new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
         tag: "v6",
+      },
+      {
+        new_sqlite_classes: [
+          "StandbyRunnerCoordinatorDurableObject",
+          "StandbyRunnerContainer",
+        ],
+        tag: "v7",
       },
     ]);
     expect(config).toMatchObject({
@@ -449,6 +476,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS).toBe("30000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS).toBe("60000");
+    expect(config.vars.HOSTED_EXECUTION_STANDBY_MODE).toBe("off");
     expect(config.vars.HOSTED_PHYSICAL_NOTES_ENABLED).toBe("true");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");
@@ -643,12 +671,16 @@ describe("hosted deploy automation helpers", () => {
     expect(generatedConfig.containers.map(({ instance_type }) => instance_type)).toEqual([
       expectedDefaultInstanceType,
       expectedDefaultInstanceType,
+      expectedDefaultInstanceType,
     ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
       expect(generatedContainer.ssh).toEqual({ enabled: false });
       expect(checkedInConfig.containers[index]).toMatchObject({
         class_name: generatedContainer.class_name,
+        ...("constraints" in generatedContainer
+          ? { constraints: generatedContainer.constraints }
+          : {}),
         instance_type: generatedContainer.instance_type,
         max_instances: generatedContainer.max_instances,
         rollout_active_grace_period: generatedContainer.rollout_active_grace_period,
@@ -715,6 +747,7 @@ describe("hosted deploy automation helpers", () => {
       ...expectedRequiredHostedCryptoWorkerVars(),
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
+      HOSTED_EXECUTION_STANDBY_MODE: "off",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });
   });
@@ -817,7 +850,7 @@ describe("hosted deploy automation helpers", () => {
       "nodejs_compat",
       "containers_pid_namespace",
     ]);
-    expect(config.containers).toHaveLength(2);
+    expect(config.containers).toHaveLength(3);
     for (const container of config.containers) {
       expect(container.ssh).toEqual({ enabled: false });
       expect(container).not.toHaveProperty("authorized_keys");

@@ -503,8 +503,9 @@ gate unset and makes no paid request.
   Webpack build worker and memory optimizations because Workflow contributes
   Webpack configuration. Three consecutive forced-cold Webpack previews, a
   later integration preview, and the final corrected head previously completed
-  on the Standard builder without OOM. The shared production runner owns the
-  versioned `.next/cache` epoch and the per-build cold-Webpack-cache policy;
+  on the Standard builder without OOM. The Next config disables the production
+  Webpack cache, while the shared production runner owns the versioned
+  `.next/cache` transition epoch;
   see `apps/web/README.md` § "Production build memory guard" for the exact
   contract. Missing or mismatched stamps fail toward a cold build instead of
   trusting cross-compiler state.

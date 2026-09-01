@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-27
+Last verified: 2026-08-31
 
 ## Decision
 
@@ -314,6 +314,34 @@ namespace, API-key auth when configured, and TLS settings. The web signal client
 and worker connection code must support the same API key, TLS enablement,
 client certificate/key, server root CA, and server-name override settings so
 `signalWithStart` and worker polling use the same trust model.
+
+### Local Production Diagnostics
+
+Murph developer machines may have the Temporal CLI and API access already
+provisioned in the repository-root local environment for faster production
+diagnosis. The expected local inputs are `TEMPORAL_API_KEY` plus the
+`HOSTED_TEMPORAL_ADDRESS`, `HOSTED_TEMPORAL_NAMESPACE`,
+`HOSTED_TEMPORAL_TASK_QUEUE`, and `HOSTED_TEMPORAL_TLS_ENABLED` connection
+fields. Their presence grants diagnostic connectivity, not general production
+mutation authority.
+
+Treat the repository-root `.env` as an opaque process input: never print,
+quote, grep, copy, persist, upload, or commit its contents. Project only the
+required Temporal fields into the exact bounded CLI or SDK process, use a
+neutral client identity such as `murph-local-temporal-diagnostics`, set an
+explicit command timeout, and do not save the API key in a Temporal CLI profile.
+Begin with list, describe, query, task-queue, deployment, and metadata-only
+history inspection. Keep member identifiers and payloads out of terminal
+output and durable artifacts; aggregate in memory whenever exact workflow
+inspection is necessary. Do not download raw histories when event types,
+failure causes, counts, or query state can answer the question.
+
+Read-only access does not authorize a write. Signals, Workflow starts,
+terminations, resets, batch operations, Schedule changes, Worker Deployment
+routing, and namespace administration require explicit user authorization for
+the current task plus an exact target resolved through read-only checks. After
+any authorized recovery, verify the canonical Web-owned facts rather than
+treating CLI or API acknowledgement as proof of recovery.
 
 Mailbox signals must stay source-less.
 
