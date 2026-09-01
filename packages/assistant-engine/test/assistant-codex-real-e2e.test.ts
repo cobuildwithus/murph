@@ -22257,6 +22257,141 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   })
+
+  it('keeps historical automatic meal closeout silent', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-historical-meal-closeout-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'meal-commands.log')
+      const photoRelativePath = path.join(
+        'raw',
+        'meals',
+        '2026',
+        '08',
+        'meal_01K3J7F6XK5T2Y8Q9C4D6E7F8G',
+        'capture.jpg',
+      )
+      const photoPath = path.join(workingDirectory, photoRelativePath)
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const stateFile = path.join(workingDirectory, 'meal-state.txt')
+      await mkdir(path.dirname(photoPath), { recursive: true })
+      await Promise.all([
+        cp(
+          path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            '../../../apps/web/public/meal-snap-2.jpg',
+          ),
+          photoPath,
+        ),
+        mkdir(skillsRoot, { recursive: true }),
+        ...(['automatic-meal-capture', 'food-journal'] as const).map(
+          (slug) => cp(
+            path.join(resolveAssistantSkillsRoot(), slug),
+            path.join(skillsRoot, slug),
+            { recursive: true },
+          ),
+        ),
+        materializeAutomaticMealCloseoutVaultCli({
+          binDirectory,
+          commandLogPath,
+          failFirstEdit: false,
+          photoRelativePath,
+          retrySucceeds: true,
+          stateFile,
+        }),
+        writeFile(stateFile, 'initial\n', 'utf8'),
+      ])
+
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAutomaticMealCloseoutDeveloperInstructions({
+          currentLocalDate: '2026-08-27',
+          scheduledOccurrenceAt: '2026-08-28T01:00:00.000Z',
+        }),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
+          'Scheduled occurrence context:',
+          '- Occurrence local date: 2026-08-27.',
+          '- Scheduled occurrence instant: 2026-08-28T01:00:00.000Z.',
+          '- The controlled fixture contains one retained device-meal photo from 2026-08-24 and no capture from the occurrence local date.',
+          '- The member prefers nonnumeric meal tracking. Save only a concise photo-supported qualitative observation.',
+          '- Complete the closeout through the canonical vault CLI and return its terminal decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      const commandText = (await readFile(commandLogPath, 'utf8')).trim()
+      const commands = commandText === '' ? [] : commandText.split('\n')
+      const editIndex = commands.findIndex(isMealEditMutationCommand)
+      const removalIndex = commands.findIndex((command) =>
+        isMealRemovePhotoCommand(
+          command,
+          'meal_01K3J7F6XK5T2Y8Q9C4D6E7F8G',
+        )
+      )
+      const postRemovalShowIndex = commands.findIndex((command, index) =>
+        index > removalIndex && command.startsWith('meal show ')
+      )
+
+      process.stdout.write(
+        `[historical-automatic-meal-closeout-e2e] ${JSON.stringify({
+          cardAttached: result.responseCard !== null,
+          commandCount: commands.length,
+          decision: decision.kind,
+          scenario: 'historical-only',
+        })}\n`,
+      )
+
+      expect(commands[0]).toContain('meal closeout-work ')
+      expect(commands[0]).toContain('--to 2026-08-27')
+      expect(commands[0]).toContain(
+        '--occurrence-at 2026-08-28T01:00:00.000Z',
+      )
+      expect(editIndex).toBeGreaterThanOrEqual(0)
+      expect(removalIndex).toBeGreaterThan(editIndex)
+      expect(postRemovalShowIndex).toBeGreaterThan(removalIndex)
+      expect(commands).not.toEqual(expect.arrayContaining([
+        expect.stringMatching(/^goal\b/u),
+        expect.stringMatching(/^meal totals\b/u),
+        expect.stringMatching(/^meal add\b/u),
+      ]))
+      expect(await readFile(stateFile, 'utf8')).toBe('removed\n')
+      expect(result.responseCard).toBeNull()
+      expect(decision).toEqual({
+        kind: 'skip',
+        privateSummary: 'Historical meal cleanup completed.',
+      })
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
@@ -22550,6 +22685,7 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
 async function materializeAutomaticMealCloseoutVaultCli(input: {
   binDirectory: string
   commandLogPath: string
+  failFirstEdit?: boolean
   photoRelativePath: string
   retrySucceeds: boolean
   stateFile: string
@@ -22626,6 +22762,21 @@ async function materializeAutomaticMealCloseoutVaultCli(input: {
         '    printf \'%s\\n\' \'meal edit retry rejected by controlled fixture\' >&2',
         '    exit 2',
       ]
+  const initialEditBranch = input.failFirstEdit === false
+    ? [
+        '    if [ "$state" = "initial" ]; then',
+        `      printf '%s\\n' enriched > ${quoteNutritionShellLiteral(input.stateFile)}`,
+        `      ${emit(enrichedShow)}`,
+        '      exit 0',
+        '    fi',
+      ]
+    : [
+        '    if [ "$state" = "initial" ]; then',
+        `      printf '%s\\n' failed-once > ${quoteNutritionShellLiteral(input.stateFile)}`,
+        '      printf \'%s\\n\' \'meal edit rejected: refresh the canonical meal and correct the arguments once\' >&2',
+        '      exit 2',
+        '    fi',
+      ]
 
   await writeFile(
     executablePath,
@@ -22647,11 +22798,7 @@ async function materializeAutomaticMealCloseoutVaultCli(input: {
       '    fi',
       '    ;;',
       '  meal\\ edit\\ *)',
-      '    if [ "$state" = "initial" ]; then',
-      `      printf '%s\\n' failed-once > ${quoteNutritionShellLiteral(input.stateFile)}`,
-      '      printf \'%s\\n\' \'meal edit rejected: refresh the canonical meal and correct the arguments once\' >&2',
-      '      exit 2',
-      '    fi',
+      ...initialEditBranch,
       ...retryBranch,
       '    ;;',
       '  meal\\ remove-photo\\ *)',
@@ -28719,7 +28866,10 @@ function buildWeeklyHealthInsightDeveloperInstructions(): string {
   })
 }
 
-function buildAutomaticMealCloseoutDeveloperInstructions(): string {
+function buildAutomaticMealCloseoutDeveloperInstructions(input: {
+  currentLocalDate?: string
+  scheduledOccurrenceAt?: string
+} = {}): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
@@ -28732,12 +28882,13 @@ function buildAutomaticMealCloseoutDeveloperInstructions(): string {
       setupCommand: 'murph',
     },
     conversationScope: 'direct',
-    currentLocalDate: '2026-08-24',
+    currentLocalDate: input.currentLocalDate ?? '2026-08-24',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
-    scheduledOccurrenceAt: '2026-08-25T01:00:00.000Z',
+    scheduledOccurrenceAt:
+      input.scheduledOccurrenceAt ?? '2026-08-25T01:00:00.000Z',
     turnTrigger: 'automation-cron',
   })
 }

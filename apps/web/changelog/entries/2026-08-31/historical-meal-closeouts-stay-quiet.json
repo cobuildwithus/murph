@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-31",
+  "order": 100,
+  "item": {
+    "id": "historical-meal-closeouts-stay-quiet",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Historical meal closeouts stay quiet",
+    "summary": "Automatic meal cleanup now stays silent when it is processing captures from an earlier day, so an old nutrition recap does not appear as today's closeout.",
+    "details": "Murph still reviews the saved capture and removes the retained photo through the existing privacy cleanup. Current-day closeouts keep their normal behavior.",
+    "relevanceTags": ["assistant", "meals", "nutrition", "privacy", "reliability"],
+    "sourcePullRequests": [2670]
+  }
+}

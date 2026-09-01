@@ -1251,7 +1251,16 @@ describe('applyMurphManagedAutomations', () => {
       'A removal failure or any selected photo remaining fails the run',
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      'Return its compact unresolved-capture question when required.',
+      'For eligible current-date work, return the compact unresolved-capture question when required.',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
+      'historical-only work returns its required `skip`',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
+      'historical captures never contribute to a current-date response',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain(
+      'dated catch-up',
     )
 
     await expect(ensureAutomaticMealCloseoutAutomation({
