@@ -2688,6 +2688,14 @@ This matches the runner readiness ceiling without weakening invalidated-shell
 or destroy-settlement checks. Accepted background invocations begin their
 pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
+Within that unchanged outer budget, the shell-prewarm, direct cold-start, and
+deploy-smoke paths make each native TCP readiness request abortable after 1.5
+seconds and retry sequentially on the existing 250 ms interval. The helper
+awaits cancellation before another probe begins. A probe timeout is therefore
+only a retry signal: it cannot publish healthy state, run `onStart`, invoke
+workspace work, or replace the existing crash and caller-abort paths. The
+helper's inherited implicit `containerFetch()` auto-start fallback retains the
+upstream five-second default.
 Container readiness receives at most 15 wall-clock seconds, including time
 queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
 allows one absolute five-second fail-closed cleanup deadline shared by the
@@ -3774,6 +3782,9 @@ An actual cold readiness RPC also carries optional numeric-only subdivisions.
 `freshStartContainerOnStartAtEpochMs` records Cloudflare's lifecycle hook; and
 `freshStartContainerPortsReadyAtEpochMs` records resolution of
 `startAndWaitForPorts`, after both the configured port and `onStart` are ready.
+The local cold-start benchmark reports start-to-ports, process-to-listen, and
+listen-to-ports percentiles from these stamps so a hosted canary can distinguish
+container boot time from managed port-proxy delay.
 The explicit private health fetch is bounded by
 `freshStartContainerHealthStartedAtEpochMs` and
 `freshStartContainerHealthFinishedAtEpochMs`, followed by

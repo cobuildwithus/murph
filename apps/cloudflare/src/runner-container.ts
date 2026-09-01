@@ -70,6 +70,8 @@ const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
 const RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS = 90_000;
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
+// Per attempt only; the outer readiness budget and strict /health gate remain authoritative.
+const RUNNER_PORT_PROBE_TIMEOUT_MS = 1_500;
 const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
 const RUNNER_DESTROY_SETTLE_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
@@ -1022,6 +1024,7 @@ export class RunnerContainer extends Container {
             await this.start(undefined, {
               portToCheck: RUNNER_PORT,
               signal,
+              portProbeTimeoutMS: RUNNER_PORT_PROBE_TIMEOUT_MS,
             });
             return { action: "start_issued", kind: "started" };
           } finally {
@@ -2534,6 +2537,7 @@ export class RunnerContainer extends Container {
             instanceGetTimeoutMS: readinessTimeoutMs,
             portReadyTimeoutMS: readinessTimeoutMs,
             waitInterval: RUNNER_WAIT_INTERVAL_MS,
+            portProbeTimeoutMS: RUNNER_PORT_PROBE_TIMEOUT_MS,
           },
         });
         if (options.startupFailureObservation) {
@@ -2777,6 +2781,7 @@ export class RunnerContainer extends Container {
         instanceGetTimeoutMS: timeoutMs,
         portReadyTimeoutMS: timeoutMs,
         waitInterval: RUNNER_WAIT_INTERVAL_MS,
+        portProbeTimeoutMS: RUNNER_PORT_PROBE_TIMEOUT_MS,
       },
     });
     if (!this.recordContainerReady(
