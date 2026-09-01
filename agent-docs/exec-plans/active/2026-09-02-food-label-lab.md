@@ -106,6 +106,28 @@ on 2026-09-02.
 5. Dense details can reproduce the current reading burden.
    Show conclusions first and keep raw reports behind optional disclosure.
 
+## Patch-Size Retrospective
+
+The first reviewed candidate has 2,214 added production-source lines and no
+review-driven source growth. Continue as one release for these reasons:
+
+- The human comparison and page-scoped WebMCP form one approved challenge
+  journey. They share one temporary visible-state contract. Splitting either
+  part would leave that journey incomplete.
+- The metric popover explains one compact comparison. The two evidence modes
+  answer different questions: tests show what a lab found, while gaps show what
+  remains unknown. Combining them would restore the dense evidence UI that the
+  design removes.
+- Existing public product APIs remain the data owner. The page owns temporary
+  state only. This change adds no service, persistence owner, dependency, score,
+  API, repeated mechanism, or parallel data path.
+
+The concepts are one page-local comparison state, pure nutrition and evidence
+projections, one comparison table, one metric popover, two evidence modes, four
+page-scoped WebMCP registrations, and two existing-style UI primitives. This
+interaction set is proportionate to the approved outcome, so no split or scope
+deletion is required.
+
 ## Tasks
 
 1. Inspect current public product contracts, route privacy, design catalog, and tests.
