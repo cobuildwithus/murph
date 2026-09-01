@@ -363,6 +363,150 @@ test("Journal keeps useful workout detail in the activity popover", () => {
   ]);
 });
 
+test("Journal keeps repeated context and experiment results inside details", () => {
+  const lateCaffeine = {
+    ...event(
+      "late_caffeine",
+      "note",
+      "2026-08-25T16:30:00.000Z",
+      {
+        note: "Coffee late in the afternoon.",
+        noteType: "journal-factor",
+      },
+      "Late caffeine",
+    ),
+    tags: ["key-late-caffeine"],
+  };
+  const workTrip = {
+    ...event(
+      "work_trip",
+      "note",
+      "2026-08-25T12:00:00.000Z",
+      {
+        destination: "Berlin",
+        detail: "Hotel stay with two work meetings.",
+        duration: "Four nights",
+        note: "Berlin · four nights",
+      },
+      "Work trip",
+    ),
+    tags: ["episode-work-trip"],
+  };
+  const activeExperiment = event(
+    "active_experiment",
+    "experiment_context",
+    "2026-08-25T08:00:00.000Z",
+    {
+      progress: "Day 6 of 14",
+      resultSummary: "Sleep duration is above the baseline so far.",
+      status: "active",
+    },
+    "Magnesium for Sleep",
+  );
+  const completedExperiment = event(
+    "completed_experiment",
+    "experiment_context",
+    "2026-08-24T08:00:00.000Z",
+    {
+      progress: "14 of 14 days",
+      resultSummary: "Sleep timing became more consistent.",
+      status: "completed",
+    },
+    "Consistent Wake Time",
+  );
+
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [
+        lateCaffeine,
+        workTrip,
+        activeExperiment,
+        completedExperiment,
+      ],
+      vaultRoot: "test://journal-concise-context",
+    }),
+    [],
+    { asOf: "2026-08-25" },
+  );
+  const events = view.days.flatMap((day) => day.events);
+
+  assert.equal(
+    events.find((entry) => entry.title === "Late caffeine")?.summary,
+    null,
+  );
+  assert.equal(
+    events.find((entry) => entry.title === "Work trip")?.summary,
+    "Berlin",
+  );
+  assert.deepEqual(
+    events.find((entry) => entry.title === "Work trip")?.details,
+    [
+      "Hotel stay with two work meetings.",
+      "Destination: Berlin",
+      "Duration: Four nights",
+    ],
+  );
+  assert.equal(
+    events.find((entry) => entry.title === "Magnesium for Sleep")?.summary,
+    "Running experiment · day 6",
+  );
+  assert.deepEqual(
+    events.find((entry) => entry.title === "Magnesium for Sleep")?.details,
+    [
+      "Status: Active",
+      "Progress: Day 6 of 14",
+      "Result: Sleep duration is above the baseline so far.",
+    ],
+  );
+  assert.equal(
+    events.find((entry) => entry.title === "Consistent Wake Time")?.summary,
+    "Experiment completed",
+  );
+});
+
+test("Journal shows each planned experiment day without writing new events", () => {
+  const experiment = entity("experiment", "experiment_daily", {
+    attributes: {
+      endedOn: "2026-08-25",
+      runPlan: {
+        baselineEnd: "2026-08-21",
+        baselineStart: "2026-08-20",
+        interventionEnd: "2026-08-25",
+        interventionStart: "2026-08-22",
+      },
+      status: "completed",
+      title: "Magnesium for Sleep",
+    },
+    date: "2026-08-20",
+    kind: "experiment_entry",
+    occurredAt: "2026-08-20T08:00:00.000Z",
+    status: "completed",
+    title: "Magnesium for Sleep",
+  });
+
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [experiment],
+      vaultRoot: "test://journal-daily-experiment",
+    }),
+    [],
+    { asOf: "2026-08-25" },
+  );
+  const summariesByDate = new Map(
+    view.days.map((day) => [day.date, day.events[0]?.summary]),
+  );
+
+  assert.deepEqual([...summariesByDate.entries()], [
+    ["2026-08-25", "Experiment completed"],
+    ["2026-08-24", "Running experiment · day 3"],
+    ["2026-08-23", "Running experiment · day 2"],
+    ["2026-08-22", "Experiment started"],
+    ["2026-08-21", "Baseline · day 2"],
+    ["2026-08-20", "Baseline · day 1"],
+  ]);
+  assert.equal(view.recordCount, 6);
+});
+
 test("Journal uses the longest unknown sleep as the night and keeps shorter sleep separate", () => {
   const view = buildJournalView(
     createVaultReadModel({

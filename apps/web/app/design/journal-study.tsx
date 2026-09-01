@@ -71,6 +71,21 @@ const JOURNAL_STUDY_DATA: JournalView = {
         summary: "24 min",
       }),
       journalEvent(
+        "experiment",
+        "experiment_context",
+        "Magnesium for Sleep",
+        "2026-06-10T10:00:00.000Z",
+        {
+          details: [
+            "Status: Active",
+            "Progress: Day 6 of 14",
+            "Result: Sleep duration is above the baseline so far.",
+          ],
+          source: "Murph",
+          summary: "Running experiment · day 6",
+        },
+      ),
+      journalEvent(
         "headache",
         "symptom",
         "Headache",
@@ -98,17 +113,38 @@ const JOURNAL_STUDY_DATA: JournalView = {
           summary: "2 h 20 across 3 sessions",
         },
       ),
+      journalEvent(
+        "strength",
+        "activity",
+        "Strength training",
+        "2026-06-09T17:30:00.000Z",
+        {
+          details: [
+            "Average heart rate: 126 bpm",
+            "Maximum heart rate: 164 bpm",
+            "Strain: 11.8",
+            "Active energy: 318 kcal",
+            "Exercises: Goblet squat, Romanian deadlift, Split squat, Calf raise",
+          ],
+          source: "Whoop",
+          summary: "52 min",
+        },
+      ),
     ]),
     day("2026-06-08", [
       journalEvent(
         "trip",
-        "experiment_context",
+        "note",
         "Work trip",
         "2026-06-08T12:00:00.000Z",
         {
-          details: ["Away from home · Hotel stay"],
+          details: [
+            "Destination: Berlin",
+            "Duration: Three days",
+            "Hotel stay with two work meetings and one travel day.",
+          ],
           source: "You",
-          summary: "Berlin · day 1 of 3",
+          summary: "Berlin",
           timing: "all_day",
         },
       ),
@@ -128,8 +164,8 @@ const JOURNAL_STUDY_DATA: JournalView = {
       }),
     ]),
   ],
-  eventCount: 14,
-  recordCount: 30,
+  eventCount: 16,
+  recordCount: 32,
   weeks: [
     {
       activityMinutes: 264,

@@ -180,9 +180,9 @@ test("Whoop persona covers the Journal connections used across the product", asy
     "Blood test results",
     "Magnesium for Sleep",
     "Bedroom temperature changed",
-    "Experiment completed",
+    "Consistent Wake Time",
     "Day trip",
-    "Experiment started",
+    "No Late Caffeine",
     "Joined Strength Crew",
   ]) {
     assert.ok(titles.has(expected), `${expected}: ${[...titles].join(", ")}`);

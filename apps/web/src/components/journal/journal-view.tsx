@@ -705,7 +705,13 @@ function JournalEventRow({
                 onPointerMove={pointerAnchor.onPointerMove}
                 type="button"
               >
-                {content}
+                <span className="flex min-w-0 items-start gap-1.5">
+                  {content}
+                  <ChevronRight
+                    aria-hidden="true"
+                    className="mt-[7px] size-3.5 shrink-0 text-muted-foreground/45 transition-colors group-hover:text-muted-foreground"
+                  />
+                </span>
               </button>
             }
           />
@@ -745,7 +751,7 @@ function JournalEventPopoverContent({
     <PopoverContent
       align="center"
       anchor={anchor}
-      className="w-[min(24rem,calc(100vw-2rem))]"
+      className="w-[min(30rem,calc(100vw-2rem))]"
       positionMethod="fixed"
       side="right"
       sideOffset={12}
@@ -1004,15 +1010,32 @@ function GenericJournalPopoverPresentation({
       {structuredDetails.length > 0 ? (
         <>
           <Separator />
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
-            {structuredDetails.map((detail) => (
-              <div key={`${detail.label}:${detail.value}`}>
+          <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+            {structuredDetails.map((detail, index) => (
+              <div
+                className={cn(
+                  structuredDetails.length % 2 === 1 &&
+                    index === structuredDetails.length - 1 &&
+                    "sm:col-span-2",
+                )}
+                key={`${detail.label}:${detail.value}`}
+              >
                 <dt className="text-xs leading-4 text-muted-foreground">
                   {detail.label}
                 </dt>
-                <dd className="mt-1 text-sm font-medium leading-5 text-foreground">
-                  {detail.value}
-                </dd>
+                {detail.label === "Exercises" ? (
+                  <dd className="mt-2">
+                    <ul className="grid grid-cols-1 gap-x-8 gap-y-1.5 text-sm font-medium leading-5 text-foreground sm:grid-cols-2">
+                      {detail.value.split(",").map((exercise) => (
+                        <li key={exercise.trim()}>{exercise.trim()}</li>
+                      ))}
+                    </ul>
+                  </dd>
+                ) : (
+                  <dd className="mt-1 text-sm font-medium leading-5 text-foreground">
+                    {detail.value}
+                  </dd>
+                )}
               </div>
             ))}
           </dl>

@@ -379,6 +379,7 @@ test("JournalPage keeps secondary sleep metrics off the main timeline", async ()
       'button[aria-label="Show details for Sleep"]',
     );
     assert.ok(detailsButton instanceof rendered.window.HTMLButtonElement);
+    assert.ok(detailsButton.querySelector('svg[aria-hidden="true"]'));
   } finally {
     await rendered.cleanup();
   }

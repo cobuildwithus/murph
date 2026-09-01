@@ -110,6 +110,12 @@ export function buildJournalView(
     ...vault.events.flatMap((event) =>
       journalCandidateFromEvent(event, fromDate, asOfDate),
     ),
+    ...journalCandidatesFromExperiments(
+      vault.experiments,
+      vault.events,
+      fromDate,
+      asOfDate,
+    ),
     ...journalMetricCandidates(metricPoints, fromDate, asOfDate),
   ])
     .sort(compareCandidates)
@@ -169,7 +175,9 @@ function journalCandidateFromEvent(
     event.kind === "sleep_session"
       ? readSleepType(event.attributes.sleepType)
       : null;
-  const groupHint = activityKey
+  const groupHint = event.kind === "experiment_context"
+    ? experimentJournalGroupHint(label, date)
+    : activityKey
     ? `activity:${date}:${activityKey.toLowerCase()}`
     : observationMetric
     ? `${observationMetric.group}:${date}`
@@ -203,6 +211,141 @@ function journalCandidateFromEvent(
       timeZone: readEventTimeZone(event),
     },
   ];
+}
+
+function journalCandidatesFromExperiments(
+  experiments: readonly CanonicalEntity[],
+  events: readonly CanonicalEntity[],
+  fromDate: string,
+  toDate: string,
+): JournalCandidate[] {
+  const explicitDays = new Set(
+    events.flatMap((event) => {
+      if (event.kind !== "experiment_context") return [];
+      const date = resolveEventDate(event);
+      const label = event.title ?? "Personal experiment";
+      return date ? [experimentJournalGroupHint(label, date)] : [];
+    }),
+  );
+
+  return experiments.flatMap((experiment) => {
+    const runPlan = readRecord(experiment.attributes.runPlan);
+    const title = readString(experiment.attributes.title) ?? experiment.title;
+    if (!runPlan || !title) return [];
+
+    const candidates: JournalCandidate[] = [];
+    const baselineStart = readString(runPlan.baselineStart);
+    const baselineEnd = readString(runPlan.baselineEnd);
+    const interventionStart = readString(runPlan.interventionStart);
+    const interventionEnd = readString(runPlan.interventionEnd);
+    const endedOn = readString(experiment.attributes.endedOn);
+    const experimentStatus =
+      readString(experiment.attributes.status) ?? experiment.status;
+
+    if (baselineStart && baselineEnd) {
+      appendExperimentPhaseCandidates({
+        candidates,
+        endDate: baselineEnd,
+        explicitDays,
+        experiment,
+        fromDate,
+        phase: "baseline",
+        startDate: baselineStart,
+        title,
+        toDate,
+      });
+    }
+    if (interventionStart && interventionEnd) {
+      const completedOn =
+        experimentStatus === "completed" ? endedOn ?? interventionEnd : null;
+      appendExperimentPhaseCandidates({
+        candidates,
+        completedOn,
+        endDate:
+          completedOn && completedOn < interventionEnd
+            ? completedOn
+            : interventionEnd,
+        explicitDays,
+        experiment,
+        fromDate,
+        phase: "active",
+        startDate: interventionStart,
+        title,
+        toDate,
+      });
+    }
+    return candidates;
+  });
+}
+
+function appendExperimentPhaseCandidates(input: {
+  candidates: JournalCandidate[];
+  completedOn?: string | null;
+  endDate: string;
+  explicitDays: ReadonlySet<string>;
+  experiment: CanonicalEntity;
+  fromDate: string;
+  phase: "active" | "baseline";
+  startDate: string;
+  title: string;
+  toDate: string;
+}): void {
+  let date = input.startDate;
+  const totalDays = daysBetweenInclusive(input.startDate, input.endDate);
+  if (totalDays === null) return;
+
+  for (let day = 1; date <= input.endDate; day += 1) {
+    if (date >= input.fromDate && date <= input.toDate) {
+      const groupHint = experimentJournalGroupHint(input.title, date);
+      if (!input.explicitDays.has(groupHint)) {
+        const isCompleted = input.completedOn === date;
+        const summary = isCompleted
+          ? "Experiment completed"
+          : input.phase === "baseline"
+          ? `Baseline · day ${day}`
+          : day === 1
+          ? "Experiment started"
+          : `Running experiment · day ${day}`;
+        input.candidates.push({
+          activityKey: null,
+          date,
+          detailItems: [
+            `Status: ${isCompleted ? "Completed" : humanize(input.phase)}`,
+            `Progress: Day ${day} of ${totalDays}`,
+          ],
+          durationMinutes: null,
+          groupHint,
+          id: `${input.experiment.entityId}:${input.phase}:${date}`,
+          kind: "experiment_context",
+          label: input.title,
+          metricKey: null,
+          metricValue: null,
+          occurredAt: `${date}T12:00:00.000Z`,
+          relatedIds: [input.experiment.entityId],
+          sleepType: null,
+          source: "murph",
+          summary,
+          tags: input.experiment.tags.slice(),
+          timing: "all_day",
+          timeZone: null,
+        });
+      }
+    }
+    date = addDays(date, 1);
+  }
+}
+
+function experimentJournalGroupHint(title: string, date: string): string {
+  return `experiment:${title.trim().toLowerCase()}:${date}`;
+}
+
+function daysBetweenInclusive(startDate: string, endDate: string): number | null {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return null;
+  }
+  return Math.round((end - start) / 86_400_000) + 1;
 }
 
 function journalMetricCandidates(
@@ -471,14 +614,7 @@ function eventLabel(event: CanonicalEntity): string {
     );
   }
   if (event.kind === "experiment_context") {
-    const status = readString(event.attributes.status) ?? event.status;
-    if (status === "completed") return "Experiment completed";
-    if (
-      status === "active" &&
-      readString(event.attributes.summary)?.includes("Day 1")
-    ) {
-      return "Experiment started";
-    }
+    return event.title ?? "Personal experiment";
   }
   if (event.title) return event.title;
   if (event.kind === "intervention_session") {
@@ -499,13 +635,22 @@ function eventLabel(event: CanonicalEntity): string {
 
 function eventSummary(event: CanonicalEntity): string | null {
   const note = readString(event.attributes.note);
-  if (note) return note;
+  if (note) {
+    if (
+      event.tags.includes("key-late-caffeine") ||
+      event.tags.includes("key-high-strain") ||
+      event.tags.includes("key-bedroom-temperature")
+    ) {
+      return null;
+    }
+    if (event.tags.includes("episode-work-trip")) {
+      return readString(event.attributes.destination);
+    }
+    return note;
+  }
   const summary = readString(event.attributes.summary);
   if (event.kind === "experiment_context") {
-    const result =
-      readString(event.attributes.resultSummary) ??
-      readString(event.attributes.result);
-    return uniqueStrings([event.title, result ?? summary]).join(" · ") || null;
+    return experimentJournalSummary(event, summary);
   }
   if (summary) return summary;
   if (event.kind === "meal") return mealSummary(event.attributes);
@@ -552,7 +697,6 @@ function journalEventDetailItems(event: CanonicalEntity): string[] {
       readString(event.attributes.resultSummary) ??
       readString(event.attributes.result);
     return uniqueStrings([
-      `Experiment: ${event.title ?? "Personal experiment"}`,
       status ? `Status: ${humanize(status)}` : null,
       progress ? `Progress: ${progress}` : null,
       result ? `Result: ${result}` : null,
@@ -612,6 +756,25 @@ function journalEventDetailItems(event: CanonicalEntity): string[] {
   }
 
   return [];
+}
+
+function experimentJournalSummary(
+  event: CanonicalEntity,
+  summary: string | null,
+): string | null {
+  const status = readString(event.attributes.status) ?? event.status;
+  const progress = readString(event.attributes.progress) ?? summary;
+  const day = progress?.match(/\bday\s+(\d+)\b/i)?.[1] ?? null;
+
+  if (status === "completed") return "Experiment completed";
+  if (status === "baseline") {
+    return day ? `Baseline · day ${day}` : "Baseline";
+  }
+  if (status === "active") {
+    if (day === "1") return "Experiment started";
+    return day ? `Running experiment · day ${day}` : "Running experiment";
+  }
+  return progress;
 }
 
 function activityDetailItems(attributes: Record<string, unknown>): string[] {

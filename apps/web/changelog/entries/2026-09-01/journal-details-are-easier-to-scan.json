@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-01",
+  "order": 100,
+  "item": {
+    "id": "journal-details-are-easier-to-scan",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Journal details are easier to scan",
+    "summary": "Journal now marks entries with more detail and keeps repeated context out of the main timeline.",
+    "details": "Wider detail panels organize workout, travel, laboratory, and experiment context without repeating the same fact in the timeline.",
+    "relevanceTags": ["journal", "workouts", "experiments", "usability"],
+    "sourcePullRequests": []
+  }
+}
