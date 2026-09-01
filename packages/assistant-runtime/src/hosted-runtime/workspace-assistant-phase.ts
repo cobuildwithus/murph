@@ -3912,7 +3912,9 @@ function mergeHostedAssistantPhaseResults(
 
 function hostedSystemMailboxOwnerCanReturnBeforeDefaultChecks(
   result: HostedWorkspaceRunnerAssistantPhaseResult | null,
-): boolean {
+): result is HostedWorkspaceRunnerAssistantPhaseResult & {
+  nextWakeReason: "mailbox";
+} {
   return result?.runtimeProjectionCheckpointRequested !== true
     && result?.nextWakeReason === "mailbox";
 }
