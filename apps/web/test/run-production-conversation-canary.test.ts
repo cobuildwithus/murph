@@ -132,16 +132,32 @@ describe("production conversation canary runner", () => {
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 
-  it("rejects a reply at the exact latency boundary and still stops", async () => {
+  it("reports an exact-boundary send-to-reply failure and still stops", async () => {
     mocks.now = [0, 20_000];
     mocks.sendResults = [true];
     mocks.messages = [
       inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
     ];
 
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
-      name: "reply-latency-budget-exceeded",
-    });
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toHaveProperty(
+      "name",
+      "reply-latency-budget-exceeded; turn=1; metric=send_to_reply; elapsed_ms=20000; budget_ms=20000",
+    );
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("reports an inter-reply-gap-only failure and still stops", async () => {
+    mocks.now = [0, 10_000, 15_000, 30_000];
+    mocks.sendResults = [true, true];
+    mocks.messages = [
+      inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+      inboundMessage({ text: "A later reply." }),
+    ];
+
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toHaveProperty(
+      "name",
+      "reply-latency-budget-exceeded; turn=2; metric=inter_reply_gap; elapsed_ms=20000; budget_ms=20000",
+    );
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 });
