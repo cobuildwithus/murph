@@ -305,7 +305,7 @@ export function buildContainerReleaseEntries(input: {
         case "modified":
           if (!before
             || before.applicationId !== after.applicationId
-            || after.version !== before.version + 1) {
+            || after.version <= before.version) {
             throw invalidReleaseTransition();
           }
           disposition = "updated";
