@@ -1,6 +1,6 @@
 # Prove runtime recheck recovery from durable progress
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-09-01
 
@@ -121,11 +121,18 @@ Updated: 2026-09-01
 - Web typecheck, focused ESLint, docs drift, complexity diff, and diff checks
   pass.
 - The first candidate's production study was rendered and inspected at 1440px
-  desktop and 390px phone widths. The corrected candidate still needs the same
-  direct phone/desktop inspection for its serial gate and discard control.
+  desktop and 390px phone widths. For the corrected candidate, the exact preview
+  reached Ready and its authenticated `/screenshots/ops` route returned 200.
+  The in-app browser was unavailable, so the serial-gate delta was reviewed
+  through the mounted six-ID production-component journey plus static desktop
+  and mobile layout inspection; no second rendered screenshot is claimed.
 - ReviewGPT round 1 found the replaceable-witness UX gap and redundant mailbox
   head metadata. Both findings are accepted and corrected: one tracked batch
   now serializes requests, and the verifier deletes the duplicate head lookup
   and metadata in favor of the owning monotonic sequence.
-- Corrected-head exact CI, direct design proof, and ReviewGPT round 2 remain
-  pending.
+- Every required exact-head CI check passed, including the Temporal reader
+  compatibility matrix and the release build, app, and package coverage jobs.
+- ReviewGPT round 2 performed a full-patch audit of the corrected exact head,
+  verified both accepted round-1 remediations, and returned
+  `ROUND_OUTCOME: PASS` with no remaining qualifying finding.
+Completed: 2026-09-01
