@@ -57,6 +57,8 @@ export type ContainerApplicationReadPhase = "before" | "after";
 const APPLICATION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const CLOUDFLARE_API_BASE_URL = "https://api.cloudflare.com/client/v4";
 const CLOUDFLARE_REQUEST_TIMEOUT_MS = 30_000;
+const CONTAINER_RELEASE_TRANSITION_MAX_ATTEMPTS = 61;
+const CONTAINER_RELEASE_TRANSITION_RETRY_DELAY_MS = 2_000;
 const ANSI_OSC_SEQUENCE_PATTERN = /\u001B\][\s\S]*?(?:\u0007|\u001B\\)/gu;
 const ANSI_CSI_SEQUENCE_PATTERN = /\u001B\[[0-?]*[ -/]*[@-~]/gu;
 const ANSI_STRING_SEQUENCE_PATTERN = /\u001B[P^_][\s\S]*?\u001B\\/gu;
@@ -358,6 +360,48 @@ export function buildContainerReleaseEntries(input: {
     });
 }
 
+export async function waitForCloudflareContainerReleaseEntries(input: {
+  actions: readonly WranglerContainerAction[];
+  before: readonly CloudflareContainerApplicationIdentity[];
+  expectedContainers: readonly RenderedContainerIdentity[];
+  listApplications: ListCloudflareContainerApplications;
+  maxAttempts?: number;
+  retryDelayMs?: number;
+  sleep?: (delayMs: number) => Promise<void>;
+}): Promise<ContainerReleaseEntry[]> {
+  const maxAttempts = input.maxAttempts ?? CONTAINER_RELEASE_TRANSITION_MAX_ATTEMPTS;
+  const retryDelayMs = input.retryDelayMs ?? CONTAINER_RELEASE_TRANSITION_RETRY_DELAY_MS;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts <= 0
+    || !Number.isSafeInteger(retryDelayMs) || retryDelayMs < 0) {
+    throw new TypeError("Container release evidence retry policy was invalid.");
+  }
+  const sleep = input.sleep ?? defaultSleep;
+  let lastError: unknown = invalidReleaseTransition();
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const after = await readCloudflareContainerApplicationIdentities(
+        input.expectedContainers,
+        input.listApplications,
+        "after",
+      );
+      return buildContainerReleaseEntries({
+        actions: input.actions,
+        after,
+        before: input.before,
+      });
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (attempt < maxAttempts) {
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw lastError;
+}
+
 function readExhaustiveCloudflareResult(value: unknown): readonly unknown[] {
   if (!isRecord(value) || value.success !== true || !Array.isArray(value.result)) {
     throw invalidProviderState();
@@ -541,6 +585,10 @@ function compareByClassNameThenApplicationName(
 
 function isConfiguredSingleLine(value: string): boolean {
   return value.length > 0 && value.trim() === value && !/[\r\n]/u.test(value);
+}
+
+async function defaultSleep(delayMs: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
 }
 
 function invalidRenderedConfig(): TypeError {

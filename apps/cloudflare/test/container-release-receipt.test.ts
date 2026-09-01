@@ -7,6 +7,7 @@ import {
   parseWranglerWorkerVersionId,
   readCloudflareContainerApplicationIdentities,
   readRenderedContainerIdentities,
+  waitForCloudflareContainerReleaseEntries,
   type CloudflareContainerApplicationIdentity,
   type WranglerContainerAction,
 } from "../scripts/container-release-receipt.js";
@@ -451,6 +452,57 @@ describe("container release receipt", () => {
         after: [identity("app", "id", 3, "image")],
         before: [identity("app", "id", 2, "image")],
       })).toThrow("Container release evidence did not form an exact provider transition.");
+    });
+
+    it("waits for modified application detail to expose the provider transition", async () => {
+      const modifiedAction = [
+        { action: "modified", applicationName: "app", className: "Container" },
+      ] as const;
+      const before = [identity("app", "id", 2, "old-image")];
+      const listApplications = vi.fn()
+        .mockResolvedValueOnce([providerIdentity("app", "id", 2, "old-image")])
+        .mockResolvedValueOnce([providerIdentity("app", "id", 3, "new-image")]);
+      const sleep = vi.fn(async () => {});
+
+      await expect(waitForCloudflareContainerReleaseEntries({
+        actions: modifiedAction,
+        before,
+        expectedContainers: [{ applicationName: "app", className: "Container" }],
+        listApplications,
+        maxAttempts: 2,
+        retryDelayMs: 7,
+        sleep,
+      })).resolves.toEqual([
+        expect.objectContaining({ disposition: "updated", version: 3 }),
+      ]);
+      expect(sleep).toHaveBeenCalledOnce();
+      expect(sleep).toHaveBeenCalledWith(7);
+      expect(listApplications).toHaveBeenCalledTimes(2);
+    });
+
+    it("fails closed when modified application detail never exposes a transition", async () => {
+      const modifiedAction = [
+        { action: "modified", applicationName: "app", className: "Container" },
+      ] as const;
+      const before = [identity("app", "id", 2, "old-image")];
+      const listApplications = vi.fn(async () => [
+        providerIdentity("app", "id", 2, "old-image"),
+      ]);
+      const sleep = vi.fn(async () => {});
+
+      await expect(waitForCloudflareContainerReleaseEntries({
+        actions: modifiedAction,
+        before,
+        expectedContainers: [{ applicationName: "app", className: "Container" }],
+        listApplications,
+        maxAttempts: 2,
+        retryDelayMs: 0,
+        sleep,
+      })).rejects.toThrow(
+        "Container release evidence did not form an exact provider transition.",
+      );
+      expect(sleep).toHaveBeenCalledOnce();
+      expect(listApplications).toHaveBeenCalledTimes(2);
     });
 
     it("rejects missing, extra, or duplicate provider state", () => {
