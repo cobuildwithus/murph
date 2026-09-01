@@ -1,6 +1,6 @@
 # iMessage health primitives
 
-Status: active
+Status: completed
 Created: 2026-08-30
 Updated: 2026-08-31
 
@@ -186,12 +186,14 @@ Updated: 2026-08-31
 - Original requirement: build all three durable primitives behind the compact
   seven-day health-template request: trusted card generation, a reusable saved
   metric view, and truthful inspection of the latest scheduled occurrence.
-- Candidate shape: 3,256 authored-source additions and 41 deletions (3,297
-  lines of source churn), plus 3,628/9 tests, 318/10 docs, and 189/1 generated
-  lines. There is no review-driven growth yet; this is the first candidate
-  shape. The largest source owners are the bounded card contract, read-only
-  occurrence projection, static renderer, fixed-window query, and typed
-  preferences extension rather than repeated copies of one mechanism.
+- Candidate shape: 3,524 authored-source additions and 97 deletions (3,621
+  lines of source churn), plus 4,119/101 tests, 403/9 docs, 13/1 config, and
+  189/1 generated lines. Review-driven growth added explicit provider-dispatch
+  receipt states and their tests; the final complexity pass then extracted
+  small helpers without changing behavior. The largest source owners remain
+  the bounded card contract, read-only occurrence projection, static renderer,
+  fixed-window query, and typed preferences extension rather than repeated
+  copies of one mechanism.
 - Decision: continue as one product-indivisible feature. Although the files are
   mechanically separable, the requested acceptance journey is one contract:
   ask for a trusted view, save and reuse that exact selection, schedule it only
@@ -204,7 +206,9 @@ Updated: 2026-08-31
   preferences lock/audit writer, automation journal/runtime/outbox evidence,
   response-card outbox, V7 static renderer, and CLI generator. It adds no new
   queue, store, scheduler, lease, retry loop, or reconciliation mechanism.
-  Obsolete generic-template handling was not retained. Further substantive
+  Obsolete generic-template handling was not retained. The exact complexity
+  guard passes; the two largest touched assistant files reduced their debt or
+  maximum complexity after mechanical helper extraction. Further substantive
   review growth or another owner would reopen the split/delete decision.
 
 ## Verification
@@ -224,7 +228,7 @@ Updated: 2026-08-31
   - Physical-device checks remain a clearly identified pre-rollout item rather
     than an unverified claim in the pull request.
 
-### Verification results on the merged candidate
+### Verification results on the final code candidate
 
 - UI: 19/19 wearable-card image, design-study, and raster-containment tests
   pass. The reviewed card component did not change during remediation.
@@ -234,8 +238,8 @@ Updated: 2026-08-31
   that deterministic expectation, the exact 103-case file passed.
 - Runtime and packaging: 76/76 hosted-execution, 67/67 assistant-runtime,
   6/6 focused CLI, 518/518 focused Cloudflare, and 43/43 runner-bundle budget
-  tests pass. The exact packaged bundle measured 11,732,995B total, 67,653B
-  entry, and 2,002,487B static boot closure across 21 chunks; only the measured
+  tests pass. The exact packaged bundle measured 11,738,413B total, 67,653B
+  entry, and 2,001,470B static boot closure across 21 chunks; only the measured
   total baseline moved, while all startup-specific limits stayed fixed.
 - Data and contracts: 360/360 contracts/artifact checks, 26/26 core preference,
   7/7 saved-view use-case, 7/7 seven-day query, and 6/6 response-card adapter
@@ -246,8 +250,20 @@ Updated: 2026-08-31
 - The exact hosted-local scheduled-message scenario is blocked before Murph
   starts on this ARM development host: the current amd64 runner image exits in
   `tini -s` because subreaper mode is unavailable under local emulation. The
-  image builds, bundled Codex starts, Docker/Temporal are healthy, and this is
-  not a feature-path failure. Exact container E2E remains a Linux CI gate.
+  image builds, the bundled CLI starts in an independent parity check, and
+  Docker/Temporal are healthy, but neither Murph nor the bundled CLI starts
+  inside the failing smoke container. This is not a feature-path failure;
+  exact container E2E remains a Linux CI gate.
+- Exact-head GitHub Actions pass, including the required macOS and Ubuntu CLI,
+  release, billing, Temporal, runner-bundle, package-coverage, privacy, and PR
+  evidence checks. The optional Vercel preview also passes.
+- Final full-snapshot ReviewGPT on `4aa647626a` returned
+  `ROUND_OUTCOME: PASS` with no findings. Its exact-turn capture ran past the
+  documented fallback floor and records the compatible `gpt-5-6-pro` response
+  model for the requested `gpt-5.6-sol` lane. The reviewer noted that the ZIP
+  lacked a readable raster; parent review independently inspected the synthetic
+  maximum-density card and confirmed the tested hierarchy, alignment, gaps,
+  averages, trends, and separate RMSSD/SDNN labeling.
 - Physical installed-app, app-absent, macOS, image-failure, and VoiceOver proof
   remains required before enabling the exact-value rollout flag.
 
@@ -268,3 +284,4 @@ Updated: 2026-08-31
   Only the selected `input` field changed. Direct adds the trusted-card catalog
   entry plus health-view and occurrence-receipt guidance; group adds only the
   occurrence-receipt guidance. Measurement-only instrumentation was removed.
+Completed: 2026-08-31
