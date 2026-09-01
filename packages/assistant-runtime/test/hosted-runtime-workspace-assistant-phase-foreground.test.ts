@@ -4822,6 +4822,51 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     }));
   });
 
+  it("services due provider cleanup before handing an older wake to the model-free owner", async () => {
+    const now = "2026-04-27T00:09:00.000Z";
+    const staleDeviceWakeAt = "2026-04-27T00:08:00.000Z";
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
+      nextWakeAt: now,
+    });
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(now);
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValue({
+      at: staleDeviceWakeAt,
+      executionClass: "model_free",
+      reason: "device-sync.reconcile",
+    });
+    mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => now,
+      workspace: createDueAssistantWorkspace({
+        nextDefaultProcessingWakeAt: now,
+        nextDefaultProcessingWakeReason: "assistant",
+        nextWakeAt: staleDeviceWakeAt,
+        nextWakeReason: "device-sync.reconcile",
+        systemMailboxProgressGeneration: "1",
+      }),
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "provider_cleanup",
+      nextWakeAt: staleDeviceWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+
+    await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledTimes(1);
+  });
+
   it("uses a hot provider cleanup checkpoint for cleanup-only progress", async () => {
     mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
       nextWakeAt: null,

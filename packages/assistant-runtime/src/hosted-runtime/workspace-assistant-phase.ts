@@ -4902,7 +4902,7 @@ function shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(
     && wakeTimeMs <= resolveHostedAssistantPhaseNowMs(phaseInput);
 }
 
-function shouldPreflightHostedAssistantCronWakeFromDefaultProjection(
+function shouldPreflightHostedDefaultProcessingWake(
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
   const workspace = phaseInput.workspace;
@@ -4927,6 +4927,28 @@ function shouldPreflightHostedAssistantCronWakeFromDefaultProjection(
   const wakeTimeMs = Date.parse(wakeAt);
   return Number.isFinite(wakeTimeMs)
     && wakeTimeMs <= resolveHostedAssistantPhaseNowMs(phaseInput);
+}
+
+async function resolveHostedDefaultProcessingWakeState(input: {
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
+}): Promise<HostedAssistantCronWakeState> {
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.phaseInput);
+  const providerCleanupWake = createHostedRuntimeWakeCandidate(
+    await resolveHostedProviderCleanupScheduledWakeAt({
+      nowMs,
+      vaultRoot: input.phaseInput.restored.vaultRoot,
+    }),
+    HOSTED_ASSISTANT_WAKE_REASON,
+  );
+  if (hostedRuntimeWakeCandidateIsDue(providerCleanupWake, nowMs)) {
+    return {
+      available: true,
+      dueNow: true,
+      wake: providerCleanupWake,
+    };
+  }
+  return await input.readAssistantCronWakeState();
 }
 
 async function resolveDueModelFreeSystemMailboxOwnerSelection(
@@ -5967,10 +5989,14 @@ async function runSystemMailboxMaintenancePhase(input: {
     pendingAssistantInputBlocksMaintenance
     && !foregroundCausalAttempted
     && !hasBackgroundSelection
-    && shouldPreflightHostedAssistantCronWakeFromDefaultProjection(phaseInput)
+    && shouldPreflightHostedDefaultProcessingWake(phaseInput)
   ) {
-    const preflightAssistantCronWakeState = await readAssistantCronWakeState();
-    if (preflightAssistantCronWakeState.dueNow) {
+    const defaultProcessingWakeState =
+      await resolveHostedDefaultProcessingWakeState({
+        phaseInput,
+        readAssistantCronWakeState,
+      });
+    if (defaultProcessingWakeState.dueNow) {
       return {
         backgroundMaintenanceYielded: false,
         continueAssistantLane: true,
@@ -5980,7 +6006,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         result: null,
       };
     }
-    staleDefaultProjectionDisproved = preflightAssistantCronWakeState.available;
+    staleDefaultProjectionDisproved = defaultProcessingWakeState.available;
   }
 
   let deferSystemMailboxPreparationForDelivery = false;

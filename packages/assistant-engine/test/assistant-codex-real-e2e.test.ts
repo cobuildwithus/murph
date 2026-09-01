@@ -21521,6 +21521,66 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
   })
 })
 
+describeRealCodex('real Codex provider-cleanup continuation silence e2e', () => {
+  it('keeps a cleanup-only continuation silent after a completed reply', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-provider-cleanup-silence-real-e2e-'),
+    )
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'An earlier user-facing answer was already delivered and terminally recorded.',
+          'This continuation only reports that provider cleanup finished.',
+          'There is no new user input or unresolved task.',
+          'Do not restate or summarize the earlier answer. Finish without a reply.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const finishAttempts = readDynamicToolAttempts(result.jsonEvents).filter(
+        (attempt) => attempt.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[provider-cleanup-continuation-silence-e2e] ${JSON.stringify({
+          finalAction: result.finalAction,
+          finalMessage: result.finalMessage,
+          finishAttemptCount: finishAttempts.length,
+        })}\n`,
+      )
+
+      expect(result.finalAction).toEqual({ kind: 'none' })
+      expect(result.finalActionExplicit).toBe(true)
+      expect(result.finalMessage).toBe('')
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseCard).toBeNull()
+      expect(finishAttempts).toHaveLength(1)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
 async function materializeAutomaticMealCloseoutVaultCli(input: {
   binDirectory: string
   commandLogPath: string
