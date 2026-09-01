@@ -717,8 +717,9 @@ gate unset and makes no paid request.
   and the same isolated Resend stub, proving paced lost-ack retry,
   identifier-free aggregation, short-window active-incident coalescing,
   six-hour fresh-evidence reminders with stable per-generation identity,
-  quiet-hour deferral, recovery/rearm, and independence from the latency
-  monitor.
+  immediate first-alert and reminder delivery during operator quiet hours,
+  recovery/rearm, and independence from the latency monitor. The latency suite
+  retains the shared quiet-hour deferral default.
 - `apps/web/test/runtime-recheck-verification-postgres.test.ts` is an opt-in
   local-PostgreSQL proof for the allowlisted runtime-recheck recovery witness.
   It executes the production bounded read against the canonical system lane,
