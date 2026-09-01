@@ -1,6 +1,7 @@
 ---
 title: 'pnpm patch-commit rewrites unrelated peer dependency snapshots'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2685'
 ---
 
 ## Expected Behavior
