@@ -203,7 +203,7 @@ describe("hosted local idle-checkpoint runtime handoff e2e", () => {
       expect(countAssistantProviderRequests()).toBe(
         providerRequestBaseline + 1,
       );
-      const finalStatus = await activeScenario.waitForHostedCompletion(userId);
+      const finalStatus = await activeScenario.waitForHostedIdle(userId);
       expect(finalStatus.lastErrorCode ?? null).toBeNull();
       expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(
         true,

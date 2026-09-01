@@ -777,16 +777,19 @@ are correctness-compatible, so either side may be rolled back independently
 during this compatibility window. The recommended order minimizes exposure to
 the old latency path.
 
-The same producer-first order applies to the positive
-`immediateRecheckRequested` owner-release edge. New Cloudflare code signs its
-exact query and lets it override only the normal future-continuation callback
-skip; old runners simply omit the edge and fall back to the owner horizon. Web
-must not deploy the due-wake level-trigger removal before the new producer is
-available. Roll back Web before Cloudflare/runner if the pair must be reverted.
+The exact owner-release attempt pointer uses consumer-first rollout: deploy the
+private Temporal worker that accepts `runtime_owner_released`, then Web, then
+Cloudflare/runner. During the compatibility window, Web maps old bodyless
+callbacks without an attempt pointer to the existing facts-only recheck. New
+Cloudflare code signs `runtimeAttemptId` and the optional
+`immediateRecheckRequested` edge in one canonical query; old Web rejects that
+query non-fatally, so Web must precede the producer. Roll back Cloudflare before
+Web, and keep the Temporal consumer compatible until Web no longer emits the
+new signal.
 
-After both deploys, confirm there is no extra metadata-only handoff checkpoint
-for the same shutdown and actionable late input causes the existing Temporal
-recheck after owner release.
+After all three deploys, confirm there is no extra metadata-only handoff
+checkpoint for the same shutdown and actionable late input causes the exact
+Temporal owner release to admit fresh reconciliation immediately.
 
 ## Assistant Ask Deployment
 
