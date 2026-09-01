@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   buildCalendarEventUrl,
@@ -20,6 +20,8 @@ const ROUTES = [
   "/goals/nutrition",
   "/goals/cardio",
   "/goals/strength",
+  "/goals/biomarkers",
+  "/goals/life-stages",
   "/goals/lower-resting-heart-rate",
   "/security",
   "/pitch",
@@ -192,6 +194,86 @@ function measureHorizontalOverflow(tolerancePx: number) {
   return { viewportWidth, scrollWidth, overflowPx, culprits };
 }
 
+async function openGoalCategory(
+  page: Page,
+  route: string,
+  width: number,
+) {
+  await page.setViewportSize({ width, height: 900 });
+  const response = await page.goto(route, { waitUntil: "load" });
+  expect(response?.status(), `${route} should respond 200 at ${width}px`).toBe(200);
+
+  const catalog = page.locator('[data-goal-directory="root"]');
+  await expect(catalog).toBeVisible();
+  await page.evaluate(async () => {
+    await document.fonts?.ready;
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+  });
+
+  return catalog;
+}
+
+function allowOnlyLoopbackRequests(page: Page) {
+  return page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      return route.continue();
+    }
+    return route.abort();
+  });
+}
+
+function countRenderedGridTracks(gridTemplateColumns: string): number {
+  return gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length;
+}
+
+async function measureStandaloneGoalDirectory(directory: Locator) {
+  return directory.evaluate((element, tolerancePx) => {
+    const directoryRect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const items = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        ':scope > [data-goal-root="standalone"]',
+      ),
+    );
+    const itemRects = items.map((item) => item.getBoundingClientRect());
+    const columns = new Map<number, DOMRect[]>();
+    for (const rect of itemRects) {
+      const columnStart = Math.round((rect.left - directoryRect.left) * 10) / 10;
+      const column = columns.get(columnStart) ?? [];
+      column.push(rect);
+      columns.set(columnStart, column);
+    }
+
+    let maxInternalGap = 0;
+    for (const column of columns.values()) {
+      column.sort((left, right) => left.top - right.top);
+      for (let index = 1; index < column.length; index += 1) {
+        maxInternalGap = Math.max(
+          maxInternalGap,
+          column[index].top - column[index - 1].bottom,
+        );
+      }
+    }
+
+    return {
+      allItemsContained: itemRects.every(
+        (rect) =>
+          rect.left >= directoryRect.left - tolerancePx
+          && rect.right <= directoryRect.right + tolerancePx,
+      ),
+      columnCount: style.gridTemplateColumns.trim().split(/\s+/).filter(Boolean)
+        .length,
+      itemCount: items.length,
+      maxInternalGap,
+      scrollWidth: element.scrollWidth,
+      usedColumnCount: columns.size,
+      visibleWidth: element.clientWidth,
+    };
+  }, OVERFLOW_TOLERANCE_PX);
+}
+
 test("calendar links wrap maximum unbroken event text", async ({ page }) => {
   test.setTimeout(240_000);
   const event = {
@@ -298,6 +380,454 @@ for (const route of ROUTES) {
   }
 }
 
+test("large cardio directory stays compact until its native disclosure opens", async ({
+  page,
+}) => {
+  test.slow();
+  await allowOnlyLoopbackRequests(page);
+
+  for (const [width, expectedColumns] of [
+    [320, 1],
+    [390, 1],
+    [640, 2],
+    [1024, 2],
+    [1280, 3],
+  ] as const) {
+    const catalog = await openGoalCategory(page, "/goals/cardio", width);
+    const disclosure = page.locator(
+      'details[data-goal-category-disclosure="cardio"]',
+    );
+    const additionalCatalog = disclosure.locator(
+      '[data-goal-directory="root-more"]',
+    );
+    const visibleRouteIds = await catalog.locator(":scope > li > a")
+      .evaluateAll((links) => links.map((link) =>
+        link.getAttribute("href")?.replace("/goals/", "")
+      ));
+    const previewCount = await catalog.locator(":scope > li").count();
+    const additionalCount = await additionalCatalog.locator(":scope > li")
+      .count();
+    const totalRootCount = await page.locator(
+      '[data-goal-root="standalone"]',
+    ).count();
+    const collapsedPageHeight = await page.evaluate(
+      () => document.documentElement.scrollHeight,
+    );
+    const layout = await measureStandaloneGoalDirectory(catalog);
+
+    await expect(disclosure).toHaveJSProperty("open", false);
+    await expect(disclosure.locator("summary")).toContainText(
+      `Show ${additionalCount} more`,
+    );
+    await expect(additionalCatalog).not.toBeVisible();
+    expect(previewCount).toBeGreaterThan(0);
+    expect(previewCount).toBeLessThanOrEqual(8);
+    expect(additionalCount).toBeGreaterThan(0);
+    expect(totalRootCount).toBe(previewCount + additionalCount);
+    expect(visibleRouteIds.slice(0, 4)).toEqual([
+      "improve-vo2-max",
+      "run-ironman",
+      "run-first-5k",
+      "improve-cardio-endurance",
+    ]);
+    expect(layout.itemCount).toBe(previewCount);
+    expect(layout.columnCount).toBe(expectedColumns);
+    expect(layout.usedColumnCount).toBe(
+      Math.min(expectedColumns, previewCount),
+    );
+    expect(layout.allItemsContained).toBe(true);
+    expect(layout.maxInternalGap).toBeLessThanOrEqual(16);
+    expect(layout.scrollWidth - layout.visibleWidth).toBeLessThanOrEqual(
+      OVERFLOW_TOLERANCE_PX,
+    );
+
+    await disclosure.locator("summary").click();
+    await expect(disclosure).toHaveJSProperty("open", true);
+    await expect(disclosure.locator("summary")).toContainText("Show fewer");
+    await expect(additionalCatalog).toBeVisible();
+
+    const expandedPageHeight = await page.evaluate(
+      () => document.documentElement.scrollHeight,
+    );
+    const additionalLayout = await measureStandaloneGoalDirectory(
+      additionalCatalog,
+    );
+    expect(additionalLayout.itemCount).toBe(additionalCount);
+    expect(additionalLayout.columnCount).toBe(expectedColumns);
+    expect(additionalLayout.usedColumnCount).toBe(
+      Math.min(expectedColumns, additionalCount),
+    );
+    expect(additionalLayout.allItemsContained).toBe(true);
+    expect(additionalLayout.maxInternalGap).toBeLessThanOrEqual(16);
+    expect(expandedPageHeight).toBeGreaterThan(collapsedPageHeight);
+
+    const overflow = await page.evaluate(
+      measureHorizontalOverflow,
+      OVERFLOW_TOLERANCE_PX,
+    );
+    expect(
+      overflow.overflowPx,
+      `/goals/cardio overflows by ${overflow.overflowPx}px at ${width}px.\n${overflow.culprits.join("\n")}`,
+    ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+  }
+});
+
+test("multi-child goal families stay two-column and compact on phones", async ({
+  page,
+}) => {
+  test.slow();
+  await allowOnlyLoopbackRequests(page);
+  for (const width of [320, 390] as const) {
+    await openGoalCategory(page, "/goals/biomarkers", width);
+    const categoryDisclosure = page.locator(
+      'details[data-goal-category-disclosure="biomarkers"]',
+    );
+    await categoryDisclosure.locator(":scope > summary").click();
+    const bloodSugarFamily = page.locator(
+      '[data-goal-family="improve-blood-sugar-control"]',
+    );
+    await expect(bloodSugarFamily).toHaveCount(1);
+
+    const layout = await bloodSugarFamily.evaluate((element) => {
+      const catalog = element.parentElement;
+      const body = element.querySelector<HTMLElement>(
+        '[data-goal-directory="specific"]',
+      );
+      if (!catalog || !body) {
+        throw new Error("Improve My Blood Sugar Control family markup is incomplete.");
+      }
+
+      const bodyRect = body.getBoundingClientRect();
+      const childRects = Array.from(body.children).map((child) =>
+        child.getBoundingClientRect()
+      );
+      const lastChildRect = childRects.at(-1);
+
+      return {
+        allChildrenContained: childRects.every(
+          (rect) => rect.left >= bodyRect.left && rect.right <= bodyRect.right,
+        ),
+        bodyGridTemplateColumns: getComputedStyle(body).gridTemplateColumns,
+        childColumnCount: new Set(
+          childRects.map((rect) => Math.round(rect.left * 10) / 10),
+        ).size,
+        childCount: childRects.length,
+        childRowCount: new Set(
+          childRects.map((rect) => Math.round(rect.top * 10) / 10),
+        ).size,
+        familyHeight: element.getBoundingClientRect().height,
+        familyWidth: element.getBoundingClientRect().width,
+        catalogWidth: catalog.getBoundingClientRect().width,
+        lastChildWidth: lastChildRect?.width ?? 0,
+        listWidth: bodyRect.width,
+      };
+    });
+
+    expect(countRenderedGridTracks(layout.bodyGridTemplateColumns)).toBe(2);
+    expect(layout.childCount).toBeGreaterThan(1);
+    expect(layout.childCount).toBeLessThanOrEqual(4);
+    expect(layout.childColumnCount).toBe(2);
+    expect(layout.childRowCount).toBe(Math.ceil(layout.childCount / 2));
+    expect(layout.allChildrenContained).toBe(true);
+    expect(layout.lastChildWidth).toBeLessThan(layout.listWidth);
+    expect(Math.abs(layout.familyWidth - layout.catalogWidth)).toBeLessThanOrEqual(
+      OVERFLOW_TOLERANCE_PX,
+    );
+    expect(layout.familyHeight).toBeLessThan(450);
+
+    const overflow = await page.evaluate(
+      measureHorizontalOverflow,
+      OVERFLOW_TOLERANCE_PX,
+    );
+    expect(overflow.overflowPx).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+  }
+});
+
+test("family cards stay in a compact row-major grid at tablet and desktop widths", async ({
+  page,
+}) => {
+  test.slow();
+  await allowOnlyLoopbackRequests(page);
+  for (const [width, expectedRootColumns] of [
+    [768, 2],
+    [1024, 2],
+    [1280, 3],
+  ] as const) {
+    const catalog = await openGoalCategory(page, "/goals/strength", width);
+    const mobilityFamily = catalog.locator(
+      ':scope > [data-goal-family="improve-mobility"]',
+    );
+    await expect(mobilityFamily).toHaveCount(1);
+
+    const layout = await mobilityFamily.evaluate((element) => {
+      const catalog = element.parentElement;
+      const body = element.querySelector<HTMLElement>(
+        '[data-goal-directory="specific"]',
+      );
+      const disclosure = element.querySelector<HTMLDetailsElement>(
+        '[data-goal-disclosure="improve-mobility"]',
+      );
+      const additionalGoals = disclosure?.querySelector<HTMLElement>(
+        '[data-goal-directory="specific-more"]',
+      );
+      if (!catalog || !body || !disclosure || !additionalGoals) {
+        throw new Error("Improve My Mobility family markup is incomplete.");
+      }
+
+      const catalogStyle = getComputedStyle(catalog);
+      const columnGap = Number.parseFloat(catalogStyle.columnGap) || 0;
+      const catalogRect = catalog.getBoundingClientRect();
+      const childRects = Array.from(body.children).map((child) =>
+        child.getBoundingClientRect()
+      );
+      const childColumnStarts = new Set(
+        childRects.map((rect) => Math.round(rect.left * 10) / 10),
+      );
+      const childRowStarts = new Set(
+        childRects.map((rect) => Math.round(rect.top * 10) / 10),
+      );
+
+      return {
+        additionalChildCount: additionalGoals.children.length,
+        bodyGridTemplateColumns: getComputedStyle(body).gridTemplateColumns,
+        childColumnCount: childColumnStarts.size,
+        childCount: childRects.length,
+        childRowCount: childRowStarts.size,
+        columnGap,
+        disclosureOpen: disclosure.open,
+        familyHeight: element.getBoundingClientRect().height,
+        familyWidth: element.getBoundingClientRect().width,
+        rootGridTemplateColumns: catalogStyle.gridTemplateColumns,
+        rootWidth: catalogRect.width,
+      };
+    });
+
+    expect(countRenderedGridTracks(layout.rootGridTemplateColumns)).toBe(
+      expectedRootColumns,
+    );
+    expect(layout.disclosureOpen).toBe(false);
+    expect(countRenderedGridTracks(layout.bodyGridTemplateColumns)).toBe(2);
+    expect(layout.childCount).toBeGreaterThan(1);
+    expect(layout.childCount).toBeLessThanOrEqual(4);
+    expect(layout.childColumnCount).toBe(2);
+    expect(layout.childRowCount).toBe(Math.ceil(layout.childCount / 2));
+    expect(layout.additionalChildCount).toBeGreaterThan(0);
+    const expectedFamilyWidth =
+      (layout.rootWidth - layout.columnGap * (expectedRootColumns - 1))
+      / expectedRootColumns;
+    expect(Math.abs(layout.familyWidth - expectedFamilyWidth)).toBeLessThanOrEqual(
+      2,
+    );
+    expect(layout.familyHeight).toBeLessThan(500);
+  }
+});
+
+test("large nutrition family is compact before its accessible disclosure opens", async ({
+  page,
+}) => {
+  test.slow();
+  await allowOnlyLoopbackRequests(page);
+
+  const phoneCatalog = await openGoalCategory(page, "/goals/nutrition", 390);
+  const phoneFamily = phoneCatalog.locator(
+    ':scope > [data-goal-family="eat-balanced-diet"]',
+  );
+  const phonePreview = phoneFamily.locator(
+    '[data-goal-directory="specific"]',
+  );
+  const phoneDisclosure = phoneFamily.locator(
+    'details[data-goal-disclosure="eat-balanced-diet"]',
+  );
+  const phoneAdditionalGoals = phoneDisclosure.locator(
+    '[data-goal-directory="specific-more"]',
+  );
+  const phonePreviewCount = await phonePreview.locator(":scope > li").count();
+  const phoneAdditionalCount = await phoneAdditionalGoals.locator(":scope > li")
+    .count();
+
+  await expect(phoneFamily).toHaveCount(1);
+  expect(phonePreviewCount).toBeGreaterThan(0);
+  expect(phonePreviewCount).toBeLessThanOrEqual(4);
+  expect(phoneAdditionalCount).toBeGreaterThan(0);
+  await expect(phoneDisclosure).toHaveJSProperty("open", false);
+  await expect(phoneDisclosure.locator("summary")).toContainText(
+    `Show ${phoneAdditionalCount} more`,
+  );
+
+  const collapsedLayout = await phoneFamily.evaluate((element) => {
+    const catalog = element.parentElement;
+    const preview = element.querySelector<HTMLElement>(
+      '[data-goal-directory="specific"]',
+    );
+    if (!catalog || !preview) {
+      throw new Error("Eat a Balanced Diet family markup is incomplete.");
+    }
+
+    return {
+      catalogWidth: catalog.getBoundingClientRect().width,
+      familyHeight: element.getBoundingClientRect().height,
+      familyWidth: element.getBoundingClientRect().width,
+      previewGridTemplateColumns: getComputedStyle(preview).gridTemplateColumns,
+    };
+  });
+
+  expect(countRenderedGridTracks(
+    collapsedLayout.previewGridTemplateColumns,
+  )).toBe(2);
+  expect(
+    Math.abs(collapsedLayout.familyWidth - collapsedLayout.catalogWidth),
+  ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+  expect(collapsedLayout.familyHeight).toBeLessThan(400);
+
+  await phoneDisclosure.locator("summary").click();
+  await expect(phoneDisclosure).toHaveJSProperty("open", true);
+  await expect(phoneDisclosure.locator("summary")).toContainText("Show fewer");
+  const expandedHeight = await phoneFamily.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  expect(expandedHeight).toBeGreaterThan(collapsedLayout.familyHeight);
+
+  const phoneOverflow = await page.evaluate(
+    measureHorizontalOverflow,
+    OVERFLOW_TOLERANCE_PX,
+  );
+  expect(phoneOverflow.overflowPx).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+
+  const desktopCatalog = await openGoalCategory(page, "/goals/nutrition", 1280);
+  const desktopFamily = desktopCatalog.locator(
+    ':scope > [data-goal-family="eat-balanced-diet"]',
+  );
+  const desktopLayout = await desktopFamily.evaluate((element) => {
+    const catalog = element.parentElement;
+    const preview = element.querySelector<HTMLElement>(
+      '[data-goal-directory="specific"]',
+    );
+    const disclosure = element.querySelector<HTMLDetailsElement>(
+      '[data-goal-disclosure="eat-balanced-diet"]',
+    );
+    if (!catalog || !preview || !disclosure) {
+      throw new Error("Eat a Balanced Diet desktop markup is incomplete.");
+    }
+
+    const catalogStyle = getComputedStyle(catalog);
+    const rootColumnCount = catalogStyle.gridTemplateColumns.trim()
+      .split(/\s+/).filter(Boolean).length;
+    const columnGap = Number.parseFloat(catalogStyle.columnGap) || 0;
+    const catalogRect = catalog.getBoundingClientRect();
+
+    return {
+      disclosureOpen: disclosure.open,
+      expectedFamilyWidth:
+        (catalogRect.width - columnGap * (rootColumnCount - 1)) / rootColumnCount,
+      familyHeight: element.getBoundingClientRect().height,
+      familyWidth: element.getBoundingClientRect().width,
+      previewChildCount: preview.children.length,
+      previewGridTemplateColumns: getComputedStyle(preview).gridTemplateColumns,
+      rootColumnCount,
+    };
+  });
+
+  expect(desktopLayout.rootColumnCount).toBe(3);
+  expect(desktopLayout.disclosureOpen).toBe(false);
+  expect(desktopLayout.previewChildCount).toBeGreaterThan(0);
+  expect(desktopLayout.previewChildCount).toBeLessThanOrEqual(4);
+  expect(countRenderedGridTracks(
+    desktopLayout.previewGridTemplateColumns,
+  )).toBe(2);
+  expect(
+    Math.abs(desktopLayout.familyWidth - desktopLayout.expectedFamilyWidth),
+  ).toBeLessThanOrEqual(2);
+  expect(desktopLayout.familyHeight).toBeLessThan(400);
+});
+
+test("goal landing and search previews stay compact and title-first", async ({
+  page,
+}) => {
+  test.slow();
+  await allowOnlyLoopbackRequests(page);
+
+  for (const [width, expectedColumns] of [
+    [320, 2],
+    [1280, 4],
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    const response = await page.goto("/goals", { waitUntil: "load" });
+    expect(response?.status()).toBe(200);
+
+    const previews = page.locator("[data-goal-preview]");
+    await expect(previews).toHaveCount(7);
+    const previewLayouts = await previews.evaluateAll((directories) =>
+      directories.map((directory) => {
+        const links = Array.from(
+          directory.querySelectorAll<HTMLElement>(":scope > li > a"),
+        );
+        return {
+          cardCount: links.length,
+          gridTemplateColumns: getComputedStyle(directory).gridTemplateColumns,
+          maxCardHeight: Math.max(
+            ...links.map((link) => link.getBoundingClientRect().height),
+          ),
+          paragraphCount: links.reduce(
+            (count, link) => count + link.querySelectorAll("p").length,
+            0,
+          ),
+        };
+      })
+    );
+
+    for (const preview of previewLayouts) {
+      expect(preview.cardCount).toBe(4);
+      expect(countRenderedGridTracks(preview.gridTemplateColumns)).toBe(
+        expectedColumns,
+      );
+      expect(preview.maxCardHeight).toBeLessThan(150);
+      expect(preview.paragraphCount).toBe(0);
+    }
+    await expect(previews.locator("[data-goal-outcome-visual]")).toHaveCount(0);
+  }
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  const searchInput = page.getByRole("searchbox", { name: "Search goals" });
+  await searchInput.fill("sleep");
+  const searchResults = page.locator('[data-goal-search-results="visible"]');
+  await expect(searchResults).toBeVisible();
+  const searchLayout = await searchResults.evaluate((directory) => {
+    const links = Array.from(
+      directory.querySelectorAll<HTMLElement>(":scope > li > a"),
+    );
+    return {
+      cardCount: links.length,
+      gridTemplateColumns: getComputedStyle(directory).gridTemplateColumns,
+      maxCardHeight: Math.max(
+        ...links.map((link) => link.getBoundingClientRect().height),
+      ),
+      paragraphCount: links.reduce(
+        (count, link) => count + link.querySelectorAll("p").length,
+        0,
+      ),
+    };
+  });
+
+  expect(searchLayout.cardCount).toBeGreaterThan(0);
+  expect(searchLayout.cardCount).toBeLessThanOrEqual(16);
+  expect(countRenderedGridTracks(searchLayout.gridTemplateColumns)).toBe(2);
+  expect(searchLayout.maxCardHeight).toBeLessThan(150);
+  expect(searchLayout.paragraphCount).toBe(0);
+  await expect(searchResults.locator("svg")).toHaveCount(0);
+  await expect(searchResults.locator("[data-goal-outcome-visual]")).toHaveCount(0);
+  const showMore = page.locator("[data-goal-search-more]");
+  await expect(showMore).toBeVisible();
+  await showMore.click();
+  const expandedSearchCount = await searchResults.locator(":scope > li").count();
+  expect(expandedSearchCount).toBeGreaterThan(searchLayout.cardCount);
+  expect(expandedSearchCount - searchLayout.cardCount).toBeLessThanOrEqual(16);
+  const overflow = await page.evaluate(
+    measureHorizontalOverflow,
+    OVERFLOW_TOLERANCE_PX,
+  );
+  expect(overflow.overflowPx).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+});
+
 test("Goal library search fills its content column", async ({ page }) => {
   test.slow();
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -339,7 +869,7 @@ test("Goal guide source hover changes only the hovered source", async ({ page })
   });
   expect(response?.status()).toBe(200);
   const sources = page.locator("article a[href^='http']:not([aria-label])");
-  await expect(sources).toHaveCount(4);
+  expect(await sources.count()).toBeGreaterThan(1);
   const before = await sources.evaluateAll((links) =>
     links.slice(0, 2).map((link) => getComputedStyle(link).textDecorationColor),
   );

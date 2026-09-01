@@ -91,8 +91,7 @@ Severe or persistent abdominal pain, especially with vomiting, needs prompt asse
 ## Sources
 
 - [American Diabetes Association: 2026 obesity and weight-management standards](https://diabetesjournals.org/care/article/49/Supplement_1/S166/163915/8-Obesity-and-Weight-Management-for-the-Prevention)
-- [Joint advisory: Nutritional priorities with GLP-1 therapy](https://pubmed.ncbi.nlm.nih.gov/40519430/)
-- [FDA: Safe use of medicines containing semaglutide](https://www.fda.gov/drugs/postmarket-drug-safety-information-patients-and-providers/medications-containing-semaglutide-marketed-type-2-diabetes-or-weight-loss)
+- [Joint advisory: Nutritional priorities to support GLP-1 therapy for obesity](https://pubmed.ncbi.nlm.nih.gov/40450457/)
 
 ## Related goals
 

@@ -49,7 +49,6 @@ const goalRevisionSchema = z.object({
 const commonsGoalSummarySchema = z.object({
   aliases: z.array(z.string().min(1)),
   category: z.enum(HEALTH_COMMONS_GOAL_CATEGORIES),
-  evidenceSourceKeys: z.array(z.string().min(1)).min(1),
   goalPhrase: z.string().min(1),
   indexable: z.literal(true),
   key: z.string().min(1),
@@ -62,6 +61,10 @@ const commonsGoalSummarySchema = z.object({
   slug: z.string().min(1),
   startPrompt: z.string().min(1),
   status: z.string().min(1),
+  sources: z.array(z.object({
+    label: z.string().min(1),
+    url: z.string().url().startsWith("https://"),
+  })).min(2),
   successSignals: z.array(z.object({
     id: z.string().min(1),
     kind: z.string().min(1),
@@ -558,7 +561,6 @@ function toGoalSummary(
   return {
     aliases: entry.aliases,
     category: entry.category,
-    evidenceSourceKeys: entry.evidenceSourceKeys,
     goalPhrase: entry.goalPhrase,
     indexable: true as const,
     key: entry.key,
@@ -574,6 +576,7 @@ function toGoalSummary(
     slug: entry.slug,
     startPrompt: entry.startPrompt,
     status: entry.status,
+    sources: entry.sources,
     successSignals: entry.successSignals,
     summary: entry.summary,
     title: entry.title,

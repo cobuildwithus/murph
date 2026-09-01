@@ -11,6 +11,10 @@ aliases:
   - improve stamina
   - get better endurance
   - increase cardiovascular endurance
+  - build my aerobic base
+  - improve aerobic fitness
+  - build endurance base
+  - get better at easy cardio
 categories:
   - goals
   - cardio

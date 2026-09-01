@@ -18,6 +18,10 @@ import {
 } from "@murphai/health-commons/runtime";
 
 import {
+  hasCompletePublicHealthGoalCatalog,
+} from "../src/public-health-goal-catalog-contract.js";
+
+import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
   readHostedDeployAutomationEnvironment,
@@ -1466,6 +1470,12 @@ function assertHealthCommonsGoalIndexIncludesImproveDeepSleep(
   ) {
     throw new Error(
       "Runner Health Commons goal index is stale or missing Improve My Deep Sleep; rebuild deploy artifacts before deploying.",
+    );
+  }
+
+  if (!hasCompletePublicHealthGoalCatalog(artifact.goals)) {
+    throw new Error(
+      "Runner Health Commons goal index is incomplete; expected at least 250 unique, valid compact goals across exactly the seven public categories; rebuild deploy artifacts before deploying.",
     );
   }
 }

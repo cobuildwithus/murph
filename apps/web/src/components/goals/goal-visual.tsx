@@ -1,17 +1,6 @@
-import {
-  Activity,
-  Flag,
-  Gauge,
-  ListChecks,
-  Sparkles,
-  Stethoscope,
-  Trophy,
-  type LucideIcon,
-} from "lucide-react";
 import Image from "next/image";
 
 import type { GoalCategorySlug } from "@/src/lib/goals/goal-categories";
-import type { GoalOutcomeKind } from "@/src/lib/goals/goal-models";
 import { cn } from "@/src/lib/utils";
 
 interface GoalCategoryVisual {
@@ -66,16 +55,6 @@ const CATEGORY_VISUALS: Record<GoalCategorySlug, GoalCategoryVisual> = {
   },
 };
 
-const OUTCOME_ICONS: Record<GoalOutcomeKind, LucideIcon> = {
-  behavior: ListChecks,
-  biomarker: Activity,
-  capacity: Gauge,
-  event: Flag,
-  function: Sparkles,
-  skill: Trophy,
-  symptom: Stethoscope,
-};
-
 export function getGoalCategoryVisual(
   category: GoalCategorySlug,
 ): GoalCategoryVisual {
@@ -114,34 +93,6 @@ export function GoalCategoryArtwork({
         src={visual.artwork}
         width={128}
       />
-    </span>
-  );
-}
-
-export function GoalOutcomeMark({
-  category,
-  className,
-  outcomeKind,
-}: {
-  category: GoalCategorySlug;
-  className?: string;
-  outcomeKind: GoalOutcomeKind;
-}) {
-  const Icon = OUTCOME_ICONS[outcomeKind];
-  const visual = getGoalCategoryVisual(category);
-
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "relative z-10 flex size-10 shrink-0 items-center justify-center rounded-full border bg-white/70",
-        visual.accentClassName,
-        visual.borderClassName,
-        className,
-      )}
-      data-goal-outcome-visual={outcomeKind}
-    >
-      <Icon className="size-5" strokeWidth={1.6} />
     </span>
   );
 }

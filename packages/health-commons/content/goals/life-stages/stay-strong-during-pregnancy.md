@@ -75,8 +75,6 @@ Reduce complexity. A short circuit of sit-to-stands, rows, incline push-ups, and
 
 Online rules that forbid all squats, all overhead work, or all lifting above an arbitrary weight are too broad. At the other extreme, prior fitness does not make warning symptoms irrelevant. Use experience, current symptoms, and obstetric guidance together.
 
-Use effort and symptoms to scale familiar movements. Leave several good repetitions in reserve, breathe through the hard part, and choose a stance and range that feel stable as balance and joint comfort change. A useful two-day template includes a squat or sit-to-stand, hinge, push, pull, calf raise, and carry. Repeat the same basic movements long enough to progress them instead of searching for pregnancy-specific novelty every week. Record the load or variation and how you felt later that day. Maintaining a movement with a lighter load can be a successful training outcome while the body is also supporting pregnancy.
-
 ## A quick note
 
 Stop for bleeding, fluid leakage, contractions, faintness, chest pain, calf swelling or pain, or unusual breathlessness. New pelvic heaviness, persistent pain, or leaking deserves modification and, when needed, pelvic-health assessment.

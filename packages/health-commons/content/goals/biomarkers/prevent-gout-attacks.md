@@ -43,6 +43,8 @@ Preventing gout attacks usually requires keeping blood urate low enough, long en
 
 Allopurinol is the usual first-line long-term urate-lowering medicine, including for many people with kidney disease, but it must be started and adjusted by a clinician. Early in treatment, flares can temporarily increase as crystal deposits begin to change. That does not necessarily mean the medicine is failing.
 
+Long-term urate-lowering medicine is not automatic after a first uncomplicated gout attack. Current U.S. rheumatology guidance generally recommends against starting it then unless stage 3 or worse chronic kidney disease, serum urate above 9 mg/dL, or kidney stones change the balance.
+
 ## What to do
 
 - **Use a treat-to-target plan when indicated.** For people on urate-lowering therapy, current gout guidance generally supports adjusting treatment to keep serum urate below 6 mg/dL, with individualization for disease severity and safety.

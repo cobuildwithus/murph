@@ -1,6 +1,7 @@
 export const GOAL_CATEGORIES = [
   {
     description: "Build a sleep schedule that leaves you rested and ready for the day.",
+    directoryTitle: "Sleep Goals",
     featuredRouteIds: [
       "sleep-better",
       "improve-deep-sleep",
@@ -12,6 +13,7 @@ export const GOAL_CATEGORIES = [
   },
   {
     description: "Eat in a way that supports your health, energy, and everyday life.",
+    directoryTitle: "Nutrition Goals",
     featuredRouteIds: [
       "lose-weight",
       "hit-protein-target",
@@ -23,17 +25,19 @@ export const GOAL_CATEGORIES = [
   },
   {
     description: "Improve endurance, heart health, and the activities you want to finish.",
+    directoryTitle: "Cardio Goals",
     featuredRouteIds: [
       "improve-vo2-max",
       "run-ironman",
       "run-first-5k",
-      "build-aerobic-base",
+      "improve-cardio-endurance",
     ],
     label: "Cardio",
     slug: "cardio",
   },
   {
     description: "Get stronger, move better, and build useful physical skills.",
+    directoryTitle: "Strength Goals",
     featuredRouteIds: [
       "get-stronger",
       "build-muscle",
@@ -45,6 +49,7 @@ export const GOAL_CATEGORIES = [
   },
   {
     description: "Support focus, mood, stress, and the way you feel day to day.",
+    directoryTitle: "Mind Goals",
     featuredRouteIds: [
       "reduce-stress",
       "feel-more-energetic",
@@ -56,6 +61,7 @@ export const GOAL_CATEGORIES = [
   },
   {
     description: "Work toward healthier measurements you can follow over time.",
+    directoryTitle: "Biomarker Goals",
     featuredRouteIds: [
       "lower-resting-heart-rate",
       "improve-hrv",
@@ -67,6 +73,7 @@ export const GOAL_CATEGORIES = [
   },
   {
     description: "Stay healthy through pregnancy, menopause, aging, and other life stages.",
+    directoryTitle: "Life Stage Goals",
     featuredRouteIds: [
       "stay-strong-as-i-age",
       "return-to-running-postpartum",

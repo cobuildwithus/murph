@@ -51,7 +51,7 @@ Start by choosing the part of anxiety that is actually getting in your way. It m
 - **Track interference, not every sensation.** Once a day, rate how much anxiety got in the way from 0 to 10 and note one activity you did or avoided. This is usually more useful than monitoring your body all day.
 - **Reduce avoidable amplifiers.** Inconsistent sleep, large or late caffeine doses, heavy alcohol use, missed meals, and constant stressful media can all make the alarm system louder. Change one obvious amplifier rather than rebuilding your entire life at once.
 - **Practice one settling skill while reasonably calm.** Slow, comfortable breathing, progressive muscle relaxation, or a brief grounding exercise can help lower arousal. A skill rehearsed daily is easier to use when anxiety rises.
-- **Approach safe situations gradually.** Avoidance brings short-term relief but can teach the brain that the situation was dangerous. Break a safe but avoided activity into manageable steps and repeat each step until it becomes more ordinary.
+- **Approach mild, everyday avoidance gradually.** Use this only for a situation you already know is safe, such as a routine call or low-stakes meeting. Break the activity into manageable steps and repeat each step until it becomes more ordinary.
 - **Give worry a container.** Write worries down and set a short daily time to review them. For each one, choose a next action, a date to revisit it, or an explicit decision to let it remain uncertain.
 - **Keep doing meaningful things.** Exercise, time with other people, regular meals, and purposeful activities are not cures, but they protect the rest of life from shrinking around anxiety.
 
@@ -59,7 +59,7 @@ Evidence-based care for an anxiety disorder often uses cognitive behavioral ther
 
 ## A simple plan
 
-For the next four weeks, pick one situation in which anxiety is limiting you. Write a five-step ladder from “uncomfortable but manageable” to the full activity. If phone calls are the problem, the steps might be drafting what to say, making a low-stakes call, calling someone familiar, completing one necessary call, and eventually making the harder call.
+For the next four weeks, pick one safe, everyday situation in which anxiety is limiting you. Write a five-step ladder from “uncomfortable but manageable” to the full activity. If phone calls are the problem, the steps might be drafting what to say, making a low-stakes call, calling someone familiar, completing one necessary call, and eventually making the harder call.
 
 On at least four days each week, practice your chosen settling skill for five to ten minutes. Two or three times a week, complete one step on the ladder without rushing to escape or repeatedly checking whether you feel calm. Stay long enough to learn that discomfort can rise and fall while you remain capable.
 
@@ -74,6 +74,8 @@ Look at two- to four-week trends rather than one difficult day. A useful directi
 ## If you get stuck
 
 Check whether the goal is too broad, the step is too large, or an amplifier is still dominating. Also ask whether you are using the coping skill to make all discomfort disappear before acting. The aim is to make action possible, not to pass a calmness test.
+
+Do not use this generic ladder for trauma memories, compulsions, eating-disorder fears, panic attacks or feared body sensations, health anxiety, or a situation whose safety is uncertain. Those need a condition-specific or professionally guided plan.
 
 If anxiety is persistent, escalating, causing major avoidance, or repeatedly disrupting sleep, work, school, eating, or relationships, professional support can make the plan safer and more effective. A clinician can also check medication effects, thyroid problems, substance effects, and other conditions that may feel like anxiety.
 

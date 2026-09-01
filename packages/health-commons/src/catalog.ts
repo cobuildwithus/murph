@@ -18,6 +18,7 @@ import {
 } from "@murphai/contracts";
 
 import { readHealthCommonsContent, type HealthCommonsContentSet, type HealthCommonsSourcePage } from "./load.ts";
+import { extractHealthCommonsGoalSources } from "./goal-sources.ts";
 import { sha256StableJson } from "./normalize.ts";
 
 export interface BuildHealthCommonsCatalogOptions {
@@ -357,12 +358,8 @@ function validateIndexableGoalBody(page: HealthCommonsSourcePage): void {
     );
   }
 
-  const sourcesHeadingIndex = lines.indexOf("## Sources");
-  const sourcesBody = lines.slice(sourcesHeadingIndex + 1).join("\n");
-  const visibleSourceLinks = [...sourcesBody.matchAll(
-    /(?<!!)\[([^\]\r\n]+)\]\((https?:\/\/[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)/giu,
-  )].filter((match) => match[1]?.trim());
-  if (visibleSourceLinks.length < 2) {
+  const visibleSources = extractHealthCommonsGoalSources(body);
+  if (visibleSources.length < 2) {
     throw new Error(
       `${page.frontmatter.key} must include at least two visible Markdown source links under ## Sources before it is indexable.`,
     );

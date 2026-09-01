@@ -85,7 +85,7 @@ Avoid detoxes and multi-ingredient liver supplements; some cause liver injury. S
 
 - [AASLD: clinical assessment and management of MASLD](https://www.aasld.org/practice-guidelines/clinical-assessment-and-management-metabolic-dysfunction-associated-steatotic)
 - [NIDDK: eating, diet, and nutrition for fatty liver disease](https://www.niddk.nih.gov/health-information/liver-disease/nafld-nash/eating-diet-nutrition)
-- [American College of Sports Medicine: exercise and fatty liver disease](https://www.acsm.org/education-resources/trending-topics-resources/physical-activity-guidelines)
+- [American College of Sports Medicine: physical activity guidelines](https://www.acsm.org/education-resources/trending-topics-resources/physical-activity-guidelines)
 
 ## Related goals
 

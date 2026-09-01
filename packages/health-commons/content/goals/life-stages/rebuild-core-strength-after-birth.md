@@ -32,6 +32,7 @@ goal:
       label: Core exercises progress without worsening pelvic or abdominal symptoms
   evidenceSourceKeys:
     - source_artifact:pmid-32217980
+    - source_artifact:pmid-40139673
   workflow:
     kind: training_plan
     ownerSkillIds:
@@ -60,7 +61,7 @@ Postpartum core recovery is not about flattening the abdomen or closing every di
 
 ## A simple plan
 
-For eight weeks, practice five slow breaths with gentle exhale tension once daily. Three days per week, complete two sets of heel slides, bridges, bird-dog arms or legs, and a supported side plank, using 6 to 10 controlled repetitions. Twice weekly, add sit-to-stands, rows, light hinges, and carries.
+One starter template—not a uniquely validated sequence—is to practice five slow breaths with gentle exhale tension once daily for eight weeks. Three days per week, complete two sets of heel slides, bridges, bird-dog arms or legs, and a supported side plank, using 6 to 10 controlled repetitions. Twice weekly, add sit-to-stands, rows, light hinges, and carries.
 
 Every two weeks, progress one exercise: longer lever, one or two repetitions, a small load, or a more upright position. Keep the change if pain, bleeding, pelvic heaviness, leaking, and abdominal symptoms remain stable during the session and the next day. Reduce one level when they do not.
 
@@ -74,8 +75,6 @@ Stop repeatedly checking the gap and ask what function is limited. If every exer
 
 Avoid programs that promise to “heal” everyone with one forbidden-exercise list. Crunches, planks, and heavier lifting can be reintroduced progressively when they are controlled and symptom-tolerant. The exercise name matters less than the dose and response.
 
-Use a progression you can feel and repeat. Start with breathing and heel slides or supported marches, move to dead-bug variations, bridges, carries, rows, and incline planks, then shorten the incline or increase the lever. Two or three focused sessions each week are enough to learn what load is tolerated. Note the hardest exercise completed with steady breathing, good control, and no next-day increase in pain, heaviness, leakage, or incision discomfort. That record shows progress more clearly than the width of a midline gap. Daily lifting and feeding positions also count as load, so include them when deciding how much formal training to add.
-
 ## A quick note
 
 Seek assessment for wound redness or drainage, severe abdominal pain, a new painful bulge, worsening pelvic heaviness, or bladder or bowel changes. Otherwise, progress below the symptom threshold and let function lead.
@@ -85,3 +84,4 @@ Seek assessment for wound redness or drainage, severe abdominal pain, a new pain
 - [ACOG: Physical Activity and Exercise During Pregnancy and the Postpartum Period](https://www.acog.org/clinical/clinical-guidance/committee-opinion/articles/2020/04/physical-activity-and-exercise-during-pregnancy-and-the-postpartum-period)
 - [ACOG: Exercise After Pregnancy](https://www.acog.org/womens-health/faqs/exercise-after-pregnancy)
 - [NICE: Pelvic Floor Dysfunction—Prevention and Nonsurgical Management](https://www.nice.org.uk/guidance/ng210)
+- [2025 Canadian guideline for physical activity, sedentary behaviour and sleep throughout the first year postpartum](https://pubmed.ncbi.nlm.nih.gov/40139673/)

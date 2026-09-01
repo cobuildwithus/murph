@@ -30,8 +30,8 @@ goal:
       kind: milestone
       label: Practical support and postpartum follow-up are in place
   evidenceSourceKeys:
-    - source_artifact:pmid-32217980
-    - source_artifact:acog-healthy-eating-pregnancy-2026-04-25
+    - source_artifact:acog-optimizing-postpartum-care
+    - source_artifact:pmid-40139673
   workflow:
     kind: general_plan
     ownerSkillIds:
@@ -60,9 +60,9 @@ Recovery after birth is not one six-week deadline. It is a gradual return of **c
 
 ## A simple plan
 
-For the next two weeks, make a daily minimum: eat three times or an equivalent snack pattern, refill a water bottle, take prescribed medicines, walk for five to ten comfortable minutes in total, and have one person who knows how you are doing. Record only pain, bleeding trend, mood, and one function such as walking or showering.
+If you are in the first two weeks after birth, make a daily minimum: eat three times or use an equivalent snack pattern, refill a water bottle, take prescribed medicines, move for a few comfortable minutes as recovery allows, and have one person who knows how you are doing. Record only pain, bleeding trend, mood, and one function such as walking or showering.
 
-When the minimum feels stable for several days, add a five-minute walk, a gentle breathing and pelvic-floor session, or one light household task—not all three at once. After cesarean birth or a complicated delivery, use the specific lifting, wound, blood-pressure, and follow-up guidance from the care team.
+If you are later postpartum, identify the symptom or function that most limits life, choose one weekly next step, and arrange assessment when progress has stalled. When the minimum feels stable for several days, add a five-minute walk, symptom-free breathing and pelvic-floor reconnection, or one light household task—not all three at once. After cesarean birth or a complicated delivery, use the specific lifting, wound, blood-pressure, and follow-up guidance from the care team.
 
 ## How to know it is working
 
@@ -74,8 +74,6 @@ Identify the bottleneck. Persistent exhaustion may involve blood loss, anemia, t
 
 Avoid using body weight, abdominal appearance, or a return-to-exercise date as the main recovery score. Function, symptoms, healing, and emotional wellbeing are more useful. Ask for help with meals, laundry, transportation, feeding support, or a protected sleep block in specific terms; “let me know if you need anything” is hard to act on.
 
-Recovery is easier to see week to week than day to day. Once a week, note walking comfort, bleeding trend, wound or perineal comfort, bowel and bladder function, sleep opportunity, mood, and one daily task that has become easier. Use that check-in to choose the next small step—another five minutes of walking, a short strength session, a feeding-support change, or an appointment for a symptom that is not improving. A difficult day after more activity does not erase progress; it tells you the current dose may need to be repeated or reduced.
-
 ## A quick note
 
 Get urgent help for heavy bleeding, chest pain, trouble breathing, fainting, seizure, severe headache or vision change, fever, a red swollen painful leg, or thoughts of harming yourself or the baby. Postpartum complications can occur after leaving the hospital.
@@ -85,3 +83,4 @@ Get urgent help for heavy bleeding, chest pain, trouble breathing, fainting, sei
 - [ACOG: Optimizing Postpartum Care](https://www.acog.org/clinical/clinical-guidance/committee-opinion/articles/2018/05/optimizing-postpartum-care)
 - [WHO: Recommendations on Maternal and Newborn Care for a Positive Postnatal Experience](https://www.who.int/publications/i/item/9789240045989)
 - [CDC: Urgent Maternal Warning Signs](https://www.cdc.gov/hearher/maternal-warning-signs/index.html)
+- [2025 Canadian guideline for physical activity, sedentary behaviour and sleep throughout the first year postpartum](https://pubmed.ncbi.nlm.nih.gov/40139673/)

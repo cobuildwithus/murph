@@ -11,6 +11,11 @@ aliases:
   - start running after giving birth
   - run again postpartum
   - postpartum return to run
+categories:
+  - goals
+  - life-stages
+  - postpartum
+  - running
 goal:
   category: life-stages
   parentGoalKey: goal_template:return-to-exercise-postpartum
@@ -30,9 +35,8 @@ goal:
       kind: function
       label: Run without worsening symptoms during or the next day
   evidenceSourceKeys:
-    - source_artifact:pmid-32217980
-    - source_artifact:pmid-22176722
-    - source_artifact:pmid-33239350
+    - source_artifact:pmid-38148108
+    - source_artifact:pmid-40139673
   workflow:
     kind: training_plan
     ownerSkillIds:
@@ -66,7 +70,7 @@ Use a practical readiness screen, not a pass/fail diagnosis. You should be able 
 
 Progress through these stages at your own pace:
 
-1. **Recovery and walking:** Accumulate comfortable walks in short bouts. Stop before fatigue changes posture or creates pressure. Add gentle strength two days per week.
+1. **Recovery and walking:** Keep at least the first three weeks after birth free of running. Accumulate comfortable walks in short bouts as healing and symptoms allow. Stop before fatigue changes posture or creates pressure, and add gentle strength when appropriate.
 2. **Strength and low-impact cardio:** Build toward 30 minutes of purposeful walking. Add a stationary bike, elliptical, or swimming only when wounds are healed, bleeding and infection risk are addressed, and the activity is appropriate for your recovery.
 3. **Impact preparation:** Twice weekly, try small doses of faster marching, step-ups, calf raises, and low hops. Begin with a few repetitions on two legs. Progress only if symptoms remain stable for the next 24 hours.
 4. **Run-walk:** On a flat, predictable surface, warm up by walking, then alternate 1 minute of easy running with 2 minutes of walking for 6 to 10 rounds. Keep at least one non-running day between sessions.
@@ -100,4 +104,4 @@ Seek urgent care for heavy or increasing bleeding, chest pain, severe breathless
 - [International consensus statement on return-to-running readiness after childbirth](https://pubmed.ncbi.nlm.nih.gov/38148108/)
 - [International consensus statement on designing a postpartum return-to-running program](https://bjsm.bmj.com/content/58/4/183)
 - [ACOG: Physical Activity and Exercise During Pregnancy and the Postpartum Period](https://www.acog.org/clinical/clinical-guidance/committee-opinion/articles/2020/04/physical-activity-and-exercise-during-pregnancy-and-the-postpartum-period)
-- [World Health Organization guidelines on physical activity and sedentary behavior](https://pubmed.ncbi.nlm.nih.gov/33239350/)
+- [2025 Canadian guideline for physical activity, sedentary behaviour and sleep throughout the first year postpartum](https://pubmed.ncbi.nlm.nih.gov/40139673/)

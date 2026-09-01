@@ -64,19 +64,17 @@ Support the nervous system with ordinary foundations: regular movement, enough s
 
 Try this two-week reset:
 
-1. **Morning, two minutes:** Rate stress from 0 to 10 and name the main source in one sentence. Do not analyze every sensation.
-2. **During the day, one action:** Take the smallest useful step on a changeable stressor. Send the email, clarify the next task, close one notification channel, or ask a specific person for specific help.
-3. **Daily, five to ten minutes:** Practice a downshift. For breathing, sit comfortably and let the breath become slower without taking huge breaths; a slightly longer exhale may feel easier. For progressive relaxation, gently tense and release muscle groups. For mindfulness, notice sensations and thoughts without trying to erase them.
-4. **Most days, move:** Walk briskly, cycle, lift, garden, or do another activity you tolerate. Even a short bout can interrupt rumination; regular weekly activity matters more than a single exhausting workout.
-5. **Evening, protect recovery:** Create a short transition out of work, place tomorrow’s tasks on paper, and keep one consistent boundary around sleep.
-6. **Twice per week, connect:** Schedule a conversation, shared meal, class, faith practice, or other contact that feels supportive rather than performative.
-7. **End of week, review:** Keep the actions that lowered stress or improved function. Replace anything that became another obligation.
+1. **Choose one controllable stressor.** Each day, take the smallest useful step: send the email, clarify the next task, close one notification channel, or ask a specific person for specific help.
+2. **Choose one downshift.** Practice it for five to ten minutes on most days. Use comfortable breathing, progressive relaxation, a guided mindfulness practice, or an easy walk.
+3. **Review once a week.** Keep what lowered stress or improved function. Shrink or replace anything that became another obligation.
+
+Sleep, movement, meals, and connection can support the plan, but do not turn all of them into new requirements at once. Add one only when the two-part core is manageable.
 
 Practice the downshift when stress is moderate, not only at the peak of a crisis. Repetition makes it easier to access under pressure. If silent meditation increases distress, use an eyes-open practice, walking, music, or a concrete sensory task instead.
 
 ## How to know it is working
 
-Track the weekly average of three simple ratings: perceived stress from 0 to 10, how much stress interfered with sleep or focus, and how quickly you recovered after a difficult moment. Also track whether you completed the one behavior under your control.
+Once a week, rate overall stress and how much it interfered with sleep, focus, or relationships from 0 to 10. Also note whether you completed the one action under your control and whether the downshift helped you recover.
 
 Look for better function, not permanent calm. Useful changes include fewer stress-driven arguments, less evening rumination, easier task initiation, more restorative sleep, and returning to baseline sooner after a setback. A hard week can raise the rating even while your skills improve.
 

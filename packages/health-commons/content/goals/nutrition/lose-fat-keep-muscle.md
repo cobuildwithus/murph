@@ -85,7 +85,7 @@ Stop pursuing a deficit if you develop fainting, persistent injury, major menstr
 
 - [Systematic review: Dietary protein during calorie restriction in resistance-trained athletes](https://pubmed.ncbi.nlm.nih.gov/24092765/)
 - [Randomized trial: Exercise and protein during severe energy deficit](https://pubmed.ncbi.nlm.nih.gov/28790922/)
-- [ACSM: Resistance training prescription overview](https://pubmed.ncbi.nlm.nih.gov/41543952/)
+- [ACSM position stand: Resistance training prescription for muscle function, hypertrophy, and physical performance](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 
 ## Related goals
 

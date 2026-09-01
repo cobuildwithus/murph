@@ -49,7 +49,7 @@ Fatigue also differs from sleepiness and muscle weakness. Sleepiness means you m
 ## What to do
 
 - **Describe the problem precisely.** Note when energy is lowest, whether rest helps, and what becomes difficult. Separate “I could fall asleep” from “I am awake but drained.”
-- **Protect enough sleep.** For two weeks, give yourself a consistent sleep opportunity of at least seven hours, and more if you reliably need it. Loud snoring, gasping, morning headaches, or persistent unrefreshing sleep deserve attention rather than more sleep-hygiene rules.
+- **Protect enough sleep.** If you are an adult, give yourself a consistent sleep opportunity of at least seven hours for two weeks, and more if you reliably need it. Children and teens need more sleep according to age. Loud snoring, gasping, morning headaches, or persistent unrefreshing sleep deserve attention rather than more sleep-hygiene rules.
 - **Eat enough, regularly enough.** Long gaps, aggressive dieting, and meals that are too small for your activity can create predictable crashes. Build ordinary meals around a protein source, carbohydrate, produce when available, and enough total food to support the day.
 - **Use movement at the right dose.** If you are mostly inactive and ordinary activity does not cause a delayed symptom flare, begin with a comfortable 10- to 15-minute walk or similar movement. Exercise training produces small-to-moderate average improvements in energy and fatigue across randomized trials, but it is not a universal treatment for unexplained fatigue.
 - **Review workload and recovery.** Hard training, rotating shifts, caregiving, constant meetings, and emotional strain all consume capacity. A realistic plan may need less load or more help, not a stricter morning routine.

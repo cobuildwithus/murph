@@ -30,8 +30,7 @@ goal:
       label: Consistent aerobic training without excessive fatigue
   evidenceSourceKeys:
     - source_artifact:acsm-guidelines-exercise-testing-prescription-2025-03-24
-    - source_artifact:pmid-18580415
-    - source_artifact:pmid-34987590
+    - source_artifact:pmid-31367909
   workflow:
     kind: training_plan
     ownerSkillIds:
@@ -84,5 +83,5 @@ A recovery value by itself does not diagnose heart disease. New chest pain, fain
 ## Sources
 
 - [ACSM's Guidelines for Exercise Testing and Prescription, 12th edition](https://acsm.org/education-resources/books/guidelines-exercise-testing-prescription/)
-- [Gormley et al.: aerobic-training intensity and fitness adaptation](https://pubmed.ncbi.nlm.nih.gov/18580415/)
+- [Höchsmann et al.: aerobic exercise and one-minute heart-rate recovery](https://pubmed.ncbi.nlm.nih.gov/31367909/)
 - [Cole et al.: heart-rate recovery after exercise and prognosis](https://pubmed.ncbi.nlm.nih.gov/10536127/)

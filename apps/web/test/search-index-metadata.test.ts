@@ -13,6 +13,7 @@ import {
   listHealthCommonsGoalEntries,
   listHealthCommonsGoalRouteAliases,
   listHealthCommonsGoalRouteParams,
+  resolveHealthCommonsGoalPage,
 } from "../src/lib/health-commons/goal-projections";
 import { GOAL_CATEGORIES } from "../src/lib/goals/goal-categories";
 import {
@@ -122,6 +123,27 @@ describe("public search indexing metadata", () => {
         ).toBe(true);
       }
     }
+  });
+
+  it("keeps the retired aerobic-base route mapped to the canonical cardio guide and out of the sitemap", () => {
+    const legacyRouteId = "build-aerobic-base";
+    const canonicalRouteId = "improve-cardio-endurance";
+
+    expect(listHealthCommonsGoalRouteAliases()).toContain(legacyRouteId);
+    expect(resolveHealthCommonsGoalPage(legacyRouteId)).toMatchObject({
+      goal: {
+        key: "goal_template:improve-cardio-endurance",
+        routeId: canonicalRouteId,
+      },
+      route: {
+        canonicalRouteId,
+        isAlias: true,
+      },
+    });
+
+    const sitemapUrls = sitemap().map((entry) => entry.url);
+    expect(sitemapUrls).toContain(publicUrl(`/goals/${canonicalRouteId}`));
+    expect(sitemapUrls).not.toContain(publicUrl(`/goals/${legacyRouteId}`));
   });
 
   it("defaults private routes to noindex and opts the public experiment index back in", () => {

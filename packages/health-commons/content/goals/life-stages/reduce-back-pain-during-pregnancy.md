@@ -31,7 +31,7 @@ goal:
       label: A tolerable movement and strength routine is in place
   evidenceSourceKeys:
     - source_artifact:pmid-32217980
-    - source_artifact:pmid-27002445
+    - source_artifact:acog-back-pain-during-pregnancy
   workflow:
     kind: general_plan
     ownerSkillIds:
@@ -74,8 +74,6 @@ Look for lower pain at the end of the day, easier turning in bed, longer comfort
 Reduce range or load before stopping all movement. A raised sit-to-stand may be better than a deep squat; a shorter walk may be better than bed rest. If pain is concentrated near the pubic joint or sacroiliac area, single-leg tasks and wide steps may need modification. A therapist can distinguish pelvic girdle symptoms from ordinary muscular back pain.
 
 Pain that radiates below the knee with numbness or weakness, pain that does not ease with position, or pain accompanied by urinary or obstetric symptoms needs a broader assessment. Do not repeatedly stretch an irritated nerve or joint into pain.
-
-Change positions before discomfort becomes intense. Alternate sitting, standing, and walking; use a small footrest or rolled towel for support; and break household or work tasks into shorter blocks. For sleep, a pillow between the knees and another supporting the abdomen may reduce strain, but the best arrangement is the one that lets you rest. Keep a short note on which movements ease or provoke symptoms and whether pain settles by the next morning. This helps distinguish a tolerable training response from a pattern that needs a different exercise, pelvic-health assessment, or medical review. A support belt can help some people temporarily, but it should support movement rather than replace strength and activity.
 
 ## A quick note
 

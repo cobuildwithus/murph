@@ -200,11 +200,15 @@ export function normalizeMurphTelegramUsername(value: string | null | undefined)
 export function resolveMurphTelegramBotUsername(
   source?: Readonly<Record<string, string | undefined>>,
 ): string {
-  const overrideUsername = source
-    ? normalizeMurphTelegramUsername(source.MURPH_TELEGRAM_USERNAME_OVERRIDE)
-    : normalizeMurphTelegramUsername(process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE);
+  const environment = source ?? process.env;
+  const overrideUsername = normalizeMurphTelegramUsername(
+    environment.MURPH_TELEGRAM_USERNAME_OVERRIDE,
+  );
+  const legacyUsername = normalizeMurphTelegramUsername(
+    environment.TELEGRAM_BOT_USERNAME,
+  );
 
-  return overrideUsername ?? DEFAULT_MURPH_TELEGRAM_BOT_USERNAME;
+  return overrideUsername ?? legacyUsername ?? DEFAULT_MURPH_TELEGRAM_BOT_USERNAME;
 }
 
 export function buildMurphTelegramUrl(username: string): string {

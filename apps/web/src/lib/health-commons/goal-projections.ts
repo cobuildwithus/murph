@@ -1,11 +1,11 @@
 import type {
   HealthCommonsWebGoalIndexEntry,
   HealthCommonsWebGoalPage,
-} from "@murphai/health-commons/runtime";
+} from "@murphai/health-commons/goal-runtime";
 import {
   getGeneratedHealthCommonsWebGoalIndex,
   loadGeneratedHealthCommonsWebGoalPage,
-} from "@murphai/health-commons/runtime";
+} from "@murphai/health-commons/goal-runtime";
 
 import {
   isGoalCategorySlug,
@@ -30,6 +30,15 @@ export function listHealthCommonsGoalRouteParams(): { goalId: string }[] {
   return listHealthCommonsGoalEntries().map((goal) => ({ goalId: goal.routeId }));
 }
 
+export function resolveHealthCommonsCanonicalGoalEntry(
+  routeId: string,
+): GoalIndexEntryModel | null {
+  const entry = getGeneratedHealthCommonsWebGoalIndex().goals.find(
+    (candidate) => candidate.routeId === routeId,
+  );
+  return entry ? toGoalIndexEntryModel(entry) : null;
+}
+
 export function listHealthCommonsGoalRouteAliases(): string[] {
   return getGeneratedHealthCommonsWebGoalIndex().goals.flatMap((entry) => {
     const page = loadGeneratedHealthCommonsWebGoalPage({ routeId: entry.routeId });
@@ -44,26 +53,6 @@ export function listHealthCommonsGoalsByCategory(
   category: GoalCategorySlug,
 ): GoalIndexEntryModel[] {
   return listHealthCommonsGoalEntries().filter((goal) => goal.category === category);
-}
-
-export function searchHealthCommonsGoals(query: string): GoalIndexEntryModel[] {
-  const terms = normalizeSearchText(query).split(/\s+/u).filter(Boolean);
-  const goals = listHealthCommonsGoalEntries();
-
-  if (terms.length === 0) {
-    return goals;
-  }
-
-  return goals.filter((goal) => {
-    const searchable = normalizeSearchText([
-      goal.title,
-      goal.summary,
-      goal.goalPhrase,
-      ...goal.aliases,
-    ].join(" "));
-
-    return terms.every((term) => searchable.includes(term));
-  });
 }
 
 export function resolveHealthCommonsGoalPage(
@@ -82,14 +71,13 @@ export function resolveHealthCommonsGoalPage(
   }
 
   const model = toGoalPageModel(entry, page);
-  const normalizedRequest = normalizeRouteId(requestedRouteId);
 
   return {
     goal: model,
     route: {
       canonicalRouteId: model.routeId,
       entry: model,
-      isAlias: normalizedRequest !== model.routeId,
+      isAlias: requestedRouteId !== model.routeId,
     },
   };
 }
@@ -111,6 +99,7 @@ function toGoalPageModel(
     body: page.body,
     indexable: page.goal.indexable,
     routeId: page.route.routeId,
+    sources: page.sources,
     startPrompt: page.goal.startPrompt,
   };
 }
@@ -134,20 +123,6 @@ function toGoalIndexEntryModel(
     summary: entry.summary,
     title: entry.title,
   };
-}
-
-function normalizeRouteId(value: string): string {
-  return normalizeSearchText(value)
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/^-+|-+$/gu, "");
-}
-
-function normalizeSearchText(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/gu, "")
-    .toLowerCase()
-    .trim();
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

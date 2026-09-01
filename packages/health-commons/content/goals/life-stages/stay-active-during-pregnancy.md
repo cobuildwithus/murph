@@ -75,8 +75,6 @@ Break the session into smaller pieces and reduce logistical friction. A ten-minu
 
 Do not use wearable recovery scores as permission or prohibition. Symptoms, medical guidance, and how activity affects function are more important than a device's readiness label. If exhaustion is new or disproportionate, consider anemia, sleep problems, or another health issue rather than prescribing more exercise.
 
-Use a weekly floor and ceiling. The floor might be ten minutes of walking plus a few mobility movements on difficult days; the ceiling is the amount you can recover from without symptoms or unusual fatigue. This prevents an all-or-nothing pattern as nausea, work, sleep, and body size change. Track minutes of purposeful movement and two strength sessions rather than calories burned. When a week is comfortable, add a few minutes to one or two sessions. When symptoms flare, return to the floor and keep the habit alive while you adjust the activity or seek guidance.
-
 ## A quick note
 
 Stop and contact the obstetric care team for bleeding, fluid leakage, painful regular contractions, chest pain, faintness, calf swelling or pain, or unusual shortness of breath. Otherwise, adapt activity to the day and keep the long view.

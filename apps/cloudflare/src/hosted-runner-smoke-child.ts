@@ -51,10 +51,12 @@ import {
   createHostedRunnerNativeParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
 import {
+  runHostedGoalCliSmoke,
+} from "./hosted-goal-cli-smoke.js";
+import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
-  HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
@@ -67,9 +69,6 @@ import {
 const execFileAsync = promisify(execFile);
 const FINNISH_DRY_SAUNA_KEY =
   "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
-const IMPROVE_DEEP_SLEEP_GOAL_KEY = "goal_template:improve-deep-sleep";
-const IMPROVE_DEEP_SLEEP_GOAL_PROMPT =
-  "Hey Murph, help me improve my deep sleep.";
 const HEALTH_COMMONS_RUNTIME_MODULE: string = "@murphai/health-commons/runtime";
 const DEVICE_SYNC_CONFIG_RUNTIME_MODULE: string = "@murphai/device-syncd/config";
 const JUNCTION_SDK_RUNTIME_PATH = "/app/node_modules/@junction-api/sdk";
@@ -184,9 +183,7 @@ async function runSmokeChecks(input: {
   }
 
   const healthCommonsRuntime = await runHealthCommonsSmoke();
-  const healthCommonsCli = await runHealthCommonsCliSmoke({
-    vaultRoot: input.vaultRoot,
-  });
+  const healthCommonsCli = await runHealthCommonsCliSmoke();
 
   const wavPath = path.join(input.vaultRoot, input.wavRelativePath);
   await assertPathExists(wavPath);
@@ -2473,9 +2470,7 @@ function parsePositiveByteCount(value: string | undefined, label: string): numbe
   return Number(value);
 }
 
-async function runHealthCommonsCliSmoke(input: {
-  vaultRoot: string;
-}): Promise<{
+async function runHealthCommonsCliSmoke(): Promise<{
   goalProofCount: number;
   protocolListBytes: number;
 }> {
@@ -2500,227 +2495,16 @@ async function runHealthCommonsCliSmoke(input: {
     );
   }
 
-  let goalProofCount = 0;
-  const goalListOutput = await runTextCommand("vault-cli", [
-    "commons",
-    "goal",
-    "list",
-    "--query",
-    "deep sleep",
-    "--limit",
-    "10",
-    "--format",
-    "json",
-  ]);
-  const goalListData = readCliSuccessData(goalListOutput, "commons-goal-list");
-  const goalSummaries = readArray(
-    goalListData.goals,
-    "commons-goal-list.data.goals",
-  ).map((value, index) =>
-    readObject(value, `commons-goal-list.data.goals[${index}]`)
-  );
-  const deepSleepSummary = goalSummaries.find((goal) =>
-    goal.key === IMPROVE_DEEP_SLEEP_GOAL_KEY
-  );
-  if (!deepSleepSummary) {
-    throw new Error(
-      `Hosted runner CLI Health Commons goal list smoke did not include ${IMPROVE_DEEP_SLEEP_GOAL_KEY}.`,
-    );
-  }
-  if (deepSleepSummary.startPrompt !== IMPROVE_DEEP_SLEEP_GOAL_PROMPT) {
-    throw new Error(
-      `Hosted runner CLI Health Commons goal list smoke returned an unexpected start prompt for ${IMPROVE_DEEP_SLEEP_GOAL_KEY}.`,
-    );
-  }
-  const listRevision = readCommonsGoalRevision(
-    deepSleepSummary.revision,
-    "commons-goal-list.data.goals[].revision",
-  );
-  goalProofCount += 1;
-
-  const goalShowOutput = await runTextCommand("vault-cli", [
-    "commons",
-    "goal",
-    "show",
-    "improve-deep-sleep",
-    "--format",
-    "json",
-  ]);
-  const goalShowData = readCliSuccessData(goalShowOutput, "commons-goal-show");
-  const shownGoal = readObject(goalShowData.goal, "commons-goal-show.data.goal");
-  if (shownGoal.key !== IMPROVE_DEEP_SLEEP_GOAL_KEY) {
-    throw new Error(
-      `Hosted runner CLI Health Commons goal show smoke did not resolve ${IMPROVE_DEEP_SLEEP_GOAL_KEY}.`,
-    );
-  }
-  const shownRevision = readCommonsGoalRevision(
-    shownGoal.revision,
-    "commons-goal-show.data.goal.revision",
-  );
-  if (
-    shownRevision.pageRevisionId !== listRevision.pageRevisionId
-    || shownRevision.workflowSpecRevisionId !== listRevision.workflowSpecRevisionId
-  ) {
-    throw new Error(
-      `Hosted runner CLI Health Commons goal list/show revision mismatch for ${IMPROVE_DEEP_SLEEP_GOAL_KEY}.`,
-    );
-  }
-  goalProofCount += 1;
-
-  const legacyGoal = await saveAndShowSmokeGoal({
-    saveArgs: [
-      "goal",
-      "save",
-      "Hosted runner smoke legacy goal",
-      "--slug",
-      "hosted-runner-smoke-legacy-goal",
-      "--status",
-      "active",
-      "--vault",
-      input.vaultRoot,
-      "--format",
-      "json",
-    ],
-    vaultRoot: input.vaultRoot,
-  });
-  if (
-    legacyGoal.commonsGoalRef !== undefined
-    && legacyGoal.commonsGoalRef !== null
-  ) {
-    throw new Error(
-      "Hosted runner CLI legacy Goal round-trip unexpectedly added Health Commons lineage.",
-    );
-  }
-  goalProofCount += 1;
-
-  const lineageGoal = await saveAndShowSmokeGoal({
-    saveArgs: [
-      "goal",
-      "save",
-      "Improve my deep sleep",
-      "--slug",
-      "hosted-runner-smoke-improve-deep-sleep",
-      "--status",
-      "active",
-      "--domain",
-      "sleep",
-      "--commons-goal-key",
-      IMPROVE_DEEP_SLEEP_GOAL_KEY,
-      "--commons-page-revision-id",
-      shownRevision.pageRevisionId,
-      "--commons-workflow-revision-id",
-      shownRevision.workflowSpecRevisionId,
-      "--vault",
-      input.vaultRoot,
-      "--format",
-      "json",
-    ],
-    vaultRoot: input.vaultRoot,
-  });
-  assertExactCommonsGoalRef(
-    lineageGoal.commonsGoalRef,
-    {
-      key: IMPROVE_DEEP_SLEEP_GOAL_KEY,
-      ...shownRevision,
+  const goalSmoke = await runHostedGoalCliSmoke({
+    async runCommand(_label, args) {
+      return await runTextCommand("vault-cli", [...args]);
     },
-  );
-  goalProofCount += 1;
-
-  if (goalProofCount < HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT) {
-    throw new Error(
-      `Hosted runner CLI Health Commons Goal smoke was incomplete. proofCount=${goalProofCount}`,
-    );
-  }
+  });
 
   return {
-    goalProofCount,
+    goalProofCount: goalSmoke.proofCount,
     protocolListBytes: Buffer.byteLength(protocolListOutput, "utf8"),
   };
-}
-
-function readCliSuccessData(output: string, label: string): Record<string, unknown> {
-  const envelope = readObject(
-    parseJsonFromCommandStdout(output, label),
-    `${label} envelope`,
-  );
-  if (envelope.ok !== true) {
-    throw new Error(`Hosted runner CLI ${label} command did not succeed.`);
-  }
-
-  return readObject(envelope.data, `${label}.data`);
-}
-
-function readCommonsGoalRevision(
-  value: unknown,
-  label: string,
-): {
-  pageRevisionId: string;
-  workflowSpecRevisionId: string;
-} {
-  const revision = readObject(value, label);
-  const pageRevisionId = readString(revision.pageRevisionId, `${label}.pageRevisionId`);
-  const workflowSpecRevisionId = readString(
-    revision.workflowSpecRevisionId,
-    `${label}.workflowSpecRevisionId`,
-  );
-  const revisionPattern = /^sha256:[0-9a-f]{64}$/u;
-  if (
-    !revisionPattern.test(pageRevisionId)
-    || !revisionPattern.test(workflowSpecRevisionId)
-  ) {
-    throw new Error(`Hosted runner CLI ${label} must contain exact sha256 revision ids.`);
-  }
-
-  return {
-    pageRevisionId,
-    workflowSpecRevisionId,
-  };
-}
-
-async function saveAndShowSmokeGoal(input: {
-  saveArgs: string[];
-  vaultRoot: string;
-}): Promise<Record<string, unknown>> {
-  const savedOutput = await runTextCommand("vault-cli", input.saveArgs);
-  const saved = readCliSuccessData(savedOutput, "goal-save");
-  if (saved.created !== true) {
-    throw new Error("Hosted runner CLI Goal round-trip did not create a disposable Goal.");
-  }
-  const goalId = readString(saved.goalId, "goal-save.data.goalId");
-  const shownOutput = await runTextCommand("vault-cli", [
-    "goal",
-    "show",
-    goalId,
-    "--vault",
-    input.vaultRoot,
-    "--format",
-    "json",
-  ]);
-  const shown = readCliSuccessData(shownOutput, "goal-show");
-  const entity = readObject(shown.entity, "goal-show.data.entity");
-
-  return readObject(entity.data, "goal-show.data.entity.data");
-}
-
-function assertExactCommonsGoalRef(
-  value: unknown,
-  expected: {
-    key: string;
-    pageRevisionId: string;
-    workflowSpecRevisionId: string;
-  },
-): void {
-  const reference = readObject(value, "goal-show.data.entity.data.commonsGoalRef");
-  if (
-    Object.keys(reference).length !== 3
-    || reference.key !== expected.key
-    || reference.pageRevisionId !== expected.pageRevisionId
-    || reference.workflowSpecRevisionId !== expected.workflowSpecRevisionId
-  ) {
-    throw new Error(
-      "Hosted runner CLI lineage Goal round-trip did not preserve the exact Health Commons lineage tuple.",
-    );
-  }
 }
 
 async function runCommand(

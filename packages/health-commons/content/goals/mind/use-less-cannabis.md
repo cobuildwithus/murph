@@ -79,7 +79,7 @@ There is no FDA-approved medication specifically for cannabis use disorder, but 
 
 ## A quick note
 
-Avoid cannabis during pregnancy and breastfeeding and use extra caution in adolescence. Hallucinations, severe paranoia, inability to care for yourself, suicidal thoughts, chest pain, or repeated vomiting with dehydration need urgent medical assessment. If stopping brings severe symptoms or you cannot reduce despite harm, contact a clinician or local substance-use service.
+Avoid cannabis during pregnancy and breastfeeding. Adolescents should avoid cannabis; frequent or high-THC use is especially concerning for the developing brain, and age-appropriate support can help with reduction or stopping. Hallucinations, severe paranoia, inability to care for yourself, suicidal thoughts, chest pain, or repeated vomiting with dehydration need urgent medical assessment. If stopping brings severe symptoms or you cannot reduce despite harm, contact a clinician or local substance-use service.
 
 ## Sources
 

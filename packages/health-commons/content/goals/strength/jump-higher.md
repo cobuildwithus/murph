@@ -29,7 +29,7 @@ goal:
       label: Standardized jump height trends upward
   evidenceSourceKeys:
     - source_artifact:pmid-41843416
-    - source_artifact:pmid-36622555
+    - source_artifact:pmid-40469865
   workflow:
     kind: training_plan
     ownerSkillIds:

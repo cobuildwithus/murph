@@ -6,6 +6,10 @@ import {
   searchHealthCommonsKnowledgeIndex,
   type HealthCommonsKnowledgeSearchResult,
 } from "../src/knowledge-index.ts";
+import {
+  loadGeneratedHealthCommonsWebGoalIndex,
+  loadGeneratedHealthCommonsWebGoalPage,
+} from "../src/runtime.ts";
 
 const knowledgeIndexPath = fileURLToPath(
   new URL("../generated/knowledge.sqlite", import.meta.url),
@@ -130,6 +134,34 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     expect(result.items.every((item) => item.entityKey !== "goal_template:improve-deep-sleep"))
       .toBe(true);
     expect(result.items.every((item) => item.sources.length > 0)).toBe(true);
+  });
+
+  it("keeps colliding goals on the dedicated goal list and show surfaces", () => {
+    const listedGoal = loadGeneratedHealthCommonsWebGoalIndex().goals.find(
+      (goal) => goal.key === "goal_template:improve-deep-sleep",
+    );
+    expect(listedGoal).toMatchObject({
+      goalPhrase: "improve my deep sleep",
+      key: "goal_template:improve-deep-sleep",
+      routeId: "improve-deep-sleep",
+      startPrompt: "Hey Murph, help me improve my deep sleep.",
+      title: "Improve My Deep Sleep",
+    });
+
+    expect(loadGeneratedHealthCommonsWebGoalPage({
+      routeId: "improve-deep-sleep",
+    })).toMatchObject({
+      goal: {
+        goalPhrase: "improve my deep sleep",
+        indexable: true,
+      },
+      key: "goal_template:improve-deep-sleep",
+      route: {
+        entityType: "goal_template",
+        routeId: "improve-deep-sleep",
+      },
+      title: "Improve My Deep Sleep",
+    });
   });
 
   it("returns recovery-modality comparisons without unrelated safety", () => {

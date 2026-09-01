@@ -78,7 +78,7 @@ Calorie tracking is optional. If you use it, treat the number as an estimate and
 
 Use a 7-day weight average or compare the same day each week. Daily shifts mostly reflect water, sodium, carbohydrate storage, food in the digestive tract, hormones, and training—not instant fat gain or loss. Look for a trend across at least three to four weeks.
 
-For many people, roughly 0.5% of body weight per week is a reasonable middle ground, but slower can be appropriate. Larger early drops are often water. Track strength, energy, hunger, sleep, mood, and whether the plan survives weekends. A downward scale trend with collapsing performance, constant preoccupation, or binge eating is not a good trade.
+There is no single right weekly rate. For many people, a slow, gradual trend is easier to sustain, and the appropriate pace depends on the starting point, health, and context. Larger early drops are often water. Track strength, energy, hunger, sleep, mood, and whether the plan survives weekends. A downward scale trend with collapsing performance, constant preoccupation, or binge eating is not a good trade.
 
 Plateaus are normal because a smaller body uses less energy and because hunger, spontaneous movement, and adherence shift over time. A maintenance period is not failure. It can stabilize routines, improve training, and show whether the result is livable.
 

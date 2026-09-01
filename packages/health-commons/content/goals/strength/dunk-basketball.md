@@ -29,7 +29,7 @@ goal:
       kind: milestone
       label: Progress from small-ball dunks to a regulation basketball
   evidenceSourceKeys:
-    - source_artifact:pmid-26778661
+    - source_artifact:pmid-40469865
     - source_artifact:health.gov-physical-activity-guidelines-2018-11-12
   workflow:
     kind: training_plan
@@ -60,17 +60,17 @@ Practice jumping while fresh. Use maximal approach jumps, countermovement jumps,
 
 ## A simple plan
 
-Use two strength days and two jump exposures per week, separated by at least 48 hours when possible:
+Use two strength days and two jump exposures per week. Keep at least 48 hours between the jump days when possible; a Monday strength, Tuesday jump, Thursday strength, Saturday jump rhythm is one workable option:
 
-1. **Day 1 — strength plus jumps:** Warm up with easy movement, ankle and hip mobility, and several submaximal jumps. Do 3 sets of 3 maximal countermovement jumps with full rest. Then perform a squat or trap-bar deadlift, a split squat, a hip hinge, and calf work.
-2. **Day 2 — approach skill:** After warming up, do 8 to 12 high-quality approach jumps in sets of 2 or 3. Rest long enough to keep height and rhythm. Practice both one-foot and two-foot takeoffs briefly, then emphasize the style that fits you best.
-3. **Day 3 — strength plus elastic work:** Use 3 sets of 10 to 20 low-amplitude pogo contacts, stopping if stiffness or height fades. Follow with another main lift, a single-leg exercise, hamstring work, and trunk control.
-4. **Day 4 — dunk progression:** Take 6 to 10 fresh attempts with a tennis ball, volleyball, women’s ball, or regulation ball at the appropriate stage. Lower the rim if available so you can practice the complete motion rather than only touching metal.
+1. **Day 1 — strength:** Warm up with easy movement and ankle and hip mobility. Then perform a squat or trap-bar deadlift, a split squat, a hip hinge, and calf work.
+2. **Day 2 — approach skill:** After warming up, do 3 sets of 3 maximal countermovement jumps with full rest, then 8 to 12 high-quality approach jumps in sets of 2 or 3. Rest long enough to keep height and rhythm. Practice both one-foot and two-foot takeoffs briefly, then emphasize the style that fits you best.
+3. **Day 3 — strength:** Use another main lift, a single-leg exercise, hamstring work, calf work, and trunk control. Keep the session challenging but stop short of grinding repetitions that would compromise the next jump day.
+4. **Day 4 — elastic work and dunk progression:** Use 3 sets of 10 to 20 low-amplitude pogo contacts, stopping if stiffness or height fades. Then take 6 to 10 fresh attempts with a tennis ball, volleyball, women’s ball, or regulation ball at the appropriate stage. Lower the rim if available so you can practice the complete motion rather than only touching metal.
 5. **Every fourth week:** Cut jump attempts and lifting volume by roughly one-third. Retest after the easier week.
 
 Start below these volumes if you are new to impact. Land quietly with the knee tracking over the foot and enough space around the basket. Do not add depth jumps or high boxes simply because they look advanced. The useful drill is the least complex one that produces a fast, confident effort.
 
-Approach technique matters. For a one-foot jump, a fast but controlled penultimate step lowers the center of mass before a quick plant. For a two-foot jump, the final steps redirect horizontal speed without braking to a stop. Film only a few reps, choose one cue, and retest it. Trying to fix arm swing, foot angle, speed, and ball path at once usually makes the jump worse.
+Approach technique matters, but the useful cue depends on your takeoff style and current movement. Film a few reps, compare a controlled faster approach with a slower one, choose one cue that improves height and balance, and retest it. Trying to fix arm swing, foot angle, speed, and ball path at once usually makes the jump worse.
 
 ## How to know it is working
 

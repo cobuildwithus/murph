@@ -41,6 +41,12 @@ goal:
   indexable: true
 safety:
   cautionLevel: high
+  avoidOrGetClinicianGuidance:
+    - "Heavy, prolonged, daily, or morning drinking, or any prior alcohol withdrawal, seizure, or hallucination"
+  stopIf:
+    - "Stopping or sharply reducing alcohol brings shaking, sweating, vomiting, severe agitation, confusion, hallucinations, or a seizure"
+  notes:
+    - "Alcohol withdrawal can be life-threatening; do not improvise a rapid taper or use someone else's withdrawal medicine."
 ---
 
 Stopping alcohol can be a clear, positive goal. It may fit better than moderation if limits repeatedly fail, drinking is worsening health or relationships, alcohol interacts with a medicine, you are pregnant, or you simply prefer an alcohol-free life. The first step is determining whether stopping abruptly is medically safe.
@@ -89,7 +95,7 @@ If alcohol was masking anxiety, trauma, pain, depression, or insomnia, those pro
 
 ## A quick note
 
-Do not stop abruptly without medical guidance if you drink heavily or have had withdrawal. Seizure, severe confusion, hallucinations, fever, irregular heartbeat, or inability to stay awake requires emergency care. In the United States, SAMHSA’s confidential helpline is 1-800-662-HELP; use local services elsewhere.
+Do not stop or sharply reduce without medical guidance if you drink heavily or have had withdrawal. Seizure, severe confusion, hallucinations, fever, irregular heartbeat, or inability to stay awake requires emergency care. In the United States, SAMHSA’s confidential helpline is 1-800-662-HELP; use local services elsewhere.
 
 ## Sources
 

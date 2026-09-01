@@ -240,7 +240,7 @@ describe("@murphai/health-commons build determinism", () => {
       '"schemaVersion": "murph.commons.web.biomarker-index.v3"',
     );
     await expect(readFile(path.join(generatedRoot, "web/browse/goals.json"), "utf8")).resolves.toContain(
-      '"schemaVersion": "murph.commons.web.goal-index.v1"',
+      '"schemaVersion": "murph.commons.web.goal-index.v2"',
     );
     expect(buildHealthCommonsSourceIndexMock).toHaveBeenCalledTimes(1);
     expect(buildHealthCommonsSourceArtifactIndexMock).toHaveBeenCalledTimes(1);

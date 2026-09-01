@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:reduce-urine-albumin
 slug: reduce-urine-albumin
 title: Reduce Albumin in My Urine
-summary: Lower persistent albuminuria by treating blood pressure, diabetes, and kidney risk while confirming the trend correctly.
+summary: Lower persistently high urine albumin by treating blood pressure, diabetes, and kidney risk while confirming the trend correctly.
 status: field-testing
 quality: usable
 aliases:

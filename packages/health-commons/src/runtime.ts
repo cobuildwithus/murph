@@ -1,11 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import {
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS,
-  healthCommonsGoalTemplateSchema,
-  healthCommonsSafetySchema,
   type HealthCommonsBiomarkerDesiredDirection,
   type HealthCommonsCatalog,
   type HealthCommonsCatalogEntity,
@@ -42,6 +39,17 @@ export {
   HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT,
   HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
 };
+export type { HealthCommonsGoalSource } from "./goal-sources.ts";
+import {
+  getGeneratedHealthCommonsWebGoalIndex,
+  loadGeneratedHealthCommonsWebGoalIndex,
+  loadGeneratedHealthCommonsWebGoalPage,
+} from "./goal-runtime.ts";
+export {
+  getGeneratedHealthCommonsWebGoalIndex,
+  loadGeneratedHealthCommonsWebGoalIndex,
+  loadGeneratedHealthCommonsWebGoalPage,
+};
 import {
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
@@ -67,27 +75,38 @@ export type {
   HealthCommonsProtocolRunSpec,
 } from "./protocol-artifacts.ts";
 import {
+  defaultHealthCommonsPackageRootUrl,
+  generatedWebArtifactUrl,
+  MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
+  readGeneratedWebArtifact,
+  type LoadGeneratedHealthCommonsWebArtifactOptions,
+} from "./runtime-paths.ts";
+export { MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV };
+export type { LoadGeneratedHealthCommonsWebArtifactOptions } from "./runtime-paths.ts";
+import {
+  getGeneratedHealthCommonsWebRouteIndex,
+  loadGeneratedHealthCommonsWebRouteIndex,
+} from "./web-route-runtime.ts";
+export {
+  getGeneratedHealthCommonsWebRouteIndex,
+  loadGeneratedHealthCommonsWebRouteIndex,
+};
+import {
   HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
-  HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION,
-  HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION,
-  HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION,
   type HealthCommonsWebBiomarkerIndex,
   type HealthCommonsWebExperimentIndex,
   type HealthCommonsWebExperimentProtocolTab,
   type HealthCommonsWebExperimentResearchTab,
   type HealthCommonsWebExperimentResultsPublic,
   type HealthCommonsWebExperimentShell,
-  type HealthCommonsWebGoalIndex,
-  type HealthCommonsWebGoalPage,
   type HealthCommonsWebProjectionKey,
   type HealthCommonsWebRouteBundle,
-  type HealthCommonsWebRouteIndex,
 } from "./web-artifacts.ts";
 
 export type {
@@ -108,9 +127,6 @@ export type {
 export { isRunnableProtocolStatus } from "./protocol-publishing.ts";
 
 export type HealthCommonsEntity = HealthCommonsCatalogEntity;
-
-export const MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV =
-  "MURPH_HEALTH_COMMONS_PACKAGE_ROOT";
 
 export const HEALTH_COMMONS_PAGE_STATUSES = [
   "draft",
@@ -193,10 +209,6 @@ export function isHealthCommonsProtocolArtifactError(
 
 export interface LoadGeneratedHealthCommonsBiomarkerDesiredDirectionsOptions {
   biomarkerDesiredDirectionsPath?: string | URL;
-}
-
-export interface LoadGeneratedHealthCommonsWebArtifactOptions {
-  generatedWebRoot?: string | URL;
 }
 
 export interface SearchGeneratedHealthCommonsKnowledgeOptions {
@@ -471,16 +483,6 @@ type HealthCommonsWebExperimentProjectionKey = Extract<
   | "experiment.results-public"
   | "experiment.shell"
 >;
-const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey[] = [
-  "biomarker.overview",
-  "biomarker.research",
-  "biomarker.shell",
-  "goal.page",
-  "experiment.protocol",
-  "experiment.research",
-  "experiment.results-public",
-  "experiment.shell",
-];
 
 let cachedGeneratedProtocolIndexReader: HealthCommonsProtocolIndexReader | null = null;
 let cachedGeneratedProtocolRunSpecReader: HealthCommonsProtocolRunSpecReader | null = null;
@@ -489,8 +491,6 @@ let cachedGeneratedBiomarkerDesiredDirections:
   HealthCommonsBiomarkerDesiredDirectionsArtifact | null = null;
 let cachedGeneratedWebBiomarkerIndex: HealthCommonsWebBiomarkerIndex | null = null;
 let cachedGeneratedWebExperimentIndex: HealthCommonsWebExperimentIndex | null = null;
-let cachedGeneratedWebGoalIndex: HealthCommonsWebGoalIndex | null = null;
-let cachedGeneratedWebRouteIndex: HealthCommonsWebRouteIndex | null = null;
 const cachedGeneratedWebRouteBundles = new Map<string, HealthCommonsWebRouteBundle>();
 const cachedGeneratedWebExperimentResearchTabs = new Map<
   string,
@@ -508,7 +508,6 @@ const cachedGeneratedWebExperimentResultsPublic = new Map<
   string,
   HealthCommonsWebExperimentResultsPublic | null
 >();
-const cachedGeneratedWebGoalPages = new Map<string, HealthCommonsWebGoalPage | null>();
 
 export function loadGeneratedHealthCommonsProtocolIndex(
   options: LoadGeneratedHealthCommonsProtocolIndexOptions = {},
@@ -625,25 +624,10 @@ export function getGeneratedHealthCommonsBiomarkerDesiredDirections(
   return cachedGeneratedBiomarkerDesiredDirections;
 }
 
-export function loadGeneratedHealthCommonsWebRouteIndex(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
-): HealthCommonsWebRouteIndex {
-  const raw = readFileSync(
-    new URL("routes/index.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
-    "utf8",
-  );
-  const parsed = parseJsonObject(raw);
-  assertGeneratedWebRouteIndex(parsed);
-  return parsed;
-}
-
 export function loadGeneratedHealthCommonsWebExperimentIndex(
   options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
 ): HealthCommonsWebExperimentIndex {
-  const raw = readFileSync(
-    new URL("browse/experiments.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
-    "utf8",
-  );
+  const raw = readGeneratedWebArtifact("browse/experiments.json", options.generatedWebRoot);
   const parsed = parseJsonObject(raw);
   assertGeneratedWebExperimentIndex(parsed);
   return parsed;
@@ -652,36 +636,10 @@ export function loadGeneratedHealthCommonsWebExperimentIndex(
 export function loadGeneratedHealthCommonsWebBiomarkerIndex(
   options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
 ): HealthCommonsWebBiomarkerIndex {
-  const raw = readFileSync(
-    new URL("browse/biomarkers.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
-    "utf8",
-  );
+  const raw = readGeneratedWebArtifact("browse/biomarkers.json", options.generatedWebRoot);
   const parsed = parseJsonObject(raw);
   assertGeneratedWebBiomarkerIndex(parsed);
   return parsed;
-}
-
-export function loadGeneratedHealthCommonsWebGoalIndex(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
-): HealthCommonsWebGoalIndex {
-  const raw = readFileSync(
-    new URL("browse/goals.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
-    "utf8",
-  );
-  const parsed = parseJsonObject(raw);
-  assertGeneratedWebGoalIndex(parsed);
-  return parsed;
-}
-
-export function getGeneratedHealthCommonsWebRouteIndex(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
-): HealthCommonsWebRouteIndex {
-  if (options.generatedWebRoot) {
-    return loadGeneratedHealthCommonsWebRouteIndex(options);
-  }
-
-  cachedGeneratedWebRouteIndex ??= loadGeneratedHealthCommonsWebRouteIndex();
-  return cachedGeneratedWebRouteIndex;
 }
 
 export function getGeneratedHealthCommonsWebExperimentIndex(
@@ -704,17 +662,6 @@ export function getGeneratedHealthCommonsWebBiomarkerIndex(
 
   cachedGeneratedWebBiomarkerIndex ??= loadGeneratedHealthCommonsWebBiomarkerIndex();
   return cachedGeneratedWebBiomarkerIndex;
-}
-
-export function getGeneratedHealthCommonsWebGoalIndex(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
-): HealthCommonsWebGoalIndex {
-  if (options.generatedWebRoot) {
-    return loadGeneratedHealthCommonsWebGoalIndex(options);
-  }
-
-  cachedGeneratedWebGoalIndex ??= loadGeneratedHealthCommonsWebGoalIndex();
-  return cachedGeneratedWebGoalIndex;
 }
 
 export function resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
@@ -763,7 +710,7 @@ export function loadGeneratedHealthCommonsWebRouteBundle(input: {
     return cachedGeneratedWebRouteBundles.get(cacheKey) ?? null;
   }
 
-  const raw = readFileSync(generatedWebArtifactUrl(route.bundlePath, input.generatedWebRoot), "utf8");
+  const raw = readGeneratedWebArtifact(route.bundlePath, input.generatedWebRoot);
   const bundle = parseJsonObject(raw);
   assertGeneratedWebRouteBundle(bundle, route.bundlePath);
 
@@ -772,59 +719,6 @@ export function loadGeneratedHealthCommonsWebRouteBundle(input: {
   }
 
   return bundle;
-}
-
-export function loadGeneratedHealthCommonsWebGoalPage(input: {
-  generatedWebRoot?: string | URL;
-  routeId: string;
-}): HealthCommonsWebGoalPage | null {
-  const routeIndex = getGeneratedHealthCommonsWebRouteIndex({
-    generatedWebRoot: input.generatedWebRoot,
-  });
-  const normalizedRouteId = normalizeRouteId(input.routeId);
-  const route = routeIndex.routes.find((entry) =>
-    entry.entityType === "goal_template" && entry.routeId === normalizedRouteId
-  );
-
-  if (!route) {
-    return null;
-  }
-
-  const artifactPath = route.projections?.["goal.page"];
-  if (!artifactPath) {
-    return null;
-  }
-
-  const canonicalRouteId = routeIdFromGeneratedWebBundlePath(route.bundlePath);
-  const expectedPath = `pages/goals/${canonicalRouteId}.json`;
-  if (artifactPath !== expectedPath) {
-    throw new Error(
-      `Health Commons generated goal page path does not match route bundle id: ${artifactPath}.`,
-    );
-  }
-
-  const cacheKey = `${routeIndex.catalogHash}:${artifactPath}`;
-  if (!input.generatedWebRoot && cachedGeneratedWebGoalPages.has(cacheKey)) {
-    return cachedGeneratedWebGoalPages.get(cacheKey) ?? null;
-  }
-
-  const raw = readFileSync(generatedWebArtifactUrl(artifactPath, input.generatedWebRoot), "utf8");
-  const page = parseJsonObject(raw);
-  assertGeneratedWebGoalPage(page, artifactPath);
-
-  if (
-    page.key !== route.key
-    || page.route.entityType !== "goal_template"
-    || page.route.routeId !== canonicalRouteId
-  ) {
-    throw new Error(`Health Commons generated goal page does not match its route: ${artifactPath}.`);
-  }
-
-  if (!input.generatedWebRoot) {
-    cachedGeneratedWebGoalPages.set(cacheKey, page);
-  }
-
-  return page;
 }
 
 export function loadGeneratedHealthCommonsWebExperimentResearchTab(input: {
@@ -918,7 +812,7 @@ function loadGeneratedHealthCommonsWebExperimentArtifact<T>(input: {
     return null;
   }
 
-  const raw = readFileSync(artifactUrl, "utf8");
+  const raw = readGeneratedWebArtifact(artifactPath, input.generatedWebRoot);
   const artifact = parseJsonObject(raw);
   input.assertArtifact(artifact, artifactPath);
   assertGeneratedWebExperimentArtifactMatchesRoute(artifact, {
@@ -2279,25 +2173,6 @@ function safeDecodeURIComponent(value: string): string {
   }
 }
 
-function normalizeGeneratedWebRoot(value: string | URL | undefined): URL {
-  if (!value) {
-    return ensureTrailingSlashUrl(defaultGeneratedWebRootUrl());
-  }
-
-  const url = typeof value === "string"
-    ? stringToGeneratedWebRootUrl(value)
-    : value;
-  return ensureTrailingSlashUrl(url);
-}
-
-function generatedWebArtifactUrl(artifactPath: string, generatedWebRoot: string | URL | undefined): URL {
-  if (!isSafeGeneratedWebArtifactPath(artifactPath)) {
-    throw new Error(`Unsafe Health Commons generated web artifact path: ${artifactPath}`);
-  }
-
-  return new URL(artifactPath, normalizeGeneratedWebRoot(generatedWebRoot));
-}
-
 function routeIdFromGeneratedWebBundlePath(bundlePath: string): string {
   const parts = bundlePath.split("/");
   if (
@@ -2362,21 +2237,6 @@ function assertGeneratedWebExperimentArtifactMatchesRoute(
   }
 }
 
-function isSafeGeneratedWebArtifactPath(value: string): boolean {
-  if (/^[a-z][a-z\d+.-]*:/iu.test(value) || value.startsWith("/") || value.includes("\\")) {
-    return false;
-  }
-
-  const parts = value.split("/");
-  return parts.length > 0 && parts.every((part) =>
-    part.length > 0 && part !== "." && part !== ".."
-  );
-}
-
-function ensureTrailingSlashUrl(value: URL): URL {
-  return value.href.endsWith("/") ? value : new URL(`${value.href}/`);
-}
-
 function defaultGeneratedProtocolIndexUrl(): URL {
   return new URL(
     DEFAULT_GENERATED_PROTOCOL_INDEX_PATH,
@@ -2410,59 +2270,6 @@ function defaultGeneratedKnowledgeIndexUrl(): URL {
     DEFAULT_GENERATED_KNOWLEDGE_INDEX_PATH,
     defaultHealthCommonsPackageRootUrl(),
   );
-}
-
-function defaultHealthCommonsPackageRootUrl(): URL {
-  const envValue = process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]?.trim();
-  if (envValue) {
-    return ensureTrailingSlashUrl(stringToFileOrUrl(envValue));
-  }
-
-  return ensureTrailingSlashUrl(new URL("..", import.meta.url));
-}
-
-function defaultGeneratedWebRootUrl(): URL {
-  const envPackageRoot = process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]?.trim();
-  if (envPackageRoot) {
-    return ensureTrailingSlashUrl(
-      new URL("generated/web", defaultHealthCommonsPackageRootUrl()),
-    );
-  }
-
-  const runtimeSourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const fallbackGeneratedWebRootUrl = pathToFileURL(resolve(
-    process.cwd(),
-    "packages/health-commons/generated/web",
-  ));
-  const candidateRootUrls = [
-    fallbackGeneratedWebRootUrl,
-    pathToFileURL(resolve(process.cwd(), "../packages/health-commons/generated/web")),
-    pathToFileURL(resolve(process.cwd(), "../../packages/health-commons/generated/web")),
-    pathToFileURL(resolve(runtimeSourceRoot, "generated/web")),
-  ];
-
-  for (const candidateRootUrl of candidateRootUrls) {
-    const candidateRoot = candidateRootUrl.protocol === "file:"
-      ? fileURLToPath(candidateRootUrl)
-      : null;
-    if (candidateRoot && existsSync(resolve(candidateRoot, "routes/index.json"))) {
-      return ensureTrailingSlashUrl(candidateRootUrl);
-    }
-  }
-
-  return ensureTrailingSlashUrl(fallbackGeneratedWebRootUrl);
-}
-
-function stringToGeneratedWebRootUrl(value: string): URL {
-  return stringToFileOrUrl(value);
-}
-
-function stringToFileOrUrl(value: string): URL {
-  if (/^[a-z][a-z\d+.-]*:/iu.test(value)) {
-    return new URL(value);
-  }
-
-  return pathToFileURL(resolve(value));
 }
 
 function parseJsonObject(raw: string): unknown {
@@ -2661,23 +2468,6 @@ function assertGeneratedHealthCommonsBiomarkerDesiredDirections(
   }
 }
 
-function assertGeneratedWebRouteIndex(
-  value: unknown,
-): asserts value is HealthCommonsWebRouteIndex {
-  if (!isRecord(value)) {
-    throw new Error("Health Commons generated web route index is invalid.");
-  }
-
-  if (
-    value["schemaVersion"] !== HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION ||
-    typeof value["catalogHash"] !== "string" ||
-    !Array.isArray(value["routes"]) ||
-    !value["routes"].every(isGeneratedWebRouteIndexEntry)
-  ) {
-    throw new Error("Health Commons generated web route index is invalid.");
-  }
-}
-
 function assertGeneratedWebExperimentIndex(
   value: unknown,
 ): asserts value is HealthCommonsWebExperimentIndex {
@@ -2709,47 +2499,6 @@ function assertGeneratedWebBiomarkerIndex(
     !value["biomarkers"].every(isGeneratedWebBiomarkerIndexEntry)
   ) {
     throw new Error("Health Commons generated web biomarker index is invalid.");
-  }
-}
-
-function assertGeneratedWebGoalIndex(
-  value: unknown,
-): asserts value is HealthCommonsWebGoalIndex {
-  if (
-    !isRecord(value)
-    || value["schemaVersion"] !== HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION
-    || typeof value["catalogHash"] !== "string"
-    || !Array.isArray(value["goals"])
-    || !value["goals"].every(isGeneratedWebGoalIndexEntry)
-  ) {
-    throw new Error("Health Commons generated goal index is invalid.");
-  }
-}
-
-function assertGeneratedWebGoalPage(
-  value: unknown,
-  artifactPath: string,
-): asserts value is HealthCommonsWebGoalPage {
-  if (
-    !isRecord(value)
-    || value["schemaVersion"] !== HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION
-    || !Array.isArray(value["aliases"])
-    || !value["aliases"].every(isString)
-    || typeof value["body"] !== "string"
-    || typeof value["catalogHash"] !== "string"
-    || !healthCommonsGoalTemplateSchema.safeParse(value["goal"]).success
-    || typeof value["key"] !== "string"
-    || !isGeneratedWebGoalRevision(value["revision"])
-    || !isRecord(value["route"])
-    || !isGeneratedWebRoute(value["route"])
-    || value["route"]["entityType"] !== "goal_template"
-    || !healthCommonsSafetySchema.safeParse(value["safety"]).success
-    || !Array.isArray(value["sourceSnippets"])
-    || !value["sourceSnippets"].every(isGeneratedWebSourceSnippet)
-    || typeof value["summary"] !== "string"
-    || typeof value["title"] !== "string"
-  ) {
-    throw new Error(`Health Commons generated web goal page is invalid: ${artifactPath}.`);
   }
 }
 
@@ -2938,39 +2687,6 @@ function assertGeneratedWebRouteBundle(
   }
 }
 
-function isGeneratedWebRouteIndexEntry(value: unknown): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const projections = value["projections"];
-  return (
-    Array.isArray(value["aliases"]) &&
-    value["aliases"].every(isString) &&
-    typeof value["bundlePath"] === "string" &&
-    isSafeGeneratedWebArtifactPath(value["bundlePath"]) &&
-    typeof value["entityType"] === "string" &&
-    typeof value["key"] === "string" &&
-    typeof value["routeId"] === "string" &&
-    typeof value["slug"] === "string" &&
-    (
-      projections === undefined ||
-      (
-        isRecord(projections) &&
-        Object.entries(projections).every(([projectionKey, artifactPath]) =>
-          isGeneratedWebProjectionKey(projectionKey) &&
-          typeof artifactPath === "string" &&
-          isSafeGeneratedWebArtifactPath(artifactPath)
-        )
-      )
-    )
-  );
-}
-
-function isGeneratedWebProjectionKey(value: string): value is HealthCommonsWebProjectionKey {
-  return HEALTH_COMMONS_WEB_PROJECTION_KEYS.some((projectionKey) => projectionKey === value);
-}
-
 function isGeneratedWebExperimentIndexEntry(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
@@ -3033,60 +2749,6 @@ function isGeneratedWebBiomarkerIndexEntry(value: unknown): boolean {
     typeof value["title"] === "string" &&
     (typeof value["unit"] === "string" || value["unit"] === null)
   );
-}
-
-function isGeneratedWebGoalIndexEntry(value: unknown): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return Array.isArray(value["aliases"])
-    && value["aliases"].every(isString)
-    && typeof value["bundlePath"] === "string"
-    && isSafeGeneratedWebArtifactPath(value["bundlePath"])
-    && typeof value["category"] === "string"
-    && Array.isArray(value["evidenceSourceKeys"])
-    && value["evidenceSourceKeys"].every(isString)
-    && typeof value["goalPhrase"] === "string"
-    && typeof value["key"] === "string"
-    && typeof value["outcomeKind"] === "string"
-    && typeof value["pagePath"] === "string"
-    && isSafeGeneratedWebArtifactPath(value["pagePath"])
-    && (value["parentGoalKey"] === null || typeof value["parentGoalKey"] === "string")
-    && typeof value["quality"] === "string"
-    && isGeneratedWebGoalRevision(value["revision"])
-    && typeof value["routeId"] === "string"
-    && typeof value["safetyTier"] === "string"
-    && typeof value["slug"] === "string"
-    && typeof value["startPrompt"] === "string"
-    && typeof value["status"] === "string"
-    && Array.isArray(value["successSignals"])
-    && value["successSignals"].every(isGeneratedWebGoalSuccessSignal)
-    && typeof value["summary"] === "string"
-    && typeof value["title"] === "string"
-    && isGeneratedWebGoalWorkflow(value["workflow"]);
-}
-
-function isGeneratedWebGoalRevision(value: unknown): boolean {
-  return isRecord(value)
-    && typeof value["pageRevisionId"] === "string"
-    && value["pageRevisionId"].startsWith("sha256:")
-    && typeof value["workflowSpecRevisionId"] === "string"
-    && value["workflowSpecRevisionId"].startsWith("sha256:");
-}
-
-function isGeneratedWebGoalSuccessSignal(value: unknown): boolean {
-  return isRecord(value)
-    && typeof value["id"] === "string"
-    && typeof value["kind"] === "string"
-    && typeof value["label"] === "string";
-}
-
-function isGeneratedWebGoalWorkflow(value: unknown): boolean {
-  return isRecord(value)
-    && typeof value["kind"] === "string"
-    && Array.isArray(value["ownerSkillIds"])
-    && value["ownerSkillIds"].every(isString);
 }
 
 function isGeneratedWebSourceSnippet(value: unknown): boolean {

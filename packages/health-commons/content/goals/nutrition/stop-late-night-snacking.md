@@ -40,11 +40,11 @@ safety:
     - A planned evening snack can be appropriate; the target is eating that feels unwanted or disruptive.
 ---
 
-Late-night snacking is not automatically unhealthy. A planned snack can make sense after training, with an early dinner, during pregnancy, or when total intake is otherwise too low. The useful goal is to reduce eating that feels automatic, worsens reflux or sleep, or repeatedly conflicts with your intentions. The cause is often earlier in the day.
+Late-night snacking is not automatically unhealthy. A planned snack can make sense after training, with an early dinner, during pregnancy, or when total intake is otherwise too low. The useful goal is to reduce eating that feels automatic, worsens reflux or sleep, or repeatedly conflicts with your intentions. Daytime eating is one useful place to look for a contributing pattern.
 
 ## What to do
 
-Check daytime nourishment first. Skipping breakfast is not inherently a problem, but arriving at dinner after many hours with too little food makes evening control harder. Build lunch and dinner with protein, fiber-rich carbohydrate, produce, and enough total energy.
+Check daytime nourishment first. Skipping breakfast is not inherently a problem, but arriving at dinner after many hours with too little food can make evening hunger harder to manage. Build lunch and dinner with protein, fiber-rich carbohydrate, produce, and enough total energy.
 
 Then change the evening environment:
 
@@ -70,7 +70,7 @@ Count nights with unwanted snacking and rate pre-snack hunger. Track reflux, sle
 
 ## What to expect
 
-Hunger-related episodes can improve quickly when earlier meals change. Habit-linked episodes may take several weeks because the cue remains. Stressful or sleep-deprived nights may still be harder. Weight change is not guaranteed; it depends on the broader energy pattern and what replaces the snack.
+Hunger-related episodes may improve when earlier meals change. Habit-linked episodes can take longer because the cue remains. Stressful or sleep-deprived nights may still be harder. Weight change is not guaranteed; it depends on the broader energy pattern and what replaces the snack.
 
 ## If you get stuck
 

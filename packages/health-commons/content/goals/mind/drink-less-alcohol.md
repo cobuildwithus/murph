@@ -40,6 +40,12 @@ goal:
   indexable: true
 safety:
   cautionLevel: moderate
+  avoidOrGetClinicianGuidance:
+    - "Heavy, prolonged, daily, or morning drinking, or any prior alcohol withdrawal, seizure, or hallucination"
+  stopIf:
+    - "Reducing alcohol brings shaking, sweating, vomiting, severe agitation, confusion, hallucinations, or a seizure"
+  notes:
+    - "Alcohol withdrawal can follow stopping or sharply reducing heavy, prolonged use and can be life-threatening."
 ---
 
 Drinking less can improve health and how you feel without requiring one universal target. The right goal depends on your current pattern, medicines, health conditions, pregnancy, prior alcohol problems, and whether moderation is workable for you. Any sustained reduction in a higher pattern can be meaningful, while not drinking carries the least alcohol-related risk.
@@ -48,6 +54,7 @@ Begin with an honest baseline. A “drink” is a standard amount of alcohol, no
 
 ## What to do
 
+- **Screen for withdrawal risk first.** If you drink heavily or daily, drink in the morning, or have had withdrawal symptoms, seizures, or hallucinations, get medical guidance before stopping or sharply reducing alcohol.
 - **Track one or two normal weeks.** Record drinks before consuming them, the day, setting, and reason. The goal is to find the pattern, not produce a perfect diary.
 - **Set a specific reduction.** Choose weekly drinks, drinks per occasion, alcohol-free days, or the removal of one predictable high-intake event. Avoid “just be better.”
 - **Decide before the situation.** Set the number, what you will drink, and when you will stop before the first alcohol. Decisions become harder as alcohol takes effect.
@@ -86,7 +93,7 @@ Signs such as strong cravings, inability to stop, withdrawal, drinking despite h
 
 ## A quick note
 
-If you have been drinking heavily for a prolonged period, do not suddenly stop on your own: alcohol withdrawal can be life-threatening. Seek medical guidance for a safe plan, especially with prior withdrawal, seizures, hallucinations, severe illness, or pregnancy.
+If you have been drinking heavily for a prolonged period, do not stop or sharply reduce on your own: alcohol withdrawal can be life-threatening. Seek medical guidance for a safe plan, especially with prior withdrawal, seizures, hallucinations, severe illness, or pregnancy.
 
 ## Sources
 

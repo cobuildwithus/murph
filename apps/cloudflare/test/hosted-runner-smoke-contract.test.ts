@@ -173,7 +173,7 @@ describe("parseHostedRunnerSmokeResult", () => {
       healthCommonsCliGoalProofCount:
         HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT - 1,
     })).toThrow(
-      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be an integer of at least ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
+      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be the integer ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
     );
 
     expect(() => parseHostedRunnerSmokeResult({
@@ -181,7 +181,15 @@ describe("parseHostedRunnerSmokeResult", () => {
       healthCommonsCliGoalProofCount:
         HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT + 0.5,
     })).toThrow(
-      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be an integer of at least ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
+      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be the integer ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      healthCommonsCliGoalProofCount:
+        HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT + 1,
+    })).toThrow(
+      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be the integer ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
     );
   });
 

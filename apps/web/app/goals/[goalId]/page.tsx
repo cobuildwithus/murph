@@ -8,7 +8,7 @@ import {
   getGoalCategory,
   type GoalCategory,
 } from "@/src/lib/goals/goal-categories";
-import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
+import type { GoalPageModel } from "@/src/lib/goals/goal-models";
 import { toReaderFacingGoalPhrase } from "@/src/lib/goals/goal-copy";
 import {
   listHealthCommonsGoalRouteParams,
@@ -16,7 +16,6 @@ import {
   resolveHealthCommonsGoalPage,
 } from "@/src/lib/health-commons/goal-projections";
 import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
-import { getHostedMurphContactContext } from "@/src/lib/hosted-onboarding/hosted-contact-context";
 import { serializeStructuredData } from "@/src/lib/public-agent-content";
 import {
   createMurphPageMetadata,
@@ -45,8 +44,9 @@ export async function generateMetadata({
     return createMurphPageMetadata({
       alternates: { canonical: `/goals/${category.slug}` },
       description: category.description,
+      openGraph: { type: "website", url: `/goals/${category.slug}` },
       robots: MURPH_INDEXABLE_PAGE_ROBOTS,
-      title: `${category.label} Goals | Murph`,
+      title: `${category.directoryTitle} | Murph`,
     });
   }
 
@@ -60,7 +60,10 @@ export async function generateMetadata({
       canonical: `/goals/${encodeURIComponent(resolved.route.canonicalRouteId)}`,
     },
     description: resolved.goal.summary,
-    openGraph: { type: "article" },
+    openGraph: {
+      type: "article",
+      url: `/goals/${encodeURIComponent(resolved.route.canonicalRouteId)}`,
+    },
     robots: MURPH_INDEXABLE_PAGE_ROBOTS,
     title: `How to ${toReaderFacingGoalPhrase(resolved.goal.goalPhrase)} | Murph`,
   });
@@ -97,11 +100,10 @@ export default async function GoalOrCategoryPage({
     notFound();
   }
 
-  const contactContext = await getHostedMurphContactContext();
   const contactOption = resolveGoalContactOption({
-    murphPhoneNumber: contactContext.murphPhoneNumber,
+    murphPhoneNumber: null,
     startPrompt: resolved.goal.startPrompt,
-    textAvailable: contactContext.initialContactChannels.text,
+    textAvailable: false,
   });
   const structuredData = buildGoalStructuredData({
     category: goalCategory,
@@ -131,7 +133,7 @@ function buildGoalStructuredData({
   goal,
 }: {
   category: GoalCategory;
-  goal: GoalIndexEntryModel;
+  goal: GoalPageModel;
 }) {
   const path = `/goals/${encodeURIComponent(goal.routeId)}`;
   const url = new URL(path, MURPH_PUBLIC_SITE_URL).toString();
@@ -149,6 +151,11 @@ function buildGoalStructuredData({
         name: "Murph Health Commons",
         url: new URL("/goals/methodology", MURPH_PUBLIC_SITE_URL).toString(),
       },
+      citation: goal.sources.map((source) => ({
+        "@type": "CreativeWork",
+        name: source.label,
+        url: source.url,
+      })),
       description: goal.summary,
       headline: goal.title,
       isAccessibleForFree: true,

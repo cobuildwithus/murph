@@ -31,8 +31,8 @@ goal:
       kind: milestone
       label: Effective professional and practical support is active
   evidenceSourceKeys:
-    - source_artifact:pmid-34162788
-    - source_artifact:pmid-32217980
+    - source_artifact:pmid-37486660
+    - source_artifact:pmid-37486661
   workflow:
     kind: care_support
     ownerSkillIds:
@@ -63,7 +63,7 @@ Postpartum depression and anxiety are health conditions, not evidence that you a
 
 In the next 24 hours, tell a trusted person and contact a health professional. Put all necessary numbers in one note. Ask for one specific practical change for the next week: an overnight shift, daily meal, school pickup, laundry, or a two-hour protected rest block.
 
-For two weeks, use a very small daily check: mood from 0 to 10, anxiety from 0 to 10, hours of protected rest, whether you ate regularly, and whether treatment or support occurred. Review the pattern with the clinician. If symptoms worsen, function drops, or safety changes, escalate immediately rather than waiting for the two weeks to end.
+For two weeks, use a very small daily check: mood from 0 to 10, anxiety from 0 to 10, hours of protected rest, whether you ate regularly, and whether treatment or support occurred. Pair that lightweight check with a clinician-selected validated measure such as the EPDS, PHQ-9, or GAD-7 at baseline and the agreed review point. A score supports assessment and monitoring; it is not a diagnosis by itself. If symptoms worsen, function drops, or safety changes, escalate immediately rather than waiting for the review.
 
 ## How to know it is working
 
@@ -75,8 +75,6 @@ If the advice is only “sleep when the baby sleeps,” name the practical barri
 
 Postpartum psychosis can develop rapidly and may include little need for sleep, extreme energy, confusion, paranoia, hallucinations, or unusual beliefs. It is an emergency even if the person does not feel depressed.
 
-Build the support plan around the hardest part of the day. One person might need protected sleep after the first evening feed; another needs company during a lonely afternoon or relief from intrusive thoughts at night. Give helpers a specific job—bring a meal, hold the baby while you shower, take a feeding shift, or stay on the phone while you arrange care. If talking feels difficult, write a one-sentence message in advance: “I am not feeling like myself and need help today.” Improvement is rarely linear, so keep support in place through a better day instead of treating it as proof the problem has passed.
-
 ## A quick note
 
 For thoughts of suicide or harming the baby, hallucinations, delusions, mania, severe confusion, or inability to stay safe, contact emergency services or 988 in the United States and have another adult stay with you and the baby.
@@ -85,4 +83,6 @@ For thoughts of suicide or harming the baby, hallucinations, delusions, mania, s
 
 - [ACOG: Postpartum Depression](https://www.acog.org/womens-health/faqs/postpartum-depression)
 - [ACOG: Anxiety and Pregnancy](https://www.acog.org/womens-health/faqs/anxiety-and-pregnancy)
+- [ACOG: Screening and Diagnosis of Mental Health Conditions During Pregnancy and Postpartum](https://www.acog.org/clinical/clinical-guidance/clinical-practice-guideline/articles/2023/06/screening-and-diagnosis-of-mental-health-conditions-during-pregnancy-and-postpartum)
+- [ACOG: Assessment and Treatment of Perinatal Mental Health Conditions](https://www.acog.org/programs/perinatal-mental-health/assessment-and-treatment-of-perinatal-mental-health-conditions)
 - [National Maternal Mental Health Hotline](https://mchb.hrsa.gov/programs-impact/national-maternal-mental-health-hotline)

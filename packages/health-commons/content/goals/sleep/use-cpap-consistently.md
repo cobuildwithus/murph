@@ -19,7 +19,7 @@ goal:
   category: sleep
   parentGoalKey: goal_template:get-sleep-apnea-under-control
   outcomeKind: behavior
-  goalPhrase: use my cpap consistently
+  goalPhrase: use my CPAP consistently
   successSignals:
     - id: nights_with_pap
       kind: behavior
@@ -38,7 +38,7 @@ goal:
     ownerSkillIds:
       - sleep-improvement
       - behavior-followthrough
-  startPrompt: Hey Murph, help me use my cpap consistently.
+  startPrompt: Hey Murph, help me use my CPAP consistently.
   indexable: true
 safety:
   cautionLevel: moderate

@@ -32,6 +32,7 @@ goal:
       label: A valued form of exercise is resumed at a tolerable level
   evidenceSourceKeys:
     - source_artifact:pmid-32217980
+    - source_artifact:pmid-40139673
   workflow:
     kind: training_plan
     ownerSkillIds:
@@ -76,8 +77,6 @@ Reduce one variable: time, load, impact, or exercise complexity. If a 30-minute 
 
 Do not use abdominal appearance alone to decide readiness. Diastasis, scars, pelvic-floor symptoms, and core strength are best judged by function and pressure control. A physical therapist can bridge from rehabilitation to the sport or program you actually want to do.
 
-Make the routine easy to restart after a rough night or missed week. Keep a ten-minute version with one walk, one push, one pull, one squat or hinge, and one carry. Resume there instead of trying to repay missed workouts. Log duration, effort, and any bleeding, heaviness, leakage, pain, or fatigue later that day and the next morning. When the same dose is comfortable two or three times, add a small amount of time or load. This creates a progression based on recovery evidence rather than comparison with a pre-pregnancy body or schedule.
-
 ## A quick note
 
 Stop and seek care for heavy or increasing bleeding, chest pain, fainting, unusual breathlessness, calf swelling or pain, fever, wound problems, or severe pelvic or abdominal pain. Otherwise, step back one level when symptoms persist into the next day.
@@ -87,3 +86,4 @@ Stop and seek care for heavy or increasing bleeding, chest pain, fainting, unusu
 - [ACOG: Physical Activity and Exercise During Pregnancy and the Postpartum Period](https://www.acog.org/clinical/clinical-guidance/committee-opinion/articles/2020/04/physical-activity-and-exercise-during-pregnancy-and-the-postpartum-period)
 - [CDC: Pregnant and Postpartum Activity Guidelines](https://www.cdc.gov/physical-activity-basics/guidelines/healthy-pregnant-or-postpartum-women.html)
 - [ACOG: Exercise After Pregnancy](https://www.acog.org/womens-health/faqs/exercise-after-pregnancy)
+- [2025 Canadian guideline for physical activity, sedentary behaviour and sleep throughout the first year postpartum](https://pubmed.ncbi.nlm.nih.gov/40139673/)

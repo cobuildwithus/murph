@@ -719,8 +719,15 @@ strict private Goal record and changes the bundled assistant CLI, prompt, skill
 tree, and compact Health Commons artifact set. Deploy the Cloudflare Worker and
 runner together with `container_rollout=immediate`. Require managed-container
 smoke to report the exact new runner-bundle fingerprint, verify bundled
-`commons goal list/show`, and round-trip an old-style and lineage-bearing Goal
-before publishing the Web Goals library.
+`commons goal list/show`, and create, read, update, and reread disposable
+old-style and lineage-bearing Goals before publishing the Web Goals library.
+The list proof reads one global count and one bounded sample from each of the
+seven categories, then requires the category totals to reconcile exactly to the
+global count of at least 250 Goals. Catalog or category size is independent of
+the CLI's per-query result limit; full-entry validation remains a build and
+packaging gate.
+The smoke reports only a fixed proof count; private Goal content never leaves
+its temporary smoke vault.
 
 Existing Goals need no migration. Before the first lineage write, the preceding
 runner is a safe rollback. After that write, the compatible runner is the hard

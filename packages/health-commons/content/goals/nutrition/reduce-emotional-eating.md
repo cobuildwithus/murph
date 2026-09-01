@@ -25,8 +25,7 @@ goal:
       kind: behavior
       label: Regular nourishment continues without compensation after an episode
   evidenceSourceKeys:
-    - source_artifact:pmid-28029852
-    - source_artifact:pmid-36610542
+    - source_artifact:pmid-41643943
   workflow:
     kind: habit_plan
     ownerSkillIds:
@@ -86,7 +85,7 @@ Purging, laxative misuse, fasting, compulsive exercise, severe restriction, rapi
 
 - [NIDDK: Binge eating disorder](https://www.niddk.nih.gov/health-information/weight-management/binge-eating-disorder/definition-facts)
 - [NIMH: Eating disorders](https://www.nimh.nih.gov/health/topics/eating-disorders)
-- [Systematic review: Emotion regulation and emotional eating](https://pubmed.ncbi.nlm.nih.gov/32712405/)
+- [Meta-analysis: Emotional dysregulation and emotional eating](https://pubmed.ncbi.nlm.nih.gov/41643943/)
 
 ## Related goals
 

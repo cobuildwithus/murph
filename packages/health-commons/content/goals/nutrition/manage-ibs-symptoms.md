@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:manage-ibs-symptoms
 slug: manage-ibs-symptoms
 title: Manage IBS Symptoms
-summary: Reduce IBS disruption with a subtype-aware plan that protects diet variety and uses proven gut–brain and bowel treatments.
+summary: Reduce IBS disruption with a plan matched to constipation, diarrhea, or both while protecting diet variety and focusing on the main symptom.
 status: field-testing
 quality: usable
 aliases:
@@ -25,8 +25,7 @@ goal:
       kind: behavior
       label: Symptom control is achieved with the least necessary restriction
   evidenceSourceKeys:
-    - source_artifact:pmid-40844856
-    - source_artifact:pmid-32246999
+    - source_artifact:pmid-33315591
   workflow:
     kind: care_support
     ownerSkillIds:

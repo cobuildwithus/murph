@@ -18,7 +18,7 @@ goal:
   category: sleep
   parentGoalKey: goal_template:sleep-better
   outcomeKind: function
-  goalPhrase: improve my rem sleep
+  goalPhrase: improve my REM sleep
   successSignals:
     - id: enough_total_sleep
       kind: behavior
@@ -37,7 +37,7 @@ goal:
     ownerSkillIds:
       - sleep-improvement
       - sleep-recovery-readiness
-  startPrompt: Hey Murph, help me improve my rem sleep.
+  startPrompt: Hey Murph, help me improve my REM sleep.
   indexable: true
 safety:
   cautionLevel: low

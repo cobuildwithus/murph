@@ -29,8 +29,7 @@ goal:
       kind: behavior
       label: Eating, movement, sleep, and substance choices support pregnancy
   evidenceSourceKeys:
-    - source_artifact:acog-healthy-eating-pregnancy-2026-04-25
-    - source_artifact:pmid-32217980
+    - source_artifact:acog-prepregnancy-counseling
   workflow:
     kind: general_plan
     ownerSkillIds:
@@ -74,8 +73,6 @@ You are ready when the important pieces are no longer vague: folic acid is happe
 Prioritize the decisions that can materially change pregnancy health. A standard prenatal vitamin, a medication review, and substance support are usually more valuable than expensive fertility foods, wearable-derived ovulation guesses, or broad supplement panels. If cycles are irregular, use cycle tracking to identify the pattern, but do not assume an app can confirm ovulation.
 
 Fertility declines with age and varies widely. Seek an evaluation after 12 months of trying if the person trying to become pregnant is under 35, after 6 months from age 35 through 40, and discuss evaluation now if they are over 40. Seek help sooner at any age with very irregular periods, known reproductive conditions, prior cancer treatment, or a known male-factor concern.
-
-Use the months before trying to remove friction, not to chase perfection. Put the daily supplement beside an existing routine, choose two or three repeatable meals, make tobacco and alcohol changes together when possible, and schedule activity that can continue after conception. A partner can improve the shared environment and work on sleep, smoking, alcohol, heat exposure, and general health too. If conception does not happen immediately, avoid changing five things every cycle. Continue the basics and use age, cycle pattern, health history, and time trying to decide when a fertility evaluation is appropriate.
 
 ## A quick note
 

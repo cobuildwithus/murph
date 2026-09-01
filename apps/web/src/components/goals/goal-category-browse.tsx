@@ -1,4 +1,3 @@
-import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -15,6 +14,14 @@ interface GoalBrowseNode {
   goal: GoalIndexEntryModel;
 }
 
+interface GoalDirectoryEntry {
+  depth: number;
+  goal: GoalIndexEntryModel;
+}
+
+const GOAL_FAMILY_PREVIEW_SIZE = 4;
+const GOAL_ROOT_PREVIEW_SIZE = 8;
+
 export function GoalCategoryBrowse({
   category,
   goals,
@@ -22,11 +29,20 @@ export function GoalCategoryBrowse({
   category: GoalCategory;
   goals: readonly GoalIndexEntryModel[];
 }) {
-  const roots = buildGoalBrowseTree(goals);
-  const hasFamilies = roots.some((node) => node.children.length > 0);
+  const roots = prioritizeFeaturedGoalTree(
+    buildGoalBrowseTree(goals),
+    category.featuredRouteIds,
+  );
+  const needsRootDisclosure = roots.length > GOAL_ROOT_PREVIEW_SIZE;
+  const previewRoots = needsRootDisclosure
+    ? roots.slice(0, GOAL_ROOT_PREVIEW_SIZE)
+    : roots;
+  const remainingRoots = needsRootDisclosure
+    ? roots.slice(GOAL_ROOT_PREVIEW_SIZE)
+    : [];
 
   return (
-    <div className="flex flex-col gap-10 pb-12">
+    <div className="flex flex-col gap-7 pb-12 sm:gap-10">
       <nav aria-label="Breadcrumb" className="text-xs text-muted-foreground">
         <Link href="/goals" className="transition-colors hover:text-foreground">
           Goals
@@ -34,55 +50,98 @@ export function GoalCategoryBrowse({
         <span className="px-2" aria-hidden="true">/</span>
         <span>{category.label}</span>
       </nav>
-      <div className="flex flex-col gap-6 border-b border-border/70 pb-9 sm:flex-row sm:items-center">
+      <div className="flex items-center gap-4 border-b border-border/70 pb-7 sm:gap-6 sm:pb-9">
         <GoalCategoryArtwork
           category={category.slug}
-          className="size-24 sm:size-28"
+          className="size-16 sm:size-24"
           imageClassName="p-3"
         />
-        <PageHeader
-          eyebrow="Goal library"
-          title={`${category.label} goals`}
-          description={category.description}
-        >
-          <p className="mt-3 text-xs text-muted-foreground">
-            {goals.length} practical {goals.length === 1 ? "guide" : "guides"}
-          </p>
-        </PageHeader>
+        <div className="min-w-0 flex-1">
+          <PageHeader
+            eyebrow="Goal library"
+            title={category.directoryTitle}
+            description={category.description}
+          >
+            <p className="mt-3 text-xs text-muted-foreground">
+              {goals.length} practical {goals.length === 1 ? "guide" : "guides"}
+            </p>
+          </PageHeader>
+        </div>
       </div>
 
       {roots.length > 0 ? (
-        <section className="flex flex-col gap-5">
-          <div className="border-b border-border/70 pb-3">
-            <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-              Browse {category.label.toLowerCase()} goals
-            </h2>
-          </div>
-
-          {hasFamilies ? (
-            <ul className="space-y-7" role="list">
-              {roots.map((node) =>
-                node.children.length > 0 ? (
-                  <GoalFamily
-                    key={node.goal.key}
-                    category={category}
-                    node={node}
-                  />
-                ) : (
-                  <StandaloneRootGoal key={node.goal.key} goal={node.goal} />
-                )
-              )}
-            </ul>
-          ) : (
-            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" role="list">
-              {roots.map(({ goal }) => (
-                <StandaloneGoalCard key={goal.key} goal={goal} />
-              ))}
-            </ul>
-          )}
-        </section>
+        <div className="flex flex-col gap-3">
+          <GoalRootDirectory
+            ariaLabel={`${category.label} goals`}
+            category={category}
+            directory="root"
+            roots={previewRoots}
+          />
+          {remainingRoots.length > 0 ? (
+            <details
+              className="group/category"
+              data-goal-category-disclosure={category.slug}
+            >
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-center rounded-xl border border-black/[0.07] bg-[#fffdf8] px-4 py-3 text-sm font-medium text-muted-foreground marker:hidden shadow-[0_1px_2px_rgba(45,52,54,0.025)] transition-[border-color,background-color,color] hover:border-black/[0.13] hover:bg-muted/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                <span className="group-open/category:hidden">
+                  Show {remainingRoots.length} more
+                </span>
+                <span className="hidden group-open/category:inline">
+                  Show fewer
+                </span>
+              </summary>
+              <div className="pt-3">
+                <GoalRootDirectory
+                  ariaLabel={`${category.label} additional goals`}
+                  category={category}
+                  directory="root-more"
+                  roots={remainingRoots}
+                />
+              </div>
+            </details>
+          ) : null}
+        </div>
       ) : null}
     </div>
+  );
+}
+
+function GoalRootDirectory({
+  ariaLabel,
+  category,
+  directory,
+  roots,
+}: {
+  ariaLabel: string;
+  category: GoalCategory;
+  directory: "root" | "root-more";
+  roots: readonly GoalBrowseNode[];
+}) {
+  const standaloneOnly = roots.every((node) => node.children.length === 0);
+
+  return (
+    <ul
+      aria-label={ariaLabel}
+      className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 xl:grid-cols-3"
+      data-goal-directory={directory}
+      role="list"
+    >
+      {roots.map((node) =>
+        node.children.length > 0 ? (
+          <GoalFamily
+            category={category}
+            key={node.goal.key}
+            node={node}
+          />
+        ) : (
+          <StandaloneRootGoal
+            fillRow={standaloneOnly}
+            key={node.goal.key}
+            goal={node.goal}
+          />
+        )
+      )}
+    </ul>
   );
 }
 
@@ -95,220 +154,158 @@ function GoalFamily({
 }) {
   const { goal } = node;
   const headingId = `goal-family-${goal.routeId}`;
-  const specificGoalCount = countDescendants(node);
+  const descendants = flattenGoalDescendants(node.children);
+  const preview = descendants.slice(0, GOAL_FAMILY_PREVIEW_SIZE);
+  const remaining = descendants.slice(GOAL_FAMILY_PREVIEW_SIZE);
   const visual = getGoalCategoryVisual(category.slug);
 
   return (
-    <li>
+    <li
+      className="min-w-0"
+      data-goal-family={goal.routeId}
+    >
       <section
         aria-labelledby={headingId}
-        className="overflow-hidden rounded-[1.5rem] border border-black/[0.07] bg-[#fffdf8] shadow-[0_1px_2px_rgba(45,52,54,0.03)]"
-        data-goal-family={goal.routeId}
+        className="overflow-hidden rounded-[1.125rem] border border-black/[0.07] bg-[#fffdf8] shadow-[0_1px_2px_rgba(45,52,54,0.03)]"
       >
         <Link
           href={`/goals/${goal.routeId}`}
           className={cn(
-            "group relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-5 overflow-hidden px-5 py-6 transition-[filter] hover:brightness-[0.985] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring sm:px-7 sm:py-7",
+            "flex min-h-17 w-full items-center border-b px-4 py-3.5 transition-[filter] hover:brightness-[0.98] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring sm:px-5",
             visual.surfaceClassName,
+            visual.borderClassName,
           )}
         >
-          <span
-            aria-hidden="true"
-            className={cn(
-              "pointer-events-none absolute -right-16 -top-24 size-52 rounded-full border opacity-10",
-              visual.accentClassName,
-              visual.borderClassName,
-            )}
-          />
-          <div className="relative min-w-0">
-            <h3
-              id={headingId}
-              className="font-serif text-2xl font-semibold leading-tight tracking-[-0.02em] text-balance text-foreground sm:text-3xl"
-            >
-              {goal.title}
-            </h3>
-            <p className="mt-2 max-w-3xl text-sm/6 text-pretty text-foreground/75 sm:text-base/7">
-              {goal.summary}
-            </p>
-            <span
-              className={cn(
-                "mt-4 inline-flex rounded-full border bg-white/55 px-3 py-1 text-[11px] font-medium",
-                visual.accentClassName,
-                visual.borderClassName,
-              )}
-            >
-              {specificGoalCount} specific {specificGoalCount === 1 ? "goal" : "goals"}
-            </span>
-          </div>
-          <ArrowRight
-            aria-hidden="true"
-            className="relative mt-1 size-5 shrink-0 text-foreground/55 transition-transform motion-safe:group-hover:translate-x-1"
-          />
+          <h3
+            id={headingId}
+            className="font-serif text-lg font-semibold leading-snug tracking-[-0.015em] text-balance text-foreground sm:text-xl"
+          >
+            {goal.title}
+          </h3>
         </Link>
-
-        <div className="border-t border-black/[0.06] p-4 sm:p-5">
-          <div className="mb-3 px-1">
-            <p className="text-sm font-medium text-foreground">
-              Specific goals
-            </p>
-          </div>
-          <ul className="grid items-start gap-2 sm:grid-cols-2 xl:grid-cols-3" role="list">
-            {node.children.map((child) => (
-              <SpecificGoalCard key={child.goal.key} node={child} depth={1} />
-            ))}
-          </ul>
-        </div>
+        <GoalDescendantList
+          directory="specific"
+          entries={preview}
+          labelledBy={headingId}
+        />
+        {remaining.length > 0 ? (
+          <details
+            className="group/disclosure border-t border-border/70"
+            data-goal-disclosure={goal.routeId}
+          >
+            <summary className="flex min-h-12 cursor-pointer list-none items-center justify-center px-4 py-3 text-sm font-medium text-muted-foreground marker:hidden transition-colors hover:bg-muted/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+              <span className="group-open/disclosure:hidden">
+                Show {remaining.length} more
+              </span>
+              <span className="hidden group-open/disclosure:inline">
+                Show fewer
+              </span>
+            </summary>
+            <GoalDescendantList
+              directory="specific-more"
+              entries={remaining}
+              labelledBy={headingId}
+            />
+          </details>
+        ) : null}
       </section>
     </li>
   );
 }
 
-function SpecificGoalCard({
-  depth,
-  node,
+function GoalDescendantList({
+  directory,
+  entries,
+  labelledBy,
 }: {
-  depth: number;
-  node: GoalBrowseNode;
+  directory: "specific" | "specific-more";
+  entries: readonly GoalDirectoryEntry[];
+  labelledBy: string;
 }) {
-  const { goal } = node;
-
   return (
-    <li className="min-w-0" data-goal-depth={depth}>
-      <div className="overflow-hidden rounded-xl border border-black/[0.07] bg-white/55 transition-[border-color,box-shadow] hover:border-black/[0.13] hover:shadow-[0_10px_28px_-24px_rgba(45,52,54,0.35)]">
-        <Link
-          href={`/goals/${goal.routeId}`}
-          className="group grid min-h-[8.5rem] grid-cols-[minmax(0,1fr)_auto] items-start gap-3 px-4 py-4 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring"
-        >
-          <div className="min-w-0">
-            <h4 className="font-serif text-lg font-semibold leading-snug tracking-tight text-balance text-foreground">
-              {goal.title}
-            </h4>
-            <p className="mt-1.5 line-clamp-3 text-sm/5 text-pretty text-muted-foreground">
-              {goal.summary}
-            </p>
-          </div>
-          <ArrowRight
-            aria-hidden="true"
-            className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-1"
-          />
-        </Link>
-
-        {node.children.length > 0 ? (
-          <ul
-            aria-label={`More specific goals for ${goal.title}`}
-            className="divide-y divide-border/60 border-t border-border/60 bg-muted/[0.14]"
-            role="list"
-          >
-            {node.children.map((child) => (
-              <NestedGoalLink
-                key={child.goal.key}
-                node={child}
-                depth={depth + 1}
-              />
-            ))}
-          </ul>
-        ) : null}
-      </div>
-    </li>
-  );
-}
-
-function NestedGoalLink({
-  depth,
-  node,
-}: {
-  depth: number;
-  node: GoalBrowseNode;
-}) {
-  const { goal } = node;
-
-  return (
-    <li data-goal-depth={depth}>
-      <Link
-        href={`/goals/${goal.routeId}`}
-        className="group grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring"
-      >
-        <div className="min-w-0">
-          <p className="font-serif text-base font-semibold leading-snug tracking-tight text-foreground">
-            {goal.title}
-          </p>
-          <p className="mt-1 line-clamp-2 text-xs/5 text-muted-foreground">
-            {goal.summary}
-          </p>
-        </div>
-        <ArrowRight
-          aria-hidden="true"
-          className="mt-1 size-3.5 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-1"
+    <ul
+      aria-labelledby={labelledBy}
+      className={cn(
+        "grid gap-px bg-border/70",
+        entries.length === 1 ? "grid-cols-1" : "grid-cols-2",
+        directory === "specific-more" && "border-t border-border/70",
+      )}
+      data-goal-directory={directory}
+      role="list"
+    >
+      {entries.map((entry, index) => (
+        <GoalDescendantNode
+          entry={entry}
+          key={entry.goal.key}
+          spansColumns={entries.length > 1
+            && entries.length % 2 === 1
+            && index === entries.length - 1}
         />
+      ))}
+    </ul>
+  );
+}
+
+function GoalDescendantNode({
+  entry,
+  spansColumns,
+}: {
+  entry: GoalDirectoryEntry;
+  spansColumns: boolean;
+}) {
+  return (
+    <li
+      className={cn("min-w-0 bg-[#fffdf8]", spansColumns && "col-span-2")}
+      data-goal-depth={entry.depth}
+    >
+      <Link
+        href={`/goals/${entry.goal.routeId}`}
+        className={cn(
+          "group flex h-full min-h-14 w-full items-center px-4 py-3 transition-colors hover:bg-muted/25 hover:text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring",
+          entry.depth > 1 && "pl-7",
+        )}
+      >
+        <span className="font-serif text-[1.0625rem] font-semibold leading-snug tracking-tight text-balance">
+          {entry.goal.title}
+        </span>
       </Link>
-      {node.children.length > 0 ? (
-        <ul className="border-t border-border/60" role="list">
-          {node.children.map((child) => (
-            <NestedGoalLink key={child.goal.key} node={child} depth={depth + 1} />
-          ))}
-        </ul>
-      ) : null}
     </li>
   );
 }
 
-function StandaloneGoalCard({
+function StandaloneRootGoal({
+  fillRow,
   goal,
 }: {
+  fillRow: boolean;
   goal: GoalIndexEntryModel;
 }) {
   return (
-    <li className="min-w-0">
+    <li
+      className={cn("min-w-0", fillRow && "self-stretch")}
+      data-goal-root="standalone"
+    >
       <Link
         href={`/goals/${goal.routeId}`}
-        className="group grid h-full min-h-[9rem] grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-xl border border-black/[0.07] bg-[#fffdf8] px-4 py-4 transition-[border-color,box-shadow,transform] motion-safe:hover:-translate-y-0.5 hover:border-black/[0.13] hover:shadow-[0_12px_30px_-25px_rgba(45,52,54,0.35)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]"
+        className={cn(
+          "flex min-h-14 w-full items-center rounded-xl border border-black/[0.07] bg-[#fffdf8] px-3 py-3 font-serif text-[0.9375rem] font-semibold leading-snug tracking-tight text-balance text-foreground shadow-[0_1px_2px_rgba(45,52,54,0.025)] transition-[border-color,background-color,color] hover:border-black/[0.13] hover:bg-muted/20 hover:text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring sm:min-h-16 sm:px-5 sm:py-3.5 sm:text-[1.0625rem]",
+          fillRow && "h-full",
+        )}
       >
-        <div className="min-w-0">
-          <h3 className="font-serif text-lg font-semibold leading-snug tracking-tight text-balance text-foreground">
-            {goal.title}
-          </h3>
-          <p className="mt-1.5 line-clamp-3 text-sm/5 text-pretty text-muted-foreground">
-            {goal.summary}
-          </p>
-        </div>
-        <ArrowRight
-          aria-hidden="true"
-          className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-1"
-        />
+        {goal.title}
       </Link>
     </li>
   );
 }
 
-function StandaloneRootGoal({ goal }: { goal: GoalIndexEntryModel }) {
-  return (
-    <li>
-      <Link
-        href={`/goals/${goal.routeId}`}
-        className="group grid grid-cols-[minmax(0,1fr)_auto] items-start gap-5 rounded-[1.5rem] border border-black/[0.07] bg-[#fffdf8] px-5 py-6 shadow-[0_1px_2px_rgba(45,52,54,0.03)] transition-[border-color,box-shadow,transform] motion-safe:hover:-translate-y-0.5 hover:border-black/[0.13] hover:shadow-[0_16px_34px_-28px_rgba(45,52,54,0.35)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8] sm:px-7 sm:py-7"
-      >
-        <div className="min-w-0">
-          <h3 className="font-serif text-2xl font-semibold leading-tight tracking-[-0.02em] text-balance text-foreground sm:text-3xl">
-            {goal.title}
-          </h3>
-          <p className="mt-2 max-w-3xl text-sm/6 text-pretty text-muted-foreground sm:text-base/7">
-            {goal.summary}
-          </p>
-        </div>
-        <ArrowRight
-          aria-hidden="true"
-          className="mt-1 size-5 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-1"
-        />
-      </Link>
-    </li>
-  );
-}
-
-function countDescendants(node: GoalBrowseNode): number {
-  return node.children.reduce(
-    (count, child) => count + 1 + countDescendants(child),
-    0,
-  );
+function flattenGoalDescendants(
+  nodes: readonly GoalBrowseNode[],
+  depth = 1,
+): GoalDirectoryEntry[] {
+  return nodes.flatMap((node) => [
+    { depth, goal: node.goal },
+    ...flattenGoalDescendants(node.children, depth + 1),
+  ]);
 }
 
 function buildGoalBrowseTree(
@@ -352,4 +349,46 @@ function buildGoalBrowseTree(
   }
 
   return roots;
+}
+
+function prioritizeFeaturedGoalTree(
+  nodes: readonly GoalBrowseNode[],
+  featuredRouteIds: readonly string[],
+): GoalBrowseNode[] {
+  const featuredRanks = new Map(
+    featuredRouteIds.map((routeId, index) => [routeId, index]),
+  );
+  const prioritizeNodes = (
+    currentNodes: readonly GoalBrowseNode[],
+  ): GoalBrowseNode[] =>
+    currentNodes
+      .map((node, index) => {
+        const prioritizedNode = {
+          ...node,
+          children: prioritizeNodes(node.children),
+        };
+
+        return {
+          index,
+          node: prioritizedNode,
+          rank: findFeaturedRank(prioritizedNode, featuredRanks),
+        };
+      })
+      .sort((left, right) => left.rank - right.rank || left.index - right.index)
+      .map(({ node }) => node);
+
+  return prioritizeNodes(nodes);
+}
+
+function findFeaturedRank(
+  node: GoalBrowseNode,
+  featuredRanks: ReadonlyMap<string, number>,
+): number {
+  let rank = featuredRanks.get(node.goal.routeId) ?? Number.POSITIVE_INFINITY;
+
+  for (const child of node.children) {
+    rank = Math.min(rank, findFeaturedRank(child, featuredRanks));
+  }
+
+  return rank;
 }

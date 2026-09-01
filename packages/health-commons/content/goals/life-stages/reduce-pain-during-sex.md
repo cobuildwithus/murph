@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-pain-during-sex
 slug: reduce-pain-during-sex
-title: Reduce Pain During Sex
-summary: Make sexual activity more comfortable by stopping the pain cycle, improving lubrication and arousal, relaxing the pelvic floor, and treating the underlying cause.
+title: Reduce Vaginal or Pelvic Pain During Sex
+summary: Make wanted sexual activity more comfortable when pain is vulvar, vaginal, or pelvic by reducing friction and guarding and treating the underlying cause.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: life-stages
   outcomeKind: symptom
-  goalPhrase: reduce pain during sex
+  goalPhrase: reduce vaginal or pelvic pain during sex
   successSignals:
     - id: lower-sexual-pain
       kind: symptom
@@ -30,12 +30,13 @@ goal:
       label: Persistent pain has a cause-specific plan
   evidenceSourceKeys:
     - source_artifact:menopause-society-gsm-2025
+    - source_artifact:acog-when-sex-is-painful
   workflow:
     kind: care_support
     ownerSkillIds:
       - cycle-hormonal-health
       - physical-therapy
-  startPrompt: Hey Murph, help me reduce pain during sex.
+  startPrompt: Hey Murph, help me reduce vaginal or pelvic pain during sex.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -45,7 +46,7 @@ safety:
     - Seek prompt care for severe pelvic pain, fever, sores, unusual discharge, possible pregnancy with pain, or more than light bleeding after sex.
 ---
 
-Pain during sex improves by making intimacy **safe and comfortable now** while finding the cause when pain persists. More pressure, forced stretching, or “relaxing harder” can reinforce guarding. Lubrication, enough arousal time, different activities or positions, pelvic-floor relaxation, and treatment for hormonal, skin, infection, musculoskeletal, or pelvic conditions are more useful.
+This guide covers pain at the vulva (the external tissue around the vaginal opening), inside the vagina, or deeper in the pelvis during wanted sexual activity. Penile, testicular, or anal pain needs a different evaluation. Improvement starts by making intimacy **safe and comfortable now** while finding the cause when pain persists. More pressure, forced stretching, or “relaxing harder” can reinforce guarding.
 
 ## What to do
 
@@ -60,7 +61,7 @@ Pain during sex improves by making intimacy **safe and comfortable now** while f
 
 ## A simple plan
 
-For four weeks, make pain-free intimacy the only success criterion. Use lubricant every time friction may occur, allow at least 15 to 20 minutes for arousal, and choose activities that remain at 0 to 2 out of 10 discomfort. Practice five minutes of slow breathing and pelvic-floor release on most days, not only immediately before sex.
+For four weeks, make comfort, control, and no worse symptoms afterward the success criteria. Use lubricant whenever friction may occur, allow unrushed time for arousal, and choose activities that stay within a personally safe mild range. Practice five minutes of slow breathing and pelvic-floor release on most days, not only immediately before sex.
 
 Keep a brief note after sexual activity: location and intensity of pain, what felt comfortable, and whether symptoms lingered. If pain is not clearly improving, arrange an evaluation and bring the pattern. Continue comfortable intimacy if wanted; there is no need to repeatedly test the painful activity.
 
@@ -73,8 +74,6 @@ Look for less anticipatory fear, less involuntary tightening, more natural lubri
 Check whether the plan is treating dryness when the actual problem is pelvic-floor guarding, or strengthening when relaxation is needed. Deep pain can come from pelvic conditions that no amount of lubricant will fix. Persistent bleeding, discharge, itching, sores, urinary symptoms, or cycle-linked pelvic pain makes an exam more useful.
 
 If fear, past trauma, or relationship pressure is part of the experience, trauma-informed therapy or sex therapy can work alongside physical treatment. Pain is real whether the driver is tissue, muscle, nervous-system sensitization, emotional context, or several at once.
-
-Agree on a stop signal before sexual activity and make stopping neutral rather than disappointing. Begin with the kind of touch that is reliably comfortable, use enough time and lubrication for arousal, and increase depth, speed, or duration only while the body stays relaxed. A zero-to-ten pain rating can help: remain in a clearly tolerable range and avoid a session that leaves symptoms worse later or the next day. Track location—at the opening, deep in the pelvis, one-sided, or external—as well as timing and cycle context. Those details guide treatment better than a single label of “painful sex.”
 
 ## A quick note
 

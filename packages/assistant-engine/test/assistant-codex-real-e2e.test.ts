@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import {
+  AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
+  buildAutomationSupportSeriesTag,
   CALENDAR_LINK_URL_PREFIX,
   eventRecordSchema,
   experimentFrontmatterSchema,
@@ -14,6 +17,7 @@ import {
   goalMetricTargetSchema,
   parseCalendarEventPayload,
   regimenFrontmatterSchema,
+  resolveFloatingIsoTimestampInTimeZone,
   workoutSessionSchema,
 } from '@murphai/contracts'
 import {
@@ -22,7 +26,9 @@ import {
   readHabitatAspect,
   readMemoryDocument,
   readPreferencesDocument,
+  reconcileAutomationSupportSeries,
   removeAutomaticMealPhoto,
+  showAutomation,
   upsertAutomation,
   upsertGoal,
   upsertHabitatAspect,
@@ -12032,12 +12038,201 @@ interface PublicGoalSetupRecord {
   goalPhrase: string
   key: string
   pageRevisionId: string
+  startPrompt: string
   workflowSpecRevisionId: string
 }
 
+const PUBLIC_GOAL_SETUP_TIME_ZONE = 'America/New_York'
+const PUBLIC_GOAL_PREVIEW_DATE_SOURCE = String.raw`\b(?:(?:Aug(?:ust)?|Sep(?:t(?:ember)?)?)\s+\d{1,2}(?:,?\s+2026)?|2026[-/.](?:0?8|0?9)[-/.]\d{1,2}|(?:0?8|0?9)[-/.]\d{1,2}(?:[-/.](?:2026|26))?)\b`
+const PUBLIC_GOAL_PREVIEW_CLOCK_SOURCE = String.raw`\b(?:\d{1,2}(?::\d{2})?\s*[ap]\.?m\.?|(?:[01]?\d|2[0-3]):[0-5]\d)\b`
+const PUBLIC_GOAL_PREVIEW_OCCURRENCE_PATTERN = new RegExp(
+  `(?<date>${PUBLIC_GOAL_PREVIEW_DATE_SOURCE})\\s*(?:at\\s*)?(?<clock>${PUBLIC_GOAL_PREVIEW_CLOCK_SOURCE})`,
+  'giu',
+)
+const PUBLIC_GOAL_PREVIEW_PURPOSE_PATTERN =
+  /\b(reminders?|messages?|cues?|nudges?|review)\b/giu
+
+interface PublicGoalPreviewSchedule {
+  reminderInstants: string[]
+  reviewInstant: string
+}
+
+function readPublicGoalPreviewSchedule(
+  text: string,
+): PublicGoalPreviewSchedule | null {
+  const purposeMarkers = [...text.matchAll(PUBLIC_GOAL_PREVIEW_PURPOSE_PATTERN)]
+  const reminderInstants: string[] = []
+  const reminderLocalDates: string[] = []
+  const reviewInstants: string[] = []
+
+  for (const occurrence of text.matchAll(PUBLIC_GOAL_PREVIEW_OCCURRENCE_PATTERN)) {
+    const occurrenceIndex = occurrence.index
+    const date = occurrence.groups?.date
+    const clock = occurrence.groups?.clock
+    if (occurrenceIndex === undefined || !date || !clock) return null
+
+    let purpose: string | null = null
+    for (const marker of purposeMarkers) {
+      if (marker.index === undefined || marker.index > occurrenceIndex) break
+      purpose = marker[1]?.toLowerCase() ?? null
+    }
+    if (!purpose) continue
+
+    const occurrenceSchedule = parsePublicGoalPreviewOccurrence({ clock, date })
+    if (!occurrenceSchedule) return null
+    if (purpose === 'review') reviewInstants.push(occurrenceSchedule.instant)
+    else {
+      reminderInstants.push(occurrenceSchedule.instant)
+      reminderLocalDates.push(occurrenceSchedule.localDate)
+    }
+  }
+
+  reminderInstants.sort()
+  const firstReminderAt = Date.parse(reminderInstants[0] ?? '')
+  const finalReminderAt = Date.parse(reminderInstants[2] ?? '')
+  const reviewAt = Date.parse(reviewInstants[0] ?? '')
+  if (
+    reminderInstants.length !== 3
+    || new Set(reminderLocalDates).size !== 3
+    || reviewInstants.length !== 1
+    || reviewAt <= finalReminderAt
+    || reviewAt > firstReminderAt + (7 * 24 * 60 * 60 * 1_000)
+  ) return null
+  return {
+    reminderInstants,
+    reviewInstant: reviewInstants[0]!,
+  }
+}
+
+function parsePublicGoalPreviewOccurrence(input: {
+  clock: string
+  date: string
+}): { instant: string; localDate: string } | null {
+  const date = normalizePublicGoalPreviewDate(input.date)
+  const clock = normalizePublicGoalPreviewClock(input.clock)
+  if (!date || !clock) return null
+  const instant = resolveFloatingIsoTimestampInTimeZone(
+    `${date}T${clock}:00`,
+    PUBLIC_GOAL_SETUP_TIME_ZONE,
+  )?.timestamp ?? null
+  return instant ? { instant, localDate: date } : null
+}
+
+function normalizePublicGoalPreviewDate(value: string): string | null {
+  const written = /^(aug(?:ust)?|sep(?:t(?:ember)?)?)\s+(\d{1,2})(?:,?\s+2026)?$/iu
+    .exec(value)
+  const yearFirst = /^2026[-/.](0?8|0?9)[-/.](\d{1,2})$/u.exec(value)
+  const monthFirst = /^(0?8|0?9)[-/.](\d{1,2})(?:[-/.](?:2026|26))?$/u
+    .exec(value)
+  const month = written
+    ? written[1]!.toLowerCase().startsWith('aug') ? 8 : 9
+    : Number(yearFirst?.[1] ?? monthFirst?.[1])
+  const day = Number(written?.[2] ?? yearFirst?.[2] ?? monthFirst?.[2])
+  const candidate = new Date(Date.UTC(2026, month - 1, day))
+  if (
+    !Number.isInteger(month)
+    || !Number.isInteger(day)
+    || candidate.getUTCFullYear() !== 2026
+    || candidate.getUTCMonth() !== month - 1
+    || candidate.getUTCDate() !== day
+  ) return null
+  return `2026-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function normalizePublicGoalPreviewClock(value: string): string | null {
+  const normalized = value.toLowerCase().replaceAll('.', '').replaceAll(' ', '')
+  const meridiem = /^(\d{1,2})(?::(\d{2}))?([ap]m)$/u.exec(normalized)
+  if (meridiem) {
+    const rawHour = Number(meridiem[1])
+    const minute = Number(meridiem[2] ?? '0')
+    if (rawHour < 1 || rawHour > 12 || minute > 59) return null
+    const hour = (rawHour % 12) + (meridiem[3] === 'pm' ? 12 : 0)
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+  }
+
+  const twentyFourHour = /^([01]?\d|2[0-3]):([0-5]\d)$/u.exec(normalized)
+  if (!twentyFourHour) return null
+  return `${twentyFourHour[1]!.padStart(2, '0')}:${twentyFourHour[2]}`
+}
+
+describe('public goal preview schedule evidence', () => {
+  it.each([
+    [
+      'written dates and 12-hour clocks',
+      'Reminders: August 30 at 11:30 p.m., August 31 at 11:30 p.m., and September 1 at 11:30 p.m. Review September 2 at 8 a.m.',
+    ],
+    [
+      'ISO dates and 24-hour clocks',
+      'Reminders: 2026-08-30 23:30, 2026-08-31 23:30, and 2026-09-01 23:30. Review 2026-09-02 08:00.',
+    ],
+    [
+      'numeric dates and 24-hour clocks',
+      'Reminders: 8/30/2026 23:30, 8/31/2026 23:30, and 9/1/2026 23:30. Review 9/2/2026 08:00.',
+    ],
+  ])('accepts %s while proving four finite dated supports', (_label, text) => {
+    expect(readPublicGoalPreviewSchedule(text)).toEqual({
+      reminderInstants: [
+        '2026-08-31T03:30:00.000Z',
+        '2026-09-01T03:30:00.000Z',
+        '2026-09-02T03:30:00.000Z',
+      ],
+      reviewInstant: '2026-09-02T12:00:00.000Z',
+    })
+  })
+
+  it('rejects a review that precedes the final reminder', () => {
+    expect(readPublicGoalPreviewSchedule(
+      'Reminders: August 30 at 11:30 p.m. and August 31 at 11:30 p.m. Review September 1 at 8 a.m. Reminder September 2 at 11:30 p.m.',
+    )).toBeNull()
+  })
+})
+
+describe('public goal canonical regimen inventory evidence', () => {
+  it.each([
+    {
+      command: 'vault-cli regimen list --limit 200 --format json',
+      expected: true,
+      label: 'direct all-status inventory',
+      output: '{}',
+    },
+    {
+      command: 'vault-cli batch --command <redacted>',
+      expected: true,
+      label: 'batch all-status inventory',
+      output: '{"argv":["regimen","list","--limit","200","--format","json"]}',
+    },
+    {
+      command:
+        'vault-cli regimen list --status active --limit 200 --format json',
+      expected: false,
+      label: 'status-filtered inventory',
+      output: '{}',
+    },
+    {
+      command: 'vault-cli regimen list --format json',
+      expected: false,
+      label: 'truncated inventory',
+      output: '{}',
+    },
+  ])('$label is accepted=$expected', ({ command, expected, output }) => {
+    expect(isSuccessfulRegimenInventoryReadAction({
+      command,
+      eventIndex: 1,
+      kind: 'command',
+      ok: true,
+      output,
+    })).toBe(expected)
+  })
+})
+
+type PublicGoalSetupAutomationSaveRequest = Extract<
+  AssistantHostedAutomationToolRequest,
+  { action: 'save' }
+>
+
 describeRealCodex('real Codex public goal setup e2e', () => {
   it(
-    'persists one accepted Goal package, replays it idempotently, and fails closed after cold reconstruction',
+    'grounds from memory, persists finite support, and reuses one Goal package in a fresh session',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const publicGoal = await readPublicGoalSetupRecord()
@@ -12049,11 +12244,27 @@ describeRealCodex('real Codex public goal setup e2e', () => {
       const vaultRoot = path.join(workingDirectory, 'vault')
       const commandLogPath = path.join(workingDirectory, 'goal-commands.log')
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      const automationHandlerFailures: string[] = []
+      const automationSaveHandledAt = new Map<
+        PublicGoalSetupAutomationSaveRequest,
+        string
+      >()
+      const savedAutomationIds: string[] = []
+      let nextAutomationNumber = 1
+      let hostedAutomationVaultRoot = vaultRoot
 
       try {
         await initializeVault({
           timezone: 'America/New_York',
           vaultRoot,
+        })
+        await upsertMemory(vaultRoot, {
+          section: 'Identity',
+          text: 'Adult.',
+        })
+        await upsertMemory(vaultRoot, {
+          section: 'Context',
+          text: 'For two weeks, total sleep has averaged about six hours from a usual 12:30 AM lights-out time to a steady 6:30 AM wake time, with tired mornings. Moving lights-out to midnight and starting a 30-minute wind-down at 11:30 PM is feasible. Colder-room and supplement attempts did not help. No known sleep-disordered-breathing or dangerous daytime-sleepiness warning signs.',
         })
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'goal-setup' }),
@@ -12090,13 +12301,148 @@ describeRealCodex('real Codex public goal setup e2e', () => {
             automationTool: {
               request: async (request) => {
                 automationRequests.push(request)
-                throw new Error(
-                  'No reminder or check-in was accepted in this goal package.',
-                )
+                if (request.action === 'save') {
+                  if (request.tags?.some((tag) =>
+                    tag === AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG
+                    || tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)
+                  )) {
+                    throw new Error(
+                      'Reserved support tags must use supportSeriesId.',
+                    )
+                  }
+                  const automationId = request.automationId
+                    ?? `automation_01K${String(nextAutomationNumber).padStart(23, '0')}`
+                  const slug = request.slug
+                    ?? `public-goal-support-${String(nextAutomationNumber).padStart(2, '0')}`
+                  const now = new Date(
+                    `2026-08-30T12:00:${String(nextAutomationNumber).padStart(2, '0')}.000Z`,
+                  )
+                  automationSaveHandledAt.set(request, now.toISOString())
+                  nextAutomationNumber += 1
+                  const saved = await upsertAutomation({
+                    activeUntil: request.activeUntil,
+                    assistantTargetOverride: request.assistantTargetOverride,
+                    automationId,
+                    continuityPolicy: request.continuityPolicy ?? 'preserve',
+                    contextReferences: request.contextReferences
+                      ? [...request.contextReferences]
+                      : undefined,
+                    createOnly: true,
+                    instructions: request.instructions,
+                    now,
+                    plannedOccurrenceOffsetMs:
+                      request.plannedOccurrenceOffsetMs,
+                    route: {
+                      channel: 'linq',
+                      deliveryTarget: 'recipient_public_goal_setup',
+                      identityId: null,
+                      participantId: null,
+                      threadId: 'conversation_public_goal_setup',
+                      threadIsDirect: true,
+                    },
+                    schedule: request.schedule,
+                    slug,
+                    status: request.status ?? 'active',
+                    summary: request.summary,
+                    supportKind: request.supportKind,
+                    tags: [
+                      ...(request.tags ?? []),
+                      ...(request.supportSeriesId
+                        ? [buildAutomationSupportSeriesTag(
+                            request.supportSeriesId,
+                          )]
+                        : []),
+                    ],
+                    title: request.title,
+                    vaultRoot: hostedAutomationVaultRoot,
+                  }).catch((error: unknown) => {
+                    const message = error instanceof Error
+                      ? error.message
+                      : String(error)
+                    automationHandlerFailures.push(
+                      message.replaceAll(hostedAutomationVaultRoot, '<vault>'),
+                    )
+                    throw error
+                  })
+                  savedAutomationIds.push(saved.record.automationId)
+                  return {
+                    action: 'save',
+                    automationId: saved.record.automationId,
+                    contextReferences: saved.record.contextReferences,
+                    created: saved.created,
+                    effectiveTimeZone: 'America/New_York',
+                    lookupId: saved.record.slug,
+                    occurrenceProjection: {
+                      nextOccurrenceAt:
+                        saved.record.schedule.kind === 'at'
+                        && Date.parse(saved.record.schedule.at) > now.getTime()
+                        ? saved.record.schedule.at
+                        : null,
+                      status: 'resolved' as const,
+                    },
+                    routeBinding: 'current_conversation' as const,
+                    schedule: saved.record.schedule,
+                    status: saved.record.status,
+                    updatedAt: saved.record.updatedAt,
+                  }
+                }
+                if (request.action === 'inspect') {
+                  const record = await showAutomation({
+                    automationId: request.lookup,
+                    vaultRoot: hostedAutomationVaultRoot,
+                  }) ?? await showAutomation({
+                    slug: request.lookup,
+                    vaultRoot: hostedAutomationVaultRoot,
+                  })
+                  if (!record) {
+                    throw new Error('Expected an existing goal-support automation.')
+                  }
+                  return {
+                    action: 'inspect',
+                    automationId: record.automationId,
+                    contextReferences: record.contextReferences,
+                    effectiveTimeZone: 'America/New_York',
+                    lookupId: record.slug,
+                    occurrenceProjection: {
+                      nextOccurrenceAt: record.schedule.kind === 'at'
+                        ? record.schedule.at
+                        : null,
+                      status: 'resolved' as const,
+                    },
+                    routeBinding: 'preserved' as const,
+                    schedule: record.schedule,
+                    status: record.status,
+                    updatedAt: record.updatedAt,
+                  }
+                }
+                if (request.action === 'reconcile') {
+                  const reconciled = await reconcileAutomationSupportSeries({
+                    desiredAutomationIds: request.desiredAutomationIds,
+                    now: new Date('2026-08-30T12:01:00.000Z'),
+                    supportSeriesTag: buildAutomationSupportSeriesTag(
+                      request.supportSeriesId,
+                    ),
+                    vaultRoot: hostedAutomationVaultRoot,
+                  })
+                  return {
+                    action: 'reconcile',
+                    archivedCount: reconciled.archivedCount,
+                    matchedCount: reconciled.matchedCount,
+                    missingDesiredAutomationIds:
+                      reconciled.missingDesiredAutomationIds,
+                    supportSeriesId: request.supportSeriesId,
+                    unchangedCount: reconciled.unchangedCount,
+                  }
+                }
+                throw new Error('Unexpected goal-support automation patch.')
               },
             },
             computerToolsAvailable: false,
-            currentHostedDeliveryContext: () => null,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_public_goal_setup',
+              recipientKey: 'recipient_public_goal_setup',
+              returnContactKind: 'text',
+            }),
             currentHostedMailboxItemIds: () => [],
             sendVaultFile: async () => {
               throw new Error('Vault file sends are unavailable in this test.')
@@ -12105,23 +12451,151 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           },
           model: config.model,
           modelProvider: config.modelProvider,
-          reasoningEffort: 'low',
+          reasoningEffort: 'medium',
           sandbox: 'workspace-write',
           workingDirectory,
         }
+        const discovery = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: publicGoal.startPrompt,
+        })
+        const discoveryActions = readCapabilityRoutingActions(
+          discovery.jsonEvents,
+        )
+        const discoveryCommandAttempts = readGoalSetupVaultCommands(
+          discoveryActions,
+          { successfulOnly: false },
+        )
+        const discoveryReply = discovery.finalMessage.trim()
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply: discoveryReply,
+            scenario: 'improve-deep-sleep-discovery',
+          })}\n`,
+        )
+        const publicGoalListRead = discoveryActions.find(
+          isSuccessfulPublicGoalListAction,
+        )
+        expect(publicGoalListRead, 'exact public Goal search').toBeDefined()
+        const publicGoalShowRead = discoveryActions.find(
+          isSuccessfulPublicGoalShowAction,
+        )
+        expect(publicGoalShowRead, 'exact public Goal read').toBeDefined()
+        const discoveryGoalInventory = discoveryActions.find(
+          isSuccessfulGoalInventoryReadAction,
+        )
+        expect(
+          discoveryGoalInventory,
+          'all-status Goal inventory during discovery',
+        ).toBeDefined()
+        const normalizeWhitespace = (value: string) =>
+          value.replace(/\s+/gu, ' ').trim()
+        const discoverySkillReadActions = (
+          await Promise.all([
+            'goal-setup',
+            'sleep-improvement',
+            'behavior-followthrough',
+          ].map(async (slug) => {
+            const skillPathSuffix = `${path.sep}${slug}${path.sep}SKILL.md`
+            const actions = discoveryActions.filter(
+              (candidate): candidate is Extract<
+                CapabilityRoutingAction,
+                { kind: 'command' }
+              > => candidate.kind === 'command'
+                && candidate.ok
+                && candidate.command.includes(skillPathSuffix),
+            )
+            expect(
+              actions.length,
+              `${slug} read actions during discovery`,
+            ).toBeGreaterThan(0)
+            const expectedSkill = await readFile(
+              path.join(skillsRoot, slug, 'SKILL.md'),
+              'utf8',
+            )
+            expect(
+              normalizeWhitespace(actions.map((action) => action.output).join('\n')),
+              `${slug} full-file read during discovery`,
+            ).toContain(normalizeWhitespace(expectedSkill))
+            return actions
+          }))
+        ).flat()
+        const discoveryMemoryRead = discoveryActions.find(
+          isSuccessfulCompactMemoryReadAction,
+        )
+        expect(
+          discoveryMemoryRead,
+          'canonical memory read before first setup question',
+        ).toBeDefined()
+        expect(discoveryCommandAttempts.some(isGoalSetupMutationCommand)).toBe(
+          false,
+        )
+        const motivationQuestionPattern =
+          /what matters most|what(?:'s| is) most important|what (?:would|will).{0,80}(?:mean|matter|make|change|feel)|why.{0,60}(?:care|important|matter|want)|what.{0,40}hoping.{0,60}(?:feel|change|easier)|what.{0,35}(?:driving|motivat|prompting|reason)|is (?:your|the) (?:main )?reason\b/iu
+        expect(discoveryReply).toMatch(motivationQuestionPattern)
+        expect(discoveryReply).not.toMatch(/what is the main issue/iu)
+        expect(discoveryReply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(discoveryReply).not.toMatch(
+          /\b(?:I|we|Murph)\s+(?:do not|don't|cannot|can't)\s+(?:find|have|know|see)\s+(?:any\s+|your\s+|a\s+)?(?:saved\s+)?(?:sleep|wearable|health)?\s*(?:baseline|context|data|plan|prior attempts?|schedule)\b/iu,
+        )
+        expect(discoveryReply).toMatch(
+          /(?:(?:six|6(?:\.0)?)\s*(?:hours?|hrs?|h)\b|12:30.{0,100}6:30)/isu,
+        )
+        expect(discoveryReply).not.toContain('goal_template:')
+        expect(discoveryReply).not.toContain('sha256:')
+        expect(automationRequests).toHaveLength(0)
+
+        const firstAgentQuestion = readCompletedAgentMessages(
+          discovery.jsonEvents,
+        ).find((message) => message.text.includes('?'))
+        expect(
+          firstAgentQuestion,
+          'first reply asks only for the person\'s reason',
+        ).toBeDefined()
+        expect(firstAgentQuestion?.text).toMatch(motivationQuestionPattern)
+        if (
+          !firstAgentQuestion
+          || !discoveryGoalInventory
+          || !discoveryMemoryRead
+          || !publicGoalListRead
+          || !publicGoalShowRead
+        ) {
+          throw new Error('Expected grounded Goal discovery before motivation.')
+        }
+        expect(discoveryMemoryRead.output).toMatch(/cold|cool|temperature/iu)
+        expect(discoveryMemoryRead.output).toMatch(/supplement/iu)
+        expect(discoveryMemoryRead.output).toMatch(/6:30|11:30|12:00|midnight/iu)
+        expect(discoveryGoalInventory.eventIndex).toBeLessThan(
+          firstAgentQuestion.eventIndex,
+        )
+        expect(discoveryMemoryRead.eventIndex).toBeLessThan(
+          firstAgentQuestion.eventIndex,
+        )
+        expect(publicGoalListRead.eventIndex).toBeLessThan(
+          firstAgentQuestion.eventIndex,
+        )
+        expect(publicGoalShowRead.eventIndex).toBeLessThan(
+          firstAgentQuestion.eventIndex,
+        )
+        for (const skillReadAction of discoverySkillReadActions) {
+          expect(skillReadAction.eventIndex).toBeLessThan(
+            firstAgentQuestion.eventIndex,
+          )
+        }
+
+        const groundingPrompt =
+          'It matters because I want enough energy to be present with my family in the morning. What do you recommend?'
+        expect(groundingPrompt).not.toMatch(
+          /six hours|\b6:30\b|\b11:30\b|\b12:30\b|midnight|colder|supplement/iu,
+        )
         const result = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: [
-            'Hey Murph, help me improve my deep sleep.',
-            'My watch has shown low deep sleep for two weeks, I average about six hours total sleep, and I wake tired.',
-            'A feasible starting lever is moving bedtime 30 minutes earlier while keeping wake time steady.',
-            'I do not snore, gasp, have morning headaches, or have dangerous daytime sleepiness.',
-            'Show me a simple plan before anything is saved or scheduled.',
-          ].join(' '),
+          prompt: groundingPrompt,
+          resumeSessionId: discovery.sessionId,
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const previewCommands = readGoalSetupVaultCommands(actions)
-        const previewCommandAttempts = readGoalSetupVaultCommands(actions, {
+        const setupActions = [...discoveryActions, ...actions]
+        const previewCommandAttempts = readGoalSetupVaultCommands(setupActions, {
           successfulOnly: false,
         })
         const reply = result.finalMessage.trim()
@@ -12131,17 +12605,6 @@ describeRealCodex('real Codex public goal setup e2e', () => {
             scenario: 'improve-deep-sleep-preview',
           })}\n`,
         )
-        expect(previewCommands.some((command) =>
-          command.startsWith('commons goal list --query ')
-        )).toBe(true)
-        expect(previewCommands.some((command) =>
-          command.startsWith(
-            'commons goal show goal_template:improve-deep-sleep --format json',
-          )
-          || command.startsWith(
-            'commons goal show improve-deep-sleep --format json',
-          )
-        )).toBe(true)
         expect(previewCommandAttempts.some(isGoalSetupMutationCommand)).toBe(
           false,
         )
@@ -12150,9 +12613,36 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         expect(previewVault.regimens).toHaveLength(0)
 
         expect(reply).toMatch(/deep[-\s]sleep/iu)
-        expect(reply).toMatch(/six|6|total sleep|sleep opportunity/iu)
-        expect(reply).toMatch(/30\s*minutes?/iu)
-        expect(reply).toMatch(/review|week|night/iu)
+        expect(reply).toMatch(/sleep opportunity|lights?[-\s]?out|bedtime/iu)
+        expect(reply).toMatch(/6:30/iu)
+        expect(reply).toMatch(/11:30|23:30/iu)
+        expect(reply).toMatch(/12:00|00:00|midnight/iu)
+        expect(reply).toMatch(/family|morning|energy/iu)
+        const failedAttemptActionPattern =
+          /\b(?:(?:adjust|adjusting|change|changing|cool|cooling|keep|keeping|lower|lowering|make|making|set|setting)\b.{0,35}\b(?:bedroom|room|temperature)\b|(?:add|adding|start|starting|take|taking|try|trying|use|using)\b.{0,35}\bsupplements?\b)/iu
+        const failedAttemptNegationPattern =
+          /\b(?:avoid|did not|didn't|didn’t|do not|don't|don’t|failed|ineffective|instead|no benefit|not|rather than|skip|won't|won’t|wouldn't|wouldn’t)\b/iu
+        const prescribedFailedAttempts = reply
+          .split(/\n|(?<=[.!?])\s+|[,;—]\s+/u)
+          .filter((segment) =>
+            failedAttemptActionPattern.test(segment)
+            && !failedAttemptNegationPattern.test(segment)
+          )
+        expect(prescribedFailedAttempts).toHaveLength(0)
+        const supportText = reply
+        expect(supportText).toMatch(/remind|message|cue|nudge/iu)
+        const previewSchedule = readPublicGoalPreviewSchedule(supportText)
+        expect(
+          previewSchedule,
+          'three dated reminders followed by one dated review',
+        ).not.toBeNull()
+        if (!previewSchedule) {
+          throw new Error('Expected an exact finite support preview.')
+        }
+        expect(supportText).toMatch(/review/iu)
+        expect(supportText).not.toMatch(
+          /(?:(?:cannot|can't|unable|not available).{0,80}(?:schedule|create)|(?:scheduled reminders?|schedule|create).{0,80}not available).{0,50}(?:reminder|message|check-in)?/iu,
+        )
         expect(reply).toMatch(/want me to|would you like me to|save (?:this|that)/iu)
         expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
         expect(reply).not.toContain('goal_template:')
@@ -12160,31 +12650,51 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         expect(reply).not.toMatch(/experiment/iu)
         expect(automationRequests).toHaveLength(0)
 
+        const acceptedPrompt =
+          'Yes—save that plan and set up the reminders and review you proposed.'
         const accepted = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: [
-            'Yes. Save exactly the plan you just previewed as one Goal and one linked habit regimen.',
-            'I explicitly decline reminders, check-ins, experiments, and every other support action.',
-            'Read each saved owner back before telling me it exists.',
-          ].join(' '),
+          prompt: acceptedPrompt,
           resumeSessionId: result.sessionId,
         })
         const acceptedActions = readCapabilityRoutingActions(
           accepted.jsonEvents,
         )
-        const acceptedCommands = readGoalSetupVaultCommands(acceptedActions)
-        const acceptedCommandAttempts = readGoalSetupVaultCommands(
-          acceptedActions,
-          { successfulOnly: false },
+        const acceptedAutomationAttempts = readDynamicToolAttempts(
+          accepted.jsonEvents,
+        ).filter((action) => action.tool === MURPH_AUTOMATION_TOOL.name)
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            automationAttempts: acceptedAutomationAttempts.map((action) =>
+              readString(action.argumentsValue.action) ?? 'unknown'
+            ),
+            automationHandlerFailures,
+            automationResults: acceptedActions.flatMap((action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_AUTOMATION_TOOL.name
+                ? [{
+                    action: readString(action.argumentsValue.action) ?? 'unknown',
+                    output: action.output.slice(0, 240),
+                    success: action.success,
+                  }]
+                : []
+            ),
+            reply: accepted.finalMessage.trim(),
+            scenario: 'improve-deep-sleep-accepted',
+          })}\n`,
         )
+        expect(automationHandlerFailures).toEqual([])
+        const acceptedVaultCommandAttempts = (
+          await readFile(commandLogPath, 'utf8')
+        ).split('\n').map((command) => command.trim()).filter(Boolean)
         const acceptedVault = await readVaultRawTolerant(vaultRoot)
         expect(acceptedVault.goals).toHaveLength(1)
         const savedGoal = acceptedVault.goals[0]
         if (!savedGoal) {
           throw new Error('Expected one lineage-bearing deep-sleep Goal.')
         }
-        expect(readString(savedGoal.attributes.title)?.toLowerCase()).toBe(
-          publicGoal.goalPhrase,
+        expect(readString(savedGoal.attributes.title)?.toLowerCase()).toMatch(
+          /^improve (?:my )?deep sleep$/u,
         )
         expect(savedGoal.attributes.status).toBe('active')
         expect(savedGoal.attributes.commonsGoalRef).toEqual({
@@ -12210,9 +12720,15 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           relatedGoalIds: [savedGoal.entityId],
           status: 'active',
         })
-        expect(savedPlanText).toMatch(/30\s*minutes?/iu)
-        expect(savedPlanText).toMatch(/bedtime/iu)
+        expect(savedPlanText).toMatch(/11:30/iu)
+        expect(savedPlanText).toMatch(/12:00|midnight/iu)
+        expect(savedPlanText).toMatch(/bedtime|lights?[-\s]?out/iu)
         expect(savedPlanText).toMatch(/wake/iu)
+        expect(savedRegimenData.note).toMatch(
+          /(?:I want )?enough energy to be present with (?:my )?family in the morning/iu,
+        )
+        expect(savedRegimenData.note).toMatch(/cold|cool|temperature/iu)
+        expect(savedRegimenData.note).toMatch(/supplement/iu)
 
         const acceptedPublicShow = requireSuccessfulGoalSetupCommand(
           acceptedActions,
@@ -12224,30 +12740,79 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           'lineage-bearing Goal save',
           ['goal save', PUBLIC_GOAL_SETUP_KEY],
         )
+        const acceptedGoalShow = requireSuccessfulGoalSetupCommand(
+          acceptedActions,
+          'saved Goal readback',
+          ['goal show', savedGoal.entityId, '--format json'],
+        )
+        const acceptedRegimenInventory = acceptedActions.find(
+          isSuccessfulRegimenInventoryReadAction,
+        )
+        expect(
+          acceptedRegimenInventory,
+          'all-status regimen inventory before linked plan creation',
+        ).toBeDefined()
+        if (!acceptedRegimenInventory) {
+          throw new Error('Expected a successful regimen inventory read.')
+        }
         const acceptedRegimenSave = requireSuccessfulGoalSetupCommand(
           acceptedActions,
           'linked habit regimen save',
           ['regimen save', savedGoal.entityId],
         )
-        const acceptedGoalInventoryRead = acceptedActions.find((action) =>
-          action.kind === 'command'
-          && action.ok
-          && action.command.includes('goal list --limit 200 --format json')
+        const acceptedRegimenShow = requireSuccessfulGoalSetupCommand(
+          acceptedActions,
+          'saved habit regimen readback',
+          ['regimen show', savedRegimen.entityId, '--format json'],
         )
-        const acceptedMemoryRead = acceptedActions.find((action) =>
-          action.kind === 'command'
-          && action.ok
-          && action.command.includes('memory show --compact --format json')
+        expect(acceptedPublicShow.eventIndex).toBeLessThan(
+          acceptedGoalSave.eventIndex,
         )
-        const inventoryReadBeforeWrite = previewCommands.some((command) =>
-          command.startsWith('goal list --limit 200 --format json')
+        expect(acceptedGoalSave.eventIndex).toBeLessThan(
+          acceptedGoalShow.eventIndex,
+        )
+        expect(acceptedRegimenInventory.eventIndex).toBeLessThan(
+          acceptedRegimenSave.eventIndex,
+        )
+        expect(acceptedGoalShow.eventIndex).toBeLessThan(
+          acceptedRegimenSave.eventIndex,
+        )
+        expect(acceptedRegimenSave.eventIndex).toBeLessThan(
+          acceptedRegimenShow.eventIndex,
+        )
+        expect(acceptedGoalShow.output).toContain(savedGoal.entityId)
+        expect(acceptedRegimenShow.output).toContain(savedRegimen.entityId)
+        const supportSeriesId = `habit:${savedRegimen.entityId}`
+        const supportInventoryActions = acceptedActions.filter((action) =>
+          isSuccessfulGoalSupportInventoryAction(action, supportSeriesId)
+        )
+        expect(
+          supportInventoryActions.length,
+          'fully paginated all-status support-series inventory',
+        ).toBeGreaterThan(0)
+        for (const inventoryAction of supportInventoryActions) {
+          if (inventoryAction.kind !== 'command') {
+            continue
+          }
+          expect(inventoryAction.command).toContain('--compact')
+          expect(inventoryAction.command).toMatch(/--limit(?:=|\s+)200\b/u)
+          expect(inventoryAction.command).not.toMatch(/--status(?:=|\s)/u)
+        }
+        const acceptedGoalInventoryRead = acceptedActions.find(
+          isSuccessfulGoalInventoryReadAction,
+        )
+        const acceptedMemoryRead = acceptedActions.find(
+          isSuccessfulCompactMemoryReadAction,
+        )
+        const inventoryReadBeforeWrite = setupActions.some(
+          isSuccessfulGoalInventoryReadAction,
         ) || (
           acceptedGoalInventoryRead !== undefined
           && acceptedActions.indexOf(acceptedGoalInventoryRead)
             < acceptedActions.indexOf(acceptedGoalSave)
         )
-        const memoryReadBeforeWrite = previewCommands.some((command) =>
-          command.startsWith('memory show --compact --format json')
+        const memoryReadBeforeWrite = setupActions.some(
+          isSuccessfulCompactMemoryReadAction,
         ) || (
           acceptedMemoryRead !== undefined
           && acceptedActions.indexOf(acceptedMemoryRead)
@@ -12259,82 +12824,313 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         ).toBe(true)
         expect(memoryReadBeforeWrite, 'memory read before Goal write').toBe(true)
 
+        expect(acceptedGoalSave.command).toContain('--commons-page-revision-id')
+        expect(acceptedGoalSave.command).toContain(publicGoal.pageRevisionId)
         expect(acceptedGoalSave.command).toContain(
-          `--commons-page-revision-id ${publicGoal.pageRevisionId}`,
+          '--commons-workflow-revision-id',
         )
         expect(acceptedGoalSave.command).toContain(
-          `--commons-workflow-revision-id ${publicGoal.workflowSpecRevisionId}`,
+          publicGoal.workflowSpecRevisionId,
         )
-        const acceptedOwnerOrder = [
-          acceptedPublicShow,
-          acceptedGoalSave,
-          acceptedRegimenSave,
-        ].map((action) => acceptedActions.indexOf(action))
-        expect(acceptedOwnerOrder).toEqual(
-          [...acceptedOwnerOrder].sort((left, right) => left - right),
-        )
-        expect(new Set(acceptedOwnerOrder).size).toBe(acceptedOwnerOrder.length)
-        expect(acceptedCommands.filter((command) =>
+        const acceptedOwnerMutationAttempts = acceptedVaultCommandAttempts
+          .filter(isGoalSetupMutationCommand)
+        expect(acceptedOwnerMutationAttempts.some((command) =>
+          command.startsWith('goal save')
+        )).toBe(true)
+        expect(acceptedOwnerMutationAttempts.some((command) =>
+          command.startsWith('regimen save')
+        )).toBe(true)
+        expect(acceptedOwnerMutationAttempts.every((command) =>
           /^(?:goal save|regimen save)/u.test(command)
-        )).toHaveLength(2)
-        expect(acceptedCommandAttempts.filter(isGoalSetupMutationCommand))
-          .toHaveLength(2)
-        expect(acceptedCommandAttempts.some((command) =>
-          /^(?:goal import-json|regimen import-json|experiment start|automation )/u
+        )).toBe(true)
+        expect(acceptedVaultCommandAttempts.some((command) =>
+          /^(?:goal import-json|regimen import-json|experiment start|automation (?:save|edit|reconcile-support-series))/u
             .test(command)
         )).toBe(false)
-        expect(automationRequests).toHaveLength(0)
-        expect(accepted.finalMessage).toMatch(/saved|set up|active|ready/iu)
-        expect(accepted.finalMessage).toMatch(/30\s*minutes?|bedtime/iu)
+        const automationSaves = automationRequests.filter(
+          (request): request is PublicGoalSetupAutomationSaveRequest =>
+            request.action === 'save',
+        )
+        const automationReconciles = automationRequests.filter((request) =>
+          request.action === 'reconcile'
+        )
+        expect(automationSaves).toHaveLength(4)
+        expect(automationReconciles).toHaveLength(1)
+        expect(automationSaves.map((request) => request.supportKind).sort())
+          .toEqual(['reminder', 'reminder', 'reminder', 'review'])
+        for (const request of automationSaves) {
+          const handledAt = automationSaveHandledAt.get(request)
+          expect(request.supportSeriesId).toBe(supportSeriesId)
+          expect(request.schedule.kind).toBe('at')
+          expect(handledAt).toBeDefined()
+          if (request.schedule.kind !== 'at' || !handledAt) {
+            throw new Error('Expected a handled one-shot support save.')
+          }
+          expect(Date.parse(request.schedule.at)).toBeGreaterThan(
+            Date.parse(handledAt),
+          )
+          if (request.activeUntil !== undefined && request.activeUntil !== null) {
+            expect(Date.parse(request.activeUntil)).toBeGreaterThan(
+              Date.parse(request.schedule.at),
+            )
+          }
+          expect(request.contextReferences).toHaveLength(2)
+          expect(request.contextReferences).toEqual(expect.arrayContaining([
+            { entityId: savedGoal.entityId, entityKind: 'goal' },
+            { entityId: savedRegimen.entityId, entityKind: 'regimen' },
+          ]))
+        }
+        const reminderTimes = automationSaves.flatMap((request) =>
+          request.supportKind === 'reminder' && request.schedule.kind === 'at'
+            ? [request.schedule.at]
+            : []
+        ).sort()
+        expect(reminderTimes).toHaveLength(3)
+        const reminderInstants = reminderTimes.map((value) => new Date(value))
+        const [firstReminder, secondReminder, thirdReminder] = reminderInstants
+        if (!firstReminder || !secondReminder || !thirdReminder) {
+          throw new Error('Expected three finite reminder instants.')
+        }
+        for (const reminderInstant of reminderInstants) {
+          expect(reminderInstant.getUTCHours()).toBe(3)
+          expect(reminderInstant.getUTCMinutes()).toBe(30)
+        }
+        expect(secondReminder.getTime() - firstReminder.getTime())
+          .toBeGreaterThanOrEqual(24 * 60 * 60 * 1_000)
+        expect(thirdReminder.getTime() - secondReminder.getTime())
+          .toBeGreaterThanOrEqual(24 * 60 * 60 * 1_000)
+        const reviewTimes = automationSaves.flatMap((request) =>
+          request.supportKind === 'review' && request.schedule.kind === 'at'
+            ? [request.schedule.at]
+            : []
+        )
+        expect(reviewTimes).toHaveLength(1)
+        const reviewInstant = new Date(reviewTimes[0] ?? '')
+        const reviewClockParts = new Intl.DateTimeFormat('en-US', {
+          hour: '2-digit',
+          hourCycle: 'h23',
+          minute: '2-digit',
+          timeZone: 'America/New_York',
+        }).formatToParts(reviewInstant)
+        const reviewLocalHour = Number(
+          reviewClockParts.find((part) => part.type === 'hour')?.value,
+        )
+        const reviewLocalMinute = Number(
+          reviewClockParts.find((part) => part.type === 'minute')?.value,
+        )
+        const reviewLocalMinuteOfDay = (
+          reviewLocalHour * 60
+        ) + reviewLocalMinute
+        expect(reviewLocalMinuteOfDay).toBeGreaterThanOrEqual(6 * 60 + 30)
+        expect(reviewLocalMinuteOfDay).toBeLessThanOrEqual(10 * 60 + 59)
+        expect(reviewInstant.getTime()).toBeGreaterThan(
+          thirdReminder.getTime(),
+        )
+        expect(reviewInstant.getTime()).toBeLessThanOrEqual(
+          firstReminder.getTime() + (7 * 24 * 60 * 60 * 1_000),
+        )
+        expect({
+          reminderInstants: reminderTimes.map((value) =>
+            new Date(value).toISOString()
+          ),
+          reviewInstant: reviewInstant.toISOString(),
+        }).toEqual(previewSchedule)
+        const automationSaveActions = acceptedActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.success
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+          && action.argumentsValue.action === 'save'
+        )
+        const automationReconcileAction = acceptedActions.find((action) =>
+          action.kind === 'dynamic'
+          && action.success
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+          && action.argumentsValue.action === 'reconcile'
+        )
+        expect(automationSaveActions).toHaveLength(4)
+        expect(automationReconcileAction).toBeDefined()
+        if (!automationReconcileAction) {
+          throw new Error('Expected successful support reconciliation.')
+        }
+        const firstAutomationEffectIndex = Math.min(
+          ...automationSaveActions.map((action) => action.eventIndex),
+          automationReconcileAction.eventIndex,
+        )
+        const terminalSupportInventory = [...supportInventoryActions]
+          .reverse()
+          .find((action) =>
+            action.kind === 'command'
+            && action.eventIndex < firstAutomationEffectIndex
+            && /"nextCursor"\s*:\s*null/u.test(action.output),
+          )
+        if (terminalSupportInventory?.kind !== 'command') {
+          throw new Error(
+            'Expected a terminal support-series inventory before support effects.',
+          )
+        }
+        expect(terminalSupportInventory.output).toMatch(
+          /"totalCount"\s*:\s*0/u,
+        )
+        expect(acceptedGoalShow.eventIndex).toBeLessThan(
+          firstAutomationEffectIndex,
+        )
+        expect(acceptedRegimenShow.eventIndex).toBeLessThan(
+          firstAutomationEffectIndex,
+        )
+        expect(terminalSupportInventory.eventIndex).toBeLessThan(
+          firstAutomationEffectIndex,
+        )
+        expect(automationReconcileAction.eventIndex).toBeGreaterThan(
+          Math.max(...automationSaveActions.map((action) => action.eventIndex)),
+        )
+        const reconcileRequest = automationReconciles[0]
+        if (reconcileRequest?.action !== 'reconcile') {
+          throw new Error('Expected one support-series reconciliation.')
+        }
+        expect(reconcileRequest.supportSeriesId).toBe(supportSeriesId)
+        const persistedAutomationIds = [...savedAutomationIds].sort()
+        expect([...reconcileRequest.desiredAutomationIds].sort()).toEqual(
+          persistedAutomationIds,
+        )
+        const persistedAutomations = await Promise.all(
+          persistedAutomationIds.map((automationId) =>
+            showAutomation({ automationId, vaultRoot })
+          ),
+        )
+        expect(persistedAutomations).toHaveLength(4)
+        expect(persistedAutomations.map((automation) =>
+          automation?.supportKind
+        ).sort()).toEqual(['reminder', 'reminder', 'reminder', 'review'])
+        expect(persistedAutomations.flatMap((automation) =>
+          automation?.schedule.kind === 'at'
+            ? [automation.schedule.at]
+            : []
+        ).sort()).toEqual([...reminderTimes, ...reviewTimes].sort())
+        for (const automation of persistedAutomations) {
+          expect(automation?.status).toBe('active')
+          expect(automation?.schedule.kind).toBe('at')
+          expect(automation?.contextReferences).toHaveLength(2)
+          expect(automation?.contextReferences).toEqual(expect.arrayContaining([
+            { entityId: savedGoal.entityId, entityKind: 'goal' },
+            { entityId: savedRegimen.entityId, entityKind: 'regimen' },
+          ]))
+          expect(automation?.tags).toContain(
+            buildAutomationSupportSeriesTag(supportSeriesId),
+          )
+        }
+        expect(accepted.finalMessage).toMatch(/saved|\bset\b|active|ready/iu)
+        expect(accepted.finalMessage).toMatch(
+          /30[-\s]*minutes?|bedtime|wind-down|lights?[-\s]?out|11:30|first step/iu,
+        )
         expect(accepted.finalMessage).toMatch(/review|week|night/iu)
         expect(accepted.finalMessage).toMatch(
-          /no (?:reminder|check-in)|without (?:a )?(?:reminder|check-in)|did not schedule|didn't schedule|declined/iu,
+          /remind(?:er|s|ing)?|message|cue|nudge|prompt/iu,
         )
-        expectNoScheduledGoalAutomationClaim(accepted.finalMessage)
+        expect(accepted.finalMessage).toMatch(/review/iu)
         expect(accepted.finalMessage).not.toContain(PUBLIC_GOAL_SETUP_KEY)
         expect(accepted.finalMessage).not.toContain('sha256:')
-        process.stdout.write(
-          `[public-goal-setup-e2e] ${JSON.stringify({
-            reply: accepted.finalMessage.trim(),
-            scenario: 'improve-deep-sleep-accepted',
-          })}\n`,
-        )
-
-        const replay = await executeRealCodexAppServerTurn({
+        const acceptedAutomationMutationCount = automationRequests.filter(
+          isGoalSetupAutomationMutationRequest,
+        ).length
+        const fresh = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: [
-            'My last acceptance may have been delivered twice.',
-            'Reconcile the exact same accepted deep-sleep package now, but do not create a second Goal, habit plan, reminder, check-in, or experiment.',
-          ].join(' '),
-          resumeSessionId: accepted.sessionId,
+          prompt: publicGoal.startPrompt,
         })
-        const replayActions = readCapabilityRoutingActions(replay.jsonEvents)
-        const replayCommands = readGoalSetupVaultCommands(replayActions)
-        const replayCommandAttempts = readGoalSetupVaultCommands(
-          replayActions,
+        expect(fresh.sessionId).not.toBe(accepted.sessionId)
+        const freshActions = readCapabilityRoutingActions(fresh.jsonEvents)
+        const freshCommandAttempts = readGoalSetupVaultCommands(
+          freshActions,
           { successfulOnly: false },
         )
-        const replayVault = await readVaultRawTolerant(vaultRoot)
-        expect(replayVault.goals).toHaveLength(1)
-        expect(replayVault.regimens).toHaveLength(1)
-        expect(replayVault.goals).toEqual(acceptedVault.goals)
-        expect(replayVault.regimens).toEqual(acceptedVault.regimens)
-        expect(replayCommands.some((command) => command.startsWith(
-          `goal show ${savedGoal.entityId} --format json`,
-        ))).toBe(true)
-        expect(replayCommandAttempts.some(isGoalSetupMutationCommand)).toBe(
-          false,
-        )
-        expect(automationRequests).toHaveLength(0)
-        expect(replay.finalMessage).toMatch(/already|same|one|kept|exists/iu)
-        expect(replay.finalMessage).not.toMatch(
-          /(?:created|added|saved|set up).{0,30}(?:another|duplicate|new|second).{0,20}(?:goal|plan|regimen)/iu,
-        )
-        expectNoScheduledGoalAutomationClaim(replay.finalMessage)
+        const freshVault = await readVaultRawTolerant(vaultRoot)
+        expect(freshVault.goals).toEqual(acceptedVault.goals)
+        expect(freshVault.regimens).toEqual(acceptedVault.regimens)
+        expect(freshActions.some(isSuccessfulPublicGoalListAction)).toBe(true)
+        expect(freshActions.some(isSuccessfulPublicGoalShowAction)).toBe(true)
+        expect(freshActions.some(isSuccessfulGoalInventoryReadAction)).toBe(true)
+        expect(freshActions.some((action) =>
+          isSuccessfulGoalSetupEntityShowAction(
+            action,
+            'goal',
+            savedGoal.entityId,
+          )
+        )).toBe(true)
         process.stdout.write(
           `[public-goal-setup-e2e] ${JSON.stringify({
-            reply: replay.finalMessage.trim(),
-            scenario: 'improve-deep-sleep-replay',
+            regimenActions: readGoalSetupRegimenActionDiagnostics(
+              freshActions,
+            ),
+            scenario: 'improve-deep-sleep-fresh-regimen-discovery',
+          })}\n`,
+        )
+        expect(freshActions.some(isSuccessfulRegimenInventoryReadAction)).toBe(
+          true,
+        )
+        expect(freshActions.some((action) =>
+          isSuccessfulGoalSetupEntityShowAction(
+            action,
+            'regimen',
+            savedRegimen.entityId,
+          )
+        )).toBe(true)
+        const freshSupportInventoryActions = freshActions.filter((action) =>
+          isSuccessfulGoalSupportInventoryAction(action, supportSeriesId)
+        )
+        expect(
+          freshSupportInventoryActions.length,
+          'fresh-session exact support-series inventory',
+        ).toBeGreaterThan(0)
+        for (const inventoryAction of freshSupportInventoryActions) {
+          if (inventoryAction.kind !== 'command') continue
+          expect(inventoryAction.command).toContain('--compact')
+          expect(inventoryAction.command).toMatch(/--limit(?:=|\s+)200\b/u)
+          expect(inventoryAction.command).not.toMatch(/--status(?:=|\s)/u)
+        }
+        const freshTerminalSupportInventory = [
+          ...freshSupportInventoryActions,
+        ].reverse().find((action) =>
+          action.kind === 'command'
+          && /"nextCursor"\s*:\s*null/u.test(action.output)
+        )
+        if (freshTerminalSupportInventory?.kind !== 'command') {
+          throw new Error(
+            'Expected fresh-session support inventory through its terminal page.',
+          )
+        }
+        expect(freshTerminalSupportInventory.output).toMatch(
+          /"totalCount"\s*:\s*4/u,
+        )
+        expect(freshCommandAttempts.some(isGoalSetupMutationCommand)).toBe(
+          false,
+        )
+        expect(freshActions.some((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+          && isGoalSetupAutomationMutationAction(action)
+        )).toBe(false)
+        expect(automationRequests.filter(isGoalSetupAutomationMutationRequest))
+          .toHaveLength(acceptedAutomationMutationCount)
+        expect(savedAutomationIds).toHaveLength(4)
+        const freshAutomations = await Promise.all(
+          savedAutomationIds.map((automationId) =>
+            showAutomation({ automationId, vaultRoot })
+          ),
+        )
+        expect(freshAutomations).toEqual(persistedAutomations)
+        expect(fresh.finalMessage).toMatch(
+          /already|existing|active|continue|next|\bset\b/iu,
+        )
+        expect(fresh.finalMessage).toMatch(/11:30|wind-down/iu)
+        expect(fresh.finalMessage).not.toMatch(
+          /(?:created|added|saved|set up).{0,30}(?:another|duplicate|new|second).{0,20}(?:goal|plan|regimen)/iu,
+        )
+        expect(fresh.finalMessage).not.toMatch(
+          /(?:I|we)(?:'ve| have)?\s+(?:also\s+)?(?:scheduled|created|added|set up).{0,30}(?:reminder|check-in|review)/iu,
+        )
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply: fresh.finalMessage.trim(),
+            scenario: 'improve-deep-sleep-fresh-session-reuse',
           })}\n`,
         )
 
@@ -12348,34 +13144,35 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           commandLogPath,
           vaultRoot: coldVaultRoot,
         })
+        hostedAutomationVaultRoot = coldVaultRoot
         const cold = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
             'Earlier Murph showed me this plan, but I no longer have that chat open:',
+            'The public outcome was “improve my deep sleep.”',
             'move bedtime 30 minutes earlier, keep wake time steady, track total sleep and whether I wake rested for 14 nights, then review it on September 13.',
             'There was no reminder, check-in, or experiment in the plan. Yes, save it now.',
           ].join(' '),
         })
         const coldActions = readCapabilityRoutingActions(cold.jsonEvents)
-        const coldCommands = readGoalSetupVaultCommands(coldActions)
         const coldCommandAttempts = readGoalSetupVaultCommands(coldActions, {
           successfulOnly: false,
         })
         const coldVault = await readVaultRawTolerant(coldVaultRoot)
-        expect(coldCommands.some((command) =>
-          command.includes('commons goal show')
-          && command.includes('improve-deep-sleep')
-        )).toBe(true)
+        expect(coldActions.some(isSuccessfulPublicGoalShowAction)).toBe(true)
         expect(coldCommandAttempts.some(isGoalSetupMutationCommand)).toBe(
           false,
         )
         expect(coldVault.goals).toHaveLength(0)
         expect(coldVault.regimens).toHaveLength(0)
-        expect(automationRequests).toHaveLength(0)
-        expect(cold.finalMessage).toMatch(/30\s*minutes?/iu)
-        expect(cold.finalMessage).toMatch(/confirm|want me to save|should I save/iu)
+        expect(automationRequests.filter(isGoalSetupAutomationMutationRequest))
+          .toHaveLength(acceptedAutomationMutationCount)
+        expect(cold.finalMessage).toMatch(/30[-\s]*minutes?/iu)
         expect(cold.finalMessage).toMatch(
-          /before I (?:save|write)|(?:not|nothing|haven't|hasn't|won't).{0,30}(?:save|saved|write|written)|(?:saved|written).{0,30}(?:not|nothing)/iu,
+          /confirm|approve|want me to (?:save|create|set up)|should I (?:save|create|set up)|would you like me to (?:save|create|set up)|(?:usual|current|typical).{0,30}(?:bedtime|lights?[-\s]?out).{0,40}wake|what time.{0,40}(?:bed|sleep|wake)/iu,
+        )
+        expect(cold.finalMessage).not.toMatch(
+          /(?:(?:I|we)(?:'ve| have)?\s+(?:saved|created|set up).{0,30}(?:goal|plan)|(?:goal|plan).{0,20}(?:is|was|has been)\s+(?:saved|created|set up))/iu,
         )
         expectNoScheduledGoalAutomationClaim(cold.finalMessage)
         expect(cold.finalMessage).not.toContain(PUBLIC_GOAL_SETUP_KEY)
@@ -12410,10 +13207,12 @@ function buildPublicGoalSetupDeveloperInstructions(): string {
       '- `regimen list`: options optional --status=string, --limit=integer, --format=json.',
       '- `regimen show`: args <regimen-id>; options --format=json.',
       '- `regimen save`: args <title>; options --id=string, --kind=medication|supplement|therapy|habit, --status=active|paused|completed|stopped, --schedule=string, --note=string, repeat --related-goal-id=string, --format=json. Do not call it before acceptance.',
+      '- `automation list`: options --support-series-id=string, optional --status=active|paused|archived, --compact, --limit=integer, --cursor=string, --format=json. This is read-only.',
       '- `memory show`: options --compact, --format=json.',
       '- `wearables sleep pattern`: options --format=json.',
     ].join('\n'),
     assistantContextSnapshotPrompt: null,
+    assistantHostedAutomationAvailable: true,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,
@@ -12449,10 +13248,12 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
   const workflowSpecRevisionId = readString(
     revision?.workflowSpecRevisionId,
   )
+  const startPrompt = readString(goal?.startPrompt)
   if (
     !goal
     || !goalPhrase
     || !pageRevisionId
+    || !startPrompt
     || !workflowSpecRevisionId
   ) {
     throw new Error(
@@ -12464,6 +13265,7 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
     goalPhrase,
     key: PUBLIC_GOAL_SETUP_KEY,
     pageRevisionId,
+    startPrompt,
     workflowSpecRevisionId,
   }
 }
@@ -12484,9 +13286,184 @@ function readGoalSetupVaultCommands(
   })
 }
 
+function isSuccessfulCompactMemoryReadAction(
+  action: CapabilityRoutingAction,
+): boolean {
+  return action.kind === 'command'
+    && action.ok
+    && (
+      (
+        /\bvault-cli\s+memory\s+show\b/u.test(action.command)
+        && /--compact(?:=|\s|$)/u.test(action.command)
+      )
+      || /"argv":\s*\[\s*"memory",\s*"show"[\s\S]{0,300}"--compact"/u
+        .test(action.output)
+    )
+}
+
+function isSuccessfulPublicGoalListAction(
+  action: CapabilityRoutingAction,
+): boolean {
+  return action.kind === 'command'
+    && action.ok
+    && (
+      (
+        /\bvault-cli\s+commons\s+goal\s+list\b/u.test(action.command)
+        && /--query(?:=|\s)/u.test(action.command)
+      )
+      || /"argv":\s*\[\s*"commons",\s*"goal",\s*"list"[\s\S]{0,500}"--query"/u
+        .test(action.output)
+    )
+}
+
+function isSuccessfulGoalInventoryReadAction(
+  action: CapabilityRoutingAction,
+): boolean {
+  return action.kind === 'command'
+    && action.ok
+    && (
+      (
+        /\bvault-cli\s+goal\s+list\b/u.test(action.command)
+        && /--limit(?:=|\s+)200\b/u.test(action.command)
+        && !/--status(?:=|\s)/u.test(action.command)
+      )
+      || /"argv":\s*\[\s*"goal",\s*"list"[\s\S]{0,400}"--limit",\s*"200"/u
+        .test(action.output)
+    )
+}
+
+function isSuccessfulRegimenInventoryReadAction(
+  action: CapabilityRoutingAction,
+): boolean {
+  return action.kind === 'command'
+    && action.ok
+    && (
+      (
+        /\bvault-cli\s+regimen\s+list\b/u.test(action.command)
+        && /--limit(?:=|\s+)200\b/u.test(action.command)
+        && !/--status(?:=|\s)/u.test(action.command)
+      )
+      || (
+        /"argv":\s*\[\s*"regimen",\s*"list"[\s\S]{0,400}"--limit",\s*"200"/u
+          .test(action.output)
+        && !/"argv":\s*\[\s*"regimen",\s*"list"[\s\S]{0,400}"--status"/u
+          .test(action.output)
+      )
+    )
+}
+
+function readGoalSetupRegimenActionDiagnostics(
+  actions: readonly CapabilityRoutingAction[],
+): Array<{
+  allStatus: boolean
+  eventIndex: number
+  kind: 'list' | 'show'
+  limit200: boolean
+  ok: boolean
+}> {
+  return actions.flatMap((action) => {
+    if (action.kind !== 'command') return []
+    const isBatchList =
+      /"argv":\s*\[\s*"regimen",\s*"list"/u.test(action.output)
+    const isBatchShow =
+      /"argv":\s*\[\s*"regimen",\s*"show"/u.test(action.output)
+    const isList = /\bvault-cli\s+regimen\s+list\b/u.test(action.command)
+      || isBatchList
+    const isShow = /\bvault-cli\s+regimen\s+show\b/u.test(action.command)
+      || isBatchShow
+    if (!isList && !isShow) return []
+
+    return [{
+      allStatus: !/--status(?:=|\s)/u.test(action.command)
+        && !/"--status"/u.test(action.output),
+      eventIndex: action.eventIndex,
+      kind: isList ? 'list' as const : 'show' as const,
+      limit200: /--limit(?:=|\s+)200\b/u.test(action.command)
+        || /"--limit",\s*"200"/u.test(action.output),
+      ok: action.ok,
+    }]
+  })
+}
+
+function isSuccessfulGoalSupportInventoryAction(
+  action: CapabilityRoutingAction,
+  supportSeriesId: string,
+): boolean {
+  return action.kind === 'command'
+    && action.ok
+    && (
+      (
+        /\bvault-cli\s+automation\s+list\b/u.test(action.command)
+        && /--support-series-id(?:=|\s)/u.test(action.command)
+        && action.command.includes(supportSeriesId)
+      )
+      || (
+        /"argv":\s*\[\s*"automation",\s*"list"/u.test(action.output)
+        && action.output.includes('"--support-series-id"')
+        && action.output.includes(supportSeriesId)
+      )
+    )
+}
+
+function isSuccessfulGoalSetupEntityShowAction(
+  action: CapabilityRoutingAction,
+  entityKind: 'goal' | 'regimen',
+  entityId: string,
+): boolean {
+  const commandPattern = new RegExp(
+    `\\bvault-cli\\s+${entityKind}\\s+show\\b`,
+    'u',
+  )
+  const batchPattern = new RegExp(
+    `"argv":\\s*\\[\\s*"${entityKind}",\\s*"show"`,
+    'u',
+  )
+  return action.kind === 'command'
+    && action.ok
+    && (
+      (commandPattern.test(action.command) && action.command.includes(entityId))
+      || (batchPattern.test(action.output) && action.output.includes(entityId))
+    )
+}
+
+function isSuccessfulPublicGoalShowAction(
+  action: CapabilityRoutingAction,
+): boolean {
+  return action.kind === 'command'
+    && action.ok
+    && (
+      (
+        action.command.includes('commons goal show')
+        && action.command.includes('improve-deep-sleep')
+      )
+      || /"argv":\s*\[\s*"commons",\s*"goal",\s*"show",\s*"(?:goal_template:)?improve-deep-sleep"/u
+        .test(action.output)
+    )
+}
+
 function isGoalSetupMutationCommand(command: string): boolean {
-  return /^(?:goal (?:save|import-json)|regimen (?:save|import-json)|experiment start|automation )/u
+  return /^(?:goal (?:save|import-json)|regimen (?:save|import-json)|experiment start|automation (?:save|edit|reconcile-support-series))/u
     .test(command)
+}
+
+function isGoalSetupAutomationMutationRequest(
+  request: AssistantHostedAutomationToolRequest,
+): boolean {
+  return request.action === 'save'
+    || request.action === 'patch'
+    || request.action === 'reconcile'
+}
+
+function isGoalSetupAutomationMutationAction(
+  action: CapabilityRoutingAction,
+): boolean {
+  return action.kind === 'dynamic'
+    && action.tool === MURPH_AUTOMATION_TOOL.name
+    && (
+      action.argumentsValue.action === 'save'
+      || action.argumentsValue.action === 'patch'
+      || action.argumentsValue.action === 'reconcile'
+    )
 }
 
 function requireSuccessfulGoalSetupCommand(
@@ -12508,7 +13485,7 @@ function requireSuccessfulGoalSetupCommand(
 
 function expectNoScheduledGoalAutomationClaim(message: string): void {
   expect(message).not.toMatch(
-    /(?:(?:I|we)(?:'ve| have)?\s+(?:also\s+)?(?:scheduled|created|added|set up).{0,30}(?:reminder|check-in)|(?:reminder|check-in).{0,30}(?:is|was|has been)\s+scheduled)/iu,
+    /(?:(?:I|we)(?:'ve| have)?\s+(?:also\s+)?(?:scheduled|created|added|set up).{0,30}(?:reminder|check-in|review)|(?:reminder|check-in|review).{0,30}(?:is|was|has been)\s+scheduled)/iu,
   )
 }
 
@@ -12527,8 +13504,6 @@ async function materializePublicGoalSetupVaultCli(input: {
     path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT),
     '../../../tsconfig.base.json',
   )
-  const emit = (value: unknown) =>
-    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
   await writeFile(
     executablePath,
     [
@@ -12536,32 +13511,7 @@ async function materializePublicGoalSetupVaultCli(input: {
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
       `export TSX_TSCONFIG_PATH=${quoteNutritionShellLiteral(tsconfigPath)}`,
-      'case "$*" in',
-      `  "memory show --compact --format json") ${emit({
-        document: {
-          exists: true,
-          records: [
-            { id: 'memory-adult', section: 'Identity', text: 'Adult.' },
-            {
-              id: 'memory-sleep-context',
-              section: 'Context',
-              text: 'No known sleep-disordered-breathing or dangerous daytime-sleepiness warning signs.',
-            },
-          ],
-        },
-        memory: null,
-      })} ;;`,
-      `  "wearables sleep pattern --format json") ${emit({
-        nights: 14,
-        summary: {
-          averageSleepMinutes: 361,
-          notes: ['Consumer sleep stages are estimates.'],
-        },
-      })} ;;`,
-      '  *)',
-      `    exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
-      '    ;;',
-      'esac',
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     { encoding: 'utf8', mode: 0o700 },

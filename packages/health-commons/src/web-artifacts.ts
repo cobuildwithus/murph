@@ -30,6 +30,10 @@ import {
   type HealthCommonsWebBiomarkerProjectionArtifact,
   type HealthCommonsWebBiomarkerProjectionKey,
 } from "./biomarker-web-artifacts.ts";
+import {
+  extractHealthCommonsGoalSources,
+  type HealthCommonsGoalSource,
+} from "./goal-sources.ts";
 import { isRunnableProtocolStatus } from "./protocol-publishing.ts";
 
 export {
@@ -48,9 +52,9 @@ export const HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION =
 export const HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION =
   "murph.commons.web.biomarker-index.v3" as const;
 export const HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION =
-  "murph.commons.web.goal-index.v1" as const;
+  "murph.commons.web.goal-index.v2" as const;
 export const HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION =
-  "murph.commons.web.goal-page.v1" as const;
+  "murph.commons.web.goal-page.v2" as const;
 export const HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION =
   "murph.commons.web.experiment-research-tab.v1" as const;
 export const HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION =
@@ -215,7 +219,6 @@ export interface HealthCommonsWebGoalIndexEntry {
   aliases: string[];
   bundlePath: string;
   category: HealthCommonsGoalTemplate["category"];
-  evidenceSourceKeys: HealthCommonsGoalTemplate["evidenceSourceKeys"];
   goalPhrase: string;
   key: string;
   outcomeKind: HealthCommonsGoalTemplate["outcomeKind"];
@@ -228,6 +231,7 @@ export interface HealthCommonsWebGoalIndexEntry {
   slug: string;
   startPrompt: string;
   status: string;
+  sources: HealthCommonsGoalSource[];
   successSignals: HealthCommonsGoalTemplate["successSignals"];
   summary: string;
   title: string;
@@ -244,7 +248,7 @@ export interface HealthCommonsWebGoalPage {
   aliases: string[];
   body: string;
   catalogHash: string;
-  goal: HealthCommonsGoalTemplate;
+  goal: Omit<HealthCommonsGoalTemplate, "evidenceSourceKeys">;
   key: string;
   revision: HealthCommonsWebGoalRevisionRef;
   route: {
@@ -255,7 +259,7 @@ export interface HealthCommonsWebGoalPage {
   };
   safety: HealthCommonsSafety;
   schemaVersion: typeof HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION;
-  sourceSnippets: HealthCommonsWebSourceSnippet[];
+  sources: HealthCommonsGoalSource[];
   summary: string;
   title: string;
 }
@@ -850,7 +854,6 @@ export function buildHealthCommonsWebGeneratedArtifacts(
             aliases: entity.aliases ?? [],
             bundlePath: bundlePathForEntity(entity.entityType, bundle.route.routeId),
             category: entity.goal.category,
-            evidenceSourceKeys: entity.goal.evidenceSourceKeys,
             goalPhrase: entity.goal.goalPhrase,
             key: entity.key,
             outcomeKind: entity.goal.outcomeKind,
@@ -863,6 +866,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
             slug: entity.slug,
             startPrompt: entity.goal.startPrompt,
             status: entity.status,
+            sources: extractHealthCommonsGoalSources(entity.body),
             successSignals: entity.goal.successSignals,
             summary: entity.summary,
             title: entity.title,
@@ -897,7 +901,7 @@ function buildGoalPage(input: {
     aliases: input.goal.aliases ?? [],
     body: input.goal.body,
     catalogHash: input.bundle.catalogHash,
-    goal: input.goal.goal,
+    goal: toWebGoalTemplate(input.goal.goal),
     key: input.goal.key,
     revision: goalRevisionRefForEntity(input.goal),
     route: {
@@ -908,13 +912,17 @@ function buildGoalPage(input: {
     },
     safety: input.goal.safety,
     schemaVersion: HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION,
-    sourceSnippets: input.goal.goal.evidenceSourceKeys.flatMap((sourceKey) => {
-      const snippet = input.bundle.sourceSnippets[sourceKey];
-      return snippet ? [snippet] : [];
-    }),
+    sources: extractHealthCommonsGoalSources(input.goal.body),
     summary: input.goal.summary,
     title: input.goal.title,
   };
+}
+
+function toWebGoalTemplate(
+  goal: HealthCommonsGoalTemplate,
+): Omit<HealthCommonsGoalTemplate, "evidenceSourceKeys"> {
+  const { evidenceSourceKeys: _legacyEvidenceSourceKeys, ...webGoal } = goal;
+  return webGoal;
 }
 
 function buildRouteBundle(input: {

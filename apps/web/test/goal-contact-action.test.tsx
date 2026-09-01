@@ -15,7 +15,9 @@ test("goal CTA is one direct native Messages link with the exact draft", () => {
     kind: "text",
     label: "Messages",
   };
-  const markup = renderToStaticMarkup(<GoalContactAction option={option} />);
+  const markup = renderToStaticMarkup(
+    <GoalContactAction goalRouteId="lower-resting-heart-rate" option={option} />,
+  );
 
   assert.equal((markup.match(/<a\b/gu) ?? []).length, 1);
   assert.match(markup, /aria-label="Build my plan with Murph in Messages"/u);
@@ -40,7 +42,9 @@ test("goal CTA preserves Telegram's direct web-to-app fallback", () => {
     rel: "noopener noreferrer",
     target: "_blank",
   };
-  const markup = renderToStaticMarkup(<GoalContactAction option={option} />);
+  const markup = renderToStaticMarkup(
+    <GoalContactAction goalRouteId="lower-resting-heart-rate" option={option} />,
+  );
 
   assert.equal((markup.match(/<a\b/gu) ?? []).length, 1);
   assert.match(

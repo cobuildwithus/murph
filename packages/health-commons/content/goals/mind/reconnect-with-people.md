@@ -49,7 +49,7 @@ A good reconnection message is warm, specific, and easy to answer. It acknowledg
 
 ## What to do
 
-- **Make a short reconnection list.** Choose three to five people you remember with warmth, trust, or genuine curiosity. Prioritize relationships that were respectful and reasonably mutual.
+- **Make a short reconnection list.** Choose a few people you remember with warmth, trust, or genuine curiosity. Prioritize relationships that were respectful and reasonably mutual.
 - **Know why you are reaching out.** You might miss the person, want to repair an accidental drift, appreciate what they meant to you, or simply wonder how they are. Avoid contacting someone only to relieve guilt or ask for a favor.
 - **Send a low-pressure message.** Mention a real memory or reason you thought of them, say you would enjoy catching up, and make it clear there is no obligation.
 - **Offer a specific next step.** Suggest a short call, coffee, walk, or a couple of times that work. A concrete option is easier to accept than “we should catch up someday.”
@@ -60,13 +60,13 @@ A good reconnection message is warm, specific, and easy to answer. It acknowledg
 
 ## A simple plan
 
-Write five names and put each in one of three groups: easy reconnection, meaningful but uncertain, or repair needed. Start with one easy reconnection so you can practice without placing all your hopes on the most emotionally complicated relationship.
+Write a short list of names and put each in one of three groups: easy reconnection, meaningful but uncertain, or repair needed. Start with one easy reconnection so you can practice without placing all your hopes on the most emotionally complicated relationship.
 
 Draft a three-part message: why they came to mind, a warm statement, and a specific invitation. For example: “I walked past the place where we used to get lunch and thought of you. I’d really like to hear how you are. Would you be up for a 20-minute call next week?” Edit out long explanations and send it.
 
 If they respond warmly, confirm a plan promptly. During the conversation, ask more than you report. Share an honest update, but do not try to cover every lost year. End by saying whether you would like to do it again and suggest a next step.
 
-Send no more than one or two reconnection messages per week. This leaves attention for real follow-through and prevents the goal from becoming a burst of outreach with no sustained contact. Review after six weeks: count messages, replies, conversations, and relationships where both people want another plan.
+Send messages at a pace that leaves attention for real follow-through; one at a time is enough. After several weeks, review messages, replies, conversations, and relationships where both people want another plan.
 
 ## How to know it is working
 

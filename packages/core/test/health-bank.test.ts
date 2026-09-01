@@ -78,6 +78,40 @@ function selectAuditMetadata(records: unknown[], action: string): Array<{
     }));
 }
 
+async function snapshotRelativeFiles(
+  vaultRoot: string,
+  relativeRoot: string,
+): Promise<Array<[string, string]>> {
+  const absoluteRoot = path.join(vaultRoot, relativeRoot);
+  let entries: string[];
+
+  try {
+    entries = await fs.readdir(absoluteRoot, { recursive: true });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const snapshot: Array<[string, string]> = [];
+  for (const relativePath of entries) {
+    try {
+      snapshot.push([
+        relativePath,
+        (await fs.readFile(path.join(absoluteRoot, relativePath))).toString("base64"),
+      ]);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "EISDIR") {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return snapshot.sort(([left], [right]) => left.localeCompare(right));
+}
+
 test("goals support multiple active records and preserve relationships in markdown registries", async () => {
   const vaultRoot = await makeTempDirectory("murph-goals");
   await initializeVault({ vaultRoot });
@@ -207,6 +241,79 @@ test("goals default start dates from the vault timezone only when missing", asyn
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("goal update-only intent rejects an absent id before canonical or audit writes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-update-only");
+  await initializeVault({ vaultRoot });
+
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Keep this goal",
+    slug: "keep-this-goal",
+    window: {
+      startAt: "2026-03-12",
+    },
+  });
+  assert.equal(created.created, true);
+
+  const replacementSuffix = created.record.entity.goalId.endsWith("A") ? "B" : "A";
+  const missingGoalId = `${created.record.entity.goalId.slice(0, -1)}${replacementSuffix}`;
+  const goalBefore = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+  const auditBefore = await snapshotRelativeFiles(vaultRoot, "audit");
+  const operationsBefore = await listWriteOperationMetadataPaths(vaultRoot);
+
+  for (const update of [
+    {
+      status: "paused" as const,
+    },
+    {
+      slug: created.record.entity.slug,
+      title: "Must not replace",
+    },
+  ]) {
+    await assert.rejects(
+      () =>
+        upsertGoal({
+          vaultRoot,
+          goalId: missingGoalId,
+          requireExistingGoalId: true,
+          ...update,
+        }),
+      (error: unknown) =>
+        error instanceof VaultError
+        && error.code === "VAULT_GOAL_MISSING"
+        && error.message === "Goal was not found.",
+    );
+  }
+
+  assert.deepEqual(
+    await readGoal({
+      vaultRoot,
+      goalId: created.record.entity.goalId,
+    }),
+    goalBefore,
+  );
+  assert.deepEqual(
+    await snapshotRelativeFiles(vaultRoot, "audit"),
+    auditBefore,
+  );
+  assert.deepEqual(
+    await listWriteOperationMetadataPaths(vaultRoot),
+    operationsBefore,
+  );
+
+  const updated = await upsertGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+    requireExistingGoalId: true,
+    title: "Update this goal",
+  });
+  assert.equal(updated.created, false);
+  assert.equal(updated.record.entity.title, "Update this goal");
 });
 
 test("goal updates can clear shared relation fields without leaving stale links behind", async () => {

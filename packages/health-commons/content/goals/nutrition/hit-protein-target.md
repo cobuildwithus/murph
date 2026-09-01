@@ -46,7 +46,7 @@ safety:
     - "A higher number is not automatically better, and supplements are optional."
 ---
 
-Hitting a protein target is easiest when the number is realistic and ordinary meals do most of the work. For generally healthy adults, the basic recommended allowance is 0.8 grams per kilogram of body weight per day. People who train regularly, want to build or preserve muscle, or are eating in a calorie deficit often use a higher range—commonly around 1.2 to 1.6 g/kg/day—depending on health, total energy intake, body size, and training. More is not automatically better.
+Hitting a protein target is easiest when the number is realistic and ordinary meals do most of the work. For generally healthy adults, the basic recommended allowance is 0.8 grams per kilogram of body weight per day. Healthy adults who train regularly—especially with resistance training, including during a calorie deficit—often use a higher range of roughly 1.2 to 1.6 g/kg/day to support muscle. Health, total energy intake, body size, and training still matter. More is not automatically better.
 
 ## What to do
 
@@ -54,13 +54,13 @@ Choose a working range rather than a perfect single number. Convert pounds to ki
 
 Audit three ordinary days, including one weekend day. You only need enough detail to see where the gaps are. Breakfast and lunch are common weak points. Add one dependable protein “anchor” to the weakest meal before rebuilding the entire day.
 
-Spread useful portions across three or four eating occasions. For many adults, roughly 25 to 40 grams in a meal is practical, though body size and the daily target matter. Food options include Greek yogurt, eggs, cottage cheese, milk or fortified soy milk, tofu, tempeh, lentils, beans, fish, poultry, lean meat, seitan, or a grain-and-legume combination. Supplements are optional convenience, not a requirement.
+Spread useful portions across three or four eating occasions. For many healthy, exercising adults, roughly 25 to 40 grams in a meal is practical, though body size and the daily target matter. Food options include Greek yogurt, eggs, cottage cheese, milk or fortified soy milk, tofu, tempeh, lentils, beans, fish, poultry, lean meat, seitan, or a grain-and-legume combination. Supplements are optional convenience, not a requirement.
 
 ## A simple plan
 
 Use this one-week setup, then repeat it:
 
-1. **Pick the range.** Use 0.8 g/kg/day as the general adult RDA/reference target, not a universal personalized floor. Consider roughly 1.2 to 1.6 g/kg/day when regular training or muscle preservation is a meaningful goal. If you have a relevant medical condition, get an individualized target first.
+1. **Pick the range.** Use 0.8 g/kg/day as the general adult RDA/reference target, not a universal personalized floor. If you are a generally healthy adult who trains regularly, consider roughly 1.2 to 1.6 g/kg/day when building or preserving muscle is a meaningful goal. If you have a relevant medical condition or are not sure the range fits your situation, get an individualized target first.
 2. **Choose three anchors.** Pick one reliable option for breakfast, lunch, and dinner. Write the approximate protein amount next to each; package labels and a reputable food database are sufficient.
 3. **Close the remaining gap.** If the three meals leave 15 to 25 grams, add a purposeful snack such as yogurt, cottage cheese, edamame, milk, soy milk, or a shake. Do not turn all-day grazing into the default.
 4. **Prepare for the hard context.** Keep a portable option for travel, work, or the period after training. Convenience is often the real bottleneck.

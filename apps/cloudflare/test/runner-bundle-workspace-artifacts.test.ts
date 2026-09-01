@@ -594,12 +594,17 @@ describe("runner bundle runtime artifact staging", () => {
 
     expect(findGoalArtifactEntry(goalIndex, "goal_template:improve-deep-sleep"))
       .toMatchObject({
-        evidenceSourceKeys: expect.any(Array),
         revision: {
           pageRevisionId: expect.stringMatching(/^sha256:/u),
           workflowSpecRevisionId: expect.stringMatching(/^sha256:/u),
         },
         routeId: "improve-deep-sleep",
+        sources: expect.arrayContaining([
+          expect.objectContaining({
+            label: expect.any(String),
+            url: expect.stringMatching(/^https?:\/\//u),
+          }),
+        ]),
         startPrompt: "Hey Murph, help me improve my deep sleep.",
       });
 
@@ -967,7 +972,7 @@ async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): 
     `${JSON.stringify({
       catalogHash: "sha256:test",
       goals: [],
-      schemaVersion: "murph.commons.web.goal-index.v1",
+      schemaVersion: "murph.commons.web.goal-index.v2",
     })}\n`,
     "utf8",
   );

@@ -1,4 +1,7 @@
-import type { HealthCommonsWebGoalIndexEntry } from "@murphai/health-commons/runtime";
+import type {
+  HealthCommonsWebGoalIndexEntry,
+  HealthCommonsWebGoalPage,
+} from "@murphai/health-commons/goal-runtime";
 
 import type { GoalCategorySlug } from "./goal-categories";
 
@@ -20,6 +23,7 @@ export interface GoalIndexEntryModel {
 export interface GoalPageModel extends GoalIndexEntryModel {
   body: string;
   indexable: boolean;
+  sources: HealthCommonsWebGoalPage["sources"];
 }
 
 export interface GoalRouteResolution {

@@ -51,7 +51,7 @@ Balance improves when it is challenged **often, progressively, and safely**. Str
 ## What to do
 
 - **Practice near stable support.** Stand beside a kitchen counter or heavy table, not in the middle of the room. Use fingertip support as needed and reduce it only when you remain steady.
-- **Progress stance.** Begin with feet together, then semi-tandem, tandem, and single-leg stance. A useful challenge creates small corrections without repeated loss of control.
+- **Progress stance.** Begin with feet together, then semi-tandem (one foot about half a step ahead), tandem (heel directly in front of the other toes), and single-leg stance. A useful challenge creates small corrections without repeated loss of control.
 - **Practice movement, not only stillness.** Add weight shifts, marching, stepping in different directions, turning, reaching, and stepping over a low object. Falls happen during movement.
 - **Strengthen the legs.** Chair stands, step-ups, calf raises, hip hinges, and side steps improve the force needed to recover from a stumble.
 - **Train three or more days per week.** Five to ten minutes is enough for a focused session. Balance responds to frequent practice better than a single long weekly session.
@@ -61,7 +61,7 @@ Balance improves when it is challenged **often, progressively, and safely**. Str
 
 ## A simple plan
 
-For eight weeks, practice for eight minutes on four days per week beside a counter. Do two rounds of 20 seconds each in feet-together, semi-tandem, and tandem stance; ten slow marches; five steps in each direction; and three controlled turns each way. Finish with eight chair stands and ten calf raises.
+For eight weeks, practice for eight minutes on four days per week beside a counter. Do two rounds of 20 seconds each with feet together, one foot half a step ahead (semi-tandem), and heel-to-toe (tandem); ten slow marches; five steps in each direction; and three controlled turns each way. Finish with eight chair stands and ten calf raises.
 
 When a position is easy for two sessions, reduce hand support, narrow the stance, add a gentle head turn, or practice on a slightly less predictable surface—but change only one variable. Once per week, practice a real task such as a curb, stairs, or uneven ground with appropriate support or another person nearby.
 
@@ -74,8 +74,6 @@ Look for less hand support, longer stable holds, smoother turns, easier curbs an
 If practice never feels challenging, it may be too easy. If you are repeatedly grabbing support, it is too hard. Adjust to the middle. If one side is much less steady, add a little extra practice but investigate new or pronounced asymmetry.
 
 Balance problems that come with spinning, faintness, hearing change, numbness, vision loss, or a medication change need cause-specific attention. After a fall, fear can lead to less movement and further weakness; a supervised program can rebuild safety and confidence together.
-
-Match practice to the places where steadiness matters. If curbs are difficult, rehearse controlled step-ups near a rail. If turning causes trouble, practice slow turns in both directions with a stable surface nearby. If getting dressed on one leg feels unsafe, practice weight shifts first and sit for the real task until control improves. Progress by narrowing the stance, reducing hand support, moving the head, stepping in different directions, or adding a simple mental task—but change only one challenge at a time. Use a counter, rail, or another person so a training drill does not become a fall. Shoes, lighting, vision correction, and a clear walking path can improve safety while physical capacity catches up. Practice both sides, giving the less steady side one extra safe set when appropriate.
 
 ## A quick note
 

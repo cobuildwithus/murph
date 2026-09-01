@@ -76,8 +76,6 @@ Persistent insomnia is not solved by spending more time in bed. If worry about s
 
 Review caffeine timing, nasal congestion, reflux, iron status, anxiety or depression, and medicines. A care team can distinguish common pregnancy changes from a treatable sleep disorder and identify options that are appropriate in pregnancy.
 
-Design a backup plan for fragmented nights. Keep the wake time within a workable range, get daylight after waking, and use a short daytime rest when needed without turning every bad night into a long day in bed. A pillow between the knees, support under the abdomen, a raised upper body for reflux, and easy access to the bathroom can reduce avoidable awakenings. If a position becomes uncomfortable, change it; waking on your back is not a reason to panic. Judge progress by easier settling, fewer prolonged awakenings, and better daytime function rather than a wearable’s estimate of deep sleep, which is not a diagnostic measure.
-
 ## A quick note
 
 Seek prompt advice for breathing pauses, severe breathlessness, fainting, chest symptoms, or dangerous daytime sleepiness. Check every sleep medicine and supplement with the pregnancy care team.

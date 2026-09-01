@@ -29,7 +29,7 @@ goal:
       kind: milestone
       label: Holding the new schedule for two weeks
   evidenceSourceKeys:
-    - source_artifact:pmid-18041479
+    - source_artifact:pmid-26414986
     - source_artifact:pmid-37684151
   workflow:
     kind: habit_plan
@@ -47,7 +47,7 @@ A drifted sleep schedule is usually easier to move with **consistent timing, mor
 ## What to do
 
 - Set the target wake time first. It is the strongest practical anchor because it determines when sleep pressure begins building again.
-- Move wake time by 15 to 30 minutes every one to three days. Bigger jumps can work for deadlines but usually feel rougher.
+- Start with a small wake-time shift—often 15 to 30 minutes—and hold it for one to three days before deciding whether to move again. This is a practical starting pace, not a universal prescription.
 - Get outdoor light after waking. In the evening, lower bright light and stop activities that repeatedly push bedtime later.
 - Move meals, exercise, and social activity toward the new schedule too. The body clock listens to a pattern of cues.
 - Avoid sleeping far into the day after a poor night. If needed, use a short early-afternoon nap while the schedule settles.
@@ -58,7 +58,7 @@ Write down your current average sleep and wake times and the target times. Choos
 
 If you must make a large shift for work or school, begin several days ahead. Expect the first mornings to feel harder and protect enough total sleep during the change.
 
-Use the direction of the shift to guide the evening. To move earlier, bring wake time, morning light, meals, and the work cutoff earlier together. To move later, avoid unintentionally locking in a very early rhythm with pre-dawn light and an early bedtime. Light timing is powerful enough that random exposure can work against the intended change.
+Use the direction of the shift to guide the evening. To move earlier, bring wake time, morning light, meals, and the work cutoff earlier together. To move later, avoid unintentionally locking in a very early rhythm with pre-dawn light and an early bedtime. Because light timing affects the body clock, poorly timed exposure can work against the intended change.
 
 Do not use an all-nighter as the default reset. It creates sleepiness but does not reliably place the body clock where you want it, and the resulting long recovery sleep can restart the drift. When a deadline requires a fast change, preserve a safe minimum of sleep and return to gradual steps afterward.
 
@@ -80,5 +80,5 @@ Melatonin and bright-light devices are timing tools, not generic sedatives. Timi
 
 ## Sources
 
-- [AASM practice parameters for circadian rhythm sleep disorders](https://pubmed.ncbi.nlm.nih.gov/18041479/)
+- [AASM 2015 guideline for intrinsic circadian rhythm sleep-wake disorders](https://pubmed.ncbi.nlm.nih.gov/26414986/)
 - [NHLBI: healthy sleep habits](https://www.nhlbi.nih.gov/health/sleep-deprivation/healthy-sleep-habits)

@@ -64,8 +64,8 @@ For one week, note when doomscrolling starts, what you were seeking, and how lon
 
 For the next two weeks, replace that pattern with a bounded news routine:
 
-1. Select two reliable sources.
-2. Check them at one scheduled time for no more than 15 or 20 minutes.
+1. Select one or two reliable sources.
+2. Check them in one scheduled window. Fifteen to 20 minutes is a starting example, not a required limit.
 3. Write any action or question that follows.
 4. Close the source and perform a physical transition.
 

@@ -1,6 +1,6 @@
 # Public Goal Guides
 
-Last verified: 2026-08-30
+Last verified: 2026-08-31
 
 ## Current State
 
@@ -23,6 +23,10 @@ of existing private primitives.
   automation, experiment, or message by itself.
 - Generated public indexes and page projections are build artifacts. Authored
   Markdown remains the source of truth.
+- The authored `Sources` section is the citation authority for the public page
+  and Murph's compact goal lookup. Generated `sources` records preserve its
+  labels and URLs; legacy `evidenceSourceKeys` remain internal catalog metadata
+  and must not replace or contradict the citations shown to readers.
 - One `goal-setup` assistant skill coordinates the private workflow. Do not add
   one skill or plugin per public guide.
 - Typed `goal save` is the only production caller that may supply public
@@ -59,7 +63,7 @@ Every indexable guide includes:
 - one category and outcome kind;
 - a natural `goalPhrase`;
 - one or more observable success signals;
-- current supporting source keys;
+- at least two direct public citations with human-readable labels and HTTPS URLs;
 - a workflow kind and one to four existing owner skill ids;
 - the exact start prompt `Hey Murph, help me <goalPhrase>.`;
 - proportional safety metadata;
@@ -79,12 +83,24 @@ review claim unless that review actually occurred and its owner is recorded.
 
 The primary action shows the Murph mark followed by `Build my plan`.
 
-- The action is one ordinary link, not a review dialog or channel chooser.
+- The action is one direct handoff, not a review dialog or channel chooser.
 - A signed-in member with a verified phone and resolved assigned Murph line
-  opens native Messages directly with the guide-owned start prompt prefilled.
-- Every other state opens Telegram directly with the same prefilled prompt.
-- Email, clipboard mutation, programmatic navigation, and line assignment are
-  intentionally excluded from the public handoff.
+  resolves that private route at click time and opens native Messages directly
+  with the guide-owned start prompt prefilled. The static article never caches
+  member routing.
+- Before that signed-in route resolves, the action is an inert button rather
+  than an anonymous link; an early click waits for the same private resolution.
+- Anonymous visitors open Telegram directly with the same prefilled prompt. A
+  signed-in member uses Telegram only when Telegram is their available linked
+  messaging channel and no text route is expected.
+- If authenticated routing cannot be resolved, the action stays on the page
+  with a retry message instead of falling back to another messaging vendor.
+- Email, clipboard mutation, review dialogs, and client-side line assignment
+  are intentionally excluded from the public handoff.
+- If the first direct Telegram message arrives before that Telegram account is
+  linked, the setup reply restores a draft only when the inbound text exactly
+  matches a published goal prompt. Arbitrary inbound text is never copied into
+  a URL, persisted as pending setup state, or replayed automatically.
 - Nothing is sent and no private record is created until the person sends the
   message and later accepts Murph's proposed setup.
 
@@ -95,13 +111,24 @@ After the person sends the prompt, `goal-setup`:
 1. resolves the public guide through `commons goal list` and `commons goal show`;
 2. retains the exact public key, page revision, and workflow revision;
 3. reads only the private context needed to avoid repeating known facts;
-4. asks one focused question when a material setup choice is still unknown;
-5. proposes a small, reviewable plan using the guide and relevant domain skill;
+4. for repeated action, loads `behavior-followthrough` before setup, reuses or
+   learns the person's reason, current pattern, prior attempts, action window,
+   and main friction one focused question per reply when they matter;
+5. proposes a small, reviewable plan using the guide and relevant domain skill,
+   with one editable finite reminder-and-review default or explicit quiet
+   support for repeated action;
 6. waits for explicit acceptance before any private write;
 7. saves one canonical private Goal with `commonsGoalRef` lineage;
-8. composes existing habit, regimen, training, tracking, automation, or
-   experiment primitives only when the accepted plan needs them;
-9. reads back the saved state and explains the next action in plain language.
+8. for an accepted non-experiment `habit_plan` or `training_plan`, reuses or
+   creates exactly one `kind=habit` regimen linked to the Goal as the durable
+   behavior-loop and support owner; domain workout or tracking records may hold
+   details but do not replace it;
+9. preserves the user's own reason, material constraints, complete accepted
+   loop, support boundary, review, and off-ramp in that regimen;
+10. inventories every page of `habit:<regimenId>` support before effects,
+    creates only missing accepted support, and reconciles the series to its
+    exact desired ids;
+11. reads back the saved state and explains the next action in plain language.
 
 A guide revision mismatch before persistence requires reopening the changed
 setup. It must not silently bind a private Goal to a different workflow.
@@ -115,7 +142,8 @@ setup. It must not silently bind a private Goal to a different workflow.
 - Include canonical guide and category URLs in the generated sitemap.
 - Use truthful Article and Breadcrumb structured data when present. Do not add
   deprecated HowTo or broad FAQ rich-result markup.
-- Search and filter query URLs are not indexable.
+- Goal search filters the public index in the browser and never writes the
+  reader's health query to a URL, history entry, or server request.
 - Health claims show visible sources. Content exists to solve the reader's
   goal, not to manufacture search inventory.
 

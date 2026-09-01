@@ -23,15 +23,15 @@ goal:
     - id: repeated_effort_capacity
       kind: capacity
       label: Better repeated sprint, shuffle, and jump capacity
-    - id: late_game_skill_quality
+    - id: late_game_movement_quality
       kind: function
-      label: Skill and decision quality hold up later in play
+      label: Movement quality holds up later in play
     - id: weekly_court_conditioning
       kind: behavior
       label: Consistent court, aerobic, and strength preparation
   evidenceSourceKeys:
     - source_artifact:health.gov-physical-activity-guidelines-2018-11-12
-    - source_artifact:pmid-17414804
+    - source_artifact:pmid-40046212
     - source_artifact:acsm-guidelines-exercise-testing-prescription-2025-03-24
   workflow:
     kind: training_plan
@@ -70,7 +70,7 @@ Before a league or tryout, practice full-court sequences and several longer scri
 
 ## How to know it is working
 
-Breathing settles sooner between possessions, sprint speed drops less across repeated efforts, and shooting or decision quality holds up later in practice. You can complete more game-like work without needing several recovery days.
+Breathing settles sooner between possessions, sprint speed drops less across repeated efforts, and movement quality holds up later in practice. Track shooting and decision quality separately: conditioning can support skill practice, but basketball studies report inconsistent effects on shooting accuracy and passing.
 
 Use a simple repeatable circuit—such as six court lengths with fixed rest—every few weeks, but do not test it weekly. Real success is being able to play the intended minutes with useful movement and skill.
 
@@ -91,5 +91,5 @@ Warm up before high-speed cutting and jumping. Stop for chest pain, fainting, se
 ## Sources
 
 - [Physical Activity Guidelines for Americans, 2nd edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
-- [Helgerud et al.: aerobic intervals and VO2 max](https://pubmed.ncbi.nlm.nih.gov/17414804/)
+- [Systematic review and meta-analysis of high-intensity interval training in basketball players](https://pubmed.ncbi.nlm.nih.gov/40046212/)
 - [2025 IOC consensus recommendations on athlete injury prevention](https://bjsm.bmj.com/content/59/22/1546)

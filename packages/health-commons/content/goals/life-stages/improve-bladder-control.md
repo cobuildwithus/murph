@@ -50,8 +50,8 @@ Bladder control usually improves fastest when the plan matches the problem. **St
 ## What to do
 
 - **Identify the pattern for three days.** Record approximate drink times, bathroom trips, strong urges, leaks, and what you were doing. Do not measure every milliliter unless a clinician asks. The pattern distinguishes stress, urgency, and mixed symptoms.
-- **Learn a correct pelvic-floor contraction.** Imagine stopping gas and closing around the urethra without squeezing the buttocks, holding the breath, or bearing down. Fully relax after each contraction. If you cannot feel a lift and release, pelvic-floor physical therapy is more useful than guessing.
-- **Train consistently, not constantly.** A common starting point is a small set of comfortable contractions once or twice per day, including both short and several-second holds. Quality and full relaxation matter more than high repetition counts.
+- **Use gentle reconnection as a technique check, not the whole treatment.** Imagine stopping gas and closing around the urethra without squeezing the buttocks, holding the breath, or bearing down, then fully relax. If you cannot feel both lift and release, pelvic-floor physical therapy is more useful than guessing.
+- **Match supervised treatment to the symptom.** For women with stress or mixed urinary incontinence, NICE recommends supervised pelvic-floor muscle training for at least three months. A clinician can tailor contraction and relaxation work when pain, prolapse, postpartum injury, prostate treatment, or difficulty emptying changes the plan.
 - **Use “the knack” for stress leaks.** Gently contract the pelvic floor just before and during a cough, sneeze, lift, or landing, then release.
 - **Retrain urgency gradually.** When a safe, strong urge appears soon after the last bathroom trip, pause, breathe slowly, use a few quick pelvic-floor contractions if they help, and walk calmly to the bathroom after the urge settles. Gradually extend overly frequent trips rather than holding through pain.
 - **Keep fluids normal.** Concentrated urine can irritate the bladder. Shift excess evening fluid earlier if nighttime trips are the issue, but do not deliberately dehydrate yourself.
@@ -59,9 +59,9 @@ Bladder control usually improves fastest when the plan matches the problem. **St
 
 ## A simple plan
 
-For 12 weeks, complete pelvic-floor practice five or six days per week and keep a three-day bladder diary at the beginning, week six, and week twelve. If stress leaks dominate, pair the contraction with your three most common triggers and scale jumping or heavy lifting temporarily while strength and timing improve. If urgency dominates, choose a realistic minimum interval based on your current pattern and extend it by about 10 to 15 minutes when comfortable.
+Start with a three-day bladder diary and use it to identify stress, urgency, or mixed symptoms. If stress or mixed leaks dominate, arrange an assessed, supervised pelvic-floor program and pair the taught contraction with common triggers such as coughing or lifting. If urgency dominates, use a structured bladder-training program for at least six weeks; extend overly frequent trips gradually without holding through pain.
 
-Keep bowel movements soft with adequate fluid, fiber, and movement. If technique is uncertain, symptoms are significant, or progress is absent after six weeks, arrange pelvic-floor physical therapy or a continence evaluation rather than doubling the repetitions.
+Keep bowel movements soft with adequate fluid, fiber, and movement. Repeat the three-day diary at the clinician-agreed review point. If technique is uncertain, symptoms are significant, or progress stalls, seek pelvic-floor physical therapy or a continence evaluation rather than doubling repetitions.
 
 ## How to know it is working
 
@@ -70,8 +70,6 @@ Count leak episodes, not perfect days. Improvement can mean fewer leaks per week
 ## If you get stuck
 
 Check the type of incontinence and the technique. Constantly clenching can create fatigue and pain. Urgency may need structured bladder training or medication; stress incontinence may benefit from a pessary, specialized physical therapy, or a procedure. Menopause-related urinary symptoms may improve with treatment for genitourinary syndrome of menopause. Postpartum recovery, prolapse, prostate conditions, neurologic disease, and prior pelvic surgery each change the plan.
-
-Use a three-day bladder diary if the pattern is unclear. Note drinks, bathroom times, urgency, leaks, and what you were doing—not every detail indefinitely. The diary can reveal whether the main issue is coughing and impact, sudden urgency, unusually frequent preventive trips, constipation, or large fluid swings. Then practice the relevant skill. For urgency, pause, breathe, use several quick pelvic-floor contractions if comfortable, let the urge settle, and walk calmly to the bathroom. For stress leaks, coordinate a contraction just before a cough or lift. Progress is often fewer leaks and more confidence before it is complete dryness.
 
 ## A quick note
 

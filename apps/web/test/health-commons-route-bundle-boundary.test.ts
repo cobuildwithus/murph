@@ -72,6 +72,28 @@ describe("Health Commons route-bundle boundary", () => {
     expect(source).not.toContain("@murphai/health-commons/runtime");
   });
 
+  it("keeps Goal projections on the narrow Goal runtime", () => {
+    for (const relativePath of [
+      "apps/web/src/lib/goals/goal-models.ts",
+      "apps/web/src/lib/health-commons/goal-projections.ts",
+    ]) {
+      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
+
+      expect(source, relativePath).toContain("@murphai/health-commons/goal-runtime");
+      expect(source, relativePath).not.toContain("@murphai/health-commons/runtime");
+    }
+  });
+
+  it("keeps public Goal recovery on the validated index-only runtime", () => {
+    const relativePath =
+      "apps/web/src/lib/hosted-onboarding/visible-secondary-webhooks.ts";
+    const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
+
+    expect(source).toContain("@murphai/health-commons/goal-index-runtime");
+    expect(source).not.toContain("@murphai/health-commons/goal-runtime");
+    expect(source).not.toContain("@murphai/health-commons/generated/");
+  });
+
   it("keeps public biomarker pages on generated page projections instead of route bundles", () => {
     const files = [
       "apps/web/app/(dashboard)/biomarkers/page.tsx",

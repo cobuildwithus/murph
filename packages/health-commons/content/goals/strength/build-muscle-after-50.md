@@ -30,7 +30,7 @@ goal:
       label: Muscle size or lean-mass trend is maintained or improved
   evidenceSourceKeys:
     - source_artifact:pmid-41843416
-    - source_artifact:pmid-36178003
+    - source_artifact:pmid-39579806
   workflow:
     kind: training_plan
     ownerSkillIds:

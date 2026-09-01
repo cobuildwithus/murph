@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { GoalContactAction } from "@/src/components/goals/goal-contact-action";
-import { GoalCategoryArtwork, GoalOutcomeMark } from "@/src/components/goals/goal-visual";
+import { GoalCategoryArtwork } from "@/src/components/goals/goal-visual";
 import { MarkdownView } from "@/src/components/ui/markdown-view";
 import type { GoalCategory } from "@/src/lib/goals/goal-categories";
 import type { GoalPageModel } from "@/src/lib/goals/goal-models";
@@ -37,24 +37,20 @@ export function GoalGuide({
       <header className="border-b border-border/70 pb-10">
         <div className="grid gap-8 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-start">
           <div>
-            <div className="flex items-center gap-3">
-              <GoalOutcomeMark
-                category={category.slug}
-                className="size-9"
-                outcomeKind={goal.outcomeKind}
-              />
-              <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                {category.label}
-              </span>
-            </div>
-            <h1 className="mt-4 font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-foreground sm:text-5xl">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              {category.label}
+            </span>
+            <h1 className="mt-3 font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-foreground sm:text-5xl">
               {goal.title}
             </h1>
             <p className="mt-5 max-w-2xl text-lg/8 text-pretty text-muted-foreground">
               {goal.summary}
             </p>
             <div className="mt-8">
-              <GoalContactAction option={contactOption} />
+              <GoalContactAction
+                goalRouteId={goal.routeId}
+                option={contactOption}
+              />
             </div>
           </div>
           <GoalCategoryArtwork

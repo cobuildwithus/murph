@@ -9,15 +9,18 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildHealthCommonsCatalogFromContent } from "../src/catalog.ts";
+import { loadGeneratedHealthCommonsWebGoalIndex } from "../src/goal-index-runtime.ts";
+import { extractHealthCommonsGoalSources } from "../src/goal-sources.ts";
 import type { HealthCommonsContentSet, HealthCommonsSourcePage } from "../src/load.ts";
 import {
-  loadGeneratedHealthCommonsWebGoalIndex,
   loadGeneratedHealthCommonsWebGoalPage,
-} from "../src/runtime.ts";
+} from "../src/goal-runtime.ts";
 import {
   buildHealthCommonsWebGeneratedArtifacts,
   HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION,
+  type HealthCommonsWebGoalIndex,
+  type HealthCommonsWebGoalPage,
 } from "../src/web-artifacts.ts";
 
 const temporaryRoots: string[] = [];
@@ -166,9 +169,18 @@ describe("Health Commons goal artifacts", () => {
       goals: [
         {
           category: "cardio",
-          evidenceSourceKeys: ["source_artifact:resting-heart-rate-guidance"],
           pagePath: "pages/goals/lower-resting-heart-rate.json",
           routeId: "lower-resting-heart-rate",
+          sources: [
+            {
+              label: "Resting heart rate guidance",
+              url: "https://example.com/resting-heart-rate-guidance",
+            },
+            {
+              label: "Aerobic activity review",
+              url: "https://example.org/aerobic-activity-review",
+            },
+          ],
           startPrompt: "Hey Murph, help me lower my resting heart rate.",
         },
       ],
@@ -182,13 +194,22 @@ describe("Health Commons goal artifacts", () => {
         goal: {
           category: "cardio",
         },
-        sourceSnippets: [
+        sources: [
           {
-            key: "source_artifact:resting-heart-rate-guidance",
+            label: "Resting heart rate guidance",
             url: "https://example.com/resting-heart-rate-guidance",
+          },
+          {
+            label: "Aerobic activity review",
+            url: "https://example.org/aerobic-activity-review",
           },
         ],
       });
+    expect(artifacts.goalIndex.goals[0]).not.toHaveProperty("evidenceSourceKeys");
+    expect(artifacts.projectionArtifacts.get("pages/goals/lower-resting-heart-rate.json"))
+      .not.toHaveProperty("goal.evidenceSourceKeys");
+    expect(artifacts.projectionArtifacts.get("pages/goals/lower-resting-heart-rate.json"))
+      .not.toHaveProperty("sourceSnippets");
     expect(artifacts.routeIndex.routes).toContainEqual(expect.objectContaining({
       entityType: "goal_template",
       projections: {
@@ -277,6 +298,191 @@ describe("Health Commons goal artifacts", () => {
         "",
       ),
     })))).toThrow("at least two visible Markdown source links under ## Sources");
+
+    const oneDirectSourceThenFurtherReading = validGoalBody()
+      .replace(
+        "\n- [Aerobic activity review](https://example.org/aerobic-activity-review)",
+        "\n\n## Further reading\n\n- [Not a direct source](https://example.net/further-reading)",
+      );
+    expect(() => buildHealthCommonsCatalogFromContent(content(goalPage({
+      body: oneDirectSourceThenFurtherReading,
+    })))).toThrow("at least two visible Markdown source links under ## Sources");
+  });
+
+  it("keeps balanced parentheses in direct source URLs", () => {
+    const parenthesizedUrl =
+      "https://example.org/article/S1933-2874(24)00240-9/fulltext";
+    const body = validGoalBody().replace(
+      "https://example.org/aerobic-activity-review",
+      parenthesizedUrl,
+    );
+
+    expect(extractHealthCommonsGoalSources(body)).toContainEqual({
+      label: "Aerobic activity review",
+      url: parenthesizedUrl,
+    });
+  });
+
+  it("ignores source links inside HTML comments and fenced code", () => {
+    const hiddenLinks = [
+      "~~~markdown",
+      "<!-- This is code, not a comment delimiter.",
+      "- [Hidden fenced source](https://example.net/hidden-fenced-source)",
+      "~~~",
+      "<!--",
+      "- [Hidden commented source](https://example.net/hidden-commented-source)",
+      "-->",
+    ].join("\n");
+    const body = [validGoalBody(), "", hiddenLinks].join("\n");
+    const catalog = buildHealthCommonsCatalogFromContent(content(goalPage({ body })));
+    const artifacts = buildHealthCommonsWebGeneratedArtifacts(catalog);
+
+    expect(extractHealthCommonsGoalSources(body)).toEqual([
+      {
+        label: "Resting heart rate guidance",
+        url: "https://example.com/resting-heart-rate-guidance",
+      },
+      {
+        label: "Aerobic activity review",
+        url: "https://example.org/aerobic-activity-review",
+      },
+    ]);
+    expect(artifacts.goalIndex.goals[0]?.sources).toEqual(
+      extractHealthCommonsGoalSources(validGoalBody()),
+    );
+
+    const onlyHiddenSecondSources = body.replace(
+      "\n- [Aerobic activity review](https://example.org/aerobic-activity-review)",
+      "",
+    );
+    expect(() => buildHealthCommonsCatalogFromContent(
+      content(goalPage({ body: onlyHiddenSecondSources })),
+    )).toThrow("at least two visible Markdown source links under ## Sources");
+  });
+
+  it.each([
+    "https://[invalid.example/source",
+    "https://user:password@example.org/source",
+    "https://127.0.0.1/source",
+    "https://example.org/source?token=placeholder",
+    "https://example.org/source?api_key=placeholder",
+    "http://example.org/source",
+  ])("rejects an unsafe direct source URL during authoring", (unsafeUrl) => {
+    const body = validGoalBody().replace(
+      "https://example.org/aerobic-activity-review",
+      unsafeUrl,
+    );
+
+    expect(() => buildHealthCommonsCatalogFromContent(content(goalPage({ body })))).toThrow(
+      "Goal source URL must be a valid public HTTPS URL without credentials or sensitive query parameters.",
+    );
+  });
+
+  it.each([
+    "https://[invalid.example/source",
+    "https://user:password@example.org/source",
+    "https://127.0.0.1/source",
+    "https://example.org/source?token=placeholder",
+    "https://example.org/source?api_key=placeholder",
+    "http://example.org/source",
+  ])("rejects an unsafe direct source URL in a generated goal page", async (unsafeUrl) => {
+    const catalog = buildHealthCommonsCatalogFromContent(content());
+    const artifacts = buildHealthCommonsWebGeneratedArtifacts(catalog);
+    const generatedWebRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-health-commons-goal-source-"),
+    );
+    temporaryRoots.push(generatedWebRoot);
+    const pageArtifact = artifacts.projectionArtifacts.get(
+      "pages/goals/lower-resting-heart-rate.json",
+    ) as HealthCommonsWebGoalPage;
+    const unsafePageArtifact: HealthCommonsWebGoalPage = {
+      ...pageArtifact,
+      sources: pageArtifact.sources.map((source, index) => (
+        index === 0 ? { ...source, url: unsafeUrl } : source
+      )),
+    };
+
+    await Promise.all([
+      writeJson(generatedWebRoot, "routes/index.json", artifacts.routeIndex),
+      writeJson(
+        generatedWebRoot,
+        "pages/goals/lower-resting-heart-rate.json",
+        unsafePageArtifact,
+      ),
+    ]);
+
+    expect(() => loadGeneratedHealthCommonsWebGoalPage({
+      generatedWebRoot,
+      routeId: "lower-resting-heart-rate",
+    })).toThrow("Health Commons generated web goal page is invalid");
+  });
+
+  it("rejects a credential-bearing source URL in the compact generated index", async () => {
+    const catalog = buildHealthCommonsCatalogFromContent(content());
+    const artifacts = buildHealthCommonsWebGeneratedArtifacts(catalog);
+    const generatedWebRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-health-commons-goal-index-source-"),
+    );
+    temporaryRoots.push(generatedWebRoot);
+    const unsafeGoalIndex: HealthCommonsWebGoalIndex = {
+      ...artifacts.goalIndex,
+      goals: artifacts.goalIndex.goals.map((goal, goalIndex) => ({
+        ...goal,
+        sources: goal.sources.map((source, sourceIndex) => (
+          goalIndex === 0 && sourceIndex === 0
+            ? { ...source, url: "https://user:password@example.org/source" }
+            : source
+        )),
+      })),
+    };
+
+    await writeJson(generatedWebRoot, "browse/goals.json", unsafeGoalIndex);
+
+    expect(() => loadGeneratedHealthCommonsWebGoalIndex({
+      generatedWebRoot,
+    })).toThrow("Health Commons generated goal index is invalid");
+  });
+
+  it("validates compact goal entries with the canonical goal schemas", async () => {
+    const artifacts = buildHealthCommonsWebGeneratedArtifacts(
+      buildHealthCommonsCatalogFromContent(content()),
+    );
+    const generatedWebRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-health-commons-goal-index-schema-"),
+    );
+    temporaryRoots.push(generatedWebRoot);
+    const goal = artifacts.goalIndex.goals[0];
+    if (!goal) {
+      throw new Error("Expected the goal fixture to generate one compact index entry.");
+    }
+
+    const invalidGoalIndexes = [
+      {
+        ...artifacts.goalIndex,
+        goals: [{ ...goal, outcomeKind: "tracker_score" }],
+      },
+      {
+        ...artifacts.goalIndex,
+        goals: [{ ...goal, startPrompt: "Help with this goal." }],
+      },
+      {
+        ...artifacts.goalIndex,
+        goals: [{
+          ...goal,
+          revision: { ...goal.revision, pageRevisionId: "sha256:" },
+        }],
+      },
+      {
+        ...artifacts.goalIndex,
+        goals: [{ ...goal, pagePath: "pages/goals/a-different-goal.json" }],
+      },
+    ];
+
+    for (const invalidGoalIndex of invalidGoalIndexes) {
+      await writeJson(generatedWebRoot, "browse/goals.json", invalidGoalIndex);
+      expect(() => loadGeneratedHealthCommonsWebGoalIndex({ generatedWebRoot }))
+        .toThrow("Health Commons generated goal index is invalid");
+    }
   });
 
   it("rejects parentGoalKey cycles", () => {
@@ -302,7 +508,7 @@ describe("Health Commons goal artifacts", () => {
   });
 
   it("resolves internal goal links through canonical routes or declared redirects", () => {
-    const linkedBody = `${validGoalBody()}\n\n[Improve My Aerobic Fitness](/goals/improve-aerobic-fitness) · [Old Aerobic Fitness Link](/goals/aerobic-fitness)`;
+    const linkedBody = `${validGoalBody()}\n\n## Related goals\n\n[Improve My Aerobic Fitness](/goals/improve-aerobic-fitness) · [Old Aerobic Fitness Link](/goals/aerobic-fitness)`;
     const first = goalPage({ body: linkedBody });
     const second = goalPage({
       aliases: ["Aerobic fitness goal"],
@@ -324,7 +530,7 @@ describe("Health Commons goal artifacts", () => {
     })).not.toThrow();
 
     expect(() => buildHealthCommonsCatalogFromContent(content(goalPage({
-      body: `${validGoalBody()}\n\n[Missing Goal](/goals/not-a-real-goal)`,
+      body: `${validGoalBody()}\n\n## Related goals\n\n[Missing Goal](/goals/not-a-real-goal)`,
     })))).toThrow(
       "goal_template:lower-resting-heart-rate links to missing public goal route /goals/not-a-real-goal.",
     );

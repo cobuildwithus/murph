@@ -30,7 +30,6 @@ goal:
       label: Less delay or disruption to sleep
   evidenceSourceKeys:
     - source_artifact:pmid-39324694
-    - source_artifact:pmid-33164742
   workflow:
     kind: care_support
     ownerSkillIds:
@@ -82,4 +81,4 @@ Do not take iron without appropriate testing and guidance; excess iron can be ha
 ## Sources
 
 - [AASM clinical practice guideline for restless legs syndrome and periodic limb movement disorder](https://jcsm.aasm.org/doi/10.5664/jcsm.11390)
-- [NHLBI: diagnosis of sleep disorders and restless legs](https://www.nhlbi.nih.gov/health/sleep-deprivation/diagnosis-treatment)
+- [National Institute of Neurological Disorders and Stroke: restless legs syndrome](https://www.ninds.nih.gov/health-information/disorders/restless-legs-syndrome)

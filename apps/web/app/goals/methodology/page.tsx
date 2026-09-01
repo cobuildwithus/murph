@@ -13,6 +13,7 @@ const METHODOLOGY_DESCRIPTION =
 export const metadata: Metadata = createMurphPageMetadata({
   alternates: { canonical: "/goals/methodology" },
   description: METHODOLOGY_DESCRIPTION,
+  openGraph: { type: "website", url: "/goals/methodology" },
   robots: MURPH_INDEXABLE_PAGE_ROBOTS,
   title: "How Murph Health Guides Are Made | Murph",
 });

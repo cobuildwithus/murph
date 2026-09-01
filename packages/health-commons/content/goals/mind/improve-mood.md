@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:improve-mood
 slug: improve-mood
 title: Improve My Mood
-summary: Rebuild the activities, movement, connection, and daily structure that make better moods more likely over time.
+summary: When mood is low, rebuild the activities, movement, connection, and daily structure that support interest and steadiness over time.
 status: field-testing
 quality: usable
 aliases:
@@ -43,9 +43,9 @@ safety:
   cautionLevel: moderate
 ---
 
-Mood is not a switch you can flip through willpower. It is more like weather shaped by many systems: sleep, stress, health, hormones, substances, relationships, loss, purpose, and what your days actually contain. You cannot command a good mood, but you can rebuild the conditions that make interest, pleasure, and steadiness more likely.
+This guide is for low mood or reduced interest, not every kind of mood change. Low mood is not a switch you can flip through willpower. It is shaped by sleep, stress, health, hormones, substances, relationships, loss, purpose, and what your days actually contain. You cannot command a good mood, but you can rebuild the conditions that make interest, pleasure, and steadiness more likely.
 
-A useful starting point is **behavior before motivation**. When mood is low, people often wait to feel ready before moving, calling someone, or doing something meaningful. But action can create the opportunity for energy and reward to return. This idea is central to behavioral activation, an evidence-based psychological approach. It does not mean pretending to be happy; it means gently reversing the withdrawal that can keep low mood going.
+A useful starting point is **behavior before motivation**. When mood is low, people often wait to feel ready before moving, calling someone, or doing something meaningful. But action can create the opportunity for energy and reward to return. This idea is central to behavioral activation, a structured psychological treatment used for adult depression. This guide borrows the basic principle; it does not provide a course of therapy or ask you to pretend to be happy.
 
 ## What to do
 
@@ -84,7 +84,7 @@ Low mood that persists, keeps returning, or significantly affects sleep, appetit
 
 ## A quick note
 
-This is a practical wellbeing plan, not a diagnosis or a replacement for mental health care. If you are thinking about suicide or self-harm, feel unable to stay safe, or are rapidly becoming unable to function, contact emergency or crisis support where you are now.
+This is a practical wellbeing plan, not a diagnosis or a replacement for mental health care. An unusually elevated or irritable mood with very little need for sleep, racing thoughts, or risky behavior needs prompt professional assessment rather than a plan to lift mood further. If you are thinking about suicide or self-harm, feel unable to stay safe, or are rapidly becoming unable to function, contact emergency or crisis support where you are now.
 
 ## Sources
 

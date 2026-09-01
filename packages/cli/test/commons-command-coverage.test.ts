@@ -323,12 +323,12 @@ test("commons goal list and show expose an outcome guide with exact lineage", as
   const listResult = await runInProcessJsonCli<{
     goals: Array<{
       category: string;
-      evidenceSourceKeys: string[];
       key: string;
       revision: {
         pageRevisionId: string;
         workflowSpecRevisionId: string;
       };
+      sources: Array<{ label: string; url: string }>;
       startPrompt: string;
     }>;
     total: number;
@@ -357,7 +357,6 @@ test("commons goal list and show expose an outcome guide with exact lineage", as
 
   const showResult = await runInProcessJsonCli<{
     goal: {
-      evidenceSourceKeys: string[];
       indexable: true;
       key: string;
       revision: {
@@ -365,6 +364,7 @@ test("commons goal list and show expose an outcome guide with exact lineage", as
         workflowSpecRevisionId: string;
       };
       safetyTier: string;
+      sources: Array<{ label: string; url: string }>;
     };
   }>(cli, ["commons", "goal", "show", "improve-deep-sleep"]);
 
@@ -372,10 +372,13 @@ test("commons goal list and show expose an outcome guide with exact lineage", as
   const shown = requireData(showResult.envelope).goal;
   assert.equal(shown.key, "goal_template:improve-deep-sleep");
   assert.equal(shown.indexable, true);
-  assert.ok(shown.evidenceSourceKeys.length > 0);
+  assert.ok(shown.sources.length >= 2);
+  assert.ok(shown.sources.every((source) => source.label.length > 0));
+  assert.ok(shown.sources.every((source) => /^https:\/\//u.test(source.url)));
   assert.ok(shown.safetyTier.length > 0);
   assert.deepEqual(shown.revision, summary?.revision);
   assert.equal(Object.hasOwn(shown, "body"), false);
+  assert.equal(Object.hasOwn(shown, "evidenceSourceKeys"), false);
   assert.equal(Object.hasOwn(shown, "sourceSnippets"), false);
 });
 
@@ -436,6 +439,32 @@ test("commons goal search normalizes understandable goal phrases without fuzzy s
 
     assert.equal(showResult.envelope.ok, true, lookup);
     assert.equal(requireData(showResult.envelope).goal.key, expectedKey, lookup);
+  }
+
+  const collisionListResult = await runInProcessJsonCli<{
+    goals: Array<{ key: string }>;
+    total: number;
+  }>(cli, ["commons", "goal", "list", "--query", "ironman", "--limit", "20"]);
+  assert.equal(collisionListResult.envelope.ok, true);
+  const collisionList = requireData(collisionListResult.envelope);
+  assert.ok(collisionList.total > 1);
+  assert.ok(
+    collisionList.goals.some((goal) => goal.key === "goal_template:complete-half-ironman"),
+  );
+  assert.ok(
+    collisionList.goals.some((goal) => goal.key === "goal_template:run-ironman"),
+  );
+
+  const ambiguousShow = await runInProcessJsonCli(cli, [
+    "commons",
+    "goal",
+    "show",
+    "ironman",
+  ]);
+  assert.equal(ambiguousShow.exitCode, 1);
+  assert.equal(ambiguousShow.envelope.ok, false);
+  if (!ambiguousShow.envelope.ok) {
+    assert.equal(ambiguousShow.envelope.error.code, "commons_goal_not_found");
   }
 
   const partialShow = await runInProcessJsonCli(cli, [

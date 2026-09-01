@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:reduce-nighttime-teeth-grinding
 slug: reduce-nighttime-teeth-grinding
 title: Reduce Nighttime Teeth Grinding
-summary: Protect teeth and reduce jaw symptoms while addressing stress, medicines, and sleep problems linked with bruxism.
+summary: Protect teeth and reduce jaw symptoms while addressing stress, medicines, and sleep problems linked with nighttime grinding.
 status: field-testing
 quality: usable
 aliases:

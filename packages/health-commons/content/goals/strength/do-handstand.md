@@ -60,7 +60,7 @@ Hands should press firmly into the floor with fingers spread. Think about pushin
 
 Three times per week, start with two sets of wrist preparation and two sets of 6 to 10 pike or overhead presses. Then perform five chest-to-wall holds of 15 to 30 seconds, resting at least as long as you hold. Stop each set before the shoulders collapse.
 
-After the wall holds, practice five to ten toe pulls. Stand chest to wall, move the feet a small distance away, shift the shoulders and fingers until the toes float briefly, then return them to the wall. Finish with five controlled kick-ups into a clear space, using the practiced exit whenever balance goes past the hands.
+After the wall holds, practice five to ten toe pulls. Stand chest to wall, move the feet a small distance away, shift the shoulders and fingers until the toes float briefly, then return them to the wall. Once you can use the practiced exit reliably, finish with up to five controlled kick-ups into a clear space. Until then, keep entries wall-assisted.
 
 When 30-second wall holds feel easy, do not chase several minutes. Walk the hands slightly closer, improve the body line, add shoulder taps at an easier angle, or devote more time to brief balance drills. Film only a few attempts so the session remains practice rather than production.
 

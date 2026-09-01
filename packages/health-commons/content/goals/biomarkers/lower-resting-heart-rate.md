@@ -29,6 +29,7 @@ goal:
       kind: function
       label: Recover normally between sessions
   evidenceSourceKeys:
+    - source_artifact:pmid-30513777
     - source_artifact:health.gov-physical-activity-guidelines-2018-11-12
     - source_artifact:pmid-33239350
     - source_artifact:pmid-32100573
@@ -95,6 +96,7 @@ A low resting heart rate can be normal in trained people, but new or symptomatic
 
 ## Sources
 
+- [Systematic review and meta-analysis: exercise effects on resting heart rate](https://pubmed.ncbi.nlm.nih.gov/30513777/)
 - [Physical Activity Guidelines for Americans, second edition](https://odphp.health.gov/sites/default/files/2019-09/Physical_Activity_Guidelines_2nd_edition.pdf)
 - [World Health Organization guidelines on physical activity and sedentary behavior](https://pubmed.ncbi.nlm.nih.gov/33239350/)
 - [American Heart Association: All About Heart Rate](https://www.heart.org/en/health-topics/high-blood-pressure/the-facts-about-high-blood-pressure/all-about-heart-rate-pulse)

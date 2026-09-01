@@ -61,7 +61,7 @@ Start with a clinical review of diabetes duration, A1C, medicines, kidney and li
 
 Choose one structured route for at least 12 weeks rather than alternating diets. Set a realistic weight or waist trajectory, two strength sessions weekly, regular walking, and a meal framework with adequate protein and fiber. Monitor glucose at the frequency your medication and care plan require.
 
-When A1C is below the diabetes threshold, medication withdrawal—if appropriate—must be clinician-directed. The remission clock begins only after usual glucose-lowering therapy has been stopped long enough for a valid assessment.
+When A1C is below the diabetes threshold, medication withdrawal—if appropriate—must be clinician-directed. After a lifestyle intervention, wait at least six months from starting the intervention and at least three months after stopping usual glucose-lowering medication before using A1C to document remission.
 
 ## How to know it is working
 

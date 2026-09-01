@@ -76,8 +76,6 @@ Lower the burden. Use frozen vegetables, canned beans, yogurt, eggs, microwave g
 
 Restrictive eating patterns, fasting, and aggressive weight-loss plans are generally a poor fit during pregnancy. Gestational diabetes also does not mean eliminating carbohydrate; it calls for a structured, individualized eating and monitoring plan.
 
-When nausea, fatigue, cost, or limited cooking makes the ideal plan unrealistic, lower the preparation burden before narrowing the diet. Frozen vegetables, canned beans, eggs, yogurt, nut butter, fortified cereal, rotisserie chicken, and microwaveable grains can build complete meals quickly. Keep a few foods that are tolerable on difficult days, then add variety when symptoms ease. If vomiting, reflux, constipation, food aversion, or a prior eating disorder is shrinking the diet, ask for targeted treatment instead of trying to solve the problem with stricter food rules. Prenatal vitamins fill selected gaps; they do not make megadoses or overlapping supplements harmless.
-
 ## A quick note
 
 Contact the care team for persistent vomiting, inability to keep fluids down, very little urination, faintness, or weight loss from severe nausea. Nutrition support and medication can help.

@@ -5,7 +5,12 @@ import path from "node:path";
 import { Cli } from "incur";
 import { test } from "vitest";
 
-import { initializeVault, parseFrontmatterDocument } from "@murphai/core";
+import {
+  initializeVault,
+  listGoals,
+  listWriteOperationMetadataPaths,
+  parseFrontmatterDocument,
+} from "@murphai/core";
 import { getGeneratedHealthCommonsWebGoalIndex } from "@murphai/health-commons/runtime";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 
@@ -55,6 +60,13 @@ interface GoalListResult {
   count: number;
   items: Array<{
     id: string;
+    data: {
+      commonsGoalRef?: {
+        key: string;
+        pageRevisionId: string;
+        workflowSpecRevisionId: string;
+      };
+    };
   }>;
 }
 
@@ -223,6 +235,88 @@ test("goal save schema exposes typed fields while goal import-json remains the J
   assert.doesNotMatch(help, /goal upsert/u);
 });
 
+test("goal save with a missing id fails closed with or without a title", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-goal-save-missing-id-",
+  );
+
+  try {
+    const cli = createGoalCli();
+    await initializeVault({ vaultRoot });
+
+    const created = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "Keep this goal",
+      "--slug",
+      "keep-this-goal",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(created.exitCode, null);
+    const createdGoal = requireData(created.envelope);
+    assert.equal(createdGoal.created, true);
+
+    const replacementSuffix = createdGoal.goalId.endsWith("A") ? "B" : "A";
+    const missingGoalId = `${createdGoal.goalId.slice(0, -1)}${replacementSuffix}`;
+    const goalsBefore = await listGoals(vaultRoot);
+    const operationsBefore = await listWriteOperationMetadataPaths(vaultRoot);
+    const commands = [
+      [
+        "goal",
+        "save",
+        "Must not replace",
+        "--id",
+        missingGoalId,
+        "--slug",
+        "keep-this-goal",
+        "--vault",
+        vaultRoot,
+      ],
+      [
+        "goal",
+        "save",
+        "--id",
+        missingGoalId,
+        "--status",
+        "paused",
+        "--vault",
+        vaultRoot,
+      ],
+    ];
+
+    for (const command of commands) {
+      const missing = await runInProcessJsonCli<GoalSaveResult>(cli, command);
+
+      assert.equal(missing.exitCode, 1);
+      assert.equal(missing.envelope.ok, false);
+      if (!missing.envelope.ok) {
+        assert.equal(missing.envelope.error.code, "not_found");
+        assert.equal(missing.envelope.error.message, "Goal was not found.");
+        assert.equal(missing.envelope.error.retryable, false);
+        assert.equal(missing.envelope.error.stage, "read");
+        assert.equal(
+          missing.envelope.error.hint,
+          "After this error, run only goal list once. Do not write again this turn. If a listed goal matches, end with one question naming its exact goal id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.",
+        );
+      }
+    }
+
+    const goalsAfter = await listGoals(vaultRoot);
+    assert.deepEqual(goalsAfter, goalsBefore);
+    assert.equal(goalsAfter[0]?.entity.title, "Keep this goal");
+    assert.deepEqual(
+      await listWriteOperationMetadataPaths(vaultRoot),
+      operationsBefore,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("goal save persists typed fields and repeated relationships", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-goal-save-",
@@ -294,6 +388,11 @@ test("goal save persists typed fields and repeated relationships", async () => {
     const saved = requireData(savedChild.envelope);
     assert.equal(saved.created, true);
     assert.equal(saved.lookupId, saved.goalId);
+    const expectedCommonsGoalRef = {
+      key: "goal_template:sleep-better",
+      pageRevisionId: commonsPageRevisionId,
+      workflowSpecRevisionId: commonsWorkflowRevisionId,
+    };
 
     const shownChild = await runInProcessJsonCli<GoalShowResult>(cli, [
       "goal",
@@ -305,12 +404,22 @@ test("goal save persists typed fields and repeated relationships", async () => {
     assert.equal(shownChild.exitCode, null, JSON.stringify(shownChild.envelope));
     assert.deepEqual(
       requireData(shownChild.envelope).entity.data.commonsGoalRef,
-      {
-        key: "goal_template:sleep-better",
-        pageRevisionId: commonsPageRevisionId,
-        workflowSpecRevisionId: commonsWorkflowRevisionId,
-      },
+      expectedCommonsGoalRef,
     );
+
+    const listedGoals = await runInProcessJsonCli<GoalListResult>(cli, [
+      "goal",
+      "list",
+      "--limit",
+      "200",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(listedGoals.exitCode, null, JSON.stringify(listedGoals.envelope));
+    const listedChild = requireData(listedGoals.envelope).items.find(
+      (item) => item.id === saved.goalId,
+    );
+    assert.deepEqual(listedChild?.data.commonsGoalRef, expectedCommonsGoalRef);
 
     const markdown = await readFile(
       path.join(vaultRoot, requireSavedPath(saved)),
@@ -450,6 +559,7 @@ test("goal save rejects missing and stale Health Commons lineage before writing"
   try {
     const cli = createGoalCli();
     await initializeVault({ vaultRoot });
+    const auditBefore = await readAuditSnapshot(vaultRoot);
 
     const missing = await runInProcessJsonCli<GoalSaveResult>(cli, [
       "goal",
@@ -510,6 +620,7 @@ test("goal save rejects missing and stale Health Commons lineage before writing"
     ]);
     assert.equal(listed.exitCode, null);
     assert.equal(requireData(listed.envelope).count, 0);
+    assert.deepEqual(await readAuditSnapshot(vaultRoot), auditBefore);
   } finally {
     await rm(parentRoot, {
       force: true,
@@ -574,7 +685,7 @@ test("goal import-json cannot create public Goal lineage", async () => {
   }
 });
 
-test("goal save pauses and resumes by id without overwriting the latest title", async () => {
+test("goal save executes the documented titleless pause and resume commands without overwriting the latest title", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-goal-lifecycle-",
   );
@@ -614,6 +725,12 @@ test("goal save pauses and resumes by id without overwriting the latest title", 
       "Improve my deep sleep",
       "--status",
       "active",
+      "--commons-goal-key",
+      commonsGoal.key,
+      "--commons-page-revision-id",
+      commonsPageRevisionId,
+      "--commons-workflow-revision-id",
+      commonsWorkflowRevisionId,
       "--vault",
       vaultRoot,
     ]);
@@ -658,6 +775,14 @@ test("goal save pauses and resumes by id without overwriting the latest title", 
       assert.equal(
         requireData(shown.envelope).entity.data.title,
         "Improve sleep depth",
+      );
+      assert.deepEqual(
+        requireData(shown.envelope).entity.data.commonsGoalRef,
+        {
+          key: commonsGoal.key,
+          pageRevisionId: commonsPageRevisionId,
+          workflowSpecRevisionId: commonsWorkflowRevisionId,
+        },
       );
     }
 

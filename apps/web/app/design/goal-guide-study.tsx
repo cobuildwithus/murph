@@ -1,4 +1,6 @@
+import { GoalCategoryBrowse } from "@/src/components/goals/goal-category-browse";
 import { GoalGuide } from "@/src/components/goals/goal-guide";
+import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
 
 const DESIGN_GOAL = {
   aliases: ["lower rhr"],
@@ -36,6 +38,16 @@ A sudden change with chest pain, fainting, or severe shortness of breath needs m
   outcomeKind: "biomarker" as const,
   parentGoalKey: null,
   routeId: "lower-resting-heart-rate",
+  sources: [
+    {
+      label: "American Heart Association: target heart rates",
+      url: "https://www.heart.org/en/healthy-living/fitness/fitness-basics/target-heart-rates",
+    },
+    {
+      label: "Centers for Disease Control and Prevention: physical activity basics",
+      url: "https://www.cdc.gov/physical-activity/php/about/index.html",
+    },
+  ],
   startPrompt: "Hey Murph, help me lower my resting heart rate.",
   summary: "Use aerobic training and better recovery to bring your resting heart rate down over time.",
   title: "Lower My Resting Heart Rate",
@@ -47,42 +59,148 @@ const DESIGN_CONTACT_OPTION = {
   label: "Messages",
 };
 
+const DESIGN_BROWSE_CATEGORY = {
+  description: "Improve endurance, heart health, and the activities you want to finish.",
+  directoryTitle: "Cardio Goals",
+  featuredRouteIds: [
+    "improve-vo2-max",
+    "run-ironman",
+    "run-first-5k",
+    "improve-cardio-endurance",
+  ],
+  label: "Cardio",
+  slug: "cardio",
+} as const;
+
+const DESIGN_BROWSE_FAMILY: GoalIndexEntryModel = {
+  aliases: [],
+  category: "cardio",
+  goalPhrase: "improve my cardio endurance",
+  key: "goal_template:design-cardio-endurance",
+  outcomeKind: "capacity",
+  parentGoalKey: null,
+  routeId: "improve-cardio-endurance",
+  startPrompt: "Hey Murph, help me improve my cardio endurance.",
+  summary: "Build endurance for the activities that matter to you.",
+  title: "Improve My Cardio Endurance",
+};
+
+const DESIGN_BROWSE_FAMILY_CHILDREN = [
+  "Exercise for 30 Minutes Without Stopping",
+  "Climb Stairs Without Getting Winded",
+  "Improve My Heart Rate Recovery",
+  "Improve My Rowing Endurance",
+  "Hike Longer Without Getting Tired",
+  "Ruck Farther",
+  "Get 150 Minutes of Cardio Each Week",
+].map((title, index): GoalIndexEntryModel => ({
+  aliases: [],
+  category: "cardio",
+  goalPhrase: title.toLowerCase(),
+  key: `goal_template:design-cardio-child-${index + 1}`,
+  outcomeKind: "capacity",
+  parentGoalKey: DESIGN_BROWSE_FAMILY.key,
+  routeId: `design-cardio-child-${index + 1}`,
+  startPrompt: `Hey Murph, help me ${title.toLowerCase()}.`,
+  summary: `A practical guide for ${title.toLowerCase()}.`,
+  title,
+}));
+
+const DESIGN_BROWSE_ROOTS = [
+  ["improve-vo2-max", "Improve My VO₂ Max"],
+  ["run-ironman", "Run an Ironman"],
+  ["run-first-5k", "Run My First 5K"],
+  ["walk-every-day", "Walk Every Day"],
+  ["cycle-faster", "Cycle Faster"],
+  ["swim-farther", "Swim Farther Without Stopping"],
+  ["jump-rope-ten-minutes", "Jump Rope for 10 Minutes"],
+  ["return-to-running", "Return to Running After a Break"],
+  ["run-marathon", "Run a Marathon"],
+  ["ride-one-hundred-miles", "Ride 100 Miles"],
+  ["complete-long-hike", "Complete a Long-Distance Hike"],
+].map(([routeId, title], index): GoalIndexEntryModel => ({
+  aliases: [],
+  category: "cardio",
+  goalPhrase: title.toLowerCase(),
+  key: `goal_template:design-cardio-root-${index + 1}`,
+  outcomeKind: "capacity",
+  parentGoalKey: null,
+  routeId,
+  startPrompt: `Hey Murph, help me ${title.toLowerCase()}.`,
+  summary: `A practical guide for ${title.toLowerCase()}.`,
+  title,
+}));
+
+const DESIGN_BROWSE_GOALS = [
+  DESIGN_BROWSE_FAMILY,
+  ...DESIGN_BROWSE_FAMILY_CHILDREN,
+  ...DESIGN_BROWSE_ROOTS,
+];
+
 export function GoalGuideStudy() {
   return (
-    <section
-      className="mx-auto w-full max-w-5xl px-6 pb-4 pt-12 sm:px-10 lg:px-16"
-      data-design-study="goal-guide"
-      id="goal-guide"
-    >
-      <div className="border-b border-[#e5e1d8] pb-12">
-        <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          Public goal guide
-        </p>
-        <h1 className="mt-2 max-w-2xl font-serif text-3xl font-semibold tracking-tight text-foreground">
-          Article-first goal page
-        </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Production composition with synthetic content. Links and actions are inert in this review surface.
-        </p>
+    <>
+      <section
+        className="mx-auto w-full max-w-5xl px-6 pb-4 pt-12 sm:px-10 lg:px-16"
+        data-design-study="goal-category-browse"
+        id="goal-category-browse"
+      >
+        <div className="border-b border-[#e5e1d8] pb-12">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            Public goal directory
+          </p>
+          <h1 className="mt-2 max-w-2xl font-serif text-3xl font-semibold tracking-tight text-foreground">
+            Compact category browsing
+          </h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Production composition with synthetic goals showing both family and category disclosures.
+          </p>
 
-        <div className="mt-10 rounded-2xl border border-border bg-background px-4 pt-8 sm:px-8" inert>
-          <GoalGuide
-            category={{
-              description: "Work toward healthier measurements you can follow over time.",
-              featuredRouteIds: [
-                "lower-resting-heart-rate",
-                "improve-hrv",
-                "lower-blood-pressure",
-                "lower-ldl-cholesterol",
-              ],
-              label: "Biomarkers",
-              slug: "biomarkers",
-            }}
-            contactOption={DESIGN_CONTACT_OPTION}
-            goal={DESIGN_GOAL}
-          />
+          <div className="mt-10 rounded-2xl border border-border bg-background px-4 pt-8 sm:px-8" inert>
+            <GoalCategoryBrowse
+              category={DESIGN_BROWSE_CATEGORY}
+              goals={DESIGN_BROWSE_GOALS}
+            />
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <section
+        className="mx-auto w-full max-w-5xl px-6 pb-4 pt-12 sm:px-10 lg:px-16"
+        data-design-study="goal-guide"
+        id="goal-guide"
+      >
+        <div className="border-b border-[#e5e1d8] pb-12">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            Public goal guide
+          </p>
+          <h1 className="mt-2 max-w-2xl font-serif text-3xl font-semibold tracking-tight text-foreground">
+            Article-first goal page
+          </h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Production composition with synthetic content. Links and actions are inert in this review surface.
+          </p>
+
+          <div className="mt-10 rounded-2xl border border-border bg-background px-4 pt-8 sm:px-8" inert>
+            <GoalGuide
+              category={{
+                description: "Work toward healthier measurements you can follow over time.",
+                directoryTitle: "Biomarker Goals",
+                featuredRouteIds: [
+                  "lower-resting-heart-rate",
+                  "improve-hrv",
+                  "lower-blood-pressure",
+                  "lower-ldl-cholesterol",
+                ],
+                label: "Biomarkers",
+                slug: "biomarkers",
+              }}
+              contactOption={DESIGN_CONTACT_OPTION}
+              goal={DESIGN_GOAL}
+            />
+          </div>
+        </div>
+      </section>
+    </>
   );
 }

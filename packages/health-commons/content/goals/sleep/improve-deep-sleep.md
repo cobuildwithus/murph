@@ -57,7 +57,7 @@ Deep sleep—also called slow-wave or N3 sleep—is one part of a normal night. 
 
 Start with sleep opportunity. Most adults need roughly seven to nine hours of sleep, so an eight-hour window is a reasonable experiment—not a universal prescription. If you routinely cut the night short, no supplement or temperature gadget can restore time you never gave yourself.
 
-Anchor your wake time within about an hour on most days. A consistent wake time helps the body clock and sleep pressure line up the following night. Add regular aerobic activity and strength training, but choose timing that does not leave you wired at bedtime. Move caffeine earlier; if sleep is fragile, start by leaving at least six to eight hours between a meaningful dose and bed, then test an earlier cutoff if needed. Keep alcohol from doing the job of a sleep aid. It may make sleep begin sooner but often fragments the later night.
+Anchor your wake time within about an hour on most days. A consistent wake time helps the body clock and sleep pressure line up the following night. Keep regular movement in your week in forms you can sustain, but treat it as general support for health and sleep rather than a selective deep-sleep treatment. Choose timing that does not leave you wired at bedtime. Move caffeine earlier; if sleep is fragile, start by leaving at least six to eight hours between a meaningful dose and bed, then test an earlier cutoff if needed. Keep alcohol from doing the job of a sleep aid. It may make sleep begin sooner but often fragments the later night.
 
 Finally, make the room reliably dark, quiet, and comfortably cool. These basics matter more than buying a perfect mattress pad or chasing a precise bedroom temperature. Change one or two levers at a time so you can tell what actually helps.
 
@@ -68,7 +68,7 @@ Use this four-week plan before judging the result:
 1. **Week 1: establish a baseline.** Keep your usual routine. Each morning record bedtime, wake time, remembered long awakenings, and how restored you feel from 1 to 5. If you already wear a tracker, record its deep-sleep estimate without changing behavior to improve the score.
 2. **Week 2: protect the night.** Set a wake-time anchor and a sleep window long enough for your needs. Put the phone on do-not-disturb, make the room dark and quiet, and keep work out of bed.
 3. **Week 3: remove one likely disruptor.** Pick the clearest issue: late caffeine, alcohol near bedtime, an overheated room, late heavy meals that worsen reflux, or irregular sleep timing. Keep everything else steady.
-4. **Week 4: support sleep drive.** Schedule three or more moderate movement sessions and two strength sessions if appropriate for you. Even a brisk walk counts. Avoid suddenly adding exhausting training; soreness and overreaching can disrupt sleep too.
+4. **Week 4: add repeatable movement.** Choose a few moderate movement sessions that fit your current baseline. If strength training is already part of your week, keep it regular; if not, add it gradually when appropriate. Even a brisk walk counts. Avoid suddenly adding exhausting training; soreness and overreaching can disrupt sleep too.
 
 Keep the pieces that feel sustainable. A complicated evening protocol that makes you anxious about sleep is not an upgrade. If life makes an eight-hour window impossible, protect the most consistent window you can and work on the constraint that is actually limiting it.
 

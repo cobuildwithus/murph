@@ -118,6 +118,13 @@ test("resolveMurphTelegramBotUsername falls back when the override is invalid", 
   assert.equal(
     resolveMurphTelegramBotUsername({
       MURPH_TELEGRAM_USERNAME_OVERRIDE: "not valid",
+      TELEGRAM_BOT_USERNAME: "legacy_murph_bot",
+    }),
+    "legacy_murph_bot",
+  );
+  assert.equal(
+    resolveMurphTelegramBotUsername({
+      MURPH_TELEGRAM_USERNAME_OVERRIDE: "not valid",
     }),
     "withmurph_bot",
   );

@@ -86,7 +86,7 @@ Unplanned weight loss can signal medical illness, depression, medication effects
 
 - [NHS: Healthy ways to gain weight](https://www.nhs.uk/live-well/healthy-weight/managing-your-weight/healthy-ways-to-gain-weight/)
 - [Dietary Guidelines for Americans, 2025–2030](https://odphp.health.gov/our-work/nutrition-physical-activity/dietary-guidelines/current-dietary-guidelines)
-- [ACSM: Resistance training prescription overview](https://pubmed.ncbi.nlm.nih.gov/41543952/)
+- [ACSM position stand: Resistance training prescription for muscle function, hypertrophy, and physical performance](https://pubmed.ncbi.nlm.nih.gov/41843416/)
 
 ## Related goals
 
