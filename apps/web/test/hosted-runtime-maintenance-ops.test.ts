@@ -3,11 +3,19 @@ import { HostedBillingStatus, Prisma } from "@prisma/client";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  $queryRaw: vi.fn(),
+  $transaction: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   hostedWorkspace: {
     count: vi.fn(),
     findFirst: vi.fn(),
+    findMany: vi.fn(),
+  },
+  hostedMember: {
+    findMany: vi.fn(),
+  },
+  hostedThreadContainerParticipant: {
     findMany: vi.fn(),
   },
   readHostedRuntimeStalledRecheckCandidates: vi.fn(),
@@ -62,7 +70,12 @@ let runtimeMaintenanceService: RuntimeMaintenanceServiceModule;
 let opsAccess: OpsAccessModule;
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
+const originalHostedAppSessionHmacKey = process.env.HOSTED_APP_SESSION_HMAC_KEY;
 const prisma = {
+  $queryRaw: mocks.$queryRaw,
+  $transaction: mocks.$transaction,
+  hostedMember: mocks.hostedMember,
+  hostedThreadContainerParticipant: mocks.hostedThreadContainerParticipant,
   hostedWorkspace: mocks.hostedWorkspace,
 };
 
@@ -76,6 +89,7 @@ describe("hosted runtime maintenance ops", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.HOSTED_OPS_MEMBER_IDS = "member_ops";
+    process.env.HOSTED_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 7).toString("base64url");
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.requireActiveHostedAppSession.mockResolvedValue({
@@ -99,6 +113,10 @@ describe("hosted runtime maintenance ops", () => {
     mocks.hostedWorkspace.count.mockResolvedValue(0);
     mocks.hostedWorkspace.findMany.mockResolvedValue([]);
     mocks.hostedWorkspace.findFirst.mockResolvedValue(null);
+    mocks.$queryRaw.mockResolvedValue([]);
+    mocks.hostedMember.findMany.mockResolvedValue([]);
+    mocks.hostedThreadContainerParticipant.findMany.mockResolvedValue([]);
+    mocks.$transaction.mockImplementation(async (operation) => await operation(prisma));
   });
 
   afterEach(() => {
@@ -106,6 +124,11 @@ describe("hosted runtime maintenance ops", () => {
       delete process.env.HOSTED_OPS_MEMBER_IDS;
     } else {
       process.env.HOSTED_OPS_MEMBER_IDS = originalHostedOpsMemberIds;
+    }
+    if (originalHostedAppSessionHmacKey === undefined) {
+      delete process.env.HOSTED_APP_SESSION_HMAC_KEY;
+    } else {
+      process.env.HOSTED_APP_SESSION_HMAC_KEY = originalHostedAppSessionHmacKey;
     }
   });
 
@@ -286,10 +309,10 @@ describe("hosted runtime maintenance ops", () => {
   });
 
   it("normalizes, deduplicates, and signals up to three runtime rechecks sequentially", async () => {
-    mocks.hostedWorkspace.findMany.mockResolvedValue([
-      { userId: "hbm_002" },
-      { userId: "hbm_001" },
-      { userId: "hbm_003" },
+    mocks.$queryRaw.mockResolvedValue([
+      runtimeRecoveryFactRow("hbm_002"),
+      runtimeRecoveryFactRow("hbm_001"),
+      runtimeRecoveryFactRow("hbm_003"),
     ]);
     let inFlight = 0;
     let maxInFlight = 0;
@@ -317,23 +340,18 @@ describe("hosted runtime maintenance ops", () => {
 
     expect(signalOrder).toEqual(["hbm_002", "hbm_001", "hbm_003"]);
     expect(maxInFlight).toBe(1);
-    expect(mocks.hostedWorkspace.findMany).toHaveBeenCalledTimes(1);
-    expect(mocks.hostedWorkspace.findMany).toHaveBeenCalledWith({
-      select: { userId: true },
-      where: {
-        userId: {
-          in: ["hbm_002", "hbm_001", "hbm_003"],
-        },
-      },
-    });
+    expect(mocks.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(3);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       requestedCount: 3,
       results: [
-        { status: "signaled", userId: "hbm_002" },
-        { status: "signaled", userId: "hbm_001" },
-        { status: "signaled", userId: "hbm_003" },
+        { status: "signaled", userId: "hbm_002", witness: { userId: "hbm_002" } },
+        { status: "signaled", userId: "hbm_001", witness: { userId: "hbm_001" } },
+        { status: "signaled", userId: "hbm_003", witness: { userId: "hbm_003" } },
       ],
     });
     expect(mocks.readHostedRuntimeStalledRecheckCandidates).not.toHaveBeenCalled();
@@ -358,7 +376,7 @@ describe("hosted runtime maintenance ops", () => {
       httpStatus: 400,
     });
 
-    expect(mocks.hostedWorkspace.findMany).not.toHaveBeenCalled();
+    expect(mocks.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   });
@@ -377,47 +395,58 @@ describe("hosted runtime maintenance ops", () => {
       httpStatus: 400,
     });
 
-    expect(mocks.hostedWorkspace.findMany).not.toHaveBeenCalled();
+    expect(mocks.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
-  it("stops at a missing workspace without sending a Temporal signal", async () => {
-    mocks.hostedWorkspace.findMany.mockResolvedValue([
-      { userId: "hbm_002" },
+  it("can safely signal an ambiguous existing-workspace witness without presenting it as recovery", async () => {
+    mocks.$queryRaw.mockResolvedValue([
+      runtimeRecoveryFactRow("hbm_ambiguous"),
     ]);
-
     const result = await runtimeMaintenanceService.signalHostedRuntimeRecheckBatch({
-      userIds: ["hbm_missing", "hbm_002"],
+      userIds: ["hbm_ambiguous"],
     });
 
-    expect(mocks.hostedWorkspace.findMany).toHaveBeenCalledTimes(1);
-    expect(mocks.hostedWorkspace.findMany).toHaveBeenCalledWith({
-      select: { userId: true },
-      where: {
-        userId: {
-          in: ["hbm_missing", "hbm_002"],
-        },
-      },
-    });
     expect(result).toMatchObject({
-      requestedCount: 2,
+      requestedCount: 1,
       results: [
         {
-          errorName: "HostedRuntimeWorkspaceNotFound",
-          status: "failed",
-          userId: "hbm_missing",
+          status: "signaled",
+          userId: "hbm_ambiguous",
+          witness: {
+            allocatedSystemHighWater: null,
+            canonicalSystemConsumed: null,
+            capturedHeadSequence: null,
+            checkpointedAt: null,
+            importedSystemSequence: null,
+          },
         },
       ],
     });
-    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
+  it("does not signal when the captured batch proves the workspace is missing", async () => {
+    const result = await runtimeMaintenanceService.signalHostedRuntimeRecheckBatch({
+      userIds: ["hbm_missing"],
+    });
+
+    expect(result).toMatchObject({
+      results: [{
+        errorName: "HostedRuntimeWorkspaceNotFound",
+        status: "failed",
+        userId: "hbm_missing",
+      }],
+    });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
   it("stops runtime rechecks on the first unknown signal result", async () => {
-    mocks.hostedWorkspace.findMany.mockResolvedValue([
-      { userId: "hbm_001" },
-      { userId: "hbm_002" },
-      { userId: "hbm_003" },
+    mocks.$queryRaw.mockResolvedValue([
+      runtimeRecoveryFactRow("hbm_001"),
+      runtimeRecoveryFactRow("hbm_002"),
+      runtimeRecoveryFactRow("hbm_003"),
     ]);
     mocks.signalHostedRuntimeRecheckRuntime.mockImplementation(async (input) => {
       if (input.userId === "hbm_002") {
@@ -436,7 +465,11 @@ describe("hosted runtime maintenance ops", () => {
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({
       results: [
-        { status: "signaled", userId: "hbm_001" },
+        {
+          status: "signaled",
+          userId: "hbm_001",
+          witness: { userId: "hbm_001" },
+        },
         {
           errorName: "TimeoutError",
           status: "failed",
@@ -444,6 +477,8 @@ describe("hosted runtime maintenance ops", () => {
         },
       ],
     });
+    expect(result.results).toHaveLength(2);
+    expect(result.results[1]).not.toHaveProperty("witness");
     expect(mocks.readHostedRuntimeStalledRecheckCandidates).not.toHaveBeenCalled();
   });
 
@@ -565,6 +600,9 @@ describe("hosted runtime maintenance ops", () => {
   });
 
   it("lists stalled candidates and explicitly signals selected runtimes", async () => {
+    mocks.$queryRaw.mockResolvedValue([
+      runtimeRecoveryFactRow("hbm_002"),
+    ]);
     mocks.readHostedRuntimeStalledRecheckCandidates.mockResolvedValue({
       candidates: [
         stalledRecheckCandidate("member_001", "2"),
@@ -585,10 +623,6 @@ describe("hosted runtime maintenance ops", () => {
       limit: 1,
       totalCandidateCount: 2,
     });
-    mocks.hostedWorkspace.findMany.mockResolvedValue([
-      { userId: "hbm_002" },
-    ]);
-
     const postRequest = new Request(
       "https://join.example.test/api/ops/runtime-maintenance",
       {
@@ -617,7 +651,11 @@ describe("hosted runtime maintenance ops", () => {
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
     await expect(postResponse.json()).resolves.toMatchObject({
       requestedCount: 1,
-      results: [{ status: "signaled", userId: "hbm_002" }],
+      results: [{
+        status: "signaled",
+        userId: "hbm_002",
+        witness: { userId: "hbm_002" },
+      }],
     });
   });
 
@@ -683,6 +721,87 @@ describe("hosted runtime maintenance ops", () => {
     expect(mocks.readHostedRuntimeStalledRecheckCandidates).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  it("authenticates a read-only verification request and never signals Temporal", async () => {
+    mocks.$queryRaw.mockResolvedValue([
+      runtimeRecoveryFactRow("hbm_verify_one"),
+    ]);
+    const signalRequest = new Request(
+      "https://join.example.test/api/ops/runtime-maintenance",
+      {
+        body: JSON.stringify({
+          operation: "recheck-runtimes",
+          userIds: ["hbm_verify_one"],
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      },
+    );
+    const signalResponse = await runtimeMaintenanceRoute.POST(signalRequest);
+    const signalBody = await signalResponse.json();
+    const baseline = signalBody.results[0].witness;
+    mocks.signalHostedRuntimeRecheckRuntime.mockClear();
+
+    const verifyRequest = new Request(
+      "https://join.example.test/api/ops/runtime-maintenance",
+      {
+        body: JSON.stringify({
+          baselines: [baseline],
+          operation: "verify-runtime-rechecks",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      },
+    );
+    const verifyResponse = await runtimeMaintenanceRoute.POST(verifyRequest);
+
+    expect(verifyResponse.status).toBe(200);
+    expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(
+      verifyRequest,
+    );
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    await expect(verifyResponse.json()).resolves.toMatchObject({
+      results: [{ status: "unknown", userId: "hbm_verify_one" }],
+    });
+  });
+
+  it("strictly bounds verification input without invoking read or signal paths", async () => {
+    const invalidBaselines = [
+      "not-an-array",
+      [],
+      [{ userId: "hbm_1" }, { userId: "hbm_2" }, { userId: "hbm_3" }, { userId: "hbm_4" }],
+    ];
+
+    for (const baselines of invalidBaselines) {
+      const response = await runtimeMaintenanceRoute.POST(new Request(
+        "https://join.example.test/api/ops/runtime-maintenance",
+        {
+          body: JSON.stringify({
+            baselines,
+            operation: "verify-runtime-rechecks",
+          }),
+          headers: {
+            "Content-Type": "application/json",
+            origin: "https://join.example.test",
+          },
+          method: "POST",
+        },
+      ));
+
+      expect(response.status).toBe(400);
+    }
+
+    expect(mocks.$transaction).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("signals maintenance through the authenticated same-origin ops route", async () => {
@@ -798,6 +917,18 @@ function workspaceRow(userId: string, version: string) {
     updatedAt: new Date("2026-06-01T12:05:00.000Z"),
     userId,
     version: BigInt(version),
+  };
+}
+
+function runtimeRecoveryFactRow(userId: string) {
+  return {
+    allocatedSystemHighWater: null,
+    canonicalSystemConsumed: null,
+    checkpointedAt: null,
+    pendingHeadSequence: null,
+    redactedStatusJson: null,
+    userId,
+    workspaceVersion: 1n,
   };
 }
 
