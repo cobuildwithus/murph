@@ -1087,7 +1087,7 @@ export function buildWranglerLocalDevConfig(
     containers: [
       buildRunnerContainerConfig({ className: "RunnerContainer", maxInstances: 50 }),
       buildRunnerContainerConfig({ className: "DeploySmokeRunnerContainer", maxInstances: 1 }),
-      buildRunnerContainerConfig({ className: "StandbyRunnerContainer", maxInstances: 1 }),
+      buildRunnerContainerConfig({ className: "StandbyRunnerContainer", maxInstances: 50 }),
     ],
     durable_objects: {
       bindings: [

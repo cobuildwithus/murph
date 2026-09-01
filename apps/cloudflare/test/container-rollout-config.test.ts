@@ -43,7 +43,7 @@ describe("Cloudflare container rollout config", () => {
     });
   });
 
-  it("renders single-step rollouts for the one-instance utility containers", () => {
+  it("renders a single deploy-smoke rollout step for the one-instance smoke container", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
@@ -65,14 +65,6 @@ describe("Cloudflare container rollout config", () => {
     });
     expect(renderedConfig.containers[1]?.rollout_step_percentage).toHaveLength(
       renderedConfig.containers[1]?.max_instances ?? 0,
-    );
-    expect(renderedConfig.containers[2]).toMatchObject({
-      class_name: "StandbyRunnerContainer",
-      max_instances: 1,
-      rollout_step_percentage: [100],
-    });
-    expect(renderedConfig.containers[2]?.rollout_step_percentage).toHaveLength(
-      renderedConfig.containers[2]?.max_instances ?? 0,
     );
   });
 
