@@ -19545,6 +19545,215 @@ describeRealCodex('real Codex strict meal import recovery e2e', () => {
       ])
     }
   })
+
+  it('repairs a typed CLI argument error once without duplicating the write', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-typed-cli-argument-recovery-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'meal-commands.log')
+      const importPath = path.join(workingDirectory, 'meal-import.json')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const privateMarker = 'PrivateMalformedArgumentMarker'
+      const privateValue = 'PrivateMalformedArgumentValue'
+
+      await initializeVault({
+        title: 'Synthetic typed CLI argument recovery proof',
+        timezone: 'America/New_York',
+        vaultRoot: workingDirectory,
+      })
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeRealWorkoutVaultCli({
+          binDirectory,
+          commandLogPath,
+          vaultRoot: workingDirectory,
+        }),
+        writeFile(commandLogPath, '', 'utf8'),
+        writeFile(
+          importPath,
+          `${JSON.stringify({
+            ingredients: ['lentils', 'brown rice', 'spinach'],
+            note: 'Lentil bowl with brown rice and spinach.',
+            nutrition: {
+              provenance: {
+                confidence: 'medium',
+                source: 'estimated',
+                sourceDetail: 'Synthetic recipe estimate.',
+              },
+              totals: {
+                calories: 510,
+                carbsGrams: 79,
+                fatGrams: 10,
+                fiberGrams: 17,
+                proteinGrams: 26,
+              },
+            },
+            occurredAt: '2026-08-30T19:00:00-04:00',
+            source: 'manual',
+          }, null, 2)}\n`,
+          'utf8',
+        ),
+      ])
+
+      const inheritedPath = normalizeEnvString(config.env.PATH)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-30',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: inheritedPath
+            ? `${binDirectory}${path.delimiter}${inheritedPath}`
+            : binDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Log the meal from meal-import.json.',
+          `For the first attempt, run exactly: vault-cli meal import-json --input @meal-import.json --${privateMarker}=${privateValue} --format json`,
+          'If the CLI returns a typed validation error, use its field and hint to remove only the malformed option, then make exactly one repaired import attempt.',
+          'Do not use meal add or meal edit, do not repeat a successful write, and do not describe CLI mechanics in the final reply.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      const commands = (await readFile(commandLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      const importCommands = commands.filter((command) =>
+        command.startsWith('meal import-json ')
+        && !command.includes('--help')
+      )
+      const helpCommands = commands.filter((command) =>
+        command.startsWith('meal import-json ')
+        && command.includes('--help')
+      )
+      const firstImportIndex = commands.indexOf(importCommands[0] ?? '')
+      const secondImportIndex = commands.indexOf(importCommands[1] ?? '')
+      const commandActions = readCapabilityRoutingActions(
+        result.jsonEvents,
+      ).filter((action) => action.kind === 'command')
+      const validationActions = commandActions.filter((action) =>
+        action.output.includes('"VALIDATION_ERROR"')
+      )
+      const validationOutput = validationActions[0]?.output ?? ''
+      const vault = await readVaultRawTolerant(workingDirectory)
+      const meals = vault.events.filter((event) => event.kind === 'meal')
+      const reply = result.finalMessage.trim()
+
+      process.stdout.write(
+        `[typed-cli-argument-recovery-e2e] ${JSON.stringify({
+          helpReads: helpCommands.length,
+          importAttempts: importCommands.length,
+          mealCount: meals.length,
+          reply,
+        })}\n`,
+      )
+
+      expect(importCommands).toHaveLength(2)
+      expect(importCommands[0]).toContain(`--${privateMarker}=${privateValue}`)
+      expect(importCommands[1]).toContain('--input @meal-import.json')
+      expect(importCommands[1]).not.toContain(privateMarker)
+      expect(importCommands[1]).not.toContain(privateValue)
+      expect(
+        commands.filter((command) => /^meal (?:add|edit)\b/u.test(command)),
+      ).toHaveLength(0)
+      expect(helpCommands.length).toBeLessThanOrEqual(1)
+      if (helpCommands.length === 1) {
+        const helpIndex = commands.indexOf(helpCommands[0] ?? '')
+        expect(helpIndex).toBeGreaterThan(firstImportIndex)
+        expect(helpIndex).toBeLessThan(secondImportIndex)
+      }
+
+      expect(validationActions).toHaveLength(1)
+      expect(JSON.parse(validationOutput)).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        fieldErrors: [{
+          code: 'custom',
+          expected: '',
+          message: 'This field is invalid.',
+          path: 'arguments',
+          received: 'invalid',
+        }],
+        hint:
+          'Run the command with --help and correct its arguments or options.',
+        message: 'The command arguments are invalid.',
+        retryable: false,
+        stage: 'validation',
+      })
+      expect(validationOutput).not.toContain(privateMarker)
+      expect(validationOutput).not.toContain(privateValue)
+      expect(validationOutput).not.toContain(workingDirectory)
+      expect(validationOutput).not.toContain('Unknown flag')
+      expect(commandActions.some((action) => action.output.includes('UNKNOWN')))
+        .toBe(false)
+
+      expect(meals).toHaveLength(1)
+      expect(result.runtimeIssueInputs).toHaveLength(1)
+      expect(result.runtimeIssueInputs[0]).toMatchObject({
+        component: 'assistant.codex-action',
+        details: {
+          actionKind: 'command.execution',
+          commandFamily: 'vault-cli meal',
+          commandOrdinal: 1,
+          exitCode: 1,
+        },
+        errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+        issueKind: 'tool_error',
+        operation: 'command.execution',
+        phase: 'provider_turn',
+        severity: 'warning',
+      })
+      expect(reply).toMatch(/\b(?:imported|logged|recorded|saved|added)\b/iu)
+      expect(reply).not.toContain(privateMarker)
+      expect(reply).not.toContain(privateValue)
+      expect(reply).not.toMatch(
+        /\b(?:CLI|command|error|invalid|retry|schema|argument|option|UNKNOWN|VALIDATION_ERROR)\b/iu,
+      )
+      expect(reply).not.toMatch(/\?/u)
+      expect(reply.split(/\s+/u).length).toBeLessThanOrEqual(30)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
 })
 
 async function materializeStrictMealImportVaultCli(input: {

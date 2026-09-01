@@ -544,7 +544,18 @@ test('batch compact mode retains requested child failure envelopes', async () =>
   const childEnvelope = JSON.parse(command?.stdout ?? '') as {
     error?: {
       code?: string
-      fieldErrors?: Array<{ message?: string }>
+      fieldErrors?: Array<{
+        code?: string
+        expected?: string
+        message?: string
+        missing?: boolean
+        path?: string
+        received?: string
+      }>
+      hint?: string
+      message?: string
+      retryable?: boolean
+      stage?: string
     }
     meta?: {
       command?: string
@@ -553,8 +564,23 @@ test('batch compact mode retains requested child failure envelopes', async () =>
     ok?: boolean
   }
   assert.equal(childEnvelope.ok, false)
-  assert.equal(childEnvelope.error?.code, 'VALIDATION_ERROR')
-  assert.ok((childEnvelope.error?.fieldErrors?.[0]?.message?.length ?? 0) > 240)
+  assert.deepEqual(childEnvelope.error, {
+    code: 'VALIDATION_ERROR',
+    message: 'The command input is invalid.',
+    retryable: false,
+    hint: 'Check the command schema and correct the invalid input.',
+    stage: 'validation',
+    fieldErrors: [
+      {
+        code: 'invalid_value',
+        missing: false,
+        path: 'kind',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+    ],
+  })
   assert.equal(childEnvelope.meta?.command, 'event list')
   assert.match(childEnvelope.meta?.duration ?? '', /^\d+ms$/u)
 
@@ -573,14 +599,12 @@ test('batch normalizes native validation fields in compact and noncompact output
     {
       argv: ['food', 'search-labels-batch', '--query', oversizedQuery],
       fieldCode: 'too_big',
-      fieldPath: 'query.0',
-      hasLongNativeFieldMessage: false,
+      fieldPath: 'query',
     },
     {
       argv: ['event', 'list', '--kind', invalidKind],
       fieldCode: 'invalid_value',
       fieldPath: 'kind',
-      hasLongNativeFieldMessage: true,
     },
   ] as const
 
@@ -632,21 +656,35 @@ test('batch normalizes native validation fields in compact and noncompact output
       const nativeError = JSON.parse(command?.stdout ?? '') as {
         code?: string
         fieldErrors?: Array<{
+          code?: string
+          expected?: string
           message?: string
+          missing?: boolean
+          path?: string
           received?: string
         }>
+        hint?: string
         message?: string
+        retryable?: boolean
+        stage?: string
       }
-      assert.equal(nativeError.code, 'VALIDATION_ERROR')
-      assert.equal(nativeError.fieldErrors?.[0]?.received, '')
-      assert.equal(
-        (nativeError.message?.length ?? 0) > 640,
-        scenario.hasLongNativeFieldMessage,
-      )
-      assert.equal(
-        (nativeError.fieldErrors?.[0]?.message?.length ?? 0) > 240,
-        scenario.hasLongNativeFieldMessage,
-      )
+      assert.deepEqual(nativeError, {
+        code: 'VALIDATION_ERROR',
+        message: 'The command input is invalid.',
+        retryable: false,
+        hint: 'Check the command schema and correct the invalid input.',
+        stage: 'validation',
+        fieldErrors: [
+          {
+            code: scenario.fieldCode,
+            missing: false,
+            path: scenario.fieldPath,
+            expected: '',
+            received: 'invalid',
+            message: 'This field is invalid.',
+          },
+        ],
+      })
     }
   }
 })

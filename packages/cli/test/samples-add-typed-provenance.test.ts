@@ -293,10 +293,9 @@ test.sequential('samples add rejects batch provenance that cannot be persisted o
     ])
 
     assert.equal(pathLikeSourceFileName.ok, false)
-    assert.match(
-      pathLikeSourceFileName.error?.message ?? '',
-      /basename|path separators|file name/u,
-    )
+    assert.equal(pathLikeSourceFileName.error?.code, 'VALIDATION_ERROR')
+    assert.equal(pathLikeSourceFileName.error?.message, 'The command input is invalid.')
+    assert.equal(pathLikeSourceFileName.error?.fieldErrors?.[0]?.path, 'batchSourceFileName')
 
     const incompleteImportConfig = await runSliceCli([
       'samples',

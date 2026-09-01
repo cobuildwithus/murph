@@ -809,13 +809,23 @@ test("commons protocol filters reject invalid public corpus status values", asyn
   assert.equal(invalidStatus.exitCode, 1);
   assert.equal(invalidStatus.envelope.ok, false);
   if (!invalidStatus.envelope.ok) {
-    assert.equal(invalidStatus.envelope.error.code, "VALIDATION_ERROR");
-    assert.equal(invalidStatus.envelope.error.stage, undefined);
-    assert.equal(invalidStatus.envelope.error.fieldErrors?.[0]?.path, "status");
-    assert.match(
-      invalidStatus.envelope.error.message ?? "",
-      /Invalid option: expected one of/u,
-    );
-    assert.doesNotMatch(invalidStatus.envelope.error.message ?? "", /active/u);
+    assert.deepEqual(invalidStatus.envelope.error, {
+      code: "VALIDATION_ERROR",
+      message: "The command input is invalid.",
+      retryable: false,
+      hint: "Check the command schema and correct the invalid input.",
+      stage: "validation",
+      fieldErrors: [
+        {
+          code: "invalid_value",
+          missing: false,
+          path: "status",
+          expected: "",
+          received: "invalid",
+          message: "This field is invalid.",
+        },
+      ],
+    });
+    assert.equal(JSON.stringify(invalidStatus.envelope.error).includes("active"), false);
   }
 });

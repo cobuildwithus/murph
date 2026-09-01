@@ -1045,9 +1045,23 @@ test.sequential('built CLI rejects invalid journal ids and streams before mutati
       vaultRoot,
     ])
     const invalidEventError = requireError(invalidEvent)
-    assert.equal(invalidEventError.code, 'VALIDATION_ERROR')
-    assert.equal(invalidEventError.retryable, undefined)
-    assert.equal(invalidEventError.fieldErrors?.[0]?.path, 'eventId.0')
+    assert.deepEqual(invalidEventError, {
+      code: 'VALIDATION_ERROR',
+      message: 'The command input is invalid.',
+      retryable: false,
+      hint: 'Check the command schema and correct the invalid input.',
+      stage: 'validation',
+      fieldErrors: [
+        {
+          code: 'invalid_format',
+          missing: false,
+          path: 'eventId',
+          expected: '',
+          received: 'invalid',
+          message: 'This field is invalid.',
+        },
+      ],
+    })
     assertDoesNotEcho(invalidEvent, [privateEventId, vaultRoot])
 
     const invalidStream = await runCli([
@@ -1060,9 +1074,23 @@ test.sequential('built CLI rejects invalid journal ids and streams before mutati
       vaultRoot,
     ])
     const invalidStreamError = requireError(invalidStream)
-    assert.equal(invalidStreamError.code, 'VALIDATION_ERROR')
-    assert.equal(invalidStreamError.retryable, undefined)
-    assert.equal(invalidStreamError.fieldErrors?.[0]?.path, 'stream.0')
+    assert.deepEqual(invalidStreamError, {
+      code: 'VALIDATION_ERROR',
+      message: 'The command input is invalid.',
+      retryable: false,
+      hint: 'Check the command schema and correct the invalid input.',
+      stage: 'validation',
+      fieldErrors: [
+        {
+          code: 'invalid_format',
+          missing: false,
+          path: 'stream',
+          expected: '',
+          received: 'invalid',
+          message: 'This field is invalid.',
+        },
+      ],
+    })
     assertDoesNotEcho(invalidStream, [privateStream, vaultRoot])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

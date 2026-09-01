@@ -2926,10 +2926,8 @@ test.sequential(
       ])
       assert.equal(invalidDayKeyPatch.ok, false)
       assert.equal(invalidDayKeyPatch.error?.code, 'VALIDATION_ERROR')
-      assert.match(
-        invalidDayKeyPatch.error?.message ?? '',
-        /Expected YYYY-MM-DD/u,
-      )
+      assert.equal(invalidDayKeyPatch.error?.message, 'The command input is invalid.')
+      assert.equal(invalidDayKeyPatch.error?.fieldErrors?.[0]?.path, 'dayKey')
 
       const recomputeWithoutExplicitTimeZone = await runSliceCli([
         'event',
