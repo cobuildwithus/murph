@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
 
 import { GoalContactAction } from "@/src/components/goals/goal-contact-action";
+import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const START_PROMPT = "Hey Murph, help me lower my resting heart rate.";
@@ -55,4 +56,27 @@ test("goal CTA preserves Telegram's direct web-to-app fallback", () => {
   assert.match(markup, /rel="noopener noreferrer"/u);
   assert.match(markup, /Opens in a new tab\./u);
   assert.doesNotMatch(markup, /dialog|textarea|copy|choose an app/iu);
+});
+
+test("goal CTA stays on-page when public auth is temporarily unavailable", () => {
+  const option: MurphContactOption = {
+    copyValue: "@withmurph_bot",
+    href: `https://t.me/withmurph_bot?${new URLSearchParams({
+      text: START_PROMPT,
+    }).toString()}`,
+    kind: "telegram",
+    label: "Telegram",
+    rel: "noopener noreferrer",
+    target: "_blank",
+  };
+  const markup = renderToStaticMarkup(
+    <AuthProvider authenticated={false} authenticationStatus="unavailable">
+      <GoalContactAction goalRouteId="lower-resting-heart-rate" option={option} />
+    </AuthProvider>,
+  );
+
+  assert.equal((markup.match(/<a\b/gu) ?? []).length, 0);
+  assert.equal((markup.match(/<button\b/gu) ?? []).length, 1);
+  assert.doesNotMatch(markup, /t\.me|Telegram/u);
+  assert.match(markup, /Couldn’t open your Murph chat\. Try again\./u);
 });

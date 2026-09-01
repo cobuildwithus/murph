@@ -141,6 +141,7 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
   const value = useMemo(
     () => ({
       authenticated: false,
+      authenticationStatus: "ready" as const,
       openAuthDialog,
       prepareAuth,
       shared: true,

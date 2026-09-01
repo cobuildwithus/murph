@@ -85,6 +85,7 @@ describe("public goal client privacy", () => {
         {
           value: {
             authenticated: true,
+            authenticationStatus: "ready",
             openAuthDialog: () => {},
             prepareAuth: () => {},
             shared: false,
@@ -443,6 +444,7 @@ describe("public goal client privacy", () => {
         {
           value: {
             authenticated: true,
+            authenticationStatus: "ready",
             openAuthDialog: () => {},
             prepareAuth: () => {},
             shared: false,
@@ -504,6 +506,71 @@ describe("public goal client privacy", () => {
     );
   });
 
+  it("retries live contact resolution when the initial auth read is unavailable", async () => {
+    const textOption: MurphContactOption = {
+      href: "sms:+15550100001?body=Help%20me%20with%20this%20goal",
+      kind: "text",
+      label: "Messages",
+    };
+    mocks.requestHostedOnboardingJson.mockResolvedValue({ option: textOption });
+    const { GoalContactAction } = await import(
+      "@/src/components/goals/goal-contact-action"
+    );
+    const rendered = await renderClientComponent(
+      createElement(
+        AuthContext.Provider,
+        {
+          value: {
+            authenticated: false,
+            authenticationStatus: "unavailable",
+            openAuthDialog: () => {},
+            prepareAuth: () => {},
+            shared: false,
+          },
+        },
+        createElement(GoalContactAction, {
+          goalRouteId: "lower-resting-heart-rate",
+          option: telegramOption,
+        }),
+      ),
+      {
+        location: {
+          href: "https://example.test/goals/lower-resting-heart-rate",
+          pathname: "/goals/lower-resting-heart-rate",
+          search: "",
+        },
+        requireButton: false,
+      },
+    );
+    cleanupRender = rendered.cleanup;
+    const button = rendered.container.querySelector("button");
+    assert.ok(button);
+
+    expect(rendered.container.querySelector("a")).toBeNull();
+    expect(rendered.container.textContent).toContain(
+      "Couldn’t open your Murph chat. Try again.",
+    );
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+
+    await act(async () => {
+      button.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+        cancelable: true,
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: { goalRouteId: "lower-resting-heart-rate" },
+      signal: expect.any(AbortSignal),
+      url: "/api/goals/contact",
+    });
+    expect(rendered.assign).toHaveBeenCalledWith(textOption.href);
+    expect(rendered.container.querySelector("a")).toBeNull();
+  });
+
   it("fails closed instead of opening anonymous Telegram when member routing fails", async () => {
     mocks.requestHostedOnboardingJson.mockRejectedValue(
       new Error("contact lookup unavailable"),
@@ -517,6 +584,7 @@ describe("public goal client privacy", () => {
         {
           value: {
             authenticated: true,
+            authenticationStatus: "ready",
             openAuthDialog: () => {},
             prepareAuth: () => {},
             shared: false,
@@ -739,6 +807,7 @@ function authenticatedGoalContactAction(
     {
       value: {
         authenticated: true,
+        authenticationStatus: "ready",
         openAuthDialog: () => {},
         prepareAuth: () => {},
         shared: false,

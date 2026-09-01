@@ -28,14 +28,17 @@ export function GoalContactAction({
   goalRouteId: string;
   option: MurphContactOption;
 }) {
-  const { authenticated } = useAuth();
+  const { authenticated, authenticationStatus } = useAuth();
+  const requiresLiveResolution = authenticated
+    || authenticationStatus === "unavailable";
 
   return (
     <div>
-      {authenticated ? (
+      {requiresLiveResolution ? (
         <AuthenticatedGoalContactAction
           key={goalRouteId}
           goalRouteId={goalRouteId}
+          initiallyUnavailable={authenticationStatus === "unavailable"}
         />
       ) : (
         <MurphContactLink
@@ -58,11 +61,15 @@ interface GoalContactAttempt {
 
 function AuthenticatedGoalContactAction({
   goalRouteId,
+  initiallyUnavailable,
 }: {
   goalRouteId: string;
+  initiallyUnavailable: boolean;
 }) {
   const activeAttempt = useRef<GoalContactAttempt | null>(null);
-  const [status, setStatus] = useState<"failed" | "idle" | "opening">("idle");
+  const [status, setStatus] = useState<"failed" | "idle" | "opening">(
+    initiallyUnavailable ? "failed" : "idle",
+  );
 
   useEffect(() => {
     const cancelForNavigation = () => {
