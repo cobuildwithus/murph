@@ -12,6 +12,9 @@ import {
   saveAssistantOutboxIntent,
 } from "@murphai/assistant-engine/assistant-outbox";
 import {
+  saveAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
+import {
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import {
@@ -791,6 +794,125 @@ it("retries an identity-less hosted Linq link-only acknowledgement before accept
   )).resolves.toMatchObject({
     deliveryConfirmationPending: false,
     status: "sent",
+  });
+});
+
+it("terminalizes an identity-less hosted Linq auto-reply as ambiguous when the channel is disabled before retry", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const mailboxItemId = "mailbox_item_identity_less_disabled_auto_reply";
+  const linkUrl = "https://pay.example.test/checkout/disabled-auto-reply";
+  const fixture = await createHostedLinqAttachmentFixture({
+    answeredMailboxItemIds: [mailboxItemId],
+    autoReply: true,
+    imageCount: 0,
+    key: "identity-less-disabled-auto-reply",
+    message: linkUrl,
+    target: "linq_chat_identity_less_disabled_auto_reply",
+  });
+  await saveAssistantAutomationState(fixture.vaultRoot, {
+    autoReply: [{
+      channel: "linq",
+      eligibleAfter: null,
+      enabledAt: "2026-08-06T19:59:00.000Z",
+    }],
+    updatedAt: "2026-08-06T19:59:00.000Z",
+    version: 1,
+  });
+  const pendingMailboxItemIds = new Set([mailboxItemId]);
+  const providerFetch = vi.fn<typeof fetch>(async (request) => {
+    const url = String(request);
+    if (!url.endsWith(`/chats/${fixture.target}/messages`)) {
+      throw new Error(`Unexpected Linq provider request: ${url}`);
+    }
+    return new Response(JSON.stringify({ message: {} }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const publicInternetFetch = vi.fn<typeof fetch>();
+  const recordLinqDeliveryOutcome = vi.fn<
+    NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+  >(async (request) => {
+    for (const answeredMailboxItemId of request.answeredMailboxItemIds ?? []) {
+      pendingMailboxItemIds.delete(answeredMailboxItemId);
+    }
+  });
+  const drainInput = {
+    ...buildHostedLinqDrainInput({
+      fixture,
+      providerFetch,
+      publicInternetFetch,
+    }),
+    effectsPort: createHostedRuntimeEffectsPortStub({
+      recordLinqDeliveryOutcome,
+    }),
+  };
+
+  const firstOutcomes = await drainHostedPreparedAssistantDeliveries(drainInput);
+  expect(firstOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryStatus: "retryable",
+      effectId: fixture.intent.intentId,
+      retryable: true,
+    }),
+  ]);
+  const retained = await readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  );
+  expect(retained).toMatchObject({
+    deliveryConfirmationPending: true,
+    lastError: { code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING" },
+    nextAttemptAt: expect.any(String),
+    status: "retryable",
+  });
+  if (!retained?.nextAttemptAt) {
+    throw new Error("Expected the identity-less auto-reply to schedule confirmation retry.");
+  }
+
+  await saveAssistantAutomationState(fixture.vaultRoot, {
+    autoReply: [],
+    updatedAt: "2026-08-06T20:00:01.000Z",
+    version: 1,
+  });
+  vi.setSystemTime(new Date(retained.nextAttemptAt));
+  const retryEffects = await collectHostedAssistantDeliverySideEffects({
+    includeBackgroundDueIntents: true,
+    vaultRoot: fixture.vaultRoot,
+  });
+  expect(retryEffects.map((effect) => effect.effectId)).toEqual([
+    fixture.intent.intentId,
+  ]);
+
+  const disabledOutcomes = await drainHostedPreparedAssistantDeliveries({
+    ...drainInput,
+    assistantDeliveryEffects: retryEffects,
+  });
+
+  expect(disabledOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      deliveryStatus: "failed_ambiguous",
+      effectId: fixture.intent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(providerFetch).toHaveBeenCalledOnce();
+  expect(publicInternetFetch).not.toHaveBeenCalled();
+  expect(recordLinqDeliveryOutcome).not.toHaveBeenCalled();
+  expect([...pendingMailboxItemIds]).toEqual([mailboxItemId]);
+  await expect(readExistingHostedPendingAssistantInputIds({
+    vaultRoot: fixture.vaultRoot,
+  })).resolves.toEqual([]);
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    answeredMailboxItemIds: [mailboxItemId],
+    deliveryConfirmationPending: false,
+    lastError: { code: "ASSISTANT_DELIVERY_AMBIGUOUS" },
+    nextAttemptAt: null,
+    status: "abandoned",
   });
 });
 
@@ -1676,6 +1798,7 @@ it.each([
 
 async function createHostedLinqAttachmentFixture(input: {
   answeredMailboxItemIds?: readonly string[];
+  autoReply?: boolean;
   card?: HostedAssistantResponseCard;
   homeRoute?: {
     directRecipientPhoneNumber: string;
@@ -1776,6 +1899,7 @@ async function createHostedLinqAttachmentFixture(input: {
     sessionId: `session_${input.key}`,
     threadId: input.target,
     threadIsDirect: true,
+    ...(input.autoReply ? { turnTrigger: "automation-auto-reply" as const } : {}),
     turnId: `turn_${input.key}`,
     vault: workspace.vaultRoot,
   });

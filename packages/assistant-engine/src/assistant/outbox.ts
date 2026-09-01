@@ -970,7 +970,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     }
 
     const retryExhaustionDisposition =
-      resolveAssistantOutboxRetryExhaustionDisposition(prepared.intent.lastError)
+      resolveAssistantOutboxRetryExhaustionDisposition(prepared.intent)
     const terminalIntent = assistantOutboxIntentRequiresTerminalConfirmation({
       dispatchHooks: input.dispatchHooks,
       intent: prepared.intent,
@@ -1497,6 +1497,7 @@ async function confirmAssistantOutboxTerminalIntent(input: {
     status: input.outcome.status === 'failed_ambiguous'
       ? 'abandoned'
       : 'failed',
+    terminalConfirmationCompleted: true,
     vault: input.vault,
   })
 }
