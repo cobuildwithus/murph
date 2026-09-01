@@ -1980,9 +1980,9 @@ describe("hosted web production migration guard", () => {
     assert.match(productionNextBuildScript, /typecheck_old_space_mb=3584/u);
     assert.match(
       productionNextBuildScript,
-      /build_cache_epoch=webpack-next-16\.3-v5-isolated-worker-cold-webpack/u,
+      /build_cache_epoch=webpack-next-16\.3-v6-isolated-worker-no-webpack-cache/u,
     );
-    assert.match(productionNextBuildScript, /webpack_cache_dir=\.next\/cache\/webpack/u);
+    assert.doesNotMatch(productionNextBuildScript, /webpack_cache_dir/u);
     assert.match(
       productionNextBuildScript,
       /node \.\.\/\.\.\/scripts\/rm-paths\.mjs \.next\/cache/u,
@@ -2000,10 +2000,7 @@ describe("hosted web production migration guard", () => {
       productionNextBuildScript,
       /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
-    assert.match(
-      productionNextBuildScript,
-      /node \.\.\/\.\.\/scripts\/rm-paths\.mjs "\$webpack_cache_dir"/u,
-    );
+    assert.doesNotMatch(productionNextBuildScript, /\.next\/cache\/webpack/u);
 
     // Vercel owns the production build lifecycle. The application does not
     // add a second deadline or route production through the local host slot.
@@ -2038,7 +2035,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(readmeDoc, /## Production build memory guard/u);
     assert.match(readmeDoc, /Vercel owns cancellation and build deadlines/u);
-    assert.match(readmeDoc, /`\.next\/cache\/webpack` before every compile/u);
+    assert.match(readmeDoc, /disables Webpack's production cache/u);
     for (const [docName, doc] of [
       ["verification-and-runtime.md", verificationDoc],
       ["testing-ci-map.md", testingCiMapDoc],
@@ -2497,7 +2494,10 @@ fi
 
     assert.deepEqual(cronPaths, [
       "/api/internal/hosted-execution/product-feedback/digest/cron",
-      "/api/internal/hosted-execution/retention/cron",
+      "/api/internal/hosted-execution/retention/control-plane/cron",
+      "/api/internal/hosted-execution/retention/external/cron",
+      "/api/internal/hosted-execution/retention/nonces/cron",
+      "/api/internal/hosted-execution/retention/runtime/cron",
       "/api/internal/hosted-growth/snapshot/cron",
       "/api/internal/hosted-growth/usage-referral/cron",
       "/api/internal/hosted-onboarding/linq/contact-card/cron",
@@ -2505,6 +2505,31 @@ fi
       "/api/internal/hosted-onboarding/stripe/cron",
       "/api/internal/hosted-runtime/latency-alert/cron",
     ]);
+    assert.deepEqual(
+      (vercelJson.crons ?? [])
+        .filter((cron) => cron.path?.includes("/retention/"))
+        .sort((left, right) =>
+          (left.path ?? "").localeCompare(right.path ?? "")
+        ),
+      [
+        {
+          path: "/api/internal/hosted-execution/retention/control-plane/cron",
+          schedule: "20 * * * *",
+        },
+        {
+          path: "/api/internal/hosted-execution/retention/external/cron",
+          schedule: "35 * * * *",
+        },
+        {
+          path: "/api/internal/hosted-execution/retention/nonces/cron",
+          schedule: "5 * * * *",
+        },
+        {
+          path: "/api/internal/hosted-execution/retention/runtime/cron",
+          schedule: "50 * * * *",
+        },
+      ],
+    );
     assert.deepEqual(
       (vercelJson.crons ?? []).find(
         (cron) =>
@@ -2557,10 +2582,31 @@ fi
       };
     };
 
-    assert.deepEqual(vercelJson.git?.deploymentEnabled, {
+    const deploymentEnabled = vercelJson.git?.deploymentEnabled;
+    assert.deepEqual(deploymentEnabled, {
       main: true,
-      "*": false,
+      "**": false,
     });
+
+    const isDeploymentEnabled = (branch: string): boolean => {
+      const matchingRules = Object.entries(deploymentEnabled ?? {}).filter(
+        ([pattern]) => path.matchesGlob(branch, pattern),
+      );
+      return (
+        matchingRules.length === 0
+        || matchingRules.some(([, enabled]) => enabled)
+      );
+    };
+
+    assert.equal(isDeploymentEnabled("main"), true);
+    for (const branch of [
+      "release",
+      "frog/sync",
+      "codex/warm-standby-experiment",
+      "fix/checkpoint-empty-probe-liveness",
+    ]) {
+      assert.equal(isDeploymentEnabled(branch), false, branch);
+    }
   });
 
   test("generates Prisma before direct local Next dev starts", async () => {

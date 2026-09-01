@@ -1,14 +1,13 @@
 ---
-description: Frontend lens for the preliminary unified ReviewGPT pass
-action: preliminary specialist frontend review
+description: On-demand review guidance for frontend implementation quality
+action: on-demand frontend review
 ---
 
-Use this review-only frontend lens for user-facing `apps/web` changes inside
-the preliminary `completion-specialists` ReviewGPT pass or the separate Claude
-Code UI double-check.
+Use this review-only guidance when the user explicitly requests a frontend
+review or when the parent wants a checklist for its own final review.
 
-The Product UX lens in the same preliminary ReviewGPT pass owns the
-irreducible purpose, complete cross-surface journey, timing and delivery, and
+The Product UX plan and walkthrough own the irreducible purpose, complete
+cross-surface journey, timing and delivery, and
 whether words, actions, choices, or screens can be removed. This lens owns
 rendered implementation quality, responsive behavior, accessibility, and
 design-system execution; do not duplicate subjective product-taste findings or

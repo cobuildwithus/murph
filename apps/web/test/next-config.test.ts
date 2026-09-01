@@ -621,18 +621,20 @@ test("buildHostedWebTurbopackConfig always points Turbopack at the repo root", (
   }
 });
 
-test("configureHostedWebWebpack aliases Privy's missing optional Farcaster peer", () => {
+test("configureHostedWebWebpack disables the production cache and aliases Privy's missing optional Farcaster peer", () => {
   const webpackConfig = {
+    cache: { type: "filesystem" },
     resolve: {
       alias: {
         existing: "/existing-module.ts",
       },
     },
   };
-  const configured = configureHostedWebWebpack(webpackConfig);
+  const configured = configureHostedWebWebpack(webpackConfig, { dev: false });
   const hasOptionalModule = resolveHostedOptionalModule();
 
   assert.equal(configured, webpackConfig);
+  assert.equal(configured.cache, false);
   if (hasOptionalModule) {
     assert.deepEqual(configured.resolve.alias, {
       existing: "/existing-module.ts",
@@ -646,6 +648,18 @@ test("configureHostedWebWebpack aliases Privy's missing optional Farcaster peer"
       ),
     });
   }
+});
+
+test("configureHostedWebWebpack preserves development caching", () => {
+  const cache = { type: "filesystem" };
+  const webpackConfig = {
+    cache,
+    resolve: {},
+  };
+
+  configureHostedWebWebpack(webpackConfig, { dev: true });
+
+  assert.equal(webpackConfig.cache, cache);
 });
 
 test("resolvePrivyBaseDomainOrigin normalizes base-domain inputs into a Privy origin", () => {

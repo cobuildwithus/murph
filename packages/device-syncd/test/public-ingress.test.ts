@@ -854,7 +854,8 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
       provider: "demo",
       displayName: "Demo",
       transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
-      oauth: {
+      connection: {
+        kind: "oauth2",
         callbackPath: "/oauth/demo/callback",
         defaultScopes: ["offline", "read:data"],
       },
@@ -3232,7 +3233,8 @@ test("public ingress validates OAuth callback state ownership and required param
       provider: "alt",
       displayName: "Alt",
       transportModes: ["oauth_callback", "scheduled_poll"],
-      oauth: {
+      connection: {
+        kind: "oauth2",
         callbackPath: "/oauth/alt/callback",
         defaultScopes: ["offline", "read:alt"],
       },
@@ -3539,7 +3541,8 @@ test("public ingress rejects webhook deliveries for providers without webhook ha
           provider: "demo",
           displayName: "Demo",
           transportModes: ["oauth_callback", "scheduled_poll"],
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/demo/callback",
             defaultScopes: ["offline", "read:data"],
           },
@@ -5658,8 +5661,9 @@ test("public ingress does not burn valid oauth state on provider mismatch", asyn
         descriptor: {
           ...whoopBase.descriptor,
           displayName: "Whoop",
-          oauth: {
-            ...whoopBase.descriptor.oauth,
+          connection: {
+            ...whoopBase.descriptor.connection,
+            kind: "oauth2",
             callbackPath: "/oauth/whoop/callback",
             defaultScopes: ["offline", "read:data"],
           },
@@ -6000,7 +6004,8 @@ test("public ingress rejects built-in OAuth callback jobs that drift from the pr
           provider: "strava",
           displayName: "Strava",
           transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/strava/callback",
             defaultScopes: ["activity:read"],
           },
@@ -6075,7 +6080,8 @@ test("public ingress rejects built-in webhook jobs that drift from the provider 
           provider: "whoop",
           displayName: "WHOOP",
           transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/whoop/callback",
             defaultScopes: ["offline"],
           },

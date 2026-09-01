@@ -1619,7 +1619,13 @@ describe('assistant local PDF evidence guidance', () => {
       'vault-cli batch --compact --format json --command \'["memory","show","--compact"]\' --command \'["goal","list"]\'',
     )
     expect(prompt).toContain(
-      'For the user\'s saved current-state context, prefer `vault-cli memory show --compact --format json`',
+      'When a bounded saved-memory context is injected, use it directly when it is sufficient',
+    )
+    expect(prompt).toContain(
+      'Do not read memory solely because that block is absent',
+    )
+    expect(prompt).toContain(
+      'only when exact saved context could materially change the current answer',
     )
     expect(prompt).not.toContain(
       '--command \'["memory","show"]\'',
@@ -2074,7 +2080,7 @@ describe('assistant system prompt cache stability', () => {
     // response-card dietary/burn target-authority boundary, explicit
     // group-family tool routing, and the cross-route CLI error-recovery
     // contract set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_374)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_542)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2307,8 +2313,11 @@ describe('assistant system prompt cache stability', () => {
         assistantContextSnapshotPrompt:
           'Vault overview for user A.\n\nActive experiment context for user A.',
         channel: 'telegram',
-        currentLocalDate: '2026-04-15',
-        currentTimeZone: 'Asia/Kuala_Lumpur',
+        currentInstant: '2027-02-14T07:17:05.678Z',
+        currentLocalDate: '2027-02-13',
+        currentTimeZone: 'America/Los_Angeles',
+        conversationScope: 'direct',
+        hostedRuntime: true,
         murphProductBaseUrl: 'http://localhost:3000',
       }),
       cacheInput,
@@ -2318,8 +2327,11 @@ describe('assistant system prompt cache stability', () => {
         assistantContextSnapshotPrompt:
           'Vault overview for user B.\n\nActive experiment context for user B.',
         channel: 'sms',
-        currentLocalDate: '2026-04-16',
+        currentInstant: '2027-07-02T03:04:05.678Z',
+        currentLocalDate: '2027-07-01',
         currentTimeZone: 'America/Los_Angeles',
+        conversationScope: 'direct',
+        hostedRuntime: true,
         murphProductBaseUrl: 'https://withmurph.ai',
       }),
       cacheInput,
@@ -2350,13 +2362,20 @@ describe('assistant system prompt cache stability', () => {
       promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
     )
 
-    expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
-    expect(stablePrefix).not.toContain('2026-04-15')
+    expect(stablePrefix).not.toContain('America/Los_Angeles')
+    expect(stablePrefix).not.toContain('2027-02-13')
+    expect(stablePrefix).not.toContain('2027-02-14T07:17:05.678Z')
     expect(stablePrefix).not.toContain('http://localhost:3000')
     expect(stablePrefix).not.toContain('Vault overview for user A.')
     expect(stablePrefix).not.toContain('Active experiment context for user A.')
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
-    expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
+    expect(dynamicSuffix).toContain('America/Los_Angeles')
+    expect(dynamicSuffix).toContain(
+      'Current local clock for the user (America/Los_Angeles): 2027-02-13 23:17:05 [UTC 2027-02-14T07:17:05.678Z].',
+    )
+    expect(promptB.layers.dynamicTurnContextPrompt).toContain(
+      'Current local clock for the user (America/Los_Angeles): 2027-07-01 20:04:05 [UTC 2027-07-02T03:04:05.678Z].',
+    )
     expect(dynamicSuffix).toContain('Vault overview for user A.')
     expect(promptB.prompt).toContain('Vault overview for user B.')
     expect(promptB.prompt).toContain('Active experiment context for user B.')
@@ -2520,6 +2539,12 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('run one `vault-cli commons knowledge search')
     expect(prompt).toContain(
       'Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state.',
+    )
+    expect(prompt).toContain(
+      "Skip this search only when the request is limited to deterministic exact food-label nutrition facts resolved by food-journal's label database; use that database directly.",
+    )
+    expect(prompt).toContain(
+      'Health reasoning or advice beyond the returned label facts still requires Commons.',
     )
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
     expect(prompt).toContain('If unavailable or empty, continue honestly.')

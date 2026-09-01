@@ -310,6 +310,19 @@ Last verified: 2026-08-30
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- Hosted background admission uses one capability-scoped projection on the
+  existing workspace checkpoint row. A capable runtime checkpoints an absolute
+  `systemMailboxProgressGeneration` plus the independently calculated next
+  default-processing wake; the generation stays equal or advances by exactly
+  one only after explicitly proven durable system progress. Legacy checkpoints
+  clear the projection atomically so an older runtime disables the gate instead
+  of preserving stale authority. Orchestration may delay repeated system-only
+  processing for 30 seconds, two minutes, then ten minutes while the progress
+  generation and handled-through frontier remain unchanged. Workspace-version,
+  attempt, signal, and selected-wake churn are not progress. Due foreground,
+  default-processing, provider-owned, and retention work bypasses the delay
+  without clearing it. This reuses the workspace CAS and Temporal timer owners;
+  it adds no queue, scheduler, per-member state table, or second wake authority.
 - A hosted-group projection grant that needs its first private projection and
   one generation-stable `runtime.maintenance-requested` control row commit in
   the same Web transaction. An append failure therefore rolls back the grant
@@ -354,6 +367,20 @@ Last verified: 2026-08-30
 
 ## Runtime Expectations
 
+- Cloudflare standby allocation is an optional one-slot optimization, not a
+  scheduler. `off` is the source-controlled default, `shadow` maintains and
+  re-proves one current-release ENAM slot without allocating it, and `allocate`
+  uses one 250 ms claim/bind deadline. A miss before slot ownership uses the
+  ordinary exact-user fallback; an ambiguous bind after the per-member stop
+  target is durably reserved retries that exact target instead of risking two
+  live containers.
+  A coordinator transaction admits at most one winner, then replacement
+  provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
+  retirement, expire unbound claim tombstones, and drain stale releases. The
+  slot transition is one-way (`unbound` to `bound` to `retiring` to `retired`),
+  and ambiguous bind/cleanup state stays assigned to its exact `UserRunner`
+  stop target until reconciliation succeeds. Mode `off` retires only
+  coordinator-owned slots and never interrupts bound member work.
 - Initial onboarding has one Postgres completion owner across website and
   native clients. Existing members are backfilled complete. During the
   migration-first rolling deploy, a temporary database default also completes
@@ -753,12 +780,20 @@ Last verified: 2026-08-30
 - Account deletion must not discard its only external-cleanup owner. The
   canonical account transaction persists the KMS-encrypted, foreign-key-free
   receipt before deleting the member. The existing hourly retention sweep
-  retries Cloudflare, Stripe-customer, and Privy-user targets independently;
+  retries Cloudflare, isolated runtime-log deletion, Temporal workflow
+  termination, Stripe-customer, and Privy-user targets independently;
   confirmed absence is idempotent success, completed targets are skipped, and
-  unconfigured, timed-out, or ambiguous targets remain pending. The deletion
-  request returns `cleanupPending` immediately after the canonical transaction
-  instead of waiting on those providers. Each retention attempt has a bounded
-  target deadline, and the bounded batch runs receipts concurrently so one
+  unconfigured, timed-out, or ambiguous targets remain pending. Temporal is
+  complete only after every captured runtime workflow is terminated or
+  confirmed absent. Its receipt stores the first unconfirmed runtime index in
+  the immutable encrypted identifier order, advances that cursor only through
+  contiguous successful batches of four, and applies retry backoff only when
+  the cursor does not move. Its predeploy expansion uses a nullable column with
+  default zero for existing receipts and old-Web inserts; the exact-deployment
+  postdrain contract lane fails on any null before requiring the column. The
+  deletion request returns `cleanupPending` immediately after the canonical
+  transaction instead of waiting on those targets. Each retention attempt has
+  a bounded target deadline, and the bounded batch runs receipts concurrently so one
   stalled vendor does not block unrelated retention work. Because every
   provider delete is idempotent and progress is monotonic, concurrent attempts
   may duplicate a provider request but cannot erase completed progress or
@@ -945,15 +980,18 @@ Last verified: 2026-08-30
   entitlement outcome. There is no new queue, cursor, retry loop, or persisted
   alert state.
 - Positive Stripe payment email is a receipt-completion obligation, not the
-  best-effort failure-alert projection. A positive `invoice.paid` amount or a
-  fulfilled usage-credit Checkout or saved-card PaymentIntent sends once after
-  canonical reconciliation. The existing receipt remains the only retry owner:
+  best-effort failure-alert projection. A positive `invoice.paid` amount whose
+  billing reason is not `subscription_cycle`, or a fulfilled usage-credit
+  Checkout or saved-card PaymentIntent, sends once after canonical
+  reconciliation. All subscription-cycle invoices complete without a
+  notification attempt. The existing receipt remains the only retry owner:
   missing configuration or provider failure leaves it claimable without
   rolling back billing, entitlement, or usage credit. A receipt-local sent
   marker is written only after provider success, while an event-derived Resend
   idempotency key covers response loss before that marker. Receipt replay after
-  the marker must skip send and finish remaining work. When canonical billing
-  succeeds, the notification and all existing post-canonical effects are
+  the marker must skip send and finish remaining work. Eligible payment
+  categories reproduce their notification candidate on retry. When canonical
+  billing succeeds, the notification and all existing post-canonical effects are
   attempted independently inside the same receipt owner. Both promises start
   before either is awaited, with concurrency bounded to one payment-email
   request plus the existing single post-canonical effect chain. Neither side's
@@ -961,19 +999,19 @@ Last verified: 2026-08-30
   the marker is absent, a direct-paid runtime-recheck failure retains its
   existing persisted retry code even when notification also fails, because
   replay consumes that code to reconstruct the wake; the absent marker retries
-  notification on the same receipt. For other simultaneous failures,
-  notification keeps the receipt retryable even if the other effect would
-  otherwise poison it. Once marked, the other effect keeps its existing retry
-  and poison behavior. When canonical billing commits activation mailbox items,
-  their
-  exact pointers are retained on the receipt in that same transaction. Every
-  positive-payment attempt restores
-  retained pointers and best-effort signals them through the existing
+  any reproducible notification candidate on the same receipt. For other
+  simultaneous failures, notification keeps the receipt retryable if the other
+  effect would otherwise poison it. Once marked, the other effect keeps its
+  existing retry and poison behavior. When canonical billing commits activation
+  mailbox items, their exact pointers are retained on the receipt in that same
+  transaction. Every positive-payment attempt restores retained pointers and
+  best-effort signals them through the existing
   activation-wake owner before notification work, even when provider success
   already wrote the sent marker. A rejected first wake can therefore overlap
   provider, sent-marker, or receipt-completion failure without losing the exact
-  retry target or creating another activation. Zero-dollar invoices and
-  no-charge plan changes complete without notification.
+  retry target or creating another activation. Subscription-cycle renewals,
+  zero-dollar invoices, and no-charge plan changes complete without
+  notification.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.

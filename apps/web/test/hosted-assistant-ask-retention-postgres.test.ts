@@ -10,7 +10,7 @@ import {
 import {
   assertHostedAssistantAskCompletionDeliveryAuthorityTx,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
-import { runHostedRetentionCleanup } from "@/src/lib/hosted-retention/cleanup";
+import { runHostedControlPlaneRetentionCleanup } from "@/src/lib/hosted-retention/cleanup";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -102,10 +102,9 @@ describe.skipIf(!runPostgresProof)(
       await expect(client.hostedMailboxItem.count({
         where: { id: { in: [requestId, completionId] } },
       })).resolves.toBe(2);
-      const cleanup = await runHostedRetentionCleanup({
+      const cleanup = await runHostedControlPlaneRetentionCleanup({
         now: cleanupAt,
         prisma: client,
-        signalRuntimeRecheck: async () => undefined,
       });
       expect(cleanup.expiredMailboxContentRetired).toBeGreaterThanOrEqual(2);
       const retiredItems = await client.hostedMailboxItem.findMany({
@@ -228,10 +227,9 @@ describe.skipIf(!runPostgresProof)(
         ],
       });
 
-      const cleanup = await runHostedRetentionCleanup({
+      const cleanup = await runHostedControlPlaneRetentionCleanup({
         now: cleanupAt,
         prisma: client,
-        signalRuntimeRecheck: async () => undefined,
       });
       expect(cleanup.expiredConversationPolicyNonRepliesRecorded)
         .toBeGreaterThanOrEqual(2);

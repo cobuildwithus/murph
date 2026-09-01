@@ -14,10 +14,7 @@ const repoRoot = path.resolve(
   '../../..',
 )
 const prebuiltArtifactPathEnv = 'MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH'
-const generationModeEnv = 'MURPH_ASSISTANT_CLI_SURFACE_GENERATION'
 const originalPrebuiltArtifactPathEnv = process.env[prebuiltArtifactPathEnv]
-const originalGenerationModeEnv = process.env[generationModeEnv]
-const originalArgv = [...process.argv]
 
 function createManifestCommandChildProcess(output: unknown): EventEmitter & {
   kill: () => void
@@ -54,8 +51,6 @@ function createManifestCommandChildProcess(output: unknown): EventEmitter & {
 }
 
 beforeEach(() => {
-  delete process.env[generationModeEnv]
-  process.argv = [...originalArgv]
   process.env[prebuiltArtifactPathEnv] = path.join(
     path.sep,
     'tmp',
@@ -69,12 +64,6 @@ afterEach(async () => {
   } else {
     process.env[prebuiltArtifactPathEnv] = originalPrebuiltArtifactPathEnv
   }
-  if (originalGenerationModeEnv === undefined) {
-    delete process.env[generationModeEnv]
-  } else {
-    process.env[generationModeEnv] = originalGenerationModeEnv
-  }
-  process.argv = [...originalArgv]
   vi.resetModules()
   vi.restoreAllMocks()
   vi.clearAllMocks()
@@ -624,7 +613,7 @@ test('readAssistantCliLlmsManifest launches workspace CLI source with base tscon
   assert.equal(spawnCall.cwd, path.join(path.sep, 'tmp', 'murph-workspace'))
 })
 
-test('readAssistantCliLlmsFullManifest launches the full manifest with bounded caller timeout support', async () => {
+test('readAssistantCliLlmsFullManifest keeps adaptive source discovery and supports an owner-defined runtime timeout', async () => {
   vi.resetModules()
 
   const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
@@ -686,30 +675,24 @@ test('readAssistantCliLlmsFullManifest launches the full manifest with bounded c
     cliEnv: {
       PATH: path.dirname(fakeTsxBinary),
     },
-  })
-  const boundedManifest = await readAssistantCliLlmsFullManifest({
-    cliEnv: {
-      PATH: path.dirname(fakeTsxBinary),
-    },
     timeoutMs: 5 * 60_000,
   })
 
   assert.equal(manifest.commands[0]?.name, 'goal save')
-  assert.equal(boundedManifest.commands[0]?.name, 'goal save')
-  assert.equal(spawnCalls.length, 2)
+  assert.equal(spawnCalls.length, 1)
 
   const spawnCall = spawnCalls[0]
   assert.ok(spawnCall)
   assert.equal(spawnCall.command, fakeTsxBinary)
   assert.deepEqual(spawnCall.args.slice(3), ['--llms-full', '--format', 'json'])
-  assert.ok(timeoutSpy.mock.calls.some(([, delay]) => delay === 60_000))
   assert.ok(timeoutSpy.mock.calls.some(([, delay]) => delay === 5 * 60_000))
 })
 
-test('readAssistantCliLlmsFullManifest explicitly prefers the built workspace CLI for composed builds', async () => {
+test('readAssistantCliLlmsFullManifestFromCliEntry requires the explicit built CLI with an owner-defined timeout', async () => {
   vi.resetModules()
 
   const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
+  const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
   const spawnCalls: Array<{
     args: string[]
     command: string
@@ -744,14 +727,12 @@ test('readAssistantCliLlmsFullManifest explicitly prefers the built workspace CL
   }))
 
   const {
-    readAssistantCliLlmsFullManifest,
+    readAssistantCliLlmsFullManifestFromCliEntry,
   } = await import('../src/assistant/cli-surface-manifest.ts')
 
-  await readAssistantCliLlmsFullManifest({
-    cliEnv: {
-      PATH: path.dirname(fakeTsxBinary),
-    },
-    preferBuiltWorkspaceCli: true,
+  await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js'),
+    workingDirectory: repoRoot,
   })
 
   assert.equal(spawnCalls.length, 1)
@@ -760,9 +741,42 @@ test('readAssistantCliLlmsFullManifest explicitly prefers the built workspace CL
   assert.equal(spawnCall.command, process.execPath)
   assert.match(spawnCall.args[0] ?? '', /packages[\\/]cli[\\/]dist[\\/]bin\.js$/u)
   assert.deepEqual(spawnCall.args.slice(1), ['--llms-full', '--format', 'json'])
+  assert.ok(timeoutSpy.mock.calls.some(([, delay]) => delay === 5 * 60_000))
 })
 
-test('generate-cli-surface-contract accepts the release timeout with built CLI preference', async () => {
+test('readAssistantCliLlmsFullManifestFromCliEntry fails before spawn when the built CLI is absent', async () => {
+  vi.resetModules()
+
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      access: vi.fn(async () => {
+        throw new Error('missing built CLI')
+      }),
+    }
+  })
+  const spawnMock = vi.fn()
+  vi.doMock('node:child_process', () => ({
+    spawn: spawnMock,
+  }))
+
+  const {
+    readAssistantCliLlmsFullManifestFromCliEntry,
+  } = await import('../src/assistant/cli-surface-manifest.ts')
+
+  await assert.rejects(
+    readAssistantCliLlmsFullManifestFromCliEntry({
+      cliEntryPath: path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js'),
+      workingDirectory: repoRoot,
+    }),
+    /required built workspace CLI is unavailable/u,
+  )
+  assert.equal(spawnMock.mock.calls.length, 0)
+})
+
+test('generateAssistantCliSurfaceContract preserves the artifact schema and serialization', async () => {
   vi.resetModules()
 
   const writeFileMock = vi.fn(
@@ -778,15 +792,9 @@ test('generate-cli-surface-contract accepts the release timeout with built CLI p
     }
   })
 
-  const readAssistantCliLlmsManifest = vi.fn(
-    async (_input: { workingDirectory?: string | null }) => {
-      throw new Error('compact manifest should not be used for prebuilt generation')
-    },
-  )
-  const readAssistantCliLlmsFullManifest = vi.fn(
+  const readAssistantCliLlmsFullManifestFromCliEntry = vi.fn(
     async (_input: {
-      preferBuiltWorkspaceCli?: boolean
-      timeoutMs?: number
+      cliEntryPath: string
       workingDirectory?: string | null
     }) => ({
       commands: [
@@ -820,49 +828,46 @@ test('generate-cli-surface-contract accepts the release timeout with built CLI p
     }),
   )
   vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
-    buildAssistantCliProcessEnv: () => ({}),
-    readAssistantCliLlmsFullManifest,
-    readAssistantCliLlmsManifest,
+    readAssistantCliLlmsFullManifestFromCliEntry,
   }))
 
-  const originalArgv = process.argv
-  process.argv = [
-    ...originalArgv.slice(0, 2),
-    '--prefer-built-workspace-cli',
-    '--manifest-timeout-ms',
-    String(5 * 60_000),
-  ]
-  try {
-    await import('../src/assistant/generate-cli-surface-contract.ts')
-  } finally {
-    process.argv = originalArgv
-  }
+  const artifactPath = path.join(
+    repoRoot,
+    'packages',
+    'assistant-engine',
+    'dist',
+    'assistant',
+    'cli-surface-contract.generated.json',
+  )
+  const cliEntryPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const {
+    generateAssistantCliSurfaceContract,
+  } = await import('../src/assistant/generate-cli-surface-contract.ts')
 
-  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
-  assert.equal(readAssistantCliLlmsFullManifest.mock.calls.length, 1)
+  await generateAssistantCliSurfaceContract({
+    artifactPath,
+    cliEntryPath,
+    workingDirectory: repoRoot,
+  })
+
+  assert.equal(readAssistantCliLlmsFullManifestFromCliEntry.mock.calls.length, 1)
   assert.equal(
     path.resolve(
-      readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.workingDirectory ?? '',
+      readAssistantCliLlmsFullManifestFromCliEntry.mock.calls[0]?.[0]
+        ?.workingDirectory ?? '',
     ),
     repoRoot,
   )
   assert.equal(
-    readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.timeoutMs,
-    5 * 60_000,
-  )
-  assert.equal(
-    readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.preferBuiltWorkspaceCli,
-    true,
+    readAssistantCliLlmsFullManifestFromCliEntry.mock.calls[0]?.[0]?.cliEntryPath,
+    cliEntryPath,
   )
   assert.equal(writeFileMock.mock.calls.length, 1)
 
   const writeCall = writeFileMock.mock.calls[0]
   assert.ok(writeCall)
-  const [artifactPath, rawArtifact, encoding] = writeCall
-  assert.match(
-    String(artifactPath),
-    /packages[\\/]assistant-engine[\\/]src[\\/]assistant[\\/]cli-surface-contract\.generated\.json$/u,
-  )
+  const [writtenArtifactPath, rawArtifact, encoding] = writeCall
+  assert.equal(writtenArtifactPath, artifactPath)
   assert.equal(encoding, 'utf8')
 
   const artifact = JSON.parse(String(rawArtifact)) as {
@@ -878,32 +883,6 @@ test('generate-cli-surface-contract accepts the release timeout with built CLI p
     artifact.contract,
     /- `goal save`: Create or update one goal from typed command fields\.; args \[title\]; options --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,
   )
-})
-
-test('generate-cli-surface-contract lets a composed build defer only its artifact substep', async () => {
-  vi.resetModules()
-  process.env[generationModeEnv] = 'defer'
-
-  const writeFileMock = vi.fn(async () => undefined)
-  vi.doMock('node:fs/promises', async () => {
-    const actual =
-      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
-    return {
-      ...actual,
-      writeFile: writeFileMock,
-    }
-  })
-  const readAssistantCliLlmsFullManifest = vi.fn(async () => ({ commands: [] }))
-  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
-    buildAssistantCliProcessEnv: () => ({}),
-    readAssistantCliLlmsFullManifest,
-    readAssistantCliLlmsManifest: vi.fn(),
-  }))
-
-  await import('../src/assistant/generate-cli-surface-contract.ts')
-
-  assert.equal(readAssistantCliLlmsFullManifest.mock.calls.length, 0)
-  assert.equal(writeFileMock.mock.calls.length, 0)
 })
 
 test('readAssistantCliLlmsManifest skips workspace CLI source when base tsconfig is missing', async () => {

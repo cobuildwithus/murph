@@ -245,9 +245,9 @@ export function spawnChildProcess(
     child,
     name,
     stderrTail: (maxChars?: number): string => stderr.read(maxChars),
-    stderrText: (): string => stderr.read(),
+    stderrText: (): string => stderr.read(HOSTED_LOCAL_OUTPUT_BUFFER_MAX_CHARS),
     stdoutTail: (maxChars?: number): string => stdout.read(maxChars),
-    stdoutText: (): string => stdout.read(),
+    stdoutText: (): string => stdout.read(HOSTED_LOCAL_OUTPUT_BUFFER_MAX_CHARS),
   };
 }
 

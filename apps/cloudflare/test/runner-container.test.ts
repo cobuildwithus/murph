@@ -33,6 +33,7 @@ import {
   RunnerContainer,
   type RunnerContainerStartupFailureStage,
 } from "../src/runner-container.ts";
+import { StandbyRunnerContainer } from "../src/standby-runner-container.ts";
 import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "../src/runner-egress-intercept.ts";
@@ -139,6 +140,8 @@ describe("RunnerContainer", () => {
     expect(RunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
     expect(DeploySmokeRunnerContainer.outbound).toBeUndefined();
     expect(DeploySmokeRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
+    expect(StandbyRunnerContainer.outbound).toBeUndefined();
+    expect(StandbyRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
   });
 
   it("keeps deploy-smoke live-model egress grants off the production runner container", () => {
@@ -1954,6 +1957,10 @@ describe("RunnerContainer", () => {
       .toBeLessThanOrEqual(timing.readyObservedAtEpochMs);
 
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions)
+      .toMatchObject({
+        portProbeTimeoutMS: 1_500,
+      });
     const healthCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/health")
     );
@@ -2168,20 +2175,23 @@ describe("RunnerContainer", () => {
     const destroyStarted = createDeferred<void>();
     const releaseDestroy = createDeferred<void>();
     let containerRef: RunnerContainer | null = null;
+    let lastChange = Date.now();
     let status: "running" | "stopped" = "stopped";
     let healthChecks = 0;
     const startAndWaitForPorts = vi.fn(async () => {
       status = "running";
+      lastChange = Date.now();
       containerRef?.onStart();
     });
     const destroy = vi.fn(async () => {
       destroyStarted.resolve(undefined);
       await releaseDestroy.promise;
       status = "stopped";
+      lastChange = Date.now();
       containerRef?.onStop({ exitCode: 0, reason: "exit" });
     });
     const getState = vi.fn(async () => ({
-      lastChange: Date.now(),
+      lastChange,
       status,
     }));
     const { container } = createContainerDouble({
@@ -3500,6 +3510,7 @@ describe("RunnerContainer", () => {
     expect(start).toHaveBeenCalledOnce();
     expect(start.mock.calls[0]?.[1]).toMatchObject({
       portToCheck: 8080,
+      portProbeTimeoutMS: 1_500,
       signal: expect.any(AbortSignal),
     });
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
@@ -3866,6 +3877,10 @@ describe("RunnerContainer", () => {
     expect(healthCalls).toHaveLength(1);
     expect(executeCalls).toHaveLength(1);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions)
+      .toMatchObject({
+        portProbeTimeoutMS: 1_500,
+      });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
@@ -4639,6 +4654,10 @@ describe("RunnerContainer", () => {
       status: 200,
     });
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions)
+      .toMatchObject({
+        portProbeTimeoutMS: 1_500,
+      });
     expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(destroy).toHaveBeenCalledTimes(1);
@@ -10601,6 +10620,7 @@ describe("RunnerContainer", () => {
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
       expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions).toMatchObject({
         instanceGetTimeoutMS: expectedTimeoutMs,
+        portProbeTimeoutMS: 1_500,
         portReadyTimeoutMS: expectedTimeoutMs,
       });
     }

@@ -96,6 +96,16 @@ export interface HostedWorkspaceInvocationOptions {
   waitForBackgroundAssistantWork(signal: AbortSignal | null): Promise<void>;
 }
 
+function preserveAcceptedRuntimeWake(
+  result: HostedAssistantWorkspaceRuntimeJobResult,
+  acceptedRuntimeWake: boolean,
+): HostedAssistantWorkspaceRuntimeJobResult {
+  if (!acceptedRuntimeWake) {
+    return result;
+  }
+  return { ...result, immediateRecheckRequested: true };
+}
+
 export function buildHostedExecutionJobRuntime(input: {
   requestedRuntime: HostedAssistantRuntimeConfig;
   supervisorEnv: Readonly<Record<string, string | undefined>>;
@@ -264,7 +274,14 @@ export async function runHostedWorkspaceInvocation(
       vaultRoot,
       waitForBackgroundAssistantWork: options.waitForBackgroundAssistantWork,
     });
-    return assertHostedExecutionRunnerJobResult(result, job);
+    acceptingRuntimeWakes = false;
+    return assertHostedExecutionRunnerJobResult(
+      preserveAcceptedRuntimeWake(
+        result,
+        runtimeWakeSignal.consumePending() !== null,
+      ),
+      job,
+    );
   } finally {
     acceptingRuntimeWakes = false;
   }

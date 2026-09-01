@@ -1298,13 +1298,13 @@ export async function runHostedDeviceSyncWakeLane(input: {
           onProcessedJobs: (observedProcessedJobs) => {
             processedJobs = observedProcessedJobs;
           },
+          onJobTimingDiagnostics: (
+            observedJobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+          ) => {
+            jobTimingDiagnostics = observedJobTimingDiagnostics;
+          },
           ...(input.runtimeLogPlatform?.logPort
             ? {
-                onJobTimingDiagnostics: (
-                  observedJobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[],
-                ) => {
-                  jobTimingDiagnostics = observedJobTimingDiagnostics;
-                },
                 onQueueSnapshots: (observedQueueSnapshots: HostedDeviceSyncPassQueueSnapshots) => {
                   queueSnapshots = observedQueueSnapshots;
                 },
@@ -1366,6 +1366,9 @@ export async function runHostedDeviceSyncWakeLane(input: {
       ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       parserProcessed: 0,
       postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
+      ...(jobTimingDiagnostics.some((diagnostic) => diagnostic.canonicalProgressCommitted === true)
+        ? { systemProgressed: true as const }
+        : {}),
       ...(deviceSyncResult.stagedDirtyAcks
         ? { stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks }
         : {}),

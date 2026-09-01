@@ -503,12 +503,21 @@ The hosted Prisma schema keeps ownership sharp and nested:
 
   Canonical account deletion also inserts one foreign-key-free, KMS-encrypted
   external-cleanup receipt in the same transaction before removing member
-  rows. The immediate attempt and existing hourly retention sweep share that
-  idempotent owner for Cloudflare runner/R2, Stripe-customer, and Privy cleanup;
-  unconfigured or partial targets stay pending, completed targets are skipped,
-  and the receipt is removed only after convergence. Immediate target calls are
-  bounded to five seconds plus a small receipt-settlement margin; hourly retries
-  use fifteen-second target bounds and four-receipt concurrency. Cloudflare is
+  rows. The immediate attempt and hourly external-retention cron share that
+  idempotent owner for Cloudflare runner/R2, isolated runtime logs, Temporal
+  workflow termination, Stripe-customer, and Privy cleanup; unconfigured or
+  partial targets stay pending, completed targets are skipped, and the receipt
+  is removed only after convergence. Temporal completion requires every
+  captured runtime workflow to be terminated or confirmed absent. One
+  receipt-owned cursor resumes deterministic batches of four at the first
+  unconfirmed runtime; progress is immediately eligible to continue, while
+  attempts with no progress back off. Predeploy adds that cursor nullable with
+  a zero default so existing receipts and old-Web inserts remain compatible;
+  after the cursor-aware Web is live and prior functions drain, the contract
+  lane rejects any unexpected null before setting `NOT NULL`. Immediate
+  cleanup uses one five-second shared target deadline plus a small
+  receipt-settlement margin; hourly retries use a fifteen-second shared target
+  deadline and four-receipt concurrency. Cloudflare is
   terminal only when the capability-bearing Worker explicitly confirms
   `deleteAllCompleted`, so a legacy response cannot erase retry ownership.
 
@@ -1286,9 +1295,24 @@ Callback auth contract:
   the signature to a null member, rejects a presented member header, consumes
   the nonce under a reserved system owner in the same replay table, and returns
   only the `bindings-v1` Web owner/key identity with `Cache-Control: no-store`.
-- the existing hourly hosted-retention cron removes only strictly expired nonce
+- the dedicated hourly nonce-retention cron removes only strictly expired nonce
   rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
-  account deletion still independently deletes the member's nonce rows
+  it finishes the small browser-assertion nonce lane first so callback catch-up
+  cannot starve that owner;
+  each statement remains capped at 5,000 rows, while callback nonces alone use
+  a 100-times-higher max-batch ceiling to drain sustained control-plane volume.
+  It runs at minute 5 with an explicit 800-second duration, independently of
+  the control-plane, external-provider, and runtime-maintenance crons; a
+  caught-up hour still stops after the first short batch. Account deletion
+  still independently deletes the member's nonce rows
+- the other hourly retention routes are staggered and independently bounded:
+  `/api/internal/hosted-execution/retention/control-plane/cron` at minute 20
+  for ordinary primary-database cleanup,
+  `/api/internal/hosted-execution/retention/external/cron` at minute 35 for
+  account and computer provider cleanup, and
+  `/api/internal/hosted-execution/retention/runtime/cron` at minute 50 for
+  runtime signals followed by best-effort isolated diagnostic-log cleanup. Each has a 300-second
+  duration; none invokes the nonce owner
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
@@ -1391,8 +1415,10 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
   and `payment_intent.succeeded` events as well as
   `checkout.session.async_payment_failed`, `payment_intent.payment_failed`,
-  `invoice.payment_failed`, and `invoice.finalization_failed`. Checkout action
-  owners cover mandatory
+  `invoice.payment_failed`, and `invoice.finalization_failed`. Positive
+  `invoice.paid` events with `billing_reason: subscription_cycle` still drive
+  billing reconciliation but intentionally do not send a positive-payment
+  notification. Checkout action owners cover mandatory
   price reads, customer provisioning, saved-card preparation, and Checkout
   Session create/resume. Paid-plan upgrades, paid-trial transitions, and
   scheduled plan switches use the same complete-action ownership. An owner
@@ -1456,7 +1482,7 @@ policy, so it remains admissible through the millisecond before
 `(exp + 61) * 1000` and is first invalid exactly at that instant. New nonce
 rows persist that first-invalid horizon, while request admission performs one
 primary-key insert and treats only the exact nonce conflict as replay. The
-bounded hourly hosted-retention owner deletes only rows whose stored
+bounded hourly nonce-retention owner deletes only rows whose stored
 `expiresAt <= now - 61 seconds`; this retains legacy raw-`exp` rows through the
 full acceptance window and deliberately retains new-format rows for an
 additional 61 seconds.
@@ -1885,19 +1911,29 @@ completed on the Standard builder with this worker boundary. The later
 single-process simplification is no longer acceptable: an exact-head cgroup
 trace measured 11.18 GB at static generation, and production reproduced the
 same intermittent 70-page stall. The hosted local-development wrapper remains
-on Turbopack and rejects an explicit Webpack flag. The production runner also
-owns a versioned cache epoch inside `.next/cache`.
+on Turbopack and rejects an explicit Webpack flag.
+
+The Next config disables Webpack's production cache. The runner already
+required every production compile to start cold, so a generated Webpack cache
+could never produce a later hit; one measured cold build nevertheless wrote 2.74 GB beneath
+`.next/cache/webpack` and peaked at 5.52 GB RSS before two adjacent Standard
+deployments were OOM-killed during compilation. Removing that dead artifact
+eliminates its serialization and page-cache pressure without changing compiler
+inputs or output. The paired production-faithful build left the Webpack cache
+absent, lowered peak RSS from 5.52 GB to 3.96 GB, and shortened compilation
+from 144 seconds to 117 seconds. Development caching remains available.
+
+The production runner also owns a versioned cache epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
-compilation and writes the epoch only after Next succeeds. Production Webpack
-compiles are additionally cold-cache by policy: the runner removes
-`.next/cache/webpack` before every compile, and because that removal precedes
-the only Next invocation and aborts the build on failure, a restored warm
-Webpack cache can never reach the compiler regardless of what an earlier
-deployment uploaded. Warm restored Webpack caches on Vercel's 8 GB Standard builder
-were the trigger for the August 2026 steady-state OOM kills and silent
-compile hangs; only the cold path is proven. Other cache subtrees such as SWC
-remain warm. Vercel owns cancellation and build deadlines. The production
-package script therefore runs directly instead of passing through the local
+compilation and writes the epoch only after Next succeeds. The disabled-cache
+epoch clears restored caches from the preceding policy once; compatible later
+builds retain non-Webpack cache subtrees such as SWC. Warm restored Webpack
+caches on Vercel's 8 GB Standard builder were the trigger for the August 2026
+steady-state OOM kills and silent compile hangs, and writing the unused cold
+cache later consumed the remaining capacity margin.
+
+Vercel owns cancellation and build deadlines. The production package script
+therefore runs directly instead of passing through the local
 shared-host verification slot or adding a second watchdog and process-group
 reaper. Bump the epoch only when a proven compiler/cache transition requires
 another full invalidation.

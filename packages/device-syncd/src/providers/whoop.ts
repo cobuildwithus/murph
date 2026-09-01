@@ -2,7 +2,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import {
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-  requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
@@ -70,10 +69,9 @@ const WHOOP_AUTH_PATH = "/oauth/oauth2/auth";
 const WHOOP_TOKEN_PATH = "/oauth/oauth2/token";
 const WHOOP_API_PREFIX = "/developer";
 const WHOOP_PROVIDER_DESCRIPTOR = WHOOP_DEVICE_PROVIDER_DESCRIPTOR;
-const WHOOP_OAUTH = requireDeviceProviderOAuthDescriptor(WHOOP_PROVIDER_DESCRIPTOR);
 const WHOOP_WEBHOOK = requireDeviceProviderWebhookDescriptor(WHOOP_PROVIDER_DESCRIPTOR);
 const WHOOP_SYNC = requireDeviceProviderSyncDescriptor(WHOOP_PROVIDER_DESCRIPTOR);
-const WHOOP_CALLBACK_PATH = WHOOP_OAUTH.callbackPath;
+const WHOOP_CALLBACK_PATH = WHOOP_PROVIDER_DESCRIPTOR.connection.callbackPath;
 const WHOOP_WEBHOOK_PATH = WHOOP_WEBHOOK.path;
 const DEFAULT_WHOOP_BASE_URL = "https://api.prod.whoop.com";
 const DEFAULT_TIMEOUT_MS = 15_000;

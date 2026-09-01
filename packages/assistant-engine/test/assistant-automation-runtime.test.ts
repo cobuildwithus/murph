@@ -679,6 +679,7 @@ function createInboxServices(
     showAttachmentStatus: unreachable,
     show: unreachable,
     search: unreachable,
+    preserveDocumentAttachment: unreachable,
     preserveDocumentAttachments: unreachable,
     promoteMeal: unreachable,
     promoteDocument: unreachable,
@@ -1824,6 +1825,9 @@ describe('assistant automation scanner', () => {
     const sentInput = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
     expect(sentInput?.promptTimeContext).toEqual({
       canonicalTimeZoneAvailable: false,
+      currentInstant: expect.stringMatching(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+      ),
       currentLocalDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/u),
       currentTimeZone: 'UTC',
     })
@@ -5230,6 +5234,35 @@ describe('assistant auto-reply runtime', () => {
       ...projectedLateInput,
       event: {
         ...projectedLateInput.event,
+        attachmentEvidence: {
+          attachments: [
+            {
+              byteSize: 128,
+              derived: null,
+              descriptorAttachmentId: 'late_voice_descriptor',
+              fileName: 'voice-note.m4a',
+              inlineFragments: [
+                {
+                  kind: 'attachment_transcript',
+                  label: 'attachment-1-transcript',
+                  text: 'That morning-summary preference was only temporary.',
+                  truncated: false,
+                },
+              ],
+              kind: 'audio',
+              mime: 'audio/m4a',
+              ordinal: 1,
+              parseState: 'succeeded',
+              raw: null,
+              sourceAttachmentId: 'late_voice_attachment',
+            },
+          ],
+          optionalInboxCaptureId: 'capture-late',
+          reasonCode: null,
+          source: 'local-parser-drain',
+          status: 'available',
+          updatedAt: '2026-04-08T00:03:01.000Z',
+        },
         replyTarget: {
           channel: 'telegram',
           messageId: 'late_msg_1',
@@ -5373,13 +5406,17 @@ describe('assistant auto-reply runtime', () => {
           expect.objectContaining({
             captureIds: ['capture-late'],
             id: lateInput.event.inputId,
+            promptFallbackText:
+              'Attachment 1 transcript:\nThat morning-summary preference was only temporary.',
           }),
         ])
         expect(admitted).toMatchObject({
           deliveryReplyToMessageId: 'late_msg_1',
         })
         expect(admitted).not.toHaveProperty('deliveryTarget')
-        expect(admitted.transcriptText).toBe('User sent an attachment.')
+        expect(admitted.transcriptText).toBe(
+          'Attachment 1 transcript:\nThat morning-summary preference was only temporary.',
+        )
         const duplicateAdmission = await input.activeTurnInput?.({
           sessionId: 'session-1',
           turnId: 'turn-1',

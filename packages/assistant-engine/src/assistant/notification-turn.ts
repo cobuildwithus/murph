@@ -1899,7 +1899,7 @@ function assistantMaintenanceRawEventsIncludeMutation(
     const dynamicMutationActions = profile === 'group-room-model'
       ? ['delete', 'upsert'] as const
       : profile === 'member-memory'
-        ? ['update', 'upsert'] as const
+        ? ['forget', 'update', 'upsert'] as const
         : null
     const dynamicMutationTool = profile === 'group-room-model'
       ? 'group_room_model'

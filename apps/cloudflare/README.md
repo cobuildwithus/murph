@@ -65,6 +65,39 @@ Internal control routes:
 The supported worker HTTP surface stops at those narrow control routes, the
 binding-admission and deploy-smoke callbacks, and the public banner and health
 checks.
+
+### ENAM runner standby
+
+The optional runner standby is internal Durable Object coordination, not a new
+HTTP route. `HOSTED_EXECUTION_STANDBY_MODE` has three strict values:
+
+- `off` (the default) advertises no slot and retires any still-unclaimed slot.
+- `shadow` keeps one release-scoped ENAM slot ready but never gives it to real
+  processing.
+- `allocate` atomically claims that one ready slot, immediately starts a
+  replacement in background work, and falls back to the ordinary exact-user
+  container when the claim does not finish within 250 ms.
+
+The public banner and health response report the canonical effective mode.
+Deployment smoke pins the newly deployed Worker version and requires its live
+mode to match the rendered config before the deploy workflow publishes that
+mode in its summary.
+
+A slot is ready only after its exact Worker release, bundle/source
+fingerprints, architecture, ENAM placement, heavy runtime hydration, pristine
+job counters, and a content-free Codex App Server initialize-and-stop probe all
+match. No member, workspace, provider credential, or canonical data enters the
+standby during this phase. Codex's reusable production App Server is still
+created only after claim and encrypted-workspace restore because its launch
+identity and home are member-specific.
+
+The coordinator receives no member id. `UserRunner` first persists the opaque
+slot as its exact stop target, then binds the slot once to that member and
+claim, opens the normal write fence, restores the workspace, and invokes the
+ordinary runner path. A claimed slot may remain warm only for that same member
+under the existing conversation idle lifecycle; it is retired and scrubbed,
+never returned to the standby for another member.
+
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
@@ -590,6 +623,15 @@ per-invocation outbound proxy tokens or dynamically installed outbound
 handlers. The runner does not run a separate post-request PID sweep over the
 native Codex App Server; warm lifecycle is owned by the existing Codex
 app-server slot and explicit runner cleanup paths.
+
+The shell-prewarm, direct cold-start, and deploy-smoke paths give each native
+TCP readiness request a 1.5 second deadline and retry sequentially on the
+existing 250 ms interval. The overall readiness budget is unchanged. A probe
+timeout cannot publish `healthy`, call workspace code, or fail the container by
+itself; the patched Containers helper awaits the aborted request before
+retrying, and only its existing successful lifecycle path publishes healthy
+state and runs `onStart`. Its implicit `containerFetch()` auto-start fallback
+retains the upstream five-second default.
 
 Legacy artifact `GET` requests attach a validated read-purpose header and one
 UUID correlation id that is stable across replay-safe retries. Runner and Worker

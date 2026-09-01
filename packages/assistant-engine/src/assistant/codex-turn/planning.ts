@@ -20,9 +20,9 @@ import {
   scopeAssistantCliSurfaceContractForAssistant,
 } from '../cli-surface-bootstrap.js'
 import {
-  readAssistantContextSnapshotPrompt,
   refreshAssistantContextSnapshotBestEffort,
 } from '../context-snapshot.js'
+import { readAssistantCurrentStatePrompt } from '../current-state.js'
 import {
   assistantRouteSupportsGroupRoomModel,
   readAssistantGroupRoomModelPrompt,
@@ -783,7 +783,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : await measureRoutePlanningAsync(
         routePlanningSpans,
         'assistantContextSnapshotElapsedMs',
-        () => readAssistantContextSnapshotPrompt({
+        () => readAssistantCurrentStatePrompt({
           vaultRoot: input.input.vault,
         }),
         (elapsedMs) => {
@@ -886,6 +886,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       channel: resolvedChannel,
       canonicalTimeZoneAvailable:
         input.promptTimeContext.canonicalTimeZoneAvailable !== false,
+      currentInstant: input.promptTimeContext.currentInstant,
       currentLocalDate: input.promptTimeContext.currentLocalDate,
       currentTimeZone: input.promptTimeContext.currentTimeZone,
       conversationScope,

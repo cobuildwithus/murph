@@ -1061,10 +1061,10 @@ export function buildWranglerLocalDevConfig(
     image: runnerContainerImage,
     image_build_context: runnerContainerImageBuildContext,
     image_vars: {
-      // The per-class build arg keeps the two class images' Docker image IDs
+      // The per-class build arg keeps the class images' Docker image IDs
       // distinct. Without it, wrangler dev's duplicate-tag cleanup
       // (`cleanupDuplicateImageTags`) untags the runner image right after the
-      // deploy-smoke image build (both tags point at one image ID), and hosted
+      // next class image build (both tags point at one image ID), and hosted
       // cold starts then fail with "No such image available named
       // cloudflare-dev/runnercontainer:<tag>" until the harness times out.
       HOSTED_RUNNER_CONTAINER_CLASS: input.className,
@@ -1087,6 +1087,7 @@ export function buildWranglerLocalDevConfig(
     containers: [
       buildRunnerContainerConfig({ className: "RunnerContainer", maxInstances: 50 }),
       buildRunnerContainerConfig({ className: "DeploySmokeRunnerContainer", maxInstances: 1 }),
+      buildRunnerContainerConfig({ className: "StandbyRunnerContainer", maxInstances: 50 }),
     ],
     durable_objects: {
       bindings: [
@@ -1114,6 +1115,14 @@ export function buildWranglerLocalDevConfig(
           name: "RUNNER_CONTAINER_SMOKE",
           class_name: "DeploySmokeRunnerContainer",
         },
+        {
+          name: "STANDBY_COORDINATOR",
+          class_name: "StandbyRunnerCoordinatorDurableObject",
+        },
+        {
+          name: "STANDBY_RUNNER_CONTAINER",
+          class_name: "StandbyRunnerContainer",
+        },
       ],
     },
     migrations: [
@@ -1140,6 +1149,13 @@ export function buildWranglerLocalDevConfig(
       {
         tag: "v6",
         new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
+      },
+      {
+        tag: "v7",
+        new_sqlite_classes: [
+          "StandbyRunnerCoordinatorDurableObject",
+          "StandbyRunnerContainer",
+        ],
       },
     ],
     triggers: {

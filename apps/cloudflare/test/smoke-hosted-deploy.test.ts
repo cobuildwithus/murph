@@ -38,6 +38,7 @@ import {
 import {
   assertSmokeCodexShellResult,
   buildVersionOverrideHeaders,
+  resolveSmokeExpectedStandbyMode,
   resolveSmokeRunnerManifestPath,
   resolveSmokeWorkerBaseUrl,
   runSmokeHostedDeploy,
@@ -71,6 +72,27 @@ describe("resolveSmokeWorkerBaseUrl", () => {
     expect(() => resolveSmokeWorkerBaseUrl({})).toThrow(
       "HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL or CF_PUBLIC_BASE_URL must be configured.",
     );
+  });
+});
+
+describe("resolveSmokeExpectedStandbyMode", () => {
+  it.each(["off", "shadow", "allocate"] as const)(
+    "accepts the canonical %s mode",
+    (mode) => {
+      expect(resolveSmokeExpectedStandbyMode({
+        HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: mode,
+      })).toBe(mode);
+    },
+  );
+
+  it("leaves local smoke checks unchanged when no expected mode is configured", () => {
+    expect(resolveSmokeExpectedStandbyMode({})).toBeNull();
+  });
+
+  it("rejects a non-canonical expected mode", () => {
+    expect(() => resolveSmokeExpectedStandbyMode({
+      HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "ready",
+    })).toThrow("HOSTED_EXECUTION_STANDBY_MODE must be off, shadow, or allocate.");
   });
 });
 
@@ -201,6 +223,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({
           ok: true,
           service: "cloudflare-hosted-runner",
+          standbyMode: "shadow",
           workerVersionId: "version-123",
         }), {
           status: 200,
@@ -210,6 +233,7 @@ describe("runSmokeHostedDeploy", () => {
       if (String(url).endsWith("/health")) {
         return new Response(JSON.stringify({
           ok: true,
+          standbyMode: "shadow",
           workerVersionId: "version-123",
         }), { status: 200 });
       }
@@ -235,6 +259,7 @@ describe("runSmokeHostedDeploy", () => {
       source: {
         CF_WORKER_NAME: "hosted-worker",
         HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
+        HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "shadow",
         HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
         HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
@@ -267,6 +292,48 @@ describe("runSmokeHostedDeploy", () => {
         },
         method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",
+      },
+    ]);
+  });
+
+  it.each([
+    ["an omitted", undefined],
+    ["a malformed", "ready"],
+    ["a mismatched", "off"],
+  ])("fails when health reports %s standby mode", async (_label, standbyMode) => {
+    const fetchHeaders: Array<HeadersInit | undefined> = [];
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: async (url: RequestInfo | URL, init?: RequestInit) => {
+        fetchHeaders.push(init?.headers);
+        if (String(url).endsWith("/")) {
+          return new Response(JSON.stringify({
+            ok: true,
+            service: "cloudflare-hosted-runner",
+            workerVersionId: "version-123",
+          }), { status: 200 });
+        }
+
+        return new Response(JSON.stringify({
+          ok: true,
+          ...(standbyMode === undefined ? {} : { standbyMode }),
+          workerVersionId: "version-123",
+        }), { status: 200 });
+      },
+      log() {},
+      source: {
+        CF_WORKER_NAME: "hosted-worker",
+        HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "shadow",
+        HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow("worker health check did not report standby mode shadow.");
+
+    expect(fetchHeaders).toEqual([
+      {
+        "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
+      },
+      {
+        "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
       },
     ]);
   });

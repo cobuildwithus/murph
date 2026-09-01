@@ -22,9 +22,14 @@ interface StaticHeader {
 }
 
 interface HostedWebWebpackConfig {
+  cache?: unknown;
   resolve: {
     alias?: Record<string, unknown>;
   };
+}
+
+interface HostedWebWebpackContext {
+  dev: boolean;
 }
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
@@ -297,7 +302,15 @@ export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
 
 export function configureHostedWebWebpack(
   config: HostedWebWebpackConfig,
+  context: HostedWebWebpackContext,
 ): HostedWebWebpackConfig {
+  if (!context.dev) {
+    // The production runner deliberately starts every Webpack compile cold, so
+    // a generated filesystem cache can never produce a later hit. Do not spend
+    // several gigabytes of memory and page cache writing that dead artifact.
+    config.cache = false;
+  }
+
   if (!hasOptionalModule("@farcaster/mini-app-solana")) {
     config.resolve.alias = {
       ...config.resolve.alias,

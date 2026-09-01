@@ -3128,14 +3128,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ref,
     })).rejects.toThrow("Hosted workspace snapshot complete failed with HTTP 409.");
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "workspace snapshot complete");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[3], "workspace snapshot complete");
     expect(completeRequest.method).toBe("POST");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("replays one transport-ambiguous snapshot completion with the identical payload and headers", async () => {
@@ -3288,7 +3288,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(responseBodyRead).toBe(false);
   });
 
-  it("does not replay or erase a completion transport failure when a wake follows it", async () => {
+  it("replays an exact completion after transport loss even when a wake follows it", async () => {
+    vi.useFakeTimers();
     const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
       Uint8Array.from({ length: 32 }, (_, index) => index + 1),
@@ -3297,7 +3298,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const abortReason = new Error("foreground wake interrupted snapshot completion");
     const completionStarted = createDeferred<void>();
     const completionFailure = createDeferred<Response>();
+    const completionReplay = createDeferred<Response>();
     let completionCalls = 0;
+    let heartbeatCalls = 0;
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const request = requireFetchRequest(args, "cancelled workspace snapshot completion");
       if (request.url.endsWith("/workspace-snapshots/start")) {
@@ -3308,6 +3311,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        heartbeatCalls += 1;
         return new Response(JSON.stringify({ alive: true, ok: true }), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
@@ -3315,8 +3319,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
         completionCalls += 1;
-        completionStarted.resolve();
-        return await completionFailure.promise;
+        if (completionCalls === 1) {
+          completionStarted.resolve();
+          return await completionFailure.promise;
+        }
+        return await completionReplay.promise;
       }
       return new Response("unexpected", { status: 500 });
     });
@@ -3325,27 +3332,36 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    await platform.workspaceSnapshotPort!.startSnapshotSession({
-      expectedWorkspaceVersion: "4",
-      reason: "idle_shutdown",
-      signal: abortController.signal,
-    });
-    const completion = platform.workspaceSnapshotPort!.completeSnapshotSession({
-      checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
-      ref,
-    });
-    await completionStarted.promise;
-    completionFailure.reject(new TypeError("fetch failed"));
-    abortController.abort(abortReason);
+    try {
+      await platform.workspaceSnapshotPort!.startSnapshotSession({
+        expectedWorkspaceVersion: "4",
+        reason: "idle_shutdown",
+        signal: abortController.signal,
+      });
+      await vi.waitFor(() => expect(heartbeatCalls).toBe(1));
+      const completion = platform.workspaceSnapshotPort!.completeSnapshotSession({
+        checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
+        ref,
+      });
+      await completionStarted.promise;
+      completionFailure.reject(new TypeError("fetch failed"));
+      abortController.abort(abortReason);
+      await vi.waitFor(() => expect(completionCalls).toBe(2));
+      const heartbeatCountAfterWake = heartbeatCalls;
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() =>
+        expect(heartbeatCalls).toBeGreaterThan(heartbeatCountAfterWake)
+      );
+      completionReplay.resolve(createWorkspaceSnapshotCompleteResponse(ref));
 
-    await expect(completion).rejects.toThrow("Hosted workspace snapshot complete request failed.");
-    await expect(completion).rejects.not.toBe(abortReason);
-    await expect(completion).rejects.toMatchObject({
-      phase: "session_complete_request",
-      timeoutMs: expect.any(Number),
-    });
+      const completed = await completion;
 
-    expect(completionCalls).toBe(1);
+      expect(completed.snapshotRef).toEqual(ref);
+      expect(completionCalls).toBe(2);
+    } finally {
+      completionReplay.resolve(createWorkspaceSnapshotCompleteResponse(ref));
+      vi.useRealTimers();
+    }
   });
 
   it("terminates snapshot completion after a second transport closure", async () => {
@@ -3542,7 +3558,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       await vi.waitFor(() => expect(completionHeaders).toHaveLength(2));
       await vi.advanceTimersByTimeAsync(2_000);
-      await vi.waitFor(() => expect(heartbeatHeaders).toHaveLength(2));
+      await vi.waitFor(() => expect(heartbeatHeaders).toHaveLength(3));
 
       expect(Object.fromEntries(completionHeaders[0] ?? [])).toEqual(expect.objectContaining({
         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -3550,7 +3566,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "x-hosted-runtime-workspace-version": "4",
       }));
       expect(completionHeaders[1]).toEqual(completionHeaders[0]);
-      expect(Object.fromEntries(heartbeatHeaders[1] ?? [])).toEqual(expect.objectContaining({
+      expect(Object.fromEntries(heartbeatHeaders.at(-1) ?? [])).toEqual(expect.objectContaining({
         "x-hosted-runtime-attempt-id": "attempt_1",
         "x-hosted-runtime-lease-generation": "9",
         "x-hosted-runtime-workspace-version": "4",
@@ -3695,8 +3711,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
     expect(completed.snapshotRef).toEqual(ref);
     expect(recordCheckpoint).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "workspace snapshot complete");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[3], "workspace snapshot complete");
     expect(completeRequest.method).toBe("POST");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
@@ -8890,7 +8906,22 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
   });
 
-  it("reconciles a canonical checkpoint whose committed response is lost", async () => {
+  it.each([
+    {
+      label: "legacy",
+      progressProjection: {},
+    },
+    {
+      label: "system-progress-capable",
+      progressProjection: {
+        nextDefaultProcessingWakeAt: "2026-04-27T00:05:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+      },
+    },
+  ])("reconciles a $label canonical checkpoint whose committed response is lost", async ({
+    progressProjection,
+  }) => {
     const redactedStatus = {
       hostedCanonicalWriteReceiptLogByteSize: 512,
       hostedCanonicalWriteReceiptLogSha256: "b".repeat(64),
@@ -8899,6 +8930,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       checkpointedAt: "2026-04-26T00:00:04.000Z",
       createdAt: "2026-04-26T00:00:00.000Z",
       inboxMediaRetentionWakeAt: "2026-04-30T00:00:00.000Z",
+      ...progressProjection,
       nextWakeAt: "2026-04-27T00:10:00.000Z",
       nextWakeReason: "assistant",
       redactedStatus,
@@ -8953,6 +8985,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expectedWorkspaceVersion: "4",
       inboxMediaRetentionWakeAt: committedWorkspace.inboxMediaRetentionWakeAt,
       leaseGeneration: "9",
+      ...progressProjection,
       nextWakeAt: committedWorkspace.nextWakeAt,
       nextWakeReason: committedWorkspace.nextWakeReason,
       reason: "canonical_runtime_commit" as const,
@@ -9013,6 +9046,33 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         label: "implicit retention wake",
         mutate({ request }) {
           delete request.inboxMediaRetentionWakeAt;
+        },
+      },
+      {
+        label: "system progress generation mismatch",
+        mutate({ request, workspace }) {
+          Object.assign(request, {
+            nextDefaultProcessingWakeAt: "2026-04-27T00:05:00.000Z",
+            nextDefaultProcessingWakeReason: "assistant",
+            systemMailboxProgressGeneration: "7",
+          });
+          Object.assign(workspace, {
+            nextDefaultProcessingWakeAt: "2026-04-27T00:05:00.000Z",
+            nextDefaultProcessingWakeReason: "assistant",
+            systemMailboxProgressGeneration: "8",
+          });
+        },
+      },
+      {
+        label: "system progress null witness omitted",
+        mutate({ request, workspace }) {
+          Object.assign(request, {
+            nextDefaultProcessingWakeAt: null,
+            nextDefaultProcessingWakeReason: null,
+            systemMailboxProgressGeneration: "7",
+          });
+          workspace.systemMailboxProgressGeneration = "7";
+          workspace.nextDefaultProcessingWakeAt = null;
         },
       },
     ];
@@ -9590,7 +9650,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ref,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     const startRequest = requireFetchRequest(fetchMock.mock.calls[1], "advanced snapshot start");
     expect(startRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(startRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
@@ -9599,7 +9659,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expectedWorkspaceVersion: "5",
       reason: "idle_shutdown",
     }));
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[3], "advanced snapshot complete");
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[4], "advanced snapshot complete");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");

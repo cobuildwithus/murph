@@ -62,6 +62,7 @@ import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
+import { RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
 import {
   PersonaOnboardingStudy,
   PersonaSettingsStudy,
@@ -792,6 +793,15 @@ export function SectionsContent({
 
       {category === "ops" ? (
         <>
+          <Separator />
+
+          <StudySection
+            id="stalled-runtime-rechecks"
+            title="Runtime rechecks and legacy-stall discovery"
+          >
+            <RuntimeMaintenanceStudy />
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Ops usage search and recovery">

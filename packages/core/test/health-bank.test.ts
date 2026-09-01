@@ -550,21 +550,25 @@ test("goal upserts merge concurrent partial updates with the latest record", asy
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       status: "paused",
     }),
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       horizon: "long_term",
     }),
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       priority: 9,
     }),
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       window: {
         targetAt: "2026-06-01",
       },
@@ -572,11 +576,13 @@ test("goal upserts merge concurrent partial updates with the latest record", asy
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       domains: ["Sleep"],
     }),
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       metricTargets,
     }),
   ]);
@@ -660,6 +666,7 @@ test("goal id-or-slug resolution preserves conflict, missing, and read-preferenc
       upsertGoal({
         vaultRoot,
         goalId: first.record.entity.goalId,
+        requireExistingGoalId: true,
         slug: second.record.entity.slug,
       }),
     (error: unknown) =>

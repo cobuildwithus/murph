@@ -16,6 +16,7 @@ import {
   buildMemoryCorePromptBlock,
   forgetMemory,
   getMemoryRecord,
+  MemoryRecordConflictError,
   MemoryPersistenceError,
   readMemoryDocument,
   resolveMemoryDocumentPath,
@@ -142,6 +143,7 @@ describe("core memory package wrapper", () => {
     expect(await getMemoryRecord(vaultRoot, expectedRecordId)).toEqual(inserted.record);
 
     const updated = await updateMemory(vaultRoot, {
+      expectedUpdatedAt: inserted.record.updatedAt,
       now: updatedAt,
       recordId: inserted.record.id,
       section: "Identity",
@@ -540,6 +542,37 @@ describe("core memory package wrapper", () => {
     });
   });
 
+  test("rejects stale updates and forgets without changing the newer memory record", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const createdAt = new Date("2026-04-08T02:00:00.000Z");
+    const inserted = await upsertMemory(vaultRoot, {
+      now: createdAt,
+      section: "Preferences",
+      text: "Prefers the original format.",
+    });
+    const current = await updateMemory(vaultRoot, {
+      expectedUpdatedAt: inserted.record.updatedAt,
+      now: createdAt,
+      recordId: inserted.record.id,
+      text: "Prefers the current format.",
+    });
+
+    expect(current.record.updatedAt).not.toBe(inserted.record.updatedAt);
+    const currentSnapshot = await readMemoryDocument(vaultRoot);
+
+    await expect(updateMemory(vaultRoot, {
+      expectedUpdatedAt: inserted.record.updatedAt,
+      recordId: inserted.record.id,
+      text: "A stale overwrite must not persist.",
+    })).rejects.toBeInstanceOf(MemoryRecordConflictError);
+    await expect(forgetMemory(vaultRoot, {
+      expectedUpdatedAt: inserted.record.updatedAt,
+      recordId: inserted.record.id,
+    })).rejects.toBeInstanceOf(MemoryRecordConflictError);
+
+    await expect(readMemoryDocument(vaultRoot)).resolves.toEqual(currentSnapshot);
+  });
+
   test("forgets missing records as a no-op and deletes existing records from the persisted memory file", async () => {
     const vaultRoot = await makeVaultRoot();
     const createdAt = new Date("2026-04-08T02:00:00.000Z");
@@ -568,6 +601,7 @@ describe("core memory package wrapper", () => {
     vi.setSystemTime(deletedAt);
     try {
       const deleted = await forgetMemory(vaultRoot, {
+        expectedUpdatedAt: inserted.record.updatedAt,
         recordId: inserted.record.id,
       });
 
