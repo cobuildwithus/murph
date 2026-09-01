@@ -62,25 +62,15 @@ describe('assistant goal setup skill', () => {
     )
   })
 
-  it('routes a public Goals handoff without making goals experiments', () => {
+  it('routes a public Goals handoff to the outcome-level skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
+      "Route by the user's visible outcome and read the primary owner.",
+    )
+    expect(prompt).toContain(
       'Setup: murph-onboarding, goal-setup, hosted-low-usage',
     )
-    expect(prompt).toContain(
-      'read `$MURPH_ASSISTANT_SKILLS_ROOT/goal-setup/SKILL.md` through EOF in one standalone command',
-    )
-    expect(prompt).toContain(
-      'recover exact Goal, habit regimen, and support before reply/write',
-    )
-    expect(prompt).toContain(
-      'Preview outcome and every support date/time',
-    )
-    expect(prompt).toContain(
-      'after yes, finish package before reply',
-    )
-    expect(prompt).toContain('a Goal is not an experiment')
   })
 
   it('ships one concise orchestration file and no per-goal resources', async () => {
