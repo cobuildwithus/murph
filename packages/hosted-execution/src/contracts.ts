@@ -361,6 +361,10 @@ export const HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT =
 export const HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT =
   "The owner of this personal Murph authored the exact incoming group request and explicitly asked Murph to answer them privately. Answer as one direct private message to the owner. You may use only the owner's personal Murph context needed for this request. Do not disclose anyone else's private information, do not post anything back to the group, and do not perform actions. This authorization applies once to this request and grants no future, scheduled, or broader access.";
 
+/** Fixed operator-only disclosure for one target-workspace diagnostic. */
+export const HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT =
+  "An authorized Murph operator requested one private diagnostic about the targeted Murph workspace. Inspect only that workspace with the available read-only tools as needed to answer the question. Return one concise diagnostic only to the authorized operator, and disclose nothing from any other workspace.";
+
 /** The one personal context resolved from the exact current group sender. */
 export interface HostedExecutionAssistantAskCurrentSenderPersonalTarget {
   groupRuntimeMemberId: string;
