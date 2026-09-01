@@ -6,9 +6,9 @@
     "kind": "improvement",
     "priority": 4,
     "title": "Background work recovers from stale timers",
-    "summary": "Murph now recovers when an outdated assistant timer and connected-device work become due together, so follow-through does not stay stuck behind a timer with no work left.",
-    "details": "Current conversations, reminders, pending deliveries, and other genuinely due assistant work keep priority. Murph changes owners only after a live check confirms the projected timer is stale.",
+    "summary": "Murph now recovers when an outdated assistant timer overlaps with connected-device work, including when interrupted scheduled work has no other event to wake it.",
+    "details": "Current conversations, reminders, pending deliveries, and other genuinely due assistant work keep priority. Interrupted scheduled work now receives its own recovery check instead of waiting for another conversation or device event.",
     "relevanceTags": ["assistant", "wearables", "reliability"],
-    "sourcePullRequests": [2679]
+    "sourcePullRequests": [2682]
   }
 }

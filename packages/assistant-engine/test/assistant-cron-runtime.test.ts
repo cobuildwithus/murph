@@ -9113,6 +9113,85 @@ describe('assistant cron runtime orchestration', () => {
     expect(stillRunning.state.lastSucceededAt).toBeNull()
   })
 
+  it('recovers a fresh one-shot canonical claim from its only future wake and becomes quiescent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-running-recovery-wake-',
+    )
+    const job = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'running-recovery-wake',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Recover the stranded one-shot occurrence.',
+      resolveTargetDefaults: false,
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+        runningAt: '2026-04-08T10:05:00.000Z',
+        runningClaimId: 'claim_running_recovery_wake',
+        runningPid: 42,
+      },
+      updatedAt: '2026-04-08T10:05:00.000Z',
+    }))
+
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toEqual({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: '2026-04-08T11:05:00.001Z',
+      runningJobs: 1,
+      totalJobs: 1,
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T11:05:00.000Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: '2026-04-08T11:05:00.001Z',
+      runningJobs: 1,
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T11:05:00.001Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 1,
+      nextRunAt: '2026-04-08T10:00:00.000Z',
+      runningJobs: 0,
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: null,
+      runningJobs: 0,
+    })
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+      { reclaimStaleRunningClaims: false },
+    )
+    expect(runtimeStore.jobs.find((record) => record.jobId === job.jobId))
+      .toBeUndefined()
+  })
+
   it('does not run or append a canonical cron result after the claim is replaced', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))

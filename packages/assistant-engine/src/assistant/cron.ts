@@ -23,7 +23,10 @@ import {
   sortAssistantCronJobs,
   type AssistantCronTargetInput,
 } from './cron/store.ts'
-import { readAssistantCronCanonicalRuntimeStore } from './cron/runtime-state.ts'
+import {
+  computeAssistantCronCanonicalRunningRecoveryAt,
+  readAssistantCronCanonicalRuntimeStore,
+} from './cron/runtime-state.ts'
 import {
   buildVisibleLocalAssistantCronStore,
   findCanonicalAssistantCronRecordInList,
@@ -501,14 +504,35 @@ export async function getAssistantCronStatus(
   const enabledJobs = canonicalJobs.filter((job) => job.enabled)
   const dueJobs = enabledJobs.filter((job) => isAssistantCronJobDue(job, now)).length
   const runningJobs = canonicalJobs.filter((job) => job.state.runningAt !== null).length
-  const visibleNextRunAt =
-    enabledJobs.find((job) => job.state.nextRunAt !== null)?.state.nextRunAt ?? null
+  // A canonical running claim keeps its historical occurrence as nextRunAt so
+  // execution can resume that exact occurrence after reclamation. Status owns
+  // the external wake projection, though, and must replace that past timestamp
+  // with the first instant at which the strict stale-claim rule can reclaim it.
+  const visibleNextRunAt = earliestAssistantAutomationWakeAt(
+    ...projection.visibleLocalStore.jobs
+      .filter((job) => job.enabled)
+      .map((job) => job.state.nextRunAt),
+    ...projection.canonicalEntries
+      .filter((entry) => entry.job.enabled)
+      .map((entry) =>
+        entry.runtimeState.state.runningAt === null
+          ? entry.job.state.nextRunAt
+          : computeAssistantCronCanonicalRunningRecoveryAt(
+              entry.runtimeState.state.runningAt,
+            )
+      ),
+  )
   // Background maintenance hidden by active foreground yield still needs a
   // wake: a released claim carries its persisted retry time, and a due but
   // never-claimed occurrence gets the same short catch-up deferral so it is
   // not disarmed until an unrelated wake.
   const backgroundMaintenanceRetryWakeAt = earliestAssistantAutomationWakeAt(
     ...projection.yieldDeferredBackgroundMaintenanceEntries.map((entry) => {
+      if (entry.runtimeState.state.runningAt !== null) {
+        return computeAssistantCronCanonicalRunningRecoveryAt(
+          entry.runtimeState.state.runningAt,
+        )
+      }
       if (entry.runtimeState.state.retryAfterAt !== null) {
         return entry.job.state.nextRunAt
       }
