@@ -35,9 +35,11 @@ export function buildHostedRuntimeLogContextFields(
 // docs/contracts/00-invariants.md).
 // Debug/info entries are verbose diagnostics, not control flow: buffer them so
 // the caller returns immediately while one background writer drains the buffer
-// in enqueue order. The writer is self-clocking — everything logged while a
-// request is in flight coalesces into the next request — so a busy invocation
-// sends far fewer round trips without any entry waiting on a timer.
+// in enqueue order. When the queue is idle, one unref'd timer gives verbose
+// entries up to 30 seconds to coalesce; a full pending request or invocation-end
+// drain starts that same writer sooner. Once active, the writer is self-clocking
+// and everything logged while a request is in flight coalesces into the next
+// request.
 // warn/error entries still write directly and block only on their own write:
 // the crash-diagnostic tail must be durable before the runtime proceeds, and
 // must not wait behind queued verbose entries. `at` is stamped at enqueue, so
@@ -58,6 +60,7 @@ const HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES = HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTR
 // fail the whole request, not one entry, so the budget stays well under the
 // limit even for multi-byte diagnostics.
 const HOSTED_RUNTIME_LOG_BATCH_MAX_JSON_LENGTH = 64 * 1024;
+const HOSTED_RUNTIME_LOG_COALESCING_WINDOW_MS = 30_000;
 const HOSTED_RUNTIME_LOG_PREEMPTION_POLL_MS = 25;
 // A stalled log endpoint must not retain unbounded verbose diagnostics in a
 // warm runner process. This bounds debug/info entries across invocations and
@@ -84,6 +87,7 @@ type QueuedHostedRuntimeLogItem =
 
 const queuedHostedRuntimeLogItems: QueuedHostedRuntimeLogItem[] = [];
 let hostedRuntimeLogWriter: Promise<void> | null = null;
+let hostedRuntimeLogWriterStartTimer: ReturnType<typeof setTimeout> | null = null;
 
 export async function writeHostedRuntimeLogBestEffort(input: {
   entry: Omit<HostedRuntimeLogEntry, "at"> & { at?: string };
@@ -112,7 +116,7 @@ export async function writeHostedRuntimeLogBestEffort(input: {
     logPort,
   });
   trimQueuedHostedRuntimeVerboseLogEntries();
-  startHostedRuntimeLogWriter();
+  scheduleHostedRuntimeLogWriter();
 }
 
 /**
@@ -255,10 +259,68 @@ function trimQueuedHostedRuntimeVerboseLogEntries(): void {
   });
 }
 
+// Idle verbose entries get one bounded coalescing window. Reaching either
+// existing request bound starts the single writer immediately instead of
+// waiting for the window to expire.
+function scheduleHostedRuntimeLogWriter(): void {
+  if (hostedRuntimeLogWriter) {
+    return;
+  }
+  if (hasPendingHostedRuntimeLogBatchReachedBound()) {
+    startHostedRuntimeLogWriter();
+    return;
+  }
+  if (hostedRuntimeLogWriterStartTimer !== null) {
+    return;
+  }
+
+  hostedRuntimeLogWriterStartTimer = setTimeout(() => {
+    hostedRuntimeLogWriterStartTimer = null;
+    startHostedRuntimeLogWriter();
+  }, HOSTED_RUNTIME_LOG_COALESCING_WINDOW_MS);
+  hostedRuntimeLogWriterStartTimer.unref?.();
+}
+
+function hasPendingHostedRuntimeLogBatchReachedBound(): boolean {
+  const tail = queuedHostedRuntimeLogItems.at(-1);
+  if (!tail || tail.kind !== "entry") {
+    return false;
+  }
+
+  let entryCount = 0;
+  let jsonLength = JSON.stringify({ entries: [] }).length;
+  for (let index = queuedHostedRuntimeLogItems.length - 1; index >= 0; index -= 1) {
+    const item = queuedHostedRuntimeLogItems[index];
+    if (item?.kind !== "entry" || item.logPort !== tail.logPort) {
+      break;
+    }
+
+    jsonLength += JSON.stringify(item.entry).length + (entryCount === 0 ? 0 : 1);
+    entryCount += 1;
+    if (
+      entryCount >= HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES
+      || jsonLength >= HOSTED_RUNTIME_LOG_BATCH_MAX_JSON_LENGTH
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function clearHostedRuntimeLogWriterStartTimer(): void {
+  if (hostedRuntimeLogWriterStartTimer === null) {
+    return;
+  }
+  clearTimeout(hostedRuntimeLogWriterStartTimer);
+  hostedRuntimeLogWriterStartTimer = null;
+}
+
 // One writer at a time keeps requests in enqueue order and lets everything
 // logged during an in-flight request coalesce into the next one.
 function startHostedRuntimeLogWriter(): void {
-  if (hostedRuntimeLogWriter) {
+  clearHostedRuntimeLogWriterStartTimer();
+  if (hostedRuntimeLogWriter || queuedHostedRuntimeLogItems.length === 0) {
     return;
   }
 
@@ -367,14 +429,17 @@ async function writeHostedRuntimeLogEntries(
 }
 
 // Awaited at invocation end so a normal shutdown never drops queued entries.
-// Queued writes swallow their own failures, so this never rejects. Re-reads the
-// writer after each await in case settled writes queued more entries.
+// Cancels any pending coalescing window and starts the existing writer
+// immediately. Queued writes swallow their own failures, so this never rejects.
+// Re-reads the writer and queue after each await in case settled writes queued
+// more entries.
 // The optional bound keeps a degraded log endpoint from delaying invocation
 // completion (result commit / checkpoint / next-wake handoff): on timeout the
 // drain returns while remaining writes keep flushing in the background.
 export async function drainHostedRuntimeLogWritesBestEffort(
   options?: { timeoutMs?: number },
 ): Promise<void> {
+  startHostedRuntimeLogWriter();
   const timeoutMs = options?.timeoutMs;
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -389,10 +454,15 @@ export async function drainHostedRuntimeLogWritesBestEffort(
       });
 
   try {
-    while (hostedRuntimeLogWriter) {
+    while (hostedRuntimeLogWriter || queuedHostedRuntimeLogItems.length > 0) {
+      startHostedRuntimeLogWriter();
+      const writer = hostedRuntimeLogWriter;
+      if (!writer) {
+        continue;
+      }
       await (timeout
-        ? Promise.race([hostedRuntimeLogWriter, timeout])
-        : hostedRuntimeLogWriter);
+        ? Promise.race([writer, timeout])
+        : writer);
       if (timedOut) {
         console.warn("Hosted runtime log drain timed out; queued writes continue in the background.", {
           timeoutMs,
