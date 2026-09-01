@@ -624,6 +624,15 @@ handlers. The runner does not run a separate post-request PID sweep over the
 native Codex App Server; warm lifecycle is owned by the existing Codex
 app-server slot and explicit runner cleanup paths.
 
+The shell-prewarm, direct cold-start, and deploy-smoke paths give each native
+TCP readiness request a 1.5 second deadline and retry sequentially on the
+existing 250 ms interval. The overall readiness budget is unchanged. A probe
+timeout cannot publish `healthy`, call workspace code, or fail the container by
+itself; the patched Containers helper awaits the aborted request before
+retrying, and only its existing successful lifecycle path publishes healthy
+state and runs `onStart`. Its implicit `containerFetch()` auto-start fallback
+retains the upstream five-second default.
+
 Legacy artifact `GET` requests attach a validated read-purpose header and one
 UUID correlation id that is stable across replay-safe retries. Runner and Worker
 structured logs use only those fields plus bounded timing/status metadata; they

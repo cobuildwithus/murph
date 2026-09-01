@@ -1957,6 +1957,10 @@ describe("RunnerContainer", () => {
       .toBeLessThanOrEqual(timing.readyObservedAtEpochMs);
 
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions)
+      .toMatchObject({
+        portProbeTimeoutMS: 1_500,
+      });
     const healthCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/health")
     );
@@ -3506,6 +3510,7 @@ describe("RunnerContainer", () => {
     expect(start).toHaveBeenCalledOnce();
     expect(start.mock.calls[0]?.[1]).toMatchObject({
       portToCheck: 8080,
+      portProbeTimeoutMS: 1_500,
       signal: expect.any(AbortSignal),
     });
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
@@ -3872,6 +3877,10 @@ describe("RunnerContainer", () => {
     expect(healthCalls).toHaveLength(1);
     expect(executeCalls).toHaveLength(1);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions)
+      .toMatchObject({
+        portProbeTimeoutMS: 1_500,
+      });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
@@ -4645,6 +4654,10 @@ describe("RunnerContainer", () => {
       status: 200,
     });
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions)
+      .toMatchObject({
+        portProbeTimeoutMS: 1_500,
+      });
     expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(destroy).toHaveBeenCalledTimes(1);
@@ -10607,6 +10620,7 @@ describe("RunnerContainer", () => {
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
       expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions).toMatchObject({
         instanceGetTimeoutMS: expectedTimeoutMs,
+        portProbeTimeoutMS: 1_500,
         portReadyTimeoutMS: expectedTimeoutMs,
       });
     }
