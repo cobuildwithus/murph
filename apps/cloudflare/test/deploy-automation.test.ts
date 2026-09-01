@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
+  HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
   parseHostedContainerImageListOutput,
@@ -186,6 +187,12 @@ function findMutableActionRefs(workflow: string): Array<{ line: number; ref: str
 }
 
 describe("hosted deploy automation helpers", () => {
+  it("exports standby capacity as a deploy-only contract input", () => {
+    expect(HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES).toEqual([
+      "CF_STANDBY_CONTAINER_MAX_INSTANCES",
+    ]);
+  });
+
   it("builds a generated wrangler config for the native container worker", () => {
     const authorityVerifyKeyringJson = JSON.stringify({
       "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/2": {
@@ -478,6 +485,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS).toBe("60000");
     expect(config.vars.HOSTED_EXECUTION_STANDBY_MODE).toBe("off");
+    expect(config.vars.CF_STANDBY_CONTAINER_MAX_INSTANCES).toBeUndefined();
     expect(config.vars.HOSTED_PHYSICAL_NOTES_ENABLED).toBe("true");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");

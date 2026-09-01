@@ -50,6 +50,12 @@ const DEFAULT_CONTAINER_INSTANCE_TYPE: HostedContainerInstanceType = {
 const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
 const RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
 
+// Deploy-only inputs stay separate from Worker vars so private deployment
+// policy can validate forwarding without exposing them to the runtime.
+export const HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES = [
+  "CF_STANDBY_CONTAINER_MAX_INSTANCES",
+] as const;
+
 export interface HostedDeployAutomationEnvironment {
   allowedRunnerSecretKeys: string | null;
   bundlesBucketName: string;
