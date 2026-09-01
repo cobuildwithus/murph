@@ -139,6 +139,47 @@ function collectKeys(value: unknown, key: string): unknown[] {
 }
 
 describe('automation model input schema', () => {
+  it('advertises Terra as the reminder default and Luna only for a fixed cue', () => {
+    const schemaDescriptions = collectKeys(
+      MURPH_AUTOMATION_TOOL.inputSchema,
+      'description',
+    ).filter((value): value is string => typeof value === 'string')
+    const modelSchemaDescription = schemaDescriptions.find((description) =>
+      description.startsWith('Optional model for this automation turn only.'),
+    )
+
+    expect(modelSchemaDescription).toBeDefined()
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an ordinary reminder, set assistantTargetOverride.model explicitly',
+    )
+    for (const guidance of [
+      MURPH_AUTOMATION_TOOL.description,
+      modelSchemaDescription ?? '',
+    ]) {
+      const normalizedGuidance = guidance.toLowerCase()
+
+      expect(normalizedGuidance).toContain(
+        'use luna only when the complete future turn is a fixed, fully self-contained cue',
+      )
+      expect(normalizedGuidance).toContain(
+        'use terra for all reminders that do not meet that luna exception; when unsure, use terra.',
+      )
+      expect(normalizedGuidance).toContain('for a non-reminder automation')
+      expect(normalizedGuidance).not.toContain(
+        'use luna for self-contained cues and reminders',
+      )
+    }
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'when its instructions or context requirements materially change or the member explicitly asks to change its model or reasoning',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'omit assistantTargetOverride for timing-only or status-only edits to preserve the stored override',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'On a non-reminder patch, assistantTargetOverride replaces the whole stored override: use null to return that automation to conversation inheritance',
+    )
+  })
+
   it('derives a compact complete advertisement from the canonical runtime schema', () => {
     const canonical = canonicalShape(MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA)
     const model = modelShape(MURPH_AUTOMATION_TOOL.inputSchema)

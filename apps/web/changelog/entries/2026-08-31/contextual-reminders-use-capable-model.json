@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-31",
+  "order": 100,
+  "item": {
+    "id": "contextual-reminders-use-capable-model",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Contextual reminders use the capable model",
+    "summary": "Murph now keeps simple fixed cues on the lightweight path and uses the more capable model when a reminder needs current context, interpretation, or judgment.",
+    "details": "Straightforward fixed cues stay quick. Reminders that need history, current data, tools, personalization, ambiguity resolution, or safety judgment use Terra; existing saved reminders keep their current model unless their instructions or context requirements materially change.",
+    "relevanceTags": ["assistant", "reminders", "personalization"],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Set a contextual reminder",
+      "prompt": "Every day at 6 PM, review my latest workout and recovery data and remind me whether to train or recover."
+    }
+  }
+}
