@@ -1552,7 +1552,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     },
   );
 
-  it("drains approved continuations before handing device maintenance to its owner", async () => {
+  it("drains approved continuations before respecting the durable mailbox frontier", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     vi.useFakeTimers();
     vi.setSystemTime(new Date(now));
@@ -1696,8 +1696,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
         }));
         const postCheckpoint = await result.afterCheckpoint?.();
         expect(postCheckpoint).toEqual(expect.objectContaining({
-          nextWakeAt: now,
-          nextWakeReason: index === 0 ? "assistant" : "device-sync.reconcile",
+          nextWakeAt: index === 0 ? now : codexRetryAt,
+          nextWakeReason: "assistant",
         }));
         workspace = createDueAssistantWorkspace({
           nextWakeAt: postCheckpoint?.nextWakeAt ?? now,
@@ -1746,8 +1746,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
       ]);
       expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
       expect(deviceResult).toEqual(expect.objectContaining({
-        nextWakeAt: now,
-        nextWakeReason: "device-sync.reconcile",
+        nextWakeAt: codexRetryAt,
         progressed: false,
       }));
       await deviceResult.afterCheckpoint?.();
@@ -4865,6 +4864,59 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     await result.afterCheckpoint?.();
 
     expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("processes a due default-owned mailbox item before due provider cleanup", async () => {
+    const now = "2026-04-27T00:09:00.000Z";
+    const defaultOwnedItem = createCodexAuthSystemMailboxItem();
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(now);
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+      async (input) =>
+        input?.allowedRouteActions == null
+          ? {
+              at: now,
+              executionClass: "default_owned",
+              reason: "assistant",
+            }
+          : {
+              at: null,
+              executionClass: null,
+              reason: null,
+            },
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: defaultOwnedItem,
+      itemId: defaultOwnedItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => now,
+      workspace: createDueAssistantWorkspace({
+        nextDefaultProcessingWakeAt: now,
+        nextDefaultProcessingWakeReason: "assistant",
+        nextWakeAt: now,
+        nextWakeReason: "assistant",
+        systemMailboxProgressGeneration: "1",
+      }),
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0])
+      .not.toHaveProperty("allowedRouteActions");
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: now,
+      progressed: true,
+    }));
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 
   it("uses a hot provider cleanup checkpoint for cleanup-only progress", async () => {

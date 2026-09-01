@@ -547,9 +547,9 @@ describe("hosted runtime system mailbox state", () => {
         now: () => "2026-04-27T00:00:00.000Z",
         vaultRoot,
       })).resolves.toEqual({
-        at: "2026-04-27T00:00:00.000Z",
-        executionClass: "model_free",
-        reason: "device-sync.reconcile",
+        at: "2026-04-27T00:01:00.000Z",
+        executionClass: null,
+        reason: "assistant",
       });
       await expect(resolveHostedSystemMailboxWakeCandidates({
         now: () => "2026-04-27T00:00:00.000Z",
@@ -560,9 +560,9 @@ describe("hosted runtime system mailbox state", () => {
           reason: "assistant",
         },
         next: {
-          at: "2026-04-27T00:00:00.000Z",
-          executionClass: "model_free",
-          reason: "device-sync.reconcile",
+          at: "2026-04-27T00:01:00.000Z",
+          executionClass: null,
+          reason: "assistant",
         },
       });
       await expect(resolveHostedSystemMailboxWakeCandidates({
@@ -668,6 +668,97 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         at: "2026-04-27T00:00:00.000Z",
+        executionClass: "model_free",
+        reason: "mailbox",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a later due model-free row behind a future durable frontier", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const now = "2026-04-27T00:00:00.000Z";
+    const deviceRetryAt = "2026-04-27T00:01:00.000Z";
+    const retainedDeviceFrontier = {
+      ...buildPendingDeviceSyncMailboxItem({
+        itemId: "pending_retained_device_frontier",
+        mailboxLaneSeq: "1",
+      }),
+      attemptCount: 1,
+      lastAttemptAt: now,
+      lastErrorCode: "device_sync_retry",
+      lastErrorMessage: "redacted",
+      nextAttemptAt: deviceRetryAt,
+    };
+    const dueMaintenanceSuccessor = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_due_maintenance_successor",
+      mailboxDedupeKey: "runtime-control:maintenance:successor",
+      mailboxLaneSeq: "2",
+      wakeKind: "runtime.maintenance-requested",
+    });
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [retainedDeviceFrontier, dueMaintenanceSuccessor],
+      }));
+
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: deviceRetryAt,
+          executionClass: null,
+          reason: "device-sync.reconcile",
+        },
+      });
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => deviceRetryAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: deviceRetryAt,
+        executionClass: "model_free",
+        reason: "device-sync.reconcile",
+      });
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: retainedDeviceFrontier,
+        vaultRoot,
+      });
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => deviceRetryAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: deviceRetryAt,
+        executionClass: "model_free",
+        reason: "mailbox",
+      });
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: dueMaintenanceSuccessor,
+        vaultRoot,
+      });
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => deviceRetryAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: null,
+        executionClass: null,
+        reason: null,
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [retainedDeviceFrontier, dueMaintenanceSuccessor],
+      }));
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        excludeItemId: retainedDeviceFrontier.itemId,
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: now,
         executionClass: "model_free",
         reason: "mailbox",
       });
