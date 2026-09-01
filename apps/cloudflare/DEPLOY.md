@@ -1174,9 +1174,8 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
 `CF_STANDBY_CONTAINER_MAX_INSTANCES` is a non-secret deploy input, not a Worker
-runtime variable. Private `cobuildwithus/murph-cloud` must map it in
-`.github/workflows/deploy-cloudflare-hosted.yml` on the `Prepare deploy
-artifacts` step's `env` as
+runtime variable. Private `cobuildwithus/murph-cloud` must map it on the
+`deploy` job's `env` in `.github/workflows/deploy-cloudflare-hosted.yml` as
 `CF_STANDBY_CONTAINER_MAX_INSTANCES: ${{ vars.CF_STANDBY_CONTAINER_MAX_INSTANCES || '1' }}`.
 The owning `preview` and `production` GitHub Environments must both start at
 `1`. A deployment is incomplete until artifact validation shows the rendered
