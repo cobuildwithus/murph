@@ -1,0 +1,22 @@
+{
+  "publishedOn": "2026-08-31",
+  "order": 100,
+  "item": {
+    "id": "shared-workout-summaries-return-after-sync",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Shared workout summaries return after sync",
+    "summary": "When a member shares workout summaries with a group, recent connected-device workouts now appear as workout counts and total minutes after sync.",
+    "details": "Sharing permissions stay separate: this restores the existing count-and-minutes summary without exposing detailed workouts, routes, heart rate, or private source identifiers.",
+    "relevanceTags": [
+      "groups",
+      "workouts",
+      "wearables",
+      "reliability",
+      "privacy"
+    ],
+    "sourcePullRequests": [
+      2658
+    ]
+  }
+}

@@ -86,6 +86,7 @@ import {
 
 const TEST_SOURCE_WORKSPACE_VERSION = "7";
 const GARMIN_SOURCE = { label: "Garmin", source: "garmin" } as const;
+const MANUAL_SOURCE = { label: "Manual", source: "manual" } as const;
 const MURPH_SOURCE = { label: "Murph", source: "murph" } as const;
 const OURA_SOURCE = { label: "Oura", source: "oura" } as const;
 const STRAVA_SOURCE = { label: "Strava", source: "strava" } as const;
@@ -183,6 +184,9 @@ const SAUNA_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
 const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
   "workouts.v0",
 );
+const WORKOUT_DAYS_SCOPE = hostedVaultShareProjectionKindToScope(
+  "workout-days.v0",
+);
 const GENERATION_TOKEN = "a".repeat(43);
 
 function activeProjectionResponse(
@@ -234,12 +238,17 @@ type WorkoutMetricRow = Pick<
   | "sourceKind"
   | "statistic"
   | "value"
->;
+> & {
+  source?: ActivitySessionProjectionRow["source"];
+};
 
 function workoutMetricRow(input: {
   date: string;
   metricKey: "workout-count" | "workout-minutes";
   recordIds?: string[];
+  source?: ActivitySessionProjectionRow["source"];
+  sourceFamily?: WorkoutMetricRow["sourceFamily"];
+  sourceKind?: WorkoutMetricRow["sourceKind"];
   value: number;
 }): WorkoutMetricRow {
   const recordIds = input.recordIds ?? [`evt_activity_${input.date}`];
@@ -250,16 +259,19 @@ function workoutMetricRow(input: {
     observedAt: `${input.date}T00:00:00.000Z`,
     pointIds: [`point_${input.metricKey}_${input.value}_${recordIds.join("_")}`],
     recordIds,
-    sourceFamily: "derived",
-    sourceKind: "activity-summary",
+    ...(input.source ? { source: input.source } : {}),
+    sourceFamily: input.sourceFamily ?? "derived",
+    sourceKind: input.sourceKind ?? "activity-summary",
     statistic: "value",
     value: input.value,
   };
 }
 
 function workoutRows(input: {
+  countSource?: ActivitySessionProjectionRow["source"];
   countRecordIds?: string[];
   date: string;
+  minuteSource?: ActivitySessionProjectionRow["source"];
   minuteRecordIds?: string[];
   workoutCount: number;
   workoutMinutes: number;
@@ -274,12 +286,14 @@ function workoutRows(input: {
       date: input.date,
       metricKey: "workout-count",
       recordIds: input.countRecordIds ?? recordIds,
+      source: input.countSource,
       value: input.workoutCount,
     })],
     minuteRows: [workoutMetricRow({
       date: input.date,
       metricKey: "workout-minutes",
       recordIds: input.minuteRecordIds ?? recordIds,
+      source: input.minuteSource,
       value: input.workoutMinutes,
     })],
     nowMs: Date.parse("2026-07-04T00:00:00.000Z"),
@@ -2984,11 +2998,72 @@ describe("selectProjectableMealNutritionDays", () => {
 describe("selectProjectableWorkoutDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
 
-  it("maps selected workout session summaries without raw workout details", () => {
+  it("reads persisted provider workout sessions as shared count and minutes", async () => {
+    const vaultRoot = await createActivitySessionVault([{
+      schemaVersion: "murph.event.v1",
+      id: "evt_vault_share_workout_summary_01",
+      kind: "activity_session",
+      occurredAt: "2026-07-03T12:00:00.000Z",
+      dayKey: "2026-07-03",
+      recordedAt: "2026-07-03T12:42:00.000Z",
+      source: "device",
+      externalRef: {
+        system: "garmin",
+        resourceType: "activity_session",
+        resourceId: "garmin-workout-summary-01",
+      },
+      activityType: "strength-training",
+      durationMinutes: 42,
+    }]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const selected = await readProjectableWorkoutDays(vaultRoot);
+      expect(selected).toEqual([{
+        data: {
+          date: ACTIVITY_DAY.date,
+          metricSemantics:
+            HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
+          workoutCount: 1,
+          workoutMinutes: 42,
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: `${ACTIVITY_DAY.date}.garmin`,
+        source: GARMIN_SOURCE,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      }]);
+
+      const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+      await expect(offerHostedVaultShareProjectionBestEffort({
+        vaultRoot,
+        vaultSharePort: {
+          deliver,
+          listActiveProjectionScopes: async () =>
+            activeProjectionResponse(WORKOUT_DAYS_SCOPE),
+        },
+      })).resolves.toEqual({ outcome: "delivered" });
+      expect(deliver).toHaveBeenCalledWith({
+        expectedGenerationToken: GENERATION_TOKEN,
+        projectionKind: "workout-days.v0",
+        projectionScope: WORKOUT_DAYS_SCOPE,
+        records: selected,
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      });
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("maps same-source workout summaries after private owner ids are redacted", () => {
     const selected = selectProjectableWorkoutDays({
       currentDate: utcDateKey(nowMs),
       ...workoutRows({
+        countRecordIds: ["activity-summary:workout-count:2026-07-03"],
+        countSource: GARMIN_SOURCE,
         date: ACTIVITY_DAY.date,
+        minuteRecordIds: ["activity-summary:workout-minutes:2026-07-03"],
+        minuteSource: GARMIN_SOURCE,
         workoutCount: 2,
         workoutMinutes: 85,
       }),
@@ -3004,7 +3079,8 @@ describe("selectProjectableWorkoutDays", () => {
           workoutMinutes: 85,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
+        recordKey: `${ACTIVITY_DAY.date}.garmin`,
+        source: GARMIN_SOURCE,
         sourceRevision: expect.stringMatching(/^[A-Za-z0-9_-]{32}$/u),
       },
     ]);
@@ -3016,16 +3092,79 @@ describe("selectProjectableWorkoutDays", () => {
     ).toEqual(selected);
   });
 
+  it("keeps exact-owner workout metrics projectable", () => {
+    const selected = selectProjectableWorkoutDays({
+      currentDate: utcDateKey(nowMs),
+      ...workoutRows({
+        date: ACTIVITY_DAY.date,
+        workoutCount: 1,
+        workoutMinutes: 42,
+      }),
+    });
+
+    expect(selected).toHaveLength(1);
+  });
+
   it("drops split-provider workout tuples instead of joining count and minutes by date", () => {
     const selected = selectProjectableWorkoutDays({
       currentDate: utcDateKey(nowMs),
       ...workoutRows({
-        countRecordIds: ["evt_garmin_count"],
+        countRecordIds: ["evt_shared_owner"],
+        countSource: GARMIN_SOURCE,
         date: ACTIVITY_DAY.date,
-        minuteRecordIds: ["evt_oura_minutes"],
+        minuteRecordIds: ["evt_shared_owner"],
+        minuteSource: OURA_SOURCE,
         workoutCount: 1,
         workoutMinutes: 85,
       }),
+    });
+
+    expect(selected).toEqual([]);
+  });
+
+  it("keeps independently owned manual and Murph workout metrics separate", () => {
+    for (const source of [MANUAL_SOURCE, MURPH_SOURCE]) {
+      const selected = selectProjectableWorkoutDays({
+        countRows: [workoutMetricRow({
+          date: ACTIVITY_DAY.date,
+          metricKey: "workout-count",
+          recordIds: [`evt_${source.source}_workout_count`],
+          source,
+          value: 1,
+        })],
+        currentDate: utcDateKey(nowMs),
+        minuteRows: [workoutMetricRow({
+          date: ACTIVITY_DAY.date,
+          metricKey: "workout-minutes",
+          recordIds: [`evt_${source.source}_workout_minutes`],
+          source,
+          value: 42,
+        })],
+      });
+
+      expect(selected).toEqual([]);
+    }
+  });
+
+  it("does not apply the redacted-owner exception to mixed metric families", () => {
+    const selected = selectProjectableWorkoutDays({
+      countRows: [workoutMetricRow({
+        date: ACTIVITY_DAY.date,
+        metricKey: "workout-count",
+        recordIds: ["activity-summary:workout-count:2026-07-03"],
+        source: GARMIN_SOURCE,
+        value: 1,
+      })],
+      currentDate: utcDateKey(nowMs),
+      minuteRows: [workoutMetricRow({
+        date: ACTIVITY_DAY.date,
+        metricKey: "workout-minutes",
+        recordIds: ["evt_garmin_workout_minutes"],
+        source: GARMIN_SOURCE,
+        sourceFamily: "event",
+        sourceKind: "observation",
+        value: 42,
+      })],
     });
 
     expect(selected).toEqual([]);

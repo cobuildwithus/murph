@@ -7044,6 +7044,145 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'reports available shared workout count and minutes',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-workout-summary-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedGroupStatusDeveloperInstructions('shared_read'),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  members: [{
+                    currentTurnHandles: [],
+                    displayName: 'Avery',
+                    memberId: 'member_workout_summary',
+                    participantId: 'participant_workout_summary',
+                    projections: [{
+                      dataStatus: 'available',
+                      grantStatus: 'granted',
+                      grantedAt: '2026-07-01T12:00:00.000Z',
+                      projectionScope: {
+                        projectionKind: 'workout-days.v0',
+                      },
+                      projectionScopeKey: 'workout-days.v0',
+                      records: [{
+                        data: {
+                          date: '2026-07-28',
+                          metricSemantics: 'canonical-workout-day',
+                          workoutCount: 1,
+                          workoutMinutes: 42,
+                        },
+                        occurredAt: '2026-07-28T00:00:00.000Z',
+                        recordKey: '2026-07-28.garmin',
+                        source: {
+                          label: 'Garmin',
+                          source: 'garmin',
+                        },
+                      }],
+                    }],
+                  }],
+                  requestedProjectionScopeKeys: ['workout-days.v0'],
+                  status: 'ok',
+                } satisfies AssistantHostedGroupSharedReadResponse
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Current group message:',
+            '"Avery shares only her daily workout-count-and-total-minutes summary, not detailed workout records. What does that shared summary show for July 28?"',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const sharedReads = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_TOOL.name
+        )
+        const finalAnswerEventIndex = result.jsonEvents.findIndex((event) => {
+          const record = readRecord(event)
+          if (readString(record?.method, record?.type) !== 'item/completed') {
+            return false
+          }
+          const item = readRecord(readRecord(record?.params)?.item)
+          return readString(item?.type) === 'agentMessage'
+            && readString(item?.text)?.trim() === result.finalMessage.trim()
+        })
+
+        process.stdout.write(
+          `[group-workout-summary-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            sharedReads,
+          })}\n`,
+        )
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: [{ projectionKind: 'workout-days.v0' }],
+          },
+        })
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{ projectionKind: 'workout-days.v0' }],
+        }])
+        expect(finalAnswerEventIndex).toBeGreaterThan(
+          sharedReads[0]?.eventIndex ?? Number.MAX_SAFE_INTEGER,
+        )
+        expect(result.finalMessage).toMatch(/Avery/iu)
+        expect(result.finalMessage).toMatch(/(?:1|one)\s+workout/iu)
+        expect(result.finalMessage).toMatch(/42\s+minutes?/iu)
+        expect(result.finalMessage).not.toMatch(
+          /no (?:usable |visible |shared )?workouts?|not (?:available|shared|showing)|sync (?:failed|error)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'attributes a scheduled weekly group comparison from fresh labeled rows',
     async () => {
       const config = await resolveRealCodexE2eConfig()
