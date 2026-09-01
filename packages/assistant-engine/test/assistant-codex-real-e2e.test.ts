@@ -18113,6 +18113,171 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     360_000,
   )
 
+  it.each([
+    {
+      expectedFinalMessage: [
+        /library book/iu,
+        /(?:January|Jan\.?)\s+15/iu,
+        /4(?::20)?\s*p\.?m\.?|16:20/iu,
+      ],
+      expectedInstructions: [/library book/iu],
+      expectedModel: 'gpt-5.6-luna',
+      expectedScheduleKind: 'at',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2031-01-15T21:20:00.000Z',
+        status: 'resolved' as const,
+      },
+      prompt:
+        'On January 15, 2031 at 4:20 PM, remind me here to bring the library book. Please save it now.',
+      scenario: 'fixed-library-cue',
+      testName: 'fixed library cue uses Luna',
+    },
+    {
+      expectedFinalMessage: [
+        /every day|daily/iu,
+        /6(?::00)?\s*p\.?m\.?|18:00/iu,
+        /workout/iu,
+        /recovery/iu,
+        /recommend|train|recover/iu,
+      ],
+      expectedInstructions: [
+        /latest|current/iu,
+        /workout/iu,
+        /recovery/iu,
+        /decid|recommend|train|recover/iu,
+      ],
+      expectedModel: 'gpt-5.6-terra',
+      expectedScheduleKind: 'recurring',
+      occurrenceProjection: { status: 'pending' as const },
+      prompt: [
+        'Every day at 6 PM, review my latest workout and recovery data,',
+        'decide whether I should train or recover, and remind me here with that recommendation. Save it now.',
+      ].join(' '),
+      scenario: 'contextual-recovery-reminder',
+      testName: 'context reminder uses Terra',
+    },
+  ] as const)(
+    '$testName',
+    async ({
+      expectedFinalMessage,
+      expectedInstructions,
+      expectedModel,
+      expectedScheduleKind,
+      occurrenceProjection,
+      prompt,
+      scenario,
+    }) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-reminder-model-choice-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected an automation save request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: `automation-reminder-model-${scenario}`,
+                  created: true,
+                  effectiveTimeZone: 'America/New_York',
+                  lookupId: `reminder-model-${scenario}`,
+                  occurrenceProjection,
+                  routeBinding: 'current_conversation',
+                  schedule: request.schedule,
+                  status: 'active',
+                  updatedAt: '2026-07-27T12:00:00.000Z',
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const savedRequest = automationRequests[0]
+        process.stdout.write(
+          `[real-codex reminder model choice] ${JSON.stringify({
+            reply: result.finalMessage.trim(),
+            scenario,
+            selectedModel:
+              savedRequest?.action === 'save'
+                ? savedRequest.assistantTargetOverride?.model ?? null
+                : null,
+          })}\n`,
+        )
+        expect(automationRequests).toHaveLength(1)
+        if (savedRequest?.action !== 'save') {
+          throw new Error('Expected one reminder save request.')
+        }
+        for (const expectedInstruction of expectedInstructions) {
+          expect(savedRequest.instructions).toMatch(expectedInstruction)
+        }
+        expect(savedRequest).toMatchObject({
+          action: 'save',
+          assistantTargetOverride: {
+            model: expectedModel,
+          },
+        })
+        if (expectedScheduleKind === 'at') {
+          if (savedRequest.schedule.kind !== 'at') {
+            throw new Error('Expected an exact one-shot schedule.')
+          }
+          expect(savedRequest.schedule.at).toBe('2031-01-15T21:20:00.000Z')
+        } else if (savedRequest.schedule.kind === 'dailyLocal') {
+          expect(savedRequest.schedule.localTime).toBe('18:00')
+        } else if (savedRequest.schedule.kind === 'cron') {
+          expect(savedRequest.schedule.expression).toMatch(/^0\s+18\s+/u)
+        } else {
+          throw new Error('Expected a recurring wall-clock schedule.')
+        }
+        expect(result.finalMessage).toMatch(
+          /active|created|saved|scheduled|set(?: up)?/iu,
+        )
+        for (const expectedReplyPattern of expectedFinalMessage) {
+          expect(result.finalMessage).toMatch(expectedReplyPattern)
+        }
+        expect(result.finalMessage).not.toMatch(/Luna|Terra|gpt-5\.6/iu)
+        expect(result.finalMessage).not.toMatch(
+          /\?|if you want|would you like|let me know/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'preserves a foreign wall clock and confirms host-recovered timing',
     async () => {

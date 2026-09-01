@@ -86,6 +86,10 @@ const replyText = "Cold-start benchmark reply.";
 const setupReplyText = "Cold-start benchmark setup complete.";
 const productionMedianPayloadBytes = 14_000_000;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
+const setupTimeoutMs =
+  process.env.MURPH_HOSTED_LOCAL_E2E_EXTENDED_SETUP_TIMEOUT === "1"
+    ? 900_000
+    : 300_000;
 const execFileAsync = promisify(execFile);
 
 interface ColdStartSample {
@@ -96,6 +100,9 @@ interface ColdStartSample {
   automationBootstrapMs?: number;
   archiveExtractMs?: number;
   cleanupMs?: number;
+  containerListeningToPortsReadyMs?: number;
+  containerProcessToListeningMs?: number;
+  containerStartToPortsReadyMs?: number;
   dataKeyUnwrapMs?: number;
   decryptMs?: number;
   durableRootReplaceMs?: number;
@@ -170,7 +177,7 @@ describe("hosted local cold-start benchmark e2e", () => {
       resetLocalDatabase: true,
       resetPersistDir: true,
     });
-  }, 300_000);
+  }, setupTimeoutMs);
 
   it("measures independent cold hosted executions", async () => {
     const measuredSamples: ColdStartSample[] = [];
@@ -459,6 +466,7 @@ async function runColdStartTrial(
   const phaseBreakdown = requirePhaseBreakdown(trace.phaseBreakdown);
   const restore = requireRestoreBreakdown(phaseBreakdown);
   const importBreakdown = phaseBreakdown.import;
+  const orchestration = phaseBreakdown.orchestration;
   const preProviderBreakdown = phaseBreakdown.preProvider;
 
   return {
@@ -485,6 +493,36 @@ async function runColdStartTrial(
     ),
     archiveExtractMs: requireTiming(restore.archiveExtractMs, "archiveExtractMs"),
     cleanupMs: requireTiming(restore.cleanupMs, "cleanupMs"),
+    containerListeningToPortsReadyMs: elapsedEpochMs(
+      requireTiming(
+        orchestration?.freshStartContainerListeningAtEpochMs,
+        "freshStartContainerListeningAtEpochMs",
+      ),
+      requireTiming(
+        orchestration?.freshStartContainerPortsReadyAtEpochMs,
+        "freshStartContainerPortsReadyAtEpochMs",
+      ),
+    ),
+    containerProcessToListeningMs: elapsedEpochMs(
+      requireTiming(
+        orchestration?.freshStartContainerProcessStartedAtEpochMs,
+        "freshStartContainerProcessStartedAtEpochMs",
+      ),
+      requireTiming(
+        orchestration?.freshStartContainerListeningAtEpochMs,
+        "freshStartContainerListeningAtEpochMs",
+      ),
+    ),
+    containerStartToPortsReadyMs: elapsedEpochMs(
+      requireTiming(
+        orchestration?.freshStartContainerStartIssuedAtEpochMs,
+        "freshStartContainerStartIssuedAtEpochMs",
+      ),
+      requireTiming(
+        orchestration?.freshStartContainerPortsReadyAtEpochMs,
+        "freshStartContainerPortsReadyAtEpochMs",
+      ),
+    ),
     dataKeyUnwrapMs: requireTiming(restore.dataKeyUnwrapMs, "dataKeyUnwrapMs"),
     decryptMs: requireTiming(restore.decryptMs, "decryptMs"),
     durableRootReplaceMs: requireTiming(
@@ -975,6 +1013,9 @@ function buildSamplePercentileRecord(
     "automationBootstrapMs",
     "archiveExtractMs",
     "cleanupMs",
+    "containerListeningToPortsReadyMs",
+    "containerProcessToListeningMs",
+    "containerStartToPortsReadyMs",
     "dataKeyUnwrapMs",
     "decryptMs",
     "durableRootReplaceMs",

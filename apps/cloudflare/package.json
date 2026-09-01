@@ -24,7 +24,9 @@
     "build": "node ../../scripts/rm-paths.mjs dist && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json --pretty false",
     "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm typecheck && pnpm test:node",
-    "test:node": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage",
+    "test:node": "pnpm test:node:workspace && pnpm test:node:containers-helper",
+    "test:node:workspace": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage",
+    "test:node:containers-helper": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.containers-helper.config.ts --no-coverage",
     "test:e2e:local": "pnpm test:e2e:hosted-local && pnpm test:e2e:workers:local",
     "test:e2e:hosted-local": "pnpm --dir ../.. hosted-local e2e",
     "test:e2e:workers:local": "pnpm test:workers",
@@ -61,7 +63,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.3.6",
+    "@cloudflare/containers": "0.3.7",
     "@linqapp/sdk": "0.34.0",
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/assistant-runtime": "workspace:*",

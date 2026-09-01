@@ -267,7 +267,10 @@ Updated: 2026-08-31
 - After `main` advanced, its newer bounded-memory and normalized-wearable prompt
   guidance was preserved alongside the default-off health-card guidance. The
   resolved merge passes 103/103 planning tests, 31/31 focused health-card and
-  prompt tests, assistant-engine typecheck, and the complexity guard.
+  prompt tests, assistant-engine typecheck, and the complexity guard. A later
+  base advance preserved the newer reminder model-routing rules alongside the
+  bounded receipt-evidence guidance and passes 55/55 focused automation tests,
+  assistant-engine typecheck, and the complexity guard.
 - Physical installed-app, app-absent, macOS, image-failure, and VoiceOver proof
   remains required before enabling the exact-value rollout flag.
 

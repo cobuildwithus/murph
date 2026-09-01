@@ -103,6 +103,7 @@ const cloudflareNodeVitestProjectSpecs = resolveVitestBucketFiles(
   {
     ignorePatterns: [
       "*e2e.test.ts",
+      "containers-helper-readiness.test.ts",
       "workers/*.test.ts",
       "workers/**/*.test.ts",
     ],

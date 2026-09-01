@@ -187,3 +187,14 @@ workers_pid="$!"
 register_background_pid "$workers_pid"
 
 wait_for_background_jobs "$node_pid" "$workers_pid"
+
+# The helper project bundles the real Cloudflare package with a dedicated
+# cloudflare:workers shim. Keep that one-second harness out of the heavy mixed
+# project process so Vitest can deterministically release every worker.
+pnpm --dir "$repo_root" exec vitest run \
+  --config apps/cloudflare/vitest.containers-helper.config.ts \
+  --no-coverage \
+  --cache=false &
+helper_pid="$!"
+register_background_pid "$helper_pid"
+wait_for_background_jobs "$helper_pid"
