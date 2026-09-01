@@ -13,9 +13,11 @@ import type {
 import {
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
+  readMemoryDocument,
   shouldSkipAutomationOccurrenceForAvailability,
   splitAutomationAvailabilityConflictBlock,
   stripAutomationAvailabilityConflictEvidenceForProvider,
+  upsertMemory,
 } from '@murphai/core'
 import {
   assistantCronJobSchema,
@@ -31,6 +33,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createAssistantGroupEmailOutboxTool,
 } from '../src/assistant/group-email-outbox.js'
+import {
+  executeMemberMemoryDynamicTool,
+} from '../src/assistant-codex/dynamic-tools/member-memory.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
 import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.js'
 import {
@@ -5143,7 +5148,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('aborts and releases overnight memory consolidation when hosted maintenance yields during provider work before side effects', async () => {
+  it('preserves shown memory and releases its retry when foreground work arrives before forget', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -5151,13 +5156,41 @@ describe('assistant cron runtime orchestration', () => {
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
+    const saved = await upsertMemory(vaultRoot, {
+      section: 'Preferences',
+      text: 'Keep the saved value.',
+    })
     let shouldYield = false
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
       async (input: { abortSignal?: AbortSignal }) => {
         expect(input.abortSignal?.aborted).toBe(false)
+        const shown = await executeMemberMemoryDynamicTool({
+          abortSignal: input.abortSignal ?? null,
+          managedMaintenanceAuthorized: true,
+          request: {
+            args: { action: 'show' },
+            kind: 'member-memory',
+          },
+          vaultRoot,
+        })
+        expect(shown.rpcResult.success).toBe(true)
         shouldYield = true
         await vi.advanceTimersByTimeAsync(300)
         expect(input.abortSignal?.aborted).toBe(true)
+        const forgotten = await executeMemberMemoryDynamicTool({
+          abortSignal: input.abortSignal ?? null,
+          managedMaintenanceAuthorized: true,
+          request: {
+            args: {
+              action: 'forget',
+              expectedUpdatedAt: saved.record.updatedAt,
+              memoryId: saved.record.id,
+            },
+            kind: 'member-memory',
+          },
+          vaultRoot,
+        })
+        expect(forgotten.rpcResult.success).toBe(false)
         throw input.abortSignal?.reason ??
           new VaultCliError(
             'ASSISTANT_TURN_ABORTED',
@@ -5196,6 +5229,25 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.state.lastRunAt).toBeNull()
     expect(runtimeRecord?.state.lastSucceededAt).toBeNull()
     expect(runtimeRecord?.state.lastFailedAt).toBeNull()
+    await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
+      records: [{
+        id: saved.record.id,
+        section: 'Preferences',
+        text: 'Keep the saved value.',
+      }],
+    })
+    await expect(getAssistantCronStatus(vaultRoot, {
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          userEnvKeys: [],
+        },
+      },
+      shouldYieldBackgroundMaintenance: () => true,
+    })).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: runtimeRecord?.state.retryAfterAt,
+    })
     await expect(listAssistantCronRuns({
       job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       vault: vaultRoot,
