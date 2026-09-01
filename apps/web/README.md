@@ -1911,19 +1911,29 @@ completed on the Standard builder with this worker boundary. The later
 single-process simplification is no longer acceptable: an exact-head cgroup
 trace measured 11.18 GB at static generation, and production reproduced the
 same intermittent 70-page stall. The hosted local-development wrapper remains
-on Turbopack and rejects an explicit Webpack flag. The production runner also
-owns a versioned cache epoch inside `.next/cache`.
+on Turbopack and rejects an explicit Webpack flag.
+
+The Next config disables Webpack's production cache. The runner already
+required every production compile to start cold, so a generated Webpack cache
+could never produce a later hit; one measured cold build nevertheless wrote 2.74 GB beneath
+`.next/cache/webpack` and peaked at 5.52 GB RSS before two adjacent Standard
+deployments were OOM-killed during compilation. Removing that dead artifact
+eliminates its serialization and page-cache pressure without changing compiler
+inputs or output. The paired production-faithful build left the Webpack cache
+absent, lowered peak RSS from 5.52 GB to 3.96 GB, and shortened compilation
+from 144 seconds to 117 seconds. Development caching remains available.
+
+The production runner also owns a versioned cache epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
-compilation and writes the epoch only after Next succeeds. Production Webpack
-compiles are additionally cold-cache by policy: the runner removes
-`.next/cache/webpack` before every compile, and because that removal precedes
-the only Next invocation and aborts the build on failure, a restored warm
-Webpack cache can never reach the compiler regardless of what an earlier
-deployment uploaded. Warm restored Webpack caches on Vercel's 8 GB Standard builder
-were the trigger for the August 2026 steady-state OOM kills and silent
-compile hangs; only the cold path is proven. Other cache subtrees such as SWC
-remain warm. Vercel owns cancellation and build deadlines. The production
-package script therefore runs directly instead of passing through the local
+compilation and writes the epoch only after Next succeeds. The disabled-cache
+epoch clears restored caches from the preceding policy once; compatible later
+builds retain non-Webpack cache subtrees such as SWC. Warm restored Webpack
+caches on Vercel's 8 GB Standard builder were the trigger for the August 2026
+steady-state OOM kills and silent compile hangs, and writing the unused cold
+cache later consumed the remaining capacity margin.
+
+Vercel owns cancellation and build deadlines. The production package script
+therefore runs directly instead of passing through the local
 shared-host verification slot or adding a second watchdog and process-group
 reaper. Bump the epoch only when a proven compiler/cache transition requires
 another full invalidation.
