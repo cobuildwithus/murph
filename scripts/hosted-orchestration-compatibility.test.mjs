@@ -1112,6 +1112,15 @@ test("Web production admission runs only for exact public main", async () => {
     ),
     "utf8",
   );
+  const admissionJob = workflow.slice(workflow.indexOf("jobs:\n  admission:"));
+  const checkoutIndex = admissionJob.indexOf("name: Check out exact public main revision");
+  const setupIndex = admissionJob.indexOf("name: Setup Node");
+  const fixtureIndex = admissionJob.indexOf("name: Execute exact production wire projection");
+  const tokenIndex = admissionJob.indexOf("name: Mint private compatibility token");
+  const proofIndex = admissionJob.indexOf(
+    "name: Prove exact public main against every supported Temporal reader",
+  );
+
   assert.match(workflow, /on:\n  push:\n    branches:\n      - main/u);
   assert.match(workflow, /name: Temporal Web production admission/u);
   assert.match(workflow, /environment: temporal-compatibility/u);
@@ -1121,6 +1130,21 @@ test("Web production admission runs only for exact public main", async () => {
   assert.match(workflow, /permission-actions: write/u);
   assert.match(workflow, /repositories: murph-cloud/u);
   assert.doesNotMatch(workflow, /pull_request:/u);
+  assert.doesNotMatch(admissionJob, /\n    needs:/u);
+  assert.doesNotMatch(workflow, /\n  producer:|upload-artifact|download-artifact/u);
+  assert.ok(checkoutIndex >= 0);
+  assert.ok(setupIndex > checkoutIndex);
+  assert.ok(fixtureIndex > setupIndex);
+  assert.ok(tokenIndex > fixtureIndex);
+  assert.ok(proofIndex > tokenIndex);
+  assert.match(
+    admissionJob,
+    /--output "\$\{RUNNER_TEMP\}\/temporal-compatibility-producer-fixtures\.json"/u,
+  );
+  assert.match(
+    admissionJob,
+    /--fixtures "\$\{RUNNER_TEMP\}\/temporal-compatibility-producer-fixtures\.json"/u,
+  );
 });
 
 test("Repo Hygiene owns the focused controller contract test", async () => {

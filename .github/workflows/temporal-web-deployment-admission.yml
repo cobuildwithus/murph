@@ -16,10 +16,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  producer:
-    name: Build exact production wire fixture
+  admission:
+    name: Temporal Web production admission
+    environment: temporal-compatibility
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 70
+    permissions:
+      contents: read
     steps:
       - name: Check out exact public main revision
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -35,37 +38,7 @@ jobs:
       - name: Execute exact production wire projection
         run: >-
           node scripts/temporal-compatibility-producer-fixtures.ts
-          --output temporal-compatibility-producer-fixtures.json
-
-      - name: Upload exact production wire fixture
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: temporal-web-deployment-producer-${{ github.sha }}
-          path: temporal-compatibility-producer-fixtures.json
-          if-no-files-found: error
-          retention-days: 1
-
-  admission:
-    name: Temporal Web production admission
-    needs: producer
-    environment: temporal-compatibility
-    runs-on: ubuntu-24.04
-    timeout-minutes: 70
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Download exact production wire fixture
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: temporal-web-deployment-producer-${{ github.sha }}
-          path: ${{ runner.temp }}/temporal-web-deployment-producer
-
-      - name: Check out exact public main revision
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
+          --output "${RUNNER_TEMP}/temporal-compatibility-producer-fixtures.json"
 
       - name: Mint private compatibility token
         id: private-app-token
@@ -86,5 +59,5 @@ jobs:
         run: >-
           node scripts/hosted-orchestration-compatibility.mjs run-main
           --sha "${GITHUB_SHA}"
-          --fixtures "${RUNNER_TEMP}/temporal-web-deployment-producer/temporal-compatibility-producer-fixtures.json"
+          --fixtures "${RUNNER_TEMP}/temporal-compatibility-producer-fixtures.json"
           --request-id "temporal-web-deploy-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
