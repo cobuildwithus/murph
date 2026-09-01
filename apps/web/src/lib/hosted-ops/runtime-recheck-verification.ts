@@ -19,21 +19,14 @@ const SIGNED_BIGINT_MAX = 9_223_372_036_854_775_807n;
 const SIGNED_SEQUENCE_PATTERN = /^(0|[1-9][0-9]{0,18})$/u;
 const WITNESS_INTEGRITY_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 
-export interface HostedRuntimeRecoveryPendingHead {
-  createdAt: string;
-  expiresAt: string | null;
-  kind: string;
-  sequence: string;
-}
-
 export interface HostedRuntimeRecoveryWitness {
   allocatedSystemHighWater: string | null;
   canonicalSystemConsumed: string | null;
+  capturedHeadSequence: string | null;
   checkpointedAt: string | null;
   importedSystemSequence: string | null;
   integrity: string;
   observedAt: string;
-  pendingHead: HostedRuntimeRecoveryPendingHead | null;
   userId: string;
   workspaceVersion: string | null;
 }
@@ -60,10 +53,9 @@ export interface HostedRuntimeRecoveryCurrentState {
   activeAccess: boolean;
   allocatedSystemHighWater: string | null;
   canonicalSystemConsumed: string | null;
-  capturedHead: HostedRuntimeRecoveryPendingHead | null;
   checkpointedAt: string | null;
   observedAt: string;
-  pendingHead: HostedRuntimeRecoveryPendingHead | null;
+  pendingHeadSequence: string | null;
   userId: string;
   workspaceVersion: string | null;
 }
@@ -71,24 +63,20 @@ export interface HostedRuntimeRecoveryCurrentState {
 export interface HostedRuntimeRecoveryFactRow {
   allocatedSystemHighWater: bigint | null;
   canonicalSystemConsumed: bigint | null;
-  capturedHeadCreatedAt: Date | null;
-  capturedHeadExpiresAt: Date | null;
-  capturedHeadKind: string | null;
-  capturedHeadSequence: bigint | null;
   checkpointedAt: Date | null;
-  pendingHeadCreatedAt: Date | null;
-  pendingHeadExpiresAt: Date | null;
-  pendingHeadKind: string | null;
   pendingHeadSequence: bigint | null;
   redactedStatusJson: Prisma.JsonValue | null;
   userId: string;
   workspaceVersion: bigint | null;
 }
 
-type HostedRuntimeRecoveryFactReadClient = Pick<PrismaClient, "$queryRaw">;
+interface HostedRuntimeRecoveryFactReadClient {
+  $queryRaw(
+    query: Prisma.Sql,
+  ): PromiseLike<HostedRuntimeRecoveryFactRow[]>;
+}
 
 type ReadHostedRuntimeRecoveryFacts = (input: {
-  capturedHeadSequences: ReadonlyMap<string, string>;
   now: Date;
   prisma?: HostedRuntimeRecoveryFactReadClient;
   userIds: readonly string[];
@@ -109,13 +97,11 @@ export async function captureHostedRuntimeRecoveryWitnesses(input: {
 }): Promise<Map<string, HostedRuntimeRecoveryWitness>> {
   const rows = input.readFacts
     ? await input.readFacts({
-        capturedHeadSequences: new Map(),
         now: input.now,
         prisma: input.prisma,
         userIds: input.userIds,
       })
     : await readHostedRuntimeRecoveryFacts({
-        capturedHeadSequences: new Map(),
         now: input.now,
         prisma: input.prisma ?? getPrisma(),
         userIds: input.userIds,
@@ -314,7 +300,7 @@ function recoveryComparison(
     baselineConsumed: BigInt(baseline.canonicalSystemConsumed!),
     baselineHighWater: BigInt(baseline.allocatedSystemHighWater!),
     baselineVersion: BigInt(baseline.workspaceVersion!),
-    capturedHeadSequence: BigInt(baseline.pendingHead!.sequence),
+    capturedHeadSequence: BigInt(baseline.capturedHeadSequence!),
     currentCheckpoint: Date.parse(current.checkpointedAt!),
     currentConsumed: BigInt(current.canonicalSystemConsumed!),
     currentHighWater: BigInt(current.allocatedSystemHighWater!),
@@ -340,12 +326,10 @@ function preservesUnconsumedCapturedHead(
   if (comparison.currentConsumed >= comparison.capturedHeadSequence) {
     return true;
   }
-  return samePendingHead(current.capturedHead, baseline.pendingHead)
-    && samePendingHead(current.pendingHead, baseline.pendingHead);
+  return current.pendingHeadSequence === baseline.capturedHeadSequence;
 }
 
 export async function readHostedRuntimeRecoveryFacts(input: {
-  capturedHeadSequences?: ReadonlyMap<string, string>;
   now: Date;
   prisma?: HostedRuntimeRecoveryFactReadClient;
   userIds: readonly string[];
@@ -353,22 +337,17 @@ export async function readHostedRuntimeRecoveryFacts(input: {
   if (input.userIds.length === 0 || input.userIds.length > HOSTED_RUNTIME_RECOVERY_MAX_BATCH) {
     throw new TypeError("Runtime recovery fact reads require one to three member ids.");
   }
-  const prisma = input.prisma ?? getPrisma();
+  const prisma: HostedRuntimeRecoveryFactReadClient =
+    input.prisma ?? getPrisma();
   const retainedAfter = new Date(
     input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS,
   );
-  const capturedHeadSequences = input.capturedHeadSequences ?? new Map();
-  const requestedRows = Prisma.join(input.userIds.map((userId, ordinal) => {
-    const capturedHeadSequence = capturedHeadSequences.get(userId);
-    return Prisma.sql`(
-      ${userId}::text,
-      ${ordinal}::integer,
-      ${capturedHeadSequence === undefined ? null : BigInt(capturedHeadSequence)}::bigint
-    )`;
-  }));
+  const requestedRows = Prisma.join(input.userIds.map((userId, ordinal) =>
+    Prisma.sql`(${userId}::text, ${ordinal}::integer)`
+  ));
 
-  return await prisma.$queryRaw<HostedRuntimeRecoveryFactRow[]>(Prisma.sql`
-    WITH requested(user_id, ordinal, captured_head_sequence) AS (
+  return await prisma.$queryRaw(Prisma.sql`
+    WITH requested(user_id, ordinal) AS (
       VALUES ${requestedRows}
     )
     SELECT
@@ -378,14 +357,7 @@ export async function readHostedRuntimeRecoveryFacts(input: {
       workspace.redacted_status_json AS "redactedStatusJson",
       lane_counter.consumed_seq AS "canonicalSystemConsumed",
       lane_counter.next_seq - 1::bigint AS "allocatedSystemHighWater",
-      pending_head.lane_seq AS "pendingHeadSequence",
-      pending_head.kind AS "pendingHeadKind",
-      pending_head.created_at AS "pendingHeadCreatedAt",
-      pending_head.expires_at AS "pendingHeadExpiresAt",
-      captured_head.lane_seq AS "capturedHeadSequence",
-      captured_head.kind AS "capturedHeadKind",
-      captured_head.created_at AS "capturedHeadCreatedAt",
-      captured_head.expires_at AS "capturedHeadExpiresAt"
+      pending_head.lane_seq AS "pendingHeadSequence"
     FROM requested
     LEFT JOIN hosted_workspace AS workspace
       ON workspace.user_id = requested.user_id
@@ -393,11 +365,7 @@ export async function readHostedRuntimeRecoveryFacts(input: {
       ON lane_counter.user_id = requested.user_id
       AND lane_counter.lane = 'system'
     LEFT JOIN LATERAL (
-      SELECT
-        mailbox_item.lane_seq,
-        mailbox_item.kind,
-        mailbox_item.created_at,
-        mailbox_item.expires_at
+      SELECT mailbox_item.lane_seq
       FROM hosted_mailbox_item AS mailbox_item
       WHERE mailbox_item.user_id = requested.user_id
         AND mailbox_item.lane = 'system'
@@ -411,25 +379,6 @@ export async function readHostedRuntimeRecoveryFacts(input: {
       ORDER BY mailbox_item.lane_seq ASC
       LIMIT 1
     ) AS pending_head ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT
-        mailbox_item.lane_seq,
-        mailbox_item.kind,
-        mailbox_item.created_at,
-        mailbox_item.expires_at
-      FROM hosted_mailbox_item AS mailbox_item
-      WHERE requested.captured_head_sequence IS NOT NULL
-        AND mailbox_item.user_id = requested.user_id
-        AND mailbox_item.lane = 'system'
-        AND mailbox_item.lane_seq = requested.captured_head_sequence
-        AND mailbox_item.created_at > ${retainedAfter}
-        AND mailbox_item.created_at <= ${input.now}
-        AND (
-          mailbox_item.expires_at IS NULL
-          OR mailbox_item.expires_at > ${input.now}
-        )
-      LIMIT 1
-    ) AS captured_head ON TRUE
     ORDER BY requested.ordinal ASC
   `);
 }
@@ -447,10 +396,6 @@ async function readHostedRuntimeRecoveryCurrentStates(input: {
       prisma: tx,
     });
     const rows = await readHostedRuntimeRecoveryFacts({
-      capturedHeadSequences: new Map(input.witnesses.map((witness) => [
-        witness.userId,
-        witness.pendingHead?.sequence ?? "0",
-      ])),
       now: input.now,
       prisma: tx,
       userIds,
@@ -482,17 +427,12 @@ function projectUnsignedRecoveryWitness(
     allocatedSystemHighWater:
       row.allocatedSystemHighWater?.toString() ?? null,
     canonicalSystemConsumed: row.canonicalSystemConsumed?.toString() ?? null,
+    capturedHeadSequence: row.pendingHeadSequence?.toString() ?? null,
     checkpointedAt: row.checkpointedAt?.toISOString() ?? null,
     importedSystemSequence: readImportedSystemSequence(
       row.redactedStatusJson,
     ),
     observedAt: observedAt.toISOString(),
-    pendingHead: projectPendingHead({
-      createdAt: row.pendingHeadCreatedAt,
-      expiresAt: row.pendingHeadExpiresAt,
-      kind: row.pendingHeadKind,
-      sequence: row.pendingHeadSequence,
-    }),
     userId: row.userId,
     workspaceVersion: row.workspaceVersion?.toString() ?? null,
   };
@@ -505,10 +445,10 @@ function emptyUnsignedRecoveryWitness(
   return {
     allocatedSystemHighWater: null,
     canonicalSystemConsumed: null,
+    capturedHeadSequence: null,
     checkpointedAt: null,
     importedSystemSequence: null,
     observedAt: observedAt.toISOString(),
-    pendingHead: null,
     userId,
     workspaceVersion: null,
   };
@@ -522,19 +462,8 @@ function projectCurrentRecoverySnapshot(row: HostedRuntimeRecoveryFactRow): Omit
     allocatedSystemHighWater:
       row.allocatedSystemHighWater?.toString() ?? null,
     canonicalSystemConsumed: row.canonicalSystemConsumed?.toString() ?? null,
-    capturedHead: projectPendingHead({
-      createdAt: row.capturedHeadCreatedAt,
-      expiresAt: row.capturedHeadExpiresAt,
-      kind: row.capturedHeadKind,
-      sequence: row.capturedHeadSequence,
-    }),
     checkpointedAt: row.checkpointedAt?.toISOString() ?? null,
-    pendingHead: projectPendingHead({
-      createdAt: row.pendingHeadCreatedAt,
-      expiresAt: row.pendingHeadExpiresAt,
-      kind: row.pendingHeadKind,
-      sequence: row.pendingHeadSequence,
-    }),
+    pendingHeadSequence: row.pendingHeadSequence?.toString() ?? null,
     workspaceVersion: row.workspaceVersion?.toString() ?? null,
   };
 }
@@ -546,31 +475,9 @@ function emptyCurrentRecoverySnapshot(): Omit<
   return {
     allocatedSystemHighWater: null,
     canonicalSystemConsumed: null,
-    capturedHead: null,
     checkpointedAt: null,
-    pendingHead: null,
+    pendingHeadSequence: null,
     workspaceVersion: null,
-  };
-}
-
-function projectPendingHead(input: {
-  createdAt: Date | null;
-  expiresAt: Date | null;
-  kind: string | null;
-  sequence: bigint | null;
-}): HostedRuntimeRecoveryPendingHead | null {
-  if (
-    input.createdAt === null
-    || input.kind === null
-    || input.sequence === null
-  ) {
-    return null;
-  }
-  return {
-    createdAt: input.createdAt.toISOString(),
-    expiresAt: input.expiresAt?.toISOString() ?? null,
-    kind: input.kind,
-    sequence: input.sequence.toString(),
   };
 }
 
@@ -618,11 +525,11 @@ function parseHostedRuntimeRecoveryWitness(
     || !hasExactKeys(value, [
       "allocatedSystemHighWater",
       "canonicalSystemConsumed",
+      "capturedHeadSequence",
       "checkpointedAt",
       "importedSystemSequence",
       "integrity",
       "observedAt",
-      "pendingHead",
       "userId",
       "workspaceVersion",
     ])
@@ -636,21 +543,23 @@ function parseHostedRuntimeRecoveryWitness(
   const canonicalSystemConsumed = parseNullableSequence(
     value.canonicalSystemConsumed,
   );
+  const capturedHeadSequence = parseNullableSequence(
+    value.capturedHeadSequence,
+  );
   const checkpointedAt = parseNullableTimestamp(value.checkpointedAt);
   const importedSystemSequence = parseNullableSequence(
     value.importedSystemSequence,
   );
   const observedAt = parseTimestamp(value.observedAt);
-  const pendingHead = parsePendingHead(value.pendingHead);
   const workspaceVersion = parseNullableSequence(value.workspaceVersion);
   const integrity = value.integrity;
   if (
     allocatedSystemHighWater === undefined
     || canonicalSystemConsumed === undefined
+    || capturedHeadSequence === undefined
     || checkpointedAt === undefined
     || importedSystemSequence === undefined
     || observedAt === null
-    || pendingHead === undefined
     || workspaceVersion === undefined
     || typeof integrity !== "string"
     || !WITNESS_INTEGRITY_PATTERN.test(integrity)
@@ -661,11 +570,11 @@ function parseHostedRuntimeRecoveryWitness(
   const witness: HostedRuntimeRecoveryWitness = {
     allocatedSystemHighWater,
     canonicalSystemConsumed,
+    capturedHeadSequence,
     checkpointedAt,
     importedSystemSequence,
     integrity,
     observedAt,
-    pendingHead,
     userId,
     workspaceVersion,
   };
@@ -691,10 +600,10 @@ function omitWitnessIntegrity(
   return {
     allocatedSystemHighWater: witness.allocatedSystemHighWater,
     canonicalSystemConsumed: witness.canonicalSystemConsumed,
+    capturedHeadSequence: witness.capturedHeadSequence,
     checkpointedAt: witness.checkpointedAt,
     importedSystemSequence: witness.importedSystemSequence,
     observedAt: witness.observedAt,
-    pendingHead: witness.pendingHead,
     userId: witness.userId,
     workspaceVersion: witness.workspaceVersion,
   };
@@ -707,13 +616,6 @@ function isValidBaselineWitness(
   if (
     !hasCanonicalBaselineSequences(witness)
     || !hasValidRecoveryTimestamps(witness, now)
-    || witness.pendingHead === null
-  ) {
-    return false;
-  }
-  if (
-    !isValidPendingHeadShape(witness.pendingHead)
-    || !isLivePendingHeadAt(witness.pendingHead, new Date(witness.observedAt))
   ) {
     return false;
   }
@@ -728,6 +630,7 @@ function hasCanonicalBaselineSequences(
     witness.importedSystemSequence,
     witness.canonicalSystemConsumed,
     witness.allocatedSystemHighWater,
+    witness.capturedHeadSequence,
   ].every(isCanonicalSequence)
     && WITNESS_INTEGRITY_PATTERN.test(witness.integrity);
 }
@@ -749,7 +652,7 @@ function hasValidBaselineSequenceRange(
   witness: HostedRuntimeRecoveryWitness,
 ): boolean {
   const consumed = BigInt(witness.canonicalSystemConsumed!);
-  const head = BigInt(witness.pendingHead!.sequence);
+  const head = BigInt(witness.capturedHeadSequence!);
   const imported = BigInt(witness.importedSystemSequence!);
   const highWater = BigInt(witness.allocatedSystemHighWater!);
   return consumed < head && head <= imported && imported <= highWater;
@@ -762,7 +665,6 @@ function isValidCurrentRecoveryState(
   if (
     !hasCanonicalCurrentSequences(state)
     || !hasValidRecoveryTimestamps(state, now)
-    || !isValidOptionalCapturedHead(state)
   ) {
     return false;
   }
@@ -779,16 +681,6 @@ function hasCanonicalCurrentSequences(
   ].every(isCanonicalSequence);
 }
 
-function isValidOptionalCapturedHead(
-  state: HostedRuntimeRecoveryCurrentState,
-): boolean {
-  if (state.capturedHead === null) {
-    return true;
-  }
-  return isValidPendingHeadShape(state.capturedHead)
-    && isLivePendingHeadAt(state.capturedHead, new Date(state.observedAt));
-}
-
 function hasValidCurrentSequenceRange(
   state: HostedRuntimeRecoveryCurrentState,
 ): boolean {
@@ -797,89 +689,12 @@ function hasValidCurrentSequenceRange(
   if (consumed > highWater) {
     return false;
   }
-  return state.pendingHead === null
+  return state.pendingHeadSequence === null
     || (
-      isValidPendingHeadShape(state.pendingHead)
-      && BigInt(state.pendingHead.sequence) > consumed
-      && BigInt(state.pendingHead.sequence) <= highWater
-      && isLivePendingHeadAt(state.pendingHead, new Date(state.observedAt))
+      isCanonicalSequence(state.pendingHeadSequence)
+      && BigInt(state.pendingHeadSequence) > consumed
+      && BigInt(state.pendingHeadSequence) <= highWater
     );
-}
-
-function isValidPendingHeadShape(
-  head: HostedRuntimeRecoveryPendingHead,
-): boolean {
-  return isCanonicalSequence(head.sequence)
-    && parseTimestamp(head.createdAt) !== null
-    && (
-      head.expiresAt === null
-      || parseTimestamp(head.expiresAt) !== null
-    )
-    && typeof head.kind === "string"
-    && head.kind.length > 0
-    && head.kind.length <= 128
-    && head.kind === head.kind.trim();
-}
-
-function isLivePendingHeadAt(
-  head: HostedRuntimeRecoveryPendingHead,
-  observedAt: Date,
-): boolean {
-  const createdAt = Date.parse(head.createdAt);
-  const retentionBoundary = observedAt.getTime() - HOSTED_MAILBOX_RETENTION_MS;
-  const expiresAt = head.expiresAt === null
-    ? null
-    : Date.parse(head.expiresAt);
-  return createdAt <= observedAt.getTime()
-    && createdAt > retentionBoundary
-    && (expiresAt === null || expiresAt > observedAt.getTime())
-    && (expiresAt === null || expiresAt > createdAt);
-}
-
-function samePendingHead(
-  left: HostedRuntimeRecoveryPendingHead | null,
-  right: HostedRuntimeRecoveryPendingHead | null,
-): boolean {
-  return left !== null
-    && right !== null
-    && left.sequence === right.sequence
-    && left.kind === right.kind
-    && left.createdAt === right.createdAt
-    && left.expiresAt === right.expiresAt;
-}
-
-function parsePendingHead(
-  value: unknown,
-): HostedRuntimeRecoveryPendingHead | null | undefined {
-  if (value === null) {
-    return null;
-  }
-  if (
-    !isRecord(value)
-    || !hasExactKeys(value, ["createdAt", "expiresAt", "kind", "sequence"])
-  ) {
-    return undefined;
-  }
-  const createdAt = parseTimestamp(value.createdAt);
-  const expiresAt = parseNullableTimestamp(value.expiresAt);
-  const sequence = parseSequence(value.sequence);
-  if (
-    createdAt === null
-    || expiresAt === undefined
-    || sequence === null
-    || typeof value.kind !== "string"
-    || value.kind.length === 0
-    || value.kind.length > 128
-    || value.kind !== value.kind.trim()
-  ) {
-    return undefined;
-  }
-  return {
-    createdAt,
-    expiresAt,
-    kind: value.kind,
-    sequence,
-  };
 }
 
 function parseNullableSequence(value: unknown): string | null | undefined {

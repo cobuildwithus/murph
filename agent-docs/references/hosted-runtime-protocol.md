@@ -2471,7 +2471,11 @@ system-lane head plus the canonical
 `hosted_mailbox_lane_counter.consumed_seq`. A later, explicit Verify action
 performs one bounded read of current active access, workspace checkpoint, and
 system-lane facts. It neither polls nor persists recovery state, and it sends no
-signal.
+signal. The browser presents at most one successful signaled batch at a time:
+another request stays disabled until every signaled witness is Recovered or the
+operator explicitly discards that ephemeral proof. A failed-only batch does not
+block another request, and discarding proof does not remove ids still queued in
+the editor.
 
 Recovery is proved only when canonical system-lane `consumed_seq` reaches the
 fixed imported target. Reaching the captured live head but not that target is

@@ -33,6 +33,7 @@ import type {
 import type { HostedOpsJunctionDiagnosticResult } from "@/src/lib/hosted-ops/device-sync-diagnostic-types";
 
 import {
+  hasUnresolvedRuntimeRecheckWitness,
   parseRuntimeRecheckUserIds,
   removeSignaledRuntimeRecheckUserIds,
   RuntimeRecheckPanel,
@@ -82,6 +83,10 @@ export function RuntimeMaintenanceClient({
     [overview.generatedAt],
   );
   const pendingLabel = describeMaintenancePendingAction(pending);
+  const hasUnresolvedRuntimeRecheckBatch = hasUnresolvedRuntimeRecheckWitness(
+    runtimeRecheckResult,
+    runtimeRecheckVerificationResult,
+  );
 
   async function refreshOverview(cursor = overview.nextCursor): Promise<void> {
     setPending({ kind: "refresh" });
@@ -169,6 +174,10 @@ export function RuntimeMaintenanceClient({
   }
 
   async function recheckRuntimeBatch(): Promise<void> {
+    if (hasUnresolvedRuntimeRecheckBatch) {
+      return;
+    }
+
     const parsedInput = parseRuntimeRecheckUserIds(runtimeRecheckUserIdsText);
     const userIds = parsedInput.userIds.slice(0, 3);
     if (parsedInput.invalidEntries.length > 0 || userIds.length === 0) {
@@ -238,6 +247,16 @@ export function RuntimeMaintenanceClient({
     } finally {
       setPending(null);
     }
+  }
+
+  function stopTrackingRuntimeRecheckBatch(): void {
+    if (!hasUnresolvedRuntimeRecheckBatch) {
+      return;
+    }
+
+    setRuntimeRecheckResult(null);
+    setRuntimeRecheckVerificationResult(null);
+    setRuntimeRecheckVerificationError(null);
   }
 
   async function runJunctionDiagnostic(formData: FormData): Promise<void> {
@@ -434,6 +453,7 @@ export function RuntimeMaintenanceClient({
         onInputChange={setRuntimeRecheckUserIdsText}
         onRecheck={() => void recheckRuntimeBatch()}
         onRefresh={() => void refreshStalledDiscovery()}
+        onStopTracking={stopTrackingRuntimeRecheckBatch}
         onVerify={() => void verifyRuntimeRecheckBatch()}
         onUseDetectedCandidates={() => {
           setRuntimeRecheckUserIdsText((currentValue) => {

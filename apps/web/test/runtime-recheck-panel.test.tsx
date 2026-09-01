@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 
 import {
+  hasUnresolvedRuntimeRecheckWitness,
   parseRuntimeRecheckUserIds,
   removeSignaledRuntimeRecheckUserIds,
   RuntimeRecheckPanel,
@@ -33,6 +34,7 @@ const BASE_PROPS: PanelProps = {
   onInputChange: () => undefined,
   onRecheck: () => undefined,
   onRefresh: () => undefined,
+  onStopTracking: () => undefined,
   onUseDetectedCandidates: () => undefined,
   onVerify: () => undefined,
   overview: OVERVIEW,
@@ -87,6 +89,66 @@ describe("RuntimeRecheckPanel", () => {
     )).toBe("hbm_test_bravo\nhbm_test_manual");
   });
 
+  test("holds one signaled batch until every member has a matching Recovered row", () => {
+    const result: NonNullable<PanelProps["result"]> = {
+      generatedAt: "2026-08-31T15:01:00.000Z",
+      requestedCount: 3,
+      results: [{
+        status: "signaled",
+        userId: "hbm_test_alpha",
+        witness: recoveryWitness("hbm_test_alpha"),
+      }, {
+        status: "signaled",
+        userId: "hbm_test_bravo",
+        witness: recoveryWitness("hbm_test_bravo"),
+      }, {
+        errorMessage: "Request deadline reached.",
+        errorName: "TimeoutError",
+        status: "failed",
+        userId: "hbm_test_charlie",
+      }],
+    };
+
+    expect(hasUnresolvedRuntimeRecheckWitness(result, null)).toBe(true);
+    for (const status of [
+      "requested",
+      "checkpoint_advanced",
+      "progressing",
+      "unknown",
+    ] as const) {
+      expect(hasUnresolvedRuntimeRecheckWitness(result, {
+        generatedAt: "2026-08-31T15:06:00.000Z",
+        results: [{
+          explanation: "Recovered.",
+          status: "recovered",
+          userId: "hbm_test_alpha",
+        }, {
+          explanation: "Not yet recovered.",
+          status,
+          userId: "hbm_test_bravo",
+        }],
+      })).toBe(true);
+    }
+    expect(hasUnresolvedRuntimeRecheckWitness(result, {
+      generatedAt: "2026-08-31T15:06:00.000Z",
+      results: ["hbm_test_alpha", "hbm_test_bravo"].map((userId) => ({
+        explanation: "Recovered.",
+        status: "recovered" as const,
+        userId,
+      })),
+    })).toBe(false);
+    expect(hasUnresolvedRuntimeRecheckWitness({
+      generatedAt: "2026-08-31T15:07:00.000Z",
+      requestedCount: 1,
+      results: [{
+        errorMessage: "Request deadline reached.",
+        errorName: "TimeoutError",
+        status: "failed",
+        userId: "hbm_test_charlie",
+      }],
+    }, null)).toBe(false);
+  });
+
   test("communicates pending and ambiguous request states without dropping queued IDs", () => {
     const pendingMarkup = renderToStaticMarkup(
       createElement(RuntimeRecheckPanel, {
@@ -134,6 +196,9 @@ describe("RuntimeRecheckPanel", () => {
     );
 
     expect(markup).toContain("Signal accepted; captured head 6 through fixed target 13");
+    expect(markup).toContain("Another batch is paused until every signaled member is verified as Recovered");
+    expect(markup).toContain("Stop tracking this batch and continue");
+    expect(buttonOpeningTag(markup, "Recheck next 2")).toContain(' disabled=""');
     expect(markup).toContain("Failed and unsent IDs remain queued");
     expect(markup).toContain("Requested means only that the signal was accepted.");
     expect(markup).toContain("hbm_test_manual");
@@ -146,6 +211,7 @@ describe("RuntimeRecheckPanel", () => {
     expect(markup).toContain("Runtime rechecks");
     expect(markup).toContain("Recheck result");
     expect(markup).toContain("Progressing");
+    expect(markup).toContain("Stop tracking this batch and continue");
   });
 
   test("renders all canonical verification states with bounded recovery wording", () => {
@@ -182,6 +248,12 @@ describe("RuntimeRecheckPanel", () => {
       expect(markup).toContain(label);
       expect(markup).toContain(explanation);
       expect(markup).toContain("Verify progress");
+      expect(markup.includes("Stop tracking this batch and continue")).toBe(
+        status !== "recovered",
+      );
+      expect(buttonOpeningTag(markup, "Recheck next 3").includes(' disabled=""')).toBe(
+        status !== "recovered",
+      );
       expect(markup.match(/lucide-circle-check/gu)?.length ?? 0).toBe(
         status === "recovered" ? 1 : 0,
       );
@@ -283,8 +355,40 @@ describe("RuntimeRecheckPanel", () => {
     expect(markup).toContain("captured baselines and prior results are retained");
     expect(markup).toContain("hbm_test_alpha");
     expect(markup).toContain("Verify progress");
+    expect(markup).toContain("Stop tracking this batch and continue");
+    expect(buttonOpeningTag(markup, "Recheck next 3")).toContain(' disabled=""');
+  });
+
+  test("does not gate the next batch when every prior result failed", () => {
+    const markup = renderToStaticMarkup(createElement(RuntimeRecheckPanel, {
+      ...BASE_PROPS,
+      result: {
+        generatedAt: "2026-08-31T15:01:00.000Z",
+        requestedCount: 1,
+        results: [{
+          errorMessage: "Request deadline reached.",
+          errorName: "TimeoutError",
+          status: "failed",
+          userId: "hbm_test_alpha",
+        }],
+      },
+    }));
+
+    expect(markup).not.toContain("Stop tracking this batch and continue");
+    expect(markup).not.toContain("Another batch is paused");
+    expect(buttonOpeningTag(markup, "Recheck next 3")).not.toContain(' disabled=""');
   });
 });
+
+function buttonOpeningTag(markup: string, label: string): string {
+  const labelIndex = markup.indexOf(label);
+  const buttonStart = markup.lastIndexOf("<button", labelIndex);
+  const buttonEnd = markup.indexOf(">", buttonStart);
+  expect(labelIndex).toBeGreaterThanOrEqual(0);
+  expect(buttonStart).toBeGreaterThanOrEqual(0);
+  expect(buttonEnd).toBeGreaterThan(buttonStart);
+  return markup.slice(buttonStart, buttonEnd + 1);
+}
 
 function recoveryWitness(userId: string) {
   return {
@@ -294,12 +398,7 @@ function recoveryWitness(userId: string) {
     importedSystemSequence: "13",
     integrity: "synthetic_test_witness_not_a_live_request_123",
     observedAt: "2026-08-31T15:01:00.000Z",
-    pendingHead: {
-      createdAt: "2026-08-31T14:15:00.000Z",
-      expiresAt: null,
-      kind: "device-sync.wake",
-      sequence: "6",
-    },
+    capturedHeadSequence: "6",
     userId,
     workspaceVersion: "24",
   };

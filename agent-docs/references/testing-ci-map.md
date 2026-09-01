@@ -727,7 +727,9 @@ gate unset and makes no paid request.
   does not mutate mailbox state. The focused service, route, classifier, and
   rendered-panel suites prove capture-before-signal ordering, partial failure,
   strict presentation-evidence validation, fail-closed progress classification,
-  authenticated read-only verification, and manual retryable UI states.
+  authenticated read-only verification, one tracked signaled batch across a
+  six-id mounted journey, recovered-only automatic unlock, explicit proof
+  discard, failed-only continuation, and manual retryable UI states.
 - `apps/web/test/hosted-ai-usage-overshoot-alert-monitor.test.ts` proves the
   five-minute runtime-alert cron reuses the operational Resend incident owner
   under a distinct allowance-overshoot identity and locks the privacy-safe

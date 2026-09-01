@@ -28,7 +28,6 @@ import {
 } from "./runtime-recheck-verification";
 
 export type {
-  HostedRuntimeRecoveryPendingHead,
   HostedRuntimeRecoveryVerificationResult,
   HostedRuntimeRecoveryVerificationStatus,
   HostedRuntimeRecoveryVerificationUserResult,

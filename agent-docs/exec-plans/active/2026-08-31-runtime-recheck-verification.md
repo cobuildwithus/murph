@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-31
-Updated: 2026-08-31
+Updated: 2026-09-01
 
 ## Goal
 
@@ -18,6 +18,9 @@ Updated: 2026-08-31
   requested, checkpoint advanced, progressing, recovered, or unknown.
 - Recovery is tied to the request-time imported prefix; version-only changes,
   signals, logs, or discovery disappearance never prove recovery.
+- One unresolved successful batch remains the only tracked browser witness until
+  every signaled row is recovered or the operator explicitly discards that
+  proof; failed-only batches never block the next bounded request.
 - Focused service, route, database-boundary, UI, and design-study tests pass,
   followed by exact-head CI and final ReviewGPT.
 
@@ -50,6 +53,9 @@ Updated: 2026-08-31
 3. Risk: retention or malformed projections create false recovery.
    Mitigation: classify ambiguity as Unknown unless canonical consumption
    proves the captured head/prefix was consumed.
+4. Risk: a later HTTP-successful batch replaces unresolved signed witnesses.
+   Mitigation: serialize successful signaled batches in the existing client and
+   require explicit proof discard before another batch can replace them.
 
 ## Tasks
 
@@ -66,6 +72,12 @@ Updated: 2026-08-31
   or background monitor is introduced.
 - Runtime logs remain supporting diagnostics and cannot establish non-execution
   or recovery.
+- The signed witness keeps only the canonical captured head sequence. The live
+  read keeps only the current pending head sequence; sequence allocation is
+  monotonic and the existing live-head query owns retention and expiry checks.
+- The browser retains at most one successful signaled batch. Automatic unlock
+  requires every signaled row to be `Recovered`; an explicit stop-tracking
+  action discards that ephemeral proof while preserving IDs still in the queue.
 
 ## Product UX plan
 
@@ -85,6 +97,10 @@ Updated: 2026-08-31
     operator sees `Unknown` instead of false success and can retry diagnosis.
   - Partial signal or verification failures remain attributable per row, and
     both actions stay capped at three workspaces.
+  - A second batch remains disabled while any successful signal is unresolved.
+    Failed-only results do not block, full recovery unlocks automatically, and
+    the operator has one clearly labeled escape hatch that discards the
+    request-time proof without changing the remaining queue.
 - System handoff: the authenticated Web action captures the recovery witness
   immediately before signaling Temporal and returns it only with successful
   acknowledgements. A later authenticated manual action submits at most three
@@ -98,13 +114,18 @@ Updated: 2026-08-31
 ## Verification
 
 - Focused runtime-maintenance, classifier, route, mounted-client, panel, and
-  design-study tests pass (40 tests).
+  design-study tests pass (44 tests), including a six-ID, two-batch mounted
+  journey and every nonterminal verification outcome.
 - The production SQL passes its opt-in PostgreSQL boundary proof against an
   isolated worktree database, including exact retention and expiry boundaries.
 - Web typecheck, focused ESLint, docs drift, complexity diff, and diff checks
   pass.
-- The real production study was rendered and inspected at 1440px desktop and
-  390px phone widths. Requested/verified timestamps, intermediate status,
-  partial failure, retry control, and the non-recovery disclaimer remain clear
-  without overflow. Product UX verdict: Ready.
-- Exact-head CI and final ReviewGPT remain pending.
+- The first candidate's production study was rendered and inspected at 1440px
+  desktop and 390px phone widths. The corrected candidate still needs the same
+  direct phone/desktop inspection for its serial gate and discard control.
+- ReviewGPT round 1 found the replaceable-witness UX gap and redundant mailbox
+  head metadata. Both findings are accepted and corrected: one tracked batch
+  now serializes requests, and the verifier deletes the duplicate head lookup
+  and metadata in favor of the owning monotonic sequence.
+- Corrected-head exact CI, direct design proof, and ReviewGPT round 2 remain
+  pending.

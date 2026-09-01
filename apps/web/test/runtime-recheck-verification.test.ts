@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 import {
   captureHostedRuntimeRecoveryWitnesses,
   classifyHostedRuntimeRecoveryWitness,
+  readHostedRuntimeRecoveryFacts,
   type HostedRuntimeRecoveryCurrentState,
   type HostedRuntimeRecoveryFactRow,
   type HostedRuntimeRecoveryWitness,
@@ -36,27 +37,22 @@ describe("runtime recheck recovery verification", () => {
     }))).toBe("checkpoint_advanced");
     expect(classify(baseline, currentState(baseline, {
       canonicalSystemConsumed: "6",
-      capturedHead: null,
       checkpointedAt: "2026-09-01T12:01:00.000Z",
-      pendingHead: pendingHead("7"),
+      pendingHeadSequence: "7",
       workspaceVersion: "11",
     }))).toBe("progressing");
     expect(classify(baseline, currentState(baseline, {
       allocatedSystemHighWater: "20",
       canonicalSystemConsumed: "8",
-      capturedHead: null,
       checkpointedAt: "2026-09-01T12:02:00.000Z",
-      pendingHead: pendingHead("9", {
-        createdAt: "2026-09-01T12:04:00.000Z",
-      }),
+      pendingHeadSequence: "9",
       workspaceVersion: "12",
     }))).toBe("recovered");
     expect(classify(baseline, currentState(baseline, {
       allocatedSystemHighWater: "20",
       canonicalSystemConsumed: "12",
-      capturedHead: null,
       checkpointedAt: "2026-09-01T12:02:00.000Z",
-      pendingHead: null,
+      pendingHeadSequence: null,
       workspaceVersion: "12",
     }))).toBe("recovered");
   });
@@ -74,13 +70,34 @@ describe("runtime recheck recovery verification", () => {
     expect(classify(baseline, currentState(baseline, {
       allocatedSystemHighWater: "40",
       canonicalSystemConsumed: "8",
-      capturedHead: null,
       checkpointedAt: "2026-09-01T12:03:00.000Z",
-      pendingHead: pendingHead("9", {
-        createdAt: "2026-09-01T12:04:00.000Z",
-      }),
+      pendingHeadSequence: "9",
       workspaceVersion: "13",
     }))).toBe("recovered");
+  });
+
+  it("requires the captured sequence to remain the live head until consumption reaches it", async () => {
+    const baseline = await recoveryWitness({
+      canonicalSystemConsumed: 3n,
+      pendingHeadSequence: 6n,
+    });
+
+    expect(classify(baseline, currentState(baseline))).toBe("requested");
+    expect(classify(baseline, currentState(baseline, {
+      pendingHeadSequence: null,
+    }))).toBe("unknown");
+    expect(classify(baseline, currentState(baseline, {
+      pendingHeadSequence: "7",
+    }))).toBe("unknown");
+    expect(classify(baseline, currentState(baseline, {
+      pendingHeadSequence: "4",
+    }))).toBe("unknown");
+    expect(classify(baseline, currentState(baseline, {
+      canonicalSystemConsumed: "6",
+      checkpointedAt: "2026-09-01T12:01:00.000Z",
+      pendingHeadSequence: "7",
+      workspaceVersion: "11",
+    }))).toBe("progressing");
   });
 
   it("fails closed for consumption without the newer pair and for missing, regressed, or impossible facts", async () => {
@@ -107,15 +124,13 @@ describe("runtime recheck recovery verification", () => {
       currentState(baseline, { canonicalSystemConsumed: "9" }),
       currentState(baseline, {
         canonicalSystemConsumed: "6",
-        capturedHead: null,
-        pendingHead: pendingHead("7"),
+        pendingHeadSequence: "7",
       }),
       currentState(baseline, {
-        capturedHead: null,
-        pendingHead: null,
+        pendingHeadSequence: null,
       }),
       currentState(baseline, {
-        capturedHead: pendingHead("6", { kind: "different.kind" }),
+        pendingHeadSequence: "7",
       }),
       currentState(baseline, {
         observedAt: "2026-09-15T11:30:00.000Z",
@@ -149,9 +164,8 @@ describe("runtime recheck recovery verification", () => {
     const baseline = await recoveryWitness();
     const readCurrentStates = vi.fn(async () => [currentState(baseline, {
       canonicalSystemConsumed: "8",
-      capturedHead: null,
       checkpointedAt: "2026-09-01T12:01:00.000Z",
-      pendingHead: null,
+      pendingHeadSequence: null,
       workspaceVersion: "11",
     })]);
 
@@ -168,6 +182,14 @@ describe("runtime recheck recovery verification", () => {
     readCurrentStates.mockClear();
     await expect(verifyHostedRuntimeRecoveryWitnesses({
       baselines: [{ ...baseline, importedSystemSequence: "6" }],
+      environment: HMAC_ENV,
+      now: VERIFIED_AT,
+      readCurrentStates,
+    })).resolves.toMatchObject({
+      results: [{ status: "unknown", userId: USER_ID }],
+    });
+    await expect(verifyHostedRuntimeRecoveryWitnesses({
+      baselines: [{ ...baseline, capturedHeadSequence: "7" }],
       environment: HMAC_ENV,
       now: VERIFIED_AT,
       readCurrentStates,
@@ -212,6 +234,24 @@ describe("runtime recheck recovery verification", () => {
       results: [{ status: "unknown", userId: USER_ID }],
     });
     expect(readCurrentStates).not.toHaveBeenCalled();
+  });
+
+  it("builds one live-head lookup for capture and verification", async () => {
+    const queries: unknown[] = [];
+    const queryRaw = vi.fn(async (query: unknown) => {
+      queries.push(query);
+      return [];
+    });
+
+    await readHostedRuntimeRecoveryFacts({
+      now: REQUESTED_AT,
+      prisma: { $queryRaw: queryRaw },
+      userIds: [USER_ID],
+    });
+
+    expect(queries).toHaveLength(1);
+    const sql = readSqlText(queries[0]);
+    expect(sql.match(/\bLEFT JOIN LATERAL\b/gu)).toHaveLength(1);
   });
 
   it("rejects an invalid outer batch and treats signed future evidence as Unknown", async () => {
@@ -266,14 +306,7 @@ function factRow(
   return {
     allocatedSystemHighWater: 12n,
     canonicalSystemConsumed: 5n,
-    capturedHeadCreatedAt: null,
-    capturedHeadExpiresAt: null,
-    capturedHeadKind: null,
-    capturedHeadSequence: null,
     checkpointedAt: new Date("2026-09-01T11:00:00.000Z"),
-    pendingHeadCreatedAt: new Date("2026-09-01T11:30:00.000Z"),
-    pendingHeadExpiresAt: null,
-    pendingHeadKind: "device-sync.wake",
     pendingHeadSequence: 6n,
     redactedStatusJson: {
       hostedMailboxSystemImportedSeq: "8",
@@ -292,25 +325,11 @@ function currentState(
     activeAccess: true,
     allocatedSystemHighWater: baseline.allocatedSystemHighWater,
     canonicalSystemConsumed: baseline.canonicalSystemConsumed,
-    capturedHead: baseline.pendingHead,
     checkpointedAt: baseline.checkpointedAt,
     observedAt: VERIFIED_AT.toISOString(),
-    pendingHead: baseline.pendingHead,
+    pendingHeadSequence: baseline.capturedHeadSequence,
     userId: baseline.userId,
     workspaceVersion: baseline.workspaceVersion,
-    ...overrides,
-  };
-}
-
-function pendingHead(
-  sequence: string,
-  overrides: Partial<NonNullable<HostedRuntimeRecoveryWitness["pendingHead"]>> = {},
-) {
-  return {
-    createdAt: "2026-09-01T11:30:00.000Z",
-    expiresAt: null,
-    kind: "device-sync.wake",
-    sequence,
     ...overrides,
   };
 }
@@ -324,4 +343,16 @@ function classify(
     current,
     now: VERIFIED_AT,
   });
+}
+
+function readSqlText(value: unknown): string {
+  if (
+    value === null
+    || typeof value !== "object"
+    || !("sql" in value)
+    || typeof value.sql !== "string"
+  ) {
+    throw new TypeError("Expected a Prisma SQL query.");
+  }
+  return value.sql;
 }

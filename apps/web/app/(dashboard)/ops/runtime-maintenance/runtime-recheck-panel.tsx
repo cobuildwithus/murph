@@ -76,12 +76,30 @@ export function removeSignaledRuntimeRecheckUserIds(
     .join("\n");
 }
 
+export function hasUnresolvedRuntimeRecheckWitness(
+  result: HostedRuntimeRecheckResult | null,
+  verificationResult: HostedRuntimeRecoveryVerificationResult | null,
+): boolean {
+  const recoveredUserIds = new Set(
+    verificationResult?.results.flatMap((entry) => (
+      entry.status === "recovered" && entry.userId !== null
+        ? [entry.userId]
+        : []
+    )) ?? [],
+  );
+
+  return result?.results.some((entry) => (
+    entry.status === "signaled" && !recoveredUserIds.has(entry.userId)
+  )) ?? false;
+}
+
 export function RuntimeRecheckPanel({
   disabled,
   error,
   onInputChange,
   onRecheck,
   onRefresh,
+  onStopTracking,
   onUseDetectedCandidates,
   onVerify,
   overview,
@@ -96,6 +114,7 @@ export function RuntimeRecheckPanel({
   onInputChange: (value: string) => void;
   onRecheck: () => void;
   onRefresh: () => void;
+  onStopTracking: () => void;
   onUseDetectedCandidates: () => void;
   onVerify: () => void;
   overview: HostedRuntimeStalledRecheckOverview;
@@ -109,6 +128,10 @@ export function RuntimeRecheckPanel({
   const hasInvalidInput = parsedInput.invalidEntries.length > 0;
   const queuedCount = parsedInput.userIds.length;
   const nextBatchCount = Math.min(queuedCount, 3);
+  const hasUnresolvedSignaledWitness = hasUnresolvedRuntimeRecheckWitness(
+    result,
+    verificationResult,
+  );
 
   return (
     <section
@@ -208,7 +231,13 @@ export function RuntimeRecheckPanel({
             Use detected candidates
           </Button>
           <Button
-            disabled={disabled || hasInvalidInput || queuedCount === 0}
+            aria-describedby="runtime-recheck-next-batch-status"
+            disabled={
+              disabled
+              || hasInvalidInput
+              || queuedCount === 0
+              || hasUnresolvedSignaledWitness
+            }
             onClick={onRecheck}
             size="sm"
             type="button"
@@ -220,12 +249,18 @@ export function RuntimeRecheckPanel({
           </Button>
         </div>
 
-        <div aria-live="polite" className="min-h-5 pt-3 text-sm text-muted-foreground">
+        <div
+          aria-live="polite"
+          className="min-h-5 pt-3 text-sm text-muted-foreground"
+          id="runtime-recheck-next-batch-status"
+        >
           {pendingAction === "refresh"
             ? "Refreshing automatic legacy-stall discovery. The member ID queue is unchanged."
             : pendingAction === "recheck"
               ? `Requesting ${formatInteger(nextBatchCount)} runtime recheck${nextBatchCount === 1 ? "" : "s"}.`
-              : ""}
+              : hasUnresolvedSignaledWitness
+                ? "Another batch is paused until every signaled member is verified as Recovered or this batch is explicitly discarded."
+                : ""}
         </div>
       </div>
 
@@ -247,6 +282,8 @@ export function RuntimeRecheckPanel({
 
       <RuntimeRecheckResultPanel
         disabled={disabled}
+        hasUnresolvedSignaledWitness={hasUnresolvedSignaledWitness}
+        onStopTracking={onStopTracking}
         onVerify={onVerify}
         pending={pendingAction === "verify"}
         result={result}
@@ -260,6 +297,8 @@ export function RuntimeRecheckPanel({
 
 function RuntimeRecheckResultPanel({
   disabled,
+  hasUnresolvedSignaledWitness,
+  onStopTracking,
   onVerify,
   pending,
   result,
@@ -267,6 +306,8 @@ function RuntimeRecheckResultPanel({
   verificationResult,
 }: {
   disabled: boolean;
+  hasUnresolvedSignaledWitness: boolean;
+  onStopTracking: () => void;
   onVerify: () => void;
   pending: boolean;
   result: HostedRuntimeRecheckResult | null;
@@ -376,6 +417,22 @@ function RuntimeRecheckResultPanel({
           );
         })}
       </div>
+      {hasUnresolvedSignaledWitness ? (
+        <div className="flex flex-col gap-3 border-t border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="max-w-2xl text-pretty text-xs leading-5 text-muted-foreground">
+            Verify this batch before starting another. Stopping tracking discards its request-time recovery proof; queued member IDs stay in the editor.
+          </p>
+          <Button
+            className="min-h-10 whitespace-normal"
+            disabled={disabled}
+            onClick={onStopTracking}
+            type="button"
+            variant="outline"
+          >
+            Stop tracking this batch and continue
+          </Button>
+        </div>
+      ) : null}
       <div className="border-t border-border/70 px-4 py-3 text-pretty text-xs leading-5 text-muted-foreground">
         Requested means only that the signal was accepted. Recovered means only that the captured request-time prefix was canonically consumed with a newer checkpoint; it does not prove global health or idleness. Failed and unsent IDs remain queued.
       </div>
@@ -407,14 +464,14 @@ function describeRequestedWitness(
   >["witness"],
 ): string {
   if (
-    witness.pendingHead === null
+    witness.capturedHeadSequence === null
     || witness.importedSystemSequence === null
     || witness.workspaceVersion === null
     || witness.checkpointedAt === null
   ) {
     return "Signal accepted; the captured canonical evidence is incomplete, so later verification will remain Unknown.";
   }
-  return `Signal accepted; captured head ${witness.pendingHead.sequence} through fixed target ${witness.importedSystemSequence} at workspace version ${witness.workspaceVersion}.`;
+  return `Signal accepted; captured head ${witness.capturedHeadSequence} through fixed target ${witness.importedSystemSequence} at workspace version ${witness.workspaceVersion}.`;
 }
 
 function RuntimeRecheckDiscovery({

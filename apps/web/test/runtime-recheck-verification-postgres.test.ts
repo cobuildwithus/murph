@@ -49,7 +49,7 @@ describe.skipIf(!runPostgresProof)(
             data: {
               checkpointedAt: new Date("2026-09-01T11:00:00.000Z"),
               redactedStatusJson: {
-              hostedMailboxSystemImportedSeq: "4",
+                hostedMailboxSystemImportedSeq: "4",
               },
               systemMailboxProgressGeneration: 2n,
               userId,
@@ -114,7 +114,6 @@ describe.skipIf(!runPostgresProof)(
           });
 
           const rows = await readHostedRuntimeRecoveryFacts({
-            capturedHeadSequences: new Map([[userId, "2"]]),
             now: observedAt,
             prisma: tx,
             userIds: [userId],
@@ -123,8 +122,6 @@ describe.skipIf(!runPostgresProof)(
           expect(rows).toMatchObject([{
             allocatedSystemHighWater: 4n,
             canonicalSystemConsumed: 0n,
-            capturedHeadSequence: null,
-            pendingHeadKind: "device-sync.wake",
             pendingHeadSequence: 4n,
             userId,
             workspaceVersion: 10n,

@@ -43,12 +43,7 @@ const DESIGN_STALLED_RECHECK_RESULT: NonNullable<
       importedSystemSequence: "13",
       integrity: "synthetic_design_witness_not_a_live_request_1",
       observedAt: "2026-08-31T15:01:00.000Z",
-      pendingHead: {
-        createdAt: "2026-08-31T14:15:00.000Z",
-        expiresAt: null,
-        kind: "device-sync.wake",
-        sequence: "6",
-      },
+      capturedHeadSequence: "6",
       userId: "hbm_demo_alpha",
       workspaceVersion: "24",
     },
@@ -84,6 +79,7 @@ export function RuntimeMaintenanceStudy() {
         onInputChange={() => undefined}
         onRecheck={() => undefined}
         onRefresh={() => undefined}
+        onStopTracking={() => undefined}
         onUseDetectedCandidates={() => undefined}
         onVerify={() => undefined}
         overview={DESIGN_STALLED_RECHECK_OVERVIEW}
