@@ -843,7 +843,7 @@ function parseSupplementIngredients(specs: string[] | undefined): SupplementIngr
 function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string } & JsonObject {
   const payload = toKeyedRecord({
     regimenId: input.regimenId,
-    requireExistingRegimenId: input.regimenId !== undefined,
+    requireExistingRegimenId: input.requireExistingRegimenId,
     slug: input.slug,
     allowSlugRename:
       input.allowSlugRename ?? (input.regimenId !== undefined && input.slug !== undefined),
@@ -887,7 +887,7 @@ function buildSupplementSavePayload(
 
   const payload = toKeyedRecord({
     regimenId: input.regimenId,
-    requireExistingRegimenId: input.regimenId !== undefined,
+    requireExistingRegimenId: input.requireExistingRegimenId,
     slug: input.slug,
     allowSlugRename: input.regimenId !== undefined && input.slug !== undefined,
     title: input.title,

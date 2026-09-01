@@ -366,7 +366,7 @@ const assistantCliSurfaceHotPathProofs: readonly {
   {
     command: "goal save",
     snippets: [
-      "args <title>",
+      "args [title]",
       "--status=active|paused|completed|abandoned",
       "--horizon=short_term|medium_term|long_term|ongoing",
       "--priority=integer",

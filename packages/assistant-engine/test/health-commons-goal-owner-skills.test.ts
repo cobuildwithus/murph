@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 import { ASSISTANT_SKILLS } from '../src/assistant-skill-assets.js'
 

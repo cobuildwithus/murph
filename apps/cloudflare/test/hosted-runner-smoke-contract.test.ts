@@ -411,7 +411,7 @@ describe("countAssistantCliSurfaceHotPathProofs", () => {
   it("counts only detailed hot-path command signatures", () => {
     const detailedContract = [
       "- `memory upsert`: args <text>; options --section=Identity|Preferences|Instructions|Context.",
-      "- `goal save`: args <title>; options --status=active|paused|completed|abandoned, --horizon=short_term|medium_term|long_term|ongoing, --priority=integer, repeat --domain=string.",
+      "- `goal save`: args [title]; options --status=active|paused|completed|abandoned, --horizon=short_term|medium_term|long_term|ongoing, --priority=integer, repeat --domain=string.",
       "- `device account list`: options --provider=string, --source-provider=string.",
       "- `device connect`: args <provider>; options --returnTo=string.",
     ].join("\n");
@@ -419,6 +419,11 @@ describe("countAssistantCliSurfaceHotPathProofs", () => {
     expect(countAssistantCliSurfaceHotPathProofs(detailedContract)).toBe(
       HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
     );
+    expect(
+      countAssistantCliSurfaceHotPathProofs(
+        detailedContract.replace("args [title]", "args <title>"),
+      ),
+    ).toBe(HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT - 1);
     expect(countAssistantCliSurfaceHotPathProofs("- `memory upsert`: Add a memory.")).toBe(0);
     expect(countAssistantCliSurfaceHotPathProofs([
       "- `device connect`: Create a browser-based OAuth connection link.",
