@@ -305,10 +305,10 @@ function JournalPageHeader({
   headingId: string;
 }) {
   return (
-    <header className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+    <header className="flex items-center justify-between gap-4 sm:items-end">
       <h1
         id={headingId}
-        className="font-serif text-3xl font-semibold tracking-tight text-foreground"
+        className="shrink-0 font-serif text-3xl font-semibold tracking-tight text-foreground"
       >
         Journal
       </h1>
@@ -510,21 +510,21 @@ function WeekControls({
 }) {
   return (
     <nav
-      className="flex items-center gap-3"
+      className="flex items-center gap-1.5 sm:gap-3"
       aria-label="Journal seven-day navigation"
     >
       <Button
         aria-label="Previous 7 days"
         disabled={!canGoPrevious}
         onClick={onPrevious}
-        className="size-[38px] rounded-full"
+        className="size-10 rounded-full sm:size-[38px]"
         size="icon"
         variant="outline"
       >
         <ChevronLeft aria-hidden="true" />
       </Button>
       <Button
-        className="h-[38px] rounded-full px-[18px]"
+        className="h-10 rounded-full px-3.5 sm:h-[38px] sm:px-[18px]"
         onClick={onToday}
         size="sm"
         variant="outline"
@@ -535,7 +535,7 @@ function WeekControls({
         aria-label="Next 7 days"
         disabled={!canGoNext}
         onClick={onNext}
-        className="size-[38px] rounded-full"
+        className="size-10 rounded-full sm:size-[38px]"
         size="icon"
         variant="outline"
       >
