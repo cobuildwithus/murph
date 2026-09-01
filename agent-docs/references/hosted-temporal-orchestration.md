@@ -41,9 +41,14 @@ attempt whose workflow identity and `head_sha` match the pre-resolved private
 commit. Candidate code can supply only the bounded canonical reconciliation
 fixture artifact produced in unprivileged public CI. Before reporting success,
 the controller re-reads private `main` and fails closed if the branch moved. The
-private protected workflow must derive the live Current and Ramping reader SHAs,
-attest exact-head integration/replay/canary success, and make that proof a
-private deploy prerequisite.
+private protected workflow must derive the live Current and Ramping reader SHAs
+and, while its standby guard remains, include the active legacy Render worker's
+exact live deploy revision. Its final attestation re-reads that complete set and
+fails on identity or routing drift before exact-head integration, exhaustive
+synthetic migration replay, bounded defense-in-depth replay of histories
+returned by Temporal Visibility, or canary proof can become a private deploy
+prerequisite. Visibility is eventually consistent, so only the synthetic
+migration corpus is the exhaustive replay contract.
 
 Temporal decides when to ask Cloudflare to process based on web-owned
 reconciliation facts and pointer-only signals. Cloudflare starts or wakes the
@@ -752,10 +757,13 @@ The hard-cut architecture is accepted when:
   trusted controller a run/head-bound bounded JSON artifact. The controller
   never owns worker code or reader policy: private Murph Cloud receives only
   serialized fixture data, derives the live Current and traffic-bearing Ramping
-  readers, automatically includes the exact dispatched private candidate, runs
-  every reader, and returns one producer-and-reader proof digest. Public code
-  stores no private revision pointer or reader policy. Missing, stale, skipped,
-  canceled, duplicated, malformed, or failed proof remains red or pending.
+  readers, automatically includes the exact dispatched private candidate and,
+  while the standby guard remains, the active legacy Render worker's exact live
+  deploy revision, then runs every reader. Final protected attestation re-reads
+  the complete reader set and fails on identity or routing drift before
+  returning one producer-and-reader proof digest. Public code stores no private
+  revision pointer or reader policy. Missing, stale, skipped, canceled,
+  duplicated, malformed, or failed proof remains red or pending.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration
