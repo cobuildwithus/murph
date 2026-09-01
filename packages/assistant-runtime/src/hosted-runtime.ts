@@ -1143,6 +1143,93 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   };
 }
 
+async function resolveHostedRuntimeStatusCheckpointWakes(input: {
+  assistantExecutionBlocked: boolean;
+  checkpointNow: string;
+  checkpointNowMs: number;
+  operatorHomeRoot: string;
+  requestedNextWakeAt: string | null;
+  requestedNextWakeReason: string | null;
+  runtimeEnv: Readonly<Record<string, string>>;
+  vaultRoot: string;
+}) {
+  const systemMailboxWakes = await resolveHostedSystemMailboxWakeCandidates({
+    ...(input.assistantExecutionBlocked
+      ? { allowedRouteActions: ["run-assistant-ask"] as const }
+      : {}),
+    now: () => input.checkpointNow,
+    vaultRoot: input.vaultRoot,
+  });
+  const defaultProcessingWake =
+    await resolveHostedSystemMailboxProcessingModeWake({
+      assistantExecutionBlocked: input.assistantExecutionBlocked,
+      extraCandidates: [
+        createHostedRuntimeWakeCandidate(
+          input.requestedNextWakeAt,
+          input.requestedNextWakeReason,
+        ),
+      ],
+      mailboxImportRetryAt: null,
+      nowMs: input.checkpointNowMs,
+      operatorHomeRoot: input.operatorHomeRoot,
+      runtimeEnv: input.runtimeEnv,
+      systemMailboxWakes,
+      vaultRoot: input.vaultRoot,
+    });
+  const requestedCheckpointWake = createHostedRuntimeWakeCandidate(
+    input.requestedNextWakeAt,
+    input.requestedNextWakeReason,
+  );
+  const checkpointProcessingWake = input.assistantExecutionBlocked
+    ? selectHostedRuntimeWakeCandidate([
+        requestedCheckpointWake,
+        systemMailboxWakes.next,
+      ])
+    : selectHostedRuntimeOwnerWakeCandidate({
+        backgroundCandidates: [
+          hostedRuntimeWakeReasonUsesAssistantPhase(
+              requestedCheckpointWake.reason,
+            )
+            ? null
+            : requestedCheckpointWake,
+        ],
+        foregroundCandidates: [
+          hostedRuntimeWakeReasonUsesAssistantPhase(
+              requestedCheckpointWake.reason,
+            )
+            ? requestedCheckpointWake
+            : null,
+        ],
+        nowMs: input.checkpointNowMs,
+        systemMailboxWake: systemMailboxWakes.next,
+      });
+  return {
+    checkpointProcessingWake: {
+      nextWakeAt: checkpointProcessingWake.at,
+      nextWakeReason: checkpointProcessingWake.reason,
+    },
+    defaultProcessingWake,
+  };
+}
+
+async function resolveHostedIdleBoundarySystemMailboxWake(input: {
+  vaultRoot: string;
+}) {
+  const allRouteWakes = await resolveHostedSystemMailboxWakeCandidates({
+    vaultRoot: input.vaultRoot,
+  });
+  if (
+    allRouteWakes.next.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+    && allRouteWakes.next.executionClass !== "default_owned"
+  ) {
+    return allRouteWakes.next;
+  }
+  return await resolveHostedSystemMailboxNextWakeCandidate({
+    allowedRouteActions: ["run-assistant-ask"],
+    vaultRoot: input.vaultRoot,
+  });
+}
+
 function hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(
   preparation: HostedSystemMailboxCheckpointPreparation | null,
 ): boolean {
@@ -1847,38 +1934,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           : workspace?.nextWakeReason ?? null;
         const checkpointNowMs = Date.now();
         const checkpointNow = new Date(checkpointNowMs).toISOString();
-        const systemMailboxWakes = await resolveHostedSystemMailboxWakeCandidates({
-          allowedRouteActions: ["run-assistant-ask"],
-          now: () => checkpointNow,
+        const {
+          checkpointProcessingWake,
+          defaultProcessingWake,
+        } = await resolveHostedRuntimeStatusCheckpointWakes({
+          assistantExecutionBlocked,
+          checkpointNow,
+          checkpointNowMs,
+          operatorHomeRoot: restored.operatorHomeRoot,
+          requestedNextWakeAt: requestedCheckpointNextWakeAt,
+          requestedNextWakeReason: requestedCheckpointNextWakeReason,
+          runtimeEnv: invocationRuntimeEnv,
           vaultRoot: restored.vaultRoot,
         });
-        const systemMailboxWake = systemMailboxWakes.next;
-        const checkpointWake = selectEarliestHostedRuntimeWake([
-          {
-            at: requestedCheckpointNextWakeAt,
-            reason: requestedCheckpointNextWakeReason,
-          },
-          {
-            at: systemMailboxWake.at,
-            reason: systemMailboxWake.reason,
-          },
-        ]);
-        const defaultProcessingWake =
-          await resolveHostedSystemMailboxProcessingModeWake({
-            assistantExecutionBlocked,
-            extraCandidates: [
-              createHostedRuntimeWakeCandidate(
-                requestedCheckpointNextWakeAt,
-                requestedCheckpointNextWakeReason,
-              ),
-            ],
-            mailboxImportRetryAt: null,
-            nowMs: checkpointNowMs,
-            operatorHomeRoot: restored.operatorHomeRoot,
-            runtimeEnv: invocationRuntimeEnv,
-            systemMailboxWakes,
-            vaultRoot: restored.vaultRoot,
-          });
         const canonicalRuntimeCommit = checkpointInput.reason === "canonical_runtime_commit";
         const checkpointWorkspacePort = canonicalRuntimeCommit
           ? workspacePort
@@ -1912,8 +1980,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             defaultProcessingWake.nextDefaultProcessingWakeAt,
           nextDefaultProcessingWakeReason:
             defaultProcessingWake.nextDefaultProcessingWakeReason,
-          nextWakeAt: checkpointWake.nextWakeAt,
-          nextWakeReason: checkpointWake.nextWakeReason,
+          nextWakeAt: checkpointProcessingWake.nextWakeAt,
+          nextWakeReason: checkpointProcessingWake.nextWakeReason,
           reason: checkpointInput.reason,
           redactedStatus,
           snapshotRef: workspace?.snapshotRef ?? null,
@@ -5541,7 +5609,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             || rerunAssistantInputBatch !== null
             || continueForegroundCausalPass
             || (input.request.processingMode ?? "default") !== "default"
-            || hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
+            || !hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
+              assistantProgressed:
+                passResult.assistantPhaseResult?.progressed === true,
+              nextWakeReason: pendingWake.nextWakeReason,
+              runtimeProjectionCheckpointRequested:
+                passResult.assistantPhaseResult
+                  ?.runtimeProjectionCheckpointRequested === true,
+            })
             || !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
           ) {
             return;
@@ -6625,8 +6700,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
         await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
         const boundarySystemMailboxWake =
-          await resolveHostedSystemMailboxNextWakeCandidate({
-            allowedRouteActions: ["run-assistant-ask"],
+          await resolveHostedIdleBoundarySystemMailboxWake({
             vaultRoot: restored.vaultRoot,
           });
         pendingWake = selectEarliestHostedRuntimeWake([
@@ -8005,6 +8079,19 @@ function normalizeHostedRuntimeWakeReason(nextWakeReason: string | null): string
 
 function hostedRuntimeWakeReasonIsAssistant(nextWakeReason: string | null): boolean {
   return hostedRuntimeWakeReasonUsesAssistantPhase(nextWakeReason);
+}
+
+function hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff(input: {
+  assistantProgressed: boolean;
+  nextWakeReason: string | null;
+  runtimeProjectionCheckpointRequested: boolean;
+}): boolean {
+  return input.nextWakeReason === "mailbox"
+    || (
+      input.runtimeProjectionCheckpointRequested
+      && !input.assistantProgressed
+      && !hostedRuntimeWakeReasonIsAssistant(input.nextWakeReason)
+    );
 }
 
 function hostedRuntimeDefaultProcessingWakeIsDue(input: {

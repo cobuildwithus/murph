@@ -1,6 +1,6 @@
 # Converge stale default wake handoff to model-free owner
 
-Status: active
+Status: completed
 Created: 2026-09-01
 Updated: 2026-09-01
 
@@ -22,6 +22,13 @@ Updated: 2026-09-01
 - A genuinely due default wake still retains priority over model-free work.
 - A running cron job with a past `nextRunAt` is not projected as new runnable
   default work.
+- An earlier retained device-sync model-free wake survives both canonical
+  runtime-status and generic idle checkpoints when the workspace scalar still
+  names a later assistant wake; blocked assistant policy keeps its existing
+  restoration path.
+- A carried device-sync scalar does not request owner handoff by itself; fresh
+  foreground work still runs unless live projection reconciliation explicitly
+  requested the non-assistant handoff.
 - Focused runtime tests, package typecheck, and required repository verification
   pass on the final diff.
 - The exact normalized live incident facts replay without private identifiers,
@@ -101,10 +108,15 @@ recovered outcome without exposing runtime identifiers or private evidence.
    failure.
 3. Implement the smallest runtime-owned projection-convergence checkpoint and
    normalize non-due cron projection timestamps.
-4. Run focused tests, typecheck, static privacy inspection, and exact-fact replay.
-5. Update durable contracts/changelog where the externally observable reliability
+4. Preserve all-owner arbitration at runtime-status checkpoints and retain
+   device-sync ownership at the idle boundary, with independent regressions so
+   one boundary cannot mask the other.
+5. Gate generalized owner handoff on the projection-only checkpoint marker so a
+   stale carried device token cannot suppress newly arrived foreground work.
+6. Run focused tests, typecheck, static privacy inspection, and exact-fact replay.
+7. Update durable contracts/changelog where the externally observable reliability
    guarantee changes.
-6. Commit, open a draft PR, run exact-head ReviewGPT with CI, merge/deploy, and
+8. Commit, open a draft PR, run exact-head ReviewGPT with CI, merge/deploy, and
    verify the affected runtime's durable frontier advances.
 
 ## Decisions
@@ -128,3 +140,4 @@ recovered outcome without exposing runtime identifiers or private evidence.
   - Post-fix first pass durably removes/advances the stale default projection and
     publishes the model-free wake; second pass advances handled-through.
   - No assistant/provider/device execution occurs during the handoff checkpoint.
+Completed: 2026-09-01

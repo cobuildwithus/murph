@@ -3408,8 +3408,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.equal(currentWorkspace.version, "1");
       assert.deepEqual(currentWorkspace.snapshotRef, checkpoint.snapshotRef);
+      const checkpointSnapshotRef = checkpoint.snapshotRef;
+      assert.ok(checkpointSnapshotRef && "hash" in checkpointSnapshotRef);
       assert.equal(
-        artifactBytesByHash.has(currentWorkspace.snapshotRef.hash),
+        artifactBytesByHash.has(checkpointSnapshotRef.hash),
         true,
       );
 
@@ -3461,7 +3463,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(currentWorkspace.systemMailboxProgressGeneration, "1");
       assert.equal(
         artifactGetCalls.slice(artifactGetCountBeforeSystemPass).includes(
-          checkpoint.snapshotRef.hash,
+          checkpointSnapshotRef.hash,
         ),
         true,
       );
