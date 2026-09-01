@@ -6,16 +6,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { test, vi } from "vitest";
 
 import { GoalContactAction } from "@/src/components/goals/goal-contact-action";
+import type { HostedPublicLayoutAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const mocks = vi.hoisted(() => ({
-  getHostedPublicLayoutAuthSnapshot: vi.fn(async () => ({
-    sidebarAuth: {
-      authenticated: false,
-      label: null,
-    },
-    status: "ready" as const,
-  })),
+  getHostedPublicLayoutAuthSnapshot: vi.fn(
+    async (): Promise<HostedPublicLayoutAuthSnapshot> => ({
+      sidebarAuth: {
+        authenticated: false,
+        label: null,
+      },
+      status: "ready",
+    }),
+  ),
 }));
 
 vi.mock("next/font/google", () => ({
