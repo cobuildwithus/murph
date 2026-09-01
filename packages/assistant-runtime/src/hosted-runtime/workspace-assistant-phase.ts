@@ -4929,6 +4929,28 @@ function shouldPreflightHostedDefaultProcessingWake(
     && wakeTimeMs <= resolveHostedAssistantPhaseNowMs(phaseInput);
 }
 
+async function resolveHostedDefaultProcessingWakeState(input: {
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
+}): Promise<HostedAssistantCronWakeState> {
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.phaseInput);
+  const providerCleanupWake = createHostedRuntimeWakeCandidate(
+    await resolveHostedProviderCleanupScheduledWakeAt({
+      nowMs,
+      vaultRoot: input.phaseInput.restored.vaultRoot,
+    }),
+    HOSTED_ASSISTANT_WAKE_REASON,
+  );
+  if (hostedRuntimeWakeCandidateIsDue(providerCleanupWake, nowMs)) {
+    return {
+      available: true,
+      dueNow: true,
+      wake: providerCleanupWake,
+    };
+  }
+  return await input.readAssistantCronWakeState();
+}
+
 async function resolveDueModelFreeSystemMailboxOwnerSelection(
   input: {
     pendingAssistantInputWakeAt: string | null;
@@ -5969,19 +5991,12 @@ async function runSystemMailboxMaintenancePhase(input: {
     && !hasBackgroundSelection
     && shouldPreflightHostedDefaultProcessingWake(phaseInput)
   ) {
-    const providerCleanupWake = createHostedRuntimeWakeCandidate(
-      await resolveHostedProviderCleanupScheduledWakeAt({
-        nowMs: resolveHostedAssistantPhaseNowMs(phaseInput),
-        vaultRoot: phaseInput.restored.vaultRoot,
-      }),
-      HOSTED_ASSISTANT_WAKE_REASON,
-    );
-    if (
-      hostedRuntimeWakeCandidateIsDue(
-        providerCleanupWake,
-        resolveHostedAssistantPhaseNowMs(phaseInput),
-      )
-    ) {
+    const defaultProcessingWakeState =
+      await resolveHostedDefaultProcessingWakeState({
+        phaseInput,
+        readAssistantCronWakeState,
+      });
+    if (defaultProcessingWakeState.dueNow) {
       return {
         backgroundMaintenanceYielded: false,
         continueAssistantLane: true,
@@ -5991,18 +6006,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         result: null,
       };
     }
-    const preflightAssistantCronWakeState = await readAssistantCronWakeState();
-    if (preflightAssistantCronWakeState.dueNow) {
-      return {
-        backgroundMaintenanceYielded: false,
-        continueAssistantLane: true,
-        deviceSyncMaintenanceRan: false,
-        initialProviderCleanupCheckpoint,
-        pendingAssistantInputWakeAt: null,
-        result: null,
-      };
-    }
-    staleDefaultProjectionDisproved = preflightAssistantCronWakeState.available;
+    staleDefaultProjectionDisproved = defaultProcessingWakeState.available;
   }
 
   let deferSystemMailboxPreparationForDelivery = false;
