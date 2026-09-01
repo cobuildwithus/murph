@@ -1339,6 +1339,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('`action="show"`')
     expect(seed.instructions).toContain('`action="upsert"`')
     expect(seed.instructions).toContain('`action="update"`')
+    expect(seed.instructions).toContain('`action="forget"`')
+    expect(seed.instructions).toContain('`expectedUpdatedAt`')
+    expect(seed.instructions).not.toContain('`member:`')
     expect(seed.instructions).toContain('hidden Codex memory state')
     expect(seed.instructions).toContain('Do not use the shell or read transcript files')
     expect(seed.instructions).toContain('Do not save assistant speculation')
@@ -1347,7 +1350,7 @@ describe('applyMurphManagedAutomations', () => {
       'clearly supported by the supplied conversation evidence',
     )
     expect(seed.instructions).toContain(
-      'deduplication and update targeting only',
+      'deduplication and mutation targeting only',
     )
     expect(seed.instructions).not.toContain('generated memory extraction')
     expect(seed.instructions).toContain(

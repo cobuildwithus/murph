@@ -4,9 +4,8 @@ set -euo pipefail
 parent_old_space_mb=1024
 build_worker_old_space_mb=3072
 typecheck_old_space_mb=3584
-build_cache_epoch=webpack-next-16.3-v5-isolated-worker-cold-webpack
+build_cache_epoch=webpack-next-16.3-v6-isolated-worker-no-webpack-cache
 build_cache_stamp=.next/cache/murph-production-build-epoch
-webpack_cache_dir=.next/cache/webpack
 prepared_typecheck_env=MURPH_HOSTED_WEB_PREPARED_TYPECHECK
 
 # Never trust an inherited bypass. This runner earns the build-only flag again
@@ -40,12 +39,9 @@ if [[ ! -f "$build_cache_stamp" ]] || [[ "$(< "$build_cache_stamp")" != "$build_
     "$build_cache_epoch"
   node ../../scripts/rm-paths.mjs .next/cache
   cache_reset=1
-else
-  printf '[apps/web build] Resetting restored Webpack cache before production compile\n'
-  node ../../scripts/rm-paths.mjs "$webpack_cache_dir"
 fi
 
-printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_mb=%s build_worker_old_space_mb=%s typecheck_old_space_mb=%s webpack_cache=cold webpack_build_worker=on\n' \
+printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_mb=%s build_worker_old_space_mb=%s typecheck_old_space_mb=%s webpack_cache=disabled webpack_build_worker=on\n' \
   "$parent_old_space_mb" \
   "$build_worker_old_space_mb" \
   "$typecheck_old_space_mb"

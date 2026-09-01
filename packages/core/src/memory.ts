@@ -45,10 +45,15 @@ export type {
 } from "@murphai/contracts";
 
 export interface UpdateMemoryInput {
+  expectedUpdatedAt?: string;
   now?: Date;
   recordId: string;
   section?: MemorySection | null;
   text: string;
+}
+
+export interface ForgetMemoryInput extends ForgetMemoryRecordInput {
+  expectedUpdatedAt?: string;
 }
 
 export class MemoryRecordNotFoundError extends Error {
@@ -57,6 +62,15 @@ export class MemoryRecordNotFoundError extends Error {
   constructor() {
     super("The requested canonical memory record does not exist.");
     this.name = "MemoryRecordNotFoundError";
+  }
+}
+
+export class MemoryRecordConflictError extends Error {
+  readonly code = "MEMORY_RECORD_CONFLICT";
+
+  constructor() {
+    super("The canonical memory record changed after it was read.");
+    this.name = "MemoryRecordConflictError";
   }
 }
 
@@ -200,9 +214,10 @@ export async function updateMemory(
         if (existing === null) {
           throw new MemoryRecordNotFoundError();
         }
+        assertExpectedMemoryUpdatedAt(existing, input.expectedUpdatedAt);
 
         const next = upsertMemoryRecord(snapshot, {
-          now: input.now,
+          now: resolveNextMemoryUpdatedAt(existing.updatedAt, input.now),
           recordId: input.recordId,
           section: input.section ?? existing.section,
           text: input.text,
@@ -246,7 +261,7 @@ export async function updateMemory(
 
 export async function forgetMemory(
   vaultRoot: string,
-  input: ForgetMemoryRecordInput,
+  input: ForgetMemoryInput,
 ): Promise<{
   document: MemoryDocumentSnapshot;
   existed: boolean;
@@ -254,6 +269,10 @@ export async function forgetMemory(
 }> {
   return await withLockedMemoryDocument(vaultRoot, async () => {
     const snapshot = await readMemoryDocument(vaultRoot);
+    const existing = snapshot.records.find((record) => record.id === input.recordId) ?? null;
+    if (existing !== null) {
+      assertExpectedMemoryUpdatedAt(existing, input.expectedUpdatedAt);
+    }
     const next = forgetMemoryRecord(snapshot, input);
     if (next.record === null) {
       return {
@@ -287,6 +306,30 @@ export async function forgetMemory(
       record: next.record,
     };
   });
+}
+
+function assertExpectedMemoryUpdatedAt(
+  record: MemoryRecord,
+  expectedUpdatedAt: string | undefined,
+): void {
+  if (
+    expectedUpdatedAt !== undefined
+    && expectedUpdatedAt !== record.updatedAt
+  ) {
+    throw new MemoryRecordConflictError();
+  }
+}
+
+function resolveNextMemoryUpdatedAt(
+  currentUpdatedAt: string,
+  requestedNow: Date | undefined,
+): Date {
+  const next = requestedNow ?? new Date();
+  const currentTime = Date.parse(currentUpdatedAt);
+  if (!Number.isFinite(currentTime) || next.getTime() > currentTime) {
+    return next;
+  }
+  return new Date(currentTime + 1);
 }
 
 export async function buildMemoryCorePromptBlock(vaultRoot: string): Promise<string | null> {

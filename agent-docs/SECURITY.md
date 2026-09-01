@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-30
+Last verified: 2026-08-31
 
 ## Non-Negotiable Rules
 
@@ -1326,6 +1326,17 @@ unavailable. Provider CLI or API output that lists a variable name, target, or
 scope is metadata only; it is never evidence that the value can or should be
 read locally. Do not download, copy, inject, echo, or reconstruct a production
 secret in a local process, file, worktree, test, or debugging session.
+
+The sole local exception is the operator-provisioned Temporal diagnostics path
+documented in `agent-docs/references/hosted-temporal-orchestration.md`. It may
+pass an already-present Temporal API credential directly to one bounded CLI or
+SDK process without inspecting, printing, copying, persisting, or repackaging
+the value. This exception does not authorize pulling provider environment
+values, creating a persistent CLI profile, forwarding local environment state
+to CI or a remote runner, or mutating Temporal. Start with list, describe,
+query, and metadata-only history inspection; signals, starts, resets,
+terminations, schedule changes, and deployment routing still require explicit
+authorization for the current task.
 
 When requested work would require a production secret, stop before
 implementation or execution. Explain the exact blocked operation, the class of

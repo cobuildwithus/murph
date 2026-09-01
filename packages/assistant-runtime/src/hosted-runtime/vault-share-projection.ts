@@ -1510,7 +1510,7 @@ export function selectProjectableWorkoutDays(
     const minuteRow = minuteRowsByDate.get(
       sourceDateKey(countRow.date, countRow.source),
     );
-    if (!minuteRow || !sameMetricSeriesPointSourceOwner(countRow, minuteRow)) {
+    if (!minuteRow || !canPairWorkoutMetricRows(countRow, minuteRow)) {
       continue;
     }
 
@@ -2579,6 +2579,28 @@ function choosePreferredActivitySessionDistanceRow(
 function activitySessionRowCompletenessScore(row: ActivitySessionProjectionRow): number {
   return (parseOptionalTimestampMs(row.startedAt) === null ? 0 : 1)
     + (parseOptionalTimestampMs(row.endedAt) === null ? 0 : 1);
+}
+
+function canPairWorkoutMetricRows(
+  left: WorkoutMetricProjectionRow,
+  right: WorkoutMetricProjectionRow,
+): boolean {
+  if (sameMetricSeriesPointSourceOwner(left, right)) {
+    return true;
+  }
+
+  // Stored provider activity summaries redact canonical record ids. Their
+  // public source/date tuple is the remaining shared owner; manual and Murph
+  // points stay under exact-owner matching because they may be authored alone.
+  const publicSource = left.source?.source;
+  return publicSource !== undefined
+    && publicSource === right.source?.source
+    && publicSource !== "manual"
+    && publicSource !== "murph"
+    && left.sourceFamily === "derived"
+    && right.sourceFamily === "derived"
+    && left.sourceKind === "activity-summary"
+    && right.sourceKind === "activity-summary";
 }
 
 function sameMetricSeriesPointSourceOwner(

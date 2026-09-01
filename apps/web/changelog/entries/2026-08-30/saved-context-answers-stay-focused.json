@@ -6,9 +6,9 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Saved-context answers stay focused",
-    "summary": "Murph keeps the same relevant saved facts while using a lighter read and names the requested target in clear suitability answers.",
-    "details": "The compact path is read-only. Full CLI detail remains available when requested, and missing-record errors are unchanged.",
+    "summary": "Murph keeps private replies focused by bringing in a small set of relevant saved facts and naming the exact target in suitability answers.",
+    "details": "Your latest message and the current saved record still win. Background cleanup reads accepted voice-note transcripts like ordinary conversation, leaves newer corrections untouched, and retires a saved fact when your recent conversation makes clear it no longer applies; full detail remains available on demand.",
     "relevanceTags": ["assistant", "context", "reliability"],
-    "sourcePullRequests": [2578]
+    "sourcePullRequests": [2578, 2621]
   }
 }

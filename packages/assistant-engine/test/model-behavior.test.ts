@@ -1619,7 +1619,13 @@ describe('assistant local PDF evidence guidance', () => {
       'vault-cli batch --compact --format json --command \'["memory","show","--compact"]\' --command \'["goal","list"]\'',
     )
     expect(prompt).toContain(
-      'For the user\'s saved current-state context, prefer `vault-cli memory show --compact --format json`',
+      'When a bounded saved-memory context is injected, use it directly when it is sufficient',
+    )
+    expect(prompt).toContain(
+      'Do not read memory solely because that block is absent',
+    )
+    expect(prompt).toContain(
+      'only when exact saved context could materially change the current answer',
     )
     expect(prompt).not.toContain(
       '--command \'["memory","show"]\'',
@@ -2074,7 +2080,7 @@ describe('assistant system prompt cache stability', () => {
     // response-card dietary/burn target-authority boundary, explicit
     // group-family tool routing, and the cross-route CLI error-recovery
     // contract set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_374)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_542)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
