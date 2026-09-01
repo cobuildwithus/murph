@@ -89,7 +89,7 @@ export function readMemberMemoryDynamicToolRequest(input: {
 }
 
 export async function executeMemberMemoryDynamicTool(input: {
-  abortSignal: AbortSignal | null
+  abortSignal?: AbortSignal | null
   managedMaintenanceAuthorized: boolean
   request: Extract<MemberMemoryDynamicToolRequest, { kind: 'member-memory' }>
   vaultRoot: string | null

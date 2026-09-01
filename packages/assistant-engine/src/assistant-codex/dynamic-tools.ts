@@ -2457,7 +2457,7 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'member-memory':
       return await executeMemberMemoryDynamicTool({
-        abortSignal: input.abortSignal ?? null,
+        abortSignal: input.abortSignal,
         managedMaintenanceAuthorized:
           input.memberMemoryMaintenanceAuthorized === true,
         request: input.request,
