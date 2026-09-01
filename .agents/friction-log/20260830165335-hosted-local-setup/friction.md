@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local setup timeout leaves owned child processes running'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2624'
 ---
 
 ## Expected Behavior

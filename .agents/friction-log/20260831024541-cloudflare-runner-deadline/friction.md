@@ -1,6 +1,7 @@
 ---
 title: 'Cloudflare runner deadline test can wait forever on synthetic generation drift'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2642'
 ---
 
 ## Expected Behavior

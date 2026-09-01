@@ -1,6 +1,7 @@
 ---
 title: 'Release app verification stalls under forced app overlap'
 severity: 'major'
+issue: 'cobuildwithus/murph#2656'
 ---
 
 ## Expected Behavior
