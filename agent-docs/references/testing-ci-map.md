@@ -1097,9 +1097,8 @@ keep the one-second presentation-only deadline and late-result rejection.
   Source refs and exact reviewed SHAs live in
   `.github/native-hosted-e2e-controller.json`, so source rotation advances the
   same protected-main checkpoint. The controller dispatches the current
-  production alias SHA. Alias lag is allowed only when the Vercel build
-  classifier proves every intervening change is an eligible dated release
-  note. They dispatch only `production_canary` with
+  production alias SHA only when it equals that current `main` revision. Any
+  mismatch fails before dispatch and retries at the next slot. They dispatch only `production_canary` with
   `non_destructive_existing_identity` and receive no database, Privy, Junction,
   candidate-deployment, or reset authority.
 - The iOS public-to-private contract remains v3 and binds the immutable private

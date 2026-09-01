@@ -12,9 +12,9 @@ Last verified: 2026-09-01
   to another deployment id. It uses the exact deployment URL from the trusted
   Vercel status, follows the complete project-domain pagination, excludes
   branch/custom-environment domains, and repeats the full proof after the
-  prior-function drain and immediately before contract SQL. Late completed
-  events for older main ancestors may skip when production has advanced; the
-  workflow remains non-concurrent so a stale event cannot cancel the valid run.
+  prior-function drain and immediately before contract SQL. The deployed commit
+  must equal current `main`; stale or late events fail before database authority.
+  The workflow remains non-concurrent so a stale event cannot cancel the valid run.
   The first production Web deployment containing the exact-deployment verifier
   is the postdeploy verification rollback floor because this workflow executes
   from the deployed checkout. A pre-floor manual retry fails closed on the

@@ -174,10 +174,9 @@ Junction-namespace, or candidate-deployment authority.
 A scheduled native pass is production-shaped evidence for the current
 protected-`main` checkpoint and the exact deployed Web SHA it dispatches.
 Trusted orchestration proves the scheduled revision remains in `main` history,
-then resolves the current production alias. When the alias trails `main`, the
-existing Vercel build classifier must prove the complete intervening diff is
-eligible dated release notes; otherwise the controller fails before paid
-dispatch and retries. It dispatches that deployed SHA with the reviewed
+then resolves the current production alias. The alias must equal the selected
+current-`main` revision; otherwise the controller fails before paid dispatch and
+retries at its next slot. It dispatches that exact SHA with the reviewed
 immutable iOS or Android source in `production_canary` mode. The private journey uses
 `non_destructive_existing_identity`; local mocked or hosted-local tests do not
 replace it. The Android production environment remains narrowly populated. The

@@ -1710,10 +1710,9 @@ Destructive contract cleanup belongs under
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
 completed production deployment statuses, checks out the exact deployed commit,
-verifies it is reachable from `origin/main`, and requires the current main tip
-to be the deployment serving the configured production base domain. A stale
-current-main release fails instead of being reported as a successful no-op;
-late events for older main ancestors remain safe no-op candidates. The workflow
+requires it to equal current `origin/main`, and requires that exact commit to be
+the deployment serving the configured production base domain. Stale or late
+deployment events fail before database authority is exposed. The workflow
 then enumerates and proves every production custom domain against the event's
 exact deployment id, waits
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
