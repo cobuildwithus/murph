@@ -457,11 +457,9 @@ export async function sendLinqChatMessage(
     },
     dependencies,
   )
-  const primaryMessageId = requireLinqPrimaryMessageId({
-    messageId: primaryResponse.message?.id,
-    operation: 'send_message',
-    richLinkFollowUp: true,
-  })
+  const primaryMessageId = normalizeNullableString(
+    primaryResponse.message?.id ?? null,
+  )
   let linkResponse: LinqMessageSendResponse
   try {
     linkResponse = await sendLinqChatRichLinkWithTextFallback(
@@ -542,13 +540,9 @@ async function sendLinqChatMessageParts(
     replyToMessageId:
       input.nativeReplyRequested === true ? replyToMessageId : null,
   }, dependencies)
-  const providerMessageId = requireLinqPrimaryMessageId({
-    messageId: response.message?.id,
-    operation: 'send_message',
-  })
   const providerMessageEffects = buildLinqProviderMessageEffects({
     body,
-    providerMessageId,
+    providerMessageId: response.message?.id,
   })
   return {
     ...response,
@@ -649,7 +643,7 @@ async function sendLinqChatMessageBody(
     signal?: AbortSignal
   },
 ): Promise<LinqMessageSendResponse> {
-  return requestLinqSdk<MessageSendResponse>({
+  const response = await requestLinqSdk<MessageSendResponse>({
     body: input.body,
     details: {
       hasIdempotencyKey: input.idempotencyKey !== null,
@@ -665,6 +659,11 @@ async function sendLinqChatMessageBody(
       client.chats.messages.send(input.chatId, input.body, { signal }),
     signal: dependencies.signal,
   })
+  requireLinqPrimaryMessageId({
+    messageId: response.message?.id,
+    operation: 'send_message',
+  })
+  return response
 }
 
 export async function checkLinqIMessageCapability(

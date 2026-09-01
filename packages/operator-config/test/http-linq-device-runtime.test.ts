@@ -841,6 +841,49 @@ test('linq runtime keeps an accepted message without provider identity retryable
   })
 })
 
+test('linq runtime keeps an accepted unselected link-only message without provider identity retryable', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestBody: Record<string, unknown> | null = null
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    requestBody = parseJsonRequestBody(requireStringRequestBody(init.body))
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: {},
+    })
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-123',
+        idempotencyKey: 'payment-message-123',
+        message: 'https://pay.example.test/checkout/session_123',
+      },
+      { env, fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_API_REQUEST_FAILED'
+      && error.context?.operation === 'send_message'
+      && error.context?.retryable === true
+      && 'deliveryMayHaveSucceeded' in error
+      && error.deliveryMayHaveSucceeded === true,
+  )
+  expect(fetchImplementation).toHaveBeenCalledOnce()
+  assert.deepEqual(requestBody, {
+    message: {
+      idempotency_key: 'payment-message-123',
+      parts: [{
+        type: 'link',
+        value: 'https://pay.example.test/checkout/session_123',
+      }],
+    },
+  })
+})
+
 const incompleteTwoPartMessageIdentityCases = [
   {
     expectedMessageId: 'message-text',

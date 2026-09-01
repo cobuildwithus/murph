@@ -643,6 +643,140 @@ it("retries an identity-less hosted Linq text acknowledgement with the same body
   });
 });
 
+it("retries an identity-less hosted Linq link-only acknowledgement before acceptance and mailbox consumption", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const mailboxItemId = "mailbox_item_identity_less_link_retry";
+  const linkUrl = "https://pay.example.test/checkout/session_123";
+  const fixture = await createHostedLinqAttachmentFixture({
+    answeredMailboxItemIds: [mailboxItemId],
+    imageCount: 0,
+    key: "identity-less-link-retry",
+    message: linkUrl,
+    target: "linq_chat_hosted_identity_less_link_retry",
+  });
+  const pendingMailboxItemIds = new Set([mailboxItemId]);
+  const requestBodies: string[] = [];
+  let messageAttempt = 0;
+  const providerMessageId = "linq_identity_less_link_retry_sent";
+  const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+    const url = String(request);
+    if (!url.endsWith(`/chats/${fixture.target}/messages`)) {
+      throw new Error(`Unexpected Linq provider request: ${url}`);
+    }
+    requestBodies.push(await readFetchRequestBody(request, init));
+    messageAttempt += 1;
+    return new Response(JSON.stringify({
+      message: messageAttempt === 1 ? {} : { id: providerMessageId },
+    }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const publicInternetFetch = vi.fn<typeof fetch>();
+  const recordLinqDeliveryOutcome = vi.fn<
+    NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+  >(async (request) => {
+    for (const answeredMailboxItemId of request.answeredMailboxItemIds ?? []) {
+      pendingMailboxItemIds.delete(answeredMailboxItemId);
+    }
+  });
+  const drainInput = {
+    ...buildHostedLinqDrainInput({
+      fixture,
+      providerFetch,
+      publicInternetFetch,
+    }),
+    effectsPort: createHostedRuntimeEffectsPortStub({
+      recordLinqDeliveryOutcome,
+    }),
+  };
+
+  const firstOutcomes = await drainHostedPreparedAssistantDeliveries(drainInput);
+
+  expect(firstOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryStatus: "retryable",
+      effectId: fixture.intent.intentId,
+      retryable: true,
+    }),
+  ]);
+  expect(providerFetch).toHaveBeenCalledTimes(1);
+  expect(recordLinqDeliveryOutcome).not.toHaveBeenCalled();
+  expect([...pendingMailboxItemIds]).toEqual([mailboxItemId]);
+  expect(publicInternetFetch).not.toHaveBeenCalled();
+  const retained = await readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  );
+  expect(retained).toMatchObject({
+    answeredMailboxItemIds: [mailboxItemId],
+    deliveryConfirmationPending: true,
+    lastError: { code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING" },
+    nextAttemptAt: expect.any(String),
+    status: "retryable",
+  });
+  if (!retained?.nextAttemptAt) {
+    throw new Error("Expected the identity-less link delivery to schedule a retry.");
+  }
+
+  vi.setSystemTime(new Date(retained.nextAttemptAt));
+  const retryEffects = await collectHostedAssistantDeliverySideEffects({
+    includeBackgroundDueIntents: true,
+    vaultRoot: fixture.vaultRoot,
+  });
+  expect(retryEffects.map((effect) => effect.effectId)).toEqual([
+    fixture.intent.intentId,
+  ]);
+
+  const retryOutcomes = await drainHostedPreparedAssistantDeliveries({
+    ...drainInput,
+    assistantDeliveryEffects: retryEffects,
+  });
+
+  expect(retryOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryStatus: "sent",
+      effectId: fixture.intent.intentId,
+      providerMessageId,
+      retryable: false,
+    }),
+  ]);
+  expect(requestBodies).toHaveLength(2);
+  const firstRequestBody = requestBodies[0];
+  const retryRequestBody = requestBodies[1];
+  if (!firstRequestBody || !retryRequestBody) {
+    throw new Error("Expected both hosted Linq link request bodies.");
+  }
+  expect(retryRequestBody).toBe(firstRequestBody);
+  expect(JSON.parse(firstRequestBody)).toEqual({
+    message: {
+      idempotency_key:
+        fixture.intent.deliveryIdempotencyKey
+        ?? `assistant-outbox:${fixture.intent.intentId}`,
+      parts: [{ type: "link", value: linkUrl }],
+    },
+  });
+  expect(recordLinqDeliveryOutcome).toHaveBeenCalledOnce();
+  expect(recordLinqDeliveryOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({
+      acceptedAt: expect.any(String),
+      answeredMailboxItemIds: [mailboxItemId],
+      intentId: fixture.intent.intentId,
+      providerMessageId,
+    }),
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+  expect([...pendingMailboxItemIds]).toEqual([]);
+  expect(publicInternetFetch).not.toHaveBeenCalled();
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    deliveryConfirmationPending: false,
+    status: "sent",
+  });
+});
+
 it("terminalizes an identity-less hosted Linq private-image acknowledgement without a second reservation", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
@@ -1211,6 +1345,7 @@ it.each([
 });
 
 async function createHostedLinqAttachmentFixture(input: {
+  answeredMailboxItemIds?: readonly string[];
   homeRoute?: {
     directRecipientPhoneNumber: string;
     fromPhoneNumber: string;
@@ -1218,6 +1353,7 @@ async function createHostedLinqAttachmentFixture(input: {
   imageCount?: number;
   key: string;
   mediaKind?: "vault_file" | "vault_image";
+  message?: string;
   target: string;
 }) {
   const workspace = await createHostedRuntimeWorkspace(
@@ -1287,6 +1423,9 @@ async function createHostedLinqAttachmentFixture(input: {
   const intent = await createAssistantOutboxIntent({
     actorId:
       input.homeRoute?.directRecipientPhoneNumber ?? `actor_${input.key}`,
+    ...(input.answeredMailboxItemIds
+      ? { answeredMailboxItemIds: input.answeredMailboxItemIds }
+      : {}),
     ...(input.homeRoute
       ? {
           bindingDelivery: { kind: "thread" as const, target: input.target },
@@ -1301,7 +1440,7 @@ async function createHostedLinqAttachmentFixture(input: {
     dedupeToken: input.key,
     identityId: `identity_${input.key}`,
     media,
-    message: "Private generated image",
+    message: input.message ?? "Private generated image",
     sessionId: `session_${input.key}`,
     threadId: input.target,
     threadIsDirect: true,
