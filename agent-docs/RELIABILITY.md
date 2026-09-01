@@ -321,8 +321,14 @@ Last verified: 2026-09-01
   generation and handled-through frontier remain unchanged. Workspace-version,
   attempt, signal, and selected-wake churn are not progress. Due foreground,
   default-processing, provider-owned, and retention work bypasses the delay
-  without clearing it. This reuses the workspace CAS and Temporal timer owners;
-  it adds no queue, scheduler, per-member state table, or second wake authority.
+  without clearing it. When live runtime evaluation disproves an overdue
+  default-processing projection and selects a due model-free frontier, the
+  runtime checkpoints the corrected projections before releasing that pass.
+  This projection-only checkpoint re-reads every default-work source, preserves
+  handled-through and the progress generation, and therefore cannot hide
+  genuinely due default work or claim system progress. This reuses the workspace
+  CAS and Temporal timer owners; it adds no queue, scheduler, per-member state
+  table, or second wake authority.
 - A hosted-group projection grant that needs its first private projection and
   one generation-stable `runtime.maintenance-requested` control row commit in
   the same Web transaction. An append failure therefore rolls back the grant

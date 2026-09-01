@@ -297,6 +297,9 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   // this invocation. This is never persisted; the runner and outer hot-wake
   // gate use it instead of inferring ownership from a merged wake timestamp.
   invocationLocalAssistantWakeAt?: string | null;
+  // Ephemeral request to checkpoint corrected wake projections. This does not
+  // claim assistant or system application progress.
+  runtimeProjectionCheckpointRequested?: true;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -3613,6 +3616,14 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
   platform: Pick<HostedWorkspaceRunnerPlatform, "logPort">;
   runtimeLogContext?: HostedRuntimeLogContext | null;
 }): Promise<void> {
+  if (
+    input.assistantPhaseResult.progressed !== true
+    && input.assistantPhaseResult.runtimeProjectionCheckpointRequested !== true
+  ) {
+    return;
+  }
+
+  input.checkpointRequestBuilder.markRuntimeStateDirty();
   if (input.assistantPhaseResult.progressed !== true) {
     return;
   }
@@ -3622,7 +3633,6 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
   );
   void input.expectedUserId;
   void input.initialMailboxImport;
-  input.checkpointRequestBuilder.markRuntimeStateDirty();
   await writeHostedForegroundCheckpointDeferredLog({
     checkpointPhase: "assistant",
     now: input.now,

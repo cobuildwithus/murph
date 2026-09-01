@@ -3309,6 +3309,54 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("marks a projection-only assistant checkpoint request dirty without claiming application progress", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_projection_checkpoint",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_projection_checkpoint",
+        async runAssistantPhase() {
+          return {
+            progressed: false,
+            runtimeProjectionCheckpointRequested: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.runtimeStateDirty, true);
+      assert.equal(result.assistantPhaseResult?.progressed, false);
+      assert.equal(result.assistantPhaseResult?.checkpointReason, undefined);
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("rejects a progressed assistant phase without an explicit checkpoint reason", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];

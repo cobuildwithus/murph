@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-01",
+  "order": 100,
+  "item": {
+    "id": "background-work-recovers-from-stale-timers",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Background work recovers from stale timers",
+    "summary": "Murph now recovers when an outdated assistant timer overlaps with connected-device work, including when interrupted scheduled work has no other event to wake it.",
+    "details": "Current conversations, reminders, pending deliveries, and other genuinely due assistant work keep priority. Interrupted scheduled work now receives its own recovery check instead of waiting for another conversation or device event.",
+    "relevanceTags": ["assistant", "wearables", "reliability"],
+    "sourcePullRequests": [2682]
+  }
+}

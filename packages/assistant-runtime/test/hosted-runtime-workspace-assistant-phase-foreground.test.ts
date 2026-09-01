@@ -1462,9 +1462,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
   });
 
   it(
-    "hands oldest model-free device maintenance to its owner after causal work",
+    "hands a model-free device frontier off after disproving a stale default projection",
     async () => {
       const now = "2026-04-27T00:00:00.000Z";
+      const staleDefaultWakeAt = "2026-04-26T23:59:00.000Z";
       const parentRoot = await mkdtemp(
         path.join(tmpdir(), "hosted-causal-fallback-"),
       );
@@ -1501,6 +1502,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
         mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
           systemMailbox.resolveHostedSystemMailboxNextWakeCandidate,
         );
+        mocks.getAssistantCronStatus.mockResolvedValueOnce({
+          dueJobs: 0,
+          enabledJobs: 1,
+          nextRunAt: staleDefaultWakeAt,
+          runningJobs: 1,
+          totalJobs: 1,
+        });
 
         const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
           assistantInputIds: [],
@@ -1509,14 +1517,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
           now: () => now,
           operatorHomeRoot,
           vaultRoot,
+          workspace: createDueAssistantWorkspace({
+            nextDefaultProcessingWakeAt: staleDefaultWakeAt,
+            nextDefaultProcessingWakeReason: "assistant",
+            nextWakeAt: staleDefaultWakeAt,
+            nextWakeReason: "device-sync.reconcile",
+            systemMailboxProgressGeneration: "1",
+          }),
         }));
 
+        expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
         expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
         expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+        expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledTimes(1);
+        expect(mocks.refreshReminderAvailability).toHaveBeenCalledTimes(1);
         expect(result).toEqual(expect.objectContaining({
           nextWakeAt: now,
           nextWakeReason: "device-sync.reconcile",
           progressed: false,
+          runtimeProjectionCheckpointRequested: true,
         }));
 
         await result.afterCheckpoint?.();
