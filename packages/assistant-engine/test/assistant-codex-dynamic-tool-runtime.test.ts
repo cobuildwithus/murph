@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
 
+import { readMemoryDocument, upsertMemory } from '@murphai/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexMocks = vi.hoisted(() => ({
@@ -60,6 +61,9 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
               ? input.request.args.question
               : null,
         })
+        if (input.request.kind === 'member-memory') {
+          return await actual.executeMurphDynamicToolRequest(input)
+        }
         return {
           ...(input.request.kind === 'finish-without-reply'
             ? {
@@ -101,6 +105,9 @@ import {
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
+import {
+  MURPH_MEMBER_MEMORY_TOOL,
+} from '../src/assistant-codex/dynamic-tools/member-memory.ts'
 
 const tempRoots: string[] = []
 
@@ -143,6 +150,67 @@ afterEach(async () => {
 })
 
 describe('Codex dynamic tool runtime routing', () => {
+  it('does not run an accepted member-memory mutation after the turn aborts', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-memory-abort-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-member-memory-abort-home-',
+    )
+    const saved = await upsertMemory(workingDirectory, {
+      section: 'Preferences',
+      text: 'Keep the saved value.',
+    })
+    const controller = new AbortController()
+    codexMocks.onDynamicToolCall = async ({ kind }) => {
+      if (kind === 'member-memory') {
+        controller.abort(new Error('Foreground work preempted maintenance.'))
+      }
+    }
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedAbortedMemberMemoryTurn(child, {
+          expectedUpdatedAt: saved.record.updatedAt,
+          memoryId: saved.record.id,
+        })
+      })
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      abortSignal: controller.signal,
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      memberMemoryMaintenanceAuthorized: true,
+      prompt: 'Forget the obsolete saved memory.',
+      sandbox: 'workspace-write',
+      vaultRoot: workingDirectory,
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_INTERRUPTED',
+    })
+
+    expect(codexMocks.dynamicToolCalls).toEqual([{
+      deliveryContextOrdinal: 0,
+      kind: 'member-memory',
+      voiceMemoRuntime: null,
+    }])
+    await expect(readMemoryDocument(workingDirectory)).resolves.toMatchObject({
+      records: [{
+        id: saved.record.id,
+        section: 'Preferences',
+        text: 'Keep the saved value.',
+      }],
+    })
+  })
+
   it('ends a group-email turn while its accepted send tool request is pending', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-group-email-terminal-work-',
@@ -720,6 +788,59 @@ describe('Codex dynamic tool runtime routing', () => {
     ])
   })
 })
+
+async function runScriptedAbortedMemberMemoryTurn(
+  child: MockChildProcess,
+  target: { expectedUpdatedAt: string; memoryId: string },
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-member-memory-abort' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-member-memory-abort' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-member-memory-abort' } },
+  }))
+  child.stdout.write(jsonLine({
+    id: 61,
+    method: 'item/tool/call',
+    params: {
+      arguments: {
+        action: 'forget',
+        expectedUpdatedAt: target.expectedUpdatedAt,
+        memoryId: target.memoryId,
+      },
+      callId: 'call-61',
+      namespace: 'murph',
+      threadId: 'thread-member-memory-abort',
+      tool: MURPH_MEMBER_MEMORY_TOOL.name,
+      turnId: 'turn-member-memory-abort',
+    },
+  }))
+  const interrupt = await child.waitForRpcMethod('turn/interrupt')
+  child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
+  child.stdout.write(jsonLine({
+    method: 'serverRequest/resolved',
+    params: {
+      requestId: 61,
+      threadId: 'thread-member-memory-abort',
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-member-memory-abort', status: 'interrupted' },
+    },
+  }))
+}
 
 async function runScriptedTerminalGroupEmailTurn(
   child: MockChildProcess,

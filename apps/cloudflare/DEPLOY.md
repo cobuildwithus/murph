@@ -1220,6 +1220,19 @@ Normal deploy smoke targets the public Worker banner and health endpoints after 
 
 The Worker also enforces that fingerprint contract on the normal user path. Before a warm or newly started runner receives a workspace invocation, its `/health` response must report the bundle and source fingerprints embedded in the generated Worker config. A stale warm shell is destroyed and restarted. Direct cold readiness may destroy and replace one stale bundle/source image inside the same lifecycle operation, using only the original caller deadline; the replacement must pass the exact architecture and fingerprint checks. A second mismatch, any other readiness failure, unsettled cleanup, an expired deadline, or changed container ownership still fails closed without receiving user work. Post-deploy smoke remains the rollout proof, while per-invocation admission prevents the window between a direct Worker deploy and that smoke from serving work through an old runner.
 
+The Worker pins and locally patches `@cloudflare/containers` so the
+shell-prewarm, direct cold-start, and deploy-smoke paths time out one TCP
+readiness request after 1.5 seconds while the existing total startup deadline,
+health validation, lifecycle hooks, and failure cleanup remain unchanged. The
+helper's implicit `containerFetch()` auto-start fallback retains the upstream
+five-second default. This is a Worker-only dependency change with no runner
+image, schema, or persisted-data migration. Before widening traffic, compare
+30–50 alternating fresh starts for the prior and candidate Worker versions.
+Require at least a 2-second p50 improvement, no new startup-failure category or
+increase in failed starts, and a candidate p95 no more than one second slower
+than the prior version. Rollback is the prior Worker version; no data rollback
+is needed.
+
 The production smoke also runs one real `gpt-5.6-terra` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.6-terra` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one bounded model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.
 
 ## Venice Provider Activation

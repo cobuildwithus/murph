@@ -1,0 +1,92 @@
+diff --git a/dist/lib/container.js b/dist/lib/container.js
+index b7567e230cf5d6168a3b6d5e1fbb1fc009eaf235..0fdb81c36857408879f8104a7c093daef3d3c4cb 100644
+--- a/dist/lib/container.js
++++ b/dist/lib/container.js
+@@ -84,16 +84,20 @@ function getExitCodeFromError(error) {
+  */
+ function addTimeoutSignal(existingSignal, timeoutMs) {
+     const controller = new AbortController();
++    const forwardExistingAbort = () => controller.abort();
+     // Forward existing signal abort
+     if (existingSignal?.aborted) {
+         controller.abort();
+         return controller.signal;
+     }
+-    existingSignal?.addEventListener('abort', () => controller.abort());
++    existingSignal?.addEventListener('abort', forwardExistingAbort, { once: true });
+     // Add timeout
+     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+-    // Clean up timeout if signal is aborted early
+-    controller.signal.addEventListener('abort', () => clearTimeout(timeoutId));
++    // Clean up timeout and the forwarded listener when either signal aborts.
++    controller.signal.addEventListener('abort', () => {
++        clearTimeout(timeoutId);
++        existingSignal?.removeEventListener('abort', forwardExistingAbort);
++    }, { once: true });
+     return controller.signal;
+ }
+ // ==== Glob helpers ====
+@@ -577,6 +581,7 @@ export class Container extends DurableObject {
+             waitInterval: pollInterval,
+             retries: waitOptions?.retries ?? Math.ceil(TIMEOUT_TO_GET_CONTAINER_MS / pollInterval),
+             portToCheck,
++            portProbeTimeoutMS: waitOptions?.portProbeTimeoutMS,
+         }, startOptions);
+         this.setupMonitorCallbacks();
+         // TODO: We should consider an onHealthy callback
+@@ -614,6 +619,7 @@ export class Container extends DurableObject {
+             retries: containerGetRetries,
+             waitInterval: pollInterval,
+             portToCheck: portsToCheck[0],
++            portProbeTimeoutMS: resolvedCancellationOptions.portProbeTimeoutMS,
+         };
+         // Start the container if it's not running
+         const triesUsed = await this.startContainerIfNotRunning(waitOptions, resolvedStartOptions);
+@@ -626,6 +632,7 @@ export class Container extends DurableObject {
+                 waitInterval: pollInterval,
+                 retries: triesLeft,
+                 portToCheck: port,
++                portProbeTimeoutMS: resolvedCancellationOptions.portProbeTimeoutMS,
+             });
+         }
+         this.setupMonitorCallbacks();
+@@ -660,7 +667,7 @@ export class Container extends DurableObject {
+         // Try to connect to the port multiple times
+         for (let i = 0; i < tries; i++) {
+             try {
+-                const combinedSignal = addTimeoutSignal(waitOptions.signal, PING_TIMEOUT_MS);
++                const combinedSignal = addTimeoutSignal(waitOptions.signal, waitOptions.portProbeTimeoutMS ?? PING_TIMEOUT_MS);
+                 await tcpPort.fetch(`http://${this.pingEndpoint}`, { signal: combinedSignal });
+                 // Successfully connected to this port
+                 break;
+@@ -1386,7 +1393,7 @@ export class Container extends DurableObject {
+             // TODO: Make this the port I'm trying to get!
+             const port = this.container.getTcpPort(waitOptions.portToCheck);
+             try {
+-                const combinedSignal = addTimeoutSignal(waitOptions.signal, PING_TIMEOUT_MS);
++                const combinedSignal = addTimeoutSignal(waitOptions.signal, waitOptions.portProbeTimeoutMS ?? PING_TIMEOUT_MS);
+                 await port.fetch('http://containerstarthealthcheck', { signal: combinedSignal });
+                 return tries;
+             }
+diff --git a/dist/types/index.d.ts b/dist/types/index.d.ts
+index 93a2ee71d2b874ee9a0704cb5ddf1ba6d3b3a7ad..b3fd51ef705152444392555f7e8c5dde941a3815 100644
+--- a/dist/types/index.d.ts
++++ b/dist/types/index.d.ts
+@@ -62,6 +62,8 @@ export interface CancellationOptions {
+     portReadyTimeoutMS?: number;
+     /** time to wait between polling, in milliseconds */
+     waitInterval?: number;
++    /** max time to wait for one TCP readiness probe, in milliseconds */
++    portProbeTimeoutMS?: number;
+ }
+ /**
+  * Options for waitForPort()
+@@ -75,6 +77,8 @@ export interface WaitOptions {
+     retries?: number;
+     /** Time to wait in between polling port for readiness, in milliseconds */
+     waitInterval?: number;
++    /** Max time to wait for one TCP readiness probe, in milliseconds */
++    portProbeTimeoutMS?: number;
+ }
+ /**
+  * Represents a scheduled task within a Container
