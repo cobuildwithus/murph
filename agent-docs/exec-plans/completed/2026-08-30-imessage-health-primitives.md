@@ -264,6 +264,10 @@ Updated: 2026-08-31
   lacked a readable raster; parent review independently inspected the synthetic
   maximum-density card and confirmed the tested hierarchy, alignment, gaps,
   averages, trends, and separate RMSSD/SDNN labeling.
+- After `main` advanced, its newer bounded-memory and normalized-wearable prompt
+  guidance was preserved alongside the default-off health-card guidance. The
+  resolved merge passes 103/103 planning tests, 31/31 focused health-card and
+  prompt tests, assistant-engine typecheck, and the complexity guard.
 - Physical installed-app, app-absent, macOS, image-failure, and VoiceOver proof
   remains required before enabling the exact-value rollout flag.
 
