@@ -34,13 +34,19 @@ errors out of the receipt. Exact-name application discovery uses the provider
 list only to resolve one application identifier; both the pre-deploy and
 post-deploy receipt snapshots come from that application's detail endpoint.
 After Wrangler reports a successful container change, the deploy helper waits
-up to two minutes for those detail snapshots to expose the exact transition;
-the bounded poll fails closed instead of issuing a stale receipt.
-The provider application version is a final-state snapshot, not a deploy
-counter; an `updated` entry requires the existing provider application identity
-to remain continuous and the detail snapshot's version or image to change. A
-later protected observer must match the receipt to 100% Worker traffic and the
-final container versions, image digests, capacities, and rollout outcomes. Land
+up to two minutes for the provider to expose the exact transition. While a
+rollout is active, the receipt uses that new rollout's authoritative target
+version and image only when its current version and image match the pre-deploy
+application and its identifier differs from any pre-existing active rollout.
+If the rollout has already completed, the receipt uses the transitioned
+application detail instead. Unreadable, reused, reverted, replaced, or
+unrelated rollout evidence fails closed instead of issuing a stale receipt.
+The provider application version is a release identity, not a deploy counter;
+an `updated` entry requires the existing provider application identity to
+remain continuous and either a newly active target or a completed detail
+transition. A later protected observer must match the receipt to 100% Worker
+traffic and the final container versions, image digests, capacities, and rollout
+outcomes. Land
 this public producer before enabling a private workflow that requires the
 receipt; the reverse order intentionally fails closed.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.

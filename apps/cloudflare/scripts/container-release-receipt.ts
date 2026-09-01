@@ -16,10 +16,19 @@ export interface WranglerContainerAction {
 
 /** Raw provider identity retained only long enough to classify this deploy. */
 export interface CloudflareContainerApplicationIdentity {
+  activeRollout?: CloudflareContainerRolloutIdentity;
   applicationId: string;
   applicationName: string;
   image: string;
   version: number;
+}
+
+export interface CloudflareContainerRolloutIdentity {
+  currentImage: string;
+  currentVersion: number;
+  rolloutId: string;
+  targetImage: string;
+  targetVersion: number;
 }
 
 export interface ContainerReleaseEntry {
@@ -43,6 +52,16 @@ export type ReadUtf8File = (
 export type ListCloudflareContainerApplications = (
   applicationName: string,
 ) => Promise<unknown>;
+
+export type ReadCloudflareContainerRollout = (
+  applicationId: string,
+  rolloutId: string,
+) => Promise<unknown>;
+
+export interface CloudflareContainerProvider {
+  listApplications: ListCloudflareContainerApplications;
+  readRollout: ReadCloudflareContainerRollout;
+}
 
 export type CloudflareContainerFetch = (
   input: URL,
@@ -195,6 +214,7 @@ export async function readCloudflareContainerApplicationIdentities(
   expectedContainers: readonly RenderedContainerIdentity[],
   listApplications: ListCloudflareContainerApplications,
   phase: ContainerApplicationReadPhase,
+  readRollout?: ReadCloudflareContainerRollout,
 ): Promise<CloudflareContainerApplicationIdentity[]> {
   assertUniqueRenderedContainers(expectedContainers, invalidProviderState);
   const identities: CloudflareContainerApplicationIdentity[] = [];
@@ -211,7 +231,27 @@ export async function readCloudflareContainerApplicationIdentities(
       throw invalidProviderState();
     }
 
-    const applications = response.map(parseProviderIdentity);
+    const applications = await Promise.all(response.map(async (application) => {
+      const identity = parseProviderIdentity(application);
+      const activeRolloutId = parseProviderActiveRolloutId(application);
+      if (!activeRolloutId) {
+        return identity;
+      }
+      if (!readRollout) {
+        throw invalidProviderState();
+      }
+
+      let rollout: unknown;
+      try {
+        rollout = await readRollout(identity.applicationId, activeRolloutId);
+      } catch {
+        throw invalidProviderState();
+      }
+      return {
+        ...identity,
+        activeRollout: parseProviderRolloutIdentity(rollout, activeRolloutId),
+      };
+    }));
     if (phase === "before" && applications.length === 0) {
       continue;
     }
@@ -227,17 +267,26 @@ export async function readCloudflareContainerApplicationIdentities(
   return identities.sort(compareByApplicationName);
 }
 
-export function createCloudflareContainerApplicationLister(input: {
+export function createCloudflareContainerProvider(input: {
   accountId: string;
   apiToken: string;
   fetchImpl?: CloudflareContainerFetch;
-}): ListCloudflareContainerApplications {
+}): CloudflareContainerProvider {
   if (!isConfiguredSingleLine(input.accountId) || !isConfiguredSingleLine(input.apiToken)) {
     throw invalidProviderState();
   }
   const fetchImpl = input.fetchImpl ?? defaultCloudflareFetch;
+  const createRequestInit = () => ({
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${input.apiToken}`,
+    },
+    method: "GET",
+    signal: AbortSignal.timeout(CLOUDFLARE_REQUEST_TIMEOUT_MS),
+  } as const);
 
-  return async (applicationName) => {
+  const listApplications: ListCloudflareContainerApplications = async (applicationName) => {
     if (!APPLICATION_NAME_PATTERN.test(applicationName)) {
       throw invalidProviderState();
     }
@@ -249,16 +298,7 @@ export function createCloudflareContainerApplicationLister(input: {
     url.searchParams.set("name", applicationName);
 
     try {
-      const requestInit = {
-        cache: "no-store",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${input.apiToken}`,
-        },
-        method: "GET",
-        signal: AbortSignal.timeout(CLOUDFLARE_REQUEST_TIMEOUT_MS),
-      } as const;
-      const response = await fetchImpl(url, requestInit);
+      const response = await fetchImpl(url, createRequestInit());
       if (!response.ok) {
         throw invalidProviderState();
       }
@@ -272,10 +312,7 @@ export function createCloudflareContainerApplicationLister(input: {
           `${CLOUDFLARE_API_BASE_URL}/accounts/${encodeURIComponent(input.accountId)}`
             + `/containers/applications/${encodeURIComponent(reference.applicationId)}`,
         );
-        const detailResponse = await fetchImpl(detailUrl, {
-          ...requestInit,
-          signal: AbortSignal.timeout(CLOUDFLARE_REQUEST_TIMEOUT_MS),
-        });
+        const detailResponse = await fetchImpl(detailUrl, createRequestInit());
         if (!detailResponse.ok) {
           throw invalidProviderState();
         }
@@ -293,6 +330,29 @@ export function createCloudflareContainerApplicationLister(input: {
       throw invalidProviderState();
     }
   };
+
+  const readRollout: ReadCloudflareContainerRollout = async (applicationId, rolloutId) => {
+    if (!isConfiguredSingleLine(applicationId) || !isConfiguredSingleLine(rolloutId)) {
+      throw invalidProviderState();
+    }
+    const rolloutUrl = new URL(
+      `${CLOUDFLARE_API_BASE_URL}/accounts/${encodeURIComponent(input.accountId)}`
+        + `/containers/applications/${encodeURIComponent(applicationId)}`
+        + `/rollouts/${encodeURIComponent(rolloutId)}`,
+    );
+
+    try {
+      const response = await fetchImpl(rolloutUrl, createRequestInit());
+      if (!response.ok) {
+        throw invalidProviderState();
+      }
+      return readCloudflareResultObject(await response.json());
+    } catch {
+      throw invalidProviderState();
+    }
+  };
+
+  return { listApplications, readRollout };
 }
 
 export function buildContainerReleaseEntries(input: {
@@ -324,26 +384,36 @@ export function buildContainerReleaseEntries(input: {
       }
 
       let disposition: ContainerReleaseEntry["disposition"];
+      let releasedImage = after.image;
+      let releasedVersion = after.version;
       switch (action.action) {
         case "created":
-          if (before || after.version !== 1) {
+          if (before || after.version !== 1 || after.activeRollout) {
             throw invalidReleaseTransition();
           }
           disposition = "created";
           break;
-        case "modified":
-          if (!before
-            || before.applicationId !== after.applicationId
+        case "modified": {
+          if (!before || before.applicationId !== after.applicationId) {
+            throw invalidReleaseTransition();
+          }
+          const rolloutTarget = resolveNewActiveRolloutTarget(before, after);
+          if (rolloutTarget) {
+            releasedImage = rolloutTarget.image;
+            releasedVersion = rolloutTarget.version;
+          } else if (before.activeRollout
             || (before.version === after.version && before.image === after.image)) {
             throw invalidReleaseTransition();
           }
           disposition = "updated";
           break;
+        }
         case "unchanged":
           if (!before
             || before.applicationId !== after.applicationId
             || before.version !== after.version
-            || before.image !== after.image) {
+            || before.image !== after.image
+            || !sameActiveRollout(before.activeRollout, after.activeRollout)) {
             throw invalidReleaseTransition();
           }
           disposition = "unchanged";
@@ -354,8 +424,8 @@ export function buildContainerReleaseEntries(input: {
         applicationName: action.applicationName,
         className: action.className,
         disposition,
-        imageSha256: createHash("sha256").update(after.image).digest("hex"),
-        version: after.version,
+        imageSha256: createHash("sha256").update(releasedImage).digest("hex"),
+        version: releasedVersion,
       };
     });
 }
@@ -366,6 +436,7 @@ export async function waitForCloudflareContainerReleaseEntries(input: {
   expectedContainers: readonly RenderedContainerIdentity[];
   listApplications: ListCloudflareContainerApplications;
   maxAttempts?: number;
+  readRollout?: ReadCloudflareContainerRollout;
   retryDelayMs?: number;
   sleep?: (delayMs: number) => Promise<void>;
 }): Promise<ContainerReleaseEntry[]> {
@@ -384,6 +455,7 @@ export async function waitForCloudflareContainerReleaseEntries(input: {
         input.expectedContainers,
         input.listApplications,
         "after",
+        input.readRollout,
       );
       return buildContainerReleaseEntries({
         actions: input.actions,
@@ -467,6 +539,90 @@ function parseProviderIdentity(value: unknown): CloudflareContainerApplicationId
   return { applicationId, applicationName, image, version };
 }
 
+function parseProviderActiveRolloutId(value: unknown): string | null {
+  if (!isRecord(value)) {
+    throw invalidProviderState();
+  }
+  const activeRolloutId = value.active_rollout_id;
+  if (activeRolloutId === undefined || activeRolloutId === null) {
+    return null;
+  }
+  if (typeof activeRolloutId !== "string" || !isConfiguredSingleLine(activeRolloutId)) {
+    throw invalidProviderState();
+  }
+  return activeRolloutId;
+}
+
+function parseProviderRolloutIdentity(
+  value: unknown,
+  expectedRolloutId: string,
+): CloudflareContainerRolloutIdentity {
+  if (!isRecord(value)
+    || !isRecord(value.current_configuration)
+    || !isRecord(value.target_configuration)
+    || value.id !== expectedRolloutId
+    || (value.status !== "pending"
+      && value.status !== "progressing"
+      && value.status !== "completed")) {
+    throw invalidProviderState();
+  }
+  const currentVersion = readPositiveSafeInteger(value, "current_version", invalidProviderState);
+  const targetVersion = readPositiveSafeInteger(value, "target_version", invalidProviderState);
+  return {
+    currentImage: readRequiredNonemptyString(
+      value.current_configuration,
+      "image",
+      invalidProviderState,
+    ),
+    currentVersion,
+    rolloutId: expectedRolloutId,
+    targetImage: readRequiredNonemptyString(
+      value.target_configuration,
+      "image",
+      invalidProviderState,
+    ),
+    targetVersion,
+  };
+}
+
+function resolveNewActiveRolloutTarget(
+  before: CloudflareContainerApplicationIdentity,
+  after: CloudflareContainerApplicationIdentity,
+): Readonly<{ image: string; version: number }> | null {
+  const rollout = after.activeRollout;
+  if (!rollout) {
+    return null;
+  }
+  const priorRolloutId = before.activeRollout?.rolloutId;
+  const applicationMatchesCurrent = after.version === rollout.currentVersion
+    && after.image === rollout.currentImage;
+  const applicationMatchesTarget = after.version === rollout.targetVersion
+    && after.image === rollout.targetImage;
+  if (rollout.rolloutId === priorRolloutId
+    || rollout.currentVersion !== before.version
+    || rollout.currentImage !== before.image
+    || (rollout.currentVersion === rollout.targetVersion
+      && rollout.currentImage === rollout.targetImage)
+    || (!applicationMatchesCurrent && !applicationMatchesTarget)) {
+    throw invalidReleaseTransition();
+  }
+  return { image: rollout.targetImage, version: rollout.targetVersion };
+}
+
+function sameActiveRollout(
+  left: CloudflareContainerRolloutIdentity | undefined,
+  right: CloudflareContainerRolloutIdentity | undefined,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  return left.rolloutId === right.rolloutId
+    && left.currentVersion === right.currentVersion
+    && left.currentImage === right.currentImage
+    && left.targetVersion === right.targetVersion
+    && left.targetImage === right.targetImage;
+}
+
 function indexProviderIdentities(
   identities: readonly CloudflareContainerApplicationIdentity[],
 ): Map<string, CloudflareContainerApplicationIdentity> {
@@ -480,7 +636,8 @@ function indexProviderIdentities(
       || !isConfiguredSingleLine(identity.image)
       || typeof identity.version !== "number"
       || !Number.isSafeInteger(identity.version)
-      || identity.version <= 0) {
+      || identity.version <= 0
+      || !isValidProviderRolloutIdentity(identity.activeRollout)) {
       throw invalidReleaseTransition();
     }
     if (indexed.has(identity.applicationName)) {
@@ -489,6 +646,19 @@ function indexProviderIdentities(
     indexed.set(identity.applicationName, identity);
   }
   return indexed;
+}
+
+function isValidProviderRolloutIdentity(
+  rollout: CloudflareContainerRolloutIdentity | undefined,
+): boolean {
+  return rollout === undefined
+    || (isConfiguredSingleLine(rollout.rolloutId)
+      && isConfiguredSingleLine(rollout.currentImage)
+      && Number.isSafeInteger(rollout.currentVersion)
+      && rollout.currentVersion > 0
+      && isConfiguredSingleLine(rollout.targetImage)
+      && Number.isSafeInteger(rollout.targetVersion)
+      && rollout.targetVersion > 0);
 }
 
 function assertUniqueProviderIdentities(
@@ -540,6 +710,18 @@ function readRequiredNonemptyString(
 ): string {
   const value = readOptionalNonemptyString(record, key);
   if (!value) {
+    throw createError();
+  }
+  return value;
+}
+
+function readPositiveSafeInteger(
+  record: Record<string, unknown>,
+  key: string,
+  createError: () => Error,
+): number {
+  const value = record[key];
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
     throw createError();
   }
   return value;
