@@ -4052,9 +4052,19 @@ describe("HostedUserRunner execution coordination", () => {
 
   it("accepts active system-mailbox rechecks without waking the running pass", async () => {
     const processingMode = "system_mailbox" as const;
+    const recheckCount = 8;
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => "accepted");
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const wakeRuntime = vi.fn<NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>>(
       async () => ({
         action: "woken" as const,
         kind: "accepted" as const,
@@ -4068,9 +4078,11 @@ describe("HostedUserRunner execution coordination", () => {
       leaseGeneration: "2",
       userId: TEST_USER_ID,
     }));
-    const { invoke, runner, sql } = createRunnerHarness({
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      abortWorkspaceInvocation,
       ensureProcessing,
       readActiveRuntimeUserFence,
+      wakeRuntime,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -4080,24 +4092,37 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceVersion: "7",
     });
 
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: `test-orchestration-attempt-${processingMode}-recheck`,
-      processingMode,
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "already_running",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
-      runtimeAttemptId: token.attemptId,
-    });
+    for (let recheckIndex = 0; recheckIndex < recheckCount; recheckIndex += 1) {
+      await expect(runner.ensureRuntimeProcessingForUser({
+        orchestrationAttemptId:
+          `test-orchestration-attempt-${processingMode}-recheck-${recheckIndex}`,
+        processingMode,
+        userId: TEST_USER_ID,
+      })).resolves.toEqual({
+        action: "already_running",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
+        runtimeAttemptId: token.attemptId,
+      });
+    }
+    await flushWaitUntil();
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledTimes(recheckCount);
     expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(wakeRuntime).not.toHaveBeenCalled();
+    expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
       active_expires_at: null,
+      active_generation: token.generation,
+      active_reason: processingMode,
+      active_started_at: FIXED_NOW,
+      active_workspace_version: "7",
       backoff_until: null,
+      failure_count: 0,
+      last_error_code: null,
+      last_invocation_at: null,
       wake_at: null,
     });
   });
