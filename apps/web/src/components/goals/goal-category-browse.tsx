@@ -4,8 +4,10 @@ import {
   GoalCategoryArtwork,
   getGoalCategoryVisual,
 } from "@/src/components/goals/goal-visual";
-import { PageHeader } from "@/src/components/ui/page-header";
-import type { GoalCategory } from "@/src/lib/goals/goal-categories";
+import {
+  GOAL_CATEGORIES,
+  type GoalCategory,
+} from "@/src/lib/goals/goal-categories";
 import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
 import { cn } from "@/src/lib/utils";
 
@@ -50,24 +52,54 @@ export function GoalCategoryBrowse({
         <span className="px-2" aria-hidden="true">/</span>
         <span>{category.label}</span>
       </nav>
-      <div className="flex items-center gap-4 border-b border-border/70 pb-7 sm:gap-6 sm:pb-9">
-        <GoalCategoryArtwork
-          category={category.slug}
-          className="size-16 sm:size-24"
-          imageClassName="p-3"
-        />
-        <div className="min-w-0 flex-1">
-          <PageHeader
-            eyebrow="Goal library"
-            title={category.directoryTitle}
-            description={category.description}
-          >
-            <p className="mt-3 text-xs text-muted-foreground">
-              {goals.length} practical {goals.length === 1 ? "guide" : "guides"}
+      <header className="border-b border-[#c4a882]/30 pb-8 sm:pb-10">
+        <div className="grid gap-6 sm:grid-cols-[minmax(0,1fr)_7.5rem] sm:items-start sm:gap-8">
+          <div className="min-w-0">
+            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#736a58]">
+              Goal library · {goals.length} practical{" "}
+              {goals.length === 1 ? "guide" : "guides"}
+            </span>
+            <h1 className="mt-3 font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-foreground sm:text-5xl">
+              {category.directoryTitle}
+            </h1>
+            <p className="mt-4 max-w-2xl text-lg/8 text-pretty text-muted-foreground">
+              {category.description}
             </p>
-          </PageHeader>
+          </div>
+          <GoalCategoryArtwork
+            category={category.slug}
+            className="order-first size-20 sm:order-none sm:size-[7.5rem] sm:justify-self-end"
+            imageClassName="p-3"
+          />
         </div>
-      </div>
+        <nav
+          aria-label="Other goal categories"
+          className="mt-8 flex flex-wrap gap-2"
+        >
+          {GOAL_CATEGORIES.filter((other) => other.slug !== category.slug).map(
+            (other) => {
+              const visual = getGoalCategoryVisual(other.slug);
+
+              return (
+                <Link
+                  href={`/goals/${other.slug}`}
+                  key={other.slug}
+                  className="inline-flex min-h-9 items-center gap-2 rounded-full border border-black/[0.08] bg-[#fffdf8] px-3.5 text-sm font-medium text-[#635a48] transition-colors hover:border-black/[0.16] hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "size-1.5 rounded-full bg-current",
+                      visual.accentClassName,
+                    )}
+                  />
+                  {other.label}
+                </Link>
+              );
+            },
+          )}
+        </nav>
+      </header>
 
       {roots.length > 0 ? (
         <div className="flex flex-col gap-3">

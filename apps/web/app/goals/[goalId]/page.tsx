@@ -16,6 +16,7 @@ import {
   resolveHealthCommonsGoalPage,
 } from "@/src/lib/health-commons/goal-projections";
 import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
+import { selectRelatedGoals } from "@/src/lib/goals/goal-related";
 import { serializeStructuredData } from "@/src/lib/public-agent-content";
 import {
   createMurphPageMetadata,
@@ -105,6 +106,15 @@ export default async function GoalOrCategoryPage({
     startPrompt: resolved.goal.startPrompt,
     textAvailable: false,
   });
+  const categoryGoals = listHealthCommonsGoalsByCategory(goalCategory.slug);
+  const related = {
+    goals: selectRelatedGoals(
+      resolved.goal,
+      categoryGoals,
+      goalCategory.featuredRouteIds,
+    ),
+    total: categoryGoals.length,
+  };
   const structuredData = buildGoalStructuredData({
     category: goalCategory,
     goal: resolved.goal,
@@ -123,6 +133,7 @@ export default async function GoalOrCategoryPage({
         category={goalCategory}
         contactOption={contactOption}
         goal={resolved.goal}
+        related={related}
       />
     </>
   );

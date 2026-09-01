@@ -1,6 +1,7 @@
 "use client";
 
-import { Search, X } from "lucide-react";
+import { ArrowRight, Search, X } from "lucide-react";
+import Link from "next/link";
 import {
   useMemo,
   useRef,
@@ -9,18 +10,29 @@ import {
 } from "react";
 
 import { GoalBrowseCard } from "@/src/components/goals/goal-browse-card";
+import { getGoalCategoryVisual } from "@/src/components/goals/goal-visual";
 import { Input } from "@/src/components/ui/input";
+import type { GoalCategorySlug } from "@/src/lib/goals/goal-categories";
 import {
   searchGoalItems,
   type GoalSearchItem,
 } from "@/src/lib/goals/goal-search";
+import { cn } from "@/src/lib/utils";
 
 const GOAL_SEARCH_BATCH_SIZE = 16;
 
+export interface GoalCategoryDirectoryEntry {
+  count: number;
+  label: string;
+  slug: GoalCategorySlug;
+}
+
 export function GoalSearchExperience({
+  categories,
   children,
   goals,
 }: {
+  categories: readonly GoalCategoryDirectoryEntry[];
   children: ReactNode;
   goals: readonly GoalSearchItem[];
 }) {
@@ -41,51 +53,67 @@ export function GoalSearchExperience({
   }
 
   return (
-    <div className="flex flex-col gap-12 pb-12">
-      <header className="border-b border-[#c4a882]/35 pb-10">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#736a58]">
-          Health guides
-        </span>
-        <h1 className="mt-3 max-w-[12ch] font-serif text-[clamp(3rem,7vw,5rem)] font-semibold leading-[0.96] tracking-[-0.04em] text-balance text-[#2d3436]">
-          Goals
-        </h1>
-        <p className="mt-5 max-w-[62ch] text-base/7 text-pretty text-[#635a48] sm:text-lg/8">
-          Choose an outcome you care about. Every guide gives you a practical
-          plan you can use on your own or carry out with Murph.
-        </p>
-        <div
-          className="relative mt-8 w-full"
-          data-goal-search="full-width"
-          role="search"
-        >
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute left-5 top-1/2 z-10 size-5 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            ref={inputRef}
-            aria-label="Search goals"
-            autoCapitalize="none"
-            autoComplete="off"
-            className="border-[#c4a882]/45 bg-[#fffdf8] pl-13 pr-20 shadow-[0_1px_2px_rgba(45,52,54,0.03)] [&::-webkit-search-cancel-button]:hidden"
-            inputSize="xl"
-            maxLength={100}
-            onInput={(event) => setQuery(event.currentTarget.value)}
-            placeholder="What do you want to improve?"
-            spellCheck={false}
-            type="search"
-          />
-          {query ? (
-            <button
-              aria-label="Clear goal search"
-              className="absolute right-3 top-1/2 flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring"
-              onClick={clearSearch}
-              type="button"
+    <div className="flex flex-col gap-12 pb-12 sm:gap-14">
+      <header className="border-b border-[#c4a882]/35 pb-10 sm:pb-12">
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(17rem,0.85fr)] lg:items-end lg:gap-16">
+          <div>
+            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#736a58]">
+              Health guides
+            </span>
+            <h1 className="mt-3 max-w-[12ch] font-serif text-[clamp(2.75rem,6vw,4.5rem)] font-semibold leading-[0.98] tracking-[-0.04em] text-balance text-[#2d3436]">
+              Goals
+            </h1>
+            <p className="mt-5 max-w-[56ch] text-base/7 text-pretty text-[#635a48] sm:text-lg/8">
+              Choose an outcome you care about. Every guide gives you a practical
+              plan you can use on your own or carry out with Murph.
+            </p>
+            <div
+              className="relative mt-8 w-full"
+              data-goal-search="full-width"
+              role="search"
             >
-              <X aria-hidden="true" className="size-4" />
-              <span className="hidden sm:inline">Clear</span>
-            </button>
-          ) : null}
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-5 top-1/2 z-10 size-5 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                ref={inputRef}
+                aria-label="Search goals"
+                autoCapitalize="none"
+                autoComplete="off"
+                className="border-[#c4a882]/45 bg-[#fffdf8] pl-13 pr-20 shadow-[0_1px_2px_rgba(45,52,54,0.03)] [&::-webkit-search-cancel-button]:hidden"
+                inputSize="xl"
+                maxLength={100}
+                onInput={(event) => setQuery(event.currentTarget.value)}
+                placeholder="What do you want to improve?"
+                spellCheck={false}
+                type="search"
+              />
+              {query ? (
+                <button
+                  aria-label="Clear goal search"
+                  className="absolute right-3 top-1/2 flex min-h-10 -translate-y-1/2 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring"
+                  onClick={clearSearch}
+                  type="button"
+                >
+                  <X aria-hidden="true" className="size-4" />
+                  <span className="hidden sm:inline">Clear</span>
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-4 text-[13px]/6 text-[#736a58]">
+              {goals.length} guides across {categories.length} categories,
+              written and kept current by{" "}
+              <Link
+                href="/goals/methodology"
+                className="font-medium text-[#2d3436] underline decoration-[#c4a882]/70 underline-offset-4 transition-colors hover:decoration-[#2d3436]"
+              >
+                Murph Health Commons
+              </Link>
+              .
+            </p>
+          </div>
+          <GoalCategoryDirectory categories={categories} />
         </div>
       </header>
 
@@ -98,6 +126,58 @@ export function GoalSearchExperience({
         />
       ) : children}
     </div>
+  );
+}
+
+function GoalCategoryDirectory({
+  categories,
+}: {
+  categories: readonly GoalCategoryDirectoryEntry[];
+}) {
+  return (
+    <nav
+      aria-label="Goal categories"
+      className="rounded-[1.25rem] border border-black/[0.07] bg-[#fffdf8] p-2 shadow-[0_1px_2px_rgba(45,52,54,0.03)]"
+      data-goal-category-directory
+    >
+      <span className="block px-3 pb-1.5 pt-2.5 font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#736a58]">
+        Browse by category
+      </span>
+      <ul className="flex flex-col">
+        {categories.map((category) => {
+          const visual = getGoalCategoryVisual(category.slug);
+
+          return (
+            <li key={category.slug}>
+              <Link
+                href={`/goals/${category.slug}`}
+                className="group flex min-h-11 items-center justify-between gap-4 rounded-xl px-3 py-2 transition-colors hover:bg-[#c4a882]/12 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "size-2 shrink-0 rounded-full bg-current",
+                      visual.accentClassName,
+                    )}
+                  />
+                  <span className="truncate font-serif text-[1.0625rem] font-semibold tracking-[-0.01em] text-[#2d3436]">
+                    {category.label}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2 font-mono text-[11px] text-[#736a58]">
+                  {category.count}
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="size-3.5 opacity-0 transition-[opacity,transform] group-hover:opacity-100 motion-safe:group-hover:translate-x-0.5"
+                  />
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }
 

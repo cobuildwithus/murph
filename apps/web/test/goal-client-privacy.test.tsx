@@ -638,6 +638,7 @@ describe("public goal client privacy", () => {
     );
     const rendered = await renderClientComponent(
       <GoalSearchExperience
+        categories={[{ count: 1, label: "Sleep", slug: "sleep" }]}
         goals={[
           {
             goalPhrase: "improve my deep sleep",
@@ -715,7 +716,10 @@ describe("public goal client privacy", () => {
       title: `Improve Sleep Outcome ${index + 1}`,
     }));
     const rendered = await renderClientComponent(
-      <GoalSearchExperience goals={goals}>
+      <GoalSearchExperience
+        categories={[{ count: goals.length, label: "Sleep", slug: "sleep" }]}
+        goals={goals}
+      >
         <div>Browse goals</div>
       </GoalSearchExperience>,
       {
