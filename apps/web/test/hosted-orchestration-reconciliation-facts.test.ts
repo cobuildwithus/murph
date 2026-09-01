@@ -727,6 +727,11 @@ describe("hosted orchestration reconciliation facts", () => {
   it.each([
     ["device-sync.wake", "device-sync.wake:item", "model_free"],
     [
+      "health.daily-metric.reported",
+      "health.daily-metric.reported:item",
+      "model_free",
+    ],
+    [
       "environment-interview.completed",
       "environment-interview.completed:item",
       "model_free",

@@ -676,6 +676,60 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
+  it("keeps a reported daily metric in the model-free device frontier", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const deviceWake = buildPendingDeviceSyncMailboxItem({
+      itemId: "pending_device_sync_before_reported_metric",
+      mailboxLaneSeq: "1",
+    });
+    const reportedMetric = buildPendingReportedDailyMetricMailboxItem({
+      itemId: "pending_reported_metric_after_device_sync",
+      mailboxLaneSeq: "2",
+    });
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [deviceWake, reportedMetric],
+      }));
+
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: "2026-04-27T00:00:00.000Z",
+          executionClass: "model_free",
+          reason: "device-sync.reconcile",
+        },
+      });
+
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: deviceWake,
+        vaultRoot,
+      });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: "2026-04-27T00:00:00.000Z",
+          executionClass: "model_free",
+          reason: "mailbox",
+        },
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("keeps a distinct dense raw retention successor after dirty receipt recording", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
@@ -1106,6 +1160,40 @@ function buildPendingDeviceSyncMailboxItem(input: {
       kind: "device-sync.wake",
       occurredAt: "2026-04-27T00:00:00.000Z",
       reason: "reconcile_due",
+      userId: "member_123",
+    },
+  };
+}
+
+function buildPendingReportedDailyMetricMailboxItem(input: {
+  itemId: string;
+  mailboxLaneSeq: string;
+}): HostedSystemMailboxPendingItem {
+  return {
+    attemptCount: 0,
+    itemId: input.itemId,
+    lastAttemptAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    mailboxDedupeKey: `health.daily-metric.reported:${input.itemId}`,
+    mailboxLaneSeq: input.mailboxLaneSeq,
+    nextAttemptAt: null,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    postCheckpointRecord: null,
+    preferenceCausalSeq: null,
+    requestId: null,
+    routeAction: "import-reported-daily-metric",
+    status: "pending",
+    wake: {
+      dailyMetric: {
+        date: "2026-04-27",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
+      eventId: `health.daily-metric.reported:${input.itemId}`,
+      kind: "health.daily-metric.reported",
+      occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_123",
     },
   };
