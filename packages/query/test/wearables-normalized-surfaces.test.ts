@@ -22,6 +22,7 @@ import {
   summarizeWearableMetricTrend,
   summarizeWearableSourceHealth,
 } from "../src/wearables.ts";
+import { collectJunctionWorkoutFeatures } from "../src/wearables/workout-features.ts";
 
 function makeEntity(
   overrides: Partial<CanonicalEntity> & Pick<CanonicalEntity, "entityId" | "family" | "kind" | "recordClass">,
@@ -249,6 +250,69 @@ function makeVaultFromJunctionSnapshot(snapshot: Parameters<typeof normalizeJunc
 
   return makeVault([...events, ...samples]);
 }
+
+test("workout features use public query normalization for underscore provider sources", () => {
+  const date = "2026-08-30";
+  const startedAt = `${date}T08:00:00.000Z`;
+  const makeWorkoutFeature = (provider: string, entityId: string) =>
+    makeEntity({
+      entityId,
+      family: "event",
+      kind: "measurement",
+      recordClass: "ledger",
+      occurredAt: startedAt,
+      date,
+      tags: ["workout-sport-running"],
+      attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: provider,
+          sourceType: "watch",
+          version: 1,
+        },
+        externalRef: {
+          system: "junction",
+          resourceType: `${provider}-workout-stream`,
+          resourceId: `${entityId}-resource`,
+          facet: "workout-stream-feature",
+        },
+      },
+    });
+  const futureProviderFeature = makeWorkoutFeature("future_ring", "evt_future_ring_workout");
+  const internalProviderFeature = makeWorkoutFeature("junction", "evt_internal_workout");
+
+  assert.deepEqual(
+    collectJunctionWorkoutFeatures(
+      [futureProviderFeature, internalProviderFeature],
+      { providers: ["future-ring"] },
+    ),
+    [{
+      date,
+      feature: {
+        activityType: "running",
+        provider: "future-ring",
+        splits: [],
+        startedAt,
+      },
+    }],
+  );
+  assert.deepEqual(
+    collectJunctionWorkoutFeatures([futureProviderFeature], { providers: ["future_ring"] }),
+    [{
+      date,
+      feature: {
+        activityType: "running",
+        provider: "future-ring",
+        splits: [],
+        startedAt,
+      },
+    }],
+  );
+  assert.deepEqual(
+    collectJunctionWorkoutFeatures([internalProviderFeature], {}),
+    [],
+  );
+});
 
 test("Junction activity heart-rate and intensity metrics stay out of sleep and support latest/trend queries", () => {
   const activityOnly = makeVaultFromJunctionSnapshot({
@@ -2434,4 +2498,40 @@ test("normalized wearable surfaces honor provider filters before selecting lates
     ),
     true,
   );
+});
+
+test("Junction Fitbit and Withings evidence is queryable by its public source provider", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-04-05T12:00:00.000Z",
+    summaries: {
+      activity: [{
+        date: "2026-04-05",
+        id: "fitbit-query-provider-steps",
+        sourceProviderSlug: "fitbit",
+        steps: 4_321,
+      }],
+    },
+    timeseries: {
+      weight: [{
+        sourceProviderSlug: "withings",
+        timestamp: "2026-04-05T08:00:00.000Z",
+        unit: "kg",
+        value: 72.4,
+      }],
+    },
+  });
+
+  const fitbit = summarizeWearableLatest(vault, { providers: ["fitbit"] });
+  const withings = summarizeWearableLatest(vault, { providers: ["withings"] });
+  const absent = summarizeWearableLatest(vault, { providers: ["future-ring"] });
+  const internal = summarizeWearableLatest(vault, { providers: ["junction"] });
+
+  assert.equal(fitbit?.activity?.steps.selection.provider, "fitbit");
+  assert.equal(fitbit?.activity?.steps.selection.value, 4_321);
+  assert.equal(fitbit?.bodyState, null);
+  assert.equal(withings?.bodyState?.weightKg.selection.provider, "withings");
+  assert.equal(withings?.bodyState?.weightKg.selection.value, 72.4);
+  assert.equal(withings?.activity, null);
+  assert.equal(absent, null);
+  assert.equal(internal, null);
 });

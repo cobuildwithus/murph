@@ -3,24 +3,42 @@ set -euo pipefail
 original_args=("$@")
 
 usage() {
-  printf 'Usage: %s [--data-research <reason>] [-b <branch> | -B <branch> | --detach] <path> [<start-point>]\n' "$(basename "$0")" >&2
+  local command_name
+  command_name="$(basename "$0")"
+  printf 'Usage: %s [--data-research <reason>] [-b <branch> | -B <branch> | --detach] <path> [<start-point>]\n' "$command_name" >&2
+  printf '       %s [--data-research <reason>] --codex-worktree <name> [-b <branch> | -B <branch> | --detach] [<start-point>]\n' "$command_name" >&2
   exit 2
+}
+
+require_option_value() {
+  [[ $# -ge 2 && -n "$2" ]] || usage
+  case "$2" in
+    --data-research|--codex-worktree|-b|-B|--detach|--) usage ;;
+  esac
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 data_reason=''
+codex_worktree_name=''
 mode=''
 branch=''
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --data-research)
-      [[ $# -ge 2 && -n "$2" ]] || usage
+      require_option_value "$@"
       data_reason="$2"
       shift 2
       ;;
+    --codex-worktree)
+      require_option_value "$@"
+      [[ -z "$codex_worktree_name" ]] || usage
+      codex_worktree_name="$2"
+      shift 2
+      ;;
     -b|-B)
-      [[ $# -ge 2 && -z "$mode" ]] || usage
+      require_option_value "$@"
+      [[ -z "$mode" ]] || usage
       mode="$1"
       branch="$2"
       shift 2
@@ -36,13 +54,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ $# -ge 1 && $# -le 2 ]] || usage
-target="$1"
-start_point="${2:-}"
-if [[ "$target" == /* ]]; then
-  target_path="$target"
+if [[ -n "$codex_worktree_name" ]]; then
+  [[ $# -le 1 ]] || usage
+  [[ "$codex_worktree_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+    printf 'create-worktree: managed name must be one safe path segment\n' >&2
+    exit 1
+  }
+  start_point="${1:-}"
 else
-  target_path="$repo_root/$target"
+  [[ $# -ge 1 && $# -le 2 ]] || usage
+  target="$1"
+  start_point="${2:-}"
+  if [[ "$target" == /* ]]; then
+    target_path="$target"
+  else
+    target_path="$repo_root/$target"
+  fi
 fi
 
 common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
@@ -51,6 +78,82 @@ lock_file="$state_dir/lock"
 mkdir -p "$state_dir"
 spotlight_marker_path='.metadata_never_index'
 spotlight_tree_head=''
+
+resolve_codex_worktree_target() {
+  local codex_home_dir codex_home_path codex_worktrees_candidate
+  local codex_worktrees_root primary_worktree repo_name
+  local repo_worktrees_candidate repo_worktrees_root
+
+  codex_home_dir="${CODEX_HOME:-${HOME:-}/.codex}"
+  [[ -n "${HOME:-}" || -n "${CODEX_HOME:-}" ]] || {
+    printf 'create-worktree: Codex home is unavailable\n' >&2
+    return 1
+  }
+  [[ "$codex_home_dir" == /* && -d "$codex_home_dir" ]] || {
+    printf 'create-worktree: Codex home must be an absolute directory\n' >&2
+    return 1
+  }
+  [[ -O "$codex_home_dir" && -w "$codex_home_dir" ]] || {
+    printf 'create-worktree: Codex home must be current-user-owned and writable\n' >&2
+    return 1
+  }
+  codex_home_path="$(cd "$codex_home_dir" && pwd -P)"
+
+  codex_worktrees_candidate="$codex_home_path/worktrees"
+  mkdir -p "$codex_worktrees_candidate" 2>/dev/null || {
+    printf 'create-worktree: Codex worktrees root is not writable\n' >&2
+    return 1
+  }
+  [[ -d "$codex_worktrees_candidate" \
+    && -O "$codex_worktrees_candidate" \
+    && -w "$codex_worktrees_candidate" ]] || {
+    printf 'create-worktree: Codex worktrees root must be current-user-owned and writable\n' >&2
+    return 1
+  }
+  codex_worktrees_root="$(cd "$codex_worktrees_candidate" && pwd -P)"
+  [[ "$codex_worktrees_root" == "$codex_worktrees_candidate" ]] || {
+    printf 'create-worktree: Codex worktrees root must not redirect outside its home\n' >&2
+    return 1
+  }
+
+  primary_worktree="$(
+    git -C "$repo_root" worktree list --porcelain |
+      awk '$1 == "worktree" && !found { print substr($0, 10); found = 1 }'
+  )"
+  [[ -n "$primary_worktree" && -d "$primary_worktree" ]] || {
+    printf 'create-worktree: primary repository checkout is unavailable\n' >&2
+    return 1
+  }
+  primary_worktree="$(cd "$primary_worktree" && pwd -P)"
+  repo_name="$(basename "$primary_worktree")"
+  [[ "$repo_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+    printf 'create-worktree: repository name cannot form a managed worktree path\n' >&2
+    return 1
+  }
+  repo_worktrees_candidate="$codex_worktrees_root/$repo_name"
+  mkdir -p "$repo_worktrees_candidate" 2>/dev/null || {
+    printf 'create-worktree: repository worktree root is not writable\n' >&2
+    return 1
+  }
+  [[ -d "$repo_worktrees_candidate" \
+    && -O "$repo_worktrees_candidate" \
+    && -w "$repo_worktrees_candidate" ]] || {
+    printf 'create-worktree: repository worktree root must be current-user-owned and writable\n' >&2
+    return 1
+  }
+  repo_worktrees_root="$(cd "$repo_worktrees_candidate" && pwd -P)"
+  [[ "$repo_worktrees_root" == "$repo_worktrees_candidate" ]] || {
+    printf 'create-worktree: repository worktree root must remain inside the Codex worktrees root\n' >&2
+    return 1
+  }
+
+  target="$repo_worktrees_root/$codex_worktree_name"
+  if [[ -e "$target" || -L "$target" ]]; then
+    printf 'create-worktree: managed target must not already exist\n' >&2
+    return 1
+  fi
+  target_path="$target"
+}
 
 prepare_worktree_spotlight_exclusion() {
   local exclude_file="$common_dir/info/exclude"
@@ -203,6 +306,10 @@ if [[ "${MURPH_CREATE_WORKTREE_LOCK_HELD:-0}" != 1 ]]; then
     printf 'create-worktree: flock or lockf is required for serialization\n' >&2
     exit 1
   fi
+fi
+
+if [[ -n "$codex_worktree_name" ]]; then
+  resolve_codex_worktree_target
 fi
 
 "$repo_root/scripts/install-git-hooks"

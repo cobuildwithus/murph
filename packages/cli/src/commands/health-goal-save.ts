@@ -62,6 +62,7 @@ function buildGoalSaveInput(input: {
   return {
     vaultRoot: input.vault,
     goalId: input.goalId,
+    requireExistingGoalId: input.goalId !== undefined,
     slug: input.slug,
     title: input.title,
     status: input.status,
@@ -79,6 +80,41 @@ function buildGoalSaveInput(input: {
     ),
     domains: normalizeRepeatableFlagOption(input.domain, "domain"),
   };
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === code
+  );
+}
+
+async function saveGoal(
+  input: Parameters<typeof upsertGoal>[0],
+): Promise<Awaited<ReturnType<typeof upsertGoal>>> {
+  const { upsertGoal } = await import("@murphai/core");
+
+  try {
+    return await upsertGoal(input);
+  } catch (error) {
+    if (!hasErrorCode(error, "VAULT_GOAL_MISSING")) {
+      throw error;
+    }
+
+    const { toVaultCliError } = await import("@murphai/vault-usecases/helpers");
+    throw toVaultCliError(error, {
+      VAULT_GOAL_MISSING: {
+        code: "not_found",
+        message: "Goal was not found.",
+        details: {
+          stage: "read",
+          hint: "After this error, run only goal list once. Do not write again this turn. If a listed goal matches, end with one question naming its exact goal id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.",
+        },
+      },
+    });
+  }
 }
 
 function toGoalSaveResult(
@@ -162,8 +198,7 @@ export function registerGoalCommands(
     }),
     output: goalSaveResultSchema,
     async run(context) {
-      const { upsertGoal } = await import("@murphai/core");
-      const result = await upsertGoal(
+      const result = await saveGoal(
         buildGoalSaveInput({
           goalId: context.options.id,
           title: context.args.title,

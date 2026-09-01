@@ -55,16 +55,25 @@ describe('assistant dynamic context prompt blocks', () => {
     const hostedDirectLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
       conversationScope: 'direct',
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-13',
+      currentTimeZone: 'America/Los_Angeles',
       hostedRuntime: true,
     })
     const hostedGroupLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
       conversationScope: 'group',
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-13',
+      currentTimeZone: 'America/Los_Angeles',
       hostedRuntime: true,
     })
 
     expect(hostedDirectLayers.threadContextPrompt).toContain(
       "use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise",
+    )
+    expect(hostedDirectLayers.dynamicTurnContextPrompt).toContain(
+      'Current local clock for the user (America/Los_Angeles): 2027-02-13 23:17:05 [UTC 2027-02-14T07:17:05.678Z].',
     )
     expect(hostedGroupLayers.staticCacheableCorePrompt).toContain(
       'The room runtime is not a participant.',
@@ -75,12 +84,24 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(hostedGroupLayers.threadContextPrompt).not.toContain(
       'use the user\'s current local time',
     )
+    expect(hostedGroupLayers.dynamicTurnContextPrompt).not.toContain(
+      'Current local clock for the user',
+    )
+    expect(hostedGroupLayers.dynamicTurnContextPrompt).not.toContain(
+      '2027-02-14T07:17:05.678Z',
+    )
     expect(
       buildAssistantSystemPromptLayers({
         ...baseConversationInput,
         conversationScope: 'direct',
       }).threadContextPrompt,
     ).not.toContain('use the user\'s current local time')
+    expect(
+      buildAssistantSystemPromptLayers({
+        ...baseConversationInput,
+        conversationScope: 'direct',
+      }).dynamicTurnContextPrompt,
+    ).not.toContain('Current local clock for the user')
   })
 
   it.each(['direct', 'group'] as const)(

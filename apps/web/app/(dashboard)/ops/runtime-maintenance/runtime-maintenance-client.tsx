@@ -26,25 +26,46 @@ import type {
   HostedRuntimeMaintenanceOverview,
   HostedRuntimeMaintenanceWakeResult,
   HostedRuntimeMaintenanceWorkspace,
+  HostedRuntimeRecheckResult,
+  HostedRuntimeStalledRecheckOverview,
 } from "@/src/lib/hosted-ops/runtime-maintenance";
 import type { HostedOpsJunctionDiagnosticResult } from "@/src/lib/hosted-ops/device-sync-diagnostic-types";
 
+import {
+  parseRuntimeRecheckUserIds,
+  removeSignaledRuntimeRecheckUserIds,
+  RuntimeRecheckPanel,
+  type RuntimeRecheckError,
+} from "./runtime-recheck-panel";
+
 interface RuntimeMaintenanceClientProps {
   initialOverview: HostedRuntimeMaintenanceOverview;
+  initialStalledRecheckOverview: HostedRuntimeStalledRecheckOverview;
 }
 
 type PendingAction =
   | { kind: "junction-diagnostic" }
   | { kind: "refresh" }
+  | { kind: "refresh-stalled-discovery" }
+  | { kind: "recheck-runtime-batch" }
   | { kind: "wake-batch"; limit: number }
   | { kind: "wake-user"; userId: string };
 
 export function RuntimeMaintenanceClient({
   initialOverview,
+  initialStalledRecheckOverview,
 }: RuntimeMaintenanceClientProps) {
   const [overview, setOverview] = useState(initialOverview);
   const [currentCursor, setCurrentCursor] = useState<string | null>(null);
   const [wakeResult, setWakeResult] = useState<HostedRuntimeMaintenanceWakeResult | null>(null);
+  const [stalledRecheckOverview, setStalledRecheckOverview] = useState(
+    initialStalledRecheckOverview,
+  );
+  const [runtimeRecheckUserIdsText, setRuntimeRecheckUserIdsText] = useState("");
+  const [runtimeRecheckResult, setRuntimeRecheckResult] =
+    useState<HostedRuntimeRecheckResult | null>(null);
+  const [runtimeRecheckError, setRuntimeRecheckError] =
+    useState<RuntimeRecheckError | null>(null);
   const [junctionDiagnosticResult, setJunctionDiagnosticResult] =
     useState<HostedOpsJunctionDiagnosticResult | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -125,6 +146,60 @@ export function RuntimeMaintenanceClient({
     }
   }
 
+  async function refreshStalledDiscovery(): Promise<void> {
+    setPending({ kind: "refresh-stalled-discovery" });
+    setRuntimeRecheckError(null);
+    try {
+      const nextOverview = await fetchStalledRecheckOverview();
+      setStalledRecheckOverview(nextOverview);
+    } catch (refreshError) {
+      setRuntimeRecheckError({
+        kind: "read",
+        message: describeClientError(refreshError),
+      });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function recheckRuntimeBatch(): Promise<void> {
+    const parsedInput = parseRuntimeRecheckUserIds(runtimeRecheckUserIdsText);
+    const userIds = parsedInput.userIds.slice(0, 3);
+    if (parsedInput.invalidEntries.length > 0 || userIds.length === 0) {
+      return;
+    }
+
+    setPending({ kind: "recheck-runtime-batch" });
+    setRuntimeRecheckError(null);
+    setRuntimeRecheckResult(null);
+    try {
+      const result = await requestJson<HostedRuntimeRecheckResult>(
+        "/api/ops/runtime-maintenance",
+        {
+          body: JSON.stringify({
+            operation: "recheck-runtimes",
+            userIds,
+          }),
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+      setRuntimeRecheckResult(result);
+      setRuntimeRecheckUserIdsText((currentValue) => (
+        removeSignaledRuntimeRecheckUserIds(currentValue, result)
+      ));
+    } catch (recheckError) {
+      setRuntimeRecheckError({
+        kind: "request",
+        message: describeClientError(recheckError),
+      });
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function runJunctionDiagnostic(formData: FormData): Promise<void> {
     setPending({ kind: "junction-diagnostic" });
     setJunctionDiagnosticError(null);
@@ -167,8 +242,8 @@ export function RuntimeMaintenanceClient({
             <h1 className="mt-2 font-serif text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-4xl">
               Runtime maintenance
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Wake active hosted workspaces that already have a checkpoint snapshot so runtime idle maintenance can run.
+            <p className="mt-3 max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
+              Inspect and recover active hosted runtimes without changing member usage or creating member-visible work.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -312,6 +387,29 @@ export function RuntimeMaintenanceClient({
           <JunctionDiagnosticResultPanel result={junctionDiagnosticResult} />
         ) : null}
       </section>
+
+      <RuntimeRecheckPanel
+        disabled={pending !== null}
+        error={runtimeRecheckError}
+        onInputChange={setRuntimeRecheckUserIdsText}
+        onRecheck={() => void recheckRuntimeBatch()}
+        onRefresh={() => void refreshStalledDiscovery()}
+        onUseDetectedCandidates={() => {
+          setRuntimeRecheckUserIdsText((currentValue) => {
+            const queuedUserIds = parseRuntimeRecheckUserIds(currentValue).userIds;
+            return [...new Set([
+              ...queuedUserIds,
+              ...stalledRecheckOverview.candidates.map((candidate) => candidate.userId),
+            ])].join("\n");
+          });
+          setRuntimeRecheckError(null);
+          setRuntimeRecheckResult(null);
+        }}
+        overview={stalledRecheckOverview}
+        pendingAction={readRuntimeRecheckPendingAction(pending)}
+        result={runtimeRecheckResult}
+        userIdsText={runtimeRecheckUserIdsText}
+      />
 
       <section
         aria-busy={pending !== null}
@@ -811,6 +909,17 @@ async function fetchOverview(input: {
   );
 }
 
+async function fetchStalledRecheckOverview(): Promise<HostedRuntimeStalledRecheckOverview> {
+  const params = new URLSearchParams({
+    limit: "100",
+    operation: "recheck-stalled-device-sync",
+  });
+
+  return requestJson<HostedRuntimeStalledRecheckOverview>(
+    `/api/ops/runtime-maintenance?${params.toString()}`,
+  );
+}
+
 function readJsonErrorMessage(payload: unknown): string | null {
   if (!payload || typeof payload !== "object" || !("error" in payload)) {
     return null;
@@ -839,7 +948,25 @@ function describeMaintenancePendingAction(pending: PendingAction | null): string
   if (pending.kind === "junction-diagnostic") {
     return "";
   }
+  if (
+    pending.kind === "refresh-stalled-discovery"
+    || pending.kind === "recheck-runtime-batch"
+  ) {
+    return "";
+  }
   return `Waking ${pending.userId}.`;
+}
+
+function readRuntimeRecheckPendingAction(
+  pending: PendingAction | null,
+): "recheck" | "refresh" | null {
+  if (pending?.kind === "refresh-stalled-discovery") {
+    return "refresh";
+  }
+  if (pending?.kind === "recheck-runtime-batch") {
+    return "recheck";
+  }
+  return null;
 }
 
 function readFormDataString(formData: FormData, key: string): string | null {

@@ -104,6 +104,7 @@ export type HostedLocalE2eScenarioName =
   | "linq-lost-active-operation"
   | "linq-onboarding-followup"
   | "linq-first-contact-test-controls"
+  | "linq-reminder-device-sync-non-starvation"
   | "linq-scheduled-reminder"
   | "linq-same-wake-batching"
   | "linq-webhook"
@@ -335,6 +336,14 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     name: "linq-scheduled-reminder",
     dedicatedVitestProcess: true,
+  },
+  {
+    dedicatedVitestProcess: true,
+    file:
+      "apps/cloudflare/test/hosted-local-linq-reminder-device-sync-non-starvation-e2e.test.ts",
+    manualOnly: true,
+    name: "linq-reminder-device-sync-non-starvation",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-telegram-scheduled-reminder-e2e.test.ts",

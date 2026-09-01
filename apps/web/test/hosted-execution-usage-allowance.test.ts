@@ -503,14 +503,14 @@ describe("hosted AI usage allowance pricing", () => {
   it("prices Venice GPT-5.6 usage at Venice's official provider rates", () => {
     const cases = [
       {
-        costUsdMicros: 10_440_000n,
+        costUsdMicros: 2_230_000n,
         model: "gpt-5.6-luna",
         providerModel: "openai-gpt-56-luna",
         rates: {
-          cachedInput: "130000",
-          cacheWrite: "1560000",
-          input: "1250000",
-          output: "7500000",
+          cachedInput: "30000",
+          cacheWrite: "330000",
+          input: "270000",
+          output: "1600000",
         },
       },
       {
@@ -559,9 +559,31 @@ describe("hosted AI usage allowance pricing", () => {
           standardCostUsdMicros: testCase.costUsdMicros.toString(),
           tokenPricingBasis: "standard",
         },
-        pricingVersion: "venice-api-pricing-2026-08-04-gpt-5.6-standard",
+        pricingVersion: "venice-api-pricing-2026-08-30-gpt-5.6-standard",
       });
     }
+  });
+
+  it("prices regular Venice Luna without applying Luna Pro rates", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      providerName: "venice",
+      requestedModel: "gpt-5.6-luna",
+      servedModel: "gpt-5.6-luna",
+      totalTokens: 2_000_000,
+    })).toMatchObject({
+      costUsdMicros: 1_870_000n,
+      counted: true,
+      pricingSnapshot: {
+        providerModel: "openai-gpt-56-luna",
+        standardCostUsdMicros: "1870000",
+      },
+      pricingVersion: "venice-api-pricing-2026-08-30-gpt-5.6-standard",
+    });
   });
 
   it("prices GPT-5.6 Sol tokens at the current Standard and Flex rates", () => {

@@ -204,11 +204,23 @@ landing; record the chosen posture here so the decision is reviewable.
   outbox or committed checkpoint can contain the runtime ref.
 
 - `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`
-  (`murph.inbox-attachment-retention.v1`) is append-only and monthly-sharded,
+  (`murph.inbox-attachment-retention.v1` for media and v2 for promoted document
+  duplicates) is append-only and monthly-sharded,
   with no compaction. Each record is a small tombstone (~200 bytes) describing
   the deleted raw inbox attachment path, sha256, purge time, reason, and
-  retained parser derivative. A heavy user adding roughly ten attachments per
-  day produces about 3,650 records per year, well under one megabyte
+  retained parser derivative when applicable. Promoted document cleanup reuses
+  this owner and the existing bounded pass: after 14 days it deletes only the
+  duplicate `raw/inbox/**` bytes whose stable capture/attachment correlation,
+  source hash, live import audit/event identity, canonical manifest, and
+  canonical raw artifact all agree. The content-free correlation is written to
+  the existing audit stream when default promotion succeeds; historical or
+  override promotions without it stay fail-closed. Lazy restore materializes
+  the source and canonical proof paths before the locked recheck; missing or
+  damaged proof fails closed. Promoted documents
+  use the existing media admission bounds, and all admitted receipts reuse one
+  transient audit/event ledger snapshot per pass. No new sidecar, cursor, queue,
+  index, or file family is introduced. A heavy user adding
+  roughly ten attachments per day produces about 3,650 records per year, well under one megabyte
   (~730 KB/year). This puts the family firmly in the "accepted unbounded-tiny"
   bucket: the monthly shard count is also bounded by elapsed wall-clock
   months. Snapshot/restore cost remains negligible at the projected steady

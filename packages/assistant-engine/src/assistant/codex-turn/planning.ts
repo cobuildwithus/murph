@@ -886,6 +886,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       channel: resolvedChannel,
       canonicalTimeZoneAvailable:
         input.promptTimeContext.canonicalTimeZoneAvailable !== false,
+      currentInstant: input.promptTimeContext.currentInstant,
       currentLocalDate: input.promptTimeContext.currentLocalDate,
       currentTimeZone: input.promptTimeContext.currentTimeZone,
       conversationScope,

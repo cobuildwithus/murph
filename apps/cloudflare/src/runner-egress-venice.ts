@@ -172,7 +172,7 @@ function adaptHostedVeniceResponsesLiteRequest(
     if (
       responsesLiteTools
       || item.role !== "developer"
-      || (item.id !== undefined && item.id !== null)
+      || !isSupportedResponsesLiteToolsId(item.id)
       || !Array.isArray(item.tools)
       || item.tools.some((tool) =>
         !isJsonObject(tool) || typeof tool.type !== "string"
@@ -204,6 +204,16 @@ function adaptHostedVeniceResponsesLiteRequest(
   return pathnameSuffix === "/responses"
     ? addHostedVenicePromptCacheBreakpoint(providerRecord)
     : providerRecord;
+}
+
+function isSupportedResponsesLiteToolsId(value: unknown): boolean {
+  return value === undefined
+    || value === null
+    || (
+      typeof value === "string"
+      && value.startsWith("at_")
+      && value.length > "at_".length
+    );
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {

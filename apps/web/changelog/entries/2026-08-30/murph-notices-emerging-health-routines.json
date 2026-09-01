@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "murph-notices-emerging-health-routines",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph notices meaningful new routines",
+    "summary": "In its weekly health check, Murph can now notice a repeated new behavior tied to something you said matters and send one useful, natural continuation.",
+    "details": "A single event, routine shortfall, duplicate note, or poorly timed interruption stays quiet. Without a current intention from you, Murph can only make a neutral observation and cannot create a goal, reminder, or accountability loop.",
+    "relevanceTags": ["assistant", "health", "coaching", "messaging"],
+    "sourcePullRequests": [2626]
+  }
+}

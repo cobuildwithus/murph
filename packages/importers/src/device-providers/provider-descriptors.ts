@@ -24,7 +24,8 @@ export type DeviceProviderMetricFamily = WearableProviderMetricFamily;
 export type DeviceProviderSnapshotParserKind = "schema" | "passthrough";
 export type DeviceProviderWebhookDeliveryMode = "notification" | "resource";
 
-export interface DeviceProviderOAuthDescriptor {
+export interface DeviceProviderOAuth2ConnectionDescriptor {
+  kind: "oauth2";
   callbackPath: string;
   defaultScopes: readonly string[];
 }
@@ -36,11 +37,15 @@ export type DeviceConnectionFlowKind =
   | "manual"
   | "none";
 
-export interface DeviceProviderConnectionDescriptor {
-  kind: DeviceConnectionFlowKind;
+export interface DeviceProviderNonOAuthConnectionDescriptor {
+  kind: Exclude<DeviceConnectionFlowKind, "oauth2">;
   callbackPath?: string;
   defaultScopes?: readonly string[];
 }
+
+export type DeviceProviderConnectionDescriptor =
+  | DeviceProviderOAuth2ConnectionDescriptor
+  | DeviceProviderNonOAuthConnectionDescriptor;
 
 export interface DeviceProviderWebhookDescriptor {
   path: string;
@@ -79,7 +84,6 @@ export interface DeviceProviderDescriptor {
   displayName: string;
   transportModes: readonly DeviceProviderTransportMode[];
   connection?: DeviceProviderConnectionDescriptor;
-  oauth?: DeviceProviderOAuthDescriptor;
   webhook?: DeviceProviderWebhookDescriptor;
   sync?: DeviceProviderSyncDescriptor;
   normalization: DeviceProviderNormalizationDescriptor;
@@ -146,34 +150,10 @@ export function createNamedDeviceProviderRegistry<T extends DeviceProviderDescri
   return api;
 }
 
-export function requireDeviceProviderOAuthDescriptor(
-  descriptor: DeviceProviderDescriptor,
-): DeviceProviderOAuthDescriptor {
-  if (!descriptor.oauth) {
-    throw new TypeError(`${descriptor.provider} does not define OAuth metadata.`);
-  }
-
-  return descriptor.oauth;
-}
-
 export function resolveDeviceProviderConnectionDescriptor(
   descriptor: DeviceProviderDescriptor,
 ): DeviceProviderConnectionDescriptor {
-  if (descriptor.connection) {
-    return descriptor.connection;
-  }
-
-  if (descriptor.oauth) {
-    return {
-      kind: "oauth2",
-      callbackPath: descriptor.oauth.callbackPath,
-      defaultScopes: descriptor.oauth.defaultScopes,
-    };
-  }
-
-  return {
-    kind: "none",
-  };
+  return descriptor.connection ?? { kind: "none" };
 }
 
 export function requireDeviceProviderWebhookDescriptor(
@@ -234,10 +214,6 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
     callbackPath: "/oauth/oura/callback",
     defaultScopes: ["personal", "daily", "workout", "session", "spo2"],
   },
-  oauth: {
-    callbackPath: "/oauth/oura/callback",
-    defaultScopes: ["personal", "daily", "workout", "session", "spo2"],
-  },
   webhook: {
     path: "/webhooks/oura",
     deliveryMode: "resource",
@@ -275,10 +251,6 @@ export const STRAVA_DEVICE_PROVIDER_DESCRIPTOR = {
     callbackPath: "/oauth/strava/callback",
     defaultScopes: ["activity:read"],
   },
-  oauth: {
-    callbackPath: "/oauth/strava/callback",
-    defaultScopes: ["activity:read"],
-  },
   webhook: {
     path: "/webhooks/strava",
     deliveryMode: "notification",
@@ -305,18 +277,6 @@ export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
   transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
   connection: {
     kind: "oauth2",
-    callbackPath: "/oauth/whoop/callback",
-    defaultScopes: [
-      "offline",
-      "read:profile",
-      "read:body_measurement",
-      "read:sleep",
-      "read:recovery",
-      "read:cycles",
-      "read:workout",
-    ],
-  },
-  oauth: {
     callbackPath: "/oauth/whoop/callback",
     defaultScopes: [
       "offline",

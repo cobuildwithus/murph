@@ -1292,15 +1292,12 @@ export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN =
 export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX =
   "/private-media/v1/";
 const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN =
-  /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}(?:\/group-avatar\.(?:jpg|png|webp))?$/u;
+  /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}\/group-avatar\.(?:jpg|png|webp)$/u;
 
 export function isHostedRuntimePrivateImageDeliveryUrl(
   url: URL,
   expectedOrigin = HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
 ): boolean {
-  if (isLegacyHostedRuntimePrivateImageDeliveryUrl(url)) {
-    return true;
-  }
   let normalizedExpectedOrigin: string;
   try {
     const parsedExpectedOrigin = new URL(expectedOrigin);
@@ -1337,41 +1334,6 @@ export function isHostedRuntimePrivateImageDeliveryUrl(
   return expiresAt !== null
     && /^[1-9][0-9]*$/u.test(expiresAt)
     && Number.isSafeInteger(Number(expiresAt));
-}
-
-function isLegacyHostedRuntimePrivateImageDeliveryUrl(url: URL): boolean {
-  const pathSegments = url.pathname.split("/").filter(Boolean);
-  if (
-    url.protocol !== "https:"
-    || url.hostname !== "imagedelivery.net"
-    || url.port
-    || url.username
-    || url.password
-    || url.hash
-    || pathSegments.length < 3
-  ) {
-    return false;
-  }
-  const entries = [...url.searchParams.entries()];
-  if (entries.length === 0) {
-    const pathAndSuffix = url.href.slice(url.origin.length);
-    return /^\/[A-Za-z0-9_-]{1,256}\/[A-Za-z0-9_-]{1,256}\/public$/u
-      .test(pathAndSuffix);
-  }
-  if (
-    entries.length !== 2
-    || entries.filter(([key]) => key === "exp").length !== 1
-    || entries.filter(([key]) => key === "sig").length !== 1
-  ) {
-    return false;
-  }
-  const expiresAt = url.searchParams.get("exp");
-  const signature = url.searchParams.get("sig");
-  return expiresAt !== null
-    && /^[1-9][0-9]*$/u.test(expiresAt)
-    && Number.isSafeInteger(Number(expiresAt))
-    && signature !== null
-    && /^[0-9a-f]{64}$/u.test(signature);
 }
 
 /**
@@ -2345,6 +2307,18 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
       | "retry_later";
     directEnsureAction?: "started" | "replaced" | "woken" | "already_running";
     directEnsureRuntimeAttemptId?: string;
+    shellPrewarmExpectedOrchestrationAttemptId?: string;
+    shellPrewarmOrchestrationAttemptId?: string;
+    shellPrewarmRequestStartedAtEpochMs?: number;
+    shellPrewarmRuntimeControlAuthStartedAtEpochMs?: number;
+    shellPrewarmRuntimeControlAuthFinishedAtEpochMs?: number;
+    shellPrewarmCloudflareRouteReceivedAtEpochMs?: number;
+    shellPrewarmUserRunnerConstructorStartedAtEpochMs?: number;
+    shellPrewarmUserRunnerConstructorFinishedAtEpochMs?: number;
+    shellPrewarmUserRunnerRpcStartedAtEpochMs?: number;
+    shellPrewarmConsentLockAcquiredAtEpochMs?: number;
+    shellPrewarmAdmissionReadStartedAtEpochMs?: number;
+    shellPrewarmAdmissionReadFinishedAtEpochMs?: number;
     runtimeControlAuthStartedAtEpochMs?: number;
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
@@ -2400,6 +2374,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
       | "superseded";
     shellPrewarmSource?:
       | "linq-instant-start"
+      | "linq-message-routing"
       | "linq-typing-started"
       | "unknown";
     workspaceReadElapsedMs?: number;
@@ -2742,6 +2717,18 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "directEnsureResultKind",
     "directEnsureAction",
     "directEnsureRuntimeAttemptId",
+    "shellPrewarmExpectedOrchestrationAttemptId",
+    "shellPrewarmOrchestrationAttemptId",
+    "shellPrewarmRequestStartedAtEpochMs",
+    "shellPrewarmRuntimeControlAuthStartedAtEpochMs",
+    "shellPrewarmRuntimeControlAuthFinishedAtEpochMs",
+    "shellPrewarmCloudflareRouteReceivedAtEpochMs",
+    "shellPrewarmUserRunnerConstructorStartedAtEpochMs",
+    "shellPrewarmUserRunnerConstructorFinishedAtEpochMs",
+    "shellPrewarmUserRunnerRpcStartedAtEpochMs",
+    "shellPrewarmConsentLockAcquiredAtEpochMs",
+    "shellPrewarmAdmissionReadStartedAtEpochMs",
+    "shellPrewarmAdmissionReadFinishedAtEpochMs",
     "runtimeControlAuthStartedAtEpochMs",
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
@@ -2920,6 +2907,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
     ],
     "orchestration.shellPrewarmSource": [
       "linq-instant-start",
+      "linq-message-routing",
       "linq-typing-started",
       "unknown",
     ],
@@ -2941,6 +2929,7 @@ export type HostedRuntimeLatencyPhaseBreakdownLeafRule =
   | { kind: "enum_string"; values: readonly string[] }
   | { kind: "lease_generation" }
   | { kind: "orchestration_attempt_id" }
+  | { kind: "shell_prewarm_attempt_id" }
   | { kind: "opaque_identifier" }
   | { kind: "safe_integer" };
 
@@ -2989,6 +2978,15 @@ function readHostedRuntimeLatencyPhaseBreakdownLeafRule(
   }
   if (
     phase === "orchestration"
+    && (
+      leafKey === "shellPrewarmExpectedOrchestrationAttemptId"
+      || leafKey === "shellPrewarmOrchestrationAttemptId"
+    )
+  ) {
+    return { kind: "shell_prewarm_attempt_id" };
+  }
+  if (
+    phase === "orchestration"
     && leafKey === "directEnsureRuntimeAttemptId"
   ) {
     return { kind: "opaque_identifier" };
@@ -3014,6 +3012,25 @@ function readHostedRuntimeLatencyPhaseBreakdownLeafRule(
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
+>;
+
+export const HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS = [
+  "shellPrewarmOrchestrationAttemptId",
+  "shellPrewarmRequestStartedAtEpochMs",
+  "shellPrewarmRuntimeControlAuthStartedAtEpochMs",
+  "shellPrewarmRuntimeControlAuthFinishedAtEpochMs",
+  "shellPrewarmCloudflareRouteReceivedAtEpochMs",
+  "shellPrewarmUserRunnerConstructorStartedAtEpochMs",
+  "shellPrewarmUserRunnerConstructorFinishedAtEpochMs",
+  "shellPrewarmUserRunnerRpcStartedAtEpochMs",
+  "shellPrewarmConsentLockAcquiredAtEpochMs",
+  "shellPrewarmAdmissionReadStartedAtEpochMs",
+  "shellPrewarmAdmissionReadFinishedAtEpochMs",
+] as const;
+
+export type HostedRuntimeShellPrewarmOrchestrationDiagnostics = Pick<
+  HostedRuntimeOrchestrationLatencyDiagnostics,
+  (typeof HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS)[number]
 >;
 
 export const HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER =
@@ -3069,6 +3086,25 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
 
   return Object.keys(diagnostics).length > 0
     ? diagnostics as HostedRuntimeOrchestrationLatencyDiagnostics
+    : null;
+}
+
+export function sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
+  value: unknown,
+): HostedRuntimeShellPrewarmOrchestrationDiagnostics | null {
+  const orchestration = sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(value);
+  if (!orchestration) {
+    return null;
+  }
+  const diagnostics = Object.fromEntries(
+    HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS.flatMap(
+      (key) => orchestration[key] === undefined
+        ? []
+        : [[key, orchestration[key]]],
+    ),
+  ) as Partial<HostedRuntimeShellPrewarmOrchestrationDiagnostics>;
+  return Object.keys(diagnostics).length > 0
+    ? diagnostics as HostedRuntimeShellPrewarmOrchestrationDiagnostics
     : null;
 }
 
@@ -3308,6 +3344,8 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
         && /^(?:0|[1-9]\d*)$/u.test(value);
     case "orchestration_attempt_id":
       return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+    case "shell_prewarm_attempt_id":
+      return isHostedRuntimeShellPrewarmOrchestrationAttemptId(value);
     case "opaque_identifier":
       return isHostedRuntimeLatencyOpaqueIdentifier(value);
     case "safe_integer":
@@ -3322,6 +3360,13 @@ export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(
 ): value is string {
   return typeof value === "string"
     && /^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
+}
+
+export function isHostedRuntimeShellPrewarmOrchestrationAttemptId(
+  value: unknown,
+): value is string {
+  return typeof value === "string"
+    && /^web-prewarm-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
 }
 
 function isHostedRuntimeLatencyOpaqueIdentifier(value: unknown): value is string {
@@ -3402,10 +3447,13 @@ export interface HostedWorkspaceState {
   checkpointedAt?: string | null;
   createdAt: string;
   inboxMediaRetentionWakeAt?: string | null;
+  nextDefaultProcessingWakeAt?: string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   snapshotRef: HostedExecutionSnapshotRefState;
+  systemMailboxProgressGeneration?: string | null;
   updatedAt: string;
   userId: string;
   version: string;
@@ -3466,12 +3514,15 @@ export interface HostedWorkspaceCheckpointRequest {
   idleCheckpointTrigger?: HostedIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
+  nextDefaultProcessingWakeAt?: string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   runtimeWakePendingAtCheckpoint?: boolean;
   snapshotRef: HostedExecutionSnapshotRefState;
+  systemMailboxProgressGeneration?: string;
 }
 
 export interface HostedWorkspaceCheckpointResponse {
@@ -3708,6 +3759,8 @@ export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
 ] as const;
 
 export type HostedWorkspaceInvocationStatus = (typeof HOSTED_WORKSPACE_INVOCATION_STATUSES)[number];
+
+export const HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS = 100;
 
 export interface HostedWorkspaceInvocationBudget {
   maxMailboxItems?: number | null;

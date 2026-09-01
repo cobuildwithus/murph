@@ -23,7 +23,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 23: Rebuild body summaries and MetricPoints after sparse-body selection semantics.
 // 24: Store bounded per-workout stream features in wearable activity summaries.
 // 25: Omit audit rows and unused indexes from rebuilt query stores.
-export const QUERY_PROJECTION_SQLITE_VERSION = 25;
+// 26: Rebuild wearable provider rows after public query slug canonicalization.
+export const QUERY_PROJECTION_SQLITE_VERSION = 26;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

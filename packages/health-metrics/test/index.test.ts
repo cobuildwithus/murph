@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   canonicalizeWearableProviderSlug,
+  normalizeWearableQueryProviderSlug,
   assessExperimentPrimaryMetricCapture,
   buildMetricSeries,
   createCustomMetricDefinition,
@@ -152,6 +153,46 @@ test("keeps Google Health as a distinct wearable origin with a readable label", 
   assert.equal(canonicalizeWearableProviderSlug("google_health"), "google-health");
   assert.equal(resolveWearableProviderDescriptor("google-health")?.displayName, "Google Health");
   assert.notEqual(canonicalizeWearableProviderSlug("google_health"), "fitbit");
+});
+
+test("normalizes public wearable query providers without a connector allowlist", () => {
+  assert.deepEqual(
+    [
+      "fitbit",
+      "withings",
+      "polar",
+      "google_health",
+      "apple_health",
+      "apple_health_kit",
+      "apple_healthkit",
+      "whoop_v2",
+      " future-ring ",
+    ].map(normalizeWearableQueryProviderSlug),
+    [
+      "fitbit",
+      "withings",
+      "polar",
+      "google-health",
+      "apple-health",
+      "apple-health-kit",
+      "apple-health-kit",
+      "whoop",
+      "future-ring",
+    ],
+  );
+
+  for (const invalid of [
+    "",
+    "   ",
+    "junction",
+    "bad provider",
+    "bad/provider",
+    "bad--provider",
+    "bad\u0000provider",
+    "a".repeat(81),
+  ]) {
+    assert.equal(normalizeWearableQueryProviderSlug(invalid), null, invalid);
+  }
 });
 
 test("resolves metric aliases, biomarker primary metrics, and normalized metric keys", () => {

@@ -10,6 +10,7 @@ import type {
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   type HostedRuntimeLatencyPhaseBreakdown,
+  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -161,6 +162,7 @@ function toShellPrewarmOrchestrationDiagnostics(
     return null;
   }
   return {
+    ...(observation.orchestration ?? {}),
     shellPrewarmFirstHintAtEpochMs: observation.firstHintAtEpochMs,
     shellPrewarmHintCount: observation.hintCount,
     ...(observation.finishedAtEpochMs === undefined ? {} : {
@@ -271,7 +273,10 @@ export class RuntimeProcessingController {
   async beginShellPrewarmForUser(
     userId: string,
     source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   ): Promise<void> {
+    const orchestrationAttemptId =
+      orchestration?.shellPrewarmOrchestrationAttemptId;
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
       throw new Error("Runner container namespace is unavailable.");
@@ -294,6 +299,9 @@ export class RuntimeProcessingController {
         component: "hosted.runner",
         details: {
           shellPrewarmAdmissionOutcome: "skipped_runtime_busy",
+          ...(orchestrationAttemptId === undefined
+            ? {}
+            : { orchestrationAttemptId }),
           shellPrewarmSource: source ?? "unknown",
         },
         message: "Hosted runner shell prewarm admission decided.",
@@ -303,6 +311,7 @@ export class RuntimeProcessingController {
       return;
     }
     await container.beginShellPrewarm({
+      ...(orchestration === undefined ? {} : { orchestration }),
       ...(source === undefined ? {} : { source }),
       timeoutMs: RUNTIME_SHELL_PREWARM_TIMEOUT_MS,
       userId,
@@ -311,6 +320,9 @@ export class RuntimeProcessingController {
       component: "hosted.runner",
       details: {
         shellPrewarmAdmissionOutcome: "scheduled",
+        ...(orchestrationAttemptId === undefined
+          ? {}
+          : { orchestrationAttemptId }),
         shellPrewarmSource: source ?? "unknown",
       },
       message: "Hosted runner shell prewarm admission decided.",

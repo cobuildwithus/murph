@@ -1802,9 +1802,9 @@ describe("updateHostedLinqChatAvatar", () => {
   it("accepts only the current preview Worker origin", async () => {
     const previewOrigin = "https://hosted-runner-staging.example.test";
     const previewUrl =
-      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
     const productionUrl =
-      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) => {
         void _input;
@@ -1832,52 +1832,20 @@ describe("updateHostedLinqChatAvatar", () => {
     });
   });
 
-  it("accepts the prior signed Images shape while old runners drain", async () => {
-    const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) => {
-        void _input;
-        void _init;
-        return createJsonResponse({ status: "pending" }, 200);
-      },
-    );
+  it.each([
+    `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+    `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
+    "https://imagedelivery.net/account/avatar/public",
+  ])("rejects a retired private-media URL before calling Linq", async (url) => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const legacyUrl =
-      `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`;
 
     await expect(updateHostedLinqChatAvatar({
       chatId: "chat_123",
-      groupChatIconUrl: legacyUrl,
-    })).resolves.toBeUndefined();
+      groupChatIconUrl: url,
+    })).rejects.toThrow(/hosted private media URL/u);
 
-    expect(readJsonRequestBody(
-      expectRequestInit(fetchMock.mock.calls[0]?.[1]),
-    )).toEqual({
-      group_chat_icon: legacyUrl,
-    });
-  });
-
-  it("accepts the prior queryless public Images shape while old runners drain", async () => {
-    const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) => {
-        void _input;
-        void _init;
-        return createJsonResponse({ status: "pending" }, 200);
-      },
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const legacyUrl =
-      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
-
-    await expect(updateHostedLinqChatAvatar({
-      chatId: "chat_123",
-      groupChatIconUrl: legacyUrl,
-    })).resolves.toBeUndefined();
-
-    expect(readJsonRequestBody(
-      expectRequestInit(fetchMock.mock.calls[0]?.[1]),
-    )).toEqual({
-      group_chat_icon: legacyUrl,
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects non-HTTPS icon URLs before calling Linq", async () => {

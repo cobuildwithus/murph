@@ -152,7 +152,10 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       scheduleAfterResponse: (task) => {
         afterResponseTasks.push(task);
       },
-      wakeHandoff: buildWakeHandoff(),
+      wakeHandoff: buildWakeHandoff({
+        runtimeShellPrewarmOrchestrationAttemptId:
+          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+      }),
     });
     void handoff.then(
       () => {
@@ -209,6 +212,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          shellPrewarmExpectedOrchestrationAttemptId:
+            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -812,12 +817,17 @@ describe("startHostedRuntimeShellPrewarmBestEffort", () => {
 
   it("issues only the shell-prewarm command for the instant-start member", async () => {
     await expect(startHostedRuntimeShellPrewarmBestEffort({
+      orchestrationAttemptId:
+        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
       source: "linq-instant-start",
       userId: "member_123",
     })).resolves.toBeUndefined();
 
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith({
+      orchestrationAttemptId:
+        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+      requestStartedAtEpochMs: expect.any(Number),
       source: "linq-instant-start",
       userId: "member_123",
     });
@@ -832,6 +842,8 @@ describe("startHostedRuntimeShellPrewarmBestEffort", () => {
 
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith({
+      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
+      requestStartedAtEpochMs: expect.any(Number),
       source: "linq-typing-started",
       userId: "member_123",
     });

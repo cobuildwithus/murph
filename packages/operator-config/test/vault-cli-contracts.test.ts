@@ -54,6 +54,37 @@ test('listFilterSchema surfaces query family loading failures', async () => {
   })
 })
 
+test('batch child errors accept every fixed CLI-specific safe stage', async () => {
+  vi.resetModules()
+  const { vaultCliBatchCommandErrorSchema } = await import(
+    '../src/vault-cli-contracts.ts'
+  )
+
+  for (const stage of [
+    'protocol_family_graph',
+    'protocol_index',
+    'protocol_run_specs',
+    'query_source',
+  ] as const) {
+    const parsed = vaultCliBatchCommandErrorSchema.parse({
+      code: 'safe_failure',
+      message: 'The command returned a safe recoverable failure.',
+      retryable: false,
+      stage,
+    })
+
+    assert.equal(parsed.stage, stage)
+  }
+
+  assert.equal(
+    vaultCliBatchCommandErrorSchema.safeParse({
+      message: 'The command returned an unknown internal stage.',
+      stage: 'private_internal_stage',
+    }).success,
+    false,
+  )
+})
+
 test('workout result contracts retain exercise-owned live tracking facts', async () => {
   vi.resetModules()
   const { workoutAddResultSchema } = await import('../src/vault-cli-contracts.ts')
@@ -83,6 +114,17 @@ test('workout result contracts retain exercise-owned live tracking facts', async
 
   assert.equal(parsed.workout?.exercises[0]?.memberRepsPerSet, 9)
   assert.equal(parsed.workout?.exercises[0]?.setPlanIsFinite, true)
+  assert.equal(parsed.note, 'Eight set workout')
+
+  const noteLess = workoutAddResultSchema.parse({
+    ...parsed,
+    note: null,
+  })
+  assert.equal(noteLess.note, null)
+  assert.throws(() => workoutAddResultSchema.parse({
+    ...parsed,
+    note: undefined,
+  }))
 })
 
 test('journal results require real calendar dates', async () => {

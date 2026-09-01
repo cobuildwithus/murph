@@ -1120,8 +1120,8 @@ function sha256Hex(bytes: Uint8Array): string {
 
 function listHostedCanonicalWriteReceiptLogArtifacts(
   artifacts: ReadonlyMap<string, Uint8Array>,
-): Array<{ entries: unknown[]; sha256: string }> {
-  const logs: Array<{ entries: unknown[]; sha256: string }> = [];
+): Array<{ entries: unknown[]; entryCount: number; sha256: string }> {
+  const logs: Array<{ entries: unknown[]; entryCount: number; sha256: string }> = [];
   for (const [sha256, bytes] of artifacts) {
     const parsed = parseJsonArtifact(bytes);
     if (
@@ -1133,6 +1133,10 @@ function listHostedCanonicalWriteReceiptLogArtifacts(
     }
     logs.push({
       entries: parsed.entries,
+      entryCount:
+        typeof parsed.entryCount === "number"
+          ? parsed.entryCount
+          : parsed.entries.length,
       sha256,
     });
   }
@@ -1335,6 +1339,16 @@ function createWorkspacePort(input: {
             ? input.checkpointWorkspace(request)
             : createWorkspaceState({
                 inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                ...(request.systemMailboxProgressGeneration === undefined
+                  ? {}
+                  : {
+                      nextDefaultProcessingWakeAt:
+                        request.nextDefaultProcessingWakeAt ?? null,
+                      nextDefaultProcessingWakeReason:
+                        request.nextDefaultProcessingWakeReason ?? null,
+                      systemMailboxProgressGeneration:
+                        request.systemMailboxProgressGeneration,
+                    }),
                 nextWakeAt: request.nextWakeAt ?? null,
                 nextWakeReason: request.nextWakeReason ?? null,
                 redactedStatus: request.redactedStatus ?? null,
@@ -1347,7 +1361,12 @@ function createWorkspacePort(input: {
   };
 }
 
-function createSaturatedCanonicalReceiptLogArtifacts(): {
+function createCanonicalReceiptLogArtifacts(
+  entryCount: number,
+  options: {
+    activeEntryCount?: number;
+  } = {},
+): {
   artifactBytesByHash: Map<string, Uint8Array>;
   receiptHash: string;
   receiptLogBytes: Buffer;
@@ -1358,21 +1377,30 @@ function createSaturatedCanonicalReceiptLogArtifacts(): {
     committedAt: TEST_NOW,
     createdAt: TEST_NOW,
     occurredAt: TEST_NOW,
-    operationId: "op_saturated_receipt_log_restore",
+    operationId: "op_receipt_log_restore",
     operationType: "hosted_canonical_write_test",
     schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-    summary: "Restore a saturated hosted canonical receipt log.",
+    summary: "Restore a hosted canonical write receipt log.",
     updatedAt: TEST_NOW,
   }, null, 2)}\n`, "utf8");
   const receiptHash = sha256Hex(receiptBytes);
+  const physicalEntryCount = options.activeEntryCount === undefined
+    ? entryCount
+    : HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES;
   const receiptLogBytes = Buffer.from(`${JSON.stringify({
     entries: Array.from(
-      { length: HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES },
+      { length: physicalEntryCount },
       () => ({
         byteSize: receiptBytes.byteLength,
         sha256: receiptHash,
       }),
     ),
+    ...(options.activeEntryCount === undefined
+      ? {}
+      : {
+          activeEntryCount: options.activeEntryCount,
+          entryCount,
+        }),
     schema: "murph.hosted-canonical-write-receipt-log.v1",
   }, null, 2)}\n`, "utf8");
   const receiptLogHash = sha256Hex(receiptLogBytes);
@@ -1385,6 +1413,14 @@ function createSaturatedCanonicalReceiptLogArtifacts(): {
     receiptLogBytes,
     receiptLogHash,
   };
+}
+
+function createSaturatedCanonicalReceiptLogArtifacts(): ReturnType<
+  typeof createCanonicalReceiptLogArtifacts
+> {
+  return createCanonicalReceiptLogArtifacts(
+    HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
+  );
 }
 
 function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMailboxItem {
@@ -2567,6 +2603,7 @@ export {
   createBrowserVaultReplicaRef,
   createBundleRef,
   createConsentedMemberAssistantAskRequestedWake,
+  createCanonicalReceiptLogArtifacts,
   createDeferred,
   createDeviceSyncResolvedConfig,
   createDeviceSyncSystemWakeForMailboxItem,
