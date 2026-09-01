@@ -167,7 +167,10 @@ export function JournalViewContent({
               canGoPrevious={selectedWindowStart > earliestDate}
               onNext={() =>
                 setSelectedWindowEnd((current) =>
-                  minDate(addDays(current, JOURNAL_WINDOW_DAYS), latestWindowEnd),
+                  minDate(
+                    addDays(current, JOURNAL_WINDOW_DAYS),
+                    latestWindowEnd,
+                  ),
                 )
               }
               onPrevious={() =>
@@ -175,7 +178,11 @@ export function JournalViewContent({
                   addDays(current, -JOURNAL_WINDOW_DAYS),
                 )
               }
+              onSelectDate={setSelectedWindowEnd}
               onToday={() => setSelectedWindowEnd(latestWindowEnd)}
+              selectedWindowEnd={selectedWindowEnd}
+              selectedWindowStart={selectedWindowStart}
+              today={today}
             />
           </div>
         ) : null}
@@ -187,7 +194,13 @@ export function JournalViewContent({
         <>
           <div className="grid items-start gap-12 lg:grid-cols-[minmax(0,1fr)_21.375rem] lg:gap-16">
             <section className="min-w-0" aria-label="Journal timeline">
-              <div className="flex flex-col">
+              <WindowStats
+                className="border-y border-border/70 py-4 lg:hidden"
+                dates={selectedDates}
+                daysByDate={daysByDate}
+                mode="mobile"
+              />
+              <div className="mt-4 flex flex-col lg:mt-0">
                 {visibleDates.map((date) => (
                   <JournalDaySection
                     date={date}
@@ -202,12 +215,19 @@ export function JournalViewContent({
             </section>
 
             <aside className="flex flex-col gap-[1.875rem] lg:sticky lg:top-6">
-              <MiniCalendar
-                onSelectDate={setSelectedWindowEnd}
-                selectedWindowEnd={selectedWindowEnd}
-                today={today}
+              <div className="hidden lg:block">
+                <MiniCalendar
+                  onSelectDate={setSelectedWindowEnd}
+                  selectedWindowEnd={selectedWindowEnd}
+                  today={today}
+                />
+              </div>
+              <WindowStats
+                className="hidden lg:block"
+                dates={selectedDates}
+                daysByDate={daysByDate}
+                mode="desktop"
               />
-              <WindowStats dates={selectedDates} daysByDate={daysByDate} />
               {visibleInsights.length > 0 ? (
                 <WeeklyInsights insights={visibleInsights} />
               ) : null}
@@ -305,7 +325,7 @@ function JournalPageHeader({
   headingId: string;
 }) {
   return (
-    <header className="flex items-center justify-between gap-4 sm:items-end">
+    <header className="flex items-center justify-between gap-2 sm:gap-4 sm:items-end">
       <h1
         id={headingId}
         className="shrink-0 font-serif text-3xl font-semibold tracking-tight text-foreground"
@@ -376,6 +396,9 @@ function JournalStatusState({
 function WeeklyInsights({ insights }: { insights: JournalInsight[] }) {
   return (
     <section aria-label="Weekly insights" className="flex flex-col gap-3">
+      <h2 className="font-serif text-xl font-semibold tracking-tight text-foreground lg:hidden">
+        From these 7 days
+      </h2>
       <div className="flex flex-col gap-3">
         {insights.map((insight) => (
           <Link
@@ -500,31 +523,84 @@ function WeekControls({
   canGoPrevious,
   onNext,
   onPrevious,
+  onSelectDate,
   onToday,
+  selectedWindowEnd,
+  selectedWindowStart,
+  today,
 }: {
   canGoNext: boolean;
   canGoPrevious: boolean;
   onNext: () => void;
   onPrevious: () => void;
+  onSelectDate: (date: string) => void;
   onToday: () => void;
+  selectedWindowEnd: string;
+  selectedWindowStart: string;
+  today: string;
 }) {
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const windowLabel = formatJournalWindowLabel(
+    selectedWindowStart,
+    selectedWindowEnd,
+    today,
+  );
+
   return (
     <nav
-      className="flex items-center gap-1.5 sm:gap-3"
+      className="flex items-center gap-1 lg:gap-3"
       aria-label="Journal seven-day navigation"
     >
       <Button
         aria-label="Previous 7 days"
         disabled={!canGoPrevious}
         onClick={onPrevious}
-        className="size-10 rounded-full sm:size-[38px]"
+        className="size-10 rounded-full lg:size-[38px]"
         size="icon"
         variant="outline"
       >
         <ChevronLeft aria-hidden="true" />
       </Button>
+      <Drawer open={calendarOpen} onOpenChange={setCalendarOpen}>
+        <DrawerTrigger asChild>
+          <Button
+            aria-label={`Choose a Journal date. Showing ${windowLabel}`}
+            className="h-10 max-w-24 rounded-full px-2.5 text-xs lg:hidden"
+            size="sm"
+            variant="outline"
+          >
+            {windowLabel}
+          </Button>
+        </DrawerTrigger>
+        <DrawerContent className="overflow-y-auto overscroll-contain data-[vaul-drawer-direction=bottom]:max-h-[85dvh] data-[vaul-drawer-direction=bottom]:rounded-t-2xl">
+          <DrawerTitle className="sr-only">Choose a Journal date</DrawerTitle>
+          <div className="flex flex-col gap-4 px-5 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3">
+            <MiniCalendar
+              onSelectDate={(date) => {
+                onSelectDate(date);
+                setCalendarOpen(false);
+              }}
+              selectedWindowEnd={selectedWindowEnd}
+              surface="drawer"
+              today={today}
+            />
+            {selectedWindowEnd !== today ? (
+              <Button
+                className="w-full rounded-full"
+                onClick={() => {
+                  onToday();
+                  setCalendarOpen(false);
+                }}
+                variant="outline"
+              >
+                Return to today
+              </Button>
+            ) : null}
+          </div>
+        </DrawerContent>
+      </Drawer>
       <Button
-        className="h-10 rounded-full px-3.5 sm:h-[38px] sm:px-[18px]"
+        className="hidden h-[38px] rounded-full px-[18px] lg:inline-flex"
         onClick={onToday}
         size="sm"
         variant="outline"
@@ -535,7 +611,7 @@ function WeekControls({
         aria-label="Next 7 days"
         disabled={!canGoNext}
         onClick={onNext}
-        className="size-10 rounded-full sm:size-[38px]"
+        className="size-10 rounded-full lg:size-[38px]"
         size="icon"
         variant="outline"
       >
@@ -1130,10 +1206,12 @@ function GenericJournalPopoverPresentation({
 function MiniCalendar({
   onSelectDate,
   selectedWindowEnd,
+  surface = "card",
   today,
 }: {
   onSelectDate: (date: string) => void;
   selectedWindowEnd: string;
+  surface?: "card" | "drawer";
   today: string;
 }) {
   const monthDate = selectedWindowEnd;
@@ -1151,7 +1229,10 @@ function MiniCalendar({
 
   return (
     <section
-      className="rounded-xl border border-border bg-card px-[22px] py-5"
+      className={cn(
+        surface === "card" &&
+          "rounded-xl border border-border bg-card px-[22px] py-5",
+      )}
       aria-label="Journal calendar"
     >
       <h2 className="font-serif text-[19px] font-semibold leading-6 text-foreground">
@@ -1181,7 +1262,8 @@ function MiniCalendar({
                 inSelectedWindow && "bg-primary/10",
                 date === selectedWindowStart && "rounded-l-full",
                 date === selectedWindowEnd && "rounded-r-full",
-                isFutureDate && "cursor-default opacity-35 hover:bg-transparent",
+                isFutureDate &&
+                  "cursor-default opacity-35 hover:bg-transparent",
               )}
               disabled={isFutureDate}
               key={date}
@@ -1214,11 +1296,15 @@ interface WeekStat {
 }
 
 function WindowStats({
+  className,
   dates,
   daysByDate,
+  mode,
 }: {
+  className?: string;
   dates: string[];
   daysByDate: Map<string, JournalView["days"][number]>;
+  mode: "desktop" | "mobile";
 }) {
   const stats: WeekStat[] = [];
   const sleepMinutes = buildWeekMetricPoints(
@@ -1261,10 +1347,10 @@ function WindowStats({
   if (stats.length === 0) return null;
 
   return (
-    <section aria-label="Seven days at a glance">
+    <section aria-label="Seven days at a glance" className={className}>
       <div className="grid grid-cols-3 gap-4 px-1">
         {stats.map((stat) => (
-          <WeekStatPopover key={stat.label} stat={stat} />
+          <WeekStatDetails key={stat.label} mode={mode} stat={stat} />
         ))}
       </div>
     </section>
@@ -1330,6 +1416,63 @@ function JournalEntryActions({
   );
 }
 
+function WeekStatDetails({
+  mode,
+  stat,
+}: {
+  mode: "desktop" | "mobile";
+  stat: WeekStat;
+}) {
+  if (mode === "mobile") {
+    return (
+      <Drawer>
+        <DrawerTrigger asChild>
+          <WeekStatButton stat={stat} />
+        </DrawerTrigger>
+        <DrawerContent className="overflow-y-auto overscroll-contain data-[vaul-drawer-direction=bottom]:max-h-[85dvh] data-[vaul-drawer-direction=bottom]:rounded-t-2xl">
+          <DrawerTitle className="px-5 pt-3 font-serif text-xl font-semibold">
+            {stat.popoverTitle}
+          </DrawerTitle>
+          <div className="px-5 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-4">
+            <WeekMetricLineChart
+              label={stat.label}
+              points={stat.points}
+              valueFormatter={stat.valueFormatter}
+            />
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return <WeekStatPopover stat={stat} />;
+}
+
+function WeekStatButton({
+  className,
+  stat,
+  ...props
+}: { stat: WeekStat } & React.ComponentProps<"button">) {
+  return (
+    <button
+      {...props}
+      aria-label={`Show ${stat.popoverTitle.toLowerCase()} details`}
+      className={cn(
+        "flex min-w-0 flex-col rounded-md text-left transition-opacity hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        className,
+      )}
+      type="button"
+    >
+      <span className="order-2 mt-[3px] text-xs leading-[17px] text-muted-foreground">
+        {stat.label}
+      </span>
+      <span className="order-1 font-serif text-xl font-semibold leading-6 tabular-nums text-foreground sm:text-2xl sm:leading-7">
+        {stat.value}
+      </span>
+    </button>
+  );
+}
+
 function WeekStatPopover({ stat }: { stat: WeekStat }) {
   const pointerAnchor = usePointerPopoverAnchor();
 
@@ -1341,6 +1484,7 @@ function WeekStatPopover({ stat }: { stat: WeekStat }) {
         openOnHover
         render={
           <button
+            aria-label={`Show ${stat.popoverTitle.toLowerCase()} details`}
             className="flex min-w-0 flex-col rounded-md text-left transition-opacity hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             onKeyDown={pointerAnchor.onKeyDown}
             onPointerMove={pointerAnchor.onPointerMove}
@@ -1569,6 +1713,32 @@ function formatMonth(date: string): string {
     timeZone: "UTC",
     year: "numeric",
   }).format(new Date(`${date}T12:00:00.000Z`));
+}
+
+function formatJournalWindowLabel(
+  startDate: string,
+  endDate: string,
+  today: string,
+): string {
+  if (endDate === today) return "Today";
+
+  const start = new Date(`${startDate}T12:00:00.000Z`);
+  const end = new Date(`${endDate}T12:00:00.000Z`);
+  const sameMonth = startDate.slice(0, 7) === endDate.slice(0, 7);
+  const day = new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  const month = new Intl.DateTimeFormat("en", {
+    month: "short",
+    timeZone: "UTC",
+  });
+
+  return sameMonth
+    ? `${month.format(end)} ${day.format(start)}–${day.format(end)}`
+    : `${month.format(start)} ${day.format(start)}–${month.format(
+        end,
+      )} ${day.format(end)}`;
 }
 
 function formatDuration(minutes: number): string {

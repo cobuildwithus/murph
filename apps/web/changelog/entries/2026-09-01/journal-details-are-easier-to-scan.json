@@ -5,9 +5,9 @@
     "id": "journal-details-are-easier-to-scan",
     "kind": "improvement",
     "priority": 3,
-    "title": "Journal details are easier to scan",
-    "summary": "Journal now marks entries with more detail and keeps repeated context out of the main timeline.",
-    "details": "Detail panels organize workout, travel, laboratory, and experiment context without repeating the same fact in the timeline. On phones, details open in a panel from the bottom for easier reading.",
+    "title": "Journal is easier to scan",
+    "summary": "Journal now keeps seven-day context close to the timeline, marks entries with more detail, and removes repeated context.",
+    "details": "On phones, the seven-day summary appears before the timeline, calendars and metric trends open from the bottom, and pattern insights follow the period they describe. Workout, travel, laboratory, and experiment details stay one tap away.",
     "relevanceTags": ["journal", "workouts", "experiments", "usability"],
     "sourcePullRequests": []
   }

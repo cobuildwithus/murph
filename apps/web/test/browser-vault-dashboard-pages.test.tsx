@@ -288,14 +288,12 @@ test("JournalPage shows the seven days ending today and disables future dates", 
       asOfDate: "2026-08-12",
       journal,
     }),
-    { requireButton: false },
+    { matchMedia: staticMatchMedia, requireButton: false },
   );
 
   const visibleDayIds = () =>
     Array.from(
-      rendered.container.querySelectorAll<HTMLElement>(
-        '[id^="journal-day-"]',
-      ),
+      rendered.container.querySelectorAll<HTMLElement>('[id^="journal-day-"]'),
       (element) => element.id,
     );
 
@@ -336,6 +334,14 @@ test("JournalPage shows the seven days ending today and disables future dates", 
     "journal-day-2026-07-30",
   ]);
   assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-06/u);
+
+  const mobileCalendarButton = rendered.container.querySelector(
+    'button[aria-label="Choose a Journal date. Showing Jul 30–Aug 5"]',
+  );
+  assert.ok(mobileCalendarButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(mobileCalendarButton.getAttribute("aria-expanded"), "false");
+  await act(async () => mobileCalendarButton.click());
+  assert.equal(mobileCalendarButton.getAttribute("aria-expanded"), "true");
 
   await rendered.cleanup();
 });
@@ -389,9 +395,7 @@ test("JournalPage keeps secondary sleep metrics off the main timeline", async ()
     const mobileDetailsButton = rendered.container.querySelector(
       'button[data-journal-detail-trigger="mobile"]',
     );
-    assert.ok(
-      mobileDetailsButton instanceof rendered.window.HTMLButtonElement,
-    );
+    assert.ok(mobileDetailsButton instanceof rendered.window.HTMLButtonElement);
     assert.ok(mobileDetailsButton.querySelector('svg[aria-hidden="true"]'));
     assert.equal(mobileDetailsButton.getAttribute("aria-expanded"), "false");
 
