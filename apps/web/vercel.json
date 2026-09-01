@@ -5,7 +5,7 @@
   "git": {
     "deploymentEnabled": {
       "main": true,
-      "*": false
+      "**": false
     }
   },
   "crons": [

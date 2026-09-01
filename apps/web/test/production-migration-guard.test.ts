@@ -2585,10 +2585,31 @@ fi
       };
     };
 
-    assert.deepEqual(vercelJson.git?.deploymentEnabled, {
+    const deploymentEnabled = vercelJson.git?.deploymentEnabled;
+    assert.deepEqual(deploymentEnabled, {
       main: true,
-      "*": false,
+      "**": false,
     });
+
+    const isDeploymentEnabled = (branch: string): boolean => {
+      const matchingRules = Object.entries(deploymentEnabled ?? {}).filter(
+        ([pattern]) => path.matchesGlob(branch, pattern),
+      );
+      return (
+        matchingRules.length === 0
+        || matchingRules.some(([, enabled]) => enabled)
+      );
+    };
+
+    assert.equal(isDeploymentEnabled("main"), true);
+    for (const branch of [
+      "release",
+      "frog/sync",
+      "codex/warm-standby-experiment",
+      "fix/checkpoint-empty-probe-liveness",
+    ]) {
+      assert.equal(isDeploymentEnabled(branch), false, branch);
+    }
   });
 
   test("generates Prisma before direct local Next dev starts", async () => {
