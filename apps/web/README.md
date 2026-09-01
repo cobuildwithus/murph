@@ -104,7 +104,8 @@ Verification uses natural traffic only. From the Web deployment-ready timestamp
 through the next natural occurrence, filter Vercel logs by the exact message and
 schema, then count grouped only by message, `stage`, and `errorClass`. The record
 is additive and Web-only: older deployments and readers tolerate its absence,
-and rollback is an ordinary Web rollback with no state or cross-plane drain.
+and recovery uses a fresh revert or forward-fix commit on `main` so the replacement
+deployment receives current production admission.
 
 ## Health-data withdrawal rollback floor
 
@@ -2058,24 +2059,21 @@ This branch is a greenfield hosted-runtime cutover. If you have an older local
 database from the superseded run/ingress/cursor chain, reset it before
 reapplying migrations.
 
-## Local Vercel prebuilt deployment
+## Production deployment ownership
 
-Use the repository-owned local prebuilt boundary instead of running a bare
-`vercel build` followed by `vercel deploy --prebuilt`:
+The Vercel Git integration is the only production deployment owner. Every
+commit pushed to `main` creates one managed production candidate; no
+repository ignore command may suppress that candidate. The candidate remains
+off the production domains until its configured Deployment Checks, including
+`Temporal Web production admission`, pass for that exact current commit.
 
-```bash
-pnpm --dir apps/web vercel:deploy:prebuilt -- --prod
-```
-
-Omit `--prod` for a preview deployment. The command runs `vercel build`,
-captures the SDK-generated Workflow function config in an ephemeral local file
-before the normal generated-source cleanup, and applies every exact generated
-trigger to the resolved final function bundle. It handles distinct functions
-and Next.js-deduplicated route links, revalidates the finished Build Output
-artifact, removes the captured evidence, and starts `vercel deploy --prebuilt`
-only after that proof succeeds. Missing, malformed, escaping, or conflicting
-evidence stops before upload. Managed Vercel builds continue to use the
-checked-in `vercel.json` build command and do not use this local boundary.
+Do not deploy production from the local CLI, promote an existing deployment,
+use Instant Rollback, or force-promote past a Deployment Check. Those paths do
+not create fresh compatibility evidence against current private `main` and live
+Temporal readers. Vercel access must withhold Full Production Deployment
+authority from ordinary operators and automation. Recover by reverting or
+forward-fixing on `main`; the new commit creates a fresh managed deployment and
+reruns production admission before domains move.
 
 ## Local dev aids
 

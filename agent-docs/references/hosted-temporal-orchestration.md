@@ -58,7 +58,11 @@ wire proof for that exact public commit against the then-current private
 configured as a Vercel production Deployment Check so a completed build cannot
 move production domains before the proof succeeds. The controller re-reads
 both public and private `main` before accepting the result, while the private
-workflow independently re-reads the complete reader set. This boundary proves
+workflow independently re-reads the complete reader set. Every `main` commit
+must create its managed Vercel candidate, and the Git integration is the only
+production owner. Local production uploads, existing-deployment promotion,
+Instant Rollback, and Force Promote are unsupported; recovery uses a fresh
+revert or forward-fix commit on `main`. This boundary proves
 the hosted reconciliation-facts wire contract; private release admission still
 owns full integration, migration replay, production routing, and canary proof.
 
@@ -785,7 +789,10 @@ The hard-cut architecture is accepted when:
   domains stay on the previous deployment until the current public commit,
   current private `main`, and current live readers produce one accepted proof.
   The public controller re-reads both branch heads, and the private controller
-  re-reads the supported reader set, before success. This proves the
+  re-reads the supported reader set, before success. Every `main` commit creates
+  one managed candidate, and no local production upload or historical
+  promotion/rollback path may compete with that Git owner. Rollback uses a fresh
+  revert commit so it receives current proof. This proves the
   reconciliation-facts wire boundary only; Murph Cloud release admission owns
   full worker/runtime integration, replay, routing, and canary safety.
 - Focused tests prove that wake acceptance is not completion and that Temporal

@@ -1392,6 +1392,16 @@ locally readable.
   side may restore candidate-controlled caches beside credentials, read private
   logs or artifacts, expose reader revisions publicly, or accept workflow/check
   names from the candidate.
+- Hosted Web production has one deployment authority: Vercel's Git integration
+  creates a candidate for every exact `main` commit, and configured Deployment
+  Checks alone admit it to production domains. Do not grant Full Production
+  Deployment permission to ordinary operators or automation, and do not use
+  local production uploads, promotion of an existing deployment, Instant
+  Rollback, or Force Promote; those paths can reuse stale commit evidence or
+  bypass the check. Recovery is a revert or forward-fix commit on `main` so the
+  replacement receives fresh compatibility proof. Provider owners remain
+  break-glass authority outside the automatic guarantee and must not exercise
+  it as an ordinary deployment path.
 - The public automated live Junction wearable canary uses only sandbox Junction
   authority, Kernel browser authority, and a dedicated Garmin test account. Keep
   those five credentials
