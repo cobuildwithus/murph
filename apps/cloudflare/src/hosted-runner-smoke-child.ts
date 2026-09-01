@@ -183,6 +183,7 @@ async function runSmokeChecks(input: {
   }
 
   const healthCommonsRuntime = await runHealthCommonsSmoke();
+  await resetCanonicalGoalRegistryForSmoke(input.vaultRoot);
   const healthCommonsCli = await runHealthCommonsCliSmoke();
 
   const wavPath = path.join(input.vaultRoot, input.wavRelativePath);
@@ -2505,6 +2506,16 @@ async function runHealthCommonsCliSmoke(): Promise<{
     goalProofCount: goalSmoke.proofCount,
     protocolListBytes: Buffer.byteLength(protocolListOutput, "utf8"),
   };
+}
+
+async function resetCanonicalGoalRegistryForSmoke(vaultRoot: string): Promise<void> {
+  // The shared Web fixture carries historical hv/goal@v1 query examples in
+  // bank/goals. They are not canonical Goal-bank documents, so the disposable
+  // hosted write round trip owns a clean registry instead of mutating them.
+  await rm(path.join(vaultRoot, "bank", "goals"), {
+    force: true,
+    recursive: true,
+  });
 }
 
 async function runCommand(
