@@ -41,7 +41,9 @@ export async function runHostedGoalCliSmoke(input: {
   runCommand: HostedGoalCliSmokeCommandRunner;
 }): Promise<HostedGoalCliSmokeResult> {
   let proofCount = 0;
-  const catalogProbe = await probePublicGoalCatalog(input.runCommand);
+  const runCommand: HostedGoalCliSmokeCommandRunner = async (label, args) =>
+    await input.runCommand(label, [...args, "--full-output"]);
+  const catalogProbe = await probePublicGoalCatalog(runCommand);
   const deepSleepSummary = catalogProbe.deepSleepSummary;
   const listRevision = readCommonsGoalRevision(
     deepSleepSummary.revision,
@@ -50,7 +52,7 @@ export async function runHostedGoalCliSmoke(input: {
   proofCount += 1;
 
   const showData = readCliSuccessData(
-    await input.runCommand("commons-goal-show", [
+    await runCommand("commons-goal-show", [
       "commons",
       "goal",
       "show",
@@ -91,7 +93,7 @@ export async function runHostedGoalCliSmoke(input: {
       "json",
     ],
     label: "legacy",
-    runCommand: input.runCommand,
+    runCommand,
   });
   assertSmokeGoalState(legacyGoal.data, {
     expectedCommonsGoalRef: null,
@@ -103,7 +105,7 @@ export async function runHostedGoalCliSmoke(input: {
   const updatedLegacyGoal = await updateAndReadSmokeGoal({
     goalId: legacyGoal.goalId,
     label: "legacy",
-    runCommand: input.runCommand,
+    runCommand,
   });
   assertSmokeGoalState(updatedLegacyGoal, {
     expectedCommonsGoalRef: null,
@@ -137,7 +139,7 @@ export async function runHostedGoalCliSmoke(input: {
       "json",
     ],
     label: "lineage",
-    runCommand: input.runCommand,
+    runCommand,
   });
   assertSmokeGoalState(lineageGoal.data, {
     expectedCommonsGoalRef,
@@ -149,7 +151,7 @@ export async function runHostedGoalCliSmoke(input: {
   const updatedLineageGoal = await updateAndReadSmokeGoal({
     goalId: lineageGoal.goalId,
     label: "lineage",
-    runCommand: input.runCommand,
+    runCommand,
   });
   assertSmokeGoalState(updatedLineageGoal, {
     expectedCommonsGoalRef,

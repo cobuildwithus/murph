@@ -53,6 +53,9 @@ describe("runHostedGoalCliSmoke", () => {
       "lineage-goal-update",
       "lineage-goal-update-read",
     ]);
+    expect(
+      runCommand.mock.calls.every(([, args]) => args.at(-1) === "--full-output"),
+    ).toBe(true);
     expect(runCommand.mock.calls[0]?.[1]).toEqual([
       "commons",
       "goal",
@@ -61,6 +64,7 @@ describe("runHostedGoalCliSmoke", () => {
       "1",
       "--format",
       "json",
+      "--full-output",
     ]);
     expect(runCommand.mock.calls[1]?.[1]).toEqual([
       "commons",
@@ -72,6 +76,7 @@ describe("runHostedGoalCliSmoke", () => {
       "1",
       "--format",
       "json",
+      "--full-output",
     ]);
     expect(runCommand.mock.calls[8]?.[1]).toEqual([
       "commons",
@@ -83,6 +88,7 @@ describe("runHostedGoalCliSmoke", () => {
       "2",
       "--format",
       "json",
+      "--full-output",
     ]);
     expect(runCommand.mock.calls[12]?.[1]).toEqual([
       "goal",
@@ -93,6 +99,7 @@ describe("runHostedGoalCliSmoke", () => {
       "paused",
       "--format",
       "json",
+      "--full-output",
     ]);
     expect(runCommand.mock.calls[14]?.[1]).toEqual([
       "goal",
@@ -112,6 +119,7 @@ describe("runHostedGoalCliSmoke", () => {
       workflowSpecRevisionId,
       "--format",
       "json",
+      "--full-output",
     ]);
     expect(runCommand.mock.calls[16]?.[1]).toEqual([
       "goal",
@@ -122,6 +130,7 @@ describe("runHostedGoalCliSmoke", () => {
       "paused",
       "--format",
       "json",
+      "--full-output",
     ]);
   });
 
