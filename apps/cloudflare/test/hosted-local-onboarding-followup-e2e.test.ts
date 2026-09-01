@@ -138,7 +138,7 @@ describe("hosted local onboarding follow-up e2e", () => {
         expect.objectContaining({
           eventCode: "assistant.onboarding_followup_reconciled",
           redactedJson: expect.objectContaining({
-            onboardingFollowupAction: "archived",
+            onboardingFollowupAction: "archived_completed",
             onboardingStateStatus: "completed",
           }),
         }),
