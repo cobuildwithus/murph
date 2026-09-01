@@ -67,6 +67,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Future Pro",
     overview:
       "Future Pro wins on individualized exercise judgment: a certified coach writes the week, reviews performance and form, and changes the program. This guide compares Future Pro, not Future's separate Health Coach membership. Murph is not a personal trainer. It provides an ongoing private conversation through familiar messaging, with web review and authorized health context, so questions outside the training program can become documented next steps.",
+    quickComparison: [
+      {
+        capability: "Dedicated human coaching",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Personalized workout programming",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Movement and form review",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     relationship: "alternative",
     slug: "future-pro",
     sources: [
@@ -158,6 +190,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Fitbod",
     overview:
       "Fitbod wins at the gym workflow: configure equipment and goals, receive a strength session, follow demonstrations, log the work, and let that history inform the next session. Murph does not generate that detailed lifting prescription. Its private thread can place the session beside authorized or shared health information, explain relevant patterns, and keep a decision visible after the gym.",
+    quickComparison: [
+      {
+        capability: "Generated strength workouts",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Set by set workout logging",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Exercise demonstrations",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "alternative",
     slug: "fitbod",
     sources: [
@@ -245,6 +309,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Caliber",
     overview:
       "Caliber has two clear advantages depending on the tier: the free app supplies a serious strength planner and log, while the paid membership adds a real coach who can review form and change the program. Murph is neither a lifting log nor an assigned trainer. It gives a person a private place to combine conversation with authorized wearable and lab data, records, notes, meals, symptoms, and workouts, then keep the resulting decisions and next steps alive.",
+    quickComparison: [
+      {
+        capability: "Strength workout logging",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Personalized workout programming",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Dedicated human coaching",
+        evidence: "format",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private ongoing conversation",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     relationship: "alternative",
     slug: "caliber",
     sources: [
@@ -332,6 +428,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Freeletics",
     overview:
       "Freeletics is strongest when the blank page is the problem: it selects sessions from a wide training catalog and adjusts the journey from reported performance. Murph does not supply that exercise-by-exercise experience. It keeps a private conversation and shared or authorized health context together, so a question can lead to documented follow-through.",
+    quickComparison: [
+      {
+        capability: "Generated workout sessions",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Adaptive workout progression",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Exercise instruction",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "alternative",
     slug: "freeletics",
     sources: [
@@ -424,6 +552,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Centr",
     overview:
       "Centr's advantage is breadth you can press play on: training, recovery, mindfulness, recipes, and meal plans live in one polished catalog, and Centr Coach helps organize it. Murph is not a class, recipe, or meal-plan library. Its advantage is beginning with one person's accumulated information and continuing the decision after the content ends.",
+    quickComparison: [
+      {
+        capability: "Guided workout library",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Meal plans and recipes",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Mindfulness content",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Personalized health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "primaryJob",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     relationship: "alternative",
     slug: "centr",
     sources: [
@@ -511,6 +671,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Ladder",
     overview:
       "Ladder wins on coached momentum: one coach sets the team's week, prerecorded cues guide each session, and the chat makes training feel shared. It is not standard one-to-one programming, and Murph does not recreate that team. Murph gives an individual a private place to consider what the shared plan misses and keep a personal decision moving.",
+    quickComparison: [
+      {
+        capability: "Coach led workout programs",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Guided workout audio",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Team community accountability",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private personal follow through",
+        evidence: "format",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     relationship: "alternative",
     slug: "ladder",
     sources: [
@@ -594,6 +786,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Nike Training Club",
     overview:
       "Nike Training Club's case is simple: it gives people a large, polished workout and program library without charging a subscription. Murph cannot beat free on that job and does not supply follow-along video instruction. Murph addresses what the library leaves open: how a routine fits one person's other health information and what should happen after that decision.",
+    quickComparison: [
+      {
+        capability: "Guided workout library",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Progressive training programs",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Exercise demonstrations",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "different-role",
     slug: "nike-training-club",
     sources: [
@@ -682,6 +906,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Peloton App",
     overview:
       "Peloton's advantage is an experience people want to return to: recognizable instructors, live energy, music, challenges, community, and a deep class catalog, with Peloton IQ organizing recommendations and plans. Murph is not a streaming fitness service. It keeps private questions, shared records, and authorized signals together so the decision after class does not disappear before the next one.",
+    quickComparison: [
+      {
+        capability: "Live instructor classes",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "On demand workout library",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Personalized workout plans",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "alternative",
     slug: "peloton-app",
     sources: [
@@ -769,6 +1025,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Tonal",
     overview:
       "Tonal's moat is physical: wall-mounted digital resistance, movement sensing, automatic weight selection, dynamic modes, instruction, and performance history operate as one system. Murph is not a home gym or strength tracker. Its private conversation can place a Tonal summary beside other authorized information and carry a question beyond the machine.",
+    quickComparison: [
+      {
+        capability: "Digitally controlled resistance",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Automatic weight adjustments",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Sensor based movement tracking",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "complement",
     slug: "tonal",
     sources: [
@@ -854,6 +1142,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "trainwell",
     overview:
       "trainwell, formerly CoPilot, wins when a person wants human eyes and judgment on training: the assigned trainer learns the constraints, builds sessions, reviews movement, communicates frequently, and adjusts the plan. Murph does not provide exercise supervision. It keeps non-training questions and authorized health information in one private thread and carries the practical work that falls outside the trainer relationship.",
+    quickComparison: [
+      {
+        capability: "Dedicated human coaching",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Personalized workout programming",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Movement and form review",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private ongoing conversation",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     relationship: "alternative",
     slug: "trainwell",
     sources: [
@@ -939,6 +1259,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "JuggernautAI",
     overview:
       "JuggernautAI is purpose-built for its stated job: it turns lifter inputs into a powerlifting or powerbuilding program, adjusts work from readiness and effort, and can peak toward a meet. Murph cannot prescribe that specialist cycle. Murph keeps a private thread across workouts, authorized signals, records, notes, meals, and symptoms and supports the follow-through prompted by that combined picture.",
+    quickComparison: [
+      {
+        capability: "Powerlifting periodization",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Readiness based programming",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Meet preparation",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     relationship: "complement",
     slug: "juggernautai",
     sources: [
@@ -1030,6 +1382,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Alpha Progression",
     overview:
       "Alpha Progression wins inside the lifting session: it can generate the program, recommend weights and repetition ranges, periodize work, schedule deloads, and learn from logged effort. Murph is not a lifting planner or log. Its value is keeping the decision around that program connected to other authorized information and visible beyond the session.",
+    quickComparison: [
+      {
+        capability: "Generated lifting programs",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Progressive overload targets",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Set by set workout logging",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "alternative",
     slug: "alpha-progression",
     sources: [
@@ -1117,6 +1501,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Strong",
     overview:
       "Strong does one job cleanly: lifters build routines, record every set, track effort and measurements, review charts, and export the history. That manual control is the reason to choose it, and Murph has no equivalent gym interface. Murph is a private health assistant in messaging and on the web that can combine a workout summary with other shared or authorized context and carry a question into a decision and next step.",
+    quickComparison: [
+      {
+        capability: "Set by set workout logging",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Custom workout routines",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Progress charts and records",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "different-role",
     slug: "strong",
     sources: [
@@ -1204,6 +1620,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Hevy",
     overview:
       "Hevy's advantage is the combination Murph does not offer: precise strength logging plus a network where lifters can publish workouts, follow friends, and share routines. Hevy Trainer also adds transparent rule-based programming. Murph is private by default and uses conversation, shared records, and authorized signals to support personal decisions, ongoing experiments, and optional group help beyond the lifting feed.",
+    quickComparison: [
+      {
+        capability: "Set by set workout logging",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Social workout feed",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Rule based workout plans",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "different-role",
     slug: "hevy",
     sources: [
@@ -1287,6 +1735,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Strava",
     overview:
       "Strava wins as the athlete's public or private activity ledger: it receives files from a wide device ecosystem, maps routes, ranks segments, analyzes training, and connects clubs and friends. Murph is not an activity-file network. It is a private assistant that can combine a shared workout summary with conversation, records, notes, meals, symptoms, and authorized signals, then support the plan or follow-up that results.",
+    quickComparison: [
+      {
+        capability: "GPS activity tracking",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Routes segments and maps",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Athlete social network",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "complement",
     slug: "strava",
     sources: [
@@ -1371,6 +1851,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Runna",
     overview:
       "Runna is strongest on a runner's core workflow: enter the event, ability, and schedule; receive a periodized plan; send structured pace and distance targets to a watch; and follow the resulting calendar. It also includes runner-specific strength and mobility work plus form, nutrition, and injury-oriented education. Murph is not a run-plan engine. It keeps the private reasoning and authorized context around the calendar together so decisions survive beyond one training week.",
+    quickComparison: [
+      {
+        capability: "Personalized race plans",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Watch ready workouts",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Pace and distance targets",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     relationship: "alternative",
     slug: "runna",
     sources: [
@@ -1456,6 +1968,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Apple Fitness+",
     overview:
       "Apple Fitness+ is strongest on polished content inside the Apple ecosystem: trainer-led workouts and meditations, music, live metrics from supported hardware, recommendations, and Custom Plans. Murph is not a streaming service. It is a private health assistant in messaging and on the web that can keep a workout in context with authorized health information, then support the decision or check-in that follows.",
+    quickComparison: [
+      {
+        capability: "Trainer led workout classes",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Guided meditation library",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Live workout metrics",
+        evidence: "hardware",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "different-role",
     slug: "apple-fitness-plus",
     sources: [
@@ -1546,6 +2090,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "RP Hypertrophy App",
     overview:
       "RP Hypertrophy App is strongest on a specific, technical workflow: build a muscle-priority mesocycle, log performance, pump, soreness, workload, and recovery, then let RP adjust volume and progression. Murph works through a private conversation rather than a mesocycle interface. It can keep other authorized information beside the plan and sustain decisions RP's feedback form does not capture.",
+    quickComparison: [
+      {
+        capability: "Hypertrophy mesocycle planning",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Fatigue based volume changes",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Set and load guidance",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "alternative",
     slug: "rp-hypertrophy-app",
     sources: [
@@ -1636,6 +2212,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "Boostcamp",
     overview:
       "Boostcamp answers two concrete questions: 'What structured program should I run?' and 'Where should I log it?' Its large free library, tracker, progression rules, and custom builder are genuine advantages. Murph approaches a different problem through an ongoing private conversation: how the chosen template coexists with authorized health information, a changing week, and decisions that need to persist.",
+    quickComparison: [
+      {
+        capability: "Strength program library",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Set by set workout logging",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Progression rules",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "different-role",
     slug: "boostcamp",
     sources: [
@@ -1728,6 +2336,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "SHRED",
     overview:
       "SHRED is strongest on execution: it turns coach-built content and software personalization into a guided session with exercise order, repetitions, load, rest, tempo, and demonstrations. Murph works through private conversation rather than a visual workout player. It can place the session beside other authorized context and carry an outside decision forward, but it does not generate or display SHRED's routine.",
+    quickComparison: [
+      {
+        capability: "Generated workout plans",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Visual exercise guidance",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Set and load prescriptions",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private ongoing conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "alternative",
     slug: "shred",
     sources: [
@@ -1810,6 +2450,38 @@ export const FITNESS_COMPARISONS = defineComparisons([
     name: "JEFIT",
     overview:
       "JEFIT combines a large exercise database, routine builder, set log, timers, reports, community programs, and phone, watch, and web access. Elite's Adaptive Mesocycle Training adds week-to-week adjustments inside four-phase cycles. Murph keeps a private conversational record around that training, using other authorized health information to sustain decisions JEFIT's lifting workflow does not own.",
+    quickComparison: [
+      {
+        capability: "Exercise database",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Set by set workout logging",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Adaptive mesocycle training",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Private health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     relationship: "different-role",
     slug: "jefit",
     sources: [

@@ -30,7 +30,7 @@ export function ComparisonArticle({
     <article aria-labelledby={titleId}>
       <header className="bg-[#2a2520] px-5 pb-14 pt-14 text-[#f5f0e8] sm:px-8 sm:pb-18 sm:pt-18 lg:px-12 lg:pb-20 lg:pt-20">
         <div className="mx-auto max-w-[1080px]">
-          <nav aria-label="Breadcrumb" className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#c4a882]">
+          <nav aria-label="Breadcrumb" className="text-[0.78rem] text-[#f5f0e8]/55">
             <ol className="flex flex-wrap items-center gap-2">
               <li>
                 <Link className="transition-colors hover:text-[#f5f0e8]" href="/">
@@ -52,11 +52,8 @@ export function ComparisonArticle({
 
           <div className="mt-10 grid gap-9 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)] lg:items-end lg:gap-18">
             <div>
-              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
-                Murph · personal health assistant
-              </p>
               <h1
-                className="mt-5 max-w-[11ch] [overflow-wrap:anywhere] text-balance font-serif text-[clamp(3.15rem,7vw,5.8rem)] font-semibold leading-[0.9] tracking-[-0.045em]"
+                className="max-w-[11ch] [overflow-wrap:anywhere] text-balance font-serif text-[clamp(3.15rem,7vw,5.8rem)] font-semibold leading-[0.9] tracking-[-0.045em]"
                 id={titleId}
               >
                 Murph vs{" "}
@@ -67,11 +64,14 @@ export function ComparisonArticle({
                   </span>
                 ))}
               </h1>
+              <p className="mt-6 max-w-[46ch] text-[0.95rem] leading-7 text-[#f5f0e8]/65">
+                Murph is a personal health assistant that works in familiar messaging.
+              </p>
             </div>
 
             <div className="border-t border-[#c4a882]/45 pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-1">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#c4a882]">
-                The relationship · {RELATIONSHIP_LABELS[comparison.relationship]}
+              <p className="text-[0.8rem] font-medium text-[#c4a882]">
+                {RELATIONSHIP_LABELS[comparison.relationship]}
               </p>
               <p className="mt-4 text-balance font-serif text-[clamp(1.55rem,3vw,2rem)] font-semibold leading-[1.12] tracking-[-0.02em] text-[#f5f0e8]">
                 {comparison.headline}
@@ -79,30 +79,15 @@ export function ComparisonArticle({
             </div>
           </div>
 
-          <dl className="mt-11 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-[#c4a882]/35 pt-5 text-[0.72rem] leading-5 text-[#f5f0e8]/60 sm:grid-cols-4 sm:gap-x-8">
-            <div>
-              <dt className="font-mono uppercase tracking-[0.1em] text-[#c4a882]">Published by</dt>
-              <dd className="mt-1">
-                <Link className="underline decoration-[#c4a882]/50 underline-offset-4 hover:text-[#f5f0e8]" href="/compare#methodology">
-                  Murph editorial research
-                </Link>
-              </dd>
-            </div>
-            <div>
-              <dt className="font-mono uppercase tracking-[0.1em] text-[#c4a882]">Evidence</dt>
-              <dd className="mt-1">{comparison.sources.length} competitor sources</dd>
-            </div>
-            <div>
-              <dt className="font-mono uppercase tracking-[0.1em] text-[#c4a882]">Reviewed</dt>
-              <dd className="mt-1">
-                <time dateTime={comparison.lastVerified}>{reviewedLabel}</time>
-              </dd>
-            </div>
-            <div>
-              <dt className="font-mono uppercase tracking-[0.1em] text-[#c4a882]">Commercial</dt>
-              <dd className="mt-1">No affiliate links</dd>
-            </div>
-          </dl>
+          <p className="mt-10 border-t border-[#c4a882]/35 pt-5 text-[0.74rem] leading-5 text-[#f5f0e8]/55">
+            Reviewed <time dateTime={comparison.lastVerified}>{reviewedLabel}</time>
+            {" · "}{comparison.sources.length} official competitor sources
+            {" · "}No affiliate links
+            {" · "}
+            <Link className="underline decoration-[#c4a882]/50 underline-offset-4 hover:text-[#f5f0e8]" href="/compare#methodology">
+              How we research
+            </Link>
+          </p>
         </div>
       </header>
 
@@ -110,54 +95,42 @@ export function ComparisonArticle({
         <div className="mx-auto grid max-w-[1080px] gap-16 lg:gap-22">
           <section aria-labelledby={`${titleId}-answer`} className="grid gap-7 border-b border-[#c4a882]/35 pb-14 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] lg:gap-18">
             <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#5a6e32]">
-                The short answer
-              </p>
               <h2
-                className="mt-3 font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
+                className="font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                 id={`${titleId}-answer`}
               >
-                Keep it, add Murph, or switch?
+                Should you switch to Murph?
               </h2>
             </div>
             <div className="max-w-[66ch]">
               <p className="text-pretty font-serif text-[clamp(1.25rem,2vw,1.55rem)] font-semibold leading-[1.42] tracking-[-0.012em] text-[#2d3436]">
                 {comparison.bottomLine}
               </p>
-              <p className="mt-5 text-[0.98rem] leading-7 text-[#665d4c]">
-                {comparison.overview}
-              </p>
             </div>
           </section>
 
           <section aria-labelledby={`${titleId}-fit`} className="grid gap-8">
             <div className="max-w-[62ch]">
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#736a58]">
-                Best fit
-              </p>
               <h2
-                className="mt-3 font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
+                className="font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                 id={`${titleId}-fit`}
               >
-                Start with the job you need done
+                Which is a better fit?
               </h2>
-              <p className="mt-4 text-[0.98rem] leading-7 text-[#4d4533]">
-                {comparison.bestFor}
-              </p>
             </div>
 
             <div className="grid border-y border-[#c4a882]/35 md:grid-cols-2">
               <div className="py-7 md:pr-8">
-                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
-                  The case for Murph
+                <p className="text-[0.82rem] font-semibold text-[#5a6e32]">
+                  Choose Murph
                 </p>
                 <p className="mt-3 text-[0.95rem] leading-7 text-[#4d4533]">
                   {comparison.chooseMurph}
                 </p>
               </div>
               <div className="border-t border-[#c4a882]/35 py-7 md:border-l md:border-t-0 md:pl-8">
-                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-                  The case for {comparison.name}
+                <p className="text-[0.82rem] font-semibold text-[#736a58]">
+                  Choose {comparison.name}
                 </p>
                 <p className="mt-3 text-[0.95rem] leading-7 text-[#4d4533]">
                   {comparison.chooseCompetitor}
@@ -167,7 +140,7 @@ export function ComparisonArticle({
 
             {comparison.useTogether ? (
               <div className="border-l-2 border-[#7a8c6e] bg-[#ebdfc6]/60 px-6 py-5">
-                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
+                <p className="text-[0.82rem] font-semibold text-[#5a6e32]">
                   Using both
                 </p>
                 <p className="mt-2 max-w-[72ch] text-[0.95rem] leading-7 text-[#4d4533]">
@@ -179,29 +152,20 @@ export function ComparisonArticle({
 
           <section aria-labelledby={`${titleId}-table`} className="grid gap-7">
             <div className="max-w-[68ch]">
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#736a58]">
-                Side by side
-              </p>
               <h2
-                className="mt-3 font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
+                className="font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                 id={`${titleId}-table`}
               >
-                What is actually different
+                Murph vs {comparison.name} at a glance
               </h2>
-              <p className="mt-4 text-[0.95rem] leading-7 text-[#665d4c]">
-                This table compares product shape and current capabilities, not medical outcomes or a universal winner.
-              </p>
             </div>
             <ComparisonTable comparison={comparison} />
           </section>
 
           <section aria-labelledby={`${titleId}-tradeoffs`} className="grid gap-7 lg:grid-cols-[minmax(0,0.65fr)_minmax(0,1.35fr)] lg:gap-16">
             <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#736a58]">
-                Look twice
-              </p>
               <h2
-                className="mt-3 font-serif text-[clamp(1.65rem,3vw,2.35rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
+                className="font-serif text-[clamp(1.65rem,3vw,2.35rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                 id={`${titleId}-tradeoffs`}
               >
                 Material tradeoffs
@@ -218,37 +182,39 @@ export function ComparisonArticle({
 
           <section aria-labelledby={`${titleId}-faq`} className="grid gap-8">
             <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#736a58]">
-                Common questions
-              </p>
               <h2
-                className="mt-3 font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
+                className="font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                 id={`${titleId}-faq`}
               >
-                Murph and {comparison.name}
+                Common questions about Murph and {comparison.name}
               </h2>
             </div>
             <div className="divide-y divide-[#c4a882]/35 border-y border-[#c4a882]/35">
               {comparison.faqs.map((faq) => (
-                <section className="grid gap-3 py-7 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:gap-12" key={faq.question}>
-                  <h3 className="font-serif text-[1.2rem] font-semibold leading-snug">
-                    {faq.question}
-                  </h3>
-                  <p className="text-[0.95rem] leading-7 text-[#4d4533]">
+                <details className="group" key={faq.question}>
+                  <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-6 py-5 marker:content-none [&::-webkit-details-marker]:hidden">
+                    <h3 className="font-serif text-[1.1rem] font-semibold leading-snug transition-colors group-hover:text-[#5a6e32]">
+                      {faq.question}
+                    </h3>
+                    <span
+                      aria-hidden="true"
+                      className="shrink-0 text-lg font-normal leading-none text-[#736a58] transition-transform group-open:rotate-45"
+                    >
+                      +
+                    </span>
+                  </summary>
+                  <p className="max-w-[72ch] pb-6 pr-10 text-[0.95rem] leading-7 text-[#4d4533]">
                     {faq.answer}
                   </p>
-                </section>
+                </details>
               ))}
             </div>
           </section>
 
           <section aria-labelledby={sourceSectionId} className="grid gap-7 lg:grid-cols-[minmax(0,0.65fr)_minmax(0,1.35fr)] lg:gap-16">
             <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#736a58]">
-                Evidence
-              </p>
               <h2
-                className="mt-3 font-serif text-[clamp(1.65rem,3vw,2.35rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
+                className="font-serif text-[clamp(1.65rem,3vw,2.35rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                 id={sourceSectionId}
               >
                 Official sources
@@ -309,14 +275,11 @@ export function ComparisonArticle({
           {related.length > 0 ? (
             <section aria-labelledby={`${titleId}-related`} className="grid gap-7">
               <div>
-                <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#736a58]">
-                  Keep comparing
-                </p>
                 <h2
-                  className="mt-3 font-serif text-[clamp(1.65rem,3vw,2.35rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
+                  className="font-serif text-[clamp(1.65rem,3vw,2.35rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                   id={`${titleId}-related`}
                 >
-                  Related Murph comparisons
+                  Compare Murph with similar tools
                 </h2>
               </div>
               <ul className="grid border-y border-[#c4a882]/35 md:grid-cols-2">
@@ -329,14 +292,9 @@ export function ComparisonArticle({
                       className="group block px-1 py-6 md:px-6"
                       href={`/compare/murph-vs-${entry.slug}`}
                     >
-                      <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-[#736a58]">
-                        Murph vs
-                      </span>
-                      <span className="mt-2 block font-serif text-[1.4rem] font-semibold transition-colors group-hover:text-[#5a6e32]">
+                      <span className="flex items-center justify-between gap-4 font-serif text-[1.4rem] font-semibold transition-colors group-hover:text-[#5a6e32]">
                         {entry.name}
-                      </span>
-                      <span className="mt-2 block text-[0.84rem] leading-6 text-[#665d4c]">
-                        {entry.headline}
+                        <span aria-hidden="true" className="font-sans text-lg font-normal text-[#736a58] transition-transform group-hover:translate-x-1">→</span>
                       </span>
                     </Link>
                   </li>
@@ -348,10 +306,7 @@ export function ComparisonArticle({
           <section className="bg-[#2a2520] px-7 py-9 text-[#f5f0e8] sm:px-10 sm:py-11">
             <div className="flex flex-col gap-7 sm:flex-row sm:items-end sm:justify-between">
               <div className="max-w-[58ch]">
-                <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#c4a882]">
-                  What Murph adds
-                </p>
-                <h2 className="mt-3 font-serif text-[clamp(1.7rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]">
+                <h2 className="font-serif text-[clamp(1.7rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]">
                   Keep what works. Bring the whole picture together.
                 </h2>
                 <p className="mt-4 text-[0.92rem] leading-7 text-[#f5f0e8]/70">

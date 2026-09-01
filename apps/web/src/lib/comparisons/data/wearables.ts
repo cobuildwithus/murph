@@ -65,6 +65,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "WHOOP measures strain, sleep, and recovery with a dedicated sensor. Murph is a personal health assistant that connects those signals to wider context and next steps.",
+    quickComparison: [
+      {
+        capability: "Continuous recovery sensing",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Sleep and strain scoring",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Decision support and follow up",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "yes",
+      },
+      {
+        capability: "Works without dedicated hardware",
+        evidence: "hardware",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "WHOOP",
     overview:
       "A WHOOP owner already has a strong answer to 'How recovered am I?' Murph is for the harder follow-up: whether the signal fits what you felt, which part of your life may explain it, what change is worth trying, and whether that change helped. WHOOP remains the source of truth for its sensor data and training scores. Murph provides a private conversation that can connect a report you share with records, symptoms, routines, constraints, and prior outcomes without pretending to be the measuring device.",
@@ -169,6 +201,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Oura Ring turns overnight sensing into sleep, readiness, and activity scores. Murph is a personal health assistant for interpreting those trends alongside the rest of your health.",
+    quickComparison: [
+      {
+        capability: "Passive overnight sensing",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Readiness and sleep scoring",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Context across records and symptoms",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Action planning and check ins",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Works without dedicated hardware",
+        evidence: "hardware",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "Oura Ring",
     overview:
       "You do not need Murph to make Oura better at sensing sleep. You may want Murph when three low Readiness scores raise a question the ring cannot settle on its own. Murph can discuss the Oura information you choose to share alongside symptoms, routines, records, goals, and earlier attempts, then help turn one plausible explanation into a manageable action and later review. Oura remains the better tool for passive measurement; Murph is the relationship around the decision.",
@@ -277,6 +341,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Garmin Connect turns Garmin device data into detailed training metrics, routes, and plans. Murph is a personal health assistant for decisions that extend beyond sport.",
+    quickComparison: [
+      {
+        capability: "GPS workout and route tracking",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Sport specific training metrics",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Context across health domains",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Conversation and remembered context",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Works without dedicated hardware",
+        evidence: "hardware",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "Garmin Connect",
     overview:
       "A serious Garmin user should keep Garmin Connect. Murph does not offer its GPS tracks, maps, device controls, training status, or coach-facing sport detail. The additional value is outside that lane: a private conversation that can put a Garmin summary beside a symptom, record, meal pattern, work trip, or prior outcome and help decide what the full picture supports. Murph can then hold onto the reasoning and help with the reminder, check-in, or experiment that the decision requires.",
@@ -379,6 +475,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Google Health Premium builds AI coaching around Fitbit and Pixel Watch data. Murph is a personal health assistant that reasons across wearable signals and broader health context.",
+    quickComparison: [
+      {
+        capability: "Coaching from device metrics",
+        evidence: "insightStyle",
+        murph: "limited",
+        competitor: "yes",
+      },
+      {
+        capability: "Fitness and sleep scoring",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Context across records and symptoms",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Ongoing messages and follow up",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "yes",
+      },
+      {
+        capability: "Works without dedicated hardware",
+        evidence: "hardware",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "Google Health Premium",
     overview:
       "If your Pixel Watch or Fitbit data is the center of the problem, Google Health Premium has the tighter loop: it owns the measurements and can coach directly from them. Murph is the better fit when the starting point could instead be a lab, symptom, health errand, meal, record, or question and the useful answer needs history from several parts of life. Murph still does not replace Google's sensor data or device-specific calculations. The distinction is first-party wearable coaching versus a hardware-independent relationship that can keep reasoning and follow-through together.",
@@ -487,6 +615,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Apple Health stores device and app data while Fitness organizes activity. Murph is a personal health assistant that turns relevant signals into practical follow-through.",
+    quickComparison: [
+      {
+        capability: "Native health data repository",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Passive device sensing",
+        evidence: "hardware",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Trainer led workout library",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health conversation",
+        evidence: "insightStyle",
+        murph: "yes",
+        competitor: "no",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "Apple Health and Fitness",
     overview:
       "An Apple user already has an excellent place to collect HealthKit data and review activity. Murph is for the moment after collection: a trend needs an explanation, a workout plan conflicts with a symptom or schedule, a record creates a question, or a useful intention keeps slipping. You can share the relevant information without moving the whole Apple repository. Murph can then use the surrounding history, help choose an action, and return to whether it happened or helped.",
@@ -588,6 +748,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Samsung Health centers Galaxy device measurements, reports, and native coaching. Murph is a personal health assistant that connects selected signals with wider health context.",
+    quickComparison: [
+      {
+        capability: "Native sensor measurements",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Energy and sleep scoring",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Regulated heart health features",
+        evidence: "clinicalRole",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Context beyond device data",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "Samsung Health",
     overview:
       "Samsung Health already covers an unusually broad set of wellness functions, especially for someone invested in Galaxy hardware. Murph is not a reason to give up that ecosystem. It is useful when an Energy Score, sleep pattern, nutrition log, or device report cannot answer a cross-domain question by itself. Murph can combine the observation you share with relevant history and constraints, help settle on a next step, and keep the decision alive after you close the app.",
@@ -689,6 +881,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Ultrahuman Ring PRO is a preorder ring designed for passive sleep, recovery, and movement sensing. Murph is a personal health assistant for deciding what a pattern warrants next.",
+    quickComparison: [
+      {
+        capability: "Passive sleep and recovery sensing",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Long term offline data storage",
+        evidence: "hardware",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Conversational health support",
+        evidence: "insightStyle",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Works without dedicated hardware",
+        evidence: "hardware",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "Ultrahuman Ring PRO",
     overview:
       "Ring PRO is compelling hardware on paper: screen-free sensing, long advertised battery life, deep offline storage, and core data without a mandatory subscription. It was also still a preorder at verification, and the broader Ultrahuman experience can include paid or region-limited services. Murph offers none of the ring's measurements. Its value is helping you decide whether a signal matters after it is compared with symptoms, labs, meals, training, and prior outcomes, then supporting the action you choose.",
@@ -789,6 +1013,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "POLAR Loop records screen-free activity, sleep, and recovery inside Polar Flow. Murph is a personal health assistant for fitting those signals to broader health and real-life constraints.",
+    quickComparison: [
+      {
+        capability: "Continuous heart rate sensing",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Training load analysis",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Works without dedicated hardware",
+        evidence: "hardware",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "POLAR Loop",
     overview:
       "Loop and Flow already give an athlete a focused, subscription-free measurement and training system. Murph should not dilute that strength with generic coaching. Its role begins when Polar's result meets a competing fact: poor sleep during travel, a symptom, a lab concern, a demanding schedule, or a plan that has repeatedly fallen apart. Murph can help weigh the full situation, choose a proportionate response, and check whether it was workable.",
@@ -889,6 +1145,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "COROS pairs sports hardware with EvoLab and Training Hub for endurance analysis. Murph is a personal health assistant for questions that extend beyond training data.",
+    quickComparison: [
+      {
+        capability: "GPS route and workout tracking",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Training load and race metrics",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Coach facing training tools",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "COROS",
     overview:
       "COROS users already have deep training analysis without a monthly software bill, and coaches have a purpose-built web hub. Murph is not a better place for routes, race predictions, workouts, or load. It is the place to continue when the decision also involves symptoms, records, nutrition, stressors, or life constraints. A private conversation can preserve why a plan changed, help with the non-training actions around it, and revisit the result without displacing COROS.",
@@ -1003,6 +1291,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Amazfit Helio Strap Pro captures workout, sleep, recovery, and movement data in Zepp. Murph is a personal health assistant for connecting a signal to context and action.",
+    quickComparison: [
+      {
+        capability: "Continuous heart rate sensing",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Movement and muscle load analysis",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Flexible body placement",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "Amazfit Helio Strap Pro",
     overview:
       "Helio Strap Pro makes a credible case on value: screen-free heart-rate and movement modules, flexible placement, hybrid-training analysis, and no required core subscription. Murph is not an upgrade to those sensors. It becomes relevant when a HybridCharge or muscle-load result needs context the Zepp app may not own, such as symptoms, meals, records, time constraints, or previous attempts. Murph can help choose a response and stay with the outcome after the training session ends.",
@@ -1099,6 +1419,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "RingConn provides subscription-free sleep, recovery, and vital-sign trends from a smart ring. Murph is a personal health assistant for interpreting a trend beyond the ring.",
+    quickComparison: [
+      {
+        capability: "Passive overnight sensing",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "On ring vibration alerts",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Vascular wellness trends",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "RingConn",
     overview:
       "RingConn appeals to people who want long-battery passive sensing without another monthly fee, and Gen 3 adds useful vibration alerts. Those strengths do not make every app insight conclusive: vascular readings are trends rather than blood-pressure measurements, wellness flags are not diagnoses, and some AI availability was unclear at verification. Murph does not replace the ring. It can help keep a trend in proportion, compare it with relevant history, and decide what, if anything, deserves action.",
@@ -1195,6 +1547,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Circular Ring 2 combines sleep tracking, ECG checks, and haptic alerts in a smart ring. Murph is a personal health assistant for cautious interpretation and follow-through.",
+    quickComparison: [
+      {
+        capability: "Passive sleep and recovery sensing",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Short ECG checks",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Haptic reminders and alerts",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "yes",
+      },
+    ],
     name: "Circular Ring 2",
     overview:
       "Circular Ring 2 has a differentiated current feature set, including a short ECG check, detailed sleep views, Kira guidance, and haptic alerts. The purchasing decision is less simple because official pages conflict on the rollout of blood-pressure and glucose trends. Murph contributes no hardware and should not be used to fill that evidence gap. It can help you reason from the measurements Circular actually provides, connect them with relevant records and symptoms, and choose a practical response without treating a roadmap item as present data.",
@@ -1291,6 +1675,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Withings brings watch, scale, blood-pressure, sleep, and other home measurements into one ecosystem. Murph is a personal health assistant for reasoning across the results.",
+    quickComparison: [
+      {
+        capability: "Home health measurements",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Blood pressure and body metrics",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Clinician shareable reports",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "insightStyle",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "Withings",
     overview:
       "Withings can build a richer home-measurement record than Murph ever could: weight and body composition, blood pressure, sleep, temperature, activity, and selected ECG data all have purpose-built devices. The remaining burden is making sense of changes across those categories and doing something appropriate with them. Murph can discuss the specific trends you choose to share alongside symptoms, meals, records, goals, and constraints, then help prepare a care question, plan a habit, handle a task, or revisit the result.",

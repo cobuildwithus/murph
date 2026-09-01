@@ -67,6 +67,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Function Health",
     overview:
       "Function Health is strongest when you want a broad, repeatable measurement program in one account. Murph works one layer above the testing event: it keeps the records and plans you choose to share in a continuing conversation, so a flagged result can become a clinician question, a realistic next step, and something you actually revisit. Function supplies the measurements; Murph carries their useful context forward.",
+    quickComparison: [
+      { capability: "Broad laboratory testing", murph: "no", competitor: "yes", evidence: "inputs" },
+      { capability: "Optional medical imaging", murph: "no", competitor: "limited", evidence: "hardware" },
+      { capability: "Cross source health context", murph: "yes", competitor: "yes", evidence: "inputs" },
+      { capability: "Ongoing conversational support", murph: "yes", competitor: "yes", evidence: "platforms" },
+      { capability: "Daily plan follow through", murph: "yes", competitor: "limited", evidence: "followThrough" },
+    ],
     relationship: "complement",
     slug: "function-health",
     sources: [
@@ -161,6 +168,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Superpower",
     overview:
       "Superpower's advantage is a relatively low starting price for one broad annual draw, scores, an AI protocol, wearable syncing, care team messaging, and access to separately priced products. Murph is useful during the months between measurements, when questions, routines, and practical follow-through determine whether a protocol fits real life. For many people, the products are more useful together than as substitutes.",
+    quickComparison: [
+      { capability: "Included annual blood test", murph: "no", competitor: "yes", evidence: "format" },
+      { capability: "Treatment marketplace access", murph: "no", competitor: "yes", evidence: "followThrough" },
+      { capability: "Ongoing conversational support", murph: "yes", competitor: "yes", evidence: "followThrough" },
+      { capability: "Cross source health context", murph: "yes", competitor: "yes", evidence: "inputs" },
+      { capability: "Daily plan follow through", murph: "yes", competitor: "limited", evidence: "followThrough" },
+    ],
     relationship: "complement",
     slug: "superpower",
     sources: [
@@ -252,6 +266,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "InsideTracker",
     overview:
       "InsideTracker gives quantified-performance users something Murph does not try to recreate: a structured dashboard, optimized ranges, and proprietary recommendations from supported biomarker and tracker data. Murph earns its place after that analysis, when a recommendation needs to be weighed against other records, turned into a workable routine, remembered, and revisited. It complements the test and dashboard; neither product replaces a clinician.",
+    quickComparison: [
+      { capability: "Blood biomarker testing", murph: "no", competitor: "limited", evidence: "format" },
+      { capability: "Proprietary performance scores", murph: "no", competitor: "yes", evidence: "insightStyle" },
+      { capability: "Context beyond performance", murph: "yes", competitor: "limited", evidence: "primaryJob" },
+      { capability: "Ongoing practical support", murph: "yes", competitor: "limited", evidence: "followThrough" },
+      { capability: "Structured action planning", murph: "yes", competitor: "yes", evidence: "followThrough" },
+    ],
     relationship: "complement",
     slug: "insidetracker",
     sources: [
@@ -355,6 +376,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "SiPhox Health",
     overview:
       "SiPhox Health's advantage is concrete: repeat blood testing from an upper-arm collection kit, configurable panels, and a dashboard built to compare cycles. Murph adds continuity beyond that dashboard. It can keep the questions raised by a result beside other records, routines, reminders, and clinician guidance, so the next test is not the first time you revisit the plan.",
+    quickComparison: [
+      { capability: "At home blood collection", murph: "no", competitor: "yes", evidence: "hardware" },
+      { capability: "Configurable laboratory panels", murph: "no", competitor: "yes", evidence: "insightStyle" },
+      { capability: "Recurring testing options", murph: "no", competitor: "yes", evidence: "format" },
+      { capability: "Cross source health context", murph: "yes", competitor: "yes", evidence: "inputs" },
+      { capability: "Ongoing conversational support", murph: "yes", competitor: "limited", evidence: "followThrough" },
+    ],
     relationship: "complement",
     slug: "siphox-health",
     sources: [
@@ -462,6 +490,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Lifeforce",
     overview:
       "Lifeforce is closer to a telehealth longevity clinic than a dashboard, and that clinical access is its decisive advantage. Murph occupies the nonclinical space around the visits: gathering the questions worth asking, retaining instructions, making routines workable, and noticing what is getting in the way. The clean comparison is licensed care versus continuity around care, not one service replacing the other.",
+    quickComparison: [
+      { capability: "Recurring laboratory testing", murph: "no", competitor: "yes", evidence: "followThrough" },
+      { capability: "Licensed clinician access", murph: "no", competitor: "yes", evidence: "clinicalRole" },
+      { capability: "Health coaching access", murph: "no", competitor: "limited", evidence: "followThrough" },
+      { capability: "Prescription treatment access", murph: "no", competitor: "limited", evidence: "followThrough" },
+      { capability: "Context between appointments", murph: "yes", competitor: "limited", evidence: "followThrough" },
+    ],
     relationship: "different-role",
     slug: "lifeforce",
     sources: [
@@ -557,6 +592,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Mito Health",
     overview:
       "Mito Health's current model is flexible: a low-cost membership, separately priced tests, member pricing, a longitudinal record, clinician reviewed action plans, and concierge support. Murph is useful after the purchase, when one result needs to be placed beside other records and turned into actions that survive daily life. It does not replace Mito's test or review; it makes the selected next steps easier to carry forward.",
+    quickComparison: [
+      { capability: "Direct laboratory ordering", murph: "no", competitor: "yes", evidence: "primaryJob" },
+      { capability: "Clinician reviewed action plans", murph: "no", competitor: "yes", evidence: "insightStyle" },
+      { capability: "Ongoing conversational support", murph: "yes", competitor: "yes", evidence: "followThrough" },
+      { capability: "Cross source health context", murph: "yes", competitor: "yes", evidence: "inputs" },
+      { capability: "Support beyond test purchases", murph: "yes", competitor: "limited", evidence: "primaryJob" },
+    ],
     relationship: "complement",
     slug: "mito-health",
     sources: [
@@ -652,6 +694,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Parsley Health",
     overview:
       "Parsley's live clinician is the meaningful difference here: the service interprets broad testing or eligible outside results in the context of symptoms, history, and lifestyle. Murph belongs before and after that encounter. It can help gather the timeline and questions that make limited visit time more useful, then keep recommendations, reminders, barriers, and follow-up questions from scattering again.",
+    quickComparison: [
+      { capability: "Broad laboratory testing", murph: "no", competitor: "limited", evidence: "format" },
+      { capability: "Licensed clinician interpretation", murph: "no", competitor: "yes", evidence: "clinicalRole" },
+      { capability: "Symptom and history context", murph: "yes", competitor: "yes", evidence: "inputs" },
+      { capability: "Ongoing conversational support", murph: "yes", competitor: "limited", evidence: "followThrough" },
+      { capability: "Long term plan follow through", murph: "yes", competitor: "limited", evidence: "followThrough" },
+    ],
     relationship: "different-role",
     slug: "parsley-health",
     sources: [
@@ -751,6 +800,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Wild Health",
     overview:
       "Wild Health combines services Murph deliberately does not provide: genetics, recurring bloodwork, licensed physician care, and coaching. Murph's value is continuity outside the scheduled program. It keeps clinician-approved actions beside the person's evolving context, helps surface friction while it is still actionable, and preserves useful questions for the next care interaction.",
+    quickComparison: [
+      { capability: "Recurring laboratory testing", murph: "no", competitor: "yes", evidence: "followThrough" },
+      { capability: "Licensed physician care", murph: "no", competitor: "yes", evidence: "clinicalRole" },
+      { capability: "Genetics informed planning", murph: "no", competitor: "yes", evidence: "insightStyle" },
+      { capability: "Health coaching access", murph: "no", competitor: "yes", evidence: "followThrough" },
+      { capability: "Works without clinical membership", murph: "yes", competitor: "no", evidence: "format" },
+    ],
     relationship: "different-role",
     slug: "wild-health",
     sources: [
@@ -854,6 +910,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Hone Health",
     overview:
       "Hone Health is built for treatment-oriented telehealth, particularly around hormones, metabolism, and longevity. That makes its labs, clinician access, and treatment eligibility the reason to choose it. Murph is the continuity layer around the clinical relationship: a place to prepare a clear history, retain instructions, notice patterns or obstacles, and arrive at follow-up with better questions without presenting itself as a prescriber.",
+    quickComparison: [
+      { capability: "Hormone laboratory testing", murph: "no", competitor: "yes", evidence: "inputs" },
+      { capability: "Licensed telehealth care", murph: "no", competitor: "limited", evidence: "clinicalRole" },
+      { capability: "Prescription management", murph: "no", competitor: "limited", evidence: "followThrough" },
+      { capability: "Ongoing health conversation", murph: "yes", competitor: "limited", evidence: "followThrough" },
+      { capability: "Broader health context", murph: "yes", competitor: "limited", evidence: "primaryJob" },
+    ],
     relationship: "different-role",
     slug: "hone-health",
     sources: [
@@ -953,6 +1016,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Quest Health",
     overview:
       "Quest Health is a straightforward answer to a measurement need: directly purchased conventional testing, with the Elite Health Profile adding biometrics and a survey in one transaction. Murph starts where that transaction ends. It can keep the report connected to the rest of a person's context, turn flagged items into clinician questions and appointments, and preserve the plan after the portal is closed.",
+    quickComparison: [
+      { capability: "Conventional laboratory testing", murph: "no", competitor: "yes", evidence: "primaryJob" },
+      { capability: "Independent result discussion", murph: "no", competitor: "yes", evidence: "followThrough" },
+      { capability: "Cross source health context", murph: "yes", competitor: "no", evidence: "inputs" },
+      { capability: "Ongoing conversational support", murph: "yes", competitor: "no", evidence: "format" },
+      { capability: "Practical next step planning", murph: "yes", competitor: "limited", evidence: "followThrough" },
+    ],
     relationship: "complement",
     slug: "quest-health",
     sources: [
@@ -1048,6 +1118,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Labcorp OnDemand",
     overview:
       "Labcorp OnDemand's advantage is access to familiar conventional testing without committing to a coaching program. Its Comprehensive Health Test is a one-time blood and urine panel; Murph provides the continuity the purchase does not aim to provide. It can connect the report with other records, keep questions ready for a clinician, and turn agreed next steps into reminders and routines.",
+    quickComparison: [
+      { capability: "Conventional laboratory testing", murph: "no", competitor: "yes", evidence: "primaryJob" },
+      { capability: "Independent order approval", murph: "no", competitor: "yes", evidence: "clinicalRole" },
+      { capability: "Cross source health context", murph: "yes", competitor: "no", evidence: "inputs" },
+      { capability: "Ongoing conversational support", murph: "yes", competitor: "no", evidence: "followThrough" },
+      { capability: "Practical plan follow through", murph: "yes", competitor: "no", evidence: "followThrough" },
+    ],
     relationship: "complement",
     slug: "labcorp-ondemand",
     sources: [
@@ -1143,6 +1220,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Bioniq",
     overview:
       "Bioniq PRO is purpose-built around one outcome: turning a qualifying blood report and questionnaire into a personalized formula delivered every three months. That focus is a strength if supplements are the goal. Murph is broader and product-neutral; it can keep the routine beside other records and priorities, capture questions or reactions, and support a clinician-informed decision about what changes next.",
+    quickComparison: [
+      { capability: "Custom supplement formula", murph: "no", competitor: "yes", evidence: "primaryJob" },
+      { capability: "Recurring supplement delivery", murph: "no", competitor: "yes", evidence: "followThrough" },
+      { capability: "Nutritionist consultation", murph: "no", competitor: "yes", evidence: "followThrough" },
+      { capability: "Broad health context", murph: "yes", competitor: "limited", evidence: "inputs" },
+      { capability: "Product neutral health support", murph: "yes", competitor: "no", evidence: "primaryJob" },
+    ],
     relationship: "different-role",
     slug: "bioniq",
     sources: [
@@ -1250,6 +1334,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Neko Health",
     overview:
       "Neko Health compresses a physical snapshot and clinician discussion into a focused in-person visit; Murph cannot reproduce that sensor system. Murph's advantage appears across the longer timeline: assembling context before the scan, retaining what the clinician said, preparing for an outside referral, and keeping practical next steps visible after the visit.",
+    quickComparison: [
+      { capability: "Clinic sensor measurements", murph: "no", competitor: "yes", evidence: "hardware" },
+      { capability: "Immediate clinician review", murph: "no", competitor: "yes", evidence: "primaryJob" },
+      { capability: "Same visit action plan", murph: "no", competitor: "yes", evidence: "followThrough" },
+      { capability: "Ongoing health conversation", murph: "yes", competitor: "no", evidence: "format" },
+      { capability: "Referral support when warranted", murph: "yes", competitor: "yes", evidence: "followThrough" },
+    ],
     relationship: "different-role",
     slug: "neko-health",
     sources: [
@@ -1349,6 +1440,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Fountain Life",
     overview:
       "Fountain Life's premium price buys a concentrated workup Murph does not offer: advanced imaging, laboratory work, genetics, and clinician review through physical centers. After that workup, Murph can keep the resulting documents and decisions connected, help coordinate follow-up, and make a clinician-approved care plan easier to carry between annual visits.",
+    quickComparison: [
+      { capability: "Advanced diagnostic imaging", murph: "no", competitor: "yes", evidence: "hardware" },
+      { capability: "Broad laboratory testing", murph: "no", competitor: "yes", evidence: "inputs" },
+      { capability: "Physician care team access", murph: "no", competitor: "yes", evidence: "clinicalRole" },
+      { capability: "Ongoing plan monitoring", murph: "yes", competitor: "yes", evidence: "followThrough" },
+      { capability: "Everyday conversational support", murph: "yes", competitor: "limited", evidence: "platforms" },
+    ],
     relationship: "different-role",
     slug: "fountain-life",
     sources: [
@@ -1444,6 +1542,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Prenuvo",
     overview:
       "Prenuvo's value is structural medical information from preventive MRI, with some annual memberships adding blood panels and provider review. Murph cannot generate or interpret those images. It can make the episode more useful by helping you arrive with organized context, preserve the reviewed findings, prepare specialist questions, and keep clinician-approved follow-up from becoming another scattered list.",
+    quickComparison: [
+      { capability: "Preventive MRI imaging", murph: "no", competitor: "yes", evidence: "hardware" },
+      { capability: "Radiologist interpretation", murph: "no", competitor: "yes", evidence: "clinicalRole" },
+      { capability: "Annual laboratory testing", murph: "no", competitor: "limited", evidence: "inputs" },
+      { capability: "Ongoing health context", murph: "yes", competitor: "limited", evidence: "insightStyle" },
+      { capability: "Follow up planning support", murph: "yes", competitor: "yes", evidence: "followThrough" },
+    ],
     relationship: "different-role",
     slug: "prenuvo",
     sources: [
@@ -1535,6 +1640,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "TruDiagnostic",
     overview:
       "TruDiagnostic does one specialized job Murph does not: it analyzes a mailed blood sample and applies methylation models to produce aging and health-related estimates. Murph adds breadth and continuity. It can keep the model outputs beside conventional results, surface the questions worth taking to a qualified clinician, and help assess whether chosen actions are realistic without treating an estimate as a diagnosis.",
+    quickComparison: [
+      { capability: "DNA methylation testing", murph: "no", competitor: "yes", evidence: "inputs" },
+      { capability: "Biological age estimates", murph: "no", competitor: "yes", evidence: "insightStyle" },
+      { capability: "Cross source health context", murph: "yes", competitor: "no", evidence: "inputs" },
+      { capability: "Ongoing practical support", murph: "yes", competitor: "limited", evidence: "followThrough" },
+      { capability: "Personalized recommendations", murph: "yes", competitor: "yes", evidence: "followThrough" },
+    ],
     relationship: "complement",
     slug: "trudiagnostic",
     sources: [
@@ -1630,6 +1742,13 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     name: "Tally Health",
     overview:
       "Tally Health turns a noninvasive cheek-cell methylation test into a clear consumer program: an age estimate, lifestyle guidance, retesting, and optional recurring supplements. Murph does not reproduce that score. Its case is breadth and memory: the ability to keep the estimate beside other records and priorities, turn selected habits into realistic actions, and revisit what actually changed rather than optimizing around one model output.",
+    quickComparison: [
+      { capability: "Cheek swab age testing", murph: "no", competitor: "yes", evidence: "format" },
+      { capability: "Daily supplement delivery", murph: "no", competitor: "limited", evidence: "followThrough" },
+      { capability: "Personalized lifestyle plan", murph: "yes", competitor: "yes", evidence: "followThrough" },
+      { capability: "Cross source health context", murph: "yes", competitor: "limited", evidence: "inputs" },
+      { capability: "Product neutral health support", murph: "yes", competitor: "no", evidence: "primaryJob" },
+    ],
     relationship: "different-role",
     slug: "tally-health",
     sources: [

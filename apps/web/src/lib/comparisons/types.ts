@@ -90,6 +90,15 @@ export type CompetitorEvidence = {
   [Key in keyof CompetitorProfile]: readonly [number, ...number[]];
 };
 
+export type ComparisonQuickStatus = "yes" | "limited" | "no";
+
+export interface ComparisonQuickRow {
+  capability: string;
+  competitor: ComparisonQuickStatus;
+  evidence: keyof CompetitorProfile;
+  murph: ComparisonQuickStatus;
+}
+
 export interface ComparisonEntry {
   aliases?: readonly string[];
   bestFor: string;
@@ -105,6 +114,13 @@ export interface ComparisonEntry {
   metaDescription: string;
   name: string;
   overview: string;
+  quickComparison: readonly [
+    ComparisonQuickRow,
+    ComparisonQuickRow,
+    ComparisonQuickRow,
+    ComparisonQuickRow,
+    ComparisonQuickRow,
+  ];
   relationship: ComparisonRelationship;
   slug: string;
   sources: readonly [ComparisonSource, ComparisonSource, ...ComparisonSource[]];

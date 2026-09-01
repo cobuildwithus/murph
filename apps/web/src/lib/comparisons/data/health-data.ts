@@ -67,6 +67,38 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     name: "Guava",
     overview:
       "Guava combines provider-record retrieval, uploaded documents, structured daily tracking, correlations, an AI assistant, visit preparation, and controlled sharing in one record-centered product. That makes it stronger than Murph for building a clinician-ready health file. Murph's advantage is a conversation-first relationship that can begin with a question, use relevant authorized context, weigh options, and keep the chosen next step moving; it is not a denser record wallet.",
+    quickComparison: [
+      {
+        capability: "Direct US provider retrieval",
+        competitor: "yes",
+        evidence: "primaryJob",
+        murph: "no",
+      },
+      {
+        capability: "Structured health record",
+        competitor: "yes",
+        evidence: "format",
+        murph: "no",
+      },
+      {
+        capability: "Visit ready sharing",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Ongoing assistant conversation",
+        competitor: "limited",
+        evidence: "insightStyle",
+        murph: "yes",
+      },
+      {
+        capability: "Reminders and check ins",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "yes",
+      },
+    ],
     relationship: "alternative",
     slug: "guava",
     sources: [
@@ -164,6 +196,38 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     name: "CareClinic",
     overview:
       "CareClinic is strong at the disciplined mechanics of condition management: configurable diaries, care plans, adherence reminders, correlations, caregiver participation, and printable reports. Murph does not ask the diary to be the center of the experience. It gives someone a continuing place to explain what changed, consider several kinds of health context together, and turn the discussion into practical follow-up.",
+    quickComparison: [
+      {
+        capability: "Detailed symptom diary",
+        competitor: "yes",
+        evidence: "format",
+        murph: "no",
+      },
+      {
+        capability: "Medication adherence tracking",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Appointment reports",
+        competitor: "limited",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Ongoing assistant conversation",
+        competitor: "no",
+        evidence: "insightStyle",
+        murph: "yes",
+      },
+      {
+        capability: "Plans reminders and check ins",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "yes",
+      },
+    ],
     relationship: "alternative",
     slug: "careclinic",
     sources: [
@@ -265,6 +329,38 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     name: "Bearable",
     overview:
       "Bearable is a mobile tracker built around customizable daily check-ins, symptom and factor ratings, medication logs, correlations, goals, and experiments. Murph does not reproduce those dedicated tracker screens. It can begin with the health question, relate the relevant pattern to other authorized context, and carry the resulting decision into follow-up.",
+    quickComparison: [
+      {
+        capability: "Custom symptom tracking",
+        competitor: "yes",
+        evidence: "format",
+        murph: "no",
+      },
+      {
+        capability: "Correlation charts",
+        competitor: "yes",
+        evidence: "insightStyle",
+        murph: "no",
+      },
+      {
+        capability: "Ongoing assistant conversation",
+        competitor: "no",
+        evidence: "insightStyle",
+        murph: "yes",
+      },
+      {
+        capability: "Connected wearable data",
+        competitor: "limited",
+        evidence: "hardware",
+        murph: "yes",
+      },
+      {
+        capability: "Plans reminders and experiments",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "yes",
+      },
+    ],
     relationship: "alternative",
     slug: "bearable",
     sources: [
@@ -371,6 +467,38 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     name: "Exist",
     overview:
       "Exist imports signals across health and daily life, then presents trends and correlations in a full web dashboard with companion apps. It deliberately rejects generative AI and leaves interpretation to the member. Murph gives up Exist's non-health integration breadth and statistics interface in exchange for an ongoing health conversation that can interpret relevant context and carry the chosen next step forward.",
+    quickComparison: [
+      {
+        capability: "Statistical correlations",
+        competitor: "yes",
+        evidence: "insightStyle",
+        murph: "no",
+      },
+      {
+        capability: "Lifestyle and productivity data",
+        competitor: "yes",
+        evidence: "inputs",
+        murph: "no",
+      },
+      {
+        capability: "Custom quantitative tracking",
+        competitor: "yes",
+        evidence: "format",
+        murph: "no",
+      },
+      {
+        capability: "Ongoing health conversation",
+        competitor: "no",
+        evidence: "insightStyle",
+        murph: "yes",
+      },
+      {
+        capability: "Personal experiments",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "yes",
+      },
+    ],
     relationship: "alternative",
     slug: "exist",
     sources: [
@@ -468,6 +596,38 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     name: "Gyroscope",
     overview:
       "Gyroscope is compelling if a polished daily dashboard is part of the motivation: Apple Health data, sleep, workouts, food photos, mood, places, productivity, and biomarkers become Daily Reports and a Health Score, with AI or human coaching depending on plan. Murph is not an alternative visual scorecard or human-coaching membership. It is a private-by-default, continuing conversation for working through context and keeping the next step from disappearing after the report.",
+    quickComparison: [
+      {
+        capability: "Visual health dashboard",
+        competitor: "yes",
+        evidence: "format",
+        murph: "no",
+      },
+      {
+        capability: "Daily health score",
+        competitor: "yes",
+        evidence: "insightStyle",
+        murph: "no",
+      },
+      {
+        capability: "Photo based food logging",
+        competitor: "yes",
+        evidence: "format",
+        murph: "no",
+      },
+      {
+        capability: "Human health coaching",
+        competitor: "limited",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Ongoing assistant conversation",
+        competitor: "limited",
+        evidence: "insightStyle",
+        murph: "yes",
+      },
+    ],
     relationship: "alternative",
     slug: "gyroscope",
     sources: [
@@ -566,6 +726,38 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     name: "Welltory",
     overview:
       "Welltory is a specialist measurement product: it turns HRV, sleep, activity, workouts, blood pressure, and other signals into stress, energy, and health reports, with an experimental AI Coach available through ChatGPT. Murph does not try to replace that score feed or HRV routine. It is useful when someone wants to place a signal beside other authorized health context, talk through uncertainty, and revisit the action over time.",
+    quickComparison: [
+      {
+        capability: "HRV measurements",
+        competitor: "yes",
+        evidence: "hardware",
+        murph: "no",
+      },
+      {
+        capability: "Stress and energy scores",
+        competitor: "yes",
+        evidence: "insightStyle",
+        murph: "no",
+      },
+      {
+        capability: "Automated wellness reports",
+        competitor: "yes",
+        evidence: "insightStyle",
+        murph: "no",
+      },
+      {
+        capability: "Ongoing assistant conversation",
+        competitor: "limited",
+        evidence: "insightStyle",
+        murph: "yes",
+      },
+      {
+        capability: "Personal health experiments",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "yes",
+      },
+    ],
     relationship: "alternative",
     slug: "welltory",
     sources: [
@@ -664,6 +856,38 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     name: "FitnessSyncer",
     overview:
       "FitnessSyncer does difficult plumbing well: it synchronizes activity and wellness information among more than 50 services, then adds a unified stream, history, custom charts, goals, reports, and an MCP bridge for external AI clients. Murph is not another route or archive. It addresses the later question of what the available context means for one person's decision and how to keep that decision moving.",
+    quickComparison: [
+      {
+        capability: "Cross service data syncing",
+        competitor: "yes",
+        evidence: "primaryJob",
+        murph: "no",
+      },
+      {
+        capability: "Read and write data routes",
+        competitor: "limited",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Archival data history",
+        competitor: "limited",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Custom health dashboards",
+        competitor: "limited",
+        evidence: "format",
+        murph: "no",
+      },
+      {
+        capability: "Native assistant conversation",
+        competitor: "no",
+        evidence: "insightStyle",
+        murph: "yes",
+      },
+    ],
     relationship: "different-role",
     slug: "fitnesssyncer",
     sources: [
@@ -761,6 +985,38 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     name: "Heads Up Health",
     overview:
       "Heads Up Health is a serious practice tool: it unifies each client's labs, wearables, records, symptoms, and notes, then gives clinicians workflows, population views, alerts, reports, and AI tools. Murph does not offer a substitute for those multi-client operations. It gives the individual a continuing place to understand personal context and follow through between decisions. Older Heads Up consumer-dashboard pages remain online, so their prices and claims should not be mixed with the current clinic offering.",
+    quickComparison: [
+      {
+        capability: "Individual self service",
+        competitor: "limited",
+        evidence: "clinicalRole",
+        murph: "yes",
+      },
+      {
+        capability: "Multi client practice workspace",
+        competitor: "yes",
+        evidence: "format",
+        murph: "no",
+      },
+      {
+        capability: "Cohort reporting and alerts",
+        competitor: "yes",
+        evidence: "insightStyle",
+        murph: "no",
+      },
+      {
+        capability: "Clinician workflow tools",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Self service AI conversation",
+        competitor: "no",
+        evidence: "insightStyle",
+        murph: "yes",
+      },
+    ],
     relationship: "different-role",
     slug: "heads-up-health",
     sources: [
@@ -854,6 +1110,38 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     name: "CommonHealth",
     overview:
       "CommonHealth does a narrow, valuable job at no charge: it lets eligible Android users retrieve participating-provider records, store and export SMART Health Cards, and share a protected patient summary. Murph does not replace that wallet or make provider coverage broader. It becomes relevant when possession of the record still leaves questions and the person wants a continuing conversation that can lead to action.",
+    quickComparison: [
+      {
+        capability: "Participating provider retrieval",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Verifiable health card storage",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Protected record sharing",
+        competitor: "yes",
+        evidence: "followThrough",
+        murph: "no",
+      },
+      {
+        capability: "Health context analysis",
+        competitor: "no",
+        evidence: "insightStyle",
+        murph: "yes",
+      },
+      {
+        capability: "Wearable and lifestyle context",
+        competitor: "no",
+        evidence: "inputs",
+        murph: "yes",
+      },
+    ],
     relationship: "different-role",
     slug: "commonhealth",
     sources: [

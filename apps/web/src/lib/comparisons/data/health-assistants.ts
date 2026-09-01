@@ -71,6 +71,38 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     name: "BodyBuddy",
     overview:
       "BodyBuddy's strongest case is focus: bring a goal, clinician or trainer plan, or program; log by text, photo, or voice; and let proactive check-ins keep the week moving. Appointment recording and plan import make it more substantial than a simple habit tracker. Murph overlaps on reminders, but its center is continuity as the health question changes: authorized wearable and lab context, records, decisions, practical tasks, experiments, and later outcomes can remain part of the same thread.",
+    quickComparison: [
+      {
+        capability: "Daily accountability loop",
+        murph: "limited",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "Support beyond a defined plan",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Records and lab context",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "inputs",
+      },
+      {
+        capability: "Appointment summaries",
+        murph: "limited",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Game based motivation",
+        murph: "no",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+    ],
     relationship: "alternative",
     slug: "bodybuddy",
     sources: [
@@ -165,6 +197,38 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     name: "Ada",
     overview:
       "Ada's strength is discipline: it asks follow-up questions about a current symptom, compares the answers with its clinical knowledge base, and returns possible explanations and care guidance in a shareable report. That bounded flow is the stronger choice when symptom assessment is the job. Murph earns its place around the episode by preserving broader context, helping with the next question or plan, and supporting the practical follow-through over time.",
+    quickComparison: [
+      {
+        capability: "Structured symptom assessment",
+        murph: "no",
+        competitor: "yes",
+        evidence: "format",
+      },
+      {
+        capability: "Regulated medical device",
+        murph: "no",
+        competitor: "yes",
+        evidence: "clinicalRole",
+      },
+      {
+        capability: "Ongoing health memory",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+      {
+        capability: "Wearable and lab context",
+        murph: "yes",
+        competitor: "no",
+        evidence: "inputs",
+      },
+      {
+        capability: "Reminders and follow through",
+        murph: "yes",
+        competitor: "no",
+        evidence: "followThrough",
+      },
+    ],
     relationship: "different-role",
     slug: "ada",
     sources: [
@@ -267,6 +331,38 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     name: "Hume Health",
     overview:
       "Hume Health is better at creating its own data stream: Pod estimates body composition, Band 2.0 records sleep and recovery signals, and the app turns those readings into trends, scores, and guidance. Murph does not replace either sensor. It can start from a question and, when measurements matter, put authorized or manually shared signals beside records, labs, symptoms, routines, goals, and day-to-day constraints, then help decide what is worth acting on and revisit what happened afterward. Hume's aging and metabolic outputs remain wellness estimates rather than established clinical measurements.",
+    quickComparison: [
+      {
+        capability: "Body composition estimates",
+        murph: "no",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Continuous wearable sensing",
+        murph: "no",
+        competitor: "yes",
+        evidence: "hardware",
+      },
+      {
+        capability: "Conversational health support",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "insightStyle",
+      },
+      {
+        capability: "Records and lab context",
+        murph: "yes",
+        competitor: "no",
+        evidence: "inputs",
+      },
+      {
+        capability: "Reminders and follow through",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+    ],
     relationship: "different-role",
     slug: "hume-health",
     sources: [
@@ -361,6 +457,38 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     name: "Humanity",
     overview:
       "Humanity makes longevity easy to see: it turns compatible phone, wearable, and optional blood-test data into proprietary aging scores, then ties those scores to daily actions across movement, nutrition, mind, and recovery. That simplicity is the appeal. Murph starts from the person's question rather than a required score and can keep authorized data, records, preferences, constraints, decisions, and outcomes together as the health thread changes. Humanity's outputs remain wellness estimates rather than clinical biological-age measurements.",
+    quickComparison: [
+      {
+        capability: "Biological age estimates",
+        murph: "no",
+        competitor: "yes",
+        evidence: "insightStyle",
+      },
+      {
+        capability: "Game based daily actions",
+        murph: "no",
+        competitor: "yes",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Wearable context",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Open ended health questions",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Records and care context",
+        murph: "yes",
+        competitor: "no",
+        evidence: "inputs",
+      },
+    ],
     relationship: "alternative",
     slug: "humanity",
     sources: [
@@ -455,6 +583,38 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     name: "Healthily",
     overview:
       "Healthily's strength is structure: it gives iPhone users a defined place to record selected factors, compare trackers, set reminders, follow short plans, and review weekly reports and self-care content. Healthily keeps interpretation inside that tracker-and-content workflow. Murph adds an open-ended private conversation that can bring authorized records, wearable or lab context, routines, and constraints into a decision and revisit it later. Healthily's store copy still mentions DOT and a symptom checker, but its official consumer page says the checker is temporarily removed.",
+    quickComparison: [
+      {
+        capability: "Structured daily journal",
+        murph: "limited",
+        competitor: "yes",
+        evidence: "format",
+      },
+      {
+        capability: "Guided self care plans",
+        murph: "limited",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "Ongoing health conversation",
+        murph: "yes",
+        competitor: "no",
+        evidence: "insightStyle",
+      },
+      {
+        capability: "Records and lab context",
+        murph: "yes",
+        competitor: "no",
+        evidence: "inputs",
+      },
+      {
+        capability: "Works beyond iPhone",
+        murph: "yes",
+        competitor: "no",
+        evidence: "platforms",
+      },
+    ],
     relationship: "different-role",
     slug: "healthily",
     sources: [

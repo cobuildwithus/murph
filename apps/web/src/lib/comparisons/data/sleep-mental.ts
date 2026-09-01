@@ -64,6 +64,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Eight Sleep controls bed temperature and estimates overnight metrics. Murph is a personal health assistant, putting sleep beside symptoms, routines, and decisions.",
+    quickComparison: [
+      {
+        capability: "Active bed temperature control",
+        evidence: "hardware",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Passive overnight sensing",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Works without dedicated hardware",
+        evidence: "hardware",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "Eight Sleep",
     overview:
       "Eight Sleep is the more concrete intervention: its Pod can cool or heat each side, adjust automatically, and estimate overnight physiology without a watch. Murph is not another bed score or control panel. It becomes useful when a rough night needs to be considered beside illness, training, travel, stress, or a changed routine. Someone who mainly sleeps hot should start with Eight Sleep; someone already collecting sleep data may get more value from interpretation and a remembered next step.",
@@ -158,6 +190,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Sleep Cycle tracks from the bedside and wakes you. Murph is a personal health assistant: it interprets the graph with wider context and supports follow-through.",
+    quickComparison: [
+      {
+        capability: "Automatic bedside sleep tracking",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Smart wake window",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Overnight sound recording",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "Sleep Cycle",
     overview:
       "Sleep Cycle turns a phone into a bedside sensor and alarm with very little daily effort. It estimates sleep from sound or movement, records selected noises, and builds nightly and long-term trends. Murph deliberately leaves that measurement job to products like Sleep Cycle. Its role begins when the user wants to ask whether a trend matches lived experience, weigh room noise against stress or schedule changes, and choose a low-burden next step that can be revisited later.",
@@ -252,6 +316,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "RISE models sleep debt and daily energy. Murph is a personal health assistant; those estimates can be weighed against symptoms, routines, records, and lived experience.",
+    quickComparison: [
+      {
+        capability: "Sleep debt modeling",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Daily energy timing",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Smart alarms and timing prompts",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "RISE: Sleep Tracker",
     overview:
       "RISE is intentionally narrow and decisive. It estimates sleep need and recent debt, then turns circadian timing into a schedule of likely energy peaks and dips. That can be easier to act on than a dense stage chart. Murph is less prescriptive and more open-ended: someone can bring the RISE pattern, a wearable result, symptoms, workouts, meals, or a disrupted schedule into one conversation, decide what evidence matters, and arrange a reminder or later review. Users who want one defined sleep framework may prefer RISE's structure.",
@@ -350,6 +446,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "AutoSleep turns Apple Watch data into dense sleep analytics. Murph is a personal health assistant, helping decide what those patterns mean across the rest of your health.",
+    quickComparison: [
+      {
+        capability: "Automatic watch sleep tracking",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Estimated stages and readiness",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Smart alarms",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Conversational health support",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "AutoSleep",
     overview:
       "AutoSleep extracts far more sleep detail from Apple Watch than Murph attempts to display: rings, a sleep bank, estimated stages, readiness, physiology, calibration, and long history, all without a recurring fee. Murph becomes relevant when those numbers create a question rather than an answer. In messaging, a person can relate a run of low-readiness nights to illness, training, travel, or how they actually feel, decide whether a small change is worth trying, and return to the result later.",
@@ -444,6 +572,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Pillow records Apple sleep sessions, audio, and alarms. Murph is a personal health assistant. It puts a nightly pattern beside wider context and helps choose a realistic next step.",
+    quickComparison: [
+      {
+        capability: "Automatic watch sleep tracking",
+        evidence: "format",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Overnight sound recording",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Smart wake window",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Conversational health support",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "Pillow",
     overview:
       "Pillow is a capable all-in-one sleep log for an Apple household: Watch-based sessions, phone audio, stage estimates, a wake window, and Apple Health history. It wins when what is missing is a record of the night. Murph starts from a different problem. In conversation, someone can ask whether repeated wake-ups track with a routine, symptom, workout, or stressful week, decide whether the signal is strong enough to act on, and set a lightweight follow-up rather than adding another score to watch.",
@@ -534,6 +694,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "SleepWatch builds an Apple sleep record with coaching. Murph is a personal health assistant. SleepWatch reports can be considered beside symptoms, records, and routines.",
+    quickComparison: [
+      {
+        capability: "Automatic watch sleep tracking",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Overnight sound recording",
+        evidence: "inputs",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Sleep reports and trends",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Dedicated sleep coaching",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "SleepWatch",
     overview:
       "SleepWatch builds an automatic nightly record from Apple Watch and iPhone signals, then adds trends, sound events, reports, and app-based guidance. That is a coherent choice for someone who wants one sleep-specific system. Murph is broader and less automatic. It becomes useful when the chart needs to be reconciled with how the person feels, other health records or routines, and the burden of possible changes, then the resulting decision needs to remain available in a later conversation.",
@@ -628,6 +820,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "SleepScore estimates nights without a wearable on compatible phones. Murph is a personal health assistant; instead of sensing sleep, it interprets observations with broader context.",
+    quickComparison: [
+      {
+        capability: "Contact free sleep tracking",
+        evidence: "format",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Estimated sleep stages and scores",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Smart alarm",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Clinician shareable sleep report",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "SleepScore",
     overview:
       "SleepScore's advantage is genuinely different from Murph's: a compatible phone near the bed can estimate sleep without anything on the wrist. It then turns stages and scores into trends, goals, questionnaires, and a guided improvement layer. Murph supplies no equivalent sensor or nightly score. Its value is in asking whether that output agrees with lived experience and other health context, separating a clue from a verdict, and helping the person choose a proportionate response that can be reviewed later.",
@@ -722,6 +946,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Sleep Reset delivers structured CBT-I work with a human coach. Murph is a personal health assistant, broader in scope but not a substitute for dedicated insomnia care.",
+    quickComparison: [
+      {
+        capability: "Structured CBTI program",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Human sleep coach",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Personalized sleep schedule",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Broad health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+      {
+        capability: "Planning and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "yes",
+      },
+    ],
     name: "Sleep Reset",
     overview:
       "Sleep Reset is not mainly a tracker. It asks the user to keep a daily diary, follow a personalized schedule, practice CBT-I exercises, and message a human sleep coach. For persistent insomnia, that narrowness is a strength and Murph should not be used as a flexible substitute. Murph fits around a different need: a continuing private conversation about wider health questions, records, routines, tradeoffs, and manageable follow-through alongside a plan owned by the appropriate program or clinician.",
@@ -816,6 +1072,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Calm offers ready-to-play meditation and sleep audio. Murph is a personal health assistant. Your situation comes first, useful context is remembered, and decisions carry forward.",
+    quickComparison: [
+      {
+        capability: "Guided meditation library",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Sleep stories and soundscapes",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Personal health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "no",
+      },
+      {
+        capability: "Reminders and progress tracking",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "yes",
+      },
+    ],
     name: "Calm",
     overview:
       "Calm is designed around pressing play, and that is a real advantage. Its catalog of meditation, Sleep Stories, music, soundscapes, breathwork, movement, and programs gives someone an immediate experience without much explanation. Murph starts with an exchange instead: bring a specific stress, sleep, symptom, or health decision into messaging, connect it with useful history, and revisit what happened later. Someone who simply wants a reliable bedtime story should choose Calm.",
@@ -910,6 +1198,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Headspace teaches meditation and sleep practices through structured content. Murph is a personal health assistant; mental wellness stays connected to the wider health thread.",
+    quickComparison: [
+      {
+        capability: "Guided meditation curriculum",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Sleep and focus audio",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Conversational reflection",
+        evidence: "insightStyle",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Human coaching and therapy",
+        evidence: "clinicalRole",
+        murph: "no",
+        competitor: "limited",
+      },
+    ],
     name: "Headspace",
     overview:
       "Headspace offers a defined path from learning a meditation technique to repeating it: courses, daily practice, Sleepcasts, breathing, focus, movement, progress tracking, and an AI reflection companion. Eligible users may also have separate routes to human care. Murph organizes the experience around the person's wider health thread rather than a practice library, connecting a mental-wellness question with symptoms, workouts, records, routines, and prior attempts. It is not Headspace's curriculum or a substitute for its separate human-care products.",
@@ -1004,6 +1324,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Balance adapts guided meditation from your feedback. Murph is a personal health assistant for open-ended questions, remembered context, and action beyond the session.",
+    quickComparison: [
+      {
+        capability: "Personalized meditation plans",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Guided sleep and relaxation audio",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Meditation skill progression",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "insightStyle",
+        murph: "yes",
+        competitor: "no",
+      },
+      {
+        capability: "Conversational health support",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "Balance",
     overview:
       "Balance reduces browsing by adapting guided sessions from stated needs and practice history. Its multi-day Plans teach techniques, while Singles and sleep audio address immediate moments. That personalization remains inside a content library, which is exactly what some users want. Murph is more open-ended: the conversation can start with a symptom, record, goal, difficult choice, or uncertain pattern and continue into a real-world action after a guided session would have ended.",
@@ -1098,6 +1450,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Wysa focuses on emotional-support chat and self-help exercises. Murph is a personal health assistant, connecting mental and physical context without claiming therapy.",
+    quickComparison: [
+      {
+        capability: "Focused emotional support chat",
+        evidence: "primaryJob",
+        murph: "limited",
+        competitor: "yes",
+      },
+      {
+        capability: "Structured self help exercises",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Optional human coaching",
+        evidence: "format",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Reminders and follow up support",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "yes",
+      },
+    ],
     name: "Wysa",
     overview:
       "Wysa keeps the path from feeling to exercise short. Its AI chat focuses on emotional wellbeing, guides users into tools inspired by established psychological approaches, and can add a human wellbeing coach on eligible plans. That focus is a strength when the immediate need is a coping exercise. Murph is broader: a mental-wellness concern can sit beside symptoms, sleep, workouts, records, routines, and prior decisions in the same health thread. Neither product is emergency care, diagnosis, or a replacement for therapy.",
@@ -1192,6 +1576,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Daylio builds mood and habit charts from quick logs. Murph is a personal health assistant that questions those patterns, adds health context, and helps choose what follows.",
+    quickComparison: [
+      {
+        capability: "Fast mood and activity logging",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Mood charts and correlations",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Habit goals and streaks",
+        evidence: "followThrough",
+        murph: "limited",
+        competitor: "yes",
+      },
+      {
+        capability: "Exportable journal reports",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health reasoning",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+    ],
     name: "Daylio",
     overview:
       "Daylio makes self-tracking unusually easy: select a mood, choose activities, and add notes or photos only when useful. Over time, those small entries become calendars, habit records, and associations that can be exported. Murph is less efficient for logging and should not be chosen for that job. Its advantage appears when the chart raises a question: a person can discuss possible explanations beside other health context, separate a useful clue from an unsupported conclusion, and set a low-burden next step to revisit later.",
@@ -1286,6 +1702,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Finch motivates self-care through a virtual pet and rewards. Murph is a personal health assistant. Direct questions, remembered context, and practical follow-through define its role.",
+    quickComparison: [
+      {
+        capability: "Gamified self care goals",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Virtual pet reward loop",
+        evidence: "format",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Reflection and wellness exercises",
+        evidence: "followThrough",
+        murph: "limited",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Direct health conversation",
+        evidence: "format",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "Finch",
     overview:
       "Finch gives self-care an emotional reason to start: complete a goal, reflection, breathing session, or other small action and a virtual pet gains energy and experiences. For someone who responds to gentle play better than analysis, that design may be more motivating than Murph. Murph uses direct conversation instead. A person can bring a health question, confusing data, symptom, or decision into messaging, use relevant history, and set practical support without turning care into a game.",
@@ -1388,6 +1836,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Muse S Athena provides EEG sensing and neurofeedback. Murph is a personal health assistant for judging how those sessions fit wider health context, cost, and daily life.",
+    quickComparison: [
+      {
+        capability: "EEG brain sensing",
+        evidence: "hardware",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Real time neurofeedback",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Headband sleep estimation",
+        evidence: "insightStyle",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Works without dedicated hardware",
+        evidence: "hardware",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "Muse S Athena",
     overview:
       "Muse S Athena puts sensors directly on the head to support real-time meditation feedback, cognitive exercises, and overnight sleep experiences. EEG and optical signals give it information Murph cannot collect, while phase-timed audio and neurofeedback create interventions Murph cannot reproduce. Murph's role is outside the session: discuss whether the result matches lived experience, place it beside routines, symptoms, records, or other wearable clues, and decide whether the cost and burden are earning a useful outcome.",
@@ -1482,6 +1962,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     lastVerified: "2026-08-31",
     metaDescription:
       "Apollo Neuro delivers scheduled vibration through a wearable. Murph is a personal health assistant that helps decide whether an intervention fits and whether it actually helped.",
+    quickComparison: [
+      {
+        capability: "Timed vibration programs",
+        evidence: "primaryJob",
+        murph: "no",
+        competitor: "yes",
+      },
+      {
+        capability: "Automated sleep routines",
+        evidence: "followThrough",
+        murph: "no",
+        competitor: "limited",
+      },
+      {
+        capability: "Cross domain health context",
+        evidence: "inputs",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Outcome planning and follow up",
+        evidence: "followThrough",
+        murph: "yes",
+        competitor: "limited",
+      },
+      {
+        capability: "Works without dedicated hardware",
+        evidence: "hardware",
+        murph: "yes",
+        competitor: "no",
+      },
+    ],
     name: "Apollo Neuro",
     overview:
       "Apollo Neuro takes an intervention-first approach. The wearable produces programmed vibrations that users schedule or select for calm, focus, energy, recovery, or sleep; it should not be confused with a sensor-rich tracker that objectively measures each outcome. Murph performs no tactile intervention. In conversation, it can help a person decide whether Apollo's price and daily burden fit the problem, define what improvement would actually matter, and revisit the experience without turning a marketing claim into a guaranteed result.",

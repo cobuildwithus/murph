@@ -41,6 +41,8 @@ const HUMAN_COPY_FIELDS = [
   "overview",
 ] as const;
 
+const QUICK_STATUS_RANK = { limited: 1, no: 0, yes: 2 } as const;
+
 function comparisonBySlug(slug: string) {
   const comparison = COMPARISONS.find((entry) => entry.slug === slug);
   assert.ok(comparison, `Missing comparison fixture for ${slug}.`);
@@ -53,6 +55,7 @@ function humanCopy(comparison: (typeof COMPARISONS)[number]): string[] {
     ...(comparison.aliases ?? []),
     ...Object.values(comparison.competitor),
     ...comparison.faqs.flatMap((faq) => [faq.question, faq.answer]),
+    ...comparison.quickComparison.map((row) => row.capability),
     ...comparison.sources.map((source) => source.label),
     ...comparison.tradeoffs,
     ...(comparison.useTogether ? [comparison.useTogether] : []),
@@ -139,6 +142,68 @@ describe("comparison catalog", () => {
         `${comparison.slug} must name a concrete Murph limitation among its tradeoffs.`,
       );
       assert.ok(comparison.sources.length >= 2);
+
+      assert.equal(
+        comparison.quickComparison.length,
+        5,
+        `${comparison.slug} needs exactly five quick-comparison rows.`,
+      );
+      assert.equal(
+        new Set(comparison.quickComparison.map((row) => row.capability)).size,
+        comparison.quickComparison.length,
+        `${comparison.slug} repeats a quick-comparison capability.`,
+      );
+      assert.ok(
+        comparison.quickComparison.filter(
+          (row) => row.murph !== row.competitor,
+        ).length >= 2,
+        `${comparison.slug} needs at least two meaningful quick-comparison differences.`,
+      );
+      assert.ok(
+        comparison.quickComparison.some(
+          (row) =>
+            QUICK_STATUS_RANK[row.murph]
+            > QUICK_STATUS_RANK[row.competitor],
+        ),
+        `${comparison.slug} must show a grounded Murph advantage.`,
+      );
+      assert.ok(
+        comparison.quickComparison.some(
+          (row) =>
+            QUICK_STATUS_RANK[row.competitor]
+            > QUICK_STATUS_RANK[row.murph],
+        ),
+        `${comparison.slug} must show a grounded competitor advantage.`,
+      );
+      for (const row of comparison.quickComparison) {
+        assert.match(
+          row.capability,
+          /^[A-Z][A-Za-z0-9 ]{0,35}$/u,
+          `${comparison.slug} has a noisy quick-comparison label.`,
+        );
+        assert.doesNotMatch(
+          row.capability,
+          /\bMurph\b/iu,
+          `${comparison.slug} names Murph in a capability label.`,
+        );
+        assert.equal(
+          row.capability.toLowerCase().includes(comparison.name.toLowerCase()),
+          false,
+          `${comparison.slug} names the competitor in a capability label.`,
+        );
+        assert.ok(
+          ["yes", "limited", "no"].includes(row.murph),
+          `${comparison.slug} has an invalid Murph quick-comparison status.`,
+        );
+        assert.ok(
+          ["yes", "limited", "no"].includes(row.competitor),
+          `${comparison.slug} has an invalid competitor quick-comparison status.`,
+        );
+        assert.ok(
+          row.evidence in comparison.competitorEvidence,
+          `${comparison.slug}.${row.capability} needs a valid evidence dimension.`,
+        );
+      }
 
       const competitorProfileKeys = Object.keys(
         comparison.competitor,
@@ -235,7 +300,17 @@ describe("comparison catalog", () => {
         headingMarkup.replaceAll(/<[^>]+>/gu, "").trim(),
         `Murph vs ${comparison.name}`,
       );
-      assert.match(markup, /<caption[^>]*>Murph and [^<]+ feature comparison<\/caption>/u);
+      assert.match(markup, /<caption[^>]*>Murph and [^<]+ at-a-glance comparison<\/caption>/u);
+      assert.match(markup, /<details[^>]*data-detailed-comparison/u);
+      assert.match(markup, /✓/u);
+      assert.match(markup, /×/u);
+      for (const row of comparison.quickComparison) {
+        assert.ok(markup.includes(`>${row.capability}<`));
+        assert.match(
+          markup,
+          new RegExp(`data-evidence-dimension="${row.evidence}"`, "u"),
+        );
+      }
       assert.match(markup, /scope="col"/u);
       assert.match(markup, /scope="row"/u);
       assert.match(markup, /Official sources/u);
@@ -375,7 +450,7 @@ describe("comparison catalog", () => {
   it("registers the real production table in the synthetic design study", () => {
     const markup = renderToStaticMarkup(createElement(PublicComparisonTableStudy));
 
-    assert.match(markup, /Murph and Recovery wearable feature comparison/u);
+    assert.match(markup, /Murph and Recovery wearable at-a-glance comparison/u);
     assert.match(markup, /role="region"/u);
     assert.match(markup, /scope="row"/u);
   });

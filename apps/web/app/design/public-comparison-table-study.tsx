@@ -57,6 +57,38 @@ const DESIGN_COMPARISON = {
   name: "Recovery wearable",
   overview:
     "This synthetic design study exercises the production comparison table without representing a real company or product claim.",
+  quickComparison: [
+    {
+      capability: "Continuous sensing",
+      competitor: "yes",
+      evidence: "inputs",
+      murph: "no",
+    },
+    {
+      capability: "Recovery score",
+      competitor: "yes",
+      evidence: "insightStyle",
+      murph: "no",
+    },
+    {
+      capability: "Cross source context",
+      competitor: "limited",
+      evidence: "inputs",
+      murph: "yes",
+    },
+    {
+      capability: "Ongoing conversation",
+      competitor: "no",
+      evidence: "format",
+      murph: "yes",
+    },
+    {
+      capability: "Required hardware",
+      competitor: "yes",
+      evidence: "hardware",
+      murph: "no",
+    },
+  ],
   relationship: "complement",
   slug: "recovery-wearable",
   sources: [

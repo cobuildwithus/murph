@@ -192,6 +192,31 @@ async function capturePages({
       if (target.name !== "index") {
         const tableSection = page.locator('section[aria-labelledby$="-table"]');
         await expect(tableSection).toBeVisible();
+        const competitorHeader = tableSection
+          .locator("table")
+          .first()
+          .locator("thead th")
+          .last();
+        const headerWidth = await competitorHeader.evaluate((element) => ({
+          client: element.clientWidth,
+          scroll: element.scrollWidth,
+        }));
+        expect(
+          headerWidth.scroll,
+          "competitor header should wrap without clipping",
+        ).toBeLessThanOrEqual(headerWidth.client + 1);
+        const detailedComparison = tableSection.locator(
+          "[data-detailed-comparison]",
+        );
+        await expect(detailedComparison).not.toHaveAttribute("open", "");
+        await tableSection.screenshot({
+          animations: "disabled",
+          caret: "initial",
+          path: path.join(outputDir, `${target.name}-${suffix}-table.png`),
+        });
+
+        await detailedComparison.locator("summary").click();
+        await expect(detailedComparison).toHaveAttribute("open", "");
         const sourceLinks = tableSection.getByRole("link", {
           name: /^Open source/u,
         });
@@ -201,11 +226,6 @@ async function capturePages({
           expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(24);
           expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(24);
         }
-        await tableSection.screenshot({
-          animations: "disabled",
-          caret: "initial",
-          path: path.join(outputDir, `${target.name}-${suffix}-table.png`),
-        });
       }
     }
     expect(browserErrors, "comparison pages should not emit browser errors").toEqual([]);
