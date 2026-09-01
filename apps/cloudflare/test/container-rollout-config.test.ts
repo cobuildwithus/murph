@@ -98,5 +98,9 @@ describe("Cloudflare container rollout config", () => {
       rollout_active_grace_period: renderedConfig.containers[1]?.rollout_active_grace_period,
       rollout_step_percentage: renderedConfig.containers[1]?.rollout_step_percentage,
     });
+    expect(checkedInConfig.containers[2]).toMatchObject({
+      rollout_active_grace_period: renderedConfig.containers[2]?.rollout_active_grace_period,
+      rollout_step_percentage: renderedConfig.containers[2]?.rollout_step_percentage,
+    });
   });
 });

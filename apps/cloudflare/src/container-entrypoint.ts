@@ -225,6 +225,10 @@ export async function startHostedContainerEntrypoint(input: {
     runtime.processApi,
     runtime.startupConfig.runnerBundleManifestPath,
   );
+  const cloudflareRegion =
+    runtime.startupConfig.supervisorEnv.CLOUDFLARE_REGION ?? null;
+  const hostedWorkerReleaseId =
+    runtime.startupConfig.supervisorEnv.HOSTED_EXECUTION_WORKER_RELEASE_ID ?? null;
   let containerTerminalExitScheduled = false;
   let hostedContainerTerminalFailureHandled = false;
   const poisonHostedContainerAndScheduleExitOnce = (
@@ -250,10 +254,19 @@ export async function startHostedContainerEntrypoint(input: {
     runtime.exitScheduler();
   };
   let heavyRuntimeHydrationPromise: Promise<HostedContainerHeavyRuntime> | null = null;
+  let heavyRuntimeHydrationCompletedAtEpochMs: number | null = null;
+  let heavyRuntimeHydrationStatus: "failed" | "pending" | "ready" = "pending";
+  let codexShellPreflightCompletedAtEpochMs: number | null = null;
+  let codexShellPreflightStatus: "failed" | "pending" | "ready" | "running" = "pending";
   const hydrateHeavyRuntime = (): Promise<HostedContainerHeavyRuntime> => {
     if (!heavyRuntimeHydrationPromise) {
-      heavyRuntimeHydrationPromise = runtime.loadHeavyRuntime();
+      heavyRuntimeHydrationPromise = runtime.loadHeavyRuntime().then((heavyRuntime) => {
+        heavyRuntimeHydrationCompletedAtEpochMs = Date.now();
+        heavyRuntimeHydrationStatus = "ready";
+        return heavyRuntime;
+      });
       void heavyRuntimeHydrationPromise.catch((error) => {
+        heavyRuntimeHydrationStatus = "failed";
         poisonHostedContainerAndScheduleExitOnce(
           error,
           "Hosted container entrypoint failed to hydrate the heavy runtime.",
@@ -269,6 +282,7 @@ export async function startHostedContainerEntrypoint(input: {
     });
   };
   let activeHostedRunnerJobCount = 0;
+  let workspaceInvocationAcceptedCount = 0;
   let conversationWarmActivityCompletedAtEpochMs: number | null = null;
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
@@ -341,9 +355,15 @@ export async function startHostedContainerEntrypoint(input: {
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(JSON.stringify({
           activeJobCount: activeHostedRunnerJobCount,
+          codexShellPreflightCompletedAtEpochMs,
+          codexShellPreflightStatus,
+          cloudflareRegion,
           conversationWarmActivityCompletedAtEpochMs,
+          heavyRuntimeHydrationCompletedAtEpochMs,
+          heavyRuntimeHydrationStatus,
           hostedRuntimeArchitectureVersion:
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
+          hostedWorkerReleaseId,
           ok: true,
           poisoned: hostedContainerProcessFatalObserved,
           processStartedAtEpochMs: HOSTED_CONTAINER_PROCESS_START_MS,
@@ -352,6 +372,7 @@ export async function startHostedContainerEntrypoint(input: {
             serverListeningAtEpochMs,
           }),
           ...(runnerBundle ? { runnerBundle } : {}),
+          workspaceInvocationAcceptedCount,
         }));
         return;
       }
@@ -634,6 +655,7 @@ export async function startHostedContainerEntrypoint(input: {
         }
         activeHostedRunnerJobCount += 1;
         claimedRunnerSlot = true;
+        codexShellPreflightStatus = "running";
         discardUnreadRequestBody(request);
         let heavyRuntime: HostedContainerHeavyRuntime | null = null;
         try {
@@ -641,11 +663,14 @@ export async function startHostedContainerEntrypoint(input: {
           const result = await heavyRuntime.runCodexShellSmoke({
             signal: requestAbort.signal,
           });
+          codexShellPreflightCompletedAtEpochMs = Date.now();
+          codexShellPreflightStatus = "ready";
           writeJsonResponse(response, 200, {
             codexShell: result,
             ok: true,
           });
         } catch (error) {
+          codexShellPreflightStatus = "failed";
           emitHostedExecutionStructuredLog({
             component: "container",
             error,
@@ -797,6 +822,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       const runnerJobAcceptedAt = new Date().toISOString();
+      workspaceInvocationAcceptedCount += 1;
       const coldNodeStartupMs = pendingColdNodeStartupMs;
       pendingColdNodeStartupMs = null;
       const orchestrationMilestones =

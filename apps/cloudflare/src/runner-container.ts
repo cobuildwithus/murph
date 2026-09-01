@@ -31,6 +31,10 @@ import {
   buildHostedRunnerContainerCaEnv,
 } from "./runner-container-ca-env.ts";
 import {
+  isHostedStandbySlotName,
+  type HostedStandbySlotBinding,
+} from "./standby-runner-contract.js";
+import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
 } from "./runner-container-error-codes.ts";
 import {
@@ -204,7 +208,7 @@ class RunnerContainerCleanupUnsettledError extends Error {
   }
 }
 
-interface HostedExecutionContainerInvokeRequest {
+export interface HostedExecutionContainerInvokeRequest {
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   timeoutMs?: number | null;
@@ -335,6 +339,8 @@ export interface HostedExecutionContainerStubLike {
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
+  readStandbySlotBinding?(): Promise<HostedStandbySlotBinding>;
+  retireStandbySlot?(input: { claimId?: string }): Promise<{ retired: true }>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
   wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult>;
 }
@@ -3250,7 +3256,7 @@ export class RunnerContainer extends Container {
     return true;
   }
 
-  private renewPlatformActivityTimeout(stage = "activity-expired-early-renew"): boolean {
+  protected renewPlatformActivityTimeout(stage = "activity-expired-early-renew"): boolean {
     const renewActivityTimeout =
       (this as RunnerContainer & Partial<RunnerActivityTimeoutRenewable>).renewActivityTimeout;
 
@@ -3811,7 +3817,7 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
 registerHostedRunnerContainerOutboundInterception(RunnerContainer);
 registerHostedRunnerContainerOutboundInterception(DeploySmokeRunnerContainer);
 
-function registerHostedRunnerContainerOutboundInterception(
+export function registerHostedRunnerContainerOutboundInterception(
   containerClass: typeof RunnerContainer,
 ): void {
   const outboundByHostSetter = Object.getOwnPropertyDescriptor(Container, "outboundByHost")?.set;
@@ -4494,7 +4500,31 @@ export async function destroyHostedExecutionContainer(input: {
   }
 
   try {
-    await input.runnerContainerNamespace.getByName(input.runnerContainerName ?? input.userId).destroyInstance();
+    const runnerContainerName = input.runnerContainerName ?? input.userId;
+    const container = input.runnerContainerNamespace.getByName(runnerContainerName);
+    if (isHostedStandbySlotName(runnerContainerName)) {
+      if (!container.readStandbySlotBinding || !container.retireStandbySlot) {
+        throw new Error("Hosted standby runner cleanup RPC is unavailable.");
+      }
+      const binding = await container.readStandbySlotBinding();
+      if (binding.slotName !== runnerContainerName) {
+        throw new Error("Hosted standby runner cleanup target did not match its binding.");
+      }
+      if (
+        (binding.state === "bound" || binding.state === "retiring")
+        && binding.userId !== null
+        && binding.userId !== input.userId
+      ) {
+        throw new Error("Hosted standby runner cleanup user did not match its binding.");
+      }
+      if (binding.state !== "retired") {
+        await container.retireStandbySlot({
+          ...(binding.claimId === null ? {} : { claimId: binding.claimId }),
+        });
+      }
+    } else {
+      await container.destroyInstance();
+    }
     return {
       attempted: true,
       errorCode: null,

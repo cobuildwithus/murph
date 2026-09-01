@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { buildWranglerLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/environment";
 import { describe, expect, it } from "vitest";
 
+import * as hostedLocalWorkerEntrypoint from "../src/hosted-local-test-index.js";
 import { parseJsoncObject } from "./helpers/jsonc.js";
 
 // Keys the checked-in production scaffold carries that have no local dev
@@ -53,8 +54,9 @@ describe("hosted-local dev wrangler config fidelity", () => {
       productionBuckets.map((bucket) => bucket.binding),
     );
 
-    // Container sizing, instance caps, and rollout staging are deploy-only
-    // concerns; class identity and operator-access policy must match.
+    // Container sizing, placement constraints, instance caps, and rollout
+    // staging are deploy-only concerns; class identity and operator-access
+    // policy must match.
     type ContainerRuntimeSurface = {
       authorized_keys?: unknown;
       class_name: string;
@@ -70,6 +72,17 @@ describe("hosted-local dev wrangler config fidelity", () => {
     expect(devContainers.map(runtimeSurface)).toEqual(
       productionContainers.map(runtimeSurface),
     );
+  });
+
+  it("exports every Durable Object class declared by the local config", () => {
+    const dev = buildWranglerLocalDevConfig({}) as {
+      durable_objects: { bindings: Array<{ class_name: string }> };
+    };
+
+    const missingExports = dev.durable_objects.bindings
+      .map((binding) => binding.class_name)
+      .filter((className) => !Reflect.has(hostedLocalWorkerEntrypoint, className));
+    expect(missingExports).toEqual([]);
   });
 
   it("diverges from production observability only on local invocation log verbosity", async () => {

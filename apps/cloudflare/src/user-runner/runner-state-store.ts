@@ -1,6 +1,7 @@
 import {
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
+import { isHostedStandbySlotName } from "../standby-runner-contract.js";
 
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
@@ -179,6 +180,13 @@ export class RunnerStateStore {
   }
 
   async reserveRunnerContainerStopTargetForShellPrewarm(input: {
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.reserveRunnerContainerStopTarget(input);
+  }
+
+  async reserveRunnerContainerStopTarget(input: {
     runnerContainerName: string;
     userId: string;
   }): Promise<boolean> {
@@ -804,7 +812,9 @@ export class RunnerStateStore {
     meta.active_custom_inference_envelope = null;
     meta.active_platform_ai_allowed = null;
     meta.active_reason = null;
-    meta.active_runner_container_name = null;
+    if (!isHostedStandbySlotName(meta.active_runner_container_name)) {
+      meta.active_runner_container_name = null;
+    }
     meta.active_started_at = null;
     meta.active_workspace_version = null;
   }
@@ -816,6 +826,8 @@ export class RunnerStateStore {
     return meta.active_attempt_id === token.attemptId
       && normalizeNonNegativeInteger(meta.active_generation).toString() === token.generation
       && readWriteFenceKind(meta.active_kind) === token.kind
+      && normalizeRunnerContainerNameOrNull(meta.active_runner_container_name)
+        === normalizeRunnerContainerNameOrNull(token.runnerContainerName)
       && meta.user_id === token.userId;
   }
 
