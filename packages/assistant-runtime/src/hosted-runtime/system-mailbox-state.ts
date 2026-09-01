@@ -422,7 +422,9 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
     allowedWakeKinds: input.allowedWakeKinds ?? null,
   })
     ? projectHostedSystemMailboxModelFreeFrontier(remainingState)
-    : remainingState;
+    : input.allowedRouteActions == null
+      ? projectHostedSystemMailboxWakeOwnerFrontier(remainingState)
+      : remainingState;
   const selectionState = input.allowedWakeKinds == null
     ? modelFreeProjectedState
     : {
@@ -706,6 +708,23 @@ export function projectHostedSystemMailboxModelFreeFrontier(
       && isHostedSystemMailboxModelFreeFrontierItem(durableFrontier)
       ? [durableFrontier]
       : [],
+  };
+}
+
+export function projectHostedSystemMailboxWakeOwnerFrontier(
+  state: HostedSystemMailboxState,
+): HostedSystemMailboxState {
+  const modelFreeFrontier = projectHostedSystemMailboxModelFreeFrontier(state)
+    .pending[0] ?? null;
+  return {
+    pending: state.pending.filter((item) =>
+      // Default-owned work remains independently eligible. Model-free work is
+      // serialized behind the durable frontier, except for its sequence-less
+      // dense-retention owner.
+      resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
+      || item.itemId === modelFreeFrontier?.itemId
+      || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
+    ),
   };
 }
 

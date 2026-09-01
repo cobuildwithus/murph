@@ -4951,6 +4951,18 @@ async function resolveHostedDefaultProcessingWakeState(input: {
   return await input.readAssistantCronWakeState();
 }
 
+async function hasDueDefaultOwnedSystemMailboxWake(
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
+): Promise<boolean> {
+  const nowMs = resolveHostedAssistantPhaseNowMs(phaseInput);
+  const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    now: () => new Date(nowMs).toISOString(),
+    vaultRoot: phaseInput.restored.vaultRoot,
+  });
+  return systemMailboxWake.executionClass === "default_owned"
+    && hostedRuntimeWakeCandidateIsDue(systemMailboxWake, nowMs);
+}
+
 async function resolveDueModelFreeSystemMailboxOwnerSelection(
   input: {
     pendingAssistantInputWakeAt: string | null;
@@ -5991,22 +6003,26 @@ async function runSystemMailboxMaintenancePhase(input: {
     && !hasBackgroundSelection
     && shouldPreflightHostedDefaultProcessingWake(phaseInput)
   ) {
-    const defaultProcessingWakeState =
-      await resolveHostedDefaultProcessingWakeState({
-        phaseInput,
-        readAssistantCronWakeState,
-      });
-    if (defaultProcessingWakeState.dueNow) {
-      return {
-        backgroundMaintenanceYielded: false,
-        continueAssistantLane: true,
-        deviceSyncMaintenanceRan: false,
-        initialProviderCleanupCheckpoint,
-        pendingAssistantInputWakeAt: null,
-        result: null,
-      };
+    const dueDefaultOwnedSystemMailboxWake =
+      await hasDueDefaultOwnedSystemMailboxWake(phaseInput);
+    if (!dueDefaultOwnedSystemMailboxWake) {
+      const defaultProcessingWakeState =
+        await resolveHostedDefaultProcessingWakeState({
+          phaseInput,
+          readAssistantCronWakeState,
+        });
+      if (defaultProcessingWakeState.dueNow) {
+        return {
+          backgroundMaintenanceYielded: false,
+          continueAssistantLane: true,
+          deviceSyncMaintenanceRan: false,
+          initialProviderCleanupCheckpoint,
+          pendingAssistantInputWakeAt: null,
+          result: null,
+        };
+      }
+      staleDefaultProjectionDisproved = defaultProcessingWakeState.available;
     }
-    staleDefaultProjectionDisproved = defaultProcessingWakeState.available;
   }
 
   let deferSystemMailboxPreparationForDelivery = false;
