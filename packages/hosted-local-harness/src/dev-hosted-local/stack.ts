@@ -1113,8 +1113,15 @@ export async function startHostedLocalDevStack(input: {
         await Promise.race([
           Promise.all(healthChecks).then(() => undefined),
           waitForFirstChildExit(children).then((child) => {
+            const exitedChild = children.find((candidate) => candidate.child === child.child);
+            const portBindCollision = exitedChild
+              ? childReportedPortBindCollision(exitedChild)
+              : false;
             throw new Error(
-              `${child.name} dev process exited before the hosted local stack became healthy.`,
+              [
+                `${child.name} dev process exited before the hosted local stack became healthy.`,
+                portBindCollision ? "Address already in use was reported by the exited process." : null,
+              ].filter((value): value is string => value !== null).join(" "),
             );
           }),
         ]);
@@ -2925,6 +2932,14 @@ function appendStartupDiagnostics(
       output ? `process output tail:\n${tail(output)}` : null,
       redactHostedLocalDiagnosticText(diagnostics),
     ].filter((value): value is string => value !== null).join("\n"),
+  );
+}
+
+function childReportedPortBindCollision(child: BufferedNamedChildProcess): boolean {
+  return [child.stdoutText(), child.stderrText()].some((output) =>
+    /\bEADDRINUSE\b/u.test(output)
+    || /\baddress already in use\b/ui.test(output)
+    || /\bport \d+ is already in use\b/ui.test(output)
   );
 }
 
