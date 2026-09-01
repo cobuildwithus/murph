@@ -82,14 +82,21 @@ export async function runLinqProductionCanary(
       const reply = await replyPromise;
       const replyAt = performance.now();
       const latencyMs = Math.round(replyAt - sentAt);
+      if (latencyMs >= CANARY_REPLY_BUDGET_MS) {
+        throwCanaryFailure(
+          `reply-latency-budget-exceeded; turn=${turn}; metric=send_to_reply; elapsed_ms=${Math.min(CANARY_REPLY_WAIT_MS, latencyMs)}; budget_ms=${CANARY_REPLY_BUDGET_MS}`,
+        );
+      }
+      const interReplyGapMs = previousReplyAt === null
+        ? null
+        : replyAt - previousReplyAt;
       if (
-        latencyMs >= CANARY_REPLY_BUDGET_MS
-        || (
-          previousReplyAt !== null
-          && replyAt - previousReplyAt >= CANARY_REPLY_BUDGET_MS
-        )
+        interReplyGapMs !== null
+        && interReplyGapMs >= CANARY_REPLY_BUDGET_MS
       ) {
-        throwCanaryFailure("reply-latency-budget-exceeded");
+        throwCanaryFailure(
+          `reply-latency-budget-exceeded; turn=${turn}; metric=inter_reply_gap; elapsed_ms=${Math.min(CANARY_REPLY_WAIT_MS, Math.round(interReplyGapMs))}; budget_ms=${CANARY_REPLY_BUDGET_MS}`,
+        );
       }
       assertLinqProductionCanaryReply({ reply, turn });
       turns.push({ latencyMs, turn });
