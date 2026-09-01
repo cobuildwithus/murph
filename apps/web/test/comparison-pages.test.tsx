@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -23,6 +24,10 @@ import {
   MURPH_COMPARISON_EVIDENCE,
   MURPH_COMPARISON_PROFILE,
 } from "../src/lib/comparisons/murph-profile";
+import {
+  COMPARISON_LOGO_ASSETS,
+  getComparisonLogoAsset,
+} from "../src/lib/comparisons/logo-assets";
 import { createComparisonStructuredData } from "../src/lib/comparisons/structured-data";
 import { COMPARISON_CATEGORIES } from "../src/lib/comparisons/types";
 import {
@@ -145,8 +150,8 @@ describe("comparison catalog", () => {
 
       assert.equal(
         comparison.quickComparison.length,
-        5,
-        `${comparison.slug} needs exactly five quick-comparison rows.`,
+        10,
+        `${comparison.slug} needs exactly ten quick-comparison rows.`,
       );
       assert.equal(
         new Set(comparison.quickComparison.map((row) => row.capability)).size,
@@ -257,6 +262,48 @@ describe("comparison catalog", () => {
 
     expect(categories).toEqual(
       new Set(COMPARISON_CATEGORIES.map((category) => category.id)),
+    );
+  });
+
+  it("ships one local, high-resolution logo asset for every competitor", () => {
+    assert.equal(
+      Object.keys(COMPARISON_LOGO_ASSETS).length,
+      COMPARISONS.length,
+    );
+    assert.equal(
+      new Set(Object.values(COMPARISON_LOGO_ASSETS).map((asset) => asset.path)).size,
+      COMPARISONS.length,
+      "Each competitor needs its own logo asset.",
+    );
+
+    for (const comparison of COMPARISONS) {
+      const asset = getComparisonLogoAsset(comparison.slug);
+      assert.ok(asset, `${comparison.slug} needs a comparison logo.`);
+      assert.equal(asset.sourceKind, "official");
+      assert.ok(
+        existsSync(new URL(`../public${asset.path}`, import.meta.url)),
+        `${comparison.slug} points to a missing logo asset.`,
+      );
+      assert.match(asset.sourceUrl, /^https:\/\//u);
+    }
+  });
+
+  it("shows BodyBuddy's real overlap without hiding either product's edge", () => {
+    const comparison = comparisonBySlug("bodybuddy");
+    const overlap = comparison.quickComparison.filter(
+      (row) => row.murph === row.competitor,
+    );
+
+    assert.ok(overlap.length >= 5);
+    assert.ok(
+      comparison.quickComparison.some(
+        (row) => QUICK_STATUS_RANK[row.murph] > QUICK_STATUS_RANK[row.competitor],
+      ),
+    );
+    assert.ok(
+      comparison.quickComparison.some(
+        (row) => QUICK_STATUS_RANK[row.competitor] > QUICK_STATUS_RANK[row.murph],
+      ),
     );
   });
 
@@ -432,7 +479,7 @@ describe("comparison catalog", () => {
     expect(comparisonIndexMetadata.openGraph).toMatchObject({
       images: [
         {
-          alt: "Murph personal health assistant comparison guides",
+          alt: "Your health is bigger than one app. Murph comparison guides.",
           url: "/compare/opengraph-image",
         },
       ],
@@ -440,7 +487,7 @@ describe("comparison catalog", () => {
     expect(comparisonIndexMetadata.twitter).toMatchObject({
       images: [
         {
-          alt: "Murph personal health assistant comparison guides",
+          alt: "Your health is bigger than one app. Murph comparison guides.",
           url: "/compare/opengraph-image",
         },
       ],

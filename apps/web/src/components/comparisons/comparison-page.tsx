@@ -1,5 +1,8 @@
 import Link from "next/link";
+import Image from "next/image";
+import { ChevronDown } from "lucide-react";
 
+import { ComparisonLogo } from "@/src/components/comparisons/comparison-logo";
 import { ComparisonTable } from "@/src/components/comparisons/comparison-table";
 import {
   formatComparisonDate,
@@ -22,13 +25,13 @@ export function ComparisonArticle({
   const titleId = `comparison-${comparison.slug}`;
   const sourceSectionId = `${titleId}-sources`;
   const reviewedLabel = formatComparisonDate(comparison.lastVerified);
-  const competitorNameParts = comparison.name.split(
-    /(?<=[a-z0-9])(?=[A-Z][a-z])/u,
-  );
 
   return (
     <article aria-labelledby={titleId}>
-      <header className="bg-[#2a2520] px-5 pb-14 pt-14 text-[#f5f0e8] sm:px-8 sm:pb-18 sm:pt-18 lg:px-12 lg:pb-20 lg:pt-20">
+      <header
+        className="bg-[#2a2520] px-5 pb-14 pt-28 text-[#f5f0e8] sm:px-8 sm:pb-18 sm:pt-32 lg:px-12 lg:pb-20 lg:pt-36"
+        data-comparison-hero
+      >
         <div className="mx-auto max-w-[1080px]">
           <nav aria-label="Breadcrumb" className="text-[0.78rem] text-[#f5f0e8]/55">
             <ol className="flex flex-wrap items-center gap-2">
@@ -50,23 +53,37 @@ export function ComparisonArticle({
             </ol>
           </nav>
 
-          <div className="mt-10 grid gap-9 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)] lg:items-end lg:gap-18">
+          <div className="mt-9 grid gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)] lg:items-end lg:gap-16">
             <div>
+              <div className="flex items-center gap-2 sm:gap-4" aria-hidden="true">
+                <span className="flex h-[clamp(68px,22vw,76px)] w-[clamp(105px,34vw,132px)] items-center justify-center rounded-2xl border border-[#c4a882]/25 bg-[#f5f0e8] px-4 sm:h-[88px] sm:w-[156px] sm:px-5">
+                  <Image
+                    alt=""
+                    className="h-auto w-full"
+                    height={24}
+                    priority
+                    src="/logo.svg"
+                    width={107}
+                  />
+                </span>
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-[#c4a882]/40 font-mono text-[0.58rem] font-semibold tracking-[0.08em] text-[#c4a882] sm:size-9 sm:text-[0.62rem]">
+                  VS
+                </span>
+                <ComparisonLogo
+                  className="h-[clamp(68px,22vw,76px)] w-[clamp(105px,34vw,132px)] rounded-2xl border border-[#c4a882]/25 bg-[#f5f0e8] p-3.5 text-[#2d3436] sm:h-[88px] sm:w-[156px] sm:p-5"
+                  decorative
+                  imageClassName="max-h-11"
+                  name={comparison.name}
+                  priority
+                  slug={comparison.slug}
+                />
+              </div>
               <h1
-                className="max-w-[11ch] [overflow-wrap:anywhere] text-balance font-serif text-[clamp(3.15rem,7vw,5.8rem)] font-semibold leading-[0.9] tracking-[-0.045em]"
+                className="mt-7 max-w-[15ch] [overflow-wrap:anywhere] text-balance font-serif text-[clamp(2.7rem,6vw,4.8rem)] font-semibold leading-[0.94] tracking-[-0.04em]"
                 id={titleId}
               >
-                Murph vs{" "}
-                {competitorNameParts.map((part, index) => (
-                  <span key={`${part}-${index}`}>
-                    {index > 0 ? <wbr /> : null}
-                    {part}
-                  </span>
-                ))}
+                Murph vs {comparison.name}
               </h1>
-              <p className="mt-6 max-w-[46ch] text-[0.95rem] leading-7 text-[#f5f0e8]/65">
-                Murph is a personal health assistant that works in familiar messaging.
-              </p>
             </div>
 
             <div className="border-t border-[#c4a882]/45 pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-1">
@@ -93,29 +110,13 @@ export function ComparisonArticle({
 
       <div className="bg-[#f5f0e8] px-5 py-14 text-[#2d3436] sm:px-8 sm:py-18 lg:px-12 lg:py-22">
         <div className="mx-auto grid max-w-[1080px] gap-16 lg:gap-22">
-          <section aria-labelledby={`${titleId}-answer`} className="grid gap-7 border-b border-[#c4a882]/35 pb-14 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] lg:gap-18">
-            <div>
-              <h2
-                className="font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
-                id={`${titleId}-answer`}
-              >
-                Should you switch to Murph?
-              </h2>
-            </div>
-            <div className="max-w-[66ch]">
-              <p className="text-pretty font-serif text-[clamp(1.25rem,2vw,1.55rem)] font-semibold leading-[1.42] tracking-[-0.012em] text-[#2d3436]">
-                {comparison.bottomLine}
-              </p>
-            </div>
-          </section>
-
           <section aria-labelledby={`${titleId}-fit`} className="grid gap-8">
             <div className="max-w-[62ch]">
               <h2
                 className="font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                 id={`${titleId}-fit`}
               >
-                Which is a better fit?
+                The short answer
               </h2>
             </div>
 
@@ -139,14 +140,18 @@ export function ComparisonArticle({
             </div>
 
             {comparison.useTogether ? (
-              <div className="border-l-2 border-[#7a8c6e] bg-[#ebdfc6]/60 px-6 py-5">
-                <p className="text-[0.82rem] font-semibold text-[#5a6e32]">
-                  Using both
-                </p>
-                <p className="mt-2 max-w-[72ch] text-[0.95rem] leading-7 text-[#4d4533]">
+              <details className="group border-b border-[#c4a882]/35">
+                <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 py-3 text-[0.86rem] font-semibold text-[#5a6e32] marker:content-none [&::-webkit-details-marker]:hidden">
+                  Can Murph and {comparison.name} work together?
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="size-4 shrink-0 transition-transform group-open:rotate-180"
+                  />
+                </summary>
+                <p className="max-w-[72ch] pb-5 pr-8 text-[0.92rem] leading-7 text-[#4d4533]">
                   {comparison.useTogether}
                 </p>
-              </div>
+              </details>
             ) : null}
           </section>
 
@@ -196,12 +201,10 @@ export function ComparisonArticle({
                     <h3 className="font-serif text-[1.1rem] font-semibold leading-snug transition-colors group-hover:text-[#5a6e32]">
                       {faq.question}
                     </h3>
-                    <span
+                    <ChevronDown
                       aria-hidden="true"
-                      className="shrink-0 text-lg font-normal leading-none text-[#736a58] transition-transform group-open:rotate-45"
-                    >
-                      +
-                    </span>
+                      className="size-4 shrink-0 text-[#736a58] transition-transform group-open:rotate-180"
+                    />
                   </summary>
                   <p className="max-w-[72ch] pb-6 pr-10 text-[0.95rem] leading-7 text-[#4d4533]">
                     {faq.answer}
@@ -302,25 +305,6 @@ export function ComparisonArticle({
               </ul>
             </section>
           ) : null}
-
-          <section className="bg-[#2a2520] px-7 py-9 text-[#f5f0e8] sm:px-10 sm:py-11">
-            <div className="flex flex-col gap-7 sm:flex-row sm:items-end sm:justify-between">
-              <div className="max-w-[58ch]">
-                <h2 className="font-serif text-[clamp(1.7rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]">
-                  Keep what works. Bring the whole picture together.
-                </h2>
-                <p className="mt-4 text-[0.92rem] leading-7 text-[#f5f0e8]/70">
-                  Murph helps connect the health context you already have, decide what to try next, and keep the practical work moving.
-                </p>
-              </div>
-              <Link
-                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-[#5a6e32] px-6 text-sm font-semibold text-[#f5f0e8] transition-colors hover:bg-[#485928]"
-                href="/#pricing"
-              >
-                Meet Murph
-              </Link>
-            </div>
-          </section>
         </div>
       </div>
     </article>

@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/src/components/ui/table";
+import { ChevronDown } from "lucide-react";
 import {
   MURPH_COMPARISON_EVIDENCE,
   MURPH_COMPARISON_PROFILE,
@@ -83,7 +84,7 @@ function SourceReferences({
   sourcePrefix: string;
 }) {
   return (
-    <span className="mt-3 flex flex-wrap items-center gap-0.5 font-mono text-[10px] text-[#736a58]">
+    <span className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[0.66rem] text-[#736a58]">
       {ordinals.map((ordinal) => {
         const sourceNumber = ordinal + sourceNumberOffset;
         const sourceLabel = String(sourceNumber).padStart(2, "0");
@@ -91,11 +92,11 @@ function SourceReferences({
         return (
           <a
             aria-label={`Open source ${sourceLabel} for ${product} ${dimension}`}
-            className="inline-flex min-h-6 min-w-6 items-center justify-center underline decoration-[#c4a882] underline-offset-4 transition-colors hover:text-[#5a6e32]"
+            className="inline-flex min-h-6 items-center justify-center rounded-full border border-[#c4a882]/45 bg-[#f5f0e8]/70 px-2.5 font-medium transition-colors hover:border-[#5a6e32]/40 hover:text-[#5a6e32]"
             href={`#${sourcePrefix}${sourceLabel}`}
             key={ordinal}
           >
-            [{sourceLabel}]
+            Source {Number(sourceLabel)}
           </a>
         );
       })}
@@ -182,13 +183,13 @@ function DetailedComparisonTable({ comparison }: { comparison: ComparisonEntry }
   const sourcePrefix = `comparison-${comparison.slug}-source-`;
 
   return (
-    <div className="grid gap-3 pt-5">
-      <p className="text-[0.78rem] leading-5 text-[#736a58]">
-        Linked numbers point to the official sources below.
+    <div className="grid gap-4 pb-1 pt-2">
+      <p className="text-[0.76rem] leading-5 text-[#736a58]">
+        Each claim links to the official sources listed below.
       </p>
       <Table
         className="block w-full border-collapse lg:table lg:min-w-[760px] lg:table-fixed"
-        containerClassName="overflow-x-visible border-y border-[#c4a882]/45 bg-[#fffcf6]/55 lg:overflow-x-auto lg:focus-visible:outline-none lg:focus-visible:ring-2 lg:focus-visible:ring-[#5a6e32]/45 lg:focus-visible:ring-offset-2 lg:focus-visible:ring-offset-[#f5f0e8]"
+        containerClassName="overflow-x-visible rounded-2xl border border-[#c4a882]/40 bg-[#fffcf6]/70 lg:overflow-x-auto lg:focus-visible:outline-none lg:focus-visible:ring-2 lg:focus-visible:ring-[#5a6e32]/45 lg:focus-visible:ring-offset-2 lg:focus-visible:ring-offset-[#f5f0e8]"
         containerProps={{
           "aria-label": tableLabel,
           role: "region",
@@ -198,19 +199,19 @@ function DetailedComparisonTable({ comparison }: { comparison: ComparisonEntry }
         <TableHeader className="sr-only bg-transparent lg:not-sr-only lg:table-header-group">
           <TableRow className="border-[#c4a882]/35 hover:bg-transparent">
             <TableHead
-              className="w-[20%] px-5 py-4 font-sans text-[0.76rem] font-semibold normal-case tracking-normal text-[#736a58]"
+              className="w-[18%] px-4 py-3.5 font-sans text-[0.72rem] font-semibold normal-case tracking-normal text-[#736a58]"
               scope="col"
             >
               Compare
             </TableHead>
             <TableHead
-              className="w-[40%] border-x border-[#7a8c6e]/20 bg-[#7a8c6e]/10 px-5 py-4 font-sans text-[0.76rem] font-semibold normal-case tracking-normal text-[#445128]"
+              className="w-[41%] border-x border-[#7a8c6e]/20 bg-[#7a8c6e]/10 px-4 py-3.5 font-sans text-[0.72rem] font-semibold normal-case tracking-normal text-[#445128]"
               scope="col"
             >
               Murph
             </TableHead>
             <TableHead
-              className="w-[40%] px-5 py-4 font-sans text-[0.76rem] font-semibold normal-case tracking-normal text-[#736a58]"
+              className="w-[41%] px-4 py-3.5 font-sans text-[0.72rem] font-semibold normal-case tracking-normal text-[#736a58]"
               scope="col"
             >
               {comparison.name}
@@ -224,12 +225,12 @@ function DetailedComparisonTable({ comparison }: { comparison: ComparisonEntry }
               key={key}
             >
               <TableHead
-                className="block h-auto whitespace-normal border-b border-[#c4a882]/30 px-5 py-4 font-serif text-[1.05rem] font-semibold normal-case tracking-[-0.01em] text-[#2d3436] lg:table-cell lg:border-b-0 lg:px-5 lg:py-5 lg:text-[0.95rem]"
+                className="block h-auto whitespace-normal border-b border-[#c4a882]/30 bg-[#efe7d9]/55 px-4 py-3 font-sans text-[0.78rem] font-semibold normal-case leading-5 tracking-normal text-[#2d3436] lg:table-cell lg:border-b-0 lg:bg-transparent lg:px-4 lg:py-4 lg:text-[0.78rem]"
                 scope="row"
               >
                 {label}
               </TableHead>
-              <TableCell className="block whitespace-normal border-b border-[#7a8c6e]/20 bg-[#7a8c6e]/5 px-5 py-5 text-[0.92rem] leading-7 text-[#2d3436] lg:table-cell lg:border-x lg:border-b-0 lg:px-5 lg:py-5 lg:text-[0.92rem] lg:leading-7">
+              <TableCell className="block whitespace-normal border-b border-[#7a8c6e]/20 bg-[#7a8c6e]/5 px-4 py-4 text-[0.84rem] leading-6 text-[#2d3436] lg:table-cell lg:border-x lg:border-b-0 lg:px-4 lg:py-4">
                 <span className="mb-2 block text-[0.78rem] font-semibold text-[#5a6e32] lg:hidden">
                   Murph
                 </span>
@@ -242,7 +243,7 @@ function DetailedComparisonTable({ comparison }: { comparison: ComparisonEntry }
                   sourcePrefix={sourcePrefix}
                 />
               </TableCell>
-              <TableCell className="block whitespace-normal px-5 py-5 text-[0.92rem] leading-7 text-[#4d4533] lg:table-cell lg:px-5 lg:py-5">
+              <TableCell className="block whitespace-normal px-4 py-4 text-[0.84rem] leading-6 text-[#4d4533] lg:table-cell lg:px-4 lg:py-4">
                 <span className="mb-2 block text-[0.78rem] font-semibold text-[#736a58] lg:hidden">
                   {comparison.name}
                 </span>
@@ -268,17 +269,20 @@ export function ComparisonTable({ comparison }: { comparison: ComparisonEntry })
     <div className="grid gap-5">
       <QuickComparisonTable comparison={comparison} />
       <details
-        className="group border-b border-[#c4a882]/40"
+        className="group border-y border-[#c4a882]/40"
         data-detailed-comparison
       >
-        <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 py-3 text-[0.88rem] font-semibold text-[#4d4533] marker:content-none hover:text-[#5a6e32] [&::-webkit-details-marker]:hidden">
-          Detailed comparison and sources
-          <span
-            aria-hidden="true"
-            className="text-lg font-normal leading-none transition-transform group-open:rotate-45"
-          >
-            +
+        <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 py-3 text-[0.88rem] font-semibold text-[#4d4533] marker:content-none hover:text-[#5a6e32] [&::-webkit-details-marker]:hidden">
+          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            Full evidence table
+            <span className="text-[0.7rem] font-normal text-[#736a58]">
+              9 researched dimensions
+            </span>
           </span>
+          <ChevronDown
+            aria-hidden="true"
+            className="size-4 shrink-0 transition-transform group-open:rotate-180"
+          />
         </summary>
         <DetailedComparisonTable comparison={comparison} />
       </details>

@@ -115,6 +115,8 @@ async function capturePages({
           .querySelectorAll("nextjs-portal")
           .forEach((element) => element.remove());
       });
+      await expect(page.locator('a[href="/compare"]').first()).toBeAttached();
+      await expect(page.locator('a[href="/#pricing"]')).toHaveCount(0);
 
       await page.screenshot({
         animations: "disabled",
@@ -132,6 +134,7 @@ async function capturePages({
       });
 
       if (target.name === "index") {
+        await expect(page.locator("[data-comparison-logo]")).toHaveCount(8);
         const directory = page.locator("[data-comparison-directory]");
         const search = page.locator("#comparison-search");
         await expect(directory).toBeVisible();
@@ -190,8 +193,12 @@ async function capturePages({
       }
 
       if (target.name !== "index") {
+        await expect(
+          page.locator("[data-comparison-hero] [data-comparison-logo]"),
+        ).toHaveCount(1);
         const tableSection = page.locator('section[aria-labelledby$="-table"]');
         await expect(tableSection).toBeVisible();
+        await expect(tableSection.locator("table").first().locator("tbody tr")).toHaveCount(10);
         const competitorHeader = tableSection
           .locator("table")
           .first()
@@ -226,6 +233,11 @@ async function capturePages({
           expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(24);
           expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(24);
         }
+        await tableSection.screenshot({
+          animations: "disabled",
+          caret: "initial",
+          path: path.join(outputDir, `${target.name}-${suffix}-evidence.png`),
+        });
       }
     }
     expect(browserErrors, "comparison pages should not emit browser errors").toEqual([]);
@@ -265,6 +277,7 @@ test("capture comparison library design proof", async ({ browser }) => {
 test("comparison directory stays browsable without JavaScript", async ({
   browser,
 }, testInfo) => {
+  test.setTimeout(300_000);
   const baseURL = testInfo.project.use.baseURL;
   if (typeof baseURL !== "string") {
     throw new Error("Comparison no-JavaScript proof requires a Playwright baseURL.");

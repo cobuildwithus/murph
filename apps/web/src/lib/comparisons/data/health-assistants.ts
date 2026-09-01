@@ -10,12 +10,12 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     bestFor:
       "Adults whose main problem is execution: they have a goal, professional plan, or program and want proactive daily texts, quick logging, and visible accountability.",
     bottomLine:
-      "Choose BodyBuddy when you want a coach to keep a defined goal or plan moving every day. Choose Murph when you want one private assistant to carry changing health questions through context, decisions, practical actions, and later follow-through.",
+      "BodyBuddy and Murph both support daily health follow-through in familiar messaging. BodyBuddy puts more emphasis on game-like accountability for a fixed plan; Murph keeps more of your health context connected as the question changes.",
     category: "health-assistants",
     chooseCompetitor:
-      "Choose BodyBuddy when the desired product is an opinionated daily accountability loop: bring a plan, log what happened by text, photo, or voice, and use check-ins and game mechanics to stay engaged.",
+      "Choose BodyBuddy for an opinionated accountability program with daily check-ins, photo and voice logging, points, badges, and leaderboards.",
     chooseMurph:
-      "Choose Murph when the work will not stay inside one plan, such as when a wearable or lab result raises a question, the answer changes a decision, and you want the reasoning, next step, reminder, and later outcome to remain connected.",
+      "Choose Murph when your health will not stay inside one fixed plan. Murph connects wearable and lab data, records, symptoms, decisions, reminders, and outcomes in one private thread as the question changes.",
     competitor: {
       clinicalRole:
         "A consumer wellness and accountability coach. BodyBuddy says it does not provide medical advice, diagnose conditions, or independently validate instructions from a health professional.",
@@ -64,7 +64,7 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
         question: "What health data can BodyBuddy use?",
       },
     ],
-    headline: "Daily plan accountability or help across changing health needs?",
+    headline: "A daily accountability coach or one assistant for your whole health picture?",
     lastVerified: "2026-08-31",
     metaDescription:
       "Murph is a personal health assistant for changing questions and follow-through; BodyBuddy specializes in proactive texts and daily accountability for a defined plan.",
@@ -74,7 +74,7 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     quickComparison: [
       {
         capability: "Daily accountability loop",
-        murph: "limited",
+        murph: "yes",
         competitor: "yes",
         evidence: "followThrough",
       },

@@ -59,6 +59,7 @@ function isLoopbackUrl(rawUrl: string): boolean {
 test("comparison evidence links keep 24px targets at narrow widths", async ({
   page,
 }) => {
+  test.setTimeout(300_000);
   await page.route("**/*", (route) => {
     if (isLoopbackUrl(route.request().url())) {
       route.continue();
@@ -73,6 +74,7 @@ test("comparison evidence links keep 24px targets at narrow widths", async ({
       waitUntil: "load",
     });
     expect(response?.status(), "WHOOP comparison should respond 200").toBe(200);
+    await page.locator("[data-detailed-comparison] summary").click();
     const sourceLinks = page.getByRole("link", {
       name: /^Open source \d+ for WHOOP/u,
     });

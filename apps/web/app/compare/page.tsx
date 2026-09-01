@@ -12,7 +12,7 @@ import {
 } from "@/src/lib/site-metadata";
 
 const comparisonIndexOgImage = createMurphOgImageRef({
-  alt: "Murph personal health assistant comparison guides",
+  alt: "Your health is bigger than one app. Murph comparison guides.",
   url: "/compare/opengraph-image",
 });
 

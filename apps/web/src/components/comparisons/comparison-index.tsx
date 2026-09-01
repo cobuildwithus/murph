@@ -1,13 +1,75 @@
 import Link from "next/link";
+import Image from "next/image";
 
 import {
   ComparisonDirectory,
   type ComparisonDirectoryItem,
 } from "@/src/components/comparisons/comparison-directory";
+import { ComparisonLogo } from "@/src/components/comparisons/comparison-logo";
 import {
   formatComparisonDate,
   type ComparisonEntry,
 } from "@/src/lib/comparisons/types";
+
+const HERO_LOGOS = [
+  { name: "WHOOP", slug: "whoop" },
+  { name: "Oura Ring", slug: "oura-ring" },
+  { name: "Function Health", slug: "function-health" },
+  { name: "Fitbod", slug: "fitbod" },
+  { name: "MyFitnessPal", slug: "myfitnesspal" },
+  { name: "Headspace", slug: "headspace" },
+  { name: "BodyBuddy", slug: "bodybuddy" },
+  { name: "CommonHealth", slug: "commonhealth" },
+] as const;
+
+function ComparisonLogoMap() {
+  return (
+    <div
+      aria-label="Murph compared with health tools across wearables, labs, fitness, nutrition, and coaching"
+      className="relative mx-auto w-full max-w-[460px]"
+      role="img"
+    >
+      <div aria-hidden="true" className="absolute inset-[12%] rounded-full border border-[#c4a882]/15" />
+      <div aria-hidden="true" className="absolute inset-[26%] rounded-full border border-[#c4a882]/25" />
+      <div className="relative grid aspect-[1.12] grid-cols-3 grid-rows-3 place-items-center gap-3 sm:gap-4">
+        {HERO_LOGOS.slice(0, 4).map((logo, index) => (
+          <ComparisonLogo
+            className={`z-10 size-[78px] rounded-2xl border border-[#c4a882]/22 bg-[#f5f0e8] p-4 text-[#2d3436] sm:size-[92px] ${
+              index === 0 ? "-rotate-3" : index === 2 ? "rotate-3" : ""
+            }`}
+            decorative
+            imageClassName="max-h-11"
+            key={logo.slug}
+            name={logo.name}
+            slug={logo.slug}
+          />
+        ))}
+        <span className="z-20 flex size-[102px] items-center justify-center rounded-[1.6rem] border border-[#c4a882]/45 bg-[#efe7d9] p-5 sm:size-[122px] sm:p-6">
+          <Image
+            alt="Murph"
+            className="h-auto w-full"
+            height={24}
+            priority
+            src="/logo.svg"
+            width={107}
+          />
+        </span>
+        {HERO_LOGOS.slice(4).map((logo, index) => (
+          <ComparisonLogo
+            className={`z-10 size-[78px] rounded-2xl border border-[#c4a882]/22 bg-[#f5f0e8] p-4 text-[#2d3436] sm:size-[92px] ${
+              index === 1 ? "-rotate-3" : index === 3 ? "rotate-3" : ""
+            }`}
+            decorative
+            imageClassName="max-h-11"
+            key={logo.slug}
+            name={logo.name}
+            slug={logo.slug}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function ComparisonIndex({ comparisons }: { comparisons: readonly ComparisonEntry[] }) {
   const lastVerified = comparisons.reduce(
@@ -27,14 +89,22 @@ export function ComparisonIndex({ comparisons }: { comparisons: readonly Compari
 
   return (
     <main className="bg-[#f5f0e8] text-[#2d3436]">
-      <header className="bg-[#2a2520] px-5 pb-14 pt-14 text-[#f5f0e8] sm:px-8 sm:pb-18 sm:pt-18 lg:px-12 lg:pb-20 lg:pt-20">
+      <header className="bg-[#2a2520] px-5 pb-14 pt-28 text-[#f5f0e8] sm:px-8 sm:pb-18 sm:pt-32 lg:px-12 lg:pb-20 lg:pt-36">
         <div className="mx-auto max-w-[1080px]">
-          <h1 className="max-w-[11ch] text-balance font-serif text-[clamp(3.4rem,8vw,6.6rem)] font-semibold leading-[0.88] tracking-[-0.05em]">
-            Murph, compared clearly.
-          </h1>
-          <p className="mt-7 max-w-[61ch] text-pretty text-[1rem] leading-7 text-[#f5f0e8]/72 sm:text-[1.08rem]">
-            Murph is a personal health assistant in familiar messaging. See where it overlaps with the tools you know—and where it does not.
-          </p>
+          <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)] lg:gap-16">
+            <div>
+              <p className="text-[0.76rem] font-semibold uppercase tracking-[0.14em] text-[#c4a882]">
+                102 source-backed guides
+              </p>
+              <h1 className="mt-5 max-w-[12ch] text-balance font-serif text-[clamp(3rem,7vw,5.5rem)] font-semibold leading-[0.9] tracking-[-0.045em]">
+                Your health is bigger than one app.
+              </h1>
+              <p className="mt-7 max-w-[49ch] text-pretty text-[0.98rem] leading-7 text-[#f5f0e8]/72 sm:text-[1.05rem]">
+                See what each tool does best—and where Murph adds the context, decisions, and follow-through around it.
+              </p>
+            </div>
+            <ComparisonLogoMap />
+          </div>
           <p className="mt-10 border-t border-[#c4a882]/35 pt-5 text-[0.74rem] leading-5 text-[#f5f0e8]/55">
             {comparisons.length} comparison guides
             {" · "}Official-source desk research

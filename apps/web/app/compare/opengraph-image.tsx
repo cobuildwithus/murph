@@ -9,7 +9,7 @@ import {
   OG_SIZE,
 } from "../_og/og-shared";
 
-export const alt = "Murph personal health assistant comparison guides.";
+export const alt = "Your health is bigger than one app. Murph comparison guides.";
 export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
@@ -20,8 +20,8 @@ export default async function ComparisonIndexOGImage() {
     (
       <MurphHeroOg
         eyebrow="MURPH · PERSONAL HEALTH ASSISTANT"
-        headline="Murph, compared clearly."
-        headlineFontSize={74}
+        headline="Your health is bigger than one app."
+        headlineFontSize={68}
         logoDataUri={logoDataUri}
         subtext={`${COMPARISONS.length} source-backed guides to the health tools you already know.`}
       />

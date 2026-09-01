@@ -114,13 +114,7 @@ export interface ComparisonEntry {
   metaDescription: string;
   name: string;
   overview: string;
-  quickComparison: readonly [
-    ComparisonQuickRow,
-    ComparisonQuickRow,
-    ComparisonQuickRow,
-    ComparisonQuickRow,
-    ComparisonQuickRow,
-  ];
+  quickComparison: readonly ComparisonQuickRow[];
   relationship: ComparisonRelationship;
   slug: string;
   sources: readonly [ComparisonSource, ComparisonSource, ...ComparisonSource[]];
