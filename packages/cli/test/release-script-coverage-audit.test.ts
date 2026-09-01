@@ -3367,7 +3367,12 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     })
     await expect(
       failedBrowserSocket.openNewTarget('https://chatgpt.com/'),
-    ).rejects.toThrow('Injected browser WebSocket error')
+    ).rejects.toMatchObject({
+      message: 'Browser CDP socket error',
+      cause: expect.objectContaining({
+        message: 'Injected browser WebSocket error',
+      }),
+    })
 
     const closedBrowserSocket = loadReviewGptOpenTargetHarness(1, undefined, {
       closeBrowserSocketBeforeOpen: true,
