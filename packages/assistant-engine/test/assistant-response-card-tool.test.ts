@@ -495,13 +495,10 @@ async function persistWorkoutCardThroughLinq(input: {
     requests.push(
       typeof init.body === 'string' ? JSON.parse(init.body) : null,
     )
-    return {
-      arrayBuffer: async () => new ArrayBuffer(0),
-      json: async () => ({ message: { id: 'msg_workout_card' } }),
-      ok: true,
-      status: 200,
-      text: async () => '',
-    }
+    return new Response(
+      JSON.stringify({ message: { id: 'msg_workout_card' } }),
+      { headers: { 'Content-Type': 'application/json' } },
+    )
   }
   await sendLinqIMessageAppCard({
     card: persistedCard,
