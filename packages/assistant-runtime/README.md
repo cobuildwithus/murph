@@ -35,6 +35,7 @@ Current responsibilities:
 - keep foreground pending-input checks read-only; incomplete indexes schedule bounded maintenance while compaction and legacy backfill remain maintenance-owned
 - apply every Web-approved sparse `member.preferences.updated` delta with that event's own cross-lane mailbox sequence, so the canonical preference owner preserves approved event order while stale-no-oping only affected fields; bounded per-field watermarks in `bank/assistant-preference-mutations.json` make replay idempotent without reservation or receipt retention
 - admit one bounded, cursor-ordered batch of same-conversation, same-reply-anchor mailbox inputs only when their positive causal sequences are exact successors; pass the terminal accepted input id to hosted personality commands so Web derives the compound turn frontier from its member-bound mailbox row, and leave gaps, legacy input, overflow, and later arrivals pending
+- recover a late foreground input from the current invocation's exact imported-ID snapshot when its best-effort active-turn notification preceded controller registration; reuse the same conversation, exact-successor, replyability, route, and capacity checks without scanning or mutating the broad pending index
 - re-read Web's effective core-provider choice immediately before every
   target-owned provider entry: resident accepted input, joined-group Assistant
   Ask, consented private candidate, and private disclosure review; a missing or

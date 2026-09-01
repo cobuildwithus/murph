@@ -303,6 +303,108 @@ describe("createHostedAssistantInputSource", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
+  it("recovers an invocation-local group successor when its pre-controller notification was missed", async () => {
+    const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const initial = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "20",
+        dedupeKey: "dedupe_pre_controller_initial",
+        eventId: "evt_pre_controller_initial",
+        itemId: "item_pre_controller_initial",
+        laneSeq: "20",
+        messageId: "msg_pre_controller_initial",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        routeAuthority: true,
+        text: "initial group question",
+        threadIsDirect: false,
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: initial.inputId,
+      vaultRoot,
+    });
+    let invocationInputIds: string[] = [];
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: [initial.inputId],
+      pendingInputRefreshMode: "none",
+      readForegroundInputIds: () => invocationInputIds,
+      selectedInputIds: [initial.inputId],
+      vaultRoot,
+    });
+
+    const successor = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "21",
+        dedupeKey: "dedupe_pre_controller_successor",
+        eventId: "evt_pre_controller_successor",
+        itemId: "item_pre_controller_successor",
+        laneSeq: "21",
+        messageId: "msg_pre_controller_successor",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        routeAuthority: true,
+        text: "rapid group clarification",
+        threadIsDirect: false,
+      }),
+    });
+    const otherConversation = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "1",
+        dedupeKey: "dedupe_pre_controller_other",
+        eventId: "evt_pre_controller_other",
+        itemId: "item_pre_controller_other",
+        laneSeq: "22",
+        messageId: "msg_pre_controller_other",
+        occurredAt: "2026-04-23T00:00:03.500Z",
+        receivedAt: "2026-04-23T00:00:04.500Z",
+        routeAuthority: true,
+        text: "different group message",
+        threadId: "thread_other",
+        threadIsDirect: false,
+      }),
+    });
+    for (const inputId of [successor.inputId, otherConversation.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    // The foreground importer already captured these exact IDs, but its
+    // best-effort notification ran before an active-turn controller existed.
+    invocationInputIds = [successor.inputId, otherConversation.inputId];
+
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
+    });
+    const selected = await source.listInputCandidates({ sourceId: "linq" });
+    const lateConversationInputs = await source.listNewConversationInputs({
+      afterCursor: initial.cursor,
+      conversation: initial.conversation!,
+    });
+
+    expect(source.readSelectedInputIds()).toEqual([initial.inputId]);
+    expect(selected.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      initial.inputId,
+    ]);
+    expect(
+      lateConversationInputs.inputs.map((candidate) => candidate.event.inputId),
+    ).toEqual([successor.inputId]);
+    expect(source.readObservedInputIds()).toEqual([
+      initial.inputId,
+      successor.inputId,
+      otherConversation.inputId,
+    ]);
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    expect(listSpy).not.toHaveBeenCalled();
+  });
+
   it("does not live-steer an exact notified input across a causal gap", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();

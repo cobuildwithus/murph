@@ -146,7 +146,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     let latestAssistantInputBatch:
       NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["initialAssistantInputBatch"]>
       | null = null;
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (
+      automationInput,
+    ) => {
+      expect(automationInput.readForegroundInputIds?.()).toEqual([]);
       latestAssistantInputBatch = {
         assistantInputIds: ["ain_00000000000000000000000000000002"],
         assistantInputRecords: [{
@@ -156,6 +159,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
         emailDeliveryContexts: [],
         linqDeliveryContexts: [lateLinqDeliveryContext],
       };
+      expect(automationInput.readForegroundInputIds?.()).toEqual([
+        "ain_00000000000000000000000000000002",
+      ]);
       return {
         activeTurnInputIngested: true,
         assistantAutomationCurrentTurnDeliveryIntentIds: [effect.effectId],

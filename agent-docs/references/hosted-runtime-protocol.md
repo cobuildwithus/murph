@@ -3050,6 +3050,11 @@ supported by the hosted foreground mailbox import loop plus the store-backed
 assistant input spine: a payloadless runtime wake causes the active child to
 import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
+That notification is a best-effort latency hint. If it precedes active-turn
+controller registration, foreground refresh may recover only exact input IDs
+already imported by the current workspace invocation; those IDs still pass the
+existing replyability, same-conversation, route, capacity, and exact-successor
+checks without broad pending-index discovery or mutation.
 The pre-delivery system-mailbox consistency barrier may pause that loop, but it
 must resume before post-checkpoint delivery or background drains continue. A
 source-less wake preempts those drains only after the resumed import proves new

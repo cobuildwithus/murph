@@ -4456,6 +4456,75 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'answers a rapid group clarification once after same-thread reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-clarification-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const initialBeat = [
+          'A participant: "The teammate completed the circuit with added resistance."',
+          'Another participant: "Murph, what kind of resistance did they use?"',
+        ].join('\n')
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: initialBeat,
+        })
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            initialBeat,
+            'The same participant: "Murph, do we know the exact resistance level?"',
+          ].join('\n\n'),
+          resumeSessionId: first.sessionId,
+        })
+        process.stdout.write(
+          `[group-clarification-e2e] ${JSON.stringify({
+            finalMessage: second.finalMessage,
+            scenario: 'rapid clarification asks for one unspecified group detail',
+          })}\n`,
+        )
+
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(second.finalMessage).toMatch(/resistance/iu)
+        expect(second.finalMessage).toMatch(
+          /(?:do not|don.t|does not|doesn.t|not|wasn.t|unknown|unspecified).{0,80}(?:kind|type|level)|(?:kind|type|level).{0,80}(?:do not|don.t|does not|doesn.t|not|wasn.t|unknown|unspecified)/iu,
+        )
+        expect(second.finalMessage).not.toMatch(
+          /draft|held|not sent|previous response|re-?evaluat|review/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
     'yields when another human takes the floor during reconsideration',
     async () => {
       const config = await resolveRealCodexE2eConfig()

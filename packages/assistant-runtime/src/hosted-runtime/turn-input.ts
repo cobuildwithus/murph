@@ -195,6 +195,7 @@ export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
   pendingInputRefreshMode: HostedPendingInputRefreshMode;
   preserveSelectedInputOrder?: boolean;
+  readForegroundInputIds?: (() => readonly string[]) | null;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): HostedAssistantInputSource {
@@ -205,6 +206,7 @@ export function createHostedAssistantInputSource(input: {
     ...(input.initialPendingInputIds ?? []),
     ...selectedInputIds,
   ]);
+  const foregroundInputIds: string[] = [];
   const emittedListInputCandidateCursorKeys = new Set<string>();
   let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
   const readSelectedCandidates = () => {
@@ -229,9 +231,18 @@ export function createHostedAssistantInputSource(input: {
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
       if (input.pendingInputRefreshMode === "none") {
+        let added = 0;
+        for (const inputId of uniqueStrings(input.readForegroundInputIds?.() ?? [])) {
+          if (observedInputIds.has(inputId)) {
+            continue;
+          }
+          observedInputIds.add(inputId);
+          foregroundInputIds.push(inputId);
+          added += 1;
+        }
         return {
-          progressed: false,
-          reason: "no_new_input",
+          progressed: added > 0,
+          reason: added > 0 ? "ingested_input" : "no_new_input",
         };
       }
       await runHostedPendingAssistantInputContentRetention({
@@ -328,10 +339,34 @@ export function createHostedAssistantInputSource(input: {
     },
     async listNewConversationInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      const candidates = await readSelectedCandidates();
+      const selectedCandidates = await readSelectedCandidates();
+      const foregroundEvents = await readHostedAssistantInputEventsById({
+        inputIds: foregroundInputIds,
+        missingInput: "skip",
+        vaultRoot: input.vaultRoot,
+      });
+      const sameConversationEvents = foregroundEvents.filter((event) =>
+        isSameAssistantConversationRef(event.conversation, query.conversation)
+      );
+      const replyableEvents = await filterHostedReplyablePendingAssistantInputEvents({
+        events: sameConversationEvents,
+        vaultRoot: input.vaultRoot,
+      });
+      const exactSuccessors = await selectHostedAssistantExactSuccessorEvents({
+        afterCursor: query.afterCursor ?? null,
+        events: sameConversationEvents,
+        replyableInputIds: new Set(
+          replyableEvents.map((event) => event.inputId),
+        ),
+        vaultRoot: input.vaultRoot,
+      });
+      const foregroundCandidates = await createHostedAssistantInputCandidates({
+        events: exactSuccessors,
+        vaultRoot: input.vaultRoot,
+      });
       assertHostedAssistantInputQueryNotAborted(query.signal);
       return filterHostedAssistantNewConversationInputs({
-        candidates,
+        candidates: [...selectedCandidates, ...foregroundCandidates],
         query,
       });
     },
