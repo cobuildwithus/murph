@@ -209,7 +209,7 @@ const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`
 const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
 const PRIVATE_MEDIA_PUBLISH_EXPIRES_AT = "2033-05-18T03:33:20.000Z";
 const PRIVATE_MEDIA_PUBLISH_URL =
-  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
 type HostedSystemProgressProjection = Required<Pick<
   HostedWorkspaceCheckpointRequest,
   | "nextDefaultProcessingWakeAt"

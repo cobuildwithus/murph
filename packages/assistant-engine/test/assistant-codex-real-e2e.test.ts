@@ -21372,6 +21372,57 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
   )
 })
 
+describeRealCodex('real Codex degraded Knowledge read e2e', () => {
+  it(
+    'uses valid saved knowledge without claiming a degraded read is complete',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealDegradedKnowledgeReadJourney({ config })
+        const commands = expandRecordedVaultCommands(result.commands)
+        const knowledgeReads = commands.filter((command) =>
+          /^knowledge (?:list|search|show)\b/u.test(command)
+        )
+        process.stdout.write(
+          `[degraded-knowledge-read-e2e] ${JSON.stringify({
+            commands: knowledgeReads,
+            providerActionCount: result.providerActionCount,
+            reply: result.message,
+            scenario: 'synthetic completeness-sensitive saved Knowledge read',
+          })}\n`,
+        )
+
+        expect(knowledgeReads.length).toBeGreaterThanOrEqual(1)
+        expect(commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(
+            /^knowledge (?:append-section|rebuild|upsert)\b/u,
+          ),
+        ]))
+        expect(result.providerActionCount).toBeGreaterThanOrEqual(1)
+        expect(result.message).toMatch(/staging approval/iu)
+        expect(result.message).toMatch(/pending|awaiting|blocker/iu)
+        expect(result.message).toMatch(
+          /incomplete|not (?:a )?complete|may be missing|might be missing|could not read|couldn't read|cannot be read|unreadable|not exhaustive/iu,
+        )
+        expect(result.message).not.toMatch(
+          /complete saved (?:picture|record)|nothing else (?:is )?saved|no other saved/iu,
+        )
+        expect(result.message).not.toMatch(
+          /never saved|was not saved|wasn't saved|does not exist|doesn't exist/iu,
+        )
+        expect(result.message).not.toMatch(
+          /private malformed sentinel|synthetic-atlas-risk-notes|derived[\\/]knowledge|parse_frontmatter|parse_json|frontmatter|\.md\b/iu,
+        )
+        expect(result.message.length).toBeLessThanOrEqual(600)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+})
+
 describeRealCodex('real Codex automatic meal clarification e2e', () => {
   it(
     'keeps an unrelated incomplete meal out of scheduled capture recovery',
@@ -21759,6 +21810,105 @@ async function runRealCompactMemoryReadJourney(input: {
     return {
       commands: commandText === '' ? [] : commandText.split('\n'),
       message: result.finalMessage,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+async function runRealDegradedKnowledgeReadJourney(input: {
+  config: RealCodexE2eConfig
+}): Promise<{
+  commands: string[]
+  message: string
+  providerActionCount: number
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-degraded-knowledge-read-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    const pagesRoot = path.join(vaultRoot, 'derived', 'knowledge', 'pages')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+    await mkdir(pagesRoot, { recursive: true })
+    await Promise.all([
+      writeFile(commandLog, '', 'utf8'),
+      writeFile(
+        path.join(pagesRoot, 'synthetic-atlas-launch.md'),
+        [
+          '---',
+          'title: Synthetic Atlas launch',
+          'slug: synthetic-atlas-launch',
+          'pageType: concept',
+          'status: active',
+          '---',
+          '',
+          '# Synthetic Atlas launch',
+          '',
+          'The staging approval is still pending and blocks the launch.',
+          '',
+        ].join('\n'),
+        'utf8',
+      ),
+      writeFile(
+        path.join(pagesRoot, 'synthetic-atlas-risk-notes.md'),
+        [
+          '---',
+          'title: Private malformed sentinel',
+          'slug: Invalid private malformed sentinel',
+          'pageType: concept',
+          'status: active',
+          '---',
+          '',
+          '# Private malformed sentinel',
+          '',
+          'This malformed fixture content must never reach the reply.',
+          '',
+        ].join('\n'),
+        'utf8',
+      ),
+    ])
+    await materializeRealWorkoutVaultCli({
+      binDirectory,
+      commandLogPath: commandLog,
+      vaultRoot,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions: buildDirectConversationDeveloperInstructions(),
+      env: {
+        ...input.config.env,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: [
+        'Using my saved Knowledge, including the saved Atlas launch overview and risk notes, tell me whether the Atlas launch has any blockers.',
+        'Is that the complete saved picture?',
+      ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+
+    return {
+      commands: commandText === '' ? [] : commandText.split('\n'),
+      message: result.finalMessage,
+      providerActionCount: result.providerActionCount,
     }
   } finally {
     await removeRealCodexTemporaryPath(workingRoot)

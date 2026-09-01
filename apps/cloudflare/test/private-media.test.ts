@@ -327,7 +327,7 @@ describe("hosted private media", () => {
     })).resolves.toBeNull();
   });
 
-  it("serves canonical GET and HEAD requests with matching headers and no HEAD body", async () => {
+  it("serves only canonical GET and HEAD requests with matching headers and no HEAD body", async () => {
     const bucket = createPrivateMediaBucket();
     const staged = await stageHostedPrivateMedia({
       bucket: bucket.api,
@@ -379,45 +379,23 @@ describe("hosted private media", () => {
     }
     expect((await head.arrayBuffer()).byteLength).toBe(0);
 
-    const legacyUrl = new URL(staged.url);
-    legacyUrl.pathname = legacyUrl.pathname.replace(
+    const extensionlessUrl = new URL(staged.url);
+    extensionlessUrl.pathname = extensionlessUrl.pathname.replace(
       /\/group-avatar\.png$/u,
       "",
     );
-    const legacyRequest = new Request(legacyUrl);
-    const legacy = await handleDeclarativeRoute(privateMediaRoutes, {
-      env,
-      request: legacyRequest,
-      url: legacyUrl,
-    });
-    expect(legacy).not.toBeNull();
-    if (!legacy) {
-      throw new Error("Expected legacy private media response.");
-    }
-    expect(legacy.status).toBe(200);
-    expect(new Uint8Array(await legacy.arrayBuffer())).toEqual(PNG_BYTES);
-
-    const legacyHeadRequest = new Request(legacyUrl, { method: "HEAD" });
-    const legacyHead = await handleDeclarativeRoute(privateMediaRoutes, {
-      env,
-      request: legacyHeadRequest,
-      url: legacyUrl,
-    });
-    expect(legacyHead).not.toBeNull();
-    if (!legacyHead) {
-      throw new Error("Expected legacy private media HEAD response.");
-    }
-    expect(legacyHead.status).toBe(legacy.status);
-    for (const header of [
-      "cache-control",
-      "content-disposition",
-      "content-length",
-      "content-type",
-      "x-content-type-options",
-    ]) {
-      expect(legacyHead.headers.get(header)).toBe(legacy.headers.get(header));
-    }
-    expect((await legacyHead.arrayBuffer()).byteLength).toBe(0);
+    expect(matchHostedPrivateMediaCapabilityPath(extensionlessUrl.pathname))
+      .toBeNull();
+    const extensionlessRequest = new Request(extensionlessUrl);
+    const extensionlessResponse = await handleDeclarativeRoute(
+      privateMediaRoutes,
+      {
+        env,
+        request: extensionlessRequest,
+        url: extensionlessUrl,
+      },
+    );
+    expect(extensionlessResponse).toBeNull();
 
     const mismatchedExtension = new URL(staged.url);
     mismatchedExtension.pathname = mismatchedExtension.pathname.replace(
