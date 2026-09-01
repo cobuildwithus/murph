@@ -165,6 +165,7 @@ export function JournalViewContent({
             <WeekControls
               canGoNext={selectedWindowEnd < latestWindowEnd}
               canGoPrevious={selectedWindowStart > earliestDate}
+              earliestDate={earliestDate}
               onNext={() =>
                 setSelectedWindowEnd((current) =>
                   minDate(
@@ -217,6 +218,8 @@ export function JournalViewContent({
             <aside className="flex flex-col gap-[1.875rem] lg:sticky lg:top-6">
               <div className="hidden lg:block">
                 <MiniCalendar
+                  earliestDate={earliestDate}
+                  key={selectedWindowEnd.slice(0, 7)}
                   onSelectDate={setSelectedWindowEnd}
                   selectedWindowEnd={selectedWindowEnd}
                   today={today}
@@ -521,6 +524,7 @@ function JournalEmptyState({
 function WeekControls({
   canGoNext,
   canGoPrevious,
+  earliestDate,
   onNext,
   onPrevious,
   onSelectDate,
@@ -531,6 +535,7 @@ function WeekControls({
 }: {
   canGoNext: boolean;
   canGoPrevious: boolean;
+  earliestDate: string;
   onNext: () => void;
   onPrevious: () => void;
   onSelectDate: (date: string) => void;
@@ -576,6 +581,8 @@ function WeekControls({
           <DrawerTitle className="sr-only">Choose a Journal date</DrawerTitle>
           <div className="flex flex-col gap-4 px-5 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3">
             <MiniCalendar
+              earliestDate={earliestDate}
+              key={`${selectedWindowEnd.slice(0, 7)}-${calendarOpen}`}
               onSelectDate={(date) => {
                 onSelectDate(date);
                 setCalendarOpen(false);
@@ -644,7 +651,7 @@ function JournalDaySection({
         <h2
           id={headingId}
           className={cn(
-            "text-xs font-semibold leading-4 text-foreground md:text-sm md:leading-5",
+            "text-[11px] font-semibold leading-4 text-foreground sm:text-sm sm:leading-5",
             isToday && "text-primary",
           )}
         >
@@ -652,9 +659,9 @@ function JournalDaySection({
         </h2>
         <span
           className={cn(
-            "font-serif text-3xl font-semibold leading-8 tracking-[-0.02em] text-foreground md:text-[2.125rem] md:leading-9",
+            "font-serif text-2xl font-semibold leading-7 tracking-[-0.02em] text-foreground sm:text-[2.125rem] sm:leading-9",
             isToday &&
-              "flex size-9 items-center justify-center rounded-full bg-primary text-xl text-primary-foreground md:size-10 md:text-[1.5rem]",
+              "flex size-[34px] items-center justify-center rounded-full bg-primary text-lg text-primary-foreground sm:size-10 sm:text-2xl",
           )}
         >
           {Number(date.slice(8, 10))}
@@ -1204,17 +1211,21 @@ function GenericJournalPopoverPresentation({
 }
 
 function MiniCalendar({
+  earliestDate,
   onSelectDate,
   selectedWindowEnd,
   surface = "card",
   today,
 }: {
+  earliestDate: string;
   onSelectDate: (date: string) => void;
   selectedWindowEnd: string;
   surface?: "card" | "drawer";
   today: string;
 }) {
-  const monthDate = selectedWindowEnd;
+  const selectedMonth = `${selectedWindowEnd.slice(0, 7)}-01`;
+  const [monthDate, setMonthDate] = useState(selectedMonth);
+
   const monthStart = `${monthDate.slice(0, 7)}-01`;
   const calendarStart = addDays(monthStart, -mondayIndex(monthStart));
   const calendarDayCount =
@@ -1226,6 +1237,8 @@ function MiniCalendar({
     selectedWindowEnd,
     -(JOURNAL_WINDOW_DAYS - 1),
   );
+  const canShowPreviousMonth = monthDate.slice(0, 7) > earliestDate.slice(0, 7);
+  const canShowNextMonth = monthDate.slice(0, 7) < today.slice(0, 7);
 
   return (
     <section
@@ -1235,9 +1248,39 @@ function MiniCalendar({
       )}
       aria-label="Journal calendar"
     >
-      <h2 className="font-serif text-[19px] font-semibold leading-6 text-foreground">
-        {formatMonth(monthDate)}
-      </h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-serif text-[19px] font-semibold leading-6 text-foreground">
+          {formatMonth(monthDate)}
+        </h2>
+        <div className="flex items-center gap-1">
+          <Button
+            aria-label="Previous month"
+            className={cn(
+              "rounded-full",
+              surface === "drawer" ? "size-11" : "size-9",
+            )}
+            disabled={!canShowPreviousMonth}
+            onClick={() => setMonthDate((current) => shiftMonth(current, -1))}
+            size="icon"
+            variant="ghost"
+          >
+            <ChevronLeft aria-hidden="true" />
+          </Button>
+          <Button
+            aria-label="Next month"
+            className={cn(
+              "rounded-full",
+              surface === "drawer" ? "size-11" : "size-9",
+            )}
+            disabled={!canShowNextMonth}
+            onClick={() => setMonthDate((current) => shiftMonth(current, 1))}
+            size="icon"
+            variant="ghost"
+          >
+            <ChevronRight aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
       <div className="mt-3.5 grid grid-cols-7 gap-y-[5px] text-center">
         {["M", "T", "W", "T", "F", "S", "S"].map((label, index) => (
           <span
@@ -1251,7 +1294,9 @@ function MiniCalendar({
           const inMonth = date.slice(0, 7) === monthDate.slice(0, 7);
           const inSelectedWindow =
             date >= selectedWindowStart && date <= selectedWindowEnd;
+          const isBeforeHistory = date < earliestDate;
           const isFutureDate = date > today;
+          const isUnavailable = isBeforeHistory || isFutureDate;
           return (
             <button
               aria-current={date === today ? "date" : undefined}
@@ -1262,10 +1307,10 @@ function MiniCalendar({
                 inSelectedWindow && "bg-primary/10",
                 date === selectedWindowStart && "rounded-l-full",
                 date === selectedWindowEnd && "rounded-r-full",
-                isFutureDate &&
+                isUnavailable &&
                   "cursor-default opacity-35 hover:bg-transparent",
               )}
-              disabled={isFutureDate}
+              disabled={isUnavailable}
               key={date}
               onClick={() => onSelectDate(date)}
               type="button"
@@ -1705,6 +1750,14 @@ function daysInMonth(date: string): number {
   const year = Number(date.slice(0, 4));
   const month = Number(date.slice(5, 7));
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function shiftMonth(date: string, offset: number): string {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  return new Date(Date.UTC(year, month - 1 + offset, 1))
+    .toISOString()
+    .slice(0, 10);
 }
 
 function formatMonth(date: string): string {

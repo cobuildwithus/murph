@@ -343,6 +343,18 @@ test("JournalPage shows the seven days ending today and disables future dates", 
   await act(async () => mobileCalendarButton.click());
   assert.equal(mobileCalendarButton.getAttribute("aria-expanded"), "true");
 
+  const previousMonthButtons = Array.from(
+    rendered.window.document.querySelectorAll(
+      'button[aria-label="Previous month"]',
+    ),
+  );
+  const drawerPreviousMonthButton = previousMonthButtons.at(-1);
+  assert.ok(
+    drawerPreviousMonthButton instanceof rendered.window.HTMLButtonElement,
+  );
+  await act(async () => drawerPreviousMonthButton.click());
+  assert.match(rendered.window.document.body.textContent ?? "", /July 2026/u);
+
   await rendered.cleanup();
 });
 
