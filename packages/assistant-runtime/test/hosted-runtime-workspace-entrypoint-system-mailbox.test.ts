@@ -3126,6 +3126,256 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
+  test("default mode checkpoints a stale assistant projection before handing an imported device frontier to the system owner", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const staleDefaultWakeAt = "2026-04-26T23:59:00.000Z";
+    const staleDeviceWakeAt = "2026-04-26T23:58:00.000Z";
+    const runningAt = "2026-04-26T23:59:30.000Z";
+    const futurePendingEffectsWakeAt = "2026-04-27T00:10:00.000Z";
+    const automationId = "automation_01JQ8PWXP5A68SQM1W0GYM41XZ";
+    const deviceHead = createMailboxItem({
+      dedupeKey: "device-sync.wake:stale-default-projection-head",
+      id: "mailbox_item_stale_default_projection_device_head",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const pendingEffects = createMailboxItem({
+      dedupeKey: "runtime.pending-effects-reconcile-requested:stale-default-projection",
+      id: "mailbox_item_stale_default_projection_pending_effects",
+      kind: "runtime.pending-effects-reconcile-requested",
+      lane: "system",
+      laneSeq: "3",
+    });
+    const deviceTail = createMailboxItem({
+      dedupeKey: "device-sync.wake:stale-default-projection-tail",
+      id: "mailbox_item_stale_default_projection_device_tail",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "4",
+    });
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.runAssistantAutomationPass.mockClear();
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        automationId,
+        continuityPolicy: "fresh",
+        instructions: "Record one synthetic scheduled check-in.",
+        now: new Date(staleDefaultWakeAt),
+        route: {
+          channel: "linq",
+          deliveryTarget: "synthetic_direct_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "synthetic_direct_chat",
+          threadIsDirect: true,
+        },
+        schedule: { at: staleDefaultWakeAt, kind: "at" },
+        status: "active",
+        title: "Synthetic stale projection check-in",
+        vaultRoot,
+      });
+      const cronAutomationStatePath = resolveAssistantStatePaths(
+        vaultRoot,
+      ).cronAutomationStatePath;
+      await mkdir(path.dirname(cronAutomationStatePath), { recursive: true });
+      await writeFile(
+        cronAutomationStatePath,
+        `${JSON.stringify({
+          jobs: [{
+            alias: null,
+            createdAt: staleDefaultWakeAt,
+            jobId: automationId,
+            schema: "murph.assistant-canonical-cron-runtime-state.v1",
+            sessionId: null,
+            state: {
+              activatedAt: staleDefaultWakeAt,
+              consecutiveFailures: 0,
+              lastError: null,
+              lastFailedAt: null,
+              lastRunAt: null,
+              lastSucceededAt: null,
+              pendingDeliveryIntentId: null,
+              pendingOccurrenceAt: staleDefaultWakeAt,
+              retryAfterAt: null,
+              runningAt,
+              runningClaimId: "claim_synthetic_stale_default",
+              runningPid: process.pid,
+            },
+            updatedAt: runningAt,
+          }],
+          version: 1,
+        }, null, 2)}\n`,
+      );
+      assert.deepEqual(await getAssistantCronStatus(vaultRoot), {
+        dueJobs: 0,
+        enabledJobs: 1,
+        nextRunAt: staleDefaultWakeAt,
+        runningJobs: 1,
+        totalJobs: 1,
+      });
+
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceHead,
+        vaultRoot,
+      });
+      await enqueuePendingEffectsSystemMailboxItemForTest({
+        effectId: "effect_synthetic_stale_default_projection",
+        item: pendingEffects,
+        vaultRoot,
+      });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceTail,
+        vaultRoot,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === pendingEffects.id
+            ? { ...item, nextAttemptAt: futurePendingEffectsWakeAt }
+            : item
+        ),
+      }));
+      const pendingBeforeInvocation = structuredClone(
+        (await readHostedSystemMailboxState(vaultRoot)).pending,
+      );
+      assert.deepEqual(
+        pendingBeforeInvocation.map((item) => item.mailboxLaneSeq),
+        ["1", "3", "4"],
+      );
+      assert.equal(
+        findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: TEST_NOW,
+          state: { pending: pendingBeforeInvocation },
+        })?.itemId,
+        deviceHead.id,
+      );
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "4";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/stale-default-projection-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_stale_default_projection",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/stale-default-projection-after.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("The restored 0/4/4 mailbox must not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextDefaultProcessingWakeAt: staleDefaultWakeAt,
+                nextDefaultProcessingWakeReason: "assistant",
+                nextWakeAt: staleDeviceWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                redactedStatus: {
+                  hostedMailboxBlockedCount: 0,
+                  hostedMailboxConversationImportedSeq: "0",
+                  hostedMailboxFetchedCount: 0,
+                  hostedMailboxImportedCount: 0,
+                  hostedMailboxRetryableBlockedCount: 0,
+                  hostedMailboxSystemHandledThroughSeq: "0",
+                  hostedMailboxSystemImportedSeq: "4",
+                },
+                snapshotRef: restoredWorkspace.snapshotRef,
+                systemMailboxProgressGeneration: "1",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            const phaseResult = await runHostedWorkspaceAssistantPhase({
+              ...input,
+              now: () => TEST_NOW,
+            });
+            assert.equal(phaseResult.progressed, false);
+            assert.equal(phaseResult.nextWakeAt, TEST_NOW);
+            assert.equal(phaseResult.nextWakeReason, "device-sync.reconcile");
+            return phaseResult;
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(checkpointRequests.length, 1);
+      const checkpoint = checkpointRequests[0];
+      assert.ok(checkpoint);
+      assert.equal(checkpoint.reason, "idle_shutdown");
+      assert.equal(checkpoint.expectedWorkspaceVersion, "0");
+      assert.equal(checkpoint.nextWakeAt, TEST_NOW);
+      assert.equal(checkpoint.nextWakeReason, "device-sync.reconcile");
+      assert.equal(
+        checkpoint.nextDefaultProcessingWakeAt,
+        futurePendingEffectsWakeAt,
+      );
+      assert.equal(checkpoint.nextDefaultProcessingWakeReason, "assistant");
+      assert.equal(checkpoint.systemMailboxProgressGeneration, "1");
+      assert.equal(
+        checkpoint.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "0",
+      );
+      assert.equal(
+        checkpoint.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "4",
+      );
+      assert.equal(checkpoint.redactedStatus?.hostedMailboxFetchedCount, 0);
+      assert.equal(checkpoint.redactedStatus?.hostedMailboxImportedCount, 0);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending,
+        pendingBeforeInvocation,
+      );
+    } finally {
+      mocks.runAssistantAutomationPass.mockClear();
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("default foreground hands a timed-out browser refresh to the model-free system owner", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();

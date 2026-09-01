@@ -1055,6 +1055,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     });
   const systemMailboxWake = systemMailboxWakes.next;
   const assistantCronWake = await resolveHostedAssistantCronWakeAfterInitialImport({
+    nowMs: input.nowMs,
     operatorHomeRoot: input.operatorHomeRoot,
     runtimeEnv: input.runtimeEnv,
     vaultRoot: input.vaultRoot,
@@ -2462,6 +2463,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const assistantCronWake =
         input.request.processingMode === "system_mailbox"
           ? await resolveHostedAssistantCronWakeAfterInitialImport({
+              nowMs: Date.now(),
               operatorHomeRoot: restored.operatorHomeRoot,
               runtimeEnv: invocationRuntimeEnv,
               vaultRoot: restored.vaultRoot,
@@ -5533,13 +5535,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         let continueForegroundCausalPass =
           !runtimeOwnerHandoffRequested
           && shouldContinueForegroundCausalPass(passResult);
-        const requestDueMailboxOwnerHandoffIfForegroundIdle = (): void => {
+        const requestDueRuntimeOwnerHandoffIfForegroundIdle = (): void => {
           if (
             runtimeOwnerHandoffRequested
             || rerunAssistantInputBatch !== null
             || continueForegroundCausalPass
             || (input.request.processingMode ?? "default") !== "default"
-            || pendingWake.nextWakeReason !== "mailbox"
+            || hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
             || !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
           ) {
             return;
@@ -5547,7 +5549,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           runtimeOwnerHandoffRequested = true;
           markIdleCheckpointTimerAfterDirtyWork();
         };
-        requestDueMailboxOwnerHandoffIfForegroundIdle();
+        requestDueRuntimeOwnerHandoffIfForegroundIdle();
         while (
           options.shutdownSignal?.aborted !== true
           && (rerunAssistantInputBatch || continueForegroundCausalPass)
@@ -5592,7 +5594,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           continueForegroundCausalPass =
             !runtimeOwnerHandoffRequested
             && shouldContinueForegroundCausalPass(passResult);
-          requestDueMailboxOwnerHandoffIfForegroundIdle();
+          requestDueRuntimeOwnerHandoffIfForegroundIdle();
         }
         return passResult;
       };
@@ -8901,6 +8903,7 @@ function selectEarliestHostedRuntimeWake(
 }
 
 async function resolveHostedAssistantCronWakeAfterInitialImport(input: {
+  nowMs: number;
   operatorHomeRoot: string;
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
@@ -8910,8 +8913,8 @@ async function resolveHostedAssistantCronWakeAfterInitialImport(input: {
   });
   const dueNow = status.dueJobs > 0;
   const at = dueNow
-    ? new Date().toISOString()
-    : status.nextRunAt;
+    ? new Date(input.nowMs).toISOString()
+    : normalizeHostedFutureWakeAt(status.nextRunAt, input.nowMs);
   return {
     at,
     dueNow,
