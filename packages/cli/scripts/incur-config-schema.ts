@@ -13,7 +13,7 @@ const INCUR_GENERATION_TIMEOUT_MS = 5 * 60_000
 export const packageDir = fileURLToPath(new URL('../', import.meta.url))
 const repoDir = fileURLToPath(new URL('../../../', import.meta.url))
 const distEntryPath = path.join(packageDir, 'dist', 'index.js')
-const incurBinPath = path.join(packageDir, 'node_modules', 'incur', 'dist', 'bin.js')
+const incurPackageDir = path.join(packageDir, 'node_modules', 'incur')
 
 export const configSchemaPath = path.join(packageDir, 'config.schema.json')
 export const incurGeneratedTypesPath = path.join(packageDir, 'src', 'incur.generated.ts')
@@ -77,11 +77,7 @@ async function withGeneratedIncurArtifacts<T>(
   options: IncurGenerationOptions,
   run: (artifacts: GeneratedIncurArtifacts) => Promise<T>,
 ): Promise<T> {
-  if (!existsSync(incurBinPath)) {
-    throw new Error(
-      'Missing local incur binary. Run pnpm install --frozen-lockfile before generating CLI artifacts.',
-    )
-  }
+  const incurBinPath = await resolveInstalledIncurBinPath()
 
   if ((options.rebuildCli ?? true) || !existsSync(distEntryPath)) {
     options.onStage?.('Building the CLI package.')
@@ -112,6 +108,79 @@ async function withGeneratedIncurArtifacts<T>(
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
+}
+
+export async function resolveInstalledIncurBinPath(): Promise<string> {
+  let packageManifest: unknown
+
+  try {
+    packageManifest = JSON.parse(
+      await readFile(path.join(incurPackageDir, 'package.json'), 'utf8'),
+    )
+  } catch {
+    throw new Error(
+      'Missing or invalid local incur package manifest. Run pnpm install --frozen-lockfile before generating CLI artifacts.',
+    )
+  }
+
+  const generatorPath = resolveIncurBinPathFromManifest(
+    incurPackageDir,
+    packageManifest,
+  )
+
+  if (!existsSync(generatorPath)) {
+    throw new Error(
+      'The installed incur package declares a missing bin.incur target. Reinstall the frozen workspace dependencies before generating CLI artifacts.',
+    )
+  }
+
+  return generatorPath
+}
+
+export function resolveIncurBinPathFromManifest(
+  packageDirectory: string,
+  packageManifest: unknown,
+): string {
+  if (
+    typeof packageManifest !== 'object' ||
+    packageManifest === null ||
+    !('bin' in packageManifest)
+  ) {
+    throw new Error('The installed incur package manifest must declare bin.incur.')
+  }
+
+  const { bin } = packageManifest
+  if (
+    typeof bin !== 'object' ||
+    bin === null ||
+    !('incur' in bin) ||
+    typeof bin.incur !== 'string' ||
+    bin.incur.trim() === ''
+  ) {
+    throw new Error('The installed incur package manifest must declare bin.incur.')
+  }
+
+  const packageRoot = path.resolve(packageDirectory)
+  if (path.isAbsolute(bin.incur)) {
+    throw new Error(
+      'The installed incur package bin.incur target must be package-relative and stay inside its package.',
+    )
+  }
+  const generatorPath = path.resolve(packageRoot, bin.incur)
+  const relativePath = path.relative(packageRoot, generatorPath)
+
+  if (
+    relativePath === '' ||
+    relativePath === '..' ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new Error(
+      'The installed incur package bin.incur target must be package-relative and stay inside its package.',
+    )
+  }
+
+  return generatorPath
 }
 
 export async function prepareBuiltCliRuntime(): Promise<void> {

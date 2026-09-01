@@ -5931,10 +5931,13 @@ describe('assistant outbox runtime', () => {
       }
       const convertedRuntimeStore =
         await readAssistantCronCanonicalRuntimeStore(paths)
+      const transfersLegacyPendingOccurrence =
+        schedule.kind === 'every' &&
+        convertedAutomation.schedule.localTime === '13:30'
       expect(convertedRuntimeStore.jobs).toContainEqual(expect.objectContaining({
         jobId: automation.record.automationId,
         state: expect.objectContaining({
-          activatedAt: schedule.kind === 'at'
+          activatedAt: schedule.kind === 'at' || transfersLegacyPendingOccurrence
             ? '2026-04-09T13:32:00.000Z'
             : automation.record.createdAt,
           pendingOccurrenceAt: occurrenceAt,

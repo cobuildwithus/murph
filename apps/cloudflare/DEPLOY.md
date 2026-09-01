@@ -1406,6 +1406,9 @@ Core execution tuning:
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
 - `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`. This restores the two-vCPU production shape after measured cold-start and same-size workspace-restore regressions on the smaller allocation. The post-completion conversation idle lease remains independently configured at ten minutes.
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
+- `CF_STANDBY_CONTAINER_MAX_INSTANCES` defaults to the resolved
+  `CF_CONTAINER_MAX_INSTANCES` value. Set it separately only when the standby
+  application needs a different ceiling from ordinary member runners.
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
@@ -1441,6 +1444,12 @@ scheduling retry alarms until fresh nudge/manual input resets the counter.
 
 Deploy the Worker, both new Durable Object classes, bindings, migration `v7`,
 and the prepared `StandbyRunnerContainer` image while the mode remains `off`.
+For the bounded 100-instance standby capacity trial, set the protected
+production environment to `CF_CONTAINER_MAX_INSTANCES=648` and
+`CF_STANDBY_CONTAINER_MAX_INSTANCES=100`. Together with the fixed one-instance
+deploy-smoke application, this preserves the existing 749-instance declared
+total. The standby ceiling does not reserve a ready slot: at saturation, a
+100th claimed standby can leave no ready replacement until capacity frees.
 Run exact-version endpoint smoke and managed-container smoke to prove the
 effective standby mode, expected Worker release, and runner bundle/source
 fingerprints first. Then use `shadow` for at least one ordinary
@@ -1718,6 +1727,9 @@ If the selected GitHub environment already defines container sizing overrides, u
 
 - `CF_CONTAINER_INSTANCE_TYPE={"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES=1000`
+- `CF_STANDBY_CONTAINER_MAX_INSTANCES=1000` when standby needs a ceiling that
+  differs from the ordinary runner application; otherwise omit it to inherit
+  `CF_CONTAINER_MAX_INSTANCES`
 
 When hosted email sender identity is configured, deploy automation renders one native `send_email` binding named `HOSTED_EMAIL` and constrains it with `allowed_sender_addresses` to that resolved sender address. Hosted email outbound send no longer requires a runtime Cloudflare account id or email-send API token inside the Worker.
 

@@ -1,6 +1,7 @@
 ---
 title: 'Automation-supplied task worktree cannot pass repository commit authorization'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2662'
 ---
 
 ## Expected Behavior

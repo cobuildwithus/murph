@@ -16,7 +16,8 @@ import {
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { PassThrough } from 'node:stream'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Script } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import {
@@ -47,6 +48,19 @@ const cliPackageJson = JSON.parse(
   name?: string
   scripts?: Record<string, string>
   version?: string
+}
+const assistantCliPackageJson = JSON.parse(
+  readFileSync(
+    path.join(repoRoot, 'packages', 'assistant-cli', 'package.json'),
+    'utf8',
+  ),
+) as {
+  dependencies?: Record<string, string>
+}
+const setupCliPackageJson = JSON.parse(
+  readFileSync(path.join(repoRoot, 'packages', 'setup-cli', 'package.json'), 'utf8'),
+) as {
+  dependencies?: Record<string, string>
 }
 const hostedWebPackageJson = JSON.parse(
   readFileSync(path.join(repoRoot, 'apps', 'web', 'package.json'), 'utf8'),
@@ -1364,6 +1378,13 @@ describe('monorepo release flow coverage audit', () => {
     ).toEqual(["  - '@cobuild/review-gpt@0.5.139'"])
     expect(
       pnpmWorkspace
+        .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1],
+    ).not.toContain('incur@')
+    expect(pnpmWorkspace).toContain(
+      "  'incur@0.4.5>@modelcontextprotocol/server': 2.0.0-alpha.2",
+    )
+    expect(
+      pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
         ?.trim()
         .split('\n')
@@ -1374,6 +1395,7 @@ describe('monorepo release flow coverage audit', () => {
         "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
         "'@cobuild/review-gpt@0.5.139': patches/@cobuild__review-gpt@0.5.139.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
+        'incur@0.5.1: patches/incur@0.5.1.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
       ],
     )
@@ -2351,6 +2373,83 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
+  })
+
+  it("keeps ReviewGPT's patched Incur MCP transport compatible with its pinned server", async () => {
+    const reviewGptPackagePath = realpathSync(
+      path.join(repoRoot, 'node_modules', '@cobuild', 'review-gpt', 'package.json'),
+    )
+    const reviewGptRequire = createRequire(reviewGptPackagePath)
+    const incurEntryPath = reviewGptRequire.resolve('incur')
+    const { Cli, Mcp } = await import(pathToFileURL(incurEntryPath).href)
+    const cli = Cli.create('review-gpt-mcp-compatibility')
+    cli.command('ping', {
+      run: async () => ({ ok: true }),
+    })
+    const commands = Cli.toCommands.get(cli)
+    if (!commands) throw new Error('Expected the compatibility command to be registered.')
+
+    const input = new PassThrough()
+    const output = new PassThrough()
+    const responses: Array<{ id?: number; result?: unknown }> = []
+    let bufferedOutput = ''
+    output.setEncoding('utf8')
+    output.on('data', (chunk: string) => {
+      bufferedOutput += chunk
+      const lines = bufferedOutput.split('\n')
+      bufferedOutput = lines.pop() ?? ''
+      for (const line of lines) {
+        if (line) responses.push(JSON.parse(line))
+      }
+    })
+
+    const send = (message: Record<string, unknown>): void => {
+      input.write(`${JSON.stringify(message)}\n`)
+    }
+    const waitForResponse = async (id: number) => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const response = responses.find((candidate) => candidate.id === id)
+        if (response) return response
+        await new Promise<void>((resolve) => setTimeout(resolve, 10))
+      }
+      throw new Error(`Timed out waiting for MCP response ${id}.`)
+    }
+
+    await Mcp.serve('review-gpt-mcp-compatibility', '1.0.0', commands, {
+      input,
+      output,
+    })
+    send({
+      id: 1,
+      jsonrpc: '2.0',
+      method: 'initialize',
+      params: {
+        capabilities: {},
+        clientInfo: { name: 'compatibility-test', version: '1.0.0' },
+        protocolVersion: '2025-11-25',
+      },
+    })
+    expect(await waitForResponse(1)).toMatchObject({
+      result: { protocolVersion: '2025-11-25' },
+    })
+
+    send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    send({ id: 2, jsonrpc: '2.0', method: 'tools/list', params: {} })
+    expect(await waitForResponse(2)).toMatchObject({
+      result: { tools: [{ name: 'ping' }] },
+    })
+
+    send({
+      id: 3,
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: { arguments: {}, name: 'ping' },
+    })
+    expect(await waitForResponse(3)).toMatchObject({
+      result: { content: [{ text: '{"ok":true}', type: 'text' }] },
+    })
+    input.end()
+    output.end()
   })
 
   it('applies ReviewGPT wrapper precedence while preserving direct package config', () => {
@@ -5753,9 +5852,12 @@ exit 1
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/assistant-engine')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/vault-usecases')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
-    expect(cliPackageJson.dependencies?.incur).toBe('0.4.5')
+    expect(cliPackageJson.dependencies?.incur).toBe('0.5.1')
+    expect(assistantCliPackageJson.dependencies?.incur).toBe('0.5.1')
+    expect(setupCliPackageJson.dependencies?.incur).toBe('0.5.1')
     expect(cliPackageJson.dependencies?.['@cfworker/json-schema']).toBe('^4.1.1')
-    expect(cliPackageJson.dependencies?.['@modelcontextprotocol/server']).toBe('^2.0.0-alpha.2')
+    expect(cliPackageJson.dependencies?.['@modelcontextprotocol/server']).toBe('2.0.0-alpha.4')
+    expect(cliPackageJson.dependencies?.['@scalar/openapi-types']).toBe('^0.8.0')
     expect(cliPackageJson.dependencies?.['@toon-format/toon']).toBe('^2.1.0')
     expect(cliPackageJson.dependencies?.tokenx).toBe('^1.3.0')
     expect(cliPackageJson.dependencies?.yaml).toBe('^2.8.2')
@@ -5768,7 +5870,9 @@ exit 1
     expect(packPublishables).toContain('shouldSkipExternalPayloadArtifact')
     expect(packPublishables).toContain("path.basename(sourcePath) === 'node_modules'")
     expect(packPublishables).toContain('isNonRuntimeIncurPayloadPath')
-    expect(packPublishables).toContain('/(?:^|\\/)[^/]+\\.test\\.[cm]?[jt]sx?$/u')
+    expect(packPublishables).toContain("relativePath === 'docs'")
+    expect(packPublishables).toContain("relativePath.startsWith('docs/')")
+    expect(packPublishables).toContain('/(?:^|\\/)[^/]+\\.test(?:-d)?\\.[cm]?[jt]sx?$/u')
     expect(packPublishables).toContain('assistantCliSurfaceAssemblyPath')
     expect(packPublishables).toContain("'assemble-assistant-cli-surface.mjs'")
     expect(packPublishables).toContain('[assistantCliSurfaceAssemblyPath]')
@@ -5875,12 +5979,23 @@ exit 1
           'node_modules',
           'incur',
         )
+        const installedIncurPackageJson = JSON.parse(
+          readFileSync(path.join(installedIncurDirectory, 'package.json'), 'utf8'),
+        ) as {
+          bin?: Record<string, string>
+          version?: string
+        }
+        expect(installedIncurPackageJson.version).toBe('0.5.1')
+        expect(installedIncurPackageJson.bin?.incur).toBe('./dist/cli/index.js')
         expect(existsSync(path.join(installedIncurDirectory, 'dist', 'index.js'))).toBe(true)
         expect(existsSync(path.join(installedIncurDirectory, 'src', 'index.ts'))).toBe(true)
+        expect(existsSync(path.join(installedIncurDirectory, 'docs'))).toBe(false)
         for (const testSource of [
+          'Cli.test-d.ts',
           'Cli.test.ts',
           'Fetch.test.ts',
           'Mcp.test.ts',
+          'Parser.test-d.ts',
           'Skill.test.ts',
           'e2e.test.ts',
         ]) {

@@ -1,6 +1,7 @@
 ---
 title: 'Assistant-runtime full Vitest suite races temp-root teardown across isolated workers'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2514'
 ---
 
 ## What happened

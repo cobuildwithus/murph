@@ -902,12 +902,29 @@ test("automation save and edit manage assistant target overrides from typed fiel
     ]);
     assert.equal(invalidReasoningEffort.exitCode, 1);
     assert.equal(invalidReasoningEffort.envelope.ok, false);
-    assert.match(
-      invalidReasoningEffort.envelope.ok
-        ? ""
-        : invalidReasoningEffort.envelope.error.message ?? "",
-      /assistantTargetOverrideReasoningEffort|reasoning effort|low|medium|high|xhigh/u,
-    );
+    if (!invalidReasoningEffort.envelope.ok) {
+      assert.deepEqual(invalidReasoningEffort.envelope.error, {
+        code: "VALIDATION_ERROR",
+        message: "The command input is invalid.",
+        retryable: false,
+        hint: "Check the command schema and correct the invalid input.",
+        stage: "validation",
+        fieldErrors: [
+          {
+            code: "invalid_value",
+            missing: false,
+            path: "assistantTargetOverrideReasoningEffort",
+            expected: "",
+            received: "invalid",
+            message: "This field is invalid.",
+          },
+        ],
+      });
+      assert.equal(
+        JSON.stringify(invalidReasoningEffort.envelope.error).includes("hihg"),
+        false,
+      );
+    }
 
     const saved = await runInProcessJsonCli<{
       automationId: string;

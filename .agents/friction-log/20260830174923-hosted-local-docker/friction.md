@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local Docker plugin discovery accepts directories without Buildx'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2677'
 ---
 
 ## Expected Behavior
