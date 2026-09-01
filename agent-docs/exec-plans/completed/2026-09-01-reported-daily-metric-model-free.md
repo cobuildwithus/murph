@@ -1,6 +1,6 @@
 # Reported daily metric mailbox ownership
 
-Status: active
+Status: completed
 Created: 2026-09-01
 Updated: 2026-09-01
 
@@ -33,3 +33,17 @@ Updated: 2026-09-01
 
 - Cloudflare hosted runtime first, with immediate container replacement; then deploy Web only if the merged shared classifier is consumed by its reconciliation build.
 - No schema, wire, Temporal workflow, provider-input, or persisted-state migration is expected.
+
+## Verification
+
+- Red proof: the mixed device-plus-metric frontier published a due default `assistant` wake, the shared classifier returned `default_owned`, and the real system-mode entrypoint left the metric pending.
+- Green proof: the same boundaries now classify both rows as model-free, publish no default wake, drain the metric through its projection boundary, clear the pending item, and avoid the assistant lane.
+- Passed 84 focused hosted runtime and contract tests and 58 hosted Web reconciliation tests.
+- Passed hosted-execution, assistant-runtime, and hosted Web typechecks plus the 207-scenario integrity check.
+
+## Product UX walkthrough
+
+- A member with earlier device-sync work and a later reported metric now stays on the background system owner until both items can advance.
+- A member sending a current message retains foreground priority because no conversation or approved-continuation ordering changed.
+- Recovery remains automatic and silent; the fix adds no duplicate message, new prompt, or member action.
+Completed: 2026-09-01

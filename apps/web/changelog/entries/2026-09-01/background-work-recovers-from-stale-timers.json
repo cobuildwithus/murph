@@ -5,10 +5,10 @@
     "id": "background-work-recovers-from-stale-timers",
     "kind": "improvement",
     "priority": 4,
-    "title": "Background work recovers from stale timers",
-    "summary": "Murph now recovers when connected-device work overlaps an outdated assistant timer or the behind-the-scenes cleanup after a reply.",
-    "details": "Current conversations, reminders, and pending deliveries keep priority. Completed replies finish cleanup without sending duplicate text, while interrupted scheduled work receives its own recovery check.",
+    "title": "Background work keeps moving",
+    "summary": "Murph now recovers when connected-device work overlaps an outdated assistant timer, the behind-the-scenes cleanup after a reply, or newly reported health data.",
+    "details": "Current conversations, reminders, and pending deliveries keep priority. Completed replies finish cleanup without sending duplicate text, while queued connected-health updates continue in order without needing an unrelated message to restart them.",
     "relevanceTags": ["assistant", "wearables", "reliability"],
-    "sourcePullRequests": [2682, 2693]
+    "sourcePullRequests": [2682, 2693, 2702]
   }
 }
