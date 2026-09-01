@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-31
+Last verified: 2026-09-01
 
 ## Current Guardrails
 
@@ -1737,8 +1737,8 @@ Last verified: 2026-08-31
   continuous anomaly cannot hide the first alert for the other. A continuing
   progress incident also becomes eligible for one fresh aggregate reminder six
   hours after its prior successful email plus stable bounded jitter. The
-  existing health reread, quiet-hours check, send lease, and singleton
-  compare-and-swap apply unchanged. Each fresh reminder claim persists a new
+  existing health reread, send lease, and singleton compare-and-swap apply
+  unchanged. Each fresh reminder claim persists a new
   generation identity and exact body before provider entry; an ambiguous retry
   reuses both and therefore cannot acquire a new provider effect. Successful
   delivery advances the send boundary that schedules the next generation. The
@@ -1746,10 +1746,14 @@ Last verified: 2026-08-31
   recover silently.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
-  Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and
-  applies stable bounded jitter after quiet hours and after every provider
-  attempt. No retry, reminder, or post-healthy recurrence may call the provider
-  less than ten minutes after the prior attempt or accepted-send boundary. A
+  Linq/iMessage. The shared policy suppresses sends from 11 PM through 7 AM
+  local time unless a monitor explicitly opts into immediate quiet-hour
+  delivery. Durable runtime-progress stalls are the sole opt-in because waiting
+  can widen a stuck execution loop; runtime-latency and allowance alerts retain
+  quiet hours. The owner applies stable bounded jitter after quiet hours and
+  after every provider attempt. No retry, reminder, or post-healthy recurrence
+  may call the provider less than ten minutes after the prior attempt or
+  accepted-send boundary. A
   retry that may already have succeeded preserves the exact body and current
   generation-scoped idempotency key. The key does not vary with mutable email
   configuration:

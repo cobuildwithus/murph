@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
+  HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
   parseHostedContainerImageListOutput,
@@ -186,6 +187,12 @@ function findMutableActionRefs(workflow: string): Array<{ line: number; ref: str
 }
 
 describe("hosted deploy automation helpers", () => {
+  it("exports standby capacity as a deploy-only contract input", () => {
+    expect(HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES).toEqual([
+      "CF_STANDBY_CONTAINER_MAX_INSTANCES",
+    ]);
+  });
+
   it("builds a generated wrangler config for the native container worker", () => {
     const authorityVerifyKeyringJson = JSON.stringify({
       "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/2": {
@@ -199,9 +206,10 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
-      CF_CONTAINER_MAX_INSTANCES: "250",
+      CF_CONTAINER_MAX_INSTANCES: "648",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
+      CF_STANDBY_CONTAINER_MAX_INSTANCES: "100",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -315,7 +323,7 @@ describe("hosted deploy automation helpers", () => {
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         image_build_context: "..",
         instance_type: "standard-1",
-        max_instances: 250,
+        max_instances: 648,
         rollout_active_grace_period: 300,
         rollout_step_percentage: [10, 25, 50, 100],
         ssh: { enabled: false },
@@ -336,7 +344,7 @@ describe("hosted deploy automation helpers", () => {
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         image_build_context: "..",
         instance_type: "standard-1",
-        max_instances: 250,
+        max_instances: 100,
         rollout_active_grace_period: 300,
         rollout_step_percentage: [10, 25, 50, 100],
         ssh: { enabled: false },
@@ -477,6 +485,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS).toBe("60000");
     expect(config.vars.HOSTED_EXECUTION_STANDBY_MODE).toBe("off");
+    expect(config.vars.CF_STANDBY_CONTAINER_MAX_INSTANCES).toBeUndefined();
     expect(config.vars.HOSTED_PHYSICAL_NOTES_ENABLED).toBe("true");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");
@@ -538,6 +547,31 @@ describe("hosted deploy automation helpers", () => {
         }),
       ).toThrow(/CF_RUNNER_READY_TIMEOUT_MS must be a positive integer/u);
     }
+  });
+
+  it("defaults the standby container ceiling to the ordinary runner ceiling", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_CONTAINER_MAX_INSTANCES: "250",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+    });
+
+    expect(environment.containerMaxInstances).toBe(250);
+    expect(environment.standbyContainerMaxInstances).toBe(250);
+  });
+
+  it("rejects an invalid standby container ceiling", () => {
+    expect(() =>
+      readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_STANDBY_CONTAINER_MAX_INSTANCES: "100x",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      }),
+    ).toThrow(/CF_STANDBY_CONTAINER_MAX_INSTANCES must be a positive integer/u);
   });
 
   it("binds generated deploy config to the prepared runner fingerprints", () => {

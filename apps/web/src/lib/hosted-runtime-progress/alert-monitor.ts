@@ -120,6 +120,7 @@ const HOSTED_RUNTIME_PROGRESS_MONITOR_SPEC: HostedOperationalAlertMonitorSpec<
   kind: HOSTED_RUNTIME_PROGRESS_MONITOR_KIND,
   readHealth: readHostedRuntimeProgressHealth,
   reminderIntervalMs: HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS,
+  sendDuringQuietHours: true,
   status: MONITOR_STATUS,
   subject: HOSTED_RUNTIME_PROGRESS_MONITOR_SUBJECT,
 };

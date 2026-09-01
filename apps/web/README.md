@@ -977,8 +977,8 @@ Hosted onboarding extras:
   row cap; execution that starts after denial is measured from its earliest
   milestone even when ingress is older than that window. The monitor sends
   no alert for scheduled automation turns, including Flex-tier turns, because
-  they do not own a user-ingress reply trace. The monitor sends one email per
-  continuous incident, suppresses sends from 11 PM through 7 AM
+  they do not own a user-ingress reply trace. The latency monitor sends one
+  email per continuous incident, suppresses sends from 11 PM through 7 AM
   operator-local time, and adds up to ten minutes of stable wake/retry jitter.
   The existing seven-day trace cleanup retires a trace only when both ingress
   and latest activity are stale, so recent resumed work remains observable
@@ -1011,8 +1011,10 @@ Hosted onboarding extras:
   lane, age, and pending-item counts only. It has its own singleton incident
   row, so an active reply-latency incident cannot suppress a newly discovered
   progress stall. While one progress incident remains anomalous, the same row
-  sends a fresh aggregate reminder every six hours plus stable jitter, outside
-  quiet hours. Each fresh reminder claim persists a new generation identity
+  sends a fresh aggregate reminder every six hours plus stable jitter,
+  including during quiet hours. The first progress alert also bypasses the
+  shared quiet-hours deferral. Each fresh reminder claim persists a new
+  generation identity
   before Resend, while an ambiguous retry reuses that identity and the exact
   body. The latency monitor remains one email per continuous incident. Recovery
   silently rearms each monitor independently and sends no recovery email.
