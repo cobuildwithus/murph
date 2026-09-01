@@ -61,6 +61,10 @@ Updated: 2026-08-31
   a second port-allocation owner.
 - Fix information loss at the hosted-local stack diagnostic boundary where the
   child output is already owned and redacted.
+- Accept ReviewGPT round 1's production-faithfulness finding: the generic child
+  `Text` readers still inherited the 2,000-character diagnostic-tail default.
+  Preserve the existing 2,000,000-character buffer as the full-text bound and
+  keep the tail readers unchanged.
 
 ## Verification
 
@@ -73,8 +77,11 @@ Updated: 2026-08-31
   - `pnpm complexity:diff`
 - Outcomes: the new regression failed before the implementation and passed
   afterward; the complete focused stack and scenario-helper files passed; all
-  448 harness tests passed with coverage; typecheck and package-boundary proof
+  449 harness tests passed with coverage; typecheck and package-boundary proof
   passed; and complexity debt did not increase.
+- Review remediation proof: a real spawned child now proves the diagnostic tail
+  omits an early collision marker while the bounded full-text reader retains it;
+  the stack regression then consumes those corrected production semantics.
 - Exact-ref end-to-end proof: the public PR's Murph Cloud integration lane owns
   the merged private Temporal checkout and the original two-scenario job. The
   available local private checkout is not that head, so it is not valid proof
