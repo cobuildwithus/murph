@@ -81,7 +81,7 @@ review claim unless that review actually occurred and its owner is recorded.
 
 ## Public Handoff
 
-The primary action shows the Murph mark followed by `Build my plan`.
+The primary action shows the Murph mark followed by `Ask Murph to help`.
 
 - The action is one direct handoff, not a review dialog or channel chooser.
 - A signed-in member with a verified phone and resolved assigned Murph line

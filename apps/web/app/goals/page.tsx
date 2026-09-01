@@ -142,10 +142,7 @@ function GoalsClosingSection() {
     >
       <div className="grid gap-8 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
         <div>
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#5a6e32]">
-            Don’t see your goal?
-          </span>
-          <h2 className="mt-4 max-w-[22ch] font-serif text-[clamp(1.6rem,3vw,2.25rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-balance text-[#2d3436]">
+          <h2 className="max-w-[22ch] font-serif text-[clamp(1.6rem,3vw,2.25rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-balance text-[#2d3436]">
             Murph can help with goals that aren’t written up yet.
           </h2>
           <p className="mt-4 max-w-[52ch] text-[0.9375rem] leading-[1.7] text-pretty text-[#635a48]">

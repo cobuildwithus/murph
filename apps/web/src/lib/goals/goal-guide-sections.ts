@@ -13,7 +13,6 @@ export const GOAL_GUIDE_SAFETY_SECTION_TITLE = "A quick note";
 export const GOAL_GUIDE_SOURCES_SECTION_TITLE = "Sources";
 
 const GOAL_GUIDE_SECTION_HEADING = /^##\s+(?<title>.+?)\s*$/u;
-const GOAL_GUIDE_WORDS_PER_MINUTE = 220;
 
 export function splitGoalGuideBody(body: string): GoalGuideOutline {
   const introLines: string[] = [];
@@ -56,11 +55,6 @@ export function isGoalGuideSourcesSection(
   section: Pick<GoalGuideSection, "title">,
 ): boolean {
   return section.title === GOAL_GUIDE_SOURCES_SECTION_TITLE;
-}
-
-export function estimateGoalGuideReadingMinutes(body: string): number {
-  const words = body.split(/\s+/u).filter(Boolean).length;
-  return Math.max(1, Math.round(words / GOAL_GUIDE_WORDS_PER_MINUTE));
 }
 
 function uniqueSectionId(title: string, usedIds: Map<string, number>): string {

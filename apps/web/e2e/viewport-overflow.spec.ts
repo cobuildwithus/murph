@@ -203,7 +203,7 @@ async function openGoalCategory(
   const response = await page.goto(route, { waitUntil: "load" });
   expect(response?.status(), `${route} should respond 200 at ${width}px`).toBe(200);
 
-  const catalog = page.locator('[data-goal-directory="root"]');
+  const catalog = page.locator("[data-goal-catalog]");
   await expect(catalog).toBeVisible();
   await page.evaluate(async () => {
     await document.fonts?.ready;
@@ -380,86 +380,46 @@ for (const route of ROUTES) {
   }
 }
 
-test("large cardio directory stays compact until its native disclosure opens", async ({
+test("standalone goal directories show every goal in one featured-first grid", async ({
   page,
 }) => {
   test.slow();
   await allowOnlyLoopbackRequests(page);
 
   for (const [width, expectedColumns] of [
-    [320, 1],
-    [390, 1],
+    [320, 2],
+    [390, 2],
     [640, 2],
-    [1024, 2],
-    [1280, 3],
+    [1024, 3],
+    [1280, 4],
   ] as const) {
-    const catalog = await openGoalCategory(page, "/goals/cardio", width);
-    const disclosure = page.locator(
-      'details[data-goal-category-disclosure="cardio"]',
-    );
-    const additionalCatalog = disclosure.locator(
-      '[data-goal-directory="root-more"]',
-    );
-    const visibleRouteIds = await catalog.locator(":scope > li > a")
+    await openGoalCategory(page, "/goals/cardio", width);
+    const directory = page.locator('[data-goal-directory="root"]');
+    await expect(directory).toHaveCount(1);
+    await expect(page.locator("details")).toHaveCount(0);
+    await expect(page.locator("[data-goal-family]")).toHaveCount(0);
+
+    const visibleRouteIds = await directory.locator(":scope > li > a")
       .evaluateAll((links) => links.map((link) =>
         link.getAttribute("href")?.replace("/goals/", "")
       ));
-    const previewCount = await catalog.locator(":scope > li").count();
-    const additionalCount = await additionalCatalog.locator(":scope > li")
-      .count();
-    const totalRootCount = await page.locator(
-      '[data-goal-root="standalone"]',
-    ).count();
-    const collapsedPageHeight = await page.evaluate(
-      () => document.documentElement.scrollHeight,
-    );
-    const layout = await measureStandaloneGoalDirectory(catalog);
+    const layout = await measureStandaloneGoalDirectory(directory);
 
-    await expect(disclosure).toHaveJSProperty("open", false);
-    await expect(disclosure.locator("summary")).toContainText(
-      `Show ${additionalCount} more`,
-    );
-    await expect(additionalCatalog).not.toBeVisible();
-    expect(previewCount).toBeGreaterThan(0);
-    expect(previewCount).toBeLessThanOrEqual(8);
-    expect(additionalCount).toBeGreaterThan(0);
-    expect(totalRootCount).toBe(previewCount + additionalCount);
     expect(visibleRouteIds.slice(0, 4)).toEqual([
       "improve-vo2-max",
       "run-ironman",
       "run-first-5k",
       "improve-cardio-endurance",
     ]);
-    expect(layout.itemCount).toBe(previewCount);
+    expect(layout.itemCount).toBeGreaterThan(8);
+    expect(layout.itemCount).toBe(visibleRouteIds.length);
     expect(layout.columnCount).toBe(expectedColumns);
-    expect(layout.usedColumnCount).toBe(
-      Math.min(expectedColumns, previewCount),
-    );
+    expect(layout.usedColumnCount).toBe(expectedColumns);
     expect(layout.allItemsContained).toBe(true);
     expect(layout.maxInternalGap).toBeLessThanOrEqual(16);
     expect(layout.scrollWidth - layout.visibleWidth).toBeLessThanOrEqual(
       OVERFLOW_TOLERANCE_PX,
     );
-
-    await disclosure.locator("summary").click();
-    await expect(disclosure).toHaveJSProperty("open", true);
-    await expect(disclosure.locator("summary")).toContainText("Show fewer");
-    await expect(additionalCatalog).toBeVisible();
-
-    const expandedPageHeight = await page.evaluate(
-      () => document.documentElement.scrollHeight,
-    );
-    const additionalLayout = await measureStandaloneGoalDirectory(
-      additionalCatalog,
-    );
-    expect(additionalLayout.itemCount).toBe(additionalCount);
-    expect(additionalLayout.columnCount).toBe(expectedColumns);
-    expect(additionalLayout.usedColumnCount).toBe(
-      Math.min(expectedColumns, additionalCount),
-    );
-    expect(additionalLayout.allItemsContained).toBe(true);
-    expect(additionalLayout.maxInternalGap).toBeLessThanOrEqual(16);
-    expect(expandedPageHeight).toBeGreaterThan(collapsedPageHeight);
 
     const overflow = await page.evaluate(
       measureHorizontalOverflow,
@@ -472,68 +432,70 @@ test("large cardio directory stays compact until its native disclosure opens", a
   }
 });
 
-test("multi-child goal families stay two-column and compact on phones", async ({
+test("goal families list every child in a full-width grid ahead of standalone goals", async ({
   page,
 }) => {
   test.slow();
   await allowOnlyLoopbackRequests(page);
-  for (const width of [320, 390] as const) {
-    await openGoalCategory(page, "/goals/biomarkers", width);
-    const categoryDisclosure = page.locator(
-      'details[data-goal-category-disclosure="biomarkers"]',
-    );
-    await categoryDisclosure.locator(":scope > summary").click();
-    const bloodSugarFamily = page.locator(
-      '[data-goal-family="improve-blood-sugar-control"]',
-    );
-    await expect(bloodSugarFamily).toHaveCount(1);
 
-    const layout = await bloodSugarFamily.evaluate((element) => {
-      const catalog = element.parentElement;
-      const body = element.querySelector<HTMLElement>(
-        '[data-goal-directory="specific"]',
+  for (const [width, expectedColumns] of [
+    [390, 2],
+    [1280, 4],
+  ] as const) {
+    const catalog = await openGoalCategory(page, "/goals/nutrition", width);
+    const family = catalog.locator(':scope > [data-goal-family="eat-balanced-diet"]');
+    await expect(family).toHaveCount(1);
+    await expect(page.locator("details")).toHaveCount(0);
+
+    const layout = await family.evaluate((element) => {
+      const catalogElement = element.parentElement;
+      const directory = element.querySelector<HTMLElement>(
+        '[data-goal-directory="family"]',
       );
-      if (!catalog || !body) {
-        throw new Error("Improve My Blood Sugar Control family markup is incomplete.");
+      const heading = element.querySelector<HTMLAnchorElement>("h2 a");
+      if (!catalogElement || !directory || !heading) {
+        throw new Error("Eat a Balanced Diet family markup is incomplete.");
       }
 
-      const bodyRect = body.getBoundingClientRect();
-      const childRects = Array.from(body.children).map((child) =>
+      const directoryRect = directory.getBoundingClientRect();
+      const childRects = Array.from(directory.children).map((child) =>
         child.getBoundingClientRect()
       );
-      const lastChildRect = childRects.at(-1);
+      const standaloneDirectory = catalogElement.querySelector<HTMLElement>(
+        '[data-goal-directory="root"]',
+      );
 
       return {
         allChildrenContained: childRects.every(
-          (rect) => rect.left >= bodyRect.left && rect.right <= bodyRect.right,
+          (rect) => rect.left >= directoryRect.left - 1
+            && rect.right <= directoryRect.right + 1,
         ),
-        bodyGridTemplateColumns: getComputedStyle(body).gridTemplateColumns,
+        catalogWidth: catalogElement.getBoundingClientRect().width,
         childColumnCount: new Set(
           childRects.map((rect) => Math.round(rect.left * 10) / 10),
         ).size,
         childCount: childRects.length,
-        childRowCount: new Set(
-          childRects.map((rect) => Math.round(rect.top * 10) / 10),
-        ).size,
-        familyHeight: element.getBoundingClientRect().height,
         familyWidth: element.getBoundingClientRect().width,
-        catalogWidth: catalog.getBoundingClientRect().width,
-        lastChildWidth: lastChildRect?.width ?? 0,
-        listWidth: bodyRect.width,
+        gridTemplateColumns: getComputedStyle(directory).gridTemplateColumns,
+        headingHref: heading.getAttribute("href"),
+        standaloneBelowFamily: standaloneDirectory
+          ? standaloneDirectory.getBoundingClientRect().top
+            >= element.getBoundingClientRect().bottom
+          : true,
       };
     });
 
-    expect(countRenderedGridTracks(layout.bodyGridTemplateColumns)).toBe(2);
-    expect(layout.childCount).toBeGreaterThan(1);
-    expect(layout.childCount).toBeLessThanOrEqual(4);
-    expect(layout.childColumnCount).toBe(2);
-    expect(layout.childRowCount).toBe(Math.ceil(layout.childCount / 2));
+    expect(layout.headingHref).toBe("/goals/eat-balanced-diet");
+    expect(layout.childCount).toBeGreaterThan(4);
+    expect(countRenderedGridTracks(layout.gridTemplateColumns)).toBe(
+      expectedColumns,
+    );
+    expect(layout.childColumnCount).toBe(expectedColumns);
     expect(layout.allChildrenContained).toBe(true);
-    expect(layout.lastChildWidth).toBeLessThan(layout.listWidth);
     expect(Math.abs(layout.familyWidth - layout.catalogWidth)).toBeLessThanOrEqual(
       OVERFLOW_TOLERANCE_PX,
     );
-    expect(layout.familyHeight).toBeLessThan(450);
+    expect(layout.standaloneBelowFamily).toBe(true);
 
     const overflow = await page.evaluate(
       measureHorizontalOverflow,
@@ -541,203 +503,6 @@ test("multi-child goal families stay two-column and compact on phones", async ({
     );
     expect(overflow.overflowPx).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
   }
-});
-
-test("family cards stay in a compact row-major grid at tablet and desktop widths", async ({
-  page,
-}) => {
-  test.slow();
-  await allowOnlyLoopbackRequests(page);
-  for (const [width, expectedRootColumns] of [
-    [768, 2],
-    [1024, 2],
-    [1280, 3],
-  ] as const) {
-    const catalog = await openGoalCategory(page, "/goals/strength", width);
-    const mobilityFamily = catalog.locator(
-      ':scope > [data-goal-family="improve-mobility"]',
-    );
-    await expect(mobilityFamily).toHaveCount(1);
-
-    const layout = await mobilityFamily.evaluate((element) => {
-      const catalog = element.parentElement;
-      const body = element.querySelector<HTMLElement>(
-        '[data-goal-directory="specific"]',
-      );
-      const disclosure = element.querySelector<HTMLDetailsElement>(
-        '[data-goal-disclosure="improve-mobility"]',
-      );
-      const additionalGoals = disclosure?.querySelector<HTMLElement>(
-        '[data-goal-directory="specific-more"]',
-      );
-      if (!catalog || !body || !disclosure || !additionalGoals) {
-        throw new Error("Improve My Mobility family markup is incomplete.");
-      }
-
-      const catalogStyle = getComputedStyle(catalog);
-      const columnGap = Number.parseFloat(catalogStyle.columnGap) || 0;
-      const catalogRect = catalog.getBoundingClientRect();
-      const childRects = Array.from(body.children).map((child) =>
-        child.getBoundingClientRect()
-      );
-      const childColumnStarts = new Set(
-        childRects.map((rect) => Math.round(rect.left * 10) / 10),
-      );
-      const childRowStarts = new Set(
-        childRects.map((rect) => Math.round(rect.top * 10) / 10),
-      );
-
-      return {
-        additionalChildCount: additionalGoals.children.length,
-        bodyGridTemplateColumns: getComputedStyle(body).gridTemplateColumns,
-        childColumnCount: childColumnStarts.size,
-        childCount: childRects.length,
-        childRowCount: childRowStarts.size,
-        columnGap,
-        disclosureOpen: disclosure.open,
-        familyHeight: element.getBoundingClientRect().height,
-        familyWidth: element.getBoundingClientRect().width,
-        rootGridTemplateColumns: catalogStyle.gridTemplateColumns,
-        rootWidth: catalogRect.width,
-      };
-    });
-
-    expect(countRenderedGridTracks(layout.rootGridTemplateColumns)).toBe(
-      expectedRootColumns,
-    );
-    expect(layout.disclosureOpen).toBe(false);
-    expect(countRenderedGridTracks(layout.bodyGridTemplateColumns)).toBe(2);
-    expect(layout.childCount).toBeGreaterThan(1);
-    expect(layout.childCount).toBeLessThanOrEqual(4);
-    expect(layout.childColumnCount).toBe(2);
-    expect(layout.childRowCount).toBe(Math.ceil(layout.childCount / 2));
-    expect(layout.additionalChildCount).toBeGreaterThan(0);
-    const expectedFamilyWidth =
-      (layout.rootWidth - layout.columnGap * (expectedRootColumns - 1))
-      / expectedRootColumns;
-    expect(Math.abs(layout.familyWidth - expectedFamilyWidth)).toBeLessThanOrEqual(
-      2,
-    );
-    expect(layout.familyHeight).toBeLessThan(500);
-  }
-});
-
-test("large nutrition family is compact before its accessible disclosure opens", async ({
-  page,
-}) => {
-  test.slow();
-  await allowOnlyLoopbackRequests(page);
-
-  const phoneCatalog = await openGoalCategory(page, "/goals/nutrition", 390);
-  const phoneFamily = phoneCatalog.locator(
-    ':scope > [data-goal-family="eat-balanced-diet"]',
-  );
-  const phonePreview = phoneFamily.locator(
-    '[data-goal-directory="specific"]',
-  );
-  const phoneDisclosure = phoneFamily.locator(
-    'details[data-goal-disclosure="eat-balanced-diet"]',
-  );
-  const phoneAdditionalGoals = phoneDisclosure.locator(
-    '[data-goal-directory="specific-more"]',
-  );
-  const phonePreviewCount = await phonePreview.locator(":scope > li").count();
-  const phoneAdditionalCount = await phoneAdditionalGoals.locator(":scope > li")
-    .count();
-
-  await expect(phoneFamily).toHaveCount(1);
-  expect(phonePreviewCount).toBeGreaterThan(0);
-  expect(phonePreviewCount).toBeLessThanOrEqual(4);
-  expect(phoneAdditionalCount).toBeGreaterThan(0);
-  await expect(phoneDisclosure).toHaveJSProperty("open", false);
-  await expect(phoneDisclosure.locator("summary")).toContainText(
-    `Show ${phoneAdditionalCount} more`,
-  );
-
-  const collapsedLayout = await phoneFamily.evaluate((element) => {
-    const catalog = element.parentElement;
-    const preview = element.querySelector<HTMLElement>(
-      '[data-goal-directory="specific"]',
-    );
-    if (!catalog || !preview) {
-      throw new Error("Eat a Balanced Diet family markup is incomplete.");
-    }
-
-    return {
-      catalogWidth: catalog.getBoundingClientRect().width,
-      familyHeight: element.getBoundingClientRect().height,
-      familyWidth: element.getBoundingClientRect().width,
-      previewGridTemplateColumns: getComputedStyle(preview).gridTemplateColumns,
-    };
-  });
-
-  expect(countRenderedGridTracks(
-    collapsedLayout.previewGridTemplateColumns,
-  )).toBe(2);
-  expect(
-    Math.abs(collapsedLayout.familyWidth - collapsedLayout.catalogWidth),
-  ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
-  expect(collapsedLayout.familyHeight).toBeLessThan(400);
-
-  await phoneDisclosure.locator("summary").click();
-  await expect(phoneDisclosure).toHaveJSProperty("open", true);
-  await expect(phoneDisclosure.locator("summary")).toContainText("Show fewer");
-  const expandedHeight = await phoneFamily.evaluate(
-    (element) => element.getBoundingClientRect().height,
-  );
-  expect(expandedHeight).toBeGreaterThan(collapsedLayout.familyHeight);
-
-  const phoneOverflow = await page.evaluate(
-    measureHorizontalOverflow,
-    OVERFLOW_TOLERANCE_PX,
-  );
-  expect(phoneOverflow.overflowPx).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
-
-  const desktopCatalog = await openGoalCategory(page, "/goals/nutrition", 1280);
-  const desktopFamily = desktopCatalog.locator(
-    ':scope > [data-goal-family="eat-balanced-diet"]',
-  );
-  const desktopLayout = await desktopFamily.evaluate((element) => {
-    const catalog = element.parentElement;
-    const preview = element.querySelector<HTMLElement>(
-      '[data-goal-directory="specific"]',
-    );
-    const disclosure = element.querySelector<HTMLDetailsElement>(
-      '[data-goal-disclosure="eat-balanced-diet"]',
-    );
-    if (!catalog || !preview || !disclosure) {
-      throw new Error("Eat a Balanced Diet desktop markup is incomplete.");
-    }
-
-    const catalogStyle = getComputedStyle(catalog);
-    const rootColumnCount = catalogStyle.gridTemplateColumns.trim()
-      .split(/\s+/).filter(Boolean).length;
-    const columnGap = Number.parseFloat(catalogStyle.columnGap) || 0;
-    const catalogRect = catalog.getBoundingClientRect();
-
-    return {
-      disclosureOpen: disclosure.open,
-      expectedFamilyWidth:
-        (catalogRect.width - columnGap * (rootColumnCount - 1)) / rootColumnCount,
-      familyHeight: element.getBoundingClientRect().height,
-      familyWidth: element.getBoundingClientRect().width,
-      previewChildCount: preview.children.length,
-      previewGridTemplateColumns: getComputedStyle(preview).gridTemplateColumns,
-      rootColumnCount,
-    };
-  });
-
-  expect(desktopLayout.rootColumnCount).toBe(3);
-  expect(desktopLayout.disclosureOpen).toBe(false);
-  expect(desktopLayout.previewChildCount).toBeGreaterThan(0);
-  expect(desktopLayout.previewChildCount).toBeLessThanOrEqual(4);
-  expect(countRenderedGridTracks(
-    desktopLayout.previewGridTemplateColumns,
-  )).toBe(2);
-  expect(
-    Math.abs(desktopLayout.familyWidth - desktopLayout.expectedFamilyWidth),
-  ).toBeLessThanOrEqual(2);
-  expect(desktopLayout.familyHeight).toBeLessThan(400);
 });
 
 test("goal landing and search previews stay compact and title-first", async ({

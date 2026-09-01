@@ -246,7 +246,7 @@ test("screenshot categories keep the production studies available without one gi
   );
   expect(componentsMarkup).toContain('id="goal-category-browse"');
   expect(componentsMarkup).toContain(
-    'data-goal-category-disclosure="cardio"',
+    'data-goal-family="improve-cardio-endurance"',
   );
   expect(componentsMarkup).toContain("WHOOP Completion Dialog");
   expect(componentsMarkup).toContain("Preview WHOOP completion");

@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "252 health goals you can act on",
     "summary": "Browse practical, research-backed guides for outcomes like sleeping better, lowering resting heart rate, building strength, and training for an event.",
-    "details": "Every guide works on its own. Build my plan opens your Murph chat with a prefilled request; Murph learns what matters, proposes a plan and reminders, and saves anything only after you approve it.",
+    "details": "Every guide works on its own. Ask Murph to help opens your Murph chat with a prefilled request; Murph learns what matters, proposes a plan and reminders, and saves anything only after you approve it.",
     "relevanceTags": ["goals", "health", "assistant"],
     "sourcePullRequests": [2616],
     "tryIt": {

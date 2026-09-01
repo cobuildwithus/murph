@@ -10,7 +10,6 @@ import {
 import { MarkdownView } from "@/src/components/ui/markdown-view";
 import type { GoalCategory } from "@/src/lib/goals/goal-categories";
 import {
-  estimateGoalGuideReadingMinutes,
   isGoalGuideSafetySection,
   isGoalGuideSourcesSection,
   splitGoalGuideBody,
@@ -54,7 +53,6 @@ export function GoalGuide({
     ...articleSections.map(({ id, title }) => ({ id, title })),
     ...(showSources ? [{ id: GOAL_SOURCES_SECTION_ID, title: "Sources" }] : []),
   ];
-  const readingMinutes = estimateGoalGuideReadingMinutes(goal.body);
   const visual = getGoalCategoryVisual(category.slug);
 
   return (
@@ -78,62 +76,18 @@ export function GoalGuide({
       <header className="border-b border-[#c4a882]/30 pb-10">
         <div className="grid gap-8 sm:grid-cols-[minmax(0,1fr)_9rem] sm:items-start">
           <div className="min-w-0">
-            <Link
-              href={`/goals/${category.slug}`}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.16em] transition-[filter] hover:brightness-[0.97] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring",
-                visual.surfaceClassName,
-                visual.borderClassName,
-                visual.accentClassName,
-              )}
-            >
-              <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
-              {category.label}
-            </Link>
-            <h1 className="mt-5 font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-foreground sm:text-5xl">
+            <h1 className="font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-foreground sm:text-5xl">
               {goal.title}
             </h1>
             <p className="mt-5 max-w-2xl text-lg/8 text-pretty text-muted-foreground">
               {goal.summary}
             </p>
-            <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
+            <div className="mt-8">
               <GoalContactAction
                 goalRouteId={goal.routeId}
                 option={contactOption}
               />
-              <p className="max-w-[34ch] text-sm/6 text-pretty text-muted-foreground">
-                Murph turns this guide into a personal plan and checks in as you
-                go.
-              </p>
             </div>
-            <dl className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-              <div>
-                <dt className="sr-only">Reading time</dt>
-                <dd>{readingMinutes} min read</dd>
-              </div>
-              {goal.sources.length > 0 ? (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <div>
-                    <dt className="sr-only">Sources</dt>
-                    <dd>
-                      <a
-                        href={`#${GOAL_SOURCES_SECTION_ID}`}
-                        className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground"
-                      >
-                        {goal.sources.length}{" "}
-                        {goal.sources.length === 1 ? "source" : "sources"}
-                      </a>
-                    </dd>
-                  </div>
-                </>
-              ) : null}
-              <span aria-hidden="true">·</span>
-              <div>
-                <dt className="sr-only">Author</dt>
-                <dd>Murph Health Commons</dd>
-              </div>
-            </dl>
           </div>
           <GoalCategoryArtwork
             category={category.slug}
@@ -171,9 +125,9 @@ export function GoalGuide({
         </div>
 
         <aside className="hidden lg:block">
-          <div className="sticky top-28 flex flex-col gap-7">
+          <div className="sticky top-28">
             <nav aria-label="On this page">
-              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#736a58]">
+              <span className="text-xs font-medium text-muted-foreground">
                 On this page
               </span>
               <ol className="mt-3 flex flex-col border-l border-[#c4a882]/30">
@@ -189,15 +143,6 @@ export function GoalGuide({
                 ))}
               </ol>
             </nav>
-            <p className="border-t border-[#c4a882]/30 pt-5 text-[13px]/6 text-muted-foreground">
-              A public starting point, not personal medical advice.{" "}
-              <Link
-                href="/goals/methodology"
-                className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
-              >
-                How these guides are made
-              </Link>
-            </p>
           </div>
         </aside>
       </div>
@@ -294,32 +239,24 @@ function GoalSources({
       >
         Sources
       </h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        The guidance and research this guide draws on.
-      </p>
       {sources.length > 0 ? (
-        <ol className="mt-4 divide-y divide-border/70">
-          {sources.map((source, index) => (
-            <li className="flex gap-4 py-3" key={source.url}>
-              <span className="pt-0.5 font-mono text-[11px] text-muted-foreground">
-                {String(index + 1).padStart(2, "0")}
+        <ul className="mt-2 divide-y divide-border/70">
+          {sources.map((source) => (
+            <li className="min-w-0 py-3" key={source.url}>
+              <a
+                href={source.url}
+                className="font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:decoration-foreground"
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                {source.label}
+              </a>
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                {describeSourceHost(source.url)}
               </span>
-              <div className="min-w-0">
-                <a
-                  href={source.url}
-                  className="font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:decoration-foreground"
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  {source.label}
-                </a>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                  {describeSourceHost(source.url)}
-                </span>
-              </div>
             </li>
           ))}
-        </ol>
+        </ul>
       ) : fallbackBody ? (
         <MarkdownView
           className={cn(GOAL_PROSE_CLASS_NAME, "mt-3")}
@@ -346,17 +283,12 @@ function GoalRelatedGoals({
       data-goal-related
     >
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[#736a58]">
-            Keep going
-          </span>
-          <h2
-            className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground"
-            id="goal-related-heading"
-          >
-            More {category.label.toLowerCase()} goals
-          </h2>
-        </div>
+        <h2
+          className="font-serif text-2xl font-semibold tracking-tight text-foreground"
+          id="goal-related-heading"
+        >
+          More {category.label.toLowerCase()} goals
+        </h2>
         <Link
           href={`/goals/${category.slug}`}
           className="group inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"

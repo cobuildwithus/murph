@@ -42,7 +42,7 @@ export function GoalContactAction({
         />
       ) : (
         <MurphContactLink
-          actionLabel="Build my plan with Murph"
+          actionLabel="Ask Murph to help with this goal"
           className={cn(buttonVariants({ size: "xl" }), "w-full sm:w-auto")}
           option={option}
         >
@@ -150,7 +150,7 @@ function AuthenticatedGoalContactAction({
   return (
     <>
       <button
-        aria-label="Build my plan with Murph"
+        aria-label="Ask Murph to help with this goal"
         aria-busy={status === "opening"}
         className={cn(buttonVariants({ size: "xl" }), "w-full sm:w-auto")}
         disabled={status === "opening"}
@@ -217,7 +217,7 @@ function GoalContactActionContents() {
         src="/icons/murph-mark.svg"
         width={36}
       />
-      Build my plan
+      Ask Murph to help
       <ArrowRight data-icon="inline-end" aria-hidden="true" />
     </>
   );

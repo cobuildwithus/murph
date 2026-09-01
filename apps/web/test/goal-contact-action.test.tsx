@@ -21,8 +21,8 @@ test("goal CTA is one direct native Messages link with the exact draft", () => {
   );
 
   assert.equal((markup.match(/<a\b/gu) ?? []).length, 1);
-  assert.match(markup, /aria-label="Build my plan with Murph in Messages"/u);
-  assert.match(markup, />Build my plan</u);
+  assert.match(markup, /aria-label="Ask Murph to help with this goal in Messages"/u);
+  assert.match(markup, />Ask Murph to help</u);
   assert.match(markup, /\/icons\/murph-mark\.svg/u);
   assert.match(
     markup,
@@ -50,7 +50,7 @@ test("goal CTA preserves Telegram's direct web-to-app fallback", () => {
   assert.equal((markup.match(/<a\b/gu) ?? []).length, 1);
   assert.match(
     markup,
-    /aria-label="Build my plan with Murph in Telegram \(opens in a new tab\)"/u,
+    /aria-label="Ask Murph to help with this goal in Telegram \(opens in a new tab\)"/u,
   );
   assert.match(markup, /target="_blank"/u);
   assert.match(markup, /rel="noopener noreferrer"/u);

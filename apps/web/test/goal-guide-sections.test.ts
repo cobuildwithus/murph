@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  estimateGoalGuideReadingMinutes,
   isGoalGuideSafetySection,
   isGoalGuideSourcesSection,
   splitGoalGuideBody,
@@ -73,12 +72,5 @@ describe("splitGoalGuideBody", () => {
       intro: "Just a paragraph.",
       sections: [],
     });
-  });
-});
-
-describe("estimateGoalGuideReadingMinutes", () => {
-  it("rounds to whole minutes with a one-minute floor", () => {
-    expect(estimateGoalGuideReadingMinutes("a few words")).toBe(1);
-    expect(estimateGoalGuideReadingMinutes(Array(660).fill("word").join(" "))).toBe(3);
   });
 });
