@@ -21,7 +21,7 @@ index 166d5bef8d52e08f0aa7747a835df7ad3b2e5642..0b5276e64ea44ed5cc2829d64d359141
  export type GlobalsDescriptor = {
      schema: z.ZodObject<any>;
 diff --git a/dist/Cli.js b/dist/Cli.js
-index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c8566099592436d0d 100644
+index 414e8f50a05021f2c9c02e4f612db81fe490b21f..a64e0d99803332b00c030c447ed1f0c3542344f4 100644
 --- a/dist/Cli.js
 +++ b/dist/Cli.js
 @@ -7,7 +7,7 @@ import { estimateTokenCount, sliceByTokens } from 'tokenx';
@@ -33,22 +33,31 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
  import * as Fetch from './Fetch.js';
  import * as Filter from './Filter.js';
  import * as Formatter from './Formatter.js';
-@@ -283,6 +283,14 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -283,6 +283,23 @@ async function serveImpl(name, commands, argv, options = {}) {
      function writeln(s) {
          stdout(s.endsWith('\n') ? s : `${s}\n`);
      }
-+    function writeSafeError(error, format) {
++    function writeSafeError(error, output) {
 +        const envelope = toErrorEnvelope(error);
-+        if (tty && format === undefined) {
++        if (tty && output.format === undefined && !output.fullOutput) {
 +            writeln(formatHumanError(envelope));
 +            return;
 +        }
-+        writeln(Formatter.format(envelope, format ?? 'toon'));
++        writeln(Formatter.format(output.fullOutput
++            ? {
++                ok: false,
++                error: envelope,
++                meta: {
++                    command: name,
++                    duration: '0ms',
++                },
++            }
++            : envelope, output.format ?? 'toon'));
 +    }
      async function writeBanner() {
          if (!options.banner || help)
              return;
-@@ -304,11 +312,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -304,11 +321,7 @@ async function serveImpl(name, commands, argv, options = {}) {
          builtinFlags = extractBuiltinFlags(argv, { configFlag });
      }
      catch (error) {
@@ -57,11 +66,11 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
 -            writeln(formatHumanError({ code: 'UNKNOWN', message }));
 -        else
 -            writeln(Formatter.format({ code: 'UNKNOWN', message }, 'toon'));
-+        writeSafeError(error, requestedOutputFormat(argv));
++        writeSafeError(error, requestedOutput(argv));
          exit(1);
          return;
      }
-@@ -334,11 +338,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -334,11 +347,10 @@ async function serveImpl(name, commands, argv, options = {}) {
              return true;
          }
          catch (error) {
@@ -70,11 +79,14 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
 -                writeln(formatHumanError({ code: 'UNKNOWN', message }));
 -            else
 -                writeln(Formatter.format({ code: 'UNKNOWN', message }, 'toon'));
-+            writeSafeError(error, formatExplicit ? formatFlag : undefined);
++            writeSafeError(error, {
++                format: formatExplicit ? formatFlag : undefined,
++                fullOutput,
++            });
              exit(1);
              return false;
          }
-@@ -451,9 +451,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -451,9 +463,8 @@ async function serveImpl(name, commands, argv, options = {}) {
          if (!isSkillsAdd && !isMcpAdd) {
              const stored = SyncSkills.readHash(name);
              if (stored && SyncSkills.hasInstalledSkills(name, { cwd: options.sync?.cwd })) {
@@ -86,7 +98,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
                      const command = process.env.npm_config_user_agent || process.env.npm_execpath
                          ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
                          : `${displayName} skills add`;
-@@ -554,10 +553,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -554,10 +565,8 @@ async function serveImpl(name, commands, argv, options = {}) {
              const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : '';
              const message = `'${skillsSub}' is not a command for '${name} skills'.${didYouMean}`;
              const ctaCommands = [];
@@ -99,7 +111,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
              ctaCommands.push({
                  command: `${name} skills --help`,
                  description: 'see all available commands',
-@@ -698,10 +695,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -698,10 +707,8 @@ async function serveImpl(name, commands, argv, options = {}) {
              const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : '';
              const message = `'${mcpSub}' is not a command for '${name} mcp'.${didYouMean}`;
              const ctaCommands = [];
@@ -112,7 +124,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
              ctaCommands.push({ command: `${name} mcp --help`, description: 'see all available commands' });
              const cta = {
                  description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
-@@ -1117,10 +1112,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -1117,10 +1124,8 @@ async function serveImpl(name, commands, argv, options = {}) {
          const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : '';
          const message = `'${effective.error}' is not a command for '${parent}'.${didYouMean}`;
          const ctaCommands = [];
@@ -125,7 +137,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
          ctaCommands.push({ command: helpCmd, description: 'see all available commands' });
          const cta = {
              description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
-@@ -1266,10 +1259,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -1266,10 +1271,7 @@ async function serveImpl(name, commands, argv, options = {}) {
          catch (error) {
              write({
                  ok: false,
@@ -137,7 +149,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
                  meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
              });
              exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
-@@ -1302,10 +1292,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -1302,10 +1304,7 @@ async function serveImpl(name, commands, argv, options = {}) {
          catch (error) {
              write({
                  ok: false,
@@ -149,7 +161,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
                  meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
              });
              exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
-@@ -1372,14 +1359,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -1372,14 +1371,7 @@ async function serveImpl(name, commands, argv, options = {}) {
          }
          write({
              ok: false,
@@ -165,7 +177,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
              meta: {
                  command: path,
                  duration,
-@@ -1542,19 +1522,6 @@ async function fetchImpl(name, commands, req, options = {}) {
+@@ -1542,19 +1534,6 @@ async function fetchImpl(name, commands, req, options = {}) {
          }
          return new Response('Not Found', { status: 404 });
      }
@@ -185,7 +197,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
      function jsonResponse(body, status) {
          return new Response(Json.stringify(body), {
              status,
-@@ -1565,7 +1532,7 @@ async function fetchImpl(name, commands, req, options = {}) {
+@@ -1565,7 +1544,7 @@ async function fetchImpl(name, commands, req, options = {}) {
      if (segments.length === 0) {
          // Root path
          if (options.rootCommand)
@@ -194,7 +206,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
          return jsonResponse({
              ok: false,
              error: { code: 'COMMAND_NOT_FOUND', message: 'No root command defined.' },
-@@ -1599,19 +1566,43 @@ async function fetchImpl(name, commands, req, options = {}) {
+@@ -1599,19 +1578,43 @@ async function fetchImpl(name, commands, req, options = {}) {
          return resolved.fetchGateway.fetch(req);
      const { command, path, rest } = resolved;
      const groupMiddlewares = 'middlewares' in resolved ? resolved.middlewares : [];
@@ -240,7 +252,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
      const allMiddleware = [
          ...(options.middlewares ?? []),
          ...(options.groupMiddlewares ?? []),
-@@ -1630,14 +1621,14 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
+@@ -1630,14 +1633,14 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
                  commandInputOptions[key] = value;
          }
          try {
@@ -259,7 +271,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
                  meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
              }, 400);
          }
-@@ -1714,11 +1705,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
+@@ -1714,11 +1717,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
                      controller.enqueue(encoder.encode(Json.stringify({
                          type: 'error',
                          ok: false,
@@ -272,7 +284,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
                          meta: meta(),
                      }) + '\n'));
                      controller.close();
-@@ -1734,14 +1721,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
+@@ -1734,14 +1733,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
          const cta = formatCtaBlock(options.name ?? path, result.cta);
          return jsonResponse({
              ok: false,
@@ -288,14 +300,19 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
              meta: {
                  command: path,
                  duration,
-@@ -1896,6 +1876,25 @@ function resolveCommand(commands, tokens) {
+@@ -1896,6 +1888,30 @@ function resolveCommand(commands, tokens) {
  }
  /** @internal Extracts built-in flags from argv. */
  const validFormats = new Set(['toon', 'json', 'yaml', 'md', 'jsonl']);
-+function requestedOutputFormat(argv) {
++function requestedOutput(argv) {
 +    let format;
++    let fullOutput = false;
 +    for (let i = 0; i < argv.length; i++) {
 +        const token = argv[i];
++        if (token === '--full-output') {
++            fullOutput = true;
++            continue;
++        }
 +        if (token === '--json') {
 +            format = 'json';
 +            continue;
@@ -309,12 +326,12 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
 +        if (value !== undefined)
 +            i++;
 +    }
-+    return format;
++    return { format, fullOutput };
 +}
  function extractBuiltinFlags(argv, options = {}) {
      let fullOutput = false;
      let llms = false;
-@@ -1943,12 +1942,15 @@ function extractBuiltinFlags(argv, options = {}) {
+@@ -1943,12 +1959,15 @@ function extractBuiltinFlags(argv, options = {}) {
              format = 'json';
              formatExplicit = true;
          }
@@ -334,7 +351,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
              formatExplicit = true;
              i++;
          }
-@@ -1971,21 +1973,30 @@ function extractBuiltinFlags(argv, options = {}) {
+@@ -1971,21 +1990,30 @@ function extractBuiltinFlags(argv, options = {}) {
              configPath = undefined;
              configDisabled = true;
          }
@@ -375,7 +392,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
              tokenOffset = n;
              i++;
          }
-@@ -2036,7 +2047,10 @@ async function loadCommandOptionDefaults(cli, path, options = {}) {
+@@ -2036,7 +2064,10 @@ async function loadCommandOptionDefaults(cli, path, options = {}) {
          if (result === undefined)
              return undefined;
          if (!isRecord(result))
@@ -387,7 +404,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
          parsed = result;
      }
      else {
-@@ -2078,10 +2092,17 @@ async function readJsonConfig(targetPath, explicit) {
+@@ -2078,10 +2109,17 @@ async function readJsonConfig(targetPath, explicit) {
      catch (error) {
          if (error.code === 'ENOENT') {
              if (explicit)
@@ -407,7 +424,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
      }
      let parsed;
      try {
-@@ -2090,12 +2111,14 @@ async function readJsonConfig(targetPath, explicit) {
+@@ -2090,12 +2128,14 @@ async function readJsonConfig(targetPath, explicit) {
      catch (error) {
          throw new ParseError({
              message: `Invalid JSON config file: ${targetPath}`,
@@ -422,7 +439,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
          });
      return parsed;
  }
-@@ -2116,6 +2139,7 @@ function extractCommandSection(parsed, cli, path) {
+@@ -2116,6 +2156,7 @@ function extractCommandSection(parsed, cli, path) {
      if (!isRecord(node))
          throw new ParseError({
              message: `Invalid config section for '${path}': expected an object`,
@@ -430,7 +447,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
          });
      const options = node.options;
      if (options === undefined)
-@@ -2123,6 +2147,7 @@ function extractCommandSection(parsed, cli, path) {
+@@ -2123,6 +2164,7 @@ function extractCommandSection(parsed, cli, path) {
      if (!isRecord(options))
          throw new ParseError({
              message: `Invalid config 'options' for '${path}': expected an object`,
@@ -438,7 +455,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
          });
      return Object.keys(options).length > 0 ? options : undefined;
  }
-@@ -2466,6 +2491,14 @@ export const toRootDefinition = new WeakMap();
+@@ -2466,6 +2508,14 @@ export const toRootDefinition = new WeakMap();
  export const toRootOptions = new WeakMap();
  /** @internal Maps CLI instances to whether config file loading is enabled. */
  export const toConfigEnabled = new WeakMap();
@@ -453,7 +470,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
  /** @internal Maps CLI instances to their output policy. */
  const toOutputPolicy = new WeakMap();
  /** @internal Maps CLI instances to their globals schema and alias map. */
-@@ -2483,6 +2516,8 @@ function formatHumanError(error) {
+@@ -2483,6 +2533,8 @@ function formatHumanError(error) {
      if (error.fieldErrors)
          for (const fe of error.fieldErrors)
              out += `\n  ${fe.path}: ${fe.message}`;
@@ -462,7 +479,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
      return out;
  }
  /** @internal Formats a CTA block for human-readable TTY output. */
-@@ -2593,17 +2628,10 @@ async function handleStreaming(generator, ctx) {
+@@ -2593,17 +2645,10 @@ async function handleStreaming(generator, ctx) {
                  ctx.writeln(JSON.stringify({
                      type: 'error',
                      ok: false,
@@ -482,7 +499,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..7c04698931ecf5230701156c85660995
              ctx.exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
          }
      }
-@@ -2672,11 +2700,7 @@ async function handleStreaming(generator, ctx) {
+@@ -2672,11 +2717,7 @@ async function handleStreaming(generator, ctx) {
          catch (error) {
              ctx.write({
                  ok: false,
@@ -1237,7 +1254,7 @@ index 7011ed74f3d71854e57ae8e024bcd4c2459b46ef..77944fdff9b3103115be83b9ea7ed790
                  ? { exitCode: error.exitCode }
                  : undefined),
 diff --git a/src/Cli.test.ts b/src/Cli.test.ts
-index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..ff94e8f5a8d42006da41115429e831226ce660d6 100644
+index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf781272bea 100644
 --- a/src/Cli.test.ts
 +++ b/src/Cli.test.ts
 @@ -71,6 +71,35 @@ async function serve(
@@ -1669,10 +1686,13 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..ff94e8f5a8d42006da41115429e83122
      ;(process.stdout as any).isTTY = true
    })
 
-@@ -6979,14 +7139,48 @@ test('--format rejects invalid format values', async () => {
+@@ -6979,14 +7139,116 @@ test('--format rejects invalid format values', async () => {
    expect(output).toMatch(/invalid|unsupported|unknown.*format/i)
  })
 
+-test('--token-limit with non-numeric value errors', async () => {
+-  const cli = Cli.create('test').command('hello', {
+-    run: (c) => c.ok({ message: 'hello world' }),
 +test.each(['--format', '--filter-output', '--token-limit', '--token-offset'])(
 +  '%s without a value returns a validation envelope',
 +  async (flag) => {
@@ -1687,17 +1707,22 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..ff94e8f5a8d42006da41115429e83122
 +  },
 +)
 +
- test('--token-limit with non-numeric value errors', async () => {
-   const cli = Cli.create('test').command('hello', {
-     run: (c) => c.ok({ message: 'hello world' }),
++test('early validation errors preserve direct and full-output JSON shapes', async () => {
++  let handlerCalls = 0
++  const cli = Cli.create('test', {
++    globals: z.object({ limit: z.number() }),
++  }).command('hello', {
++    run(c) {
++      handlerCalls++
++      return c.ok({ message: 'hello world' })
++    },
    })
 
 -  const { exitCode, output } = await serve(cli, ['hello', '--token-limit', 'foo', '--json'])
+-  expect(exitCode).toBe(1)
+-  expect(output).not.toContain('NaN')
 +  const privateMarker = 'private-marker-that-must-not-echo'
-+  const result = await serve(cli, ['hello', '--token-limit', privateMarker, '--json'])
-+  const { exitCode, output } = result
-   expect(exitCode).toBe(1)
-+  expect(JSON.parse(output)).toEqual({
++  const argumentError = {
 +    code: 'VALIDATION_ERROR',
 +    message: 'The command arguments are invalid.',
 +    retryable: false,
@@ -1713,14 +1738,79 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..ff94e8f5a8d42006da41115429e83122
 +        message: 'This field is invalid.',
 +      },
 +    ],
++  }
++  const inputError = {
++    code: 'VALIDATION_ERROR',
++    message: 'The command input is invalid.',
++    retryable: false,
++    hint: 'Check the command schema and correct the invalid input.',
++    stage: 'validation',
++    fieldErrors: [
++      {
++        code: 'invalid_type',
++        missing: false,
++        path: 'limit',
++        expected: '',
++        received: 'invalid',
++        message: 'This field is invalid.',
++      },
++    ],
++  }
++
++  const direct = await serve(cli, [
++    'hello',
++    '--token-limit',
++    privateMarker,
++    '--format',
++    'json',
++  ])
++  expect(direct.exitCode).toBe(1)
++  expect(JSON.parse(direct.output)).toEqual(argumentError)
++  const invalidOutputs = [direct.output]
++
++  for (const { args, error } of [
++    { args: ['hello', '--token-limit', privateMarker], error: argumentError },
++    { args: ['hello', '--limit', privateMarker], error: inputError },
++  ]) {
++    const wrapped = await serve(cli, [...args, '--full-output', '--format', 'json'])
++    expect(wrapped.exitCode).toBe(1)
++    expect(JSON.parse(wrapped.output)).toEqual({
++      ok: false,
++      error,
++      meta: {
++        command: 'test',
++        duration: '0ms',
++      },
++    })
++    invalidOutputs.push(wrapped.output)
++  }
++
++  for (const output of invalidOutputs) {
++    expect(output).not.toContain('NaN')
++    expect(output).not.toContain(privateMarker)
++  }
++
++  expect(handlerCalls).toBe(0)
++  const valid = await serve(cli, [
++    'hello',
++    '--limit',
++    '3',
++    '--full-output',
++    '--format',
++    'json',
++  ])
++  expect(valid.exitCode).toBeUndefined()
++  expect(JSON.parse(valid.output)).toMatchObject({
++    ok: true,
++    data: { message: 'hello world' },
++    meta: { command: 'hello' },
 +  })
-   expect(output).not.toContain('NaN')
-+  expect(output).not.toContain(privateMarker)
++  expect(handlerCalls).toBe(1)
  })
 
  test('--token-offset with non-numeric value errors', async () => {
 diff --git a/src/Cli.ts b/src/Cli.ts
-index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7ed146c68 100644
+index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a6380a346fe 100644
 --- a/src/Cli.ts
 +++ b/src/Cli.ts
 @@ -9,7 +9,7 @@ import { z } from 'zod'
@@ -1741,45 +1831,65 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
            /** Glob patterns for directories containing SKILL.md files to include (e.g. `"skills/*"`, `"my-skill"`). */
            include?: string[] | undefined
            /** Example prompts shown after sync to help users get started. */
-@@ -773,6 +775,15 @@ async function serveImpl(
+@@ -773,6 +775,32 @@ async function serveImpl(
      stdout(s.endsWith('\n') ? s : `${s}\n`)
    }
 
-+  function writeSafeError(error: unknown, format?: Formatter.Format) {
++  function writeSafeError(
++    error: unknown,
++    output: { format?: Formatter.Format | undefined; fullOutput: boolean },
++  ) {
 +    const envelope = toErrorEnvelope(error)
-+    if (tty && format === undefined) {
++    if (tty && output.format === undefined && !output.fullOutput) {
 +      writeln(formatHumanError(envelope))
 +      return
 +    }
-+    writeln(Formatter.format(envelope, format ?? 'toon'))
++    writeln(
++      Formatter.format(
++        output.fullOutput
++          ? {
++              ok: false,
++              error: envelope,
++              meta: {
++                command: name,
++                duration: '0ms',
++              },
++            }
++          : envelope,
++        output.format ?? 'toon',
++      ),
++    )
 +  }
 +
    async function writeBanner() {
      if (!options.banner || help) return
      const banner =
-@@ -791,9 +802,7 @@ async function serveImpl(
+@@ -791,9 +819,7 @@ async function serveImpl(
    try {
      builtinFlags = extractBuiltinFlags(argv, { configFlag })
    } catch (error) {
 -    const message = error instanceof Error ? error.message : String(error)
 -    if (human) writeln(formatHumanError({ code: 'UNKNOWN', message }))
 -    else writeln(Formatter.format({ code: 'UNKNOWN', message }, 'toon'))
-+    writeSafeError(error, requestedOutputFormat(argv))
++    writeSafeError(error, requestedOutput(argv))
      exit(1)
      return
    }
-@@ -838,9 +847,7 @@ async function serveImpl(
+@@ -838,9 +864,10 @@ async function serveImpl(
        filtered = result.rest
        return true
      } catch (error) {
 -      const message = error instanceof Error ? error.message : String(error)
 -      if (human) writeln(formatHumanError({ code: 'UNKNOWN', message }))
 -      else writeln(Formatter.format({ code: 'UNKNOWN', message }, 'toon'))
-+      writeSafeError(error, formatExplicit ? formatFlag : undefined)
++      writeSafeError(error, {
++        format: formatExplicit ? formatFlag : undefined,
++        fullOutput,
++      })
        exit(1)
        return false
      }
-@@ -953,9 +960,9 @@ async function serveImpl(
+@@ -953,9 +980,9 @@ async function serveImpl(
      if (!isSkillsAdd && !isMcpAdd) {
        const stored = SyncSkills.readHash(name)
        if (stored && SyncSkills.hasInstalledSkills(name, { cwd: options.sync?.cwd })) {
@@ -1792,7 +1902,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
            const command =
              process.env.npm_config_user_agent || process.env.npm_execpath
                ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
-@@ -1075,10 +1082,7 @@ async function serveImpl(
+@@ -1075,10 +1102,7 @@ async function serveImpl(
        const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : ''
        const message = `'${skillsSub}' is not a command for '${name} skills'.${didYouMean}`
        const ctaCommands: FormattedCta[] = []
@@ -1804,7 +1914,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
        ctaCommands.push({
          command: `${name} skills --help`,
          description: 'see all available commands',
-@@ -1227,10 +1231,7 @@ async function serveImpl(
+@@ -1227,10 +1251,7 @@ async function serveImpl(
        const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : ''
        const message = `'${mcpSub}' is not a command for '${name} mcp'.${didYouMean}`
        const ctaCommands: FormattedCta[] = []
@@ -1816,7 +1926,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
        ctaCommands.push({ command: `${name} mcp --help`, description: 'see all available commands' })
        const cta: FormattedCtaBlock = {
          description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
-@@ -1675,10 +1676,7 @@ async function serveImpl(
+@@ -1675,10 +1696,7 @@ async function serveImpl(
      const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : ''
      const message = `'${effective.error}' is not a command for '${parent}'.${didYouMean}`
      const ctaCommands: FormattedCta[] = []
@@ -1828,7 +1938,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
      ctaCommands.push({ command: helpCmd, description: 'see all available commands' })
      const cta: FormattedCtaBlock = {
        description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
-@@ -1834,10 +1832,7 @@ async function serveImpl(
+@@ -1834,10 +1852,7 @@ async function serveImpl(
      } catch (error) {
        write({
          ok: false,
@@ -1840,7 +1950,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
          meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
        })
        exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
-@@ -1877,10 +1872,7 @@ async function serveImpl(
+@@ -1877,10 +1892,7 @@ async function serveImpl(
      } catch (error) {
        write({
          ok: false,
@@ -1852,7 +1962,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
          meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
        })
        exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
-@@ -1961,14 +1953,7 @@ async function serveImpl(
+@@ -1961,14 +1973,7 @@ async function serveImpl(
 
      write({
        ok: false,
@@ -1868,7 +1978,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
        meta: {
          command: path,
          duration,
-@@ -2231,17 +2216,6 @@ async function fetchImpl(
+@@ -2231,17 +2236,6 @@ async function fetchImpl(
      return new Response('Not Found', { status: 404 })
    }
 
@@ -1886,7 +1996,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
    function jsonResponse(body: unknown, status: number) {
      return new Response(Json.stringify(body), {
        status,
-@@ -2253,7 +2227,7 @@ async function fetchImpl(
+@@ -2253,7 +2247,7 @@ async function fetchImpl(
    if (segments.length === 0) {
      // Root path
      if (options.rootCommand)
@@ -1895,7 +2005,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
      return jsonResponse(
        {
          ok: false,
-@@ -2300,7 +2274,7 @@ async function fetchImpl(
+@@ -2300,7 +2294,7 @@ async function fetchImpl(
 
    const { command, path, rest } = resolved
    const groupMiddlewares = 'middlewares' in resolved ? resolved.middlewares : []
@@ -1904,7 +2014,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
      ...options,
      groupMiddlewares,
    })
-@@ -2311,7 +2285,6 @@ async function executeCommand(
+@@ -2311,7 +2305,6 @@ async function executeCommand(
    path: string,
    command: CommandDefinition<any, any, any>,
    rest: string[],
@@ -1912,7 +2022,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
    request: Request,
    start: number,
    options: fetchImpl.Options,
-@@ -2323,6 +2296,34 @@ async function executeCommand(
+@@ -2323,6 +2316,34 @@ async function executeCommand(
      })
    }
 
@@ -1947,7 +2057,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
    const allMiddleware = [
      ...(options.middlewares ?? []),
      ...((options.groupMiddlewares as MiddlewareHandler[] | undefined) ?? []),
-@@ -2340,14 +2341,14 @@ async function executeCommand(
+@@ -2340,14 +2361,14 @@ async function executeCommand(
        else commandInputOptions[key] = value
      }
      try {
@@ -1967,7 +2077,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
            meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
          },
          400,
-@@ -2437,11 +2438,7 @@ async function executeCommand(
+@@ -2437,11 +2458,7 @@ async function executeCommand(
                Json.stringify({
                  type: 'error',
                  ok: false,
@@ -1980,7 +2090,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
                  meta: meta(),
                }) + '\n',
              ),
-@@ -2461,14 +2458,7 @@ async function executeCommand(
+@@ -2461,14 +2478,7 @@ async function executeCommand(
      return jsonResponse(
        {
          ok: false,
@@ -1996,7 +2106,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
          meta: {
            command: path,
            duration,
-@@ -2726,6 +2716,7 @@ declare namespace serveImpl {
+@@ -2726,6 +2736,7 @@ declare namespace serveImpl {
            body?: string | undefined
            cwd?: string | undefined
            depth?: number | undefined
@@ -2004,14 +2114,22 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
            include?: string[] | undefined
            suggestions?: string[] | undefined
          }
-@@ -2740,6 +2731,24 @@ declare namespace serveImpl {
+@@ -2740,6 +2751,32 @@ declare namespace serveImpl {
  /** @internal Extracts built-in flags from argv. */
  const validFormats = new Set(['toon', 'json', 'yaml', 'md', 'jsonl'] as const)
 
-+function requestedOutputFormat(argv: string[]): Formatter.Format | undefined {
++function requestedOutput(argv: string[]): {
++  format?: Formatter.Format | undefined
++  fullOutput: boolean
++} {
 +  let format: Formatter.Format | undefined
++  let fullOutput = false
 +  for (let i = 0; i < argv.length; i++) {
 +    const token = argv[i]
++    if (token === '--full-output') {
++      fullOutput = true
++      continue
++    }
 +    if (token === '--json') {
 +      format = 'json'
 +      continue
@@ -2023,13 +2141,13 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
 +    }
 +    if (value !== undefined) i++
 +  }
-+  return format
++  return { format, fullOutput }
 +}
 +
  function extractBuiltinFlags(argv: string[], options: extractBuiltinFlags.Options = {}) {
    let fullOutput = false
    let llms = false
-@@ -2780,12 +2789,15 @@ function extractBuiltinFlags(argv: string[], options: extractBuiltinFlags.Option
+@@ -2780,12 +2817,15 @@ function extractBuiltinFlags(argv: string[], options: extractBuiltinFlags.Option
      else if (token === '--json') {
        format = 'json'
        formatExplicit = true
@@ -2049,7 +2167,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
        formatExplicit = true
        i++
      } else if (cfgFlag && token === cfgFlag) {
-@@ -2804,19 +2816,28 @@ function extractBuiltinFlags(argv: string[], options: extractBuiltinFlags.Option
+@@ -2804,19 +2844,28 @@ function extractBuiltinFlags(argv: string[], options: extractBuiltinFlags.Option
      } else if (noCfgFlag && token === noCfgFlag) {
        configPath = undefined
        configDisabled = true
@@ -2088,7 +2206,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
        tokenOffset = n
        i++
      } else if (token === '--token-count') tokenCount = true
-@@ -2876,7 +2897,10 @@ async function loadCommandOptionDefaults(
+@@ -2876,7 +2925,10 @@ async function loadCommandOptionDefaults(
      const result = await loader(targetPath)
      if (result === undefined) return undefined
      if (!isRecord(result))
@@ -2100,7 +2218,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
      parsed = result
    } else {
      if (!targetPath) return undefined
-@@ -2932,10 +2956,18 @@ async function readJsonConfig(
+@@ -2932,10 +2984,18 @@ async function readJsonConfig(
      raw = await fs.readFile(targetPath, 'utf8')
    } catch (error) {
      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -2121,7 +2239,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
    }
 
    let parsed: unknown
-@@ -2944,6 +2976,7 @@ async function readJsonConfig(
+@@ -2944,6 +3004,7 @@ async function readJsonConfig(
    } catch (error) {
      throw new ParseError({
        message: `Invalid JSON config file: ${targetPath}`,
@@ -2129,7 +2247,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
        cause: error instanceof Error ? error : undefined,
      })
    }
-@@ -2951,6 +2984,7 @@ async function readJsonConfig(
+@@ -2951,6 +3012,7 @@ async function readJsonConfig(
    if (!isRecord(parsed))
      throw new ParseError({
        message: `Invalid config file: expected a top-level object in ${targetPath}`,
@@ -2137,7 +2255,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
      })
    return parsed
  }
-@@ -2973,6 +3007,7 @@ function extractCommandSection(
+@@ -2973,6 +3035,7 @@ function extractCommandSection(
    if (!isRecord(node))
      throw new ParseError({
        message: `Invalid config section for '${path}': expected an object`,
@@ -2145,7 +2263,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
      })
 
    const options = node.options
-@@ -2980,6 +3015,7 @@ function extractCommandSection(
+@@ -2980,6 +3043,7 @@ function extractCommandSection(
    if (!isRecord(options))
      throw new ParseError({
        message: `Invalid config 'options' for '${path}': expected an object`,
@@ -2153,7 +2271,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
      })
    return Object.keys(options).length > 0 ? options : undefined
  }
-@@ -3444,6 +3480,14 @@ export const toRootOptions = new WeakMap<Cli, z.ZodObject<any>>()
+@@ -3444,6 +3508,14 @@ export const toRootOptions = new WeakMap<Cli, z.ZodObject<any>>()
  /** @internal Maps CLI instances to whether config file loading is enabled. */
  export const toConfigEnabled = new WeakMap<Cli, boolean>()
 
@@ -2168,7 +2286,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
  /** @internal Maps CLI instances to their output policy. */
  const toOutputPolicy = new WeakMap<Cli, OutputPolicy>()
 
-@@ -3491,6 +3535,7 @@ type CtaBlock<commands extends CommandsMap = Commands> = {
+@@ -3491,6 +3563,7 @@ type CtaBlock<commands extends CommandsMap = Commands> = {
  function formatHumanError(error: {
    code: string
    message: string
@@ -2176,7 +2294,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
    fieldErrors?: FieldError[] | undefined
  }): string {
    const prefix =
-@@ -3499,6 +3544,7 @@ function formatHumanError(error: {
+@@ -3499,6 +3572,7 @@ function formatHumanError(error: {
        : `Error (${error.code})`
    let out = `${prefix}: ${error.message}`
    if (error.fieldErrors) for (const fe of error.fieldErrors) out += `\n  ${fe.path}: ${fe.message}`
@@ -2184,7 +2302,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
    return out
  }
 
-@@ -3638,20 +3684,10 @@ async function handleStreaming(
+@@ -3638,20 +3712,10 @@ async function handleStreaming(
            JSON.stringify({
              type: 'error',
              ok: false,
@@ -2207,7 +2325,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
        ctx.exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
      }
    } else {
-@@ -3722,11 +3758,7 @@ async function handleStreaming(
+@@ -3722,11 +3786,7 @@ async function handleStreaming(
      } catch (error) {
        ctx.write({
          ok: false,
@@ -2220,7 +2338,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..eef13e203e657cada9a298990f4ae0e7
          meta: {
            command: ctx.path,
            duration: `${Math.round(performance.now() - ctx.start)}ms`,
-@@ -4056,10 +4088,14 @@ type Output = OneOf<
+@@ -4056,10 +4116,14 @@ type Output = OneOf<
          code: string
          /** Per-field validation errors. */
          fieldErrors?: FieldError[] | undefined

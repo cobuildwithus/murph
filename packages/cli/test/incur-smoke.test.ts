@@ -235,7 +235,7 @@ async function withInProcessCliProcessStateLock<T>(
 }
 
 async function runJsonCli<TData>(
-  cli: Cli.Cli,
+  cli: { serve: Cli.Cli['serve'] },
   args: string[],
 ): Promise<{
   envelope: CliEnvelope<TData>
@@ -611,10 +611,12 @@ test('source and built CLI parse failures are typed, private, and write-free', a
 
 test('early validation failures honor explicit JSON and retain the human recovery hint', async () => {
   const privateMarker = 'PrivateEarlyParseMarker'
+  let handlerCalls = 0
   const cli = Cli.create('early-validation-smoke', {
     globals: z.object({ limit: z.number() }),
   }).command('ping', {
     run() {
+      handlerCalls++
       return { pong: true }
     },
   })
@@ -670,6 +672,37 @@ test('early validation failures honor explicit JSON and retain the human recover
     ],
   })
 
+  const builtFullOutput = await runBuiltCliProcess([
+    '--token-limit',
+    privateMarker,
+    '--full-output',
+    '--format',
+    'json',
+  ])
+  assert.equal(builtFullOutput.exitCode, 1)
+  const builtEnvelope = JSON.parse(builtFullOutput.stdout) as CliEnvelope<unknown>
+  assertSafeParseValidationEnvelope(builtEnvelope)
+  assert.deepEqual(builtEnvelope.meta, {
+    command: 'vault-cli',
+    duration: '0ms',
+  })
+
+  const globalFullOutput = await runJsonCli<unknown>(cli, [
+    'ping',
+    '--limit',
+    privateMarker,
+  ])
+  assert.equal(globalFullOutput.exitCode, 1)
+  assertSafeInputValidationEnvelope(globalFullOutput.envelope, {
+    code: 'invalid_type',
+    missing: false,
+    path: 'limit',
+  })
+  assert.deepEqual(globalFullOutput.envelope.meta, {
+    command: 'early-validation-smoke',
+    duration: '0ms',
+  })
+
   const human = await runHumanCli(cli, ['--token-limit', privateMarker])
   assert.equal(human.exitCode, 1)
   assert.match(human.output, /Error \(VALIDATION_ERROR\): The command arguments are invalid\./u)
@@ -701,12 +734,23 @@ test('early validation failures honor explicit JSON and retain the human recover
   for (const output of [
     builtinJson.output,
     globalsJson.output,
+    builtFullOutput.stdout,
+    JSON.stringify(globalFullOutput.envelope),
     human.output,
     humanInput.output,
   ]) {
     assert.equal(output.includes(privateMarker), false)
     assert.equal(output.includes('UNKNOWN'), false)
   }
+
+  assert.equal(handlerCalls, 0)
+  const valid = await runJsonCli<{ pong: boolean }>(cli, ['ping', '--limit', '3'])
+  assert.equal(valid.exitCode, null)
+  assert.equal(valid.envelope.ok, true)
+  if (valid.envelope.ok) {
+    assert.deepEqual(valid.envelope.data, { pong: true })
+  }
+  assert.equal(handlerCalls, 1)
 })
 
 test('native command and HTTP validation errors use safe envelopes', async () => {
