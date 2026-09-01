@@ -164,7 +164,13 @@ describe("hosted runtime delegated foreground owner", () => {
       expect(finalPending).toEqual(device ? [device] : []);
       expect(assistantPhaseCalls).toBe(1);
       expect(delegatedConsumptionCount).toBe(1);
-      expect(result.status).toBe("idle");
+      if (device) {
+        assert.equal(result.status, "scheduled");
+        assert.equal(result.nextWakeAt, TEST_NOW);
+        assert.equal(result.nextWakeReason, "device-sync.reconcile");
+      } else {
+        assert.equal(result.status, "idle");
+      }
     } finally {
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });
