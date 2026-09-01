@@ -298,3 +298,7 @@ Updated: 2026-08-31
   source/dist parity review, frozen reinstall, patch-hash check, lockfile churn
   check, clean CLI checker, assistant-engine and Cloudflare checkers, complexity
   guard, and `git diff --check` all pass.
+- 2026-08-31: Draft PR #2666 now owns the real source reference. Added the
+  public entry `2026-08-31 · murph-recovers-from-invalid-command-inputs`;
+  the production changelog archive test passes 9/9 and directly renders the
+  authored title, summary, details, and source link.
