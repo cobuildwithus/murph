@@ -57,6 +57,7 @@ export interface HostedDeployAutomationEnvironment {
   compatibilityDate: string;
   containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
+  standbyContainerMaxInstances: number;
   logHeadSamplingRate: number;
   maxEventAttempts: string;
   retryDelayMs: string;
@@ -111,6 +112,11 @@ export function readHostedDeployAutomationEnvironment(
   const workerName = requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME");
   const timeouts = readHostedDeployAutomationTimeouts(source);
   const workerVars = readHostedWorkerVars(source);
+  const containerMaxInstances = normalizePositiveInteger(
+    source.CF_CONTAINER_MAX_INSTANCES,
+    DEFAULT_CONTAINER_MAX_INSTANCES,
+    "CF_CONTAINER_MAX_INSTANCES",
+  );
   assertHostedR2Configuration({
     bundlesBucketName,
     workerVars,
@@ -126,11 +132,7 @@ export function readHostedDeployAutomationEnvironment(
       DEFAULT_CONTAINER_INSTANCE_TYPE,
       "CF_CONTAINER_INSTANCE_TYPE",
     ),
-    containerMaxInstances: normalizePositiveInteger(
-      source.CF_CONTAINER_MAX_INSTANCES,
-      DEFAULT_CONTAINER_MAX_INSTANCES,
-      "CF_CONTAINER_MAX_INSTANCES",
-    ),
+    containerMaxInstances,
     logHeadSamplingRate: normalizeSamplingRate(
       source.CF_LOG_HEAD_SAMPLING_RATE,
       DEFAULT_LOG_HEAD_SAMPLING_RATE,
@@ -151,6 +153,11 @@ export function readHostedDeployAutomationEnvironment(
       source.CF_RUNNER_READY_TIMEOUT_MS,
       "20000",
       "CF_RUNNER_READY_TIMEOUT_MS",
+    ),
+    standbyContainerMaxInstances: normalizePositiveInteger(
+      source.CF_STANDBY_CONTAINER_MAX_INSTANCES,
+      containerMaxInstances,
+      "CF_STANDBY_CONTAINER_MAX_INSTANCES",
     ),
     traceHeadSamplingRate: normalizeSamplingRate(
       source.CF_TRACE_HEAD_SAMPLING_RATE,

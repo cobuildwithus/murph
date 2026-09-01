@@ -199,9 +199,10 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
-      CF_CONTAINER_MAX_INSTANCES: "250",
+      CF_CONTAINER_MAX_INSTANCES: "648",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
+      CF_STANDBY_CONTAINER_MAX_INSTANCES: "100",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -315,7 +316,7 @@ describe("hosted deploy automation helpers", () => {
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         image_build_context: "..",
         instance_type: "standard-1",
-        max_instances: 250,
+        max_instances: 648,
         rollout_active_grace_period: 300,
         rollout_step_percentage: [10, 25, 50, 100],
         ssh: { enabled: false },
@@ -336,7 +337,7 @@ describe("hosted deploy automation helpers", () => {
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         image_build_context: "..",
         instance_type: "standard-1",
-        max_instances: 250,
+        max_instances: 100,
         rollout_active_grace_period: 300,
         rollout_step_percentage: [10, 25, 50, 100],
         ssh: { enabled: false },
@@ -538,6 +539,31 @@ describe("hosted deploy automation helpers", () => {
         }),
       ).toThrow(/CF_RUNNER_READY_TIMEOUT_MS must be a positive integer/u);
     }
+  });
+
+  it("defaults the standby container ceiling to the ordinary runner ceiling", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_CONTAINER_MAX_INSTANCES: "250",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+    });
+
+    expect(environment.containerMaxInstances).toBe(250);
+    expect(environment.standbyContainerMaxInstances).toBe(250);
+  });
+
+  it("rejects an invalid standby container ceiling", () => {
+    expect(() =>
+      readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_STANDBY_CONTAINER_MAX_INSTANCES: "100x",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      }),
+    ).toThrow(/CF_STANDBY_CONTAINER_MAX_INSTANCES must be a positive integer/u);
   });
 
   it("binds generated deploy config to the prepared runner fingerprints", () => {
