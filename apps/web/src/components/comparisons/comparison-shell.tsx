@@ -19,10 +19,10 @@ function ComparisonClosingCta({ authenticated }: { authenticated: boolean }) {
             Ready when you are
           </p>
           <h2 className="mt-3 text-balance font-serif text-[clamp(1.8rem,4vw,3rem)] font-semibold leading-[1.02] tracking-[-0.03em]">
-            Bring Murph the question behind the data.
+            Try Murph with your own questions.
           </h2>
           <p className="mt-4 text-[0.92rem] leading-7 text-[#665d4c]">
-            Start a private conversation in the messaging app you already use.
+            A private conversation in the messaging app you already use. Free to start, no card needed.
           </p>
         </div>
         {authenticated ? (

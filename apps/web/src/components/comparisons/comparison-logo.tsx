@@ -32,6 +32,13 @@ export function ComparisonLogo({
 }) {
   const asset = getComparisonLogoAsset(slug);
   const useDarkSurface = asset && LIGHT_MARK_LOGO_SLUGS.has(slug);
+  // Wide wordmarks need the tile's full width to stay legible at small sizes,
+  // so they trade most of the padding a square app icon keeps.
+  const aspectRatio = asset ? (asset.width ?? 1) / (asset.height ?? 1) : 1;
+  const isWideMark = asset !== null && aspectRatio >= 2.2;
+  // Square marks are mostly full-bleed app icons; an iOS-style radius keeps
+  // them concentric with the rounded tile instead of a hard square inside it.
+  const isSquareMark = asset !== null && Math.abs(aspectRatio - 1) <= 0.08;
 
   return (
     <span
@@ -39,6 +46,7 @@ export function ComparisonLogo({
         "flex min-h-0 min-w-0 items-center justify-center overflow-hidden",
         className,
         useDarkSurface ? "bg-[#2a2520]" : "bg-[#f5f0e8]",
+        isWideMark ? "px-1.5" : null,
       )}
       data-comparison-logo={slug}
     >
@@ -48,6 +56,7 @@ export function ComparisonLogo({
           className={cn(
             "h-auto w-auto max-h-full max-w-full object-contain",
             imageClassName,
+            isSquareMark ? "rounded-[22%]" : null,
           )}
           height={Math.max(1, Math.round(asset.height ?? 96))}
           priority={priority}

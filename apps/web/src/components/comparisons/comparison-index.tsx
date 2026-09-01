@@ -44,14 +44,14 @@ function ComparisonLogoMap() {
             slug={logo.slug}
           />
         ))}
-        <span className="z-20 flex size-[102px] items-center justify-center rounded-[1.6rem] border border-[#c4a882]/45 bg-[#efe7d9] p-5 sm:size-[122px] sm:p-6">
+        <span className="z-20 flex size-[102px] items-center justify-center rounded-[1.6rem] border border-[#c4a882]/45 bg-[#efe7d9] p-6 sm:size-[122px] sm:p-7">
           <Image
             alt="Murph"
             className="h-auto w-full"
-            height={24}
+            height={44}
             priority
-            src="/logo.svg"
-            width={107}
+            src="/logo-mark.svg"
+            width={65}
           />
         </span>
         {HERO_LOGOS.slice(4).map((logo, index) => (
@@ -93,14 +93,14 @@ export function ComparisonIndex({ comparisons }: { comparisons: readonly Compari
         <div className="mx-auto max-w-[1080px]">
           <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)] lg:gap-16">
             <div>
-              <p className="text-[0.76rem] font-semibold uppercase tracking-[0.14em] text-[#c4a882]">
-                102 source-backed guides
+              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]">
+                {comparisons.length} source-backed guides
               </p>
               <h1 className="mt-5 max-w-[12ch] text-balance font-serif text-[clamp(3rem,7vw,5.5rem)] font-semibold leading-[0.9] tracking-[-0.045em]">
                 Your health is bigger than one app.
               </h1>
               <p className="mt-7 max-w-[49ch] text-pretty text-[0.98rem] leading-7 text-[#f5f0e8]/72 sm:text-[1.05rem]">
-                See what each tool does best—and where Murph adds the context, decisions, and follow-through around it.
+                See what each tool does best, and where Murph fits alongside it.
               </p>
             </div>
             <ComparisonLogoMap />
@@ -123,7 +123,7 @@ export function ComparisonIndex({ comparisons }: { comparisons: readonly Compari
               No universal winner
             </h2>
             <p className="max-w-[66ch] text-[0.98rem] leading-7 text-[#4d4533]">
-              Wearables measure, clinicians diagnose and treat, and focused apps may go deeper on one job. Murph connects those pieces to decisions and follow-through. These guides make that boundary explicit.
+              Wearables measure. Clinicians diagnose and treat. A focused app may do one job better than Murph does. Murph ties those pieces together and helps you act on them, and these guides say plainly where each product stops.
             </p>
           </section>
 
@@ -133,10 +133,10 @@ export function ComparisonIndex({ comparisons }: { comparisons: readonly Compari
             </h2>
             <div className="grid max-w-[66ch] gap-4 text-[0.92rem] leading-7 text-[#4d4533]">
               <p>
-                Product facts come from first-party product, support, pricing, legal, or storefront material. We label inference and do not claim hands-on testing that did not happen.
+                Product facts come from each company's own product, support, pricing, legal, or app store pages. When we infer something, we say so. We do not claim hands-on testing we did not do.
               </p>
               <p>
-                Details change, so every guide shows its review date and sources. Murph claims follow our{" "}
+                Products change, so every guide shows its review date and sources. Claims about Murph follow our{" "}
                 <Link className="underline decoration-[#c4a882] underline-offset-4 hover:text-[#5a6e32]" href="/about">
                   public product description
                 </Link>

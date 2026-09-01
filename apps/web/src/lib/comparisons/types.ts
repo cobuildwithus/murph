@@ -90,7 +90,9 @@ export type CompetitorEvidence = {
   [Key in keyof CompetitorProfile]: readonly [number, ...number[]];
 };
 
-export type ComparisonQuickStatus = "yes" | "limited" | "no";
+// "connected" means the product uses this through a device or account the
+// member connects (for Murph: authorized wearable, lab, and app connections).
+export type ComparisonQuickStatus = "yes" | "connected" | "limited" | "no";
 
 export interface ComparisonQuickRow {
   capability: string;

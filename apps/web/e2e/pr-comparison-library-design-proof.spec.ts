@@ -134,7 +134,10 @@ async function capturePages({
       });
 
       if (target.name === "index") {
-        await expect(page.locator("[data-comparison-logo]")).toHaveCount(8);
+        await expect(page.locator("main > header [data-comparison-logo]")).toHaveCount(8);
+        await expect(
+          page.locator("[data-comparison-directory] [data-comparison-logo]"),
+        ).toHaveCount(COMPARISONS.length);
         const directory = page.locator("[data-comparison-directory]");
         const search = page.locator("#comparison-search");
         await expect(directory).toBeVisible();
@@ -198,7 +201,12 @@ async function capturePages({
         ).toHaveCount(1);
         const tableSection = page.locator('section[aria-labelledby$="-table"]');
         await expect(tableSection).toBeVisible();
-        await expect(tableSection.locator("table").first().locator("tbody tr")).toHaveCount(10);
+        await expect(
+          tableSection.locator("table").first().locator("tbody tr[data-evidence-dimension]"),
+        ).toHaveCount(10);
+        await expect(
+          tableSection.locator("table").first().locator("tbody tr[data-quick-group]"),
+        ).not.toHaveCount(0);
         const competitorHeader = tableSection
           .locator("table")
           .first()

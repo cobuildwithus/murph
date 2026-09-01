@@ -119,3 +119,7 @@ export function getComparisonLogoAsset(
 
   return COMPARISON_LOGO_ASSETS[slug as ComparisonLogoSlug];
 }
+
+export function hasComparisonLogoAsset(slug: string): boolean {
+  return Object.hasOwn(COMPARISON_LOGO_ASSETS, slug);
+}

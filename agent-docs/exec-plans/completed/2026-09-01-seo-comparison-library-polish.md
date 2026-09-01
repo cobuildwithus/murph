@@ -177,3 +177,53 @@ Updated: 2026-09-01
   after this implementation commit is pushed; the pull request remains
   unmerged.
 Completed: 2026-09-01
+
+## Follow-up: distinct decisions and table redesign (2026-09-01)
+
+- Resolved the final-audit finding that the ten-row tables repeated or
+  contradicted themselves. Every guide now owns ten rows that answer ten
+  different questions: the guide's product-specific rows come first, and the
+  freed slots carry Murph capabilities that are true from Murph's own profile
+  (messaging channel, health errands, personal experiments, free start, open
+  source, group support, and conditional hardware, history, adaptability, and
+  reminder rows). Competitor statuses were judged per guide from each
+  competitor profile; a status is `no` only where the official material
+  plainly lacks the capability, otherwise `limited`.
+- The catalog test now enforces one row per concept group (hardware, history,
+  follow-up, adaptability, conversation, context, experiments, errands, group,
+  open source, pricing, clinical) and pins the reviewed WHOOP, Ada, Guava,
+  Hume, and BodyBuddy cases plus one guide per category.
+- The quick table groups the authored rows at render time by who comes out
+  ahead (competitor first, overlap, then Murph), shows both product marks in
+  the column headers, and replaces the check and cross glyphs with a full,
+  half, and hollow disc plus a text label and legend. The full evidence view is
+  a hairline ledger with mono dimension labels and plain "Source n" links.
+- The detail hero puts the relationship label, title, and headline on the left
+  with a larger paired logo lockup on the right; the directory and related
+  lists show each competitor's mark beside its name.
+- Later in the same pass: the Murph dot mark (`/logo-mark.svg`, cropped from
+  the wordmark) replaces the full wordmark in the hero lockup, table header,
+  and index mosaic; square app icons carry an iOS-style radius inside their
+  tiles; the table header shows bare marks instead of bordered tiles; the
+  directory's search results use a compact mono category label; and the
+  closing invitation reads "Try Murph with your own questions."
+- A fourth status, `connected` ("Via connection"), marks rows where Murph uses
+  the competitor's data through a connection Murph actually offers (WHOOP,
+  Oura, Apple Health and its iPhone relays, Garmin, Fitbit, Dexcom, Eight
+  Sleep, Withings, Polar, Peloton, Cronometer, Strava). It ranks between
+  Limited and Yes, so a sensing row still sits under the competitor's edge; the
+  table explains the term in its caption and legend, and the test pins the
+  allowlist of connected guides.
+- A credit pass reviewed every row where Murph read "No": rows Murph covers
+  through connected devices, CGMs, scales, or Apple Health relays became "Via
+  connection"; things Murph does outright (photo meal logging, food and weight
+  diaries, the records vault, the exercise library, data export) became "Yes";
+  capabilities Murph covers conversationally without a dedicated UI (workout
+  and symptom logging, plans, correlations, community, Epic record retrieval in
+  beta) became "Limited". Ultrahuman's offline-storage row now reads "Long term
+  data storage and export" because members can download their data.
+- "Compare" left the top navigation; the footer's "Comparisons" link remains
+  the entry point. The index copy and the closing invitation were rewritten in
+  plain language, and every guide's prose was rewritten for clarity (see the
+  copy brief rules: short sentences, concrete nouns, no rhetorical headlines,
+  no machine-sounding vocabulary), keeping every sourced fact.

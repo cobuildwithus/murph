@@ -13,6 +13,7 @@ import { metadata as comparisonIndexMetadata } from "../app/compare/page";
 import { PublicComparisonTableStudy } from "../app/design/public-comparison-table-study";
 import { ComparisonArticle } from "../src/components/comparisons/comparison-page";
 import { ComparisonDirectory } from "../src/components/comparisons/comparison-directory";
+import { groupQuickComparisonRows } from "../src/components/comparisons/comparison-table";
 import {
   comparisonPath,
   COMPARISONS,
@@ -43,59 +44,96 @@ const HUMAN_COPY_FIELDS = [
   "name",
 ] as const;
 
-const QUICK_STATUS_RANK = { limited: 1, no: 0, yes: 2 } as const;
+const QUICK_STATUS_RANK = { connected: 2, limited: 1, no: 0, yes: 3 } as const;
 
-const PRODUCT_SPECIFIC_STATUS_EXAMPLES = {
-  ada: {
-    "Longitudinal history": "limited",
-    "No dedicated device": "yes",
-    "Proactive follow up": "no",
-  },
-  bodybuddy: {
-    "Familiar messaging access": "yes",
-    "Handles changing priorities": "yes",
-    "Longitudinal history": "yes",
-    "No dedicated device": "yes",
-    "Proactive follow up": "yes",
-  },
-  "function-health": {
-    "Longitudinal history": "yes",
-    "No dedicated device": "yes",
-    "Proactive follow up": "limited",
-  },
-  "future-pro": {
-    "Familiar messaging access": "limited",
-    "Handles changing priorities": "yes",
-    "Proactive follow up": "yes",
-  },
-  guava: {
-    "Handles changing priorities": "yes",
-    "Proactive follow up": "yes",
-  },
-  "hume-health": {
-    "No dedicated device": "no",
-  },
-  "january-ai": {
-    "Handles changing priorities": "yes",
-    "Proactive follow up": "yes",
-  },
-  "sleep-reset": {
-    "Familiar messaging access": "limited",
-    "Proactive follow up": "yes",
-  },
-  whoop: {
-    "No dedicated device": "no",
-    "Proactive follow up": "yes",
-  },
+// Guides whose data Murph can read through a connection it actually offers
+// (direct integrations plus Apple Health relays for iPhone-paired devices).
+const CONNECTED_GUIDES = new Set([
+  "amazfit-helio-strap",
+  "apple-health-fitness",
+  "autosleep",
+  "circular",
+  "coros",
+  "cronometer",
+  "eight-sleep",
+  "garmin-connect",
+  "google-health",
+  "hume-health",
+  "january-ai",
+  "levels",
+  "macrofactor",
+  "nutrisense",
+  "oura-ring",
+  "pillow",
+  "polar-loop",
+  "ringconn",
+  "signos",
+  "sleep-cycle",
+  "sleepwatch",
+  "strava",
+  "ultrahuman-ring-pro",
+  "welltory",
+  "whoop",
+  "withings",
+]);
+
+// One row per practical decision. No two rows in a guide may share a concept,
+// so the ten-row table never spends two slots on the same question.
+const QUICK_ROW_CONCEPTS = {
+  adaptability:
+    /\b(changing priorities|defined plan|changing questions?|as questions change|open ended)\b/iu,
+  clinical:
+    /\b(clinician|physician|licensed|prescription|regulated|telehealth|dietitian|medical)\b/iu,
+  context: /\bcontext\b/iu,
+  conversation:
+    /\b(messaging|imessage|telegram|conversation|conversational|health questions|assistant)\b/iu,
+  errands: /\b(errands?|logistics)\b/iu,
+  experiments: /\b(experiments?|what works)\b/iu,
+  followUp:
+    /\b(follow up|follow through|check ins?|reminders?|accountability|nudges?)\b/iu,
+  group: /\b(group|family|community|peer|team|social|leaderboards?)\b/iu,
+  hardware:
+    /\b(without dedicated hardware|without a sensor|no dedicated device|without a device|without hardware)\b/iu,
+  history: /\b(history|longitudinal|archival|memory)\b/iu,
+  openSource: /\bopen source\b/iu,
+  pricing:
+    /\b(free|without a card|price|pricing|subscription|insurance|billing|billed|cost)\b/iu,
 } as const;
 
-const PRODUCT_SPECIFIC_ROW_EVIDENCE = {
-  "Familiar messaging access": "format",
-  "Handles changing priorities": "primaryJob",
-  "Longitudinal history": "inputs",
-  "No dedicated device": "hardware",
-  "Proactive follow up": "followThrough",
-} as const;
+type QuickRowConcept = keyof typeof QUICK_ROW_CONCEPTS;
+
+// Shared Murph-advantage rows stay pinned to the Murph profile dimension that
+// supports them, so their evidence links never point at an unrelated claim.
+const MURPH_ADVANTAGE_ROWS: Record<
+  string,
+  ReadonlyArray<keyof typeof MURPH_COMPARISON_PROFILE>
+> = {
+  "Free start without a card": ["pricing"],
+  "Handles changing priorities": ["primaryJob"],
+  "Handles health errands": ["followThrough"],
+  "Longitudinal history": ["inputs"],
+  "Open ended health questions": ["insightStyle", "primaryJob", "format"],
+  "Open source option": ["platforms"],
+  "Optional group support": ["followThrough"],
+  "Reminders and check ins": ["followThrough"],
+  "Tests what works for you": ["followThrough", "insightStyle"],
+  "Wearable and lab context": ["inputs"],
+  "Works in iMessage or Telegram": ["format"],
+  "Works without dedicated hardware": ["hardware"],
+};
+
+function rowsForConcept(
+  comparison: (typeof COMPARISONS)[number],
+  concept: QuickRowConcept,
+) {
+  return comparison.quickComparison.filter((row) =>
+    QUICK_ROW_CONCEPTS[concept].test(row.capability),
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
 
 function comparisonBySlug(slug: string) {
   const comparison = COMPARISONS.find((entry) => entry.slug === slug);
@@ -252,13 +290,23 @@ describe("comparison catalog", () => {
           `${comparison.slug} names the competitor in a capability label.`,
         );
         assert.ok(
-          ["yes", "limited", "no"].includes(row.murph),
+          ["yes", "connected", "limited", "no"].includes(row.murph),
           `${comparison.slug} has an invalid Murph quick-comparison status.`,
         );
         assert.ok(
           ["yes", "limited", "no"].includes(row.competitor),
           `${comparison.slug} has an invalid competitor quick-comparison status.`,
         );
+        if (row.murph === "connected") {
+          assert.ok(
+            CONNECTED_GUIDES.has(comparison.slug),
+            `${comparison.slug} claims a connection Murph does not offer.`,
+          );
+          assert.ok(
+            row.competitor === "yes" || row.competitor === "limited",
+            `${comparison.slug}.${row.capability} via-connection rows describe data the competitor produces.`,
+          );
+        }
         assert.ok(
           row.evidence in comparison.competitorEvidence,
           `${comparison.slug}.${row.capability} needs a valid evidence dimension.`,
@@ -320,36 +368,94 @@ describe("comparison catalog", () => {
     );
   });
 
-  it("keeps the shared decision rows product specific and evidence backed", () => {
+  it("keeps every guide's ten rows to ten distinct decisions", () => {
     for (const comparison of COMPARISONS) {
-      const rowsByCapability = new Map(
-        comparison.quickComparison.map((row) => [row.capability, row]),
-      );
+      for (const concept of Object.keys(QUICK_ROW_CONCEPTS) as QuickRowConcept[]) {
+        const matches = rowsForConcept(comparison, concept);
+        assert.ok(
+          matches.length <= 1,
+          `${comparison.slug} spends ${matches.length} rows on ${concept}: ${matches
+            .map((row) => row.capability)
+            .join(", ")}.`,
+        );
+      }
 
-      for (const [capability, evidence] of Object.entries(
-        PRODUCT_SPECIFIC_ROW_EVIDENCE,
-      )) {
-        const row = rowsByCapability.get(capability);
-        assert.ok(row, `${comparison.slug} is missing ${capability}.`);
-        assert.equal(row.evidence, evidence);
-        assert.equal(row.murph, "yes");
+      for (const row of comparison.quickComparison) {
+        const dimensions = MURPH_ADVANTAGE_ROWS[row.capability];
+        if (!dimensions) {
+          continue;
+        }
+        assert.ok(
+          dimensions.includes(row.evidence),
+          `${comparison.slug}.${row.capability} must cite ${dimensions.join(" or ")}, not ${row.evidence}.`,
+        );
+        assert.equal(
+          row.murph,
+          "yes",
+          `${comparison.slug}.${row.capability} is a Murph capability from its own profile.`,
+        );
       }
     }
+  });
 
-    for (const [slug, expectedStatuses] of Object.entries(
-      PRODUCT_SPECIFIC_STATUS_EXAMPLES,
-    )) {
-      const comparison = comparisonBySlug(slug);
-      const rowsByCapability = new Map(
-        comparison.quickComparison.map((row) => [row.capability, row]),
+  it("resolves the reviewed duplicate and contradictory rows", () => {
+    assert.equal(rowsForConcept(comparisonBySlug("whoop"), "hardware").length, 1);
+
+    const ada = comparisonBySlug("ada");
+    assert.equal(rowsForConcept(ada, "history").length, 1);
+    assert.equal(rowsForConcept(ada, "followUp").length, 1);
+
+    assert.equal(rowsForConcept(comparisonBySlug("guava"), "followUp").length, 1);
+
+    const hume = comparisonBySlug("hume-health");
+    const humeFollowUp = rowsForConcept(hume, "followUp");
+    assert.equal(humeFollowUp.length, 1);
+    assert.equal(humeFollowUp[0]?.competitor, "limited");
+    assert.equal(rowsForConcept(hume, "hardware")[0]?.competitor, "no");
+
+    for (const category of COMPARISON_CATEGORIES) {
+      const sample = COMPARISONS.find(
+        (comparison) => comparison.category === category.id,
       );
+      assert.ok(sample, `${category.id} needs at least one guide.`);
+      const seen = new Set<QuickRowConcept>();
+      for (const row of sample.quickComparison) {
+        for (const concept of Object.keys(QUICK_ROW_CONCEPTS) as QuickRowConcept[]) {
+          if (!QUICK_ROW_CONCEPTS[concept].test(row.capability)) {
+            continue;
+          }
+          assert.equal(seen.has(concept), false, `${sample.slug} repeats ${concept}.`);
+          seen.add(concept);
+        }
+      }
+    }
+  });
 
-      for (const [capability, competitor] of Object.entries(expectedStatuses)) {
-        assert.equal(
-          rowsByCapability.get(capability)?.competitor,
-          competitor,
-          `${slug}.${capability} must reflect its own sourced product profile.`,
-        );
+  it("groups authored rows by who comes out ahead without dropping any", () => {
+    for (const comparison of COMPARISONS) {
+      const groups = groupQuickComparisonRows(comparison);
+      const grouped = groups.flatMap((group) => group.rows);
+
+      assert.equal(grouped.length, comparison.quickComparison.length);
+      assert.deepEqual(
+        groups.map((group) => group.id),
+        groups.map((group) => group.id).sort((left, right) => {
+          const order = { competitor: 0, murph: 2, shared: 1 } as const;
+          return order[left] - order[right];
+        }),
+        `${comparison.slug} must show the competitor's edge first and Murph's last.`,
+      );
+      for (const group of groups) {
+        assert.ok(group.rows.length > 0);
+        for (const row of group.rows) {
+          const expected =
+            QUICK_STATUS_RANK[row.murph] > QUICK_STATUS_RANK[row.competitor]
+              ? "murph"
+              : QUICK_STATUS_RANK[row.murph] < QUICK_STATUS_RANK[row.competitor]
+                ? "competitor"
+                : "shared";
+          assert.equal(group.id, expected, `${comparison.slug}.${row.capability}`);
+        }
       }
     }
   });
@@ -379,20 +485,21 @@ describe("comparison catalog", () => {
 
   it("shows BodyBuddy's real overlap without hiding either product's edge", () => {
     const comparison = comparisonBySlug("bodybuddy");
-    const overlap = comparison.quickComparison.filter(
-      (row) => row.murph === row.competitor,
+    const groups = Object.fromEntries(
+      groupQuickComparisonRows(comparison).map((group) => [group.id, group.rows]),
     );
+    const overlapLabels = (groups.shared ?? []).map((row) => row.capability);
 
-    assert.ok(overlap.length >= 5);
-    assert.ok(
-      comparison.quickComparison.some(
-        (row) => QUICK_STATUS_RANK[row.murph] > QUICK_STATUS_RANK[row.competitor],
-      ),
-    );
-    assert.ok(
-      comparison.quickComparison.some(
-        (row) => QUICK_STATUS_RANK[row.competitor] > QUICK_STATUS_RANK[row.murph],
-      ),
+    assert.ok(overlapLabels.includes("Daily accountability loop"));
+    assert.ok(overlapLabels.includes("Works in iMessage or Telegram"));
+    assert.ok((groups.competitor?.length ?? 0) >= 1);
+    assert.ok((groups.murph?.length ?? 0) >= 4);
+    assert.equal(rowsForConcept(comparison, "adaptability").length, 1);
+    assert.equal(rowsForConcept(comparison, "followUp").length, 1);
+    assert.equal(
+      rowsForConcept(comparison, "adaptability")[0]?.competitor,
+      "limited",
+      "BodyBuddy's defined-plan boundary must not be contradicted by another row.",
     );
   });
 
@@ -438,8 +545,18 @@ describe("comparison catalog", () => {
       );
       assert.match(markup, /<caption[^>]*>Murph and [^<]+ at-a-glance comparison<\/caption>/u);
       assert.match(markup, /<details[^>]*data-detailed-comparison/u);
-      assert.match(markup, /✓/u);
-      assert.match(markup, /×/u);
+      assert.match(markup, /data-quick-group="murph"/u);
+      assert.match(markup, /Where Murph goes further/u);
+      assert.match(
+        markup,
+        new RegExp(`Where ${escapeRegExp(comparison.name)} goes further`, "u"),
+      );
+      assert.match(markup, />Yes</u);
+      assert.match(markup, />No</u);
+      if (comparison.quickComparison.some((row) => row.murph === "connected")) {
+        assert.match(markup, />Via connection</u);
+        assert.match(markup, /Via connection means Murph uses it through a device or account you connect\./u);
+      }
       for (const row of comparison.quickComparison) {
         assert.ok(markup.includes(`>${row.capability}<`));
         assert.match(

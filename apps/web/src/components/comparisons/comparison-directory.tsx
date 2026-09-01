@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 
+import { ComparisonLogo } from "@/src/components/comparisons/comparison-logo";
 import {
   COMPARISON_CATEGORIES,
   type ComparisonCategoryId,
@@ -37,6 +38,7 @@ export function ComparisonDirectory({
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const normalizedQuery = normalizeSearchValue(query);
+  const searching = normalizedQuery.length > 0;
   const filteredComparisons = useMemo(() => {
     if (!normalizedQuery) {
       return comparisons;
@@ -62,10 +64,10 @@ export function ComparisonDirectory({
 
   return (
     <div
-      className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-14 sm:gap-16"
+      className={`grid min-w-0 grid-cols-[minmax(0,1fr)] ${searching ? "gap-10" : "gap-14 sm:gap-16"}`}
       data-comparison-directory
     >
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-8 border-b border-[#c4a882]/40 pb-10">
+      <div className={`grid min-w-0 grid-cols-[minmax(0,1fr)] gap-8 border-b border-[#c4a882]/40 ${searching ? "pb-6" : "pb-10"}`}>
         <div className="group block min-w-0 max-w-full">
           <label
             className="text-sm font-semibold text-[#5a6e32]"
@@ -121,7 +123,7 @@ export function ComparisonDirectory({
         <nav
           aria-label="Comparison categories"
           className="min-w-0 max-w-full"
-          hidden={Boolean(normalizedQuery)}
+          hidden={searching}
         >
           <ul className="grid grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-3 lg:grid-cols-4">
             {COMPARISON_CATEGORIES.map((category) => (
@@ -155,42 +157,58 @@ export function ComparisonDirectory({
               id={`category-${category.id}`}
               key={category.id}
             >
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:items-end lg:gap-16">
-                <div>
+              {searching ? (
+                <h2
+                  className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-[#736a58]"
+                  id={`category-${category.id}-heading`}
+                >
+                  {category.label}
+                  <span aria-hidden="true" className="ml-2 text-[#b39a76]">
+                    {categoryComparisons.length}
+                  </span>
+                </h2>
+              ) : (
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:items-end lg:gap-16">
                   <h2
                     className="font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.05] tracking-[-0.025em]"
                     id={`category-${category.id}-heading`}
                   >
                     {category.label}
                   </h2>
+                  <p className="max-w-[62ch] text-[0.9rem] leading-6 text-[#665d4c]">
+                    {category.description}
+                  </p>
                 </div>
-                <p className="max-w-[62ch] text-[0.9rem] leading-6 text-[#665d4c]">
-                  {category.description}
-                </p>
-              </div>
+              )}
 
-              <ul className="mt-7 grid grid-cols-2 gap-x-5 border-b border-[#c4a882]/35 sm:gap-x-8 lg:grid-cols-3">
+              <ul
+                className={`grid border-b border-[#c4a882]/35 sm:grid-cols-2 sm:gap-x-8 lg:grid-cols-3 ${searching ? "mt-3" : "mt-7"}`}
+              >
                 {categoryComparisons.map((comparison) => (
                   <li className="border-t border-[#c4a882]/35" key={comparison.slug}>
                     <Link
                       aria-label={`Compare Murph with ${comparison.name}`}
-                      className="group flex min-h-20 flex-col justify-center gap-3 py-4 sm:min-h-28 sm:justify-between sm:gap-4 sm:py-5"
+                      className="group flex min-h-[4.5rem] items-center gap-4 py-3.5 sm:min-h-24 sm:items-start sm:py-5"
                       href={`/compare/murph-vs-${comparison.slug}`}
                     >
-                      <span>
-                        <span className="block font-serif text-[1.15rem] font-semibold leading-tight tracking-[-0.02em] transition-colors group-hover:text-[#5a6e32] sm:text-[1.35rem]">
-                          {comparison.name}
+                      <ComparisonLogo
+                        className="size-11 shrink-0 rounded-xl border border-[#c4a882]/30 p-2 text-[#2d3436] sm:size-12"
+                        decorative
+                        imageClassName="max-h-7"
+                        name={comparison.name}
+                        slug={comparison.slug}
+                      />
+                      <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+                        <span className="flex items-center justify-between gap-3">
+                          <span className="min-w-0 font-serif text-[1.15rem] font-semibold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere] transition-colors group-hover:text-[#5a6e32] sm:text-[1.25rem]">
+                            {comparison.name}
+                          </span>
+                          <span aria-hidden="true" className="shrink-0 text-lg leading-none text-[#736a58] transition-transform group-hover:translate-x-1 group-hover:text-[#5a6e32]">
+                            →
+                          </span>
                         </span>
-                      </span>
-                      <span className="hidden items-end justify-between gap-4 text-[0.78rem] leading-5 text-[#665d4c] sm:flex">
-                        <span className="line-clamp-2">{comparison.headline}</span>
-                        <span aria-hidden="true" className="shrink-0 text-lg leading-none text-[#736a58] transition-transform group-hover:translate-x-1 group-hover:text-[#5a6e32]">
-                          →
-                        </span>
-                      </span>
-                      <span className="flex justify-end text-[#736a58] sm:hidden">
-                        <span aria-hidden="true" className="text-base leading-none transition-transform group-hover:translate-x-1 group-hover:text-[#5a6e32]">
-                          →
+                        <span className="hidden text-[0.78rem] leading-5 text-[#665d4c] sm:line-clamp-2">
+                          {comparison.headline}
                         </span>
                       </span>
                     </Link>
