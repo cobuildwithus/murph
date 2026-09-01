@@ -4902,7 +4902,7 @@ function shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(
     && wakeTimeMs <= resolveHostedAssistantPhaseNowMs(phaseInput);
 }
 
-function shouldPreflightHostedAssistantCronWakeFromDefaultProjection(
+function shouldPreflightHostedDefaultProcessingWake(
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
   const workspace = phaseInput.workspace;
@@ -5967,8 +5967,30 @@ async function runSystemMailboxMaintenancePhase(input: {
     pendingAssistantInputBlocksMaintenance
     && !foregroundCausalAttempted
     && !hasBackgroundSelection
-    && shouldPreflightHostedAssistantCronWakeFromDefaultProjection(phaseInput)
+    && shouldPreflightHostedDefaultProcessingWake(phaseInput)
   ) {
+    const providerCleanupWake = createHostedRuntimeWakeCandidate(
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: resolveHostedAssistantPhaseNowMs(phaseInput),
+        vaultRoot: phaseInput.restored.vaultRoot,
+      }),
+      HOSTED_ASSISTANT_WAKE_REASON,
+    );
+    if (
+      hostedRuntimeWakeCandidateIsDue(
+        providerCleanupWake,
+        resolveHostedAssistantPhaseNowMs(phaseInput),
+      )
+    ) {
+      return {
+        backgroundMaintenanceYielded: false,
+        continueAssistantLane: true,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt: null,
+        result: null,
+      };
+    }
     const preflightAssistantCronWakeState = await readAssistantCronWakeState();
     if (preflightAssistantCronWakeState.dueNow) {
       return {
