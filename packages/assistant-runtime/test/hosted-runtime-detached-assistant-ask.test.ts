@@ -12,6 +12,7 @@ import type {
 import { initializeVault } from "@murphai/core";
 import { buildHostedExecutionAssistantAskCompletedWake } from "@murphai/hosted-execution";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import type { HostedRuntimeAssistantAskControlRequest } from "@murphai/hosted-execution/runtime-control";
 import { describe, test, vi } from "vitest";
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -793,6 +794,7 @@ describe("hosted detached assistant ask controller", () => {
       );
       assert.equal(consentedInput.question, "Are you free Tuesday afternoon?");
       assert.equal(consentedInput.workspaceRoot, vaultRoot);
+      assert.equal(consentedInput.workspaceInspection, undefined);
       assert.deepEqual(completedResult, { answer: null, outcome: "cannot_answer" });
       assert.equal(usageRecords.length, 0);
       assert.equal(deferredUsageEffects.length, 1);
@@ -832,6 +834,73 @@ describe("hosted detached assistant ask controller", () => {
       ]);
     } finally {
       await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("enables workspace reads for a group-runtime operator diagnostic without delivery authority", async () => {
+    const groupRuntimeRoot = await createVaultRoot();
+    const executeConsentedAsk = vi.fn(async (
+      _input: ConsentedReadOnlyAssistantAskInput,
+    ): Promise<ReadOnlyAssistantAskResult> => ({
+      answer: "Synthetic diagnostic answer.",
+      outcome: "answered",
+    }));
+    const assistantAskRequest = vi.fn(async (
+      request: HostedRuntimeAssistantAskControlRequest,
+    ) => request.action === "prepare"
+      ? {
+          action: "prepare" as const,
+          disclosure: { permissionText: "Inspect this workspace only." },
+          question: "What is the synthetic status?",
+          status: "ready" as const,
+          targetLabel: null,
+        }
+      : { action: "complete" as const, status: "completed" as const });
+
+    try {
+      await writePending(groupRuntimeRoot, [
+        createPendingAsk({
+          eventId: "ask_event_operator_diagnostic",
+          itemId: "item_operator_diagnostic",
+          operator: true,
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          request: assistantAskRequest,
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        executeConsentedAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot: groupRuntimeRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal(
+          (await readHostedSystemMailboxState(groupRuntimeRoot)).pending.length,
+          0,
+        );
+      });
+      await controller.closeAndRequeue();
+
+      const operatorInput = executeConsentedAsk.mock.calls[0]?.[0];
+      assert.ok(operatorInput);
+      assert.equal(operatorInput.workspaceInspection, "read_tools");
+      assert.equal(operatorInput.workspaceRoot, groupRuntimeRoot);
+      assert.deepEqual(assistantAskRequest.mock.calls[1]?.[0], {
+        action: "complete",
+        requestId: "ask_event_operator_diagnostic",
+        result: {
+          answer: "Synthetic diagnostic answer.",
+          outcome: "answered",
+        },
+      });
+    } finally {
+      await removeVaultRoot(groupRuntimeRoot);
     }
   });
 
@@ -1471,6 +1540,7 @@ function createPendingAsk(input: {
   currentSender?: boolean;
   eventId: string;
   itemId: string;
+  operator?: boolean;
 }): HostedSystemMailboxPendingItem {
   return {
     attemptCount: 0,
@@ -1487,7 +1557,16 @@ function createPendingAsk(input: {
     routeAction: "run-assistant-ask",
     status: "pending",
     wake: {
-      ask: input.currentSender
+      ask: input.operator
+        ? {
+            expiresAt: "2026-07-15T12:10:00.000Z",
+            question: "operator diagnostic question",
+            target: {
+              kind: "operator_task" as const,
+              taskId: "opt_synthetic_diagnostic",
+            },
+          }
+        : input.currentSender
         ? {
             expiresAt: "2026-07-15T12:10:00.000Z",
             origin: {

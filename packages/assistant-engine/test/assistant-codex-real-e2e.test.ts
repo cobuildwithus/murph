@@ -32,6 +32,7 @@ import {
 } from '@murphai/core'
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
+  HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT,
 } from '@murphai/hosted-execution'
 import {
   buildMurphHostedPermissionProfileTomlLines,
@@ -79,6 +80,7 @@ import {
   resolveCodexCommandFamily,
 } from '../src/assistant-codex/command-family.ts'
 import {
+  executeConsentedReadOnlyAssistantAsk,
   executeReadOnlyAssistantAsk,
 } from '../src/assistant-ask.ts'
 import {
@@ -11137,6 +11139,128 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
       }
     },
     720_000,
+  )
+})
+
+describeRealCodex('real Codex operator diagnostic read tools e2e', () => {
+  it(
+    'reads an automation support kind without changing canonical state',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const vaultRoot = await mkdtemp(
+        path.join(tmpdir(), 'murph-operator-diagnostic-e2e-'),
+      )
+      let permissionHomePaths: string[] = []
+
+      try {
+        await initializeVault({
+          timezone: 'America/Denver',
+          vaultRoot,
+        })
+        const projectConfigDirectory = path.join(vaultRoot, '.codex')
+        const projectMcpMarker = path.join(
+          vaultRoot,
+          'synthetic-project-mcp-started',
+        )
+        await mkdir(projectConfigDirectory, { recursive: true })
+        await writeFile(
+          path.join(projectConfigDirectory, 'config.toml'),
+          [
+            '[mcp_servers.synthetic_workspace_trap]',
+            'command = "/usr/bin/touch"',
+            `args = [${tomlString(projectMcpMarker)}]`,
+            'startup_timeout_sec = 1',
+            '',
+          ].join('\n'),
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: 'Summarize the synthetic workspace status this evening.',
+          now: new Date('2026-06-14T12:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: 'synthetic-workspace-summary',
+            identityId: null,
+            participantId: null,
+            threadId: 'synthetic-workspace-summary',
+            threadIsDirect: false,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '21:17' },
+          slug: 'synthetic-evening-workspace-summary',
+          status: 'active',
+          supportKind: 'review',
+          tags: [],
+          title: 'Synthetic evening workspace summary',
+          vaultRoot,
+        })
+        const canonicalVaultBefore = await snapshotRealCodexCanonicalVault(
+          vaultRoot,
+        )
+        const permissionConfig =
+          await materializeRealCodexHostedPermissionHome(config, {
+            trustedProjectRoot: vaultRoot,
+          })
+        permissionHomePaths = permissionConfig.temporaryPaths
+
+        const result = await executeConsentedReadOnlyAssistantAsk({
+          answerMode: 'caller_handoff',
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: permissionConfig.codexHome,
+          env: config.env,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          now: new Date('2026-06-15T12:00:00.000Z'),
+          onProviderUsage: ({ usage }) => {
+            recordRealCodexProviderUsage(usage.usage)
+          },
+          permissionText:
+            HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT,
+          question: [
+            'Inspect the one active evening workspace-summary automation in this workspace.',
+            'Return only its exact automation ID, persisted support kind, schedule, and workspace timezone.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          workspaceInspection: 'read_tools',
+          workspaceRoot: vaultRoot,
+        })
+
+        expect(result.outcome).toBe('answered')
+        if (result.outcome !== 'answered') {
+          throw new Error('Expected the operator diagnostic to answer.')
+        }
+        expect(result.answer).toContain(
+          createdAutomation.record.automationId,
+        )
+        expect(result.answer).toMatch(/\breview\b/iu)
+        expect(result.answer).toMatch(/(?:21:17|9:17\s*p\.?m\.?)\b/iu)
+        expect(result.answer).toContain('America/Denver')
+        expect(result.answer).not.toContain(vaultRoot)
+        expect(result.answer).not.toMatch(
+          /(?:\.codex|\.runtime|bank\/|MCP|permission profile|read-only tools|workspace root)/iu,
+        )
+        console.info(
+          `[real-codex operator diagnostic] ${result.answer.replaceAll(/\s+/gu, ' ').trim()}`,
+        )
+        await expect(
+          readFile(projectMcpMarker, 'utf8'),
+        ).rejects.toMatchObject({ code: 'ENOENT' })
+        await expect(
+          snapshotRealCodexCanonicalVault(vaultRoot),
+        ).resolves.toEqual(
+          canonicalVaultBefore,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          vaultRoot,
+          ...permissionHomePaths,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 })
 
@@ -23590,6 +23714,35 @@ async function listMaterializedSkillAssetPaths(
   return assets
 }
 
+async function snapshotRealCodexCanonicalVault(
+  vaultRoot: string,
+): Promise<Record<string, string>> {
+  const files: Array<[string, string]> = []
+  const visit = async (directory: string, relativeDirectory: string) => {
+    const entries = await readdir(directory, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name))
+    for (const entry of entries) {
+      const absolutePath = path.join(directory, entry.name)
+      const relativePath = path.join(relativeDirectory, entry.name)
+      if (relativePath === '.runtime') {
+        continue
+      }
+      if (entry.isDirectory()) {
+        await visit(absolutePath, relativePath)
+      } else if (entry.isFile()) {
+        files.push([
+          relativePath,
+          createHash('sha256')
+            .update(await readFile(absolutePath))
+            .digest('hex'),
+        ])
+      }
+    }
+  }
+  await visit(vaultRoot, '')
+  return Object.fromEntries(files)
+}
+
 async function readUnexpectedSkillPolicyActionIndexes(input: {
   actions: readonly CapabilityRoutingAction[]
   allowedRelativePaths: readonly string[]
@@ -27621,6 +27774,7 @@ function buildRealCodexConfigToml(input: {
 
 async function materializeRealCodexHostedPermissionHome(
   config: RealCodexE2eConfig,
+  options?: { trustedProjectRoot?: string },
 ): Promise<{ codexHome: string; temporaryPaths: string[] }> {
   const codexHome = await mkdtemp(
     path.join(tmpdir(), 'murph-codex-hosted-permissions-home-'),
@@ -27629,7 +27783,17 @@ async function materializeRealCodexHostedPermissionHome(
   try {
     await writeFile(
       path.join(codexHome, 'config.toml'),
-      buildRealCodexHostedPermissionConfigToml(config),
+      [
+        buildRealCodexHostedPermissionConfigToml(config).trimEnd(),
+        ...(options?.trustedProjectRoot
+          ? [
+              '',
+              `[projects.${tomlKey(options.trustedProjectRoot)}]`,
+              'trust_level = "trusted"',
+              '',
+            ]
+          : []),
+      ].join('\n'),
       {
         encoding: 'utf8',
         mode: 0o600,

@@ -982,7 +982,13 @@ keep the one-second presentation-only deadline and late-result rejection.
   leaking or silently consuming work. Replay/restart and concurrent
   admission/completion proofs assert one canonical request per source and
   exactly one authorized terminal experience, including private exact-text
-  delivery and no cross-audience completion. The opt-in PostgreSQL cases run the
+  delivery and no cross-audience completion. A focused synthetic operator
+  engine-level diagnostic live journey reads canonical automation metadata from its exact
+  target workspace while remaining in an isolated process directory; a trusted
+  target-local MCP config cannot start its marker process, and canonical vault
+  files remain byte-for-byte unchanged. Runtime routing proves only an
+  `operator_task` selects workspace inspection, and the signed group-runtime
+  control route completes privately without a delivery handoff. The opt-in PostgreSQL cases run the
   same transaction and lock owners against a real database. The production-like
   Linux proof must still show committed group reads succeed while writes,
   `.runtime/**`, `.codex/**`, environment files, other roots, inherited shell

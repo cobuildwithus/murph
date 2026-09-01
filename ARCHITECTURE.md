@@ -366,14 +366,20 @@ consumer-first cutover live in
 
 ### Operator tasks
 
-Allowlisted Web operators may admit one member-bound `diagnostic` or
-`member_message` task. `HostedOperatorTask` owns only audit/status and the
+Allowlisted Web operators may admit one target-runtime-bound `diagnostic` or
+member-bound `member_message` task. A diagnostic target may be an active
+personal or group runtime. `HostedOperatorTask` owns only audit/status and the
 encrypted private diagnostic result. The existing encrypted system mailbox is
 the work queue: diagnostics reuse `assistant.ask.requested`, while messages
 reuse `assistant.notification.requested` and the ordinary transcript/outbox
 delivery path. The exported Web admission function is the single entry point
 for Ops, workflows, and future cron callers; callers supply a stable
 idempotency key rather than creating another scheduler or delivery owner.
+The diagnostic answer candidate starts in an isolated working directory and
+receives the exact targeted workspace path as immutable host prompt data. It may
+use Codex's native read tools under the existing `murph-group-read` profile.
+The separate disclosure reviewer remains tool-free and isolated from that
+workspace; diagnostics have no network, dynamic effect tool, or delivery port.
 
 Assistant Ask is one typed request/reply primitive over the existing encrypted
 hosted mailbox. `assistant.ask.requested` carries one bounded question to an
@@ -597,16 +603,19 @@ account-deletion owners.
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
 one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
-Server process. The trusted group target adapter supplies the authorized root
+Server process. The trusted target adapter supplies the authorized root
 and bounded committed conversation evidence; the model cannot choose either.
-The native `murph-group-read` permission profile then exposes the live group
+The native `murph-group-read` permission profile then exposes the live target
 read: exact workspace roots are read-only, `.runtime/**`, `.codex/**`, and
 retired vault-share projection roots, and environment files are denied; tool
-network is off, shell commands inherit no secrets, and the child receives only
-the consent-aware narrow legacy `murph.group/read_shared` dynamic tool, with no mutation
-or delivery authority.
-The thread request supplies the exact profile, roots, empty working directory,
-disabled instruction sources, and approval policy. The App Server response is
+network is off, shell commands inherit no secrets, and no child receives mutation
+or delivery authority. Joined-group asks receive only the consent-aware narrow
+legacy `murph.group/read_shared` dynamic tool; consented and operator candidates
+and disclosure reviewers receive no dynamic tools.
+The thread request supplies the exact profile, roots, disabled instruction sources,
+and approval policy. Every candidate and reviewer uses an empty working
+directory; an authenticated operator diagnostic selected for read-tool inspection
+receives the exact target path as quoted host prompt data. The App Server response is
 not an authorization boundary; production-like Linux smoke proves the
 profile's actual filesystem, environment, and network enforcement.
 The child never shares the resident process, provider thread, interruption

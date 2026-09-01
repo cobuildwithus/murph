@@ -920,10 +920,13 @@ system-message execution and starts at most one `executeReadOnlyAssistantAsk`
 promise. That call launches a separate one-shot App Server process with the
 native `murph-group-read` profile, exact runtime workspace roots, `.runtime/**`,
 `.codex/**`, and environment-file denial, no tool network or inherited shell
-secrets, and only the consent-aware lazy `murph.group/read_shared` dynamic
-tool, with no mutation or delivery authority. The thread request supplies the
-exact profile, roots, sealed empty working directory, disabled instruction
-sources, and approval policy. Its response is not an authorization boundary;
+secrets, and no mutation or delivery authority. A joined-group child receives
+only the consent-aware lazy `murph.group/read_shared` dynamic tool; consented
+and operator candidates and disclosure reviewers receive no dynamic tools. The
+thread request supplies the exact profile, roots, disabled instruction sources,
+and approval policy. Every candidate and reviewer uses a sealed empty working
+directory; an authenticated operator diagnostic selected for read-tool inspection
+receives the exact target path as quoted host prompt data. Its response is not an authorization boundary;
 production-like Linux smoke proves the resulting filesystem, environment, and
 network enforcement. Further asks stay
 pending in the mailbox. The resident process remains the sole model-authored
