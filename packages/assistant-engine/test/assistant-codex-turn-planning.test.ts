@@ -368,12 +368,12 @@ describe('assistant Codex turn planning', () => {
     expect(Object.fromEntries(
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toEqual({
-      direct: 'f40eda46aa1823ab1ce4d021707f532c6186f01e94b242fa3fe15582bf099dd8',
-      group: 'a15bed8837225bcbf50db839b068fe56ce0beb6d9e185c8853389b910480e3f5',
+      direct: '08316537c7d6f2fe01d72673c3e6a82b37ea8e5df9fc0f2df151b0b3cbedd80e',
+      group: '5d052e0cfe862834f85b8c914acf69f500f2a35c61a52ab7e1d609bb2b7da69f',
       maintenance: '5abc4da7e3a77608be9324bee78a5ebadd6cfbf972827a4fe2fb05174585c250',
       outputOnly: '22bb678775ca7810731ab679a950ed62ab787b819f322a308cd4fbfb05f46bb2',
       scheduledEmail:
-        'b7567f42d3e45593e53e2d870897eb8e2dbf0d53df9f6c7254ae852c3b4490ab',
+        '719c2ccd3643a562c9c459c3b1661811cd9710131a713e4fe090c770087b7bf3',
     })
   })
 

@@ -2079,8 +2079,8 @@ describe('assistant system prompt cache stability', () => {
     // longitudinal recommendation policy, narrowest-relevant-safety rule,
     // response-card dietary/burn target-authority boundary, explicit
     // group-family tool routing, and the cross-route CLI error-recovery
-    // contract set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_542)
+    // contract plus the public goal workflow owner set this exact ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_554)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
