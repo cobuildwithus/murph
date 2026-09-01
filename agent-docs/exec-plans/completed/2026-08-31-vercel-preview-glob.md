@@ -1,6 +1,6 @@
 # Prevent slash-named Vercel preview deployments
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-08-31
 
@@ -65,3 +65,14 @@ Updated: 2026-08-31
   - `git diff --check`
 - Expected outcomes: the focused suite proves `main` enabled and representative
   non-production branches disabled; complexity and whitespace checks pass.
+
+## Completion evidence
+
+- Focused hosted Web config suite: 68 tests passed.
+- Hosted Web typecheck: passed.
+- Complexity diff, docs drift, and whitespace checks: passed.
+- Live Vercel check: no deployment record was created for either pushed
+  slash-named candidate head.
+- ReviewGPT round 1: `ROUND_OUTCOME: PASS` with no findings.
+- Required GitHub checks on the reviewed candidate head: all passed.
+Completed: 2026-08-31
