@@ -1,6 +1,6 @@
 # Carry hosted snapshot refs into v2 materialization
 
-Status: active
+Status: completed
 Created: 2026-09-01
 Updated: 2026-09-01
 
@@ -47,4 +47,7 @@ Updated: 2026-09-01
 - Passed: assistant-runtime package typecheck.
 - Passed: cyclomatic-complexity diff after moving conditional resolution outside the existing runtime hotspots; no changed-file debt or maximum increased.
 - Passed: `git diff --check` and parent inspection of the source, test, and plan diff.
-- Pending: exact-head required GitHub Actions, final ReviewGPT, and merge.
+- Passed: PR evidence validation on the candidate head.
+- Passed: final ReviewGPT full-patch audit on the candidate head with no qualifying findings.
+- Required GitHub Actions remain the merge gate on the final documentation-only completion head.
+Completed: 2026-09-01
