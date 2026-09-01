@@ -1,6 +1,6 @@
 # Upgrade Incur 0.5.1 and type parse failures
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-08-31
 
@@ -33,10 +33,12 @@ Updated: 2026-08-31
 - The bundled CLI directly declares the new Incur runtime/type dependencies,
   package-shape verification passes, and the lockfile has no unrelated churn or
   release-age bypass for Incur 0.5.1.
-- Native parse failures return exit 1, `VALIDATION_ERROR`, a fixed generic
-  message, non-retryable status, validation stage, fixed help hint, and a single
-  generic `arguments` field issue without submitted values, raw causes, paths,
-  or provider details.
+- Native parse and outer validation failures return exit 1, `VALIDATION_ERROR`,
+  fixed non-retryable validation guidance, and no submitted values, raw causes,
+  nested paths, or provider details. Parse failures use `arguments`; opted-in
+  public schemas may expose only an owned top-level field name; fixed config
+  classifications expose only `config` plus missing-or-invalid state; private
+  or unknown validation falls back to `input`.
 - Unexpected exceptions still return `UNKNOWN`; a nearby valid command produces
   the same successful result and malformed input performs no vault write.
 - Config/type/skill artifacts regenerate idempotently through Incur's declared
@@ -208,15 +210,16 @@ Updated: 2026-08-31
   of the release-age exception list. `pnpm why incur -r --depth 1` confirms
   exactly those three versions and owners.
 - 2026-08-31: Canonical patch SHA-256 is
-  `b1daf247232c2b2abb2dc0140f668fa1f986445c5941d8461f0404d361e9a3e5`.
+  `ea430fcb868b6c81cbb521247c7300e6a189f527249c650e4d045b4b96cb3fcf`.
   Source and emitted runtime now project native parse/outer validation failures
   to fixed non-echoing `VALIDATION_ERROR` envelopes across CLI, fetch, HTTP,
   MCP streaming, and internal execution. Early built-in/global failures share
   one safe renderer that honors explicit machine formats and retains the fixed
-  recovery hint in TTY output. Unexpected exceptions deliberately remain
-  `UNKNOWN`; generic unexpected messages and the pre-existing update, skills,
-  MCP-add, and doctor diagnostic paths remain outside this production
-  parse/validation fix.
+  recovery hint in TTY output. Public schema detail is opt-in and limited to an
+  owned top-level field; missing, invalid, and unreadable config files use fixed
+  privacy-safe classes. Unexpected exceptions deliberately remain `UNKNOWN`;
+  generic unexpected messages and the pre-existing update, skills, MCP-add, and
+  doctor diagnostic paths remain outside this production parse/validation fix.
 - 2026-08-31: The generator resolves Incur's declared package-relative
   `bin.incur` target. Two final post-install generation passes were byte-stable:
   config schema `40e69691a36bcdd408f35e5de28a60672a6d916d491076aaabc0dbc5c2721cc5`,
@@ -229,13 +232,12 @@ Updated: 2026-08-31
   high, 39 moderate, 6 low); machine-readable inspection found zero advisory
   paths referencing Incur, the new MCP server, or Scalar dependency. The only
   matching CLI-consumer path is unchanged `sharp`.
-- 2026-08-31: Final deterministic proof passed: focused Incur/config suite
-  83/83; complete `pnpm verify:cli` 427/427 across 21 files; setup bridge 1/1;
-  runner bundle 17/17; focused
-  release guards 2/2; CLI package shape; CLI, setup CLI,
-  assistant CLI, assistant engine, and Cloudflare typechecks; CLI, setup CLI,
-  assistant CLI, and Cloudflare builds; docs drift and gardening; and
-  `git diff --check`.
+- 2026-08-31: Final deterministic proof passed: focused final remediation
+  10/10; complete `pnpm verify:cli` 431/431 across 21 files; runner bundle
+  17/17; changelog registry/archive 55/55; focused release guards 2/2; CLI
+  package shape; CLI, setup CLI, assistant CLI, assistant engine, and Cloudflare
+  typechecks; CLI, setup CLI, assistant CLI, and Cloudflare builds; docs drift
+  and gardening; complexity with zero debt; and `git diff --check`.
 - 2026-08-31: The opt-in real release-tarball test passed and proves bundled
   Incur 0.5.1, `./dist/cli/index.js`, retained runtime/source entrypoints, and
   omission of non-runtime docs and test/type-test sources. The initial tarball
@@ -265,8 +267,9 @@ Updated: 2026-08-31
   `pnpm patch-commit` is recorded as
   `20260831182059-pnpm-patch-commit`; unrelated peer snapshot rewrites were
   removed from the candidate lockfile before the final frozen install.
-- 2026-08-31: Public changelog authoring remains intentionally deferred until
-  the parent creates a real PR number; no source PR was invented.
+- 2026-08-31: Public changelog entry
+  `murph-recovers-from-invalid-command-inputs` now references real PR #2666;
+  no source PR was invented before that number existed.
 - 2026-08-31: A final transitive-graph review proved that ordinary lockfile
   deduplication had moved ReviewGPT's patched Incur 0.4.5 from its compatible
   MCP server alpha.2 to alpha.4, where that older Incur build cannot construct
@@ -302,3 +305,16 @@ Updated: 2026-08-31
   public entry `2026-08-31 · murph-recovers-from-invalid-command-inputs`;
   the production changelog archive test passes 9/9 and directly renders the
   authored title, summary, details, and source link.
+- 2026-08-31: Final ReviewGPT recovery finding accepted. One closed
+  `ParseError.kind` discriminator now classifies arguments and the three owned
+  config outcomes; `ValidationError.publicIssues` is opt-in and carries only a
+  schema-owned top-level path, missing state, and allowlisted code. Raw Zod
+  messages, values, nested paths, causes, and filesystem paths remain private;
+  unknown or private validation uses the generic fallback. No subclass,
+  dependency, service, state owner, or compatibility layer was added.
+- 2026-08-31: Final packaged-patch parity, privacy, coverage, simplicity, and
+  task-finish audits report `PASS`. The focused real-Codex recovery journey is
+  `Ready` on the first authorized alternate subscription home after the default
+  home failed before provider action: two import attempts, exactly one durable
+  synthetic meal, no help loop or third attempt, and concise truthful prose.
+Completed: 2026-08-31

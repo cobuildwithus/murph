@@ -624,7 +624,7 @@ test('meal edit rejects a non-IANA timezone in the final repair envelope', async
   if (!result.envelope.ok) {
     assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
     assert.equal(result.envelope.error.message, 'The command input is invalid.')
-    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'input')
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'timeZone')
   }
   assert.doesNotMatch(JSON.stringify(result.envelope), /Private\/TimezoneSentinel/u)
 })
@@ -1039,7 +1039,7 @@ test.sequential(
       assert.equal(whitespaceOnlyMeal.ok, false)
       assert.equal(whitespaceOnlyMeal.error?.code, 'VALIDATION_ERROR')
       assert.equal(whitespaceOnlyMeal.error?.message, 'The command input is invalid.')
-      assert.equal(whitespaceOnlyMeal.error?.fieldErrors?.[0]?.path, 'input')
+      assert.equal(whitespaceOnlyMeal.error?.fieldErrors?.[0]?.path, 'note')
 
       const currentMeal = requireData(
         await runSourceCli<MealAddEnvelope>([

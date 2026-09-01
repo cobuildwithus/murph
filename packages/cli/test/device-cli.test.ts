@@ -165,7 +165,14 @@ test('device account provider inputs reject public connect targets before daemon
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
       assert.equal(result.envelope.error.message, 'The command input is invalid.')
-      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'input')
+      assert.deepEqual(result.envelope.error.fieldErrors?.[0], {
+        code: 'custom',
+        missing: false,
+        path: 'provider',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      })
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -188,7 +195,14 @@ test('device connect rejects Junction as a public connect target', async () => {
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
       assert.equal(result.envelope.error.message, 'The command input is invalid.')
-      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'input')
+      assert.deepEqual(result.envelope.error.fieldErrors?.[0], {
+        code: 'custom',
+        missing: false,
+        path: 'provider',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      })
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

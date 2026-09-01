@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
-import { Cli, Errors, Mcp, z } from 'incur'
+import { Cli, Errors, Mcp, Parser, z } from 'incur'
 import { EVENT_KINDS } from '@murphai/contracts'
 import { initializeVault } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -359,13 +359,8 @@ async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, str
   return snapshot.sort(([left], [right]) => left.localeCompare(right))
 }
 
-function assertSafeParseValidationEnvelope(envelope: CliEnvelope<unknown>): void {
-  assert.equal(envelope.ok, false)
-  if (envelope.ok) {
-    assert.fail('Expected malformed command arguments to fail.')
-  }
-
-  assert.deepEqual(envelope.error, {
+function assertSafeParseValidationError(error: unknown): void {
+  assert.deepEqual(error, {
     code: 'VALIDATION_ERROR',
     message: 'The command arguments are invalid.',
     retryable: false,
@@ -374,6 +369,7 @@ function assertSafeParseValidationEnvelope(envelope: CliEnvelope<unknown>): void
     fieldErrors: [
       {
         code: 'custom',
+        missing: false,
         path: 'arguments',
         expected: '',
         received: 'invalid',
@@ -383,13 +379,24 @@ function assertSafeParseValidationEnvelope(envelope: CliEnvelope<unknown>): void
   })
 }
 
-function assertSafeInputValidationEnvelope(envelope: CliEnvelope<unknown>): void {
+function assertSafeParseValidationEnvelope(envelope: CliEnvelope<unknown>): void {
   assert.equal(envelope.ok, false)
   if (envelope.ok) {
-    assert.fail('Expected invalid command input to fail.')
+    assert.fail('Expected malformed command arguments to fail.')
   }
 
-  assert.deepEqual(envelope.error, {
+  assertSafeParseValidationError(envelope.error)
+}
+
+function assertSafeInputValidationError(
+  error: unknown,
+  field: { code: string; missing: boolean; path: string } = {
+    code: 'custom',
+    missing: false,
+    path: 'input',
+  },
+): void {
+  assert.deepEqual(error, {
     code: 'VALIDATION_ERROR',
     message: 'The command input is invalid.',
     retryable: false,
@@ -397,15 +404,67 @@ function assertSafeInputValidationEnvelope(envelope: CliEnvelope<unknown>): void
     stage: 'validation',
     fieldErrors: [
       {
-        code: 'custom',
-        path: 'input',
+        ...field,
         expected: '',
-        received: 'invalid',
-        message: 'This field is invalid.',
+        received: field.missing ? 'missing' : 'invalid',
+        message: field.missing ? 'This field is required.' : 'This field is invalid.',
       },
     ],
   })
 }
+
+function assertSafeInputValidationEnvelope(
+  envelope: CliEnvelope<unknown>,
+  field: { code: string; missing: boolean; path: string } = {
+    code: 'custom',
+    missing: false,
+    path: 'input',
+  },
+): void {
+  assert.equal(envelope.ok, false)
+  if (envelope.ok) {
+    assert.fail('Expected invalid command input to fail.')
+  }
+
+  assertSafeInputValidationError(envelope.error, field)
+}
+
+test('public schema repair details reject private paths and unknown issue codes', () => {
+  const privateMarker = 'PrivateSchemaProjectionMarker'
+  const schema = z.object({ visible: z.string() }).superRefine((_value, context) => {
+    context.addIssue({ code: 'custom', message: privateMarker, path: [] })
+    context.addIssue({
+      code: 'custom',
+      message: privateMarker,
+      path: [privateMarker, 'nested'],
+    })
+  })
+  let caught: unknown
+
+  try {
+    Parser.zodParse(schema, { visible: 'ok' }, { exposeSchemaFields: true })
+  } catch (error) {
+    caught = error
+  }
+
+  assert.ok(caught instanceof Errors.ValidationError)
+  const privatePathError = Errors.toErrorEnvelope(caught)
+  assertSafeInputValidationError(privatePathError)
+  assert.equal(JSON.stringify(privatePathError).includes(privateMarker), false)
+
+  const unknownCodeError = Errors.toErrorEnvelope(
+    new Errors.ValidationError({
+      message: privateMarker,
+      publicIssues: [{ code: privateMarker, missing: false, path: 'visible' }],
+    }),
+  )
+  assertSafeInputValidationError(unknownCodeError, {
+    code: 'custom',
+    missing: false,
+    path: 'visible',
+  })
+  assert.equal(JSON.stringify(unknownCodeError).includes(privateMarker), false)
+})
 
 test('root help exposes the Incur built-ins and simple health CRUD command groups', async () => {
   const help = await runSourceCliRaw(['--help'])
@@ -576,6 +635,7 @@ test('early validation failures honor explicit JSON and retain the human recover
     fieldErrors: [
       {
         code: 'custom',
+        missing: false,
         path: 'arguments',
         expected: '',
         received: 'invalid',
@@ -600,8 +660,9 @@ test('early validation failures honor explicit JSON and retain the human recover
     stage: 'validation',
     fieldErrors: [
       {
-        code: 'custom',
-        path: 'input',
+        code: 'invalid_type',
+        missing: false,
+        path: 'limit',
         expected: '',
         received: 'invalid',
         message: 'This field is invalid.',
@@ -668,7 +729,11 @@ test('native command and HTTP validation errors use safe envelopes', async () =>
     privateMarker,
   ])
   assert.equal(commandResult.exitCode, 1)
-  assertSafeInputValidationEnvelope(commandResult.envelope)
+  assertSafeInputValidationEnvelope(commandResult.envelope, {
+    code: 'custom',
+    missing: false,
+    path: 'value',
+  })
   assert.equal(JSON.stringify(commandResult.envelope).includes(privateMarker), false)
   assert.equal(commandCalls, 0)
 
@@ -689,7 +754,11 @@ test('native command and HTTP validation errors use safe envelopes', async () =>
   const fetchEnvelope = (await response.json()) as CliEnvelope<unknown>
 
   assert.equal(response.status, 400)
-  assertSafeInputValidationEnvelope(fetchEnvelope)
+  assertSafeInputValidationEnvelope(fetchEnvelope, {
+    code: 'custom',
+    missing: false,
+    path: 'credential',
+  })
   assert.equal(JSON.stringify(fetchEnvelope).includes(privateMarker), false)
   assert.equal(fetchCalls, 0)
 
@@ -738,6 +807,183 @@ test('native command and HTTP validation errors use safe envelopes', async () =>
   )
   assert.equal(gatewayResponse.status, 200)
   assert.equal(forwardedBody, JSON.stringify({ value: privateMarker }))
+})
+
+test('config failures expose a safe repair target without paths or contents', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'incur-config-recovery-'))
+  const privateMarker = 'PrivateConfigRecoveryMarker'
+  const missingPath = path.join(tempRoot, `${privateMarker}.json`)
+  const invalidPath = path.join(tempRoot, 'invalid.json')
+  const validPath = path.join(tempRoot, 'valid.json')
+  let handlerCalls = 0
+  const cli = Cli.create('config-recovery-smoke', {
+    config: { flag: 'config' },
+  }).command('check', {
+    run() {
+      handlerCalls += 1
+      return { ok: true }
+    },
+  })
+
+  try {
+    await writeFile(invalidPath, `{ "private": "${privateMarker}"`)
+    await writeFile(validPath, JSON.stringify({ commands: { check: {} } }))
+
+    const missing = await runJsonCli(cli, ['check', '--config', missingPath])
+    assert.equal(missing.exitCode, 1)
+    assert.equal(missing.envelope.ok, false)
+    if (!missing.envelope.ok) {
+      assert.deepEqual(missing.envelope.error, {
+        code: 'VALIDATION_ERROR',
+        message: 'The selected config file was not found.',
+        retryable: false,
+        hint: 'Select an existing config file or omit the config override and retry.',
+        stage: 'validation',
+        fieldErrors: [
+          {
+            code: 'custom',
+            missing: true,
+            path: 'config',
+            expected: '',
+            received: 'missing',
+            message: 'This field is required.',
+          },
+        ],
+      })
+    }
+
+    const invalid = await runJsonCli(cli, ['check', '--config', invalidPath])
+    assert.equal(invalid.exitCode, 1)
+    assert.equal(invalid.envelope.ok, false)
+    if (!invalid.envelope.ok) {
+      assert.deepEqual(invalid.envelope.error, {
+        code: 'VALIDATION_ERROR',
+        message: 'The command configuration is invalid.',
+        retryable: false,
+        hint: 'Correct the command configuration and retry.',
+        stage: 'validation',
+        fieldErrors: [
+          {
+            code: 'custom',
+            missing: false,
+            path: 'config',
+            expected: '',
+            received: 'invalid',
+            message: 'This field is invalid.',
+          },
+        ],
+      })
+    }
+
+    const unavailable = await runJsonCli(cli, ['check', '--config', tempRoot])
+    assert.equal(unavailable.exitCode, 1)
+    assert.equal(unavailable.envelope.ok, false)
+    if (!unavailable.envelope.ok) {
+      assert.deepEqual(unavailable.envelope.error, {
+        code: 'VALIDATION_ERROR',
+        message: 'The config file could not be read.',
+        retryable: false,
+        hint: 'Check that the selected config file is readable and retry.',
+        stage: 'validation',
+        fieldErrors: [
+          {
+            code: 'custom',
+            missing: false,
+            path: 'config',
+            expected: '',
+            received: 'invalid',
+            message: 'This field is invalid.',
+          },
+        ],
+      })
+    }
+
+    assert.equal(handlerCalls, 0)
+    assert.equal(JSON.stringify(missing.envelope).includes(privateMarker), false)
+    assert.equal(JSON.stringify(invalid.envelope).includes(privateMarker), false)
+    assert.equal(JSON.stringify(unavailable.envelope).includes(tempRoot), false)
+
+    const valid = await runJsonCli(cli, ['check', '--config', validPath])
+    assert.equal(valid.exitCode, null)
+    assert.equal(valid.envelope.ok, true)
+    assert.equal(handlerCalls, 1)
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
+  }
+})
+
+test('config structural failures share one fixed invalid recovery', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'incur-config-structure-'))
+  const configPath = path.join(tempRoot, 'config.json')
+  const privateMarker = 'PrivateConfigStructureMarker'
+  const expectedError = {
+    code: 'VALIDATION_ERROR',
+    message: 'The command configuration is invalid.',
+    retryable: false,
+    hint: 'Correct the command configuration and retry.',
+    stage: 'validation',
+    fieldErrors: [
+      {
+        code: 'custom',
+        missing: false,
+        path: 'config',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+    ],
+  }
+  let handlerCalls = 0
+  const fileCli = Cli.create('config-structure-smoke', {
+    config: { flag: 'config' },
+  }).command('check', {
+    options: z.object({ known: z.boolean().optional() }),
+    run() {
+      handlerCalls += 1
+      return { ok: true }
+    },
+  })
+
+  try {
+    for (const config of [
+      { commands: { check: { options: privateMarker } } },
+      { commands: { check: { options: { [privateMarker]: true } } } },
+    ]) {
+      await writeFile(configPath, JSON.stringify(config))
+      const result = await runJsonCli(fileCli, ['check', '--config', configPath])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (!result.envelope.ok) assert.deepEqual(result.envelope.error, expectedError)
+      assert.equal(JSON.stringify(result.envelope).includes(privateMarker), false)
+    }
+
+    const loaderConfig = {
+      flag: 'config',
+      loader: () => ({}),
+    }
+    assert.equal(Reflect.set(loaderConfig, 'loader', () => privateMarker), true)
+    const loaderCli = Cli.create('config-loader-smoke', {
+      config: loaderConfig,
+    }).command('check', {
+      run() {
+        handlerCalls += 1
+        return { ok: true }
+      },
+    })
+    const loaderResult = await runJsonCli(loaderCli, [
+      'check',
+      '--config',
+      path.join(tempRoot, privateMarker),
+    ])
+    assert.equal(loaderResult.exitCode, 1)
+    assert.equal(loaderResult.envelope.ok, false)
+    if (!loaderResult.envelope.ok)
+      assert.deepEqual(loaderResult.envelope.error, expectedError)
+    assert.equal(JSON.stringify(loaderResult.envelope).includes(privateMarker), false)
+    assert.equal(handlerCalls, 0)
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
+  }
 })
 
 test('real MCP transports defer validation to the safe Incur envelope', async () => {
@@ -820,7 +1066,10 @@ test('real MCP transports defer validation to the safe Incur envelope', async ()
     },
   ])
 
-  for (const response of [directResponses[2], progressiveResponses[1]]) {
+  for (const [response, field] of [
+    [directResponses[2], { code: 'custom', missing: false, path: 'value' }],
+    [progressiveResponses[1], { code: 'too_small', missing: false, path: 'limit' }],
+  ] as const) {
     assert.equal(response?.result?.isError, true)
     const content = response?.result?.content?.[0]
     assert.equal(content?.type, 'text')
@@ -832,8 +1081,7 @@ test('real MCP transports defer validation to the safe Incur envelope', async ()
       stage: 'validation',
       fieldErrors: [
         {
-          code: 'custom',
-          path: 'input',
+          ...field,
           expected: '',
           received: 'invalid',
           message: 'This field is invalid.',
@@ -880,6 +1128,7 @@ test('MCP streaming parse failures use the safe validation envelope', async () =
     fieldErrors: [
       {
         code: 'custom',
+        missing: false,
         path: 'arguments',
         expected: '',
         received: 'invalid',
@@ -889,6 +1138,65 @@ test('MCP streaming parse failures use the safe validation envelope', async () =
   })
   assert.equal(content.text.includes(privateMarker), false)
   assert.equal(content.text.includes('UNKNOWN'), false)
+})
+
+test('CLI and HTTP streaming catches preserve typed parse recovery', async () => {
+  const privateMarker = 'PrivateStreamingRecoveryMarker'
+  const cli = Cli.create('stream-recovery-smoke').command('stream', {
+    async *run() {
+      yield { progress: 1 }
+      throw new Errors.ParseError({
+        message: `Unknown flag: --${privateMarker}`,
+      })
+    },
+  })
+  const parseRecords = (output: string): Record<string, unknown>[] =>
+    output
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+  for (const format of ['jsonl', 'json'] as const) {
+    const output: string[] = []
+    let exitCode: number | null = null
+    await cli.serve(['stream', '--format', format, '--full-output'], {
+      env: process.env,
+      exit(code) {
+        exitCode = code
+      },
+      stdout(chunk) {
+        output.push(chunk)
+      },
+    })
+
+    const serialized = output.join('').trim()
+    const record =
+      format === 'jsonl'
+        ? parseRecords(serialized).find((candidate) => candidate.type === 'error')
+        : (JSON.parse(serialized) as Record<string, unknown>)
+    assert.ok(record)
+    assert.equal(exitCode, 1)
+    assertSafeParseValidationError(record.error)
+    assert.equal(serialized.includes(privateMarker), false)
+    assert.equal(serialized.includes('UNKNOWN'), false)
+  }
+
+  const response = await cli.fetch(
+    new Request('http://localhost/stream', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    }),
+  )
+  const responseText = await response.text()
+  const terminal = parseRecords(responseText).find((candidate) => candidate.type === 'error')
+  assert.ok(terminal)
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type') ?? '', /application\/x-ndjson/u)
+  assertSafeParseValidationError(terminal.error)
+  assert.equal(responseText.includes(privateMarker), false)
+  assert.equal(responseText.includes('UNKNOWN'), false)
 })
 
 test('fetch gateway malformed options use the safe validation envelope', async () => {
