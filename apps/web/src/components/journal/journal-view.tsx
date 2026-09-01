@@ -1393,6 +1393,11 @@ function WindowStats({
 
   return (
     <section aria-label="Seven days at a glance" className={className}>
+      {mode === "mobile" ? (
+        <p className="mb-3 px-1 font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+          Last 7 days
+        </p>
+      ) : null}
       <div className="grid grid-cols-3 gap-4 px-1">
         {stats.map((stat) => (
           <WeekStatDetails key={stat.label} mode={mode} stat={stat} />
