@@ -1599,6 +1599,7 @@ describe("buildWranglerLocalDevConfig", () => {
     }[];
     const container = containers[0]!;
     const smokeContainer = containers[1]!;
+    const standbyContainer = containers[2]!;
 
     expect(config.main).toBe("../src/index.ts");
     expect(config.name).toBe("murph-hosted");
@@ -1606,6 +1607,7 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(containers.map((entry) => entry.class_name)).toEqual([
       "RunnerContainer",
       "DeploySmokeRunnerContainer",
+      "StandbyRunnerContainer",
     ]);
     expect(config.compatibility_flags).toEqual([
       "nodejs_compat",
@@ -1629,6 +1631,14 @@ describe("buildWranglerLocalDevConfig", () => {
           class_name: "OpenAiAuthorizationAlertDurableObject",
           name: "OPENAI_AUTHORIZATION_ALERT_MONITOR",
         },
+        {
+          class_name: "StandbyRunnerCoordinatorDurableObject",
+          name: "STANDBY_COORDINATOR",
+        },
+        {
+          class_name: "StandbyRunnerContainer",
+          name: "STANDBY_RUNNER_CONTAINER",
+        },
       ]),
     });
     expect(config.migrations).toEqual(expect.arrayContaining([
@@ -1643,6 +1653,13 @@ describe("buildWranglerLocalDevConfig", () => {
       {
         new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
         tag: "v6",
+      },
+      {
+        new_sqlite_classes: [
+          "StandbyRunnerCoordinatorDurableObject",
+          "StandbyRunnerContainer",
+        ],
+        tag: "v7",
       },
     ]));
     expect(config.triggers).toEqual({
@@ -1674,6 +1691,16 @@ describe("buildWranglerLocalDevConfig", () => {
         HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
       },
       max_instances: 1,
+    });
+    expect(standbyContainer).toMatchObject({
+      image: container.image,
+      image_build_context: container.image_build_context,
+      image_vars: {
+        HOSTED_RUNNER_CONTAINER_CLASS: "StandbyRunnerContainer",
+        HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+        HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
+      },
+      max_instances: 50,
     });
   });
 

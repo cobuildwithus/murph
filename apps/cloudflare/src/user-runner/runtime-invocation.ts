@@ -53,6 +53,13 @@ import {
   readHostedRunnerContainerIdentity,
 } from "../hosted-runner-container-identity.js";
 import {
+  HOSTED_STANDBY_LOCATION_HINT,
+  HOSTED_STANDBY_REGION,
+  isHostedStandbySlotName,
+  readHostedStandbyReleaseId,
+  type HostedStandbyRunnerContainerNamespaceLike,
+} from "../standby-runner-contract.js";
+import {
   createHostedProviderEgressCredential,
 } from "../hosted-provider-egress-credential.js";
 import {
@@ -183,6 +190,7 @@ export class RuntimeInvocationService {
     private readonly input: {
       env: HostedExecutionEnvironment;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
+      standbyContainerNamespace?: HostedStandbyRunnerContainerNamespaceLike | null;
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
       runnerStoreCache: RunnerStoreCache;
       stateStore: RunnerStateStore;
@@ -956,14 +964,11 @@ export class RuntimeInvocationService {
           stepTimeoutMs: this.input.env.webControlTimeoutMs,
         }),
       ]);
-    const runnerContainerIdentity = readHostedRunnerContainerIdentity({
-      containerName: input.token.runnerContainerName,
-      source: this.input.runnerRuntimeEnvSource,
+    const runnerContainerName = await this.resolveInvocationRunnerContainerName({
+      commandBudget: input.commandBudget ?? null,
+      runnerContainerName: input.token.runnerContainerName,
+      userId: input.userId,
     });
-    if (!runnerContainerIdentity || runnerContainerIdentity.userId !== input.userId) {
-      throw new Error("Hosted runner container identity did not match the runtime invocation user.");
-    }
-    const runnerContainerName = runnerContainerIdentity.runnerContainerName;
     const openAiCredentialBeforeMintKind =
       readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
     const veniceCredentialBeforeMintKind =
@@ -1084,6 +1089,54 @@ export class RuntimeInvocationService {
       runnerContainerName,
       runtimeStoreEnsureElapsedMs,
     };
+  }
+
+  private async resolveInvocationRunnerContainerName(input: {
+    commandBudget: RuntimeProcessingCommandBudget | null;
+    runnerContainerName: string | null;
+    userId: string;
+  }): Promise<string> {
+    if (
+      typeof input.runnerContainerName === "string"
+      && isHostedStandbySlotName(input.runnerContainerName)
+    ) {
+      const runnerContainerName = input.runnerContainerName;
+      const namespace = this.input.standbyContainerNamespace;
+      const releaseId = readHostedStandbyReleaseId(this.input.runnerRuntimeEnvSource);
+      if (!namespace || !releaseId) {
+        throw new Error("Hosted standby invocation binding is unavailable.");
+      }
+      const readBinding = async () =>
+        await namespace.getByName(runnerContainerName, {
+          locationHint: HOSTED_STANDBY_LOCATION_HINT,
+        }).readStandbySlotBinding();
+      const binding = input.commandBudget
+        ? await runRuntimeProcessingCommandStep({
+            budget: input.commandBudget,
+            operation: readBinding,
+            stepTimeoutMs: this.input.env.webControlTimeoutMs,
+          })
+        : await readBinding();
+      if (
+        binding.state !== "bound"
+        || binding.userId !== input.userId
+        || binding.slotName !== runnerContainerName
+        || binding.releaseId !== releaseId
+        || binding.region !== HOSTED_STANDBY_REGION
+      ) {
+        throw new Error("Hosted standby slot binding did not match the runtime invocation user.");
+      }
+      return binding.slotName;
+    }
+
+    const runnerContainerIdentity = readHostedRunnerContainerIdentity({
+      containerName: input.runnerContainerName,
+      source: this.input.runnerRuntimeEnvSource,
+    });
+    if (!runnerContainerIdentity || runnerContainerIdentity.userId !== input.userId) {
+      throw new Error("Hosted runner container identity did not match the runtime invocation user.");
+    }
+    return runnerContainerIdentity.runnerContainerName;
   }
 
   private async invokePreparedWorkspaceRunner(

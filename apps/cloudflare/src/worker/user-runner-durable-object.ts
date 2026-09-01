@@ -23,6 +23,9 @@ import type {
 import {
   asWorkerStringEnvironment,
 } from "../worker-contracts.ts";
+import {
+  createHostedRunnerContainerNamespaceRouter,
+} from "../standby-runner-contract.ts";
 import type {
   UserRunnerDurableObjectStubLike,
   WorkerEnvironmentSource,
@@ -227,12 +230,18 @@ function createHostedUserRunner(
   state: DurableObjectStateLike,
   env: WorkerEnvironmentSource,
 ): HostedUserRunner {
+  const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
+    exactUser: env.RUNNER_CONTAINER,
+    standby: env.STANDBY_RUNNER_CONTAINER ?? null,
+  });
   return new HostedUserRunner(
     state,
     readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
     env.BUNDLES,
     env,
-    env.RUNNER_CONTAINER,
+    runnerContainerNamespace,
     env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
+    env.STANDBY_COORDINATOR ?? null,
+    env.STANDBY_RUNNER_CONTAINER ?? null,
   );
 }

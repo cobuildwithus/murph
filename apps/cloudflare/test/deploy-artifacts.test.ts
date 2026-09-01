@@ -1105,6 +1105,11 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
             image: "../../Dockerfile.cloudflare-hosted-runner",
             image_build_context: ".",
           },
+          {
+            class_name: "StandbyRunnerContainer",
+            image: "../../Dockerfile.cloudflare-hosted-runner",
+            image_build_context: ".",
+          },
         ],
       },
     });

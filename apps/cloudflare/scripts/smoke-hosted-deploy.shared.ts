@@ -36,6 +36,12 @@ import {
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
+import {
+  readHostedStandbyMode,
+} from "../src/standby-runner-contract.ts";
+import type {
+  HostedStandbyMode,
+} from "../src/standby-runner-contract.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -158,6 +164,18 @@ export function resolveSmokeRunnerManifestPath(source: EnvSource = process.env):
     ?? path.join(appDir, ".deploy", "runner-bundle", runnerBundleManifestFileName);
 }
 
+export function resolveSmokeExpectedStandbyMode(
+  source: EnvSource = process.env,
+): HostedStandbyMode | null {
+  if (normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE) === null) {
+    return null;
+  }
+
+  return readHostedStandbyMode({
+    HOSTED_EXECUTION_STANDBY_MODE: source.HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE,
+  });
+}
+
 export async function runSmokeHostedDeploy(input: {
   fetchImpl?: FetchLike;
   log?: (message: string) => void;
@@ -169,6 +187,7 @@ export async function runSmokeHostedDeploy(input: {
   const workerBaseUrl = resolveSmokeWorkerBaseUrl(source);
   const smokeUserId = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_USER_ID);
   const smokeVersionId = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_VERSION_ID);
+  const expectedStandbyMode = resolveSmokeExpectedStandbyMode(source);
   const shouldSmokeRunnerContainer = readBooleanEnv(
     source.HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER,
     false,
@@ -199,6 +218,7 @@ export async function runSmokeHostedDeploy(input: {
     fetchImpl,
     healthUrl: new URL("/health", smokeBaseUrl).toString(),
     log,
+    expectedStandbyMode,
     serviceBannerUrl: new URL("/", smokeBaseUrl).toString(),
     smokeVersionId,
     versionOverrideHeaders,
@@ -681,6 +701,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function assertPublicWorkerSmoke(input: {
+  expectedStandbyMode: HostedStandbyMode | null;
   fetchImpl: FetchLike;
   healthUrl: string;
   log: (message: string) => void;
@@ -699,6 +720,7 @@ async function assertPublicWorkerSmoke(input: {
       await assertHealth(
         input.fetchImpl,
         input.healthUrl,
+        input.expectedStandbyMode,
         input.smokeVersionId,
         input.versionOverrideHeaders,
       );
@@ -723,6 +745,7 @@ async function assertPublicWorkerSmoke(input: {
 async function assertHealth(
   fetchImpl: FetchLike,
   url: string,
+  expectedStandbyMode: HostedStandbyMode | null,
   expectedVersionId: string | null,
   versionOverrideHeaders: Record<string, string> | undefined,
 ): Promise<void> {
@@ -730,6 +753,12 @@ async function assertHealth(
 
   if (payload.ok !== true) {
     throw new Error("worker health check did not return ok=true.");
+  }
+
+  if (expectedStandbyMode !== null && payload.standbyMode !== expectedStandbyMode) {
+    throw new Error(
+      `worker health check did not report standby mode ${expectedStandbyMode}.`,
+    );
   }
 
   assertSmokeWorkerVersion(payload, expectedVersionId, "worker health check");
@@ -759,7 +788,12 @@ async function readSmokePublicPayload(
   url: string,
   versionOverrideHeaders: Record<string, string> | undefined,
   action: string,
-): Promise<{ ok?: unknown; service?: unknown; workerVersionId?: unknown }> {
+): Promise<{
+  ok?: unknown;
+  service?: unknown;
+  standbyMode?: unknown;
+  workerVersionId?: unknown;
+}> {
   const response = await fetchImpl(url, {
     headers: versionOverrideHeaders,
   });
@@ -768,7 +802,12 @@ async function readSmokePublicPayload(
     throw new Error(`${action} failed with HTTP ${response.status}.`);
   }
 
-  return await response.json() as { ok?: unknown; service?: unknown; workerVersionId?: unknown };
+  return await response.json() as {
+    ok?: unknown;
+    service?: unknown;
+    standbyMode?: unknown;
+    workerVersionId?: unknown;
+  };
 }
 
 function assertSmokeWorkerVersion(
