@@ -444,6 +444,13 @@ export async function buildCodexTurnAttemptPlan(input: {
   }
 }
 
+function areWearableTrendCardsAvailable(
+  responseCardsAvailable: boolean,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  return responseCardsAvailable && isMurphWearableTrendCardsEnabled(env)
+}
+
 export async function resolveAssistantRouteTurnPlan(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   allowFinishWithoutReply?: boolean | null
@@ -560,9 +567,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
-  const wearableTrendCardsAvailable =
-    responseCardsAvailable &&
-    isMurphWearableTrendCardsEnabled(input.sharedPlan.cliAccess.env)
+  const wearableTrendCardsAvailable = areWearableTrendCardsAvailable(
+    responseCardsAvailable,
+    input.sharedPlan.cliAccess.env,
+  )
   const telegramPresentationResponseCardsAvailable =
     resolvedChannel?.trim().toLowerCase() === 'telegram' &&
     (

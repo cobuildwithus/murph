@@ -1258,6 +1258,14 @@ function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
   }
 }
 
+function projectWearableTrendCardsRuntimeEnv(
+  platformEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return isMurphWearableTrendCardsEnabled(platformEnv)
+    ? { [MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV]: "1" }
+    : {};
+}
+
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -1804,9 +1812,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ...(isMurphAndroidAppEnabled(guardedRuntime.platformEnv)
         ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
         : {}),
-      ...(isMurphWearableTrendCardsEnabled(guardedRuntime.platformEnv)
-        ? { [MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV]: "1" }
-        : {}),
+      ...projectWearableTrendCardsRuntimeEnv(guardedRuntime.platformEnv),
       ...(imageCodexModelCatalogJson
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
         : {}),

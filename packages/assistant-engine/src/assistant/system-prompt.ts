@@ -422,7 +422,7 @@ function buildStableRouteCapabilityPrompt(
           assistantHostedDeviceConnectProviders:
             input.assistantHostedDeviceConnectProviders ?? [],
           assistantWearableTrendCardsAvailable:
-            input.assistantWearableTrendCardsAvailable ?? false,
+            input.assistantWearableTrendCardsAvailable === true,
         })
       : null,
     conversationScope === "direct"

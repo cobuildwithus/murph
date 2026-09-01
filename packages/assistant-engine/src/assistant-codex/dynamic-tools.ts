@@ -2309,7 +2309,10 @@ async function executeSendVaultFileDynamicTool(
       'secure vault-file approval is unavailable for this conversation',
     )
   }
-  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+  if (
+    input.currentResponseCard !== null &&
+    input.currentResponseCard !== undefined
+  ) {
     return replyRequiredResult(
       false,
       'vault-file sending cannot be combined with a response card',
@@ -3030,7 +3033,10 @@ async function executeGenerateImageDynamicTool(
   input: ExecuteMurphDynamicToolRequestInput,
   request: Extract<MurphDynamicToolRequest, { kind: 'generate-image' }>,
 ): Promise<MurphDynamicToolExecutionResult> {
-  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+  if (
+    input.currentResponseCard !== null &&
+    input.currentResponseCard !== undefined
+  ) {
     return toolTextResult(false, 'image generation cannot be combined with a response card')
   }
   if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
@@ -3192,6 +3198,76 @@ async function executeGenerateImageDynamicTool(
   }
 }
 
+async function executeWearableTrendCardAttachment(input: {
+  allowed: boolean
+  currentResponseCard?: AssistantResponseCard | null
+  currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  request: WearableTrendCardRequestV1
+  vaultRoot?: string | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  if (!input.allowed) {
+    return toolTextResult(
+      false,
+      'wearable trend cards require a private direct conversation',
+    )
+  }
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'a response card is already attached')
+  }
+  if ((input.currentResponseMedia ?? []).length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+    )
+  }
+  const resolved = await resolveTrustedWearableTrendCard({
+    request: input.request,
+    vaultRoot: input.vaultRoot ?? null,
+  })
+  if (!resolved.ok) {
+    return toolTextResult(
+      false,
+      resolved.reason === 'saved_view_not_found'
+        ? 'that saved health view no longer exists; do not recreate or schedule it'
+        : 'wearable trend card data is unavailable',
+    )
+  }
+  return {
+    ...toolTextResult(true, 'wearable trend card attached'),
+    responseCardPatch: { card: resolved.card },
+  }
+}
+
+function executeOversizedResponseCardFallback(input: {
+  allowed: boolean
+  card: CompactTableWorkoutResponseCardV1
+  currentResponseCard?: AssistantResponseCard | null
+  currentResponseMedia?: readonly AssistantResponseMedia[] | null
+}): MurphDynamicToolExecutionResult {
+  if (!input.allowed) {
+    return toolTextResult(
+      false,
+      'response cards require a private direct conversation',
+    )
+  }
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'a response card is already attached')
+  }
+  if ((input.currentResponseMedia ?? []).length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+    )
+  }
+  return {
+    ...toolTextResult(
+      true,
+      'workout card envelope too large; full text recovery selected',
+    ),
+    responseCardTextFallbackPatch: { card: input.card },
+  }
+}
+
 export async function executeMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -3234,28 +3310,12 @@ export async function executeMurphDynamicToolRequest(
     case 'invalid-automation-arguments':
       return executeInvalidAutomationArgumentsDynamicTool(input.request)
     case 'response-card-envelope-too-large':
-      if (input.privateDirectResponseCardAllowed !== true) {
-        return toolTextResult(
-          false,
-          'response cards require a private direct conversation',
-        )
-      }
-      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
-        return toolTextResult(false, 'a response card is already attached')
-      }
-      if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
-          false,
-          'response cards cannot be combined with response media',
-        )
-      }
-      return {
-        ...toolTextResult(
-          true,
-          'workout card envelope too large; full text recovery selected',
-        ),
-        responseCardTextFallbackPatch: { card: input.request.card },
-      }
+      return executeOversizedResponseCardFallback({
+        allowed: input.privateDirectResponseCardAllowed === true,
+        card: input.request.card,
+        currentResponseCard: input.currentResponseCard,
+        currentResponseMedia: input.currentResponseMedia,
+      })
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-group-challenge-response-card':
@@ -3308,39 +3368,14 @@ export async function executeMurphDynamicToolRequest(
         responseCardPatch: { card },
       }
     }
-    case 'attach-wearable-trend-card': {
-      if (input.privateDirectResponseCardAllowed !== true) {
-        return toolTextResult(
-          false,
-          'wearable trend cards require a private direct conversation',
-        )
-      }
-      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
-        return toolTextResult(false, 'a response card is already attached')
-      }
-      if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
-          false,
-          'response cards cannot be combined with response media',
-        )
-      }
-      const resolved = await resolveTrustedWearableTrendCard({
+    case 'attach-wearable-trend-card':
+      return await executeWearableTrendCardAttachment({
+        allowed: input.privateDirectResponseCardAllowed === true,
+        currentResponseCard: input.currentResponseCard,
+        currentResponseMedia: input.currentResponseMedia,
         request: input.request.request,
-        vaultRoot: input.vaultRoot ?? null,
+        vaultRoot: input.vaultRoot,
       })
-      if (!resolved.ok) {
-        return toolTextResult(
-          false,
-          resolved.reason === 'saved_view_not_found'
-            ? 'that saved health view no longer exists; do not recreate or schedule it'
-            : 'wearable trend card data is unavailable',
-        )
-      }
-      return {
-        ...toolTextResult(true, 'wearable trend card attached'),
-        responseCardPatch: { card: resolved.card },
-      }
-    }
     case 'attach-response-media': {
       if (
         input.request.media.length > 0 &&

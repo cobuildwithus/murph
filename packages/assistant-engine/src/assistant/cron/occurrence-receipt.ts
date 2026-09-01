@@ -54,6 +54,14 @@ export interface AssistantAutomationOccurrenceReceiptReadOptions {
   >
 }
 
+type ObservedOccurrenceReceiptCommon = {
+  finishedAt: string
+  history: 'observed'
+  scheduledAt: string | null
+  startedAt: string
+  trigger: 'manual' | 'scheduled'
+}
+
 /**
  * Reads canonical scheduler evidence and projects one bounded, content-free
  * latest-occurrence receipt. This does not create a second receipt store.
@@ -132,13 +140,12 @@ async function getAssistantDeviceActivityOccurrenceReceipt(input: {
   ])
   const job = cronStore?.jobs.find((candidate) => candidate.jobId === jobId) ?? null
   if (job !== null) {
-    const metadata = readAssistantDeviceActivityCronJobMetadata(job.name)
-    if (
-      metadata?.parentAutomationId !== input.automationId
-      || metadata.occurrenceKey !== jobId.slice('cron_device_activity_'.length)
-    ) {
-      throw new Error('Device activity occurrence authority is unavailable.')
-    }
+    assertDeviceActivityOccurrenceAuthority({
+      automationId: input.automationId,
+      metadata: readAssistantDeviceActivityCronJobMetadata(job.name),
+      occurrenceKey: jobId.slice('cron_device_activity_'.length),
+      unavailableMessage: 'Device activity occurrence authority is unavailable.',
+    })
   }
   const pendingDeliveryIntentId = job?.state.pendingDeliveryIntentId ?? null
   const pendingDeliveryIntentRecord = pendingDeliveryIntentId === null
@@ -151,15 +158,14 @@ async function getAssistantDeviceActivityOccurrenceReceipt(input: {
     throw new Error('Device activity delivery evidence is unavailable.')
   }
   if (pendingDeliveryIntentRecord !== null) {
-    const metadata = readAssistantDeviceActivityDeliveryIdempotencyMetadata(
-      pendingDeliveryIntentRecord.deliveryIdempotencyKey,
-    )
-    if (
-      metadata?.parentAutomationId !== input.automationId
-      || metadata.occurrenceKey !== jobId.slice('cron_device_activity_'.length)
-    ) {
-      throw new Error('Device activity delivery authority is unavailable.')
-    }
+    assertDeviceActivityOccurrenceAuthority({
+      automationId: input.automationId,
+      metadata: readAssistantDeviceActivityDeliveryIdempotencyMetadata(
+        pendingDeliveryIntentRecord.deliveryIdempotencyKey,
+      ),
+      occurrenceKey: jobId.slice('cron_device_activity_'.length),
+      unavailableMessage: 'Device activity delivery authority is unavailable.',
+    })
   }
   return projectAssistantAutomationOccurrenceReceipt({
     latestRun: runs[0] ?? null,
@@ -169,6 +175,23 @@ async function getAssistantDeviceActivityOccurrenceReceipt(input: {
     pendingOccurrenceAt: job?.state.nextRunAt ?? null,
     runningAt: job?.state.runningAt ?? null,
   })
+}
+
+function assertDeviceActivityOccurrenceAuthority(input: {
+  automationId: string
+  metadata: {
+    occurrenceKey: string
+    parentAutomationId: string
+  } | null
+  occurrenceKey: string
+  unavailableMessage: string
+}): void {
+  if (
+    input.metadata?.parentAutomationId !== input.automationId
+    || input.metadata.occurrenceKey !== input.occurrenceKey
+  ) {
+    throw new Error(input.unavailableMessage)
+  }
 }
 
 function projectOccurrenceOutboxEvidence(
@@ -214,28 +237,21 @@ export function projectAssistantAutomationOccurrenceReceipt(
   }
 
   if (isLegacyAmbiguousSuccessRun(run)) {
-    if (run.notificationDecision?.kind === 'skip') {
-      return {
-        ...common,
-        delivered: 'not_reached',
-        generated: 'not_reached',
-        outcome: 'skipped',
-        sent: 'not_reached',
-      }
-    }
-    return {
-      ...common,
-      delivered: 'unknown',
-      generated:
-        run.notificationDecision?.kind === 'send_message'
-        || run.responseLength > 0
-          ? 'confirmed'
-          : 'unknown',
-      outcome: 'unknown',
-      sent: 'unknown',
-    }
+    return projectLegacyAmbiguousSuccessReceipt(common, run)
   }
 
+  return projectRecordedOccurrenceReceipt(
+    common,
+    run,
+    input.pendingDeliveryIntent,
+  )
+}
+
+function projectRecordedOccurrenceReceipt(
+  common: ObservedOccurrenceReceiptCommon,
+  run: AssistantCronRunRecord,
+  pendingDeliveryIntent: OccurrenceOutboxEvidence | null,
+): AssistantAutomationOccurrenceReceipt {
   switch (run.outcome) {
     case 'delivered':
       return {
@@ -246,7 +262,7 @@ export function projectAssistantAutomationOccurrenceReceipt(
         sent: 'confirmed',
       }
     case 'delivery_pending':
-      return projectPendingDeliveryReceipt(common, input.pendingDeliveryIntent)
+      return projectPendingDeliveryReceipt(common, pendingDeliveryIntent)
     case 'expired':
       return {
         ...common,
@@ -259,75 +275,109 @@ export function projectAssistantAutomationOccurrenceReceipt(
       return {
         ...common,
         delivered: 'not_reached',
-        generated:
-          run.notificationDecision?.kind === 'send_message'
-          || run.responseLength > 0
-            ? 'confirmed'
-            : 'not_reached',
+        generated: projectGeneratedEvidence(run, 'not_reached'),
         outcome: 'skipped',
         sent: 'not_reached',
       }
     case 'no_op':
-      if (run.notificationDecision?.kind === 'skip') {
-        return {
-          ...common,
-          delivered: 'not_reached',
-          generated: 'not_reached',
-          outcome: 'skipped',
-          sent: 'not_reached',
-        }
-      }
+      return projectNoOpOccurrenceReceipt(common, run)
+    case 'failed':
+      return projectFailedOccurrenceReceipt(common, run)
+  }
+}
+
+function projectLegacyAmbiguousSuccessReceipt(
+  common: ObservedOccurrenceReceiptCommon,
+  run: AssistantCronRunRecord,
+): AssistantAutomationOccurrenceReceipt {
+  if (run.notificationDecision?.kind === 'skip') {
+    return {
+      ...common,
+      delivered: 'not_reached',
+      generated: 'not_reached',
+      outcome: 'skipped',
+      sent: 'not_reached',
+    }
+  }
+  return {
+    ...common,
+    delivered: 'unknown',
+    generated: projectGeneratedEvidence(run, 'unknown'),
+    outcome: 'unknown',
+    sent: 'unknown',
+  }
+}
+
+function projectNoOpOccurrenceReceipt(
+  common: ObservedOccurrenceReceiptCommon,
+  run: AssistantCronRunRecord,
+): AssistantAutomationOccurrenceReceipt {
+  if (run.notificationDecision?.kind === 'skip') {
+    return {
+      ...common,
+      delivered: 'not_reached',
+      generated: 'not_reached',
+      outcome: 'skipped',
+      sent: 'not_reached',
+    }
+  }
+  return {
+    ...common,
+    delivered: 'not_reached',
+    generated: projectGeneratedEvidence(run, 'not_reached'),
+    outcome: 'no_message',
+    sent: 'not_reached',
+  }
+}
+
+function projectFailedOccurrenceReceipt(
+  common: ObservedOccurrenceReceiptCommon,
+  run: AssistantCronRunRecord,
+): AssistantAutomationOccurrenceReceipt {
+  switch (run.reason) {
+    case 'delivery_failed_not_reached':
       return {
         ...common,
         delivered: 'not_reached',
-        generated:
-          run.notificationDecision?.kind === 'send_message'
-          || run.responseLength > 0
-            ? 'confirmed'
-            : 'not_reached',
-        outcome: 'no_message',
+        generated: 'confirmed',
+        outcome: 'failed',
         sent: 'not_reached',
       }
-    case 'failed':
-      if (run.reason === 'delivery_failed_not_reached') {
-        return {
-          ...common,
-          delivered: 'not_reached',
-          generated: 'confirmed',
-          outcome: 'failed',
-          sent: 'not_reached',
-        }
+    case 'delivery_failed_sent':
+      return {
+        ...common,
+        delivered: 'unconfirmed',
+        generated: 'confirmed',
+        outcome: 'sent',
+        sent: 'confirmed',
       }
-      if (run.reason === 'delivery_failed_sent') {
-        return {
-          ...common,
-          delivered: 'unconfirmed',
-          generated: 'confirmed',
-          outcome: 'sent',
-          sent: 'confirmed',
-        }
-      }
-      if (run.reason === 'delivery_failed_unknown') {
-        return {
-          ...common,
-          delivered: 'unknown',
-          generated: 'confirmed',
-          outcome: 'failed',
-          sent: 'unknown',
-        }
-      }
+    case 'delivery_failed_unknown':
       return {
         ...common,
         delivered: 'unknown',
-        generated:
-          run.notificationDecision?.kind === 'send_message'
-          || run.responseLength > 0
-            ? 'confirmed'
-            : 'unknown',
+        generated: 'confirmed',
+        outcome: 'failed',
+        sent: 'unknown',
+      }
+    default:
+      return {
+        ...common,
+        delivered: 'unknown',
+        generated: projectGeneratedEvidence(run, 'unknown'),
         outcome: 'failed',
         sent: 'unknown',
       }
   }
+}
+
+function projectGeneratedEvidence(
+  run: AssistantCronRunRecord,
+  fallback: 'not_reached' | 'unknown',
+): 'confirmed' | 'not_reached' | 'unknown' {
+  return run.notificationDecision?.kind === 'send_message'
+    || run.responseLength > 0
+    ? 'confirmed'
+    : fallback
 }
 
 function isLegacyAmbiguousSuccessRun(
@@ -338,13 +388,7 @@ function isLegacyAmbiguousSuccessRun(
 }
 
 function projectPendingDeliveryReceipt(
-  common: {
-    finishedAt: string
-    history: 'observed'
-    scheduledAt: string | null
-    startedAt: string
-    trigger: 'manual' | 'scheduled'
-  },
+  common: ObservedOccurrenceReceiptCommon,
   intent: OccurrenceOutboxEvidence | null,
 ): AssistantAutomationOccurrenceReceipt {
   if (intent === null) {
