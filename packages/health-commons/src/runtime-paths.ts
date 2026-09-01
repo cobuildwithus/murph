@@ -117,7 +117,13 @@ function defaultGeneratedWebRootUrl(): URL {
     const candidateRoot = candidateRootUrl.protocol === "file:"
       ? fileURLToPath(candidateRootUrl)
       : null;
-    if (candidateRoot && existsSync(resolve(candidateRoot, "routes/index.json"))) {
+    if (
+      candidateRoot
+      && (
+        existsSync(resolve(candidateRoot, "routes/index.json"))
+        || existsSync(resolve(candidateRoot, "browse/goals.json"))
+      )
+    ) {
       return ensureTrailingSlashUrl(candidateRootUrl);
     }
   }

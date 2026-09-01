@@ -319,7 +319,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // input. Exact macOS production assembly measured 11,678,063B total on
 // 2026-08-31; ratchet only the total baseline and retain the fixed
 // cross-platform allowance and all startup-specific gates.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_678_063 + 32_768;
+// Goal catalog and setup support extend the existing lazy Health Commons and
+// assistant graph without adding a boot input. Exact macOS production assembly
+// measured 11,713,714B total on 2026-09-01; ratchet only the total baseline and
+// retain the fixed cross-platform allowance and all startup-specific gates.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_713_714 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 64_257;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 1_950_662;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;

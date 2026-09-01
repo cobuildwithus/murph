@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   generatedWebArtifactUrl,
   isSafeGeneratedWebArtifactPath,
+  MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
   readGeneratedWebArtifact,
 } from "../src/runtime-paths.ts";
 
@@ -105,6 +106,44 @@ describe("Health Commons generated web runtime paths", () => {
         rm(generatedWebRoot, { force: true, recursive: true }),
         rm(outsideRoot, { force: true, recursive: true }),
       ]);
+    }
+  });
+
+  it("discovers a sparse packaged goal index without a routes artifact", async () => {
+    const workspaceRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-health-commons-sparse-package-"),
+    );
+    const generatedWebRoot = path.join(
+      workspaceRoot,
+      "packages",
+      "health-commons",
+      "generated",
+      "web",
+    );
+    const previousWorkingDirectory = process.cwd();
+    const previousPackageRoot =
+      process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+
+    try {
+      await mkdir(path.join(generatedWebRoot, "browse"), { recursive: true });
+      await writeFile(
+        path.join(generatedWebRoot, "browse/goals.json"),
+        "{\"sparsePackage\":true}\n",
+        "utf8",
+      );
+      delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+      process.chdir(workspaceRoot);
+
+      expect(readGeneratedWebArtifact("browse/goals.json", undefined))
+        .toBe("{\"sparsePackage\":true}\n");
+    } finally {
+      process.chdir(previousWorkingDirectory);
+      if (previousPackageRoot === undefined) {
+        delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
+      } else {
+        process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = previousPackageRoot;
+      }
+      await rm(workspaceRoot, { force: true, recursive: true });
     }
   });
 });
