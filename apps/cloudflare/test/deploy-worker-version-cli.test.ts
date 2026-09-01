@@ -5,11 +5,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const wranglerMocks = vi.hoisted(() => ({
   runWranglerJson: vi.fn(),
   runWranglerLogged: vi.fn(),
+  runWranglerLoggedCaptured: vi.fn(),
+}));
+const receiptMocks = vi.hoisted(() => ({
+  buildContainerReleaseEntries: vi.fn(),
+  createCloudflareContainerApplicationLister: vi.fn(),
+  parseWranglerContainerActions: vi.fn(),
+  parseWranglerWorkerVersionId: vi.fn(),
+  readCloudflareContainerApplicationIdentities: vi.fn(),
+  readRenderedContainerIdentities: vi.fn(),
 }));
 
 vi.mock("../scripts/wrangler-runner.js", () => ({
   runWranglerJson: wranglerMocks.runWranglerJson,
   runWranglerLogged: wranglerMocks.runWranglerLogged,
+  runWranglerLoggedCaptured: wranglerMocks.runWranglerLoggedCaptured,
+}));
+vi.mock("../scripts/container-release-receipt.js", () => ({
+  buildContainerReleaseEntries: receiptMocks.buildContainerReleaseEntries,
+  createCloudflareContainerApplicationLister:
+    receiptMocks.createCloudflareContainerApplicationLister,
+  parseWranglerContainerActions: receiptMocks.parseWranglerContainerActions,
+  parseWranglerWorkerVersionId: receiptMocks.parseWranglerWorkerVersionId,
+  readCloudflareContainerApplicationIdentities:
+    receiptMocks.readCloudflareContainerApplicationIdentities,
+  readRenderedContainerIdentities: receiptMocks.readRenderedContainerIdentities,
 }));
 
 import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.js";
@@ -18,6 +38,20 @@ describe("runDeployWorkerVersionCli", () => {
   beforeEach(() => {
     wranglerMocks.runWranglerJson.mockReset();
     wranglerMocks.runWranglerLogged.mockReset();
+    wranglerMocks.runWranglerLoggedCaptured.mockReset();
+    wranglerMocks.runWranglerLoggedCaptured.mockResolvedValue({ stderr: "", stdout: "deploy" });
+    receiptMocks.buildContainerReleaseEntries.mockReset();
+    receiptMocks.buildContainerReleaseEntries.mockReturnValue(releasedContainers);
+    receiptMocks.createCloudflareContainerApplicationLister.mockReset();
+    receiptMocks.createCloudflareContainerApplicationLister.mockReturnValue(vi.fn());
+    receiptMocks.parseWranglerContainerActions.mockReset();
+    receiptMocks.parseWranglerContainerActions.mockReturnValue([]);
+    receiptMocks.parseWranglerWorkerVersionId.mockReset();
+    receiptMocks.parseWranglerWorkerVersionId.mockReturnValue("version-direct");
+    receiptMocks.readCloudflareContainerApplicationIdentities.mockReset();
+    receiptMocks.readCloudflareContainerApplicationIdentities.mockResolvedValue([]);
+    receiptMocks.readRenderedContainerIdentities.mockReset();
+    receiptMocks.readRenderedContainerIdentities.mockResolvedValue(renderedContainers);
   });
 
   it("passes app-root deploy artifact paths to the deploy entrypoint", async () => {
@@ -98,11 +132,36 @@ describe("runDeployWorkerVersionCli", () => {
     ]);
   });
 
-  it("uses configured gradual container rollout on direct deploys by default", async () => {
+  it("builds a receipt around the exact direct deploy", async () => {
     const env = {
       CF_BUNDLES_BUCKET: "hosted-bundles",
+      CLOUDFLARE_ACCOUNT_ID: "account-fixture",
+      CLOUDFLARE_API_TOKEN: "token-fixture",
       CF_WORKER_NAME: "hosted-worker",
     };
+    const listApplications = vi.fn();
+    const before = [{
+      applicationId: "provider-app-id",
+      applicationName: "hosted-worker-runnercontainer",
+      image: "image-before",
+      version: 6,
+    }];
+    const after = [{
+      applicationId: "provider-app-id",
+      applicationName: "hosted-worker-runnercontainer",
+      image: "image-after",
+      version: 7,
+    }];
+    const actions = [{
+      action: "modified",
+      applicationName: "hosted-worker-runnercontainer",
+      className: "RunnerContainer",
+    }];
+    receiptMocks.createCloudflareContainerApplicationLister.mockReturnValue(listApplications);
+    receiptMocks.readCloudflareContainerApplicationIdentities
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(after);
+    receiptMocks.parseWranglerContainerActions.mockReturnValue(actions);
 
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
@@ -126,7 +185,7 @@ describe("runDeployWorkerVersionCli", () => {
       },
     );
 
-    expect(wranglerMocks.runWranglerLogged).toHaveBeenCalledWith([
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
       "deploy",
       "--config",
       "/tmp/wrangler.generated.jsonc",
@@ -139,13 +198,38 @@ describe("runDeployWorkerVersionCli", () => {
       "--secrets-file",
       "/tmp/worker-secrets.json",
     ]);
+    expect(receiptMocks.readRenderedContainerIdentities).toHaveBeenCalledWith(
+      "/tmp/wrangler.generated.jsonc",
+    );
+    expect(receiptMocks.createCloudflareContainerApplicationLister).toHaveBeenCalledWith({
+      accountId: "account-fixture",
+      apiToken: "token-fixture",
+    });
+    expect(receiptMocks.readCloudflareContainerApplicationIdentities)
+      .toHaveBeenNthCalledWith(1, renderedContainers, listApplications, "before");
+    expect(receiptMocks.parseWranglerContainerActions).toHaveBeenCalledWith(
+      "deploy\n",
+      renderedContainers,
+    );
+    expect(receiptMocks.parseWranglerWorkerVersionId).toHaveBeenCalledWith("deploy\n");
+    expect(receiptMocks.readCloudflareContainerApplicationIdentities)
+      .toHaveBeenNthCalledWith(2, renderedContainers, listApplications, "after");
+    expect(receiptMocks.buildContainerReleaseEntries).toHaveBeenCalledWith({
+      actions,
+      after,
+      before,
+    });
   });
 
   it("applies R2 lifecycle rules to configured bundles buckets before direct deploys", async () => {
     const deployRoot = path.join("/tmp", "repo", "apps", "cloudflare");
     const trace: string[] = [];
     wranglerMocks.runWranglerLogged.mockImplementation(async (args: string[]) => {
-      trace.push(args[0] === "deploy" ? "deploy" : "lifecycle");
+      trace.push(args[0] ?? "unknown");
+    });
+    wranglerMocks.runWranglerLoggedCaptured.mockImplementation(async () => {
+      trace.push("deploy");
+      return { stderr: "", stdout: "deploy" };
     });
 
     await runDeployWorkerVersionCli(
@@ -155,6 +239,8 @@ describe("runDeployWorkerVersionCli", () => {
         env: {
           CF_BUNDLES_BUCKET: "hosted-bundles",
           CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+          CLOUDFLARE_ACCOUNT_ID: "account-fixture",
+          CLOUDFLARE_API_TOKEN: "token-fixture",
           CF_WORKER_NAME: "hosted-worker",
         },
         log: false,
@@ -204,7 +290,7 @@ describe("runDeployWorkerVersionCli", () => {
         cwd: deployRoot,
       },
     );
-    expect(wranglerMocks.runWranglerLogged).toHaveBeenNthCalledWith(3, [
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
       "deploy",
       "--config",
       "/tmp/wrangler.generated.jsonc",
@@ -215,7 +301,7 @@ describe("runDeployWorkerVersionCli", () => {
       "--tag",
       "manual-version",
     ]);
-    expect(trace).toEqual(["lifecycle", "lifecycle", "deploy"]);
+    expect(trace).toEqual(["r2", "r2", "deploy"]);
   });
 
   it("passes the immediate container rollout flag only for explicit hotfix deploys", async () => {
@@ -225,6 +311,8 @@ describe("runDeployWorkerVersionCli", () => {
         deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
         env: {
           CF_BUNDLES_BUCKET: "hosted-bundles",
+          CLOUDFLARE_ACCOUNT_ID: "account-fixture",
+          CLOUDFLARE_API_TOKEN: "token-fixture",
           CF_WORKER_NAME: "hosted-worker",
         },
         log: false,
@@ -244,7 +332,7 @@ describe("runDeployWorkerVersionCli", () => {
       },
     );
 
-    expect(wranglerMocks.runWranglerLogged).toHaveBeenCalledWith([
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
       "deploy",
       "--config",
       "/tmp/wrangler.generated.jsonc",
@@ -285,8 +373,31 @@ describe("runDeployWorkerVersionCli", () => {
 
 function createDeploymentResult() {
   return {
+    containerReleaseReceipt: {
+      containers: releasedContainers,
+      schemaVersion: 1 as const,
+      versionTag: "manual-version",
+      workerVersionId: "version-direct",
+    },
     finalDeploymentVersions: [],
     smokeVersionId: "version-direct",
     workerName: "hosted-worker",
   };
 }
+
+const renderedContainers = [
+  {
+    applicationName: "hosted-worker-runnercontainer",
+    className: "RunnerContainer",
+  },
+] as const;
+
+const releasedContainers = [
+  {
+    applicationName: "hosted-worker-runnercontainer",
+    className: "RunnerContainer",
+    disposition: "unchanged",
+    imageSha256: "a".repeat(64),
+    version: 7,
+  },
+] as const;

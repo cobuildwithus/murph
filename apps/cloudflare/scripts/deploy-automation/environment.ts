@@ -54,6 +54,7 @@ const RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
 // policy can validate forwarding without exposing them to the runtime.
 export const HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES = [
   "CF_STANDBY_CONTAINER_MAX_INSTANCES",
+  "HOSTED_EXECUTION_DEPLOY_TAG",
 ] as const;
 
 export interface HostedDeployAutomationEnvironment {
