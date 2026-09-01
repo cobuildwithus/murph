@@ -1,6 +1,6 @@
 # Restore reliable Vercel Web builds after isolated-worker OOM
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-08-31
 
@@ -66,6 +66,12 @@ Updated: 2026-08-31
 - The paired local production lane reduced peak RSS from 5.52 GB to 3.96 GB,
   reduced compile time from 144 seconds to 117 seconds, and replaced a 2.74 GB
   Webpack cache with no Webpack cache directory.
+- The exact reviewed PR head passed every required GitHub check and final
+  ReviewGPT with no findings. One forced-cold Standard preview reached Ready;
+  a second identical preview remained queued for 57 minutes behind
+  production-priority deployments without entering a build container. The user
+  explicitly authorized merge, so the prioritized post-merge production build
+  owns the second live Standard proof.
 
 ## Verification
 
@@ -77,4 +83,8 @@ Updated: 2026-08-31
 - Result: 119 focused tests passed; hosted Web typecheck passed; the production
   lane compiled all routes, generated 284/284 static pages, passed dev smoke
   and build-output tests, and completed lint with only the 44 pre-existing
-  warnings reported by the baseline lane.
+  warnings reported by the baseline lane. Required PR checks passed, final
+  ReviewGPT returned `ROUND_OUTCOME: PASS`, and the first forced-cold Vercel
+  Standard preview reached Ready with `webpack_cache=disabled` in its build
+  policy log.
+Completed: 2026-08-31
