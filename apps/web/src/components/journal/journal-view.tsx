@@ -34,6 +34,12 @@ import {
 import { DashboardPageStatus } from "@/src/components/dashboard/dashboard-page-status";
 import { Button } from "@/src/components/ui/button";
 import {
+  Drawer,
+  DrawerContent,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/src/components/ui/drawer";
+import {
   Popover,
   PopoverContent,
   PopoverHeader,
@@ -562,7 +568,7 @@ function JournalDaySection({
         <h2
           id={headingId}
           className={cn(
-            "text-sm font-semibold leading-5 text-foreground",
+            "text-xs font-semibold leading-4 text-foreground md:text-sm md:leading-5",
             isToday && "text-primary",
           )}
         >
@@ -570,9 +576,9 @@ function JournalDaySection({
         </h2>
         <span
           className={cn(
-            "font-serif text-[2.125rem] font-semibold leading-9 tracking-[-0.02em] text-foreground",
+            "font-serif text-3xl font-semibold leading-8 tracking-[-0.02em] text-foreground md:text-[2.125rem] md:leading-9",
             isToday &&
-              "flex size-10 items-center justify-center rounded-full bg-primary text-[1.5rem] text-primary-foreground",
+              "flex size-9 items-center justify-center rounded-full bg-primary text-xl text-primary-foreground md:size-10 md:text-[1.5rem]",
           )}
         >
           {Number(date.slice(8, 10))}
@@ -619,6 +625,7 @@ function JournalEventRow({
   sleepBaselines: SleepMetricBaselines;
 }) {
   const pointerAnchor = usePointerPopoverAnchor();
+  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
   const sources = [
     ...new Set(
       event.records
@@ -692,37 +699,69 @@ function JournalEventRow({
         {renderEventIcon(event)}
       </span>
       {hasDetails ? (
-        <Popover>
-          <PopoverTrigger
-            closeDelay={200}
-            delay={150}
-            openOnHover
-            render={
-              <button
-                aria-label={`Show details for ${event.title}`}
-                className="-mx-2 -my-1 w-fit max-w-full min-w-0 justify-self-start rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onKeyDown={pointerAnchor.onKeyDown}
-                onPointerMove={pointerAnchor.onPointerMove}
-                type="button"
-              >
-                <span className="flex min-w-0 items-start gap-1.5">
-                  {content}
-                  <ChevronRight
-                    aria-hidden="true"
-                    className="mt-[7px] size-3.5 shrink-0 text-muted-foreground/45 transition-colors group-hover:text-muted-foreground"
+        <>
+          <div className="md:hidden">
+            <Drawer
+              open={mobileDetailsOpen}
+              onOpenChange={setMobileDetailsOpen}
+            >
+              <DrawerTrigger asChild>
+                <button
+                  aria-expanded={mobileDetailsOpen}
+                  aria-haspopup="dialog"
+                  aria-label={`Show details for ${event.title}`}
+                  className="-mx-2 -my-1 w-fit max-w-full min-w-0 justify-self-start rounded-lg px-2 py-1 text-left transition-colors active:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-journal-detail-trigger="mobile"
+                  onClick={() => setMobileDetailsOpen(true)}
+                  type="button"
+                >
+                  <JournalEventDetailTrigger content={content} />
+                </button>
+              </DrawerTrigger>
+              <DrawerContent className="overflow-y-auto overscroll-contain data-[vaul-drawer-direction=bottom]:max-h-[85dvh] data-[vaul-drawer-direction=bottom]:rounded-t-2xl">
+                <DrawerTitle className="sr-only">
+                  {event.title} details
+                </DrawerTitle>
+                <div className="flex shrink-0 flex-col gap-3 px-5 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3">
+                  <JournalEventDetailContent
+                    details={details}
+                    event={event}
+                    sleepBaselines={sleepBaselines}
+                    sources={visibleSources}
                   />
-                </span>
-              </button>
-            }
-          />
-          <JournalEventPopoverContent
-            anchor={pointerAnchor.anchor}
-            details={details}
-            event={event}
-            sleepBaselines={sleepBaselines}
-            sources={visibleSources}
-          />
-        </Popover>
+                </div>
+              </DrawerContent>
+            </Drawer>
+          </div>
+          <div className="hidden md:block">
+            <Popover>
+              <PopoverTrigger
+                closeDelay={200}
+                delay={150}
+                openOnHover
+                render={
+                  <button
+                    aria-label={`Show details for ${event.title}`}
+                    className="-mx-2 -my-1 w-fit max-w-full min-w-0 justify-self-start rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    data-journal-detail-trigger="desktop"
+                    onKeyDown={pointerAnchor.onKeyDown}
+                    onPointerMove={pointerAnchor.onPointerMove}
+                    type="button"
+                  >
+                    <JournalEventDetailTrigger content={content} />
+                  </button>
+                }
+              />
+              <JournalEventPopoverContent
+                anchor={pointerAnchor.anchor}
+                details={details}
+                event={event}
+                sleepBaselines={sleepBaselines}
+                sources={visibleSources}
+              />
+            </Popover>
+          </div>
+        </>
       ) : (
         content
       )}
@@ -730,14 +769,24 @@ function JournalEventRow({
   );
 }
 
-function JournalEventPopoverContent({
-  anchor,
+function JournalEventDetailTrigger({ content }: { content: React.ReactNode }) {
+  return (
+    <span className="flex min-w-0 items-start gap-1.5">
+      {content}
+      <ChevronRight
+        aria-hidden="true"
+        className="mt-[7px] size-3.5 shrink-0 text-muted-foreground/45 transition-colors group-hover:text-muted-foreground"
+      />
+    </span>
+  );
+}
+
+function JournalEventDetailContent({
   details,
   event,
   sleepBaselines,
   sources,
 }: {
-  anchor: () => { getBoundingClientRect: () => DOMRect } | null;
   details: string[];
   event: JournalEvent;
   sleepBaselines: SleepMetricBaselines;
@@ -748,14 +797,7 @@ function JournalEventPopoverContent({
   const detailHref = journalEventDetailHref(event);
 
   return (
-    <PopoverContent
-      align="center"
-      anchor={anchor}
-      className="w-[min(30rem,calc(100vw-2rem))]"
-      positionMethod="fixed"
-      side="right"
-      sideOffset={12}
-    >
+    <>
       {sleepDetails ? (
         <SleepPopoverPresentation
           details={sleepDetails}
@@ -782,6 +824,38 @@ function JournalEventPopoverContent({
           <p className="text-xs text-muted-foreground">{sources[0]}</p>
         </>
       ) : null}
+    </>
+  );
+}
+
+function JournalEventPopoverContent({
+  anchor,
+  details,
+  event,
+  sleepBaselines,
+  sources,
+}: {
+  anchor: () => { getBoundingClientRect: () => DOMRect } | null;
+  details: string[];
+  event: JournalEvent;
+  sleepBaselines: SleepMetricBaselines;
+  sources: string[];
+}) {
+  return (
+    <PopoverContent
+      align="center"
+      anchor={anchor}
+      className="w-[min(30rem,calc(100vw-2rem))]"
+      positionMethod="fixed"
+      side="right"
+      sideOffset={12}
+    >
+      <JournalEventDetailContent
+        details={details}
+        event={event}
+        sleepBaselines={sleepBaselines}
+        sources={sources}
+      />
     </PopoverContent>
   );
 }
@@ -844,12 +918,11 @@ function SleepPopoverPresentation({
 
   return (
     <TooltipProvider>
-      <PopoverHeader className="gap-0">
+      <div>
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
           Night sleep
         </p>
-        <PopoverTitle className="sr-only">Sleep details</PopoverTitle>
-      </PopoverHeader>
+      </div>
       {primaryMetrics.length > 0 ? (
         <dl className="grid grid-cols-2 gap-6">
           {primaryMetrics.map((metric) => (
@@ -997,16 +1070,16 @@ function GenericJournalPopoverPresentation({
 
   return (
     <>
-      <PopoverHeader className="gap-1">
+      <div className="flex flex-col gap-1">
         {event.timing === "night" ? (
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
             Night sleep
           </p>
         ) : null}
-        <PopoverTitle className="font-serif text-xl font-semibold leading-6">
+        <h2 className="font-serif text-xl font-semibold leading-6">
           {event.title}
-        </PopoverTitle>
-      </PopoverHeader>
+        </h2>
+      </div>
       {structuredDetails.length > 0 ? (
         <>
           <Separator />

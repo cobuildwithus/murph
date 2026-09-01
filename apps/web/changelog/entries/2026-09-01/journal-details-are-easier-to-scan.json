@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Journal details are easier to scan",
     "summary": "Journal now marks entries with more detail and keeps repeated context out of the main timeline.",
-    "details": "Wider detail panels organize workout, travel, laboratory, and experiment context without repeating the same fact in the timeline.",
+    "details": "Detail panels organize workout, travel, laboratory, and experiment context without repeating the same fact in the timeline. On phones, details open in a panel from the bottom for easier reading.",
     "relevanceTags": ["journal", "workouts", "experiments", "usability"],
     "sourcePullRequests": []
   }

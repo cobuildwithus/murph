@@ -24,7 +24,16 @@ const JOURNAL_STUDY_DATA: JournalView = {
   days: [
     day("2026-06-13", [
       journalEvent("sleep-sat", "sleep", "Sleep", "2026-06-13T07:20:00.000Z", {
-        details: ["91% efficiency", "HRV 58 ms", "readiness 82"],
+        details: [
+          "91% efficiency",
+          "HRV 58 ms",
+          "recovery 82",
+          "resting HR 57 bpm",
+          "deep sleep 78 min",
+          "REM sleep 104 min",
+          "respiratory rate 14 breaths/min",
+          "SpO₂ 96%",
+        ],
         source: "Oura",
         summary: "7 h 42 · sleep score 86",
         timing: "night",

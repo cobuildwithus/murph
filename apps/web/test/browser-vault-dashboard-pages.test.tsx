@@ -55,6 +55,17 @@ type BrowserVaultEntity = Parameters<
 let clientFixture: Awaited<ReturnType<typeof createFixtureClient>>;
 const experimentProtocols = listHealthCommonsExperimentBrowseProtocols();
 
+const staticMatchMedia: typeof window.matchMedia = (query) => ({
+  addEventListener() {},
+  addListener() {},
+  dispatchEvent: () => false,
+  matches: false,
+  media: query,
+  onchange: null,
+  removeEventListener() {},
+  removeListener() {},
+});
+
 beforeEach(async () => {
   clientFixture = await createFixtureClient();
   mocks.refresh.mockClear();
@@ -370,16 +381,23 @@ test("JournalPage keeps secondary sleep metrics off the main timeline", async ()
         windowDays: 120,
       },
     }),
-    { requireButton: false },
+    { matchMedia: staticMatchMedia, requireButton: false },
   );
 
   try {
     assert.doesNotMatch(rendered.container.textContent ?? "", /efficiency/u);
-    const detailsButton = rendered.container.querySelector(
-      'button[aria-label="Show details for Sleep"]',
+    const mobileDetailsButton = rendered.container.querySelector(
+      'button[data-journal-detail-trigger="mobile"]',
     );
-    assert.ok(detailsButton instanceof rendered.window.HTMLButtonElement);
-    assert.ok(detailsButton.querySelector('svg[aria-hidden="true"]'));
+    assert.ok(
+      mobileDetailsButton instanceof rendered.window.HTMLButtonElement,
+    );
+    assert.ok(mobileDetailsButton.querySelector('svg[aria-hidden="true"]'));
+    assert.equal(mobileDetailsButton.getAttribute("aria-expanded"), "false");
+
+    await act(async () => mobileDetailsButton.click());
+
+    assert.equal(mobileDetailsButton.getAttribute("aria-expanded"), "true");
   } finally {
     await rendered.cleanup();
   }
