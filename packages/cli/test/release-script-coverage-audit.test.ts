@@ -1355,13 +1355,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.141')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.142')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.141'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.142'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1371,7 +1371,7 @@ describe('monorepo release flow coverage audit', () => {
     ).toEqual(
       [
         "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
-        "'@cobuild/review-gpt@0.5.141': patches/@cobuild__review-gpt@0.5.141.patch",
+        "'@cobuild/review-gpt@0.5.142': patches/@cobuild__review-gpt@0.5.142.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
       ],
@@ -1381,7 +1381,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(repoToolsPatch).toContain('add -u -- "${tracked_files[@]}"')
     expect(repoToolsPatch).toContain('add -A -- "${untracked_files[@]}"')
     expect(
-      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.141.patch')),
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.142.patch')),
     ).toBe(true)
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.140.patch')),
@@ -1417,7 +1417,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('{ targetId: normalizedTargetId }')
     expect(reviewGptDriver).toContain('attemptDeadline')
     expect(reviewGptDriver).toContain('failure.reviewGptTargetId = targetId;')
-    expect(reviewGptDriver.match(/void (?:targetClosed|closed)\.catch\(\(\) => \{\}\);/gu)).toHaveLength(3)
+    expect(reviewGptDriver.match(/void (?:targetClosed|closed)\.catch\(\(\) => \{\}\);/gu)).toHaveLength(2)
+    expect(reviewGptDriver).toContain('function createPageCdpCommandChannel(')
+    expect(reviewGptDriver).toContain('const rejectPendingPageCommands = (socket, error) => {')
+    expect(reviewGptDriver).not.toContain('const commandClosed = closed;')
+    expect(reviewGptDriver).not.toContain('Promise.race([response, commandClosed])')
     expect(reviewGptDriver).toContain('const controller = new AbortController();')
     expect(reviewGptDriver).toContain(
       'const browserTransportTimeoutMs = Math.min(configuredDraftTimeoutMs, 15000);',
