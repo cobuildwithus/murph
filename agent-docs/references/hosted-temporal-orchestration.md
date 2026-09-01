@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-27
+Last verified: 2026-08-31
 
 ## Decision
 
@@ -24,11 +24,26 @@ The final ownership split is:
   authorization, R2/snapshot transport plumbing, and cleanup.
 
 The public Murph repository owns the released orchestration contracts,
-hosted-local harness, and architecture guardrails. The private
-`cobuildwithus/murph-cloud` repository owns the production Temporal worker,
-Render Blueprint, deploy workflow, operational runbook, and rollback through
-previously deployed private versions. Public Murph contains no worker
-implementation or second production deployment path.
+hosted-local harness, architecture guardrails, and trusted default-branch
+compatibility controller. The private `cobuildwithus/murph-cloud` repository
+owns the production Temporal worker, live Current/Ramping reader discovery and
+attestation, exact-head integration/replay/canary admission, Render Blueprint,
+deploy workflow, operational runbook, and rollback through previously deployed
+private versions. Public Murph contains no worker implementation, private
+reader policy, or second production deployment path.
+
+The compatibility controller persists no private SHA/tag pointer and imports no
+private code. After same-repository human and exact-public-head admission, it
+uses its repository-scoped GitHub App token to resolve private `main`, validates
+the fixed `public-murph-integration.yml` workflow identity, and dispatches that
+workflow at `main` with returned run details. It accepts only the returned first
+attempt whose workflow identity and `head_sha` match the pre-resolved private
+commit. Candidate code can supply only the bounded canonical reconciliation
+fixture artifact produced in unprivileged public CI. Before reporting success,
+the controller re-reads private `main` and fails closed if the branch moved. The
+private protected workflow must derive the live Current and Ramping reader SHAs,
+attest exact-head integration/replay/canary success, and make that proof a
+private deploy prerequisite.
 
 Temporal decides when to ask Cloudflare to process based on web-owned
 reconciliation facts and pointer-only signals. Cloudflare starts or wakes the
@@ -708,12 +723,11 @@ The hard-cut architecture is accepted when:
   candidate producer runs only in unprivileged Repo Hygiene and hands the
   trusted controller a run/head-bound bounded JSON artifact. The controller
   never owns worker code or reader policy: private Murph Cloud receives only
-  serialized fixture data, declares the immutable supported-reader set,
-  automatically includes its pinned controller revision, runs every reader,
-  and returns one producer-and-reader proof digest. The committed public policy
-  binds the private controller to a SHA-suffixed immutable tag. Missing, stale,
-  skipped, canceled, duplicated, malformed, or failed proof remains red or
-  pending.
+  serialized fixture data, derives the live Current and traffic-bearing Ramping
+  readers, automatically includes the exact dispatched private candidate, runs
+  every reader, and returns one producer-and-reader proof digest. Public code
+  stores no private revision pointer or reader policy. Missing, stale, skipped,
+  canceled, duplicated, malformed, or failed proof remains red or pending.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration
