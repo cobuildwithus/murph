@@ -235,6 +235,25 @@ export function createAssistantDeliveryAmbiguousError(
   }
 }
 
+export function resolveAssistantOutboxRetryExhaustionDisposition(
+  lastError: AssistantDeliveryError | null,
+): {
+  error: AssistantDeliveryError
+  status: 'abandoned' | 'failed'
+} {
+  if (lastError?.code === 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING') {
+    return {
+      error: createAssistantDeliveryAmbiguousError(lastError),
+      status: 'abandoned',
+    }
+  }
+
+  return {
+    error: createAssistantDeliveryRetryExhaustedError(lastError),
+    status: 'failed',
+  }
+}
+
 function readAssistantOutboxRetryableFlag(error: unknown): boolean | null {
   const contextRetryable = readBooleanProperty(readRecord(error)?.context, 'retryable')
   if (contextRetryable !== null) {

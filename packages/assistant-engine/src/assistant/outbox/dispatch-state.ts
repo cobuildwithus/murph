@@ -30,6 +30,7 @@ import {
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
   resolveAssistantOutboxRetryDelayMs,
+  resolveAssistantOutboxRetryExhaustionDisposition,
 } from './retry-policy.js'
 import {
   persistAssistantOutboxIntentAtPath,
@@ -1358,32 +1359,35 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
       ) &&
       isAssistantOutboxRetryBudgetExhausted(baseIntent)
     ) {
+      const retryExhaustionDisposition =
+        resolveAssistantOutboxRetryExhaustionDisposition(baseIntent.lastError)
       const deliveryError = sanitizeAssistantDeliveryErrorForPersistence(
-        createAssistantDeliveryRetryExhaustedError(baseIntent.lastError),
+        retryExhaustionDisposition.error,
       )!
-      const failedIntent = assistantOutboxIntentSchema.parse(
+      const terminalIntent = assistantOutboxIntentSchema.parse(
         sanitizeAssistantOutboxIntentForPersistence({
           ...baseIntent,
+          deliveryConfirmationPending: false,
           updatedAt: input.startedAt,
           nextAttemptAt: null,
           preparedDispatchToken: null,
-          status: 'failed',
+          status: retryExhaustionDisposition.status,
           lastError: deliveryError,
         }),
       )
       await persistAssistantOutboxIntentAtPath({
-        intent: failedIntent,
+        intent: terminalIntent,
         intentPath: input.intentPath,
         paths,
       })
       await repairAssistantOutboxReceiptForIntent({
-        at: failedIntent.updatedAt,
-        intent: failedIntent,
+        at: terminalIntent.updatedAt,
+        intent: terminalIntent,
         vault: input.vault,
       })
       retryExhausted = true
       return {
-        intent: failedIntent,
+        intent: terminalIntent,
         ownsDispatch: false,
         preparedDispatchToken: null,
         previousDispatchState,
@@ -1741,6 +1745,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
         deliveryConfirmationPending: false,
         updatedAt: failedAt,
         nextAttemptAt,
+        preparedDispatchToken: retryable ? baseIntent.preparedDispatchToken : null,
         status: retryExhausted ? 'failed' : input.status,
         lastError: deliveryError,
       }),
