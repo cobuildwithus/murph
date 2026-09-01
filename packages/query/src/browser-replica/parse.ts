@@ -4,6 +4,7 @@ import type { TimelineEntry } from "../timeline.ts";
 import type {
   JournalDay,
   JournalEvent,
+  JournalEventMetrics,
   JournalRecord,
   JournalView,
   JournalWeekSummary,
@@ -231,6 +232,7 @@ function parseJournalEvent(value: unknown, label: string): JournalEvent {
       : requireStringArray(record.details, `${label}.details`),
     id: requireString(record.id, `${label}.id`),
     kind: requireString(record.kind, `${label}.kind`),
+    metrics: parseJournalEventMetrics(record.metrics, `${label}.metrics`),
     occurredAt: requireIsoDateTime(record.occurredAt, `${label}.occurredAt`),
     records: requireArray(record.records, `${label}.records`).map((entry, index) =>
       parseJournalRecord(entry, `${label}.records[${index}]`)
@@ -239,6 +241,56 @@ function parseJournalEvent(value: unknown, label: string): JournalEvent {
     timing: parseJournalEventTiming(record.timing),
     timeZone: readNullableString(record.timeZone),
     title: requireString(record.title, `${label}.title`),
+  };
+}
+
+function parseJournalEventMetrics(
+  value: unknown,
+  label: string,
+): JournalEventMetrics {
+  if (value === undefined) {
+    return emptyJournalEventMetrics();
+  }
+  const record = requireRecord(value, label);
+  const activityMinutes = requireFiniteNumber(
+    record.activityMinutes,
+    `${label}.activityMinutes`,
+  );
+  if (activityMinutes < 0) {
+    throw new TypeError(`${label}.activityMinutes must be non-negative.`);
+  }
+  return {
+    activityMinutes,
+    deepSleepMinutes: readNullableFiniteNumber(record.deepSleepMinutes),
+    hrvMs: readNullableFiniteNumber(record.hrvMs),
+    readinessScore: readNullableFiniteNumber(record.readinessScore),
+    recoveryScore: readNullableFiniteNumber(record.recoveryScore),
+    remSleepMinutes: readNullableFiniteNumber(record.remSleepMinutes),
+    respiratoryRate: readNullableFiniteNumber(record.respiratoryRate),
+    restingHeartRateBpm: readNullableFiniteNumber(record.restingHeartRateBpm),
+    sleepEfficiencyPercent: readNullableFiniteNumber(
+      record.sleepEfficiencyPercent,
+    ),
+    sleepMinutes: readNullableFiniteNumber(record.sleepMinutes),
+    sleepScore: readNullableFiniteNumber(record.sleepScore),
+    spo2Percent: readNullableFiniteNumber(record.spo2Percent),
+  };
+}
+
+function emptyJournalEventMetrics(): JournalEventMetrics {
+  return {
+    activityMinutes: 0,
+    deepSleepMinutes: null,
+    hrvMs: null,
+    readinessScore: null,
+    recoveryScore: null,
+    remSleepMinutes: null,
+    respiratoryRate: null,
+    restingHeartRateBpm: null,
+    sleepEfficiencyPercent: null,
+    sleepMinutes: null,
+    sleepScore: null,
+    spo2Percent: null,
   };
 }
 

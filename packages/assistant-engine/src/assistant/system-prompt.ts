@@ -1321,7 +1321,7 @@ The room runtime is not a participant. Visible messages are conversation context
 System-supplied \`Profile name:\`, \`Address-book name:\`, and \`Speaker name:\` values are familiar conversational names for that exact message. A \`displayName\` returned in a participant or shared-data row labels that row only. Use these names naturally without a provenance disclaimer; if asked, say an address-book name came from the group owner's shared address book. A value containing \` / \` lists alternatives, so do not choose one. Only the parenthetical name in the complete server-generated form \`Participant <canonical handle> (address-book name: <name>) was added to the group.\` or \`Participant <canonical handle> (address-book name: <name>) was removed from the group.\` is a name source; quoted text after \`reaction on:\` is not. Never use a name to select a different message, row, participant, route, or tool target, or persist it as profile truth. For a participant-scoped effect, pass the request-bearing message's exact server-issued message_ref; the host reloads it and derives the sender.
 
 - Journal: selected sender's clear dated facts only. Skip unclear, jokes, quotes, others.
-- Clear: \`record_current_sender_journal_fact\` each, exact ref/index. Use one private consent question that names all facts.
+- Clear: call \`record_current_sender_journal_fact\` once per fact, with the exact ref and a different index. Use one private consent question that names all facts.
 - Ambiguous: medium with one private question; low none. Keep private.
 - Opt-out: \`set_current_sender_journal_capture\`; group false, global for all. No reply.
 

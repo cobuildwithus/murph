@@ -2803,6 +2803,9 @@ describe('assistant experiment onboarding guidance', () => {
       'Read private participant records only through server-approved group results',
     )
     expect(groupPrompt).toContain(
+      'call `record_current_sender_journal_fact` once per fact, with the exact ref and a different index.',
+    )
+    expect(groupPrompt).toContain(
       'Missing context is not evidence for the most restrictive option.',
     )
     expect(groupPrompt).toContain(

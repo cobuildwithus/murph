@@ -252,10 +252,7 @@ function buildPersonaFixture(
     entities.push(
       eventEntity({
         attributes: {
-          note:
-            personaId === "whoop"
-              ? "A late, high-strain session."
-              : "Coffee late in the afternoon.",
+          note: personaId === "whoop" ? "High strain" : "Late caffeine",
           noteType: "journal-factor",
           source: "manual",
         },
@@ -597,7 +594,7 @@ function addContextRichEvents(asOfDate: string, entities: CanonicalEntity[]) {
       },
       date: tripStart,
       id: "oura_trip",
-      note: "Berlin · four nights",
+      note: "Work trip",
       occurredAt: null,
       source: "calendar",
       tags: ["key-travel", "episode-work-trip"],
@@ -609,7 +606,7 @@ function addContextRichEvents(asOfDate: string, entities: CanonicalEntity[]) {
       },
       date: addDays(asOfDate, -12),
       id: "oura_environment",
-      note: "21 C to 18 C",
+      note: "Bedroom temperature changed",
       occurredAt: null,
       source: "environment",
       tags: ["key-bedroom-temperature"],
@@ -700,7 +697,7 @@ function addWhoopJournalExamples(
       },
       date: date(3),
       id: "whoop_multi_day_trip",
-      note: "Lisbon · day 2 of 3",
+      note: "Work trip",
       occurredAt: null,
       source: "calendar",
       tags: ["key-travel", "episode-work-trip"],
@@ -754,7 +751,7 @@ function addWhoopJournalExamples(
       },
       date: date(7),
       id: "whoop_environment_change",
-      note: "Changed from 21 C to 18 C.",
+      note: "Bedroom temperature changed",
       occurredAt: null,
       source: "environment",
       tags: ["key-bedroom-temperature"],

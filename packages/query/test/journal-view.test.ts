@@ -276,11 +276,21 @@ test("Journal turns dense wearable records into main sleep, naps, and grouped ac
 
   assert.equal(mainSleep?.timing, "night");
   assert.equal(mainSleep?.summary, "7 h 30 · sleep score 78");
-  assert.deepEqual(mainSleep?.details, [
-    "89% efficiency",
-    "HRV 68 ms",
-    "readiness 71",
-  ]);
+  assert.deepEqual(mainSleep?.details, []);
+  assert.deepEqual(mainSleep?.metrics, {
+    activityMinutes: 0,
+    deepSleepMinutes: null,
+    hrvMs: 68.1429,
+    readinessScore: 71,
+    recoveryScore: null,
+    remSleepMinutes: null,
+    respiratoryRate: null,
+    restingHeartRateBpm: null,
+    sleepEfficiencyPercent: 89,
+    sleepMinutes: 450,
+    sleepScore: 78,
+    spo2Percent: null,
+  });
   assert.equal(
     mainSleep?.records.some((record) => record.label === "Recovery score"),
     false,
@@ -296,6 +306,7 @@ test("Journal turns dense wearable records into main sleep, naps, and grouped ac
 
   assert.equal(yardWork?.title, "Yard work");
   assert.equal(yardWork?.summary, "2 h 50 across 3 sessions");
+  assert.equal(yardWork?.metrics.activityMinutes, 170);
   assert.deepEqual(yardWork?.records.map((record) => record.id).sort(), [
     "yard_1",
     "yard_2",
@@ -363,7 +374,7 @@ test("Journal keeps useful workout detail in the activity popover", () => {
   ]);
 });
 
-test("Journal keeps repeated context and experiment results inside details", () => {
+test("Journal keeps source note summaries and experiment results without tag rules", () => {
   const lateCaffeine = {
     ...event(
       "late_caffeine",
@@ -417,12 +428,7 @@ test("Journal keeps repeated context and experiment results inside details", () 
 
   const view = buildJournalView(
     createVaultReadModel({
-      entities: [
-        lateCaffeine,
-        workTrip,
-        activeExperiment,
-        completedExperiment,
-      ],
+      entities: [lateCaffeine, workTrip, activeExperiment, completedExperiment],
       vaultRoot: "test://journal-concise-context",
     }),
     [],
@@ -432,11 +438,11 @@ test("Journal keeps repeated context and experiment results inside details", () 
 
   assert.equal(
     events.find((entry) => entry.title === "Late caffeine")?.summary,
-    null,
+    "Coffee late in the afternoon.",
   );
   assert.equal(
     events.find((entry) => entry.title === "Work trip")?.summary,
-    "Berlin",
+    "Berlin · four nights",
   );
   assert.deepEqual(
     events.find((entry) => entry.title === "Work trip")?.details,
@@ -496,14 +502,17 @@ test("Journal shows each planned experiment day without writing new events", () 
     view.days.map((day) => [day.date, day.events[0]?.summary]),
   );
 
-  assert.deepEqual([...summariesByDate.entries()], [
-    ["2026-08-25", "Experiment completed"],
-    ["2026-08-24", "Running experiment · day 3"],
-    ["2026-08-23", "Running experiment · day 2"],
-    ["2026-08-22", "Experiment started"],
-    ["2026-08-21", "Baseline · day 2"],
-    ["2026-08-20", "Baseline · day 1"],
-  ]);
+  assert.deepEqual(
+    [...summariesByDate.entries()],
+    [
+      ["2026-08-25", "Experiment completed"],
+      ["2026-08-24", "Running experiment · day 3"],
+      ["2026-08-23", "Running experiment · day 2"],
+      ["2026-08-22", "Experiment started"],
+      ["2026-08-21", "Baseline · day 2"],
+      ["2026-08-20", "Baseline · day 1"],
+    ],
+  );
   assert.equal(view.recordCount, 6);
 });
 

@@ -350,8 +350,9 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
       sourceHash: sourceBefore.hash,
     });
 
-    const sourceBeforePublish = await cancellation.runOwned((signal) =>
-      hashHostedBrowserVaultReplicaSources(input.vaultRoot, signal),
+    const sourceBeforePublish = await cancellation.runOwned(
+      "second_source_hash",
+      (signal) => hashHostedBrowserVaultReplicaSources(input.vaultRoot, signal),
     );
     if (sourceBeforePublish.hash !== sourceBefore.hash) {
       return {

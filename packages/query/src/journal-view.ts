@@ -41,12 +41,28 @@ export interface JournalEvent {
   details: string[];
   id: string;
   kind: string;
+  metrics: JournalEventMetrics;
   occurredAt: string;
   records: JournalRecord[];
   summary: string | null;
   timing: JournalEventTiming;
   timeZone: string | null;
   title: string;
+}
+
+export interface JournalEventMetrics {
+  activityMinutes: number;
+  deepSleepMinutes: number | null;
+  hrvMs: number | null;
+  readinessScore: number | null;
+  recoveryScore: number | null;
+  remSleepMinutes: number | null;
+  respiratoryRate: number | null;
+  restingHeartRateBpm: number | null;
+  sleepEfficiencyPercent: number | null;
+  sleepMinutes: number | null;
+  sleepScore: number | null;
+  spo2Percent: number | null;
 }
 
 export type JournalEventTiming = "all_day" | "night" | "timed";
@@ -92,12 +108,6 @@ interface JournalCandidate extends JournalRecord {
   timing: JournalEventTiming;
 }
 
-interface BuiltJournalEvent extends JournalEvent {
-  activityMinutes: number;
-  sleepMinutes: number | null;
-  sleepScore: number | null;
-}
-
 export function buildJournalView(
   vault: VaultReadModel,
   metricPoints: readonly MetricPoint[] = [],
@@ -122,14 +132,7 @@ export function buildJournalView(
     .slice(0, MAX_RECORDS);
   const builtEvents = groupJournalCandidates(candidates);
   const weeks = buildJournalWeekSummaries(builtEvents);
-  const events = builtEvents.map(
-    ({
-      activityMinutes: _activityMinutes,
-      sleepMinutes: _sleepMinutes,
-      sleepScore: _sleepScore,
-      ...event
-    }) => event,
-  );
+  const events = builtEvents;
   const daysByDate = new Map<string, JournalEvent[]>();
   for (const event of events) {
     const dayEvents = daysByDate.get(event.date) ?? [];
@@ -175,13 +178,14 @@ function journalCandidateFromEvent(
     event.kind === "sleep_session"
       ? readSleepType(event.attributes.sleepType)
       : null;
-  const groupHint = event.kind === "experiment_context"
-    ? experimentJournalGroupHint(label, date)
-    : activityKey
-    ? `activity:${date}:${activityKey.toLowerCase()}`
-    : observationMetric
-    ? `${observationMetric.group}:${date}`
-    : null;
+  const groupHint =
+    event.kind === "experiment_context"
+      ? experimentJournalGroupHint(label, date)
+      : activityKey
+      ? `activity:${date}:${activityKey.toLowerCase()}`
+      : observationMetric
+      ? `${observationMetric.group}:${date}`
+      : null;
   return [
     {
       activityKey,
@@ -339,7 +343,10 @@ function experimentJournalGroupHint(title: string, date: string): string {
   return `experiment:${title.trim().toLowerCase()}:${date}`;
 }
 
-function daysBetweenInclusive(startDate: string, endDate: string): number | null {
+function daysBetweenInclusive(
+  startDate: string,
+  endDate: string,
+): number | null {
   const start = Date.parse(`${startDate}T00:00:00.000Z`);
   const end = Date.parse(`${endDate}T00:00:00.000Z`);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
@@ -503,7 +510,7 @@ function journalObservationMetric(
 
 function groupJournalCandidates(
   candidates: readonly JournalCandidate[],
-): BuiltJournalEvent[] {
+): JournalEvent[] {
   const parent = new Map(
     candidates.map((candidate) => [candidate.id, candidate.id]),
   );
@@ -547,7 +554,6 @@ function groupJournalCandidates(
     const lead = selectLeadRecord(sorted);
     const presentation = buildEventPresentation(sorted, lead);
     return {
-      activityMinutes: presentation.activityMinutes,
       date: lead.date,
       details: presentation.details,
       id: sorted
@@ -555,6 +561,7 @@ function groupJournalCandidates(
         .sort()
         .join(":"),
       kind: eventGroupKind(sorted),
+      metrics: presentation.metrics,
       occurredAt: lead.occurredAt,
       records: sorted.map(
         ({
@@ -571,8 +578,6 @@ function groupJournalCandidates(
           ...record
         }) => record,
       ),
-      sleepMinutes: presentation.sleepMinutes,
-      sleepScore: presentation.sleepScore,
       summary: presentation.summary,
       timing: presentation.timing,
       timeZone: lead.timeZone,
@@ -635,19 +640,7 @@ function eventLabel(event: CanonicalEntity): string {
 
 function eventSummary(event: CanonicalEntity): string | null {
   const note = readString(event.attributes.note);
-  if (note) {
-    if (
-      event.tags.includes("key-late-caffeine") ||
-      event.tags.includes("key-high-strain") ||
-      event.tags.includes("key-bedroom-temperature")
-    ) {
-      return null;
-    }
-    if (event.tags.includes("episode-work-trip")) {
-      return readString(event.attributes.destination);
-    }
-    return note;
-  }
+  if (note) return note;
   const summary = readString(event.attributes.summary);
   if (event.kind === "experiment_context") {
     return experimentJournalSummary(event, summary);
@@ -896,10 +889,8 @@ function buildEventPresentation(
   records: readonly JournalCandidate[],
   lead: JournalCandidate,
 ): {
-  activityMinutes: number;
   details: string[];
-  sleepMinutes: number | null;
-  sleepScore: number | null;
+  metrics: JournalEventMetrics;
   summary: string | null;
   timing: JournalEventTiming;
 } {
@@ -911,15 +902,16 @@ function buildEventPresentation(
       activitySessions.map((record) => record.durationMinutes),
     );
     return {
-      activityMinutes,
       details: uniqueStrings(
         records.flatMap((record) => [
           ...record.detailItems,
           ...(record.kind === "note" ? [record.summary] : []),
         ]),
       ),
-      sleepMinutes: null,
-      sleepScore: null,
+      metrics: {
+        ...emptyJournalEventMetrics(),
+        activityMinutes,
+      },
       summary:
         activityMinutes > 0
           ? `${formatDuration(activityMinutes)}${
@@ -940,9 +932,10 @@ function buildEventPresentation(
     sleepSessions.length > 0 ||
     records.some((record) => record.groupHint?.startsWith("sleep:"))
   ) {
-    const sleepMinutes = maxNumber(
-      sleepSessions.map((record) => record.durationMinutes),
-    );
+    const sleepMinutes = maxNumber([
+      ...sleepSessions.map((record) => record.durationMinutes),
+      metricValue(records, "total-sleep"),
+    ]);
     const sleepScore = metricValue(records, "sleep-score");
     const summaryParts = [
       sleepMinutes === null ? null : formatDuration(sleepMinutes),
@@ -950,84 +943,46 @@ function buildEventPresentation(
         ? `sleep score ${formatNumber(sleepScore)}`
         : null,
     ].filter((value): value is string => value !== null);
-    const details = isNap
-      ? []
-      : [
-          formatMetricDetail(
-            records,
-            "sleep-efficiency",
-            (value) => `${formatNumber(value)}% efficiency`,
-          ),
-          formatMetricDetail(
-            records,
-            "hrv-rmssd",
-            (value) => `HRV ${formatNumber(value)} ms`,
-          ),
-          formatMetricDetail(
-            records,
-            "readiness-score",
-            (value) => `readiness ${formatNumber(value)}`,
-          ),
-          formatMetricDetail(
-            records,
-            "recovery-score",
-            (value) => `recovery ${formatNumber(value)}`,
-          ),
-          formatMetricDetail(
-            records,
-            "resting-heart-rate",
-            (value) => `resting HR ${formatNumber(value)} bpm`,
-          ),
-          formatMetricDetail(
-            records,
-            "deep-sleep-minutes",
-            (value) => `deep sleep ${formatNumber(value)} min`,
-          ),
-          formatMetricDetail(
-            records,
-            "rem-sleep-minutes",
-            (value) => `REM sleep ${formatNumber(value)} min`,
-          ),
-          formatMetricDetail(
-            records,
-            "respiratory-rate",
-            (value) => `respiratory rate ${formatNumber(value)} breaths/min`,
-          ),
-          formatMetricDetail(
-            records,
-            "spo2",
-            (value) => `SpO₂ ${formatNumber(value)}%`,
-          ),
-        ].filter((value): value is string => value !== null);
     return {
-      activityMinutes: 0,
-      details,
-      sleepMinutes: isNap ? null : sleepMinutes,
-      sleepScore: isNap ? null : sleepScore,
+      details: [],
+      metrics: isNap
+        ? emptyJournalEventMetrics()
+        : {
+            ...emptyJournalEventMetrics(),
+            deepSleepMinutes: metricValue(records, "deep-sleep-minutes"),
+            hrvMs: metricValue(records, "hrv-rmssd"),
+            readinessScore: metricValue(records, "readiness-score"),
+            recoveryScore: metricValue(records, "recovery-score"),
+            remSleepMinutes: metricValue(records, "rem-sleep-minutes"),
+            respiratoryRate: metricValue(records, "respiratory-rate"),
+            restingHeartRateBpm: metricValue(records, "resting-heart-rate"),
+            sleepEfficiencyPercent: metricValue(records, "sleep-efficiency"),
+            sleepMinutes,
+            sleepScore,
+            spo2Percent: metricValue(records, "spo2"),
+          },
       summary: summaryParts.length > 0 ? summaryParts.join(" · ") : null,
       timing: isNap ? "timed" : "night",
     };
   }
 
   return {
-    activityMinutes: 0,
     details: uniqueStrings(
       records.flatMap((record) => [
         ...record.detailItems,
         ...(record !== lead ? [record.summary] : []),
       ]),
     ),
-    sleepMinutes: null,
-    sleepScore: null,
+    metrics: emptyJournalEventMetrics(),
     summary: lead.summary,
     timing: lead.timing,
   };
 }
 
 function buildJournalWeekSummaries(
-  events: readonly BuiltJournalEvent[],
+  events: readonly JournalEvent[],
 ): JournalWeekSummary[] {
-  const byStartDate = new Map<string, BuiltJournalEvent[]>();
+  const byStartDate = new Map<string, JournalEvent[]>();
   for (const event of events) {
     const startDate = startOfIsoWeek(event.date);
     const weekEvents = byStartDate.get(startDate) ?? [];
@@ -1039,17 +994,17 @@ function buildJournalWeekSummaries(
     .sort(([left], [right]) => right.localeCompare(left))
     .map(([startDate, weekEvents]) => {
       const sleepEvents = weekEvents.filter(
-        (event) => event.sleepMinutes !== null,
+        (event) => event.metrics.sleepMinutes !== null,
       );
       const sleepMinutes = sleepEvents
-        .map((event) => event.sleepMinutes)
+        .map((event) => event.metrics.sleepMinutes)
         .filter((value): value is number => value !== null);
       const sleepScores = sleepEvents
-        .map((event) => event.sleepScore)
+        .map((event) => event.metrics.sleepScore)
         .filter((value): value is number => value !== null);
       return {
         activityMinutes: sumNumbers(
-          weekEvents.map((event) => event.activityMinutes),
+          weekEvents.map((event) => event.metrics.activityMinutes),
         ),
         averageSleepMinutes: averageNumbers(sleepMinutes),
         averageSleepScore: averageNumbers(sleepScores),
@@ -1093,13 +1048,21 @@ function metricValue(
   );
 }
 
-function formatMetricDetail(
-  records: readonly JournalCandidate[],
-  metricKey: string,
-  format: (value: number) => string,
-): string | null {
-  const value = metricValue(records, metricKey);
-  return value === null ? null : format(value);
+function emptyJournalEventMetrics(): JournalEventMetrics {
+  return {
+    activityMinutes: 0,
+    deepSleepMinutes: null,
+    hrvMs: null,
+    readinessScore: null,
+    recoveryScore: null,
+    remSleepMinutes: null,
+    respiratoryRate: null,
+    restingHeartRateBpm: null,
+    sleepEfficiencyPercent: null,
+    sleepMinutes: null,
+    sleepScore: null,
+    spo2Percent: null,
+  };
 }
 
 function formatDuration(minutes: number): string {

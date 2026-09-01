@@ -73,19 +73,10 @@ export async function recordHostedGroupCurrentSenderJournalFact(input: {
       return handledAdmission();
     }
 
-    if (input.confidence === "medium") {
-      return appendPrivateQuestionTx({
-        authority,
-        factIndex: input.journalFact.factIndex,
-        kind: "clarification",
-        now,
-        originAssistantInputId: input.origin.assistantInputId,
-        question: input.privateQuestion,
-        tx,
-      });
-    }
-
     if (state.groupJournalCaptureEnabled === null) {
+      if (input.confidence === "medium") {
+        return handledAdmission();
+      }
       if (state.groupJournalCaptureConsentRequestedAt !== null) {
         return handledAdmission();
       }
@@ -105,6 +96,18 @@ export async function recordHostedGroupCurrentSenderJournalFact(input: {
         });
       }
       return admission;
+    }
+
+    if (input.confidence === "medium") {
+      return appendPrivateQuestionTx({
+        authority,
+        factIndex: input.journalFact.factIndex,
+        kind: "clarification",
+        now,
+        originAssistantInputId: input.origin.assistantInputId,
+        question: input.privateQuestion,
+        tx,
+      });
     }
 
     const eventId = createGroupJournalId({

@@ -24,16 +24,18 @@ const JOURNAL_STUDY_DATA: JournalView = {
   days: [
     day("2026-06-13", [
       journalEvent("sleep-sat", "sleep", "Sleep", "2026-06-13T07:20:00.000Z", {
-        details: [
-          "91% efficiency",
-          "HRV 58 ms",
-          "recovery 82",
-          "resting HR 57 bpm",
-          "deep sleep 78 min",
-          "REM sleep 104 min",
-          "respiratory rate 14 breaths/min",
-          "SpO₂ 96%",
-        ],
+        metrics: {
+          deepSleepMinutes: 78,
+          hrvMs: 58,
+          recoveryScore: 82,
+          remSleepMinutes: 104,
+          respiratoryRate: 14,
+          restingHeartRateBpm: 57,
+          sleepEfficiencyPercent: 91,
+          sleepMinutes: 462,
+          sleepScore: 86,
+          spo2Percent: 96,
+        },
         source: "Oura",
         summary: "7 h 42 · sleep score 86",
         timing: "night",
@@ -45,32 +47,52 @@ const JOURNAL_STUDY_DATA: JournalView = {
     ]),
     day("2026-06-12", [
       journalEvent("sleep-fri", "sleep", "Sleep", "2026-06-12T07:40:00.000Z", {
-        details: ["87% efficiency", "HRV 51 ms", "readiness 74"],
+        metrics: {
+          hrvMs: 51,
+          readinessScore: 74,
+          sleepEfficiencyPercent: 87,
+          sleepMinutes: 418,
+          sleepScore: 76,
+        },
         source: "Oura",
         summary: "6 h 58 · sleep score 76",
         timing: "night",
       }),
       journalEvent("walk", "activity", "Walking", "2026-06-12T16:15:00.000Z", {
+        metrics: { activityMinutes: 65 },
         source: "Apple Health",
         summary: "1 h 05 across 2 sessions",
       }),
     ]),
     day("2026-06-11", [
       journalEvent("sleep-thu", "sleep", "Sleep", "2026-06-11T07:15:00.000Z", {
-        details: ["90% efficiency", "HRV 61 ms", "readiness 87"],
+        metrics: {
+          hrvMs: 61,
+          readinessScore: 87,
+          sleepEfficiencyPercent: 90,
+          sleepMinutes: 486,
+          sleepScore: 89,
+        },
         source: "Oura",
         summary: "8 h 06 · sleep score 89",
         timing: "night",
       }),
       journalEvent("tennis", "activity", "Tennis", "2026-06-11T18:00:00.000Z", {
         details: ["Played well. Left elbow felt a little sore."],
+        metrics: { activityMinutes: 59 },
         source: "Oura",
         summary: "59 min",
       }),
     ]),
     day("2026-06-10", [
       journalEvent("sleep-wed", "sleep", "Sleep", "2026-06-10T07:30:00.000Z", {
-        details: ["84% efficiency", "HRV 48 ms", "readiness 69"],
+        metrics: {
+          hrvMs: 48,
+          readinessScore: 69,
+          sleepEfficiencyPercent: 84,
+          sleepMinutes: 391,
+          sleepScore: 71,
+        },
         source: "Oura",
         summary: "6 h 31 · sleep score 71",
         timing: "night",
@@ -107,7 +129,13 @@ const JOURNAL_STUDY_DATA: JournalView = {
     ]),
     day("2026-06-09", [
       journalEvent("sleep-tue", "sleep", "Sleep", "2026-06-09T07:10:00.000Z", {
-        details: ["88% efficiency", "HRV 55 ms", "readiness 78"],
+        metrics: {
+          hrvMs: 55,
+          readinessScore: 78,
+          sleepEfficiencyPercent: 88,
+          sleepMinutes: 438,
+          sleepScore: 81,
+        },
         source: "Oura",
         summary: "7 h 18 · sleep score 81",
         timing: "night",
@@ -118,6 +146,7 @@ const JOURNAL_STUDY_DATA: JournalView = {
         "Yard work",
         "2026-06-09T11:00:00.000Z",
         {
+          metrics: { activityMinutes: 140 },
           source: "Oura",
           summary: "2 h 20 across 3 sessions",
         },
@@ -135,30 +164,31 @@ const JOURNAL_STUDY_DATA: JournalView = {
             "Active energy: 318 kcal",
             "Exercises: Goblet squat, Romanian deadlift, Split squat, Calf raise",
           ],
+          metrics: { activityMinutes: 52 },
           source: "Whoop",
           summary: "52 min",
         },
       ),
     ]),
     day("2026-06-08", [
-      journalEvent(
-        "trip",
-        "note",
-        "Work trip",
-        "2026-06-08T12:00:00.000Z",
-        {
-          details: [
-            "Destination: Berlin",
-            "Duration: Three days",
-            "Hotel stay with two work meetings and one travel day.",
-          ],
-          source: "You",
-          summary: "Berlin",
-          timing: "all_day",
-        },
-      ),
+      journalEvent("trip", "note", "Work trip", "2026-06-08T12:00:00.000Z", {
+        details: [
+          "Destination: Berlin",
+          "Duration: Three days",
+          "Hotel stay with two work meetings and one travel day.",
+        ],
+        source: "You",
+        summary: "Berlin",
+        timing: "all_day",
+      }),
       journalEvent("sleep-mon", "sleep", "Sleep", "2026-06-08T07:50:00.000Z", {
-        details: ["82% efficiency", "HRV 46 ms", "readiness 65"],
+        metrics: {
+          hrvMs: 46,
+          readinessScore: 65,
+          sleepEfficiencyPercent: 82,
+          sleepMinutes: 404,
+          sleepScore: 70,
+        },
         source: "Oura",
         summary: "6 h 44 · sleep score 70",
         timing: "night",
@@ -166,7 +196,13 @@ const JOURNAL_STUDY_DATA: JournalView = {
     ]),
     day("2026-06-07", [
       journalEvent("sleep-sun", "sleep", "Sleep", "2026-06-07T07:25:00.000Z", {
-        details: ["86% efficiency", "HRV 52 ms", "readiness 73"],
+        metrics: {
+          hrvMs: 52,
+          readinessScore: 73,
+          sleepEfficiencyPercent: 86,
+          sleepMinutes: 423,
+          sleepScore: 77,
+        },
         source: "Oura",
         summary: "7 h 03 · sleep score 77",
         timing: "night",
@@ -245,6 +281,7 @@ function journalEvent(
   occurredAt: string,
   options: {
     details?: string[];
+    metrics?: Partial<JournalEvent["metrics"]>;
     source: string;
     summary: string;
     timing?: JournalEvent["timing"];
@@ -255,6 +292,21 @@ function journalEvent(
     details: options.details ?? [],
     id,
     kind,
+    metrics: {
+      activityMinutes: 0,
+      deepSleepMinutes: null,
+      hrvMs: null,
+      readinessScore: null,
+      recoveryScore: null,
+      remSleepMinutes: null,
+      respiratoryRate: null,
+      restingHeartRateBpm: null,
+      sleepEfficiencyPercent: null,
+      sleepMinutes: null,
+      sleepScore: null,
+      spo2Percent: null,
+      ...options.metrics,
+    },
     occurredAt,
     records: [
       journalRecord(

@@ -67,13 +67,12 @@ beforeEach(() => {
       threadIsDirect: true,
     },
   });
-  mocks.append.mockImplementation(async (input: {
-    envelope: { eventId: string };
-    itemId: string;
-  }) => ({
-    dedupeConflict: false,
-    item: { id: input.itemId },
-  }));
+  mocks.append.mockImplementation(
+    async (input: { envelope: { eventId: string }; itemId: string }) => ({
+      dedupeConflict: false,
+      item: { id: input.itemId },
+    }),
+  );
   fakeTx.hostedMember.update.mockResolvedValue({ id: MEMBER_ID });
   fakeTx.hostedMember.updateMany.mockResolvedValue({ count: 1 });
   fakeTx.hostedGroup.findUnique.mockResolvedValue({ id: "group-1" });
@@ -88,12 +87,14 @@ describe("hosted current-sender group Journal capture", () => {
       mailboxWake: { expectedUserId: MEMBER_ID },
       result: { status: "handled" },
     });
-    expect(mocks.append).toHaveBeenCalledWith(expect.objectContaining({
-      envelope: expect.objectContaining({
-        kind: "assistant.notification.requested",
-        userId: MEMBER_ID,
+    expect(mocks.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          kind: "assistant.notification.requested",
+          userId: MEMBER_ID,
+        }),
       }),
-    }));
+    );
     expect(fakeTx.hostedMember.update).toHaveBeenCalledWith({
       data: { groupJournalCaptureConsentRequestedAt: NOW },
       where: { id: MEMBER_ID },
@@ -104,6 +105,28 @@ describe("hosted current-sender group Journal capture", () => {
       origin: origin(),
       tx: asTransactionClient(fakeTx),
     });
+  });
+
+  it("does not ask a private clarification before Journal consent", async () => {
+    setCaptureState(null, null, null);
+
+    await expect(recordFact("medium")).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "handled" },
+    });
+    expect(mocks.append).not.toHaveBeenCalled();
+    expect(fakeTx.hostedMember.update).not.toHaveBeenCalled();
+  });
+
+  it("does not retain later facts while the consent choice is pending", async () => {
+    setCaptureState(null, NOW, null);
+
+    await expect(recordFact("high")).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "handled" },
+    });
+    expect(mocks.append).not.toHaveBeenCalled();
+    expect(fakeTx.hostedMember.update).not.toHaveBeenCalled();
   });
 
   it("does not write or ask when current-sender authority is unavailable", async () => {
@@ -126,21 +149,27 @@ describe("hosted current-sender group Journal capture", () => {
     await expect(recordFact("high")).resolves.toMatchObject({
       result: { status: "handled" },
     });
-    expect(mocks.append).toHaveBeenCalledWith(expect.objectContaining({
-      envelope: expect.objectContaining({
-        journalFact: expect.objectContaining({ title: "Yard work" }),
-        kind: "journal.group-fact.recorded",
-        userId: MEMBER_ID,
+    expect(mocks.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          journalFact: expect.objectContaining({ title: "Yard work" }),
+          kind: "journal.group-fact.recorded",
+          userId: MEMBER_ID,
+        }),
       }),
-    }));
+    );
   });
 
   it("asks privately for medium confidence and stays silent when disabled", async () => {
     setCaptureState(true, NOW, null);
     await recordFact("medium");
-    expect(mocks.append).toHaveBeenCalledWith(expect.objectContaining({
-      envelope: expect.objectContaining({ kind: "assistant.notification.requested" }),
-    }));
+    expect(mocks.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          kind: "assistant.notification.requested",
+        }),
+      }),
+    );
 
     vi.clearAllMocks();
     mocks.readAuthority.mockResolvedValue({
@@ -157,14 +186,16 @@ describe("hosted current-sender group Journal capture", () => {
   });
 
   it("stores a current-sender opt-out for only this group", async () => {
-    await expect(setHostedGroupCurrentSenderJournalCapture({
-      enabled: false,
-      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      now: NOW,
-      origin: origin(),
-      prisma: testPrisma,
-      scope: "group",
-    })).resolves.toMatchObject({ result: { status: "handled" } });
+    await expect(
+      setHostedGroupCurrentSenderJournalCapture({
+        enabled: false,
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        now: NOW,
+        origin: origin(),
+        prisma: testPrisma,
+        scope: "group",
+      }),
+    ).resolves.toMatchObject({ result: { status: "handled" } });
     expect(fakeTx.hostedGroupMember.updateMany).toHaveBeenCalledWith({
       data: { journalCaptureDisabledAt: NOW },
       where: { groupId: "group-1", memberId: MEMBER_ID },

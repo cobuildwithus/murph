@@ -89,7 +89,6 @@ export default function JournalPageClient({
 
   return (
     <JournalViewContent
-      asOfDate={client?.replica.generatedAt.slice(0, 10)}
       contactOptions={contactOptions}
       insights={insights}
       isRefreshing={refreshPending}

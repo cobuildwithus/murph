@@ -8,13 +8,9 @@ import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_RUNTIME_GROUP_TOOL_PATH,
-} from "@murphai/hosted-execution/routes";
+import { HOSTED_RUNTIME_GROUP_TOOL_PATH } from "@murphai/hosted-execution/routes";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  createHostedAssistantAskRequestId,
-} from "@/src/lib/hosted-groups/group-assistant-ask";
+import { createHostedAssistantAskRequestId } from "@/src/lib/hosted-groups/group-assistant-ask";
 
 const mocks = vi.hoisted(() => ({
   handoffHostedMailboxWake: vi.fn(),
@@ -33,9 +29,8 @@ vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
   handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
 }));
 
-type RouteModule = typeof import(
-  "../app/api/internal/hosted-execution/groups/tool/route"
-);
+type RouteModule =
+  typeof import("../app/api/internal/hosted-execution/groups/tool/route");
 
 let route: RouteModule;
 
@@ -49,19 +44,23 @@ describe("hosted group tool route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.handoffHostedMailboxWake.mockResolvedValue(undefined);
-    mocks.requireJsonCallback.mockImplementation(async (
-      request: Request,
-      options: { maxBodyBytes: number },
-    ) => {
-      const payloadText = await request.text();
-      if (new TextEncoder().encode(payloadText).byteLength > options.maxBodyBytes) {
-        throw new RangeError(`Request body exceeded ${options.maxBodyBytes} bytes.`);
-      }
-      return {
-        payload: JSON.parse(payloadText),
-        userId: "member_group_runtime",
-      };
-    });
+    mocks.requireJsonCallback.mockImplementation(
+      async (request: Request, options: { maxBodyBytes: number }) => {
+        const payloadText = await request.text();
+        if (
+          new TextEncoder().encode(payloadText).byteLength >
+          options.maxBodyBytes
+        ) {
+          throw new RangeError(
+            `Request body exceeded ${options.maxBodyBytes} bytes.`,
+          );
+        }
+        return {
+          payload: JSON.parse(payloadText),
+          userId: "member_group_runtime",
+        };
+      },
+    );
     mocks.handleTool.mockResolvedValue({
       action: "read_shared",
       result: {
@@ -118,6 +117,79 @@ describe("hosted group tool route", () => {
     expect(handled.requestStartedAtMs).toBeLessThanOrEqual(Date.now());
   });
 
+  it.each([
+    {
+      body: {
+        action: "record_current_sender_journal_fact",
+        confidence: "high",
+        journalFact: {
+          date: "2026-08-31",
+          factIndex: 1,
+          note: "Worked in the yard for two hours.",
+          noteType: "journal-factor",
+          title: "Yard work",
+        },
+        origin: {
+          assistantInputId: `ain_${"a".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        privateQuestion: "Can I save yard work in your private Journal?",
+      },
+      response: {
+        action: "record_current_sender_journal_fact",
+        result: { status: "handled" },
+      },
+    },
+    {
+      body: {
+        action: "set_current_sender_journal_capture",
+        enabled: false,
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        scope: "group",
+      },
+      response: {
+        action: "set_current_sender_journal_capture",
+        result: { status: "handled" },
+      },
+    },
+    {
+      body: { action: "set_journal_capture", enabled: true },
+      response: {
+        action: "set_journal_capture",
+        result: { enabled: true, status: "updated" },
+      },
+    },
+  ])(
+    "admits hosted group Journal action $body.action",
+    async ({ body, response: expectedResponse }) => {
+      mocks.handleTool.mockResolvedValueOnce(expectedResponse);
+      const request = new Request(
+        `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+        {
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+
+      const response = await route.POST(request);
+
+      expect(response.status).toBe(200);
+      expect(mocks.handleTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          memberId: "member_group_runtime",
+          request: body,
+        }),
+      );
+      await expect(response.json()).resolves.toEqual(expectedResponse);
+    },
+  );
+
   it("enables participant rosters only for the versioned inventory query", async () => {
     const body = { action: "list_memberships" };
     mocks.handleTool.mockResolvedValueOnce({
@@ -141,11 +213,13 @@ describe("hosted group tool route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
-      includeMembershipAvailability: true,
-      includeParticipantRosters: true,
-      request: body,
-    }));
+    expect(mocks.handleTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeMembershipAvailability: true,
+        includeParticipantRosters: true,
+        request: body,
+      }),
+    );
   });
 
   it("keeps roster-only inventory v2 compatible during rollout", async () => {
@@ -171,11 +245,13 @@ describe("hosted group tool route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
-      includeMembershipAvailability: false,
-      includeParticipantRosters: true,
-      request: body,
-    }));
+    expect(mocks.handleTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeMembershipAvailability: false,
+        includeParticipantRosters: true,
+        request: body,
+      }),
+    );
   });
 
   it("accepts an eight-scope group email preparation callback", async () => {
@@ -256,13 +332,19 @@ describe("hosted group tool route", () => {
       const response = await route.POST(request);
 
       expect(response.status).toBe(500);
-      expect(response.headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER))
-        .toBe(expectedDiagnosticCode);
-      expect(response.headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER))
-        .toBe(createHostedAssistantAskRequestId({
+      expect(
+        response.headers.get(
+          HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
+        ),
+      ).toBe(expectedDiagnosticCode);
+      expect(
+        response.headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER),
+      ).toBe(
+        createHostedAssistantAskRequestId({
           memberId: "member_group_runtime",
           originAssistantInputId,
-        }));
+        }),
+      );
       await expect(response.json()).resolves.toEqual({
         error: {
           code: "INTERNAL_ERROR",
@@ -346,11 +428,14 @@ describe("hosted group tool route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(500);
-    expect(response.headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER))
-      .toBe(createHostedAssistantAskRequestId({
+    expect(
+      response.headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER),
+    ).toBe(
+      createHostedAssistantAskRequestId({
         memberId: "member_group_runtime",
         originAssistantInputId,
-      }));
+      }),
+    );
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "INTERNAL_ERROR",
@@ -667,12 +752,7 @@ describe("hosted group tool route", () => {
     },
   ] as const)(
     "does not acknowledge an accepted $toolResponse.action when its durable handoff rejects",
-    async ({
-      body,
-      expectedUserId,
-      mailboxItemId,
-      toolResponse,
-    }) => {
+    async ({ body, expectedUserId, mailboxItemId, toolResponse }) => {
       mocks.handoffHostedMailboxWake.mockRejectedValueOnce(
         new Error("Temporal unavailable"),
       );

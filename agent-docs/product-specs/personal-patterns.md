@@ -50,6 +50,8 @@ unavailable result. It does not receive the member's consent state or private
 Journal data.
 
 The first clear fact asks for one global choice in the member's direct chat.
+While that choice is pending, later group facts are not retained. The member
+can state them again after enabling capture.
 After consent, later clear facts save without another question. One useful
 ambiguity causes one private question. Weak claims, jokes, quotes, facts about
 another person, and unclear dates do not save. A member can disable capture for

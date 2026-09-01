@@ -362,7 +362,7 @@ test("browser vault shard parsers validate schemas, bucket placement, and genera
 test("browser vault metric bucket assignment has stable SHA-256 test vectors", async () => {
   // Changing any vector requires a generation bump so old refs are never read
   // with a new canonical-key placement rule.
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 13);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 14);
   assert.equal(await getBrowserVaultMetricBucketId("spo2"), "02");
   assert.equal(await getBrowserVaultMetricBucketId("lowest-spo2"), "19");
   assert.equal(await getBrowserVaultMetricBucketId("estimated-vo2-max"), "0d");
@@ -392,6 +392,20 @@ function createReplica(): BrowserVaultReplica {
               occurredAt: "2026-08-12T09:00:00.000Z",
               id: "journal-event-1",
               kind: "note",
+              metrics: {
+                activityMinutes: 0,
+                deepSleepMinutes: null,
+                hrvMs: null,
+                readinessScore: null,
+                recoveryScore: null,
+                remSleepMinutes: null,
+                respiratoryRate: null,
+                restingHeartRateBpm: null,
+                sleepEfficiencyPercent: null,
+                sleepMinutes: null,
+                sleepScore: null,
+                spo2Percent: null,
+              },
               records: [
                 {
                   id: "journal-record-1",

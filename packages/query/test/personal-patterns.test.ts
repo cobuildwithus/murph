@@ -776,6 +776,43 @@ test("Personal Patterns labels one result as an Observation and repeated results
   assert.equal(repeated.factors[0]?.confirmedAbsentDays, 2);
 });
 
+test("Personal Patterns caps manual activities that use an unobserved baseline", () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        ...runningDates.map((date, index) =>
+          event(`manual_run_${index}`, date, "activity_session", {
+            activityType: "running",
+            source: "manual",
+          }),
+        ),
+        ...Array.from({ length: 112 }, (_, index) => {
+          const date = addDays(start, index);
+          return observation(
+            `manual_run_hrv_${index}`,
+            date,
+            "hrv",
+            runningDates.includes(addDays(date, -1)) ? 75 : 50,
+            "ms",
+          );
+        }),
+      ],
+      vaultRoot: "test://manual-activity-pattern",
+    }),
+    { asOf: "2026-04-27", windowDays: 120 },
+  );
+
+  const cell = report.cells.find(
+    (candidate) => candidate.factorId === "running",
+  );
+  assert.equal(cell?.comparisonBasis, "unobserved_baseline");
+  assert.equal(cell?.grade, "D");
+});
+
 test("Personal Patterns counts a multi-day context as one episode", () => {
   const tripDates = [
     "2026-01-05",
@@ -1032,7 +1069,7 @@ test("Personal Patterns anchors sleep outcomes to the localized sleep-end date i
       kind: "activity_session",
       occurredAt: `${date}T12:00:00.000Z`,
       schemaVersion: "murph.event.v1",
-      source: "manual",
+      source: "device",
       title: "Running",
     }),
   );
@@ -1410,7 +1447,7 @@ test("Personal Patterns runtime and Browser Vault reuse the same projected metri
     kind: "activity_session",
     occurredAt: `${date}T12:00:00.000Z`,
     schemaVersion: "murph.event.v1",
-    source: "manual",
+    source: "device",
     title: "Running",
   }));
   const metricSamples = Array.from({ length: 112 }, (_, index) => {
@@ -1505,7 +1542,10 @@ function event(
   attributes: Record<string, unknown>,
 ): CanonicalEntity {
   return entity("event", id, {
-    attributes,
+    attributes:
+      kind === "activity_session" && attributes.source === undefined
+        ? { ...attributes, source: "device" }
+        : attributes,
     date,
     kind,
     occurredAt: `${date}T12:00:00.000Z`,

@@ -86,7 +86,12 @@ export function JournalViewContent({
   onRefresh?: () => void;
 }) {
   const headingId = useId();
-  const today = asOfDate ?? new Date().toISOString().slice(0, 10);
+  const localToday = useSyncExternalStore(
+    subscribeToClock,
+    currentLocalDate,
+    serverCurrentDate,
+  );
+  const today = asOfDate ?? localToday;
   const latestWindowEnd = today;
   const earliestDate = journal.days.at(-1)?.date ?? latestWindowEnd;
   const [selectedWindowEnd, setSelectedWindowEnd] = useState(latestWindowEnd);
@@ -718,8 +723,7 @@ function JournalEventRow({
     event.summary && normalizeText(event.summary) !== normalizeText(event.title)
       ? event.summary
       : null;
-  const sleepScore =
-    event.kind === "sleep" ? readSleepScore(event.summary) : null;
+  const sleepScore = event.kind === "sleep" ? event.metrics.sleepScore : null;
   const isConcern =
     event.kind === "symptom" || (sleepScore !== null && sleepScore < 70);
   const details = event.details.filter(
@@ -964,14 +968,17 @@ function journalEventDetailHref(
 interface SleepPopoverMetric {
   description: string;
   label: string;
+  numericValue: number;
   value: string;
 }
 
 interface SleepPopoverDetails {
   duration: string | null;
+  durationMinutes: number | null;
   extraDetails: string[];
   metrics: SleepPopoverMetric[];
   score: string | null;
+  scoreValue: number | null;
 }
 
 type SleepMetricBaselines = Map<string, number[]>;
@@ -990,10 +997,25 @@ function SleepPopoverPresentation({
   sleepBaselines: SleepMetricBaselines;
 }) {
   const primaryMetrics = [
-    details.duration ? { label: "Total sleep", value: details.duration } : null,
-    details.score ? { label: "Sleep score", value: details.score } : null,
+    details.duration && details.durationMinutes !== null
+      ? {
+          label: "Total sleep",
+          numericValue: details.durationMinutes,
+          value: details.duration,
+        }
+      : null,
+    details.score && details.scoreValue !== null
+      ? {
+          label: "Sleep score",
+          numericValue: details.scoreValue,
+          value: details.score,
+        }
+      : null,
   ].filter(
-    (metric): metric is { label: string; value: string } => metric !== null,
+    (
+      metric,
+    ): metric is { label: string; numericValue: number; value: string } =>
+      metric !== null,
   );
 
   return (
@@ -1014,6 +1036,7 @@ function SleepPopoverPresentation({
               }
               key={metric.label}
               label={metric.label}
+              numericValue={metric.numericValue}
               sleepBaselines={sleepBaselines}
               value={metric.value}
               variant="primary"
@@ -1030,6 +1053,7 @@ function SleepPopoverPresentation({
                 description={metric.description}
                 key={metric.label}
                 label={metric.label}
+                numericValue={metric.numericValue}
                 sleepBaselines={sleepBaselines}
                 value={metric.value}
               />
@@ -1056,17 +1080,19 @@ function SleepPopoverPresentation({
 function SleepMetricValue({
   description,
   label,
+  numericValue,
   sleepBaselines,
   value,
   variant = "detail",
 }: {
   description: string;
   label: string;
+  numericValue: number;
   sleepBaselines: SleepMetricBaselines;
   value: string;
   variant?: "detail" | "primary";
 }) {
-  const context = getSleepMetricContext(label, value, sleepBaselines);
+  const context = getSleepMetricContext(label, numericValue, sleepBaselines);
 
   return (
     <div>
@@ -1393,11 +1419,9 @@ function WindowStats({
 
   return (
     <section aria-label="Seven days at a glance" className={className}>
-      {mode === "mobile" ? (
-        <p className="mb-3 px-1 font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-          Last 7 days
-        </p>
-      ) : null}
+      <p className="mb-3 px-1 font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+        Last 7 days
+      </p>
       <div className="grid grid-cols-3 gap-4 px-1">
         {stats.map((stat) => (
           <WeekStatDetails key={stat.label} mode={mode} stat={stat} />
@@ -1674,8 +1698,8 @@ function readJournalDayMetric(
   if (metric === "activity") {
     const durations = events
       .filter((event) => event.kind === "activity")
-      .map((event) => parseDurationMinutes(event.summary))
-      .filter((value): value is number => value !== null);
+      .map((event) => event.metrics.activityMinutes)
+      .filter((value) => value > 0);
     return durations.length > 0
       ? durations.reduce((sum, value) => sum + value, 0)
       : null;
@@ -1683,21 +1707,9 @@ function readJournalDayMetric(
 
   const sleep = events.find((event) => event.kind === "sleep");
   if (!sleep) return null;
-  if (metric === "sleep-score") {
-    const match = sleep.summary?.match(/sleep score\s+(\d+(?:\.\d+)?)/iu);
-    return match?.[1] ? Number(match[1]) : null;
-  }
-  return parseDurationMinutes(sleep.summary);
-}
-
-function parseDurationMinutes(value: string | null): number | null {
-  if (!value) return null;
-  const hours = value.match(/(\d+)\s*h(?:\s*(\d+)(?:\s*min)?)?/iu);
-  if (hours?.[1]) {
-    return Number(hours[1]) * 60 + Number(hours[2] ?? 0);
-  }
-  const minutes = value.match(/(\d+)\s*min/iu);
-  return minutes?.[1] ? Number(minutes[1]) : null;
+  return metric === "sleep-score"
+    ? sleep.metrics.sleepScore
+    : sleep.metrics.sleepMinutes;
 }
 
 function formatShortDay(date: string): string {
@@ -1808,6 +1820,10 @@ function formatDuration(minutes: number): string {
   return `${hours} h ${remaining}`;
 }
 
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
 function formatSource(value: string | null): string | null {
   if (!value) return null;
   const normalized = value.trim().toLowerCase();
@@ -1829,11 +1845,6 @@ function normalizeEventSources(sources: readonly string[]): string[] {
     (source) => source.toLowerCase() !== "device",
   );
   return [...new Set(specificSources.length > 0 ? specificSources : sources)];
-}
-
-function readSleepScore(summary: string | null): number | null {
-  const match = summary?.match(/sleep score\s+(\d+(?:\.\d+)?)/iu);
-  return match?.[1] ? Number(match[1]) : null;
 }
 
 function normalizeText(value: string): string {
@@ -1864,116 +1875,86 @@ function parseSleepPopoverDetails(
   event: JournalEvent,
   details: readonly string[],
 ): SleepPopoverDetails {
-  const summaryParts = event.summary
-    ? event.summary.split(" · ").map((part) => part.trim())
-    : [];
-  const scorePart = summaryParts.find((part) =>
-    /^(?:sleep )?score\s+/iu.test(part),
-  );
-  const duration =
-    summaryParts.find((part) => !/^(?:sleep )?score\s+/iu.test(part)) ?? null;
-  const score = scorePart?.replace(/^(?:sleep )?score\s+/iu, "") ?? null;
-  const metrics: SleepPopoverMetric[] = [];
-  const extraDetails: string[] = [];
+  const values = event.metrics;
+  const metrics = [
+    sleepPopoverMetric(
+      values.sleepEfficiencyPercent,
+      "Sleep efficiency",
+      "The share of time in bed that you spent asleep.",
+      (value) => `${formatNumber(value)}%`,
+    ),
+    sleepPopoverMetric(
+      values.hrvMs,
+      "HRV",
+      "Variation between heartbeats. Your own trend matters most.",
+      (value) => `${formatNumber(value)} ms`,
+    ),
+    sleepPopoverMetric(
+      values.readinessScore,
+      "Readiness",
+      "How prepared your body appears for today's strain.",
+      formatNumber,
+    ),
+    sleepPopoverMetric(
+      values.recoveryScore,
+      "Recovery",
+      "How recovered your body appears after recent strain.",
+      formatNumber,
+    ),
+    sleepPopoverMetric(
+      values.restingHeartRateBpm,
+      "Resting heart rate",
+      "Your heart rate while your body was resting.",
+      (value) => `${formatNumber(value)} bpm`,
+    ),
+    sleepPopoverMetric(
+      values.deepSleepMinutes,
+      "Deep sleep",
+      "The sleep stage most linked with physical recovery.",
+      (value) => `${formatNumber(value)} min`,
+    ),
+    sleepPopoverMetric(
+      values.remSleepMinutes,
+      "REM sleep",
+      "The sleep stage linked with memory and learning.",
+      (value) => `${formatNumber(value)} min`,
+    ),
+    sleepPopoverMetric(
+      values.respiratoryRate,
+      "Respiratory rate",
+      "How many breaths you took each minute during sleep.",
+      formatNumber,
+    ),
+    sleepPopoverMetric(
+      values.spo2Percent,
+      "SpO₂",
+      "Your estimated average blood oxygen during sleep.",
+      (value) => `${formatNumber(value)}%`,
+    ),
+  ].filter((metric): metric is SleepPopoverMetric => metric !== null);
 
-  for (const detail of details) {
-    const efficiency = detail.match(/^([\d.]+)% efficiency$/iu);
-    if (efficiency?.[1]) {
-      metrics.push({
-        description: "The share of time in bed that you spent asleep.",
-        label: "Sleep efficiency",
-        value: `${efficiency[1]}%`,
-      });
-      continue;
-    }
+  return {
+    duration:
+      values.sleepMinutes === null
+        ? null
+        : formatDuration(Math.round(values.sleepMinutes)),
+    durationMinutes: values.sleepMinutes,
+    extraDetails: [...details],
+    metrics,
+    score: values.sleepScore === null ? null : formatNumber(values.sleepScore),
+    scoreValue: values.sleepScore,
+  };
+}
 
-    const hrv = detail.match(/^HRV ([\d.]+) ms$/iu);
-    if (hrv?.[1]) {
-      metrics.push({
-        description:
-          "Variation between heartbeats. Your own trend matters most.",
-        label: "HRV",
-        value: `${hrv[1]} ms`,
-      });
-      continue;
-    }
-
-    const readiness = detail.match(/^readiness ([\d.]+)$/iu);
-    if (readiness?.[1]) {
-      metrics.push({
-        description: "How prepared your body appears for today's strain.",
-        label: "Readiness",
-        value: readiness[1],
-      });
-      continue;
-    }
-
-    const recovery = detail.match(/^recovery ([\d.]+)$/iu);
-    if (recovery?.[1]) {
-      metrics.push({
-        description: "How recovered your body appears after recent strain.",
-        label: "Recovery",
-        value: recovery[1],
-      });
-      continue;
-    }
-
-    const restingHeartRate = detail.match(/^resting HR ([\d.]+) bpm$/iu);
-    if (restingHeartRate?.[1]) {
-      metrics.push({
-        description: "Your heart rate while your body was resting.",
-        label: "Resting heart rate",
-        value: `${restingHeartRate[1]} bpm`,
-      });
-      continue;
-    }
-
-    const deepSleep = detail.match(/^deep sleep ([\d.]+) min$/iu);
-    if (deepSleep?.[1]) {
-      metrics.push({
-        description: "The sleep stage most linked with physical recovery.",
-        label: "Deep sleep",
-        value: `${deepSleep[1]} min`,
-      });
-      continue;
-    }
-
-    const remSleep = detail.match(/^REM sleep ([\d.]+) min$/iu);
-    if (remSleep?.[1]) {
-      metrics.push({
-        description: "The sleep stage linked with memory and learning.",
-        label: "REM sleep",
-        value: `${remSleep[1]} min`,
-      });
-      continue;
-    }
-
-    const respiratoryRate = detail.match(
-      /^respiratory rate ([\d.]+) breaths\/min$/iu,
-    );
-    if (respiratoryRate?.[1]) {
-      metrics.push({
-        description: "How many breaths you took each minute during sleep.",
-        label: "Respiratory rate",
-        value: respiratoryRate[1],
-      });
-      continue;
-    }
-
-    const spo2 = detail.match(/^SpO₂ ([\d.]+)%$/iu);
-    if (spo2?.[1]) {
-      metrics.push({
-        description: "Your estimated average blood oxygen during sleep.",
-        label: "SpO₂",
-        value: `${spo2[1]}%`,
-      });
-      continue;
-    }
-
-    extraDetails.push(detail);
-  }
-
-  return { duration, extraDetails, metrics, score };
+function sleepPopoverMetric(
+  numericValue: number | null,
+  label: string,
+  description: string,
+  format: (value: number) => string,
+): SleepPopoverMetric | null {
+  return numericValue === null
+    ? null
+    : { description, label, numericValue, value: format(numericValue) };
 }
 
 function buildSleepMetricBaselines(
@@ -1983,21 +1964,31 @@ function buildSleepMetricBaselines(
   for (const day of days) {
     for (const event of day.events) {
       if (event.kind !== "sleep") continue;
-      const details = parseSleepPopoverDetails(event, event.details);
       const metrics = [
-        details.duration
-          ? { label: "Total sleep", value: details.duration }
-          : null,
-        details.score ? { label: "Sleep score", value: details.score } : null,
-        ...details.metrics,
+        { label: "Total sleep", value: event.metrics.sleepMinutes },
+        { label: "Sleep score", value: event.metrics.sleepScore },
+        {
+          label: "Sleep efficiency",
+          value: event.metrics.sleepEfficiencyPercent,
+        },
+        { label: "HRV", value: event.metrics.hrvMs },
+        { label: "Readiness", value: event.metrics.readinessScore },
+        { label: "Recovery", value: event.metrics.recoveryScore },
+        {
+          label: "Resting heart rate",
+          value: event.metrics.restingHeartRateBpm,
+        },
+        { label: "Deep sleep", value: event.metrics.deepSleepMinutes },
+        { label: "REM sleep", value: event.metrics.remSleepMinutes },
+        { label: "Respiratory rate", value: event.metrics.respiratoryRate },
+        { label: "SpO₂", value: event.metrics.spo2Percent },
       ].filter(
-        (metric): metric is { label: string; value: string } => metric !== null,
+        (metric): metric is { label: string; value: number } =>
+          metric.value !== null,
       );
       for (const metric of metrics) {
-        const value = parseSleepMetricValue(metric.label, metric.value);
-        if (value === null) continue;
         const values = baselines.get(metric.label) ?? [];
-        values.push(value);
+        values.push(metric.value);
         baselines.set(metric.label, values);
       }
     }
@@ -2007,13 +1998,11 @@ function buildSleepMetricBaselines(
 
 function getSleepMetricContext(
   label: string,
-  formattedValue: string,
+  current: number,
   baselines: SleepMetricBaselines,
 ): SleepMetricContext | null {
   const values = baselines.get(label) ?? [];
   if (values.length < 7) return null;
-  const current = parseSleepMetricValue(label, formattedValue);
-  if (current === null) return null;
   const baseline =
     values.reduce((sum, value) => sum + value, 0) / values.length;
   if (baseline === 0) return null;
@@ -2028,12 +2017,6 @@ function getSleepMetricContext(
   }
   const favorable = direction === "higher" ? difference > 0 : difference < 0;
   return { tone: favorable ? "favorable" : "unfavorable" };
-}
-
-function parseSleepMetricValue(label: string, value: string): number | null {
-  if (label === "Total sleep") return parseDurationMinutes(value);
-  const match = value.match(/[\d.]+/u);
-  return match ? Number(match[0]) : null;
 }
 
 function sleepMetricDirection(label: string): SleepMetricDirection {
@@ -2059,6 +2042,19 @@ function currentGreeting(): string {
 
 function serverGreeting(): string {
   return "Welcome back.";
+}
+
+function currentLocalDate(): string {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function serverCurrentDate(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function mondayIndex(date: string): number {

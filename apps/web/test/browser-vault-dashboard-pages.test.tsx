@@ -193,74 +193,95 @@ test("PatternsPage renders personal comparisons on their own route", () => {
 });
 
 test("JournalPage renders the derived private health timeline", () => {
-  const journalClient = createBrowserVaultQueryClient({
-    ...clientFixture.replica,
-    generatedAt: "2026-08-12T12:00:00.000Z",
-    journal: {
-      days: [
-        {
-          date: "2026-08-12",
-          events: [
-            {
-              date: "2026-08-12",
-              details: [],
-              id: "morning-walk",
-              kind: "activity",
-              occurredAt: "2026-08-12T08:00:00.000Z",
-              records: [
-                {
-                  id: "morning-walk-record",
-                  kind: "activity_session",
-                  label: "Morning walk",
-                  occurredAt: "2026-08-12T08:00:00.000Z",
-                  source: "Apple Health",
-                  summary: "30 min",
-                  tags: [],
-                  timeZone: "Europe/Warsaw",
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-08-12T12:00:00.000Z"));
+  try {
+    const journalClient = createBrowserVaultQueryClient({
+      ...clientFixture.replica,
+      generatedAt: "2026-08-11T23:30:00.000Z",
+      journal: {
+        days: [
+          {
+            date: "2026-08-12",
+            events: [
+              {
+                date: "2026-08-12",
+                details: [],
+                id: "morning-walk",
+                kind: "activity",
+                metrics: {
+                  activityMinutes: 30,
+                  deepSleepMinutes: null,
+                  hrvMs: null,
+                  readinessScore: null,
+                  recoveryScore: null,
+                  remSleepMinutes: null,
+                  respiratoryRate: null,
+                  restingHeartRateBpm: null,
+                  sleepEfficiencyPercent: null,
+                  sleepMinutes: null,
+                  sleepScore: null,
+                  spo2Percent: null,
                 },
-              ],
-              summary: "30 min",
-              timing: "timed",
-              timeZone: "Europe/Warsaw",
-              title: "Morning walk",
-            },
-          ],
-        },
-      ],
-      eventCount: 1,
-      recordCount: 1,
-      weeks: [
-        {
-          activityMinutes: 30,
-          averageSleepMinutes: null,
-          averageSleepScore: null,
-          endDate: "2026-08-16",
-          sleepNights: 0,
-          startDate: "2026-08-10",
-        },
-      ],
-      windowDays: 120,
-    },
-  });
-  mocks.useBrowserVault.mockReturnValue({
-    client: journalClient,
-    dataVersion: journalClient.replica.source.dataVersion,
-    error: null,
-    ref: null,
-    refreshPending: false,
-    refresh: mocks.refresh,
-    status: "ready",
-  });
-  const markup = renderToStaticMarkup(createElement(JournalPageClient));
+                occurredAt: "2026-08-12T08:00:00.000Z",
+                records: [
+                  {
+                    id: "morning-walk-record",
+                    kind: "activity_session",
+                    label: "Morning walk",
+                    occurredAt: "2026-08-12T08:00:00.000Z",
+                    source: "Apple Health",
+                    summary: "30 min",
+                    tags: [],
+                    timeZone: "Europe/Warsaw",
+                  },
+                ],
+                summary: "30 min",
+                timing: "timed",
+                timeZone: "Europe/Warsaw",
+                title: "Morning walk",
+              },
+            ],
+          },
+        ],
+        eventCount: 1,
+        recordCount: 1,
+        weeks: [
+          {
+            activityMinutes: 30,
+            averageSleepMinutes: null,
+            averageSleepScore: null,
+            endDate: "2026-08-16",
+            sleepNights: 0,
+            startDate: "2026-08-10",
+          },
+        ],
+        windowDays: 120,
+      },
+    });
+    mocks.useBrowserVault.mockReturnValue({
+      client: journalClient,
+      dataVersion: journalClient.replica.source.dataVersion,
+      error: null,
+      ref: null,
+      refreshPending: false,
+      refresh: mocks.refresh,
+      status: "ready",
+    });
+    const markup = renderToStaticMarkup(createElement(JournalPageClient));
 
-  assert.doesNotMatch(markup, /Your Journal/u);
-  assert.match(markup, /Journal/u);
-  assert.doesNotMatch(markup, /10–16 August 2026/u);
-  assert.match(markup, /Morning walk/u);
-  assert.match(markup, /To add, correct, or remove an entry, tell Murph/u);
-  assert.match(markup, /journal-day-2026-08-12/u);
-  assert.doesNotMatch(markup, /journal-day-2026-08-13/u);
-  assert.doesNotMatch(markup, /No data/u);
+    assert.doesNotMatch(markup, /Your Journal/u);
+    assert.match(markup, /Journal/u);
+    assert.doesNotMatch(markup, /10–16 August 2026/u);
+    assert.match(markup, /Morning walk/u);
+    assert.match(markup, /Last 7 days/u);
+    assert.match(markup, /To add, correct, or remove an entry, tell Murph/u);
+    assert.match(markup, /journal-day-2026-08-12/u);
+    assert.doesNotMatch(markup, /journal-day-2026-08-13/u);
+    assert.doesNotMatch(markup, /No data/u);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("JournalPage shows the seven days ending today and disables future dates", async () => {
@@ -369,9 +390,23 @@ test("JournalPage keeps secondary sleep metrics off the main timeline", async ()
             events: [
               {
                 date: "2026-08-12",
-                details: ["89% efficiency", "HRV 68 ms", "readiness 71"],
+                details: [],
                 id: "sleep",
                 kind: "sleep",
+                metrics: {
+                  activityMinutes: 0,
+                  deepSleepMinutes: null,
+                  hrvMs: 68,
+                  readinessScore: 71,
+                  recoveryScore: null,
+                  remSleepMinutes: null,
+                  respiratoryRate: null,
+                  restingHeartRateBpm: null,
+                  sleepEfficiencyPercent: 89,
+                  sleepMinutes: 450,
+                  sleepScore: 78,
+                  spo2Percent: null,
+                },
                 occurredAt: "2026-08-12T07:00:00.000Z",
                 records: [
                   {
@@ -895,6 +930,20 @@ test("PatternsPage local diagnostics distinguishes a factor missing before selec
               details: ["2 h 45 across 2 sessions"],
               id: "trail-running-activity",
               kind: "activity_session",
+              metrics: {
+                activityMinutes: 165,
+                deepSleepMinutes: null,
+                hrvMs: null,
+                readinessScore: null,
+                recoveryScore: null,
+                remSleepMinutes: null,
+                respiratoryRate: null,
+                restingHeartRateBpm: null,
+                sleepEfficiencyPercent: null,
+                sleepMinutes: null,
+                sleepScore: null,
+                spo2Percent: null,
+              },
               occurredAt: "2026-08-28T19:27:00.000Z",
               records: [
                 {

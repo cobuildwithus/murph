@@ -483,7 +483,7 @@ function buildObservedFactorCandidates(input: {
     date: input.date,
     episodeId: readEpisodeId(input.event) ?? `${input.token}:${input.date}`,
     implicitAbsenceAllowed:
-      input.kind === "activity" || input.event.attributes.source === "device",
+      readString(input.event.attributes.source) === "device",
     kind: input.kind,
     state: "observed",
     token: input.token,

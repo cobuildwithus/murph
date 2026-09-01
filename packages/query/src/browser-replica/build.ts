@@ -130,7 +130,9 @@ export async function createBrowserVaultReplica(
       row.biomarkerKey !== null &&
       row.value !== null
     ),
-    journal: buildJournalView(input.vault, allMetricPoints, { asOf: generatedAt }),
+    journal: buildJournalView(input.vault, allMetricPoints, {
+      asOf: addDaysToIsoDate(generatedAt.slice(0, 10), 1),
+    }),
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
@@ -746,4 +748,8 @@ function subtractDaysFromIsoDate(value: string, days: number): string {
 
   parsed.setUTCDate(parsed.getUTCDate() - days);
   return parsed.toISOString().slice(0, 10);
+}
+
+function addDaysToIsoDate(value: string, days: number): string {
+  return subtractDaysFromIsoDate(value, -days);
 }
