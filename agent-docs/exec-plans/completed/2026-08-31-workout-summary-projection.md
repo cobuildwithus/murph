@@ -1,6 +1,6 @@
 # Restore shared workout summaries from canonical sessions
 
-Status: active
+Status: completed
 Created: 2026-08-31
 Updated: 2026-08-31
 
@@ -62,14 +62,14 @@ Updated: 2026-08-31
 
 ## Tasks
 
-1. Add the composed failing regression for a persisted canonical activity
+1. [x] Add the composed failing regression for a persisted canonical activity
    session reaching `workout-days.v0`.
-2. Replace the lossy provenance coupling with the smallest canonical evidence
+2. [x] Replace the lossy provenance coupling with the smallest canonical evidence
    derivation and delete obsolete pairing complexity where possible.
-3. Add boundary cases and one focused real-Codex group journey.
-4. Update the public changelog and durable docs only if the architecture
+3. [x] Add boundary cases and one focused real-Codex group journey.
+4. [x] Update the public changelog and durable docs only if the architecture
    contract changes.
-5. Run focused verification, Product UX replay, parent review, exact-head CI,
+5. [x] Run focused verification, Product UX replay, parent review, exact-head CI,
    and required ReviewGPT gates.
 
 ## Decisions
@@ -85,12 +85,30 @@ Updated: 2026-08-31
 
 ## Verification
 
-- Focused query and assistant-runtime Vitest files covering the composed path.
+- Assistant Runtime projection suite: 140 tests passed, including the composed
+  canonical-session -> persisted redacted summary -> `workout-days.v0` path.
+- Assistant Runtime typecheck passed.
+- Web changelog page suite: 9 tests passed; Web typecheck passed.
 - Assistant Engine real-Codex journey selected by one unique test pattern.
 - Live journey reply review: the model read the correct `workout-days.v0`
   scope and answered the synthetic count/minutes truthfully, but remains Hold
   because it repeated the identical read. The existing shared-sleep journey
   reproduces that same current-model action-count regression.
-- Typechecks for every changed production package.
-- `git diff --check`, privacy/identifier scan, Product UX walkthrough, exact
-  pushed-head ReviewGPT, and required GitHub checks.
+- `git diff --check`, added-content privacy/identifier scan, and Product UX
+  walkthrough passed.
+- Final sensitive ReviewGPT round passed with no qualifying findings against
+  exact head `cd2c6e9669239b79235dc4c50cfa688108da6dec`; the parent full-diff
+  review also found no production, privacy, test, or architecture issue.
+- Pull request: #2658. Required GitHub checks own broad exact-head verification
+  after this plan-archive-only final commit is pushed.
+
+## Completion
+
+- Restored shared workout count-and-minutes projection with one local pairing
+  predicate and no new persisted state, schema, protocol, service, dependency,
+  migration, backfill, or compatibility layer.
+- Preserved strict source-owner matching as the default and the separate
+  detailed-workout projection contract.
+- Added a public recovery note and synthetic deterministic/model-facing proof
+  without copying confidential production evidence into the repository.
+Completed: 2026-08-31
