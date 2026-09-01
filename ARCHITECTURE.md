@@ -1885,7 +1885,8 @@ supplement generic search and the public projection retain their pre-existing
 ranking and candidate contracts. Existing labels databases must receive the
 foods name-rank and exact-name-rank indexes before this private-food query shape
 is deployed. The public
-projection of that database is Murph Safe at `/search` and the
+projection of that database is Murph Safe at `/search` and the branded-food
+comparison at `/food`, plus the
 read-only Murph Product Data API under `/api/public/v1`. Wire contracts belong
 to `@murphai/contracts`; one web-owned service maps bounded database records to
 those contracts. Browser search posts to the public route, while the
@@ -1896,6 +1897,13 @@ SQL candidate sets; detail reads cap stored label transfer and aggregate DTO
 size. One Vercel-aware singleton pool is shared by public and private label
 readers. Vercel custom firewall rules sit in front of public search and detail,
 and the production build verifies their exact active configuration.
+
+`/food` keeps temporary comparison state in the browser and derives four
+nutrition comparisons plus a separate exact-evidence summary from existing
+public DTOs. Compatible browsers receive four page-scoped WebMCP tools through
+`document.modelContext.registerTool`. These tools call the same bounded page
+actions as manual controls and disappear when the page unmounts. They do not
+create a remote MCP service, a second data owner, or an authenticated path.
 
 Each product-test observation may preserve evidence and sampling context,
 sample or lot identity, result bounds and qualifiers, analytical limits, and

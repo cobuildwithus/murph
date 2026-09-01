@@ -853,9 +853,10 @@ fields; an older importer requires an explicit constraint rollback first.
 
 ## Murph Safe public product data
 
-`/search` exposes the public Murph Safe product-evidence experience. Its browser
-search calls `POST /api/public/v1/products/search`; server-rendered product
-details use the same service as
+`/search` exposes the public Murph Safe product-evidence experience. `/food`
+uses the same records for a conclusion-first comparison of two to four branded
+foods. Browser searches call `POST /api/public/v1/products/search`;
+server-rendered product details use the same service as
 `GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
 is available at `/api/public/v1/openapi.json`, and the current schema id is
 `murph.public-products.v1`.
@@ -865,6 +866,13 @@ excludes generic food origins. Search and detail DTOs are bounded normalized
 projections; product tests join only through the selected row's exact
 `food_id` or `supplement_id`. Search terms stay in POST bodies and are not
 echoed, persisted, analyzed, or logged.
+
+Compatible browsers expose four page-scoped, read-only WebMCP tools while
+`/food` is open: `search_food_products`, `compare_food_products`,
+`get_food_comparison`, and `show_food_evidence`. The tools use exact public
+product references and update the same visible page state as manual controls.
+One abort signal removes every registration when the page unmounts. This is a
+browser surface, not a remote MCP server, and it adds no account or vault access.
 
 Before a production build, configure these Production-scoped server values:
 

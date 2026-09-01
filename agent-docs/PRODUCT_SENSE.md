@@ -283,3 +283,10 @@ missing testing sound reassuring. Keep supplement and branded-food search
 useful without implying that separately ranked corpora are directly
 comparable. Generic foods, inferred test linkage, and formula-revision claims
 remain outside the surface until their product meaning is explicitly defined.
+
+Food comparison should give the useful conclusion before the supporting data.
+Show one winner per complete nutrition metric and a top match based only on
+those visible metric wins. Never turn that result into a universal health or
+safety score. Keep exact test alerts, evidence coverage, and unknowns in a
+separate evidence row. Use a short popover for one metric and a side sheet for
+tests or gaps, with raw reports hidden until requested.

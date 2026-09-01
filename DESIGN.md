@@ -488,6 +488,20 @@ only for genuine warnings or failures. Evidence gaps stay neutral and explicit.
 At phone widths, metadata wraps under identity and long product/source strings
 must break without horizontal scrolling.
 
+### Food Label Lab
+The public `/food` page uses the same editorial paper system with less text.
+Start with one search field, then show a two-to-four-column comparison table.
+Put category art and the product name in each column. Mark the winner in each
+complete metric row with a sage check and light sage tint. A top-match badge may
+count metric wins, but must not read as a health or safety score.
+
+Keep evidence in one separate row. Use sienna only for a real exact-sample
+alert. Show missing evidence with muted or amber-neutral treatments. One metric
+cell opens a compact ranked-bar popover. Tests and gaps open in a right-side
+sheet with one large conclusion, simple status marks, and raw reports hidden by
+default. At phone widths, preserve the first label column and let product
+columns scroll horizontally.
+
 ### Choice Cards
 Use the shared `ChoiceCard` with `RadioGroup` when a member must compare two to
 five consequential options. Each card has one short title, one brief purpose

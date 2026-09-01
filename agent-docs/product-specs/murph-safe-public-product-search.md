@@ -1,13 +1,14 @@
 # Murph Safe public product search
 
 Status: Active
-Last verified: 2026-07-16
+Last verified: 2026-09-02
 
 ## Product promise
 
-Murph Safe is the public evidence-checking surface at `/search`. It answers the
-question “Is it Murph Safe?” by showing what Murph can substantiate about a
-specific product record. It never certifies a product as safe or unsafe.
+Murph Safe is the public product-evidence system. `/search` answers the question
+“Is it Murph Safe?” by showing what Murph can substantiate about one product
+record. `/food` compares branded foods from the same system. Neither surface
+certifies a product as safe, unsafe, or healthy overall.
 
 The first catalog includes every technically available supplement and branded
 purchasable-food record in the shared labels database. Generic USDA food
@@ -25,6 +26,35 @@ records are excluded because this experience is package and product oriented.
 - Product-test screening compares compatible measurements with curated
   thresholds and names the threshold. It is not a diagnosis or a safety
   determination.
+
+### Food comparison
+
+- `/food` lets a visitor search and compare two to four branded foods.
+- The main table compares calories, protein, total sugars, and total fat on a
+  shared per-100-gram or per-serving basis.
+- A top match wins the most complete visible metrics. It is not a health score.
+- Each metric names its own winner. Missing values do not create a winner.
+- Evidence stays separate from nutrition. Real screening alerts use a warning
+  treatment; missing tests and other gaps stay neutral.
+- Metric detail uses a short popover. Tests and evidence gaps open in a side
+  sheet with the conclusion first and raw reports on demand.
+- Category art is illustrative. It does not identify the package or certify the
+  product category.
+
+### Page-scoped WebMCP
+
+On compatible browsers, `/food` registers four read-only page tools:
+
+- `search_food_products` returns at most six branded-food choices.
+- `compare_food_products` accepts two to four exact product references and
+  updates the visible comparison.
+- `get_food_comparison` reads the compact comparison now shown on the page.
+- `show_food_evidence` opens the tests or gaps sheet for a shown product.
+
+The tools use the same page state and public API as manual actions. They exist
+only while `/food` is open and unregister through the browser-owned abort
+signal. Murph adds no remote MCP server, account access, vault access, writes,
+or food logging through this surface.
 
 ## Public data contract
 
@@ -60,7 +90,7 @@ schema identifier is `murph.public-products.v1`.
 
 ## Privacy and abuse controls
 
-Search terms must not enter URLs, browser history state, page metadata,
+Search terms from `/search`, `/food`, or WebMCP must not enter URLs, browser history state, page metadata,
 referrers, persistent browser storage, analytics events, or application logs.
 Public search uses `credentials: omit`, `no-store`, and `no-referrer`; public
 routes suppress third-party analytics and do not enable permissive CORS.
@@ -81,5 +111,5 @@ configuration only.
 ## Non-goals
 
 This release does not add accounts, API keys, writes, corrections, batch
-endpoints, downloads, x402, MCP, plugins, permissive CORS, formula-revision
-storage, or inferred product-test linkage.
+endpoints, downloads, x402, a remote MCP server, plugins, permissive CORS,
+formula-revision storage, or inferred product-test linkage.
