@@ -4,6 +4,8 @@ import { rm } from 'node:fs/promises'
 import { Cli } from 'incur'
 import { afterEach, test, vi } from 'vitest'
 
+import * as coreRuntime from '@murphai/core'
+import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 
 import { registerSupplementCommands } from '../src/commands/supplement.js'
@@ -612,30 +614,118 @@ test('wearables commands exercise day and list surfaces with provider normalizat
   assert.equal(requireData(sourcesList.envelope).count >= 0, true)
 })
 
-test('wearables provider filters reject unsupported provider names in-process', async () => {
+test('real wearable CLI provider filters select Fitbit and Withings evidence', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-wearables-provider-guard-',
+    'murph-cli-wearables-provider-query-',
   )
   cleanupPaths.push(parentRoot)
 
   const cli = createCoverageCli()
-  const result = await runInProcessJsonCli(cli, [
+  const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+    'init',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(initResult.exitCode, null)
+
+  await importDeviceProviderSnapshot(
+    {
+      provider: 'junction',
+      sourceKind: 'poll',
+      deliveryMode: 'scheduled_reconcile',
+      vaultRoot,
+      snapshot: {
+        importedAt: '2026-04-05T12:00:00.000Z',
+        summaries: {
+          activity: [{
+            date: '2026-04-05',
+            id: 'fitbit-cli-provider-steps',
+            sourceProviderSlug: 'fitbit',
+            steps: 4_321,
+          }],
+        },
+        timeseries: {
+          weight: [{
+            sourceProviderSlug: 'withings',
+            timestamp: '2026-04-05T08:00:00.000Z',
+            unit: 'kg',
+            value: 72.4,
+          }],
+        },
+      },
+    },
+    { corePort: coreRuntime },
+  )
+
+  type DayResult = {
+    filters: { providers: string[] }
+    summary: {
+      activity?: {
+        steps?: { provider?: string | null; value: number | null }
+      } | null
+      bodyState?: {
+        weightKg?: { provider?: string | null; value: number | null }
+      } | null
+    } | null
+  }
+
+  const fitbit = await runInProcessJsonCli<DayResult>(cli, [
     'wearables',
     'day',
     '2026-04-05',
     '--provider',
-    'ottoai',
+    'fitbit',
     '--vault',
     vaultRoot,
   ])
+  assert.equal(fitbit.exitCode, null)
+  const fitbitData = requireData(fitbit.envelope)
+  assert.deepEqual(fitbitData.filters.providers, ['fitbit'])
+  assert.equal(fitbitData.summary?.activity?.steps?.provider, 'fitbit')
+  assert.equal(fitbitData.summary?.activity?.steps?.value, 4_321)
+  assert.equal(fitbitData.summary?.bodyState ?? null, null)
 
-  assert.equal(result.exitCode, 1)
-  assert.equal(result.envelope.ok, false)
-  if (!result.envelope.ok) {
-    assert.match(
-      result.envelope.error.message ?? '',
-      /Unsupported value for --provider: "ottoai"/u,
-    )
-    assert.match(result.envelope.error.message ?? '', /garmin, oura, strava, whoop/u)
-  }
+  const withings = await runInProcessJsonCli<DayResult>(cli, [
+    'wearables',
+    'day',
+    '2026-04-05',
+    '--provider',
+    'withings',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(withings.exitCode, null)
+  const withingsData = requireData(withings.envelope)
+  assert.deepEqual(withingsData.filters.providers, ['withings'])
+  assert.equal(withingsData.summary?.bodyState?.weightKg?.provider, 'withings')
+  assert.equal(withingsData.summary?.bodyState?.weightKg?.value, 72.4)
+  assert.equal(withingsData.summary?.activity ?? null, null)
+
+  const absent = await runInProcessJsonCli<DayResult>(cli, [
+    'wearables',
+    'day',
+    '2026-04-05',
+    '--provider',
+    'future-ring',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(absent.exitCode, null)
+  assert.deepEqual(requireData(absent.envelope).filters.providers, ['future-ring'])
+  assert.equal(requireData(absent.envelope).summary, null)
+
+  const sources = await runInProcessJsonCli<{
+    items: Array<{ provider: string }>
+  }>(cli, [
+    'wearables',
+    'sources',
+    'list',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(sources.exitCode, null)
+  assert.deepEqual(
+    requireData(sources.envelope).items.map((item) => item.provider).sort(),
+    ['fitbit', 'withings'],
+  )
 })

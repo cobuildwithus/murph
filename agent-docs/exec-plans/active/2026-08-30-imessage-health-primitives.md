@@ -43,8 +43,8 @@ Updated: 2026-08-31
   states have deterministic tests and synthetic design-route proof.
 - A focused real-model assistant journey proves that a direct request selects
   the dedicated card tool and returns the card without duplicate prose.
-- Relevant package tests, typecheck, preliminary specialist review, final
-  managed review, and repository finish checks pass before handoff.
+- Relevant package tests, typecheck, exact-head final ReviewGPT, and repository
+  finish checks pass before handoff.
 
 ## Scope
 
@@ -84,8 +84,8 @@ Updated: 2026-08-31
   - Direction language is neutral: higher, lower, steady, or unavailable.
   - UI proof must represent common three-metric, sparse maximum-density, and
     all-missing states using synthetic data only.
-  - This cross-owner feature follows the active-plan, Product UX, ReviewGPT,
-    changelog, scoped-commit, and pull-request workflow.
+  - This cross-owner feature follows the active-plan, Product UX, exact-head
+    ReviewGPT, changelog, scoped-commit, and pull-request workflow.
 
 ## Product UX plan
 
@@ -157,8 +157,8 @@ Updated: 2026-08-31
 4. Add the redacted latest-occurrence projection to automation inspection.
 5. Add the dedicated assistant attachment tool and focused real-model journey.
 6. Add synthetic design proof, changelog, rollout note, and regression tests.
-7. Run focused and broad verification, specialist review, final managed review,
-   parent review, privacy/diff audit, finish-task, and open a scoped pull request.
+7. Run focused and broad verification, exact-head final ReviewGPT, privacy/diff
+   audit, finish-task, and the scoped pull-request workflow.
 
 ## Decisions
 
@@ -215,8 +215,7 @@ Updated: 2026-08-31
   - Static renderer snapshots/raster containment and design-route tests.
   - `pnpm test:assistant:live -- --test "<unique health-view journey>"`.
   - Repository typecheck and the broadest relevant workspace test command.
-  - Preliminary specialist ReviewGPT and final managed ReviewGPT with the
-    repository-default wait.
+  - Final exact-head ReviewGPT with the repository-default wait.
   - Repository finish-task checks and a final privacy/diff audit.
 - Expected outcomes:
   - All automated checks pass with no value/date/model transcription drift.
@@ -224,6 +223,33 @@ Updated: 2026-08-31
   - Review findings are resolved or explicitly documented as rollout gates.
   - Physical-device checks remain a clearly identified pre-rollout item rather
     than an unverified claim in the pull request.
+
+### Verification results on the merged candidate
+
+- UI: 19/19 wearable-card image, design-study, and raster-containment tests
+  pass. The reviewed card component did not change during remediation.
+- Assistant behavior: 103/103 route-planning cases and 31/31 focused card,
+  prompt-gate, and occurrence-receipt cases pass. A wider assistant-engine run
+  passed 4,303 tests with one combined-branch digest mismatch; after updating
+  that deterministic expectation, the exact 103-case file passed.
+- Runtime and packaging: 76/76 hosted-execution, 67/67 assistant-runtime,
+  6/6 focused CLI, 518/518 focused Cloudflare, and 43/43 runner-bundle budget
+  tests pass. The exact packaged bundle measured 11,732,995B total, 67,653B
+  entry, and 2,002,487B static boot closure across 21 chunks; only the measured
+  total baseline moved, while all startup-specific limits stayed fixed.
+- Data and contracts: 360/360 contracts/artifact checks, 26/26 core preference,
+  7/7 saved-view use-case, 7/7 seven-day query, and 6/6 response-card adapter
+  checks pass.
+- Typecheck passes for assistant-engine, assistant-runtime, CLI, Cloudflare,
+  and Web. The focused real-Codex journey passes with ordered steps, total
+  sleep, and RMSSD metrics, one trusted wearable card, and no competing prose.
+- The exact hosted-local scheduled-message scenario is blocked before Murph
+  starts on this ARM development host: the current amd64 runner image exits in
+  `tini -s` because subreaper mode is unavailable under local emulation. The
+  image builds, bundled Codex starts, Docker/Temporal are healthy, and this is
+  not a feature-path failure. Exact container E2E remains a Linux CI gate.
+- Physical installed-app, app-absent, macOS, image-failure, and VoiceOver proof
+  remains required before enabling the exact-value rollout flag.
 
 ### Provider-input measurement
 

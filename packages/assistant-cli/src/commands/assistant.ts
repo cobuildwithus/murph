@@ -2,6 +2,10 @@ import path from 'node:path'
 import { access } from 'node:fs/promises'
 import { Cli, z } from 'incur'
 import {
+  MemoryDocumentParseError,
+  memoryDocumentRelativePath,
+} from '@murphai/contracts'
+import {
   assistantAskResultSchema,
   assistantChannelNameSchema,
   assistantChatResultSchema,
@@ -581,6 +585,33 @@ function buildAssistantOnboardingResumeContextErrorSurface(
   }
 }
 
+function buildAssistantOnboardingResumeContextMemoryErrorSurface(
+  error: unknown,
+): AssistantOnboardingResumeContextFailureSurface {
+  if (
+    !(error instanceof MemoryDocumentParseError)
+    || error.details.sourcePath !== memoryDocumentRelativePath
+  ) {
+    return buildAssistantOnboardingResumeContextErrorSurface(error)
+  }
+
+  const { field, lineNumber } = error.details
+  const location = lineNumber === undefined
+    ? memoryDocumentRelativePath
+    : `${memoryDocumentRelativePath}:${lineNumber}`
+  const hint = field === undefined
+    ? `Repair ${location} before continuing onboarding.`
+    : `Repair ${location} by fixing the invalid ${field} field before continuing onboarding.`
+
+  return {
+    status: 'error',
+    code: 'memory_document_invalid',
+    message: 'Canonical memory could not be read while resuming onboarding.',
+    retryable: false,
+    hint,
+  }
+}
+
 function buildAssistantOnboardingResumeContextUnavailableSurface():
   AssistantOnboardingResumeContextFailureSurface {
   return {
@@ -658,7 +689,7 @@ async function readAssistantOnboardingResumeContextMemory(input: {
       updatedAt: result.document.updatedAt,
     }
   } catch (error) {
-    return buildAssistantOnboardingResumeContextErrorSurface(error)
+    return buildAssistantOnboardingResumeContextMemoryErrorSurface(error)
   }
 }
 

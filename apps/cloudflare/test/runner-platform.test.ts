@@ -8890,7 +8890,22 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
   });
 
-  it("reconciles a canonical checkpoint whose committed response is lost", async () => {
+  it.each([
+    {
+      label: "legacy",
+      progressProjection: {},
+    },
+    {
+      label: "system-progress-capable",
+      progressProjection: {
+        nextDefaultProcessingWakeAt: "2026-04-27T00:05:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+      },
+    },
+  ])("reconciles a $label canonical checkpoint whose committed response is lost", async ({
+    progressProjection,
+  }) => {
     const redactedStatus = {
       hostedCanonicalWriteReceiptLogByteSize: 512,
       hostedCanonicalWriteReceiptLogSha256: "b".repeat(64),
@@ -8899,6 +8914,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       checkpointedAt: "2026-04-26T00:00:04.000Z",
       createdAt: "2026-04-26T00:00:00.000Z",
       inboxMediaRetentionWakeAt: "2026-04-30T00:00:00.000Z",
+      ...progressProjection,
       nextWakeAt: "2026-04-27T00:10:00.000Z",
       nextWakeReason: "assistant",
       redactedStatus,
@@ -8953,6 +8969,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expectedWorkspaceVersion: "4",
       inboxMediaRetentionWakeAt: committedWorkspace.inboxMediaRetentionWakeAt,
       leaseGeneration: "9",
+      ...progressProjection,
       nextWakeAt: committedWorkspace.nextWakeAt,
       nextWakeReason: committedWorkspace.nextWakeReason,
       reason: "canonical_runtime_commit" as const,
@@ -9013,6 +9030,33 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         label: "implicit retention wake",
         mutate({ request }) {
           delete request.inboxMediaRetentionWakeAt;
+        },
+      },
+      {
+        label: "system progress generation mismatch",
+        mutate({ request, workspace }) {
+          Object.assign(request, {
+            nextDefaultProcessingWakeAt: "2026-04-27T00:05:00.000Z",
+            nextDefaultProcessingWakeReason: "assistant",
+            systemMailboxProgressGeneration: "7",
+          });
+          Object.assign(workspace, {
+            nextDefaultProcessingWakeAt: "2026-04-27T00:05:00.000Z",
+            nextDefaultProcessingWakeReason: "assistant",
+            systemMailboxProgressGeneration: "8",
+          });
+        },
+      },
+      {
+        label: "system progress null witness omitted",
+        mutate({ request, workspace }) {
+          Object.assign(request, {
+            nextDefaultProcessingWakeAt: null,
+            nextDefaultProcessingWakeReason: null,
+            systemMailboxProgressGeneration: "7",
+          });
+          workspace.systemMailboxProgressGeneration = "7";
+          workspace.nextDefaultProcessingWakeAt = null;
         },
       },
     ];

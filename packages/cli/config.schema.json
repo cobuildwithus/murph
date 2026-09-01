@@ -8518,7 +8518,7 @@
                             "minLength": 1,
                             "maxLength": 256
                           },
-                          "description": "Food product, brand, or generic ingredient search text. Repeat --query for multiple values."
+                          "description": "Food product, brand, USDA FDC id, UPC, or generic ingredient search text. Repeat --query for multiple values."
                         },
                         "limit": {
                           "description": "Maximum label matches to return per query. Defaults to 1.",
@@ -10888,11 +10888,10 @@
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "provider": {
-                          "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                          "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "type": "string"
                           }
                         }
                       }
@@ -10914,11 +10913,10 @@
                           "maxLength": 128
                         },
                         "provider": {
-                          "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                          "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "type": "string"
                           }
                         }
                       }
@@ -10955,11 +10953,10 @@
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "provider": {
-                          "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                          "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "type": "string"
                           }
                         },
                         "windowDays": {
@@ -11181,11 +11178,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "windowDays": {
@@ -11229,11 +11225,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "windowDays": {
@@ -11289,11 +11284,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {
@@ -11337,11 +11331,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "timeZone": {
@@ -11402,11 +11395,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {
@@ -11462,11 +11454,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {
@@ -11522,11 +11513,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {
@@ -11582,11 +11572,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {

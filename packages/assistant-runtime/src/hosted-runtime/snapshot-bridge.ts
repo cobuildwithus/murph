@@ -188,6 +188,16 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
             ? checkpointInput.inboxMediaRetentionWakeAt ?? null
             : input.request.workspace?.inboxMediaRetentionWakeAt ?? null,
           leaseGeneration: input.request.leaseGeneration,
+          ...(checkpointInput.systemMailboxProgressGeneration === undefined
+            ? {}
+            : {
+                nextDefaultProcessingWakeAt:
+                  checkpointInput.nextDefaultProcessingWakeAt ?? null,
+                nextDefaultProcessingWakeReason:
+                  checkpointInput.nextDefaultProcessingWakeReason ?? null,
+                systemMailboxProgressGeneration:
+                  checkpointInput.systemMailboxProgressGeneration,
+              }),
           nextWakeAt: Object.hasOwn(checkpointInput, "nextWakeAt")
             ? checkpointInput.nextWakeAt ?? null
             : null,

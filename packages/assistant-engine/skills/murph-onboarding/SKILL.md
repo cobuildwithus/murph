@@ -107,6 +107,10 @@ If no welcome or prior onboarding is visible, run one bounded resume check:
 vault-cli assistant onboarding resume-context --format json
 ```
 
+A non-retryable `memory_document_invalid` memory surface is terminal: do not
+read, write, or advance. Reply with its hint, keeping file, line, and field;
+stop until repaired.
+
 Treat every useful saved fact in the snapshot as known evidence for the open
 health threads and foundation checkpoints. Never re-ask it.
 Missing evidence is unresolved unless the visible conversation shows that the

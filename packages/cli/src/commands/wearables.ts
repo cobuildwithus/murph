@@ -9,12 +9,12 @@ import {
   wearableTrendMetricKeySchema,
 } from '@murphai/contracts'
 import {
+  normalizeWearableQueryProviderSlug,
+} from '@murphai/health-metrics'
+import {
   resolveWearableCanonicalMetricKey,
   wearableCanonicalMetricKeys,
 } from '@murphai/importers/device-providers/metric-catalog'
-import {
-  canonicalizeDeviceProviderSlug,
-} from '@murphai/importers/device-providers/provider-descriptors'
 import {
   emptyArgsSchema,
   requestIdFromOptions,
@@ -69,10 +69,10 @@ const personalPatternWindowDaysOptionSchema = z
     'Calendar-day window for matched personal patterns. Defaults to 120 days.',
   )
 const repeatableProviderOptionSchema = z
-  .array(z.string().min(1))
+  .array(z.string())
   .optional()
   .describe(
-    'Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.',
+    'Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.',
   )
 const wearableInputDateSchema = localDateSchema.refine(
   isStrictIsoDate,
@@ -739,11 +739,25 @@ function withPersonalPatternOptions() {
 }
 
 function normalizeWearableProviders(value: readonly string[] | undefined): string[] {
-  return normalizeRepeatableEnumFlagOption(
-    value?.map((entry) => canonicalizeDeviceProviderSlug(entry)),
-    'provider',
-    wearablePreferenceProviderValues,
-  ) ?? []
+  if (value === undefined) {
+    return []
+  }
+
+  const providers = value.map((entry) => normalizeWearableQueryProviderSlug(entry))
+  if (providers.some((provider) => provider === null)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Invalid wearable --provider. Use a public provider slug; internal transport names and malformed values are not accepted.',
+      {
+        retryable: false,
+        hint: 'Run `vault-cli wearables sources list --format json` without --provider to list the providers present in this vault.',
+        issues: [publicValidationIssue({ code: 'custom' }, ['provider'])],
+        stage: 'validation',
+      },
+    )
+  }
+
+  return [...new Set(providers.filter((provider): provider is string => provider !== null))]
 }
 
 function isSupportedWearableMetricRequest(value: string): boolean {

@@ -41,6 +41,10 @@ import {
 import {
   ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION,
 } from "./group-shared-freshness.js";
+import {
+  formatAssistantPromptInstant,
+  formatAssistantPromptUtcInstant,
+} from "./prompt-time.js";
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
@@ -68,6 +72,7 @@ export interface AssistantSystemPromptInput {
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   canonicalTimeZoneAvailable?: boolean;
+  currentInstant?: string;
   currentLocalDate: string;
   currentTimeZone: string;
   conversationScope?: AssistantConversationScope;
@@ -952,6 +957,13 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
     timeZone: input.currentTimeZone,
   });
   return joinPromptSections(
+    buildAssistantCurrentTimeLineText({
+      canonicalTimeZoneAvailable: input.canonicalTimeZoneAvailable !== false,
+      conversationScope,
+      currentInstant: input.currentInstant ?? null,
+      currentTimeZone: input.currentTimeZone,
+      hostedRuntime: input.hostedRuntime === true,
+    }),
     buildAssistantCurrentDateLineText(
       input.currentLocalDate,
       input.canonicalTimeZoneAvailable !== false,
@@ -1091,6 +1103,28 @@ function buildAssistantCurrentDateLineText(
   return canonicalTimeZoneAvailable
     ? `Today's date for the user is ${formattedDate}.`
     : `The current UTC date is ${formattedDate}; the member-local date is unknown for this turn.`;
+}
+
+function buildAssistantCurrentTimeLineText(input: {
+  canonicalTimeZoneAvailable: boolean;
+  conversationScope: AssistantConversationScope;
+  currentInstant: string | null;
+  currentTimeZone: string;
+  hostedRuntime: boolean;
+}): string | null {
+  if (
+    !input.currentInstant
+    || !input.hostedRuntime
+    || input.conversationScope !== "direct"
+  ) {
+    return null;
+  }
+
+  if (!input.canonicalTimeZoneAvailable) {
+    return `Current time authority: ${formatAssistantPromptUtcInstant(input.currentInstant)} (UTC only). The member-local clock is unknown; do not infer or relabel a local clock from the runtime environment.`;
+  }
+
+  return `Current local clock for the user (${input.currentTimeZone}): ${formatAssistantPromptInstant(input.currentInstant, input.currentTimeZone)}. This host-rendered value is the authority for current member-local time; do not use or relabel the runtime UTC clock as local.`;
 }
 
 function buildAssistantProductBaseUrlLineText(
@@ -1431,7 +1465,7 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
-- Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state. Before health Q&A or advice beyond it, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns.
+- Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state. Before health Q&A or advice beyond it, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Skip this search only when the request is limited to deterministic exact food-label nutrition facts resolved by food-journal's label database; use that database directly. Health reasoning or advice beyond the returned label facts still requires Commons. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 

@@ -2211,15 +2211,30 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(artifactGetCalls, [
+      assert.deepEqual(artifactGetCalls.slice(0, 3), [
         baseHash,
         hotHash,
         receiptLogHash,
+      ]);
+      assert.deepEqual(
+        artifactGetCalls
+          .filter((hash) => hash === olderReceiptHash || hash === receiptHash),
+        [olderReceiptHash, receiptHash],
+      );
+      assert.deepEqual([...artifactGetCalls.slice(3)].sort(), [
         olderReceiptHash,
         olderPayloadHash,
         receiptHash,
         exactPayloadHash,
-      ]);
+      ].sort());
+      assert.ok(
+        artifactGetCalls.indexOf(olderReceiptHash)
+          < artifactGetCalls.indexOf(olderPayloadHash),
+      );
+      assert.ok(
+        artifactGetCalls.indexOf(receiptHash)
+          < artifactGetCalls.indexOf(exactPayloadHash),
+      );
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-28.md"), "utf8"),

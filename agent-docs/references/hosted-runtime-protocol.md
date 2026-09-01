@@ -147,13 +147,17 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 ### Resident Codex And Detached Enrichment Boundary
 
 The container owns one resident Codex App Server and keeps it warm across
-ordinary turns and ordinary workspace invocations. Turn completion, invocation
-completion, and invocation-scoped credential rotation do not replace it. An
-explicit workspace invocation abort or preemption is different: the container
+ordinary turns while one restored workspace remains active. Turn completion,
+invocation completion, and invocation-scoped credential rotation do not by
+themselves replace it. Before any restore path validates, replaces, clears, or
+sanitizes Codex home, the runtime synchronously stops the exact process so a
+fresh process can rebuild private indexes against the restored home. An explicit
+workspace invocation abort or preemption is also a stop boundary: the container
 interrupts the active background-work boundary and synchronously stops the exact
 owned App Server before it releases the job slot for another invocation. A stop
-failure poisons the container rather than allowing a replacement invocation to
-reuse ambiguous process state.
+failure at the pre-restore boundary fails that invocation before restore starts;
+any later invocation must pass the same stop gate before it can prepare or run
+the workspace.
 
 After restore and final Codex config/auth preparation, only the first fresh
 auto-reply-enabled conversation candidate staged during the pre-pass may decide
@@ -1400,7 +1404,12 @@ necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
 checkpoint replay floor. The system lane advances that floor from its
-checkpointed handled-through status. At the conversation lane's successful
+checkpointed handled-through status. After restore, a zero-row system import
+uses the existing workspace checkpoint path once when both local system
+progress cursors are at least canonical and one is newer. Equal,
+canonical-newer, crossed, missing, or malformed progress does not trigger the
+repair, so the runtime cannot roll canonical progress backward or create a new
+wake owner. At the conversation lane's successful
 `idle_shutdown` checkpoint, the runtime instead carries up to 256 exact mailbox
 item ids whose local inputs have terminal evidence. In the same transaction as
 the accepted snapshot CAS, Web stamps `consumed_at` only on matching same-user
@@ -1658,8 +1667,19 @@ therefore relinquishes the existing lifecycle boundary without leaving a stale
 hint or partially initialized start ahead of foreground work. If a Worker
 version changes before authoritative start, the `UserRunner` destroys and
 clears a different pending versioned target before binding the current fence.
-The existing Web helper carries its bounded `linq-instant-start` or
-`linq-typing-started` source through the same request and RPC. During additive
+For an ordinary established direct Linq message, pre-transaction routing
+preparation may fire that same request immediately after it resolves an active
+member, before root KMS work and transaction entry. It threads
+one UUID-shaped attempt id through Web, the authenticated route, UserRunner
+activation and admission, and the container's first coalesced observation. The
+final wake carries the same id as expected evidence; the latency report treats
+the hint as causal only when the consumed observation matches it exactly. No
+attempt id is authority, and a retry that resolves another member starts a new
+hint while the planner remains authoritative.
+
+The existing Web helper carries its bounded `linq-instant-start`,
+`linq-message-routing`, or `linq-typing-started` source through the same request
+and RPC. During additive
 rollout an empty legacy request remains accepted and is recorded as `unknown`;
 unknown is never assumed to mean typing. Cloudflare logs one bounded admission outcome (`scheduled`,
 `skipped_consent_busy`, `skipped_admission_unavailable`,
@@ -1673,8 +1693,9 @@ do not imply port or health readiness.
 
 The container also consumes its in-memory hint observation on the next
 authoritative `ensureReadyForProcessing` call. One observation belongs to one
-shell-prewarm operation and carries its triggering source, first causal hint
-timestamp, completion time and duration, coalesced hint count, and one terminal
+shell-prewarm operation and carries its triggering source, bounded
+orchestration attempt and phase timestamps, first causal hint timestamp,
+completion time and duration, coalesced hint count, and one terminal
 outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
 After that operation settles, later hints may only increment its bounded hint
 count until readiness consumes it; they cannot launch a second operation or
@@ -1683,12 +1704,12 @@ leaves into the existing orchestration latency phase breakdown; it adds no
 request, persisted state owner, awaited reporting step, or work on the
 message-ingress path. A stop, explicit destroy, or Durable Object eviction may
 erase the optional observation, so an absent observation means `no observed
-prewarm`, not proof that no typing hint occurred. The aggregate cold-start
-report includes only typing-sourced, chronology-safe, uniquely matched
-Web-direct traces whose reply belongs to the same runtime attempt. It omits
-instant-start, unknown-source, ambiguous, backlog, and attempt-handoff rows
-rather than guessing, and returns no member, mailbox, trace, delivery, or
-runtime-attempt identifiers.
+prewarm`, not proof that no hint occurred. The aggregate cold-start report
+includes chronology-safe typing hints and exact-id-matched message-routing
+hints on uniquely matched Web-direct traces whose reply belongs to the same
+runtime attempt. It omits instant-start, unknown-source, ambiguous, backlog,
+and attempt-handoff rows rather than guessing, and returns no member, mailbox,
+trace, delivery, or runtime-attempt identifiers.
 The signal
 reconciles both the foreground conversation lane and the already-durable
 activation item. Web then
@@ -2403,6 +2424,21 @@ can wake one explicit workspace, and caps batch wakes to a tiny window that
 stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
 
+The same surface has a separate facts-only runtime recheck. An operator may
+submit up to three normalized, deduplicated hosted member ids; Web first
+requires an existing workspace, then the signal owner independently rechecks
+active runtime access. The signals run sequentially under one bounded deadline
+and stop on the first unknown result. Each accepted request sends only
+`runtime_recheck_requested`: it appends no mailbox item, changes no usage, and
+grants no new work authority. Signal acceptance proves only that the runtime was
+asked to reread canonical facts, not that recovery completed.
+
+Automatic discovery may seed that same explicit-id control with active
+checkpointed system lanes matching the legacy device-sync stall signature for
+at least 15 minutes. Discovery and effect authority stay separate; manually
+entered ids do not need to match that incident signature, while every mutation
+still passes the workspace and live-access guards above.
+
 An already-dormant workspace that persisted `nextWakeAt = null` before a
 wake-preservation fix cannot self-start merely because the fixed runtime has
 been deployed. Recover it through the same bounded maintenance surface rather
@@ -3089,9 +3125,9 @@ or live foreground paths must not fall back to broad foreground full snapshots,
 path-scoped working deltas, legacy hot producers, Worker-body snapshot uploads,
 or artifact-sidecar v2 producers. `idle_shutdown` is the only new checkpoint
 snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
-write receipts and publishes a receipt-log ref, bounded to 64 pending entries
-and 64 KiB, through a status-only workspace checkpoint that retains the prior
-snapshot ref. Capacity, log shape, and payload lengths are validated before
+write receipts and publishes a receipt-log head ref through a status-only
+workspace checkpoint that retains the prior snapshot ref. Capacity, log shape,
+and payload lengths are validated before
 upload. The complete immutable payload, receipt, and log artifact set then
 uploads in small fixed concurrent waves; every started wave settles before a
 failure returns, and the checkpoint publishes the log ref only after the whole
@@ -3110,10 +3146,33 @@ conversation deferral. When that import performs a canonical write, the runner
 publishes its receipt and imported watermark atomically before later assistant
 or managed-automation writes can add dependent receipts. Restore can therefore
 replay the complete canonical sequence directly over the published snapshot
-without reconstructing unauthenticated local prefixes. When the restored log
-is at the hard entry bound, the runtime consolidates it through an idle
-snapshot before foreground mailbox or assistant work. That recovery snapshot
-publishes an immediate
+without reconstructing unauthenticated local prefixes. Receipt logs remain on
+the existing v1 schema so every prior reader can restore a newly written log.
+Each immutable log is at most 64 KiB and exposes at most 64 active receipt refs.
+When the active prefix is full, the current writer parses the refs in canonical
+first-occurrence order, flattens their actions into one deterministic v1
+receipt, and starts the next active prefix with that compacted receipt and the
+new receipt. The log's optional cumulative count and receipt-hash provenance
+are ignored by prior readers. After the first compaction, the physical v1
+entries array remains padded to 64 with duplicates of the first active ref and
+an optional active-prefix count identifies the meaningful leading refs. Prior
+restore already deduplicates those refs in prefix order, while a prior writer
+sees its existing full-log boundary and cannot erase the new metadata.
+
+The current reader validates the active prefix, duplicate-only barrier padding,
+cumulative count, and provenance before replay. It admits at most 512
+cumulative receipts, fetches receipt artifacts in fixed waves of eight while
+applying them in canonical order, and bounds one compaction's receipt bodies
+and flattened output to 4 MiB. That byte ceiling can stop unusually large
+receipt histories before the 512-count ceiling; canonical payload object bytes
+remain governed by their existing integrity and artifact-store contracts, not
+this log bound. Invocation requests admit at most 100 mailbox items. When a
+restored log reaches the 63-receipt background admission boundary, the runtime
+consolidates it through an idle snapshot before foreground mailbox or assistant
+work; the remaining active-prefix capacity lets one already-admitted
+background append finish before cooperative yield is observed, while
+foreground writes can compact the v1 log until the next quiescent checkpoint.
+That recovery snapshot publishes an immediate
 mailbox-continuation wake so web accepts it even when foreground conversation
 rows are already pending; immediately after that snapshot, a status-only
 checkpoint durably restores the prior wake projection before foreground work
@@ -3126,11 +3185,12 @@ The two receipt-log pointer fields and three recovery-marker fields are
 reserved outside the ordinary 96-field redacted-status budget at both
 transport parsing and workspace persistence boundaries; ordinary status
 remains capped at 96 fields.
-Later idle snapshots omit the receipt-log status. The pending-log
-limits bound replay work, not object
-retention: encrypted owner-scoped receipt, log, and payload artifacts are not
-eagerly deleted after consolidation until the artifact store has a
-reference-safe owner-scoped retention primitive.
+Later idle snapshots omit the receipt-log status. The pending-log limits bound
+log traversal and retained receipt-reference count, not receipt/payload body
+bytes or all replay work. They also do not govern object retention: encrypted
+owner-scoped receipt, log, and payload artifacts are not eagerly deleted after
+consolidation until the artifact store has a reference-safe owner-scoped
+retention primitive.
 `idle_shutdown` is the snapshot boundary for warm-runner wind-down: it maps to
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease

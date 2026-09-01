@@ -8,9 +8,12 @@ import {
 import {
   addMeal as addMealInternal,
   dedupeDeviceEventsByExternalRef as dedupeDeviceEventsByExternalRefInternal,
+  listInboxDocumentDefaultPromotionCorrelations as listInboxDocumentDefaultPromotionCorrelationsInternal,
+  listLiveExactDocumentImportEvidence as listLiveExactDocumentImportEvidenceInternal,
   importDeviceBatch as importDeviceBatchInternal,
   importEventBatch as importEventBatchInternal,
   importDocument as importDocumentInternal,
+  recordInboxDocumentDefaultPromotion as recordInboxDocumentDefaultPromotionInternal,
   importSamples as importSamplesInternal,
   validateSampleImport as validateSampleImportInternal,
   resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal,
@@ -108,6 +111,18 @@ export {
   removeAutomaticMealPhotoInternal as removeAutomaticMealPhoto,
   upsertEventInternal as upsertEvent,
 };
+
+export async function listLiveExactDocumentImportEvidence(
+  input: Parameters<typeof listLiveExactDocumentImportEvidenceInternal>[0],
+): ReturnType<typeof listLiveExactDocumentImportEvidenceInternal> {
+  return listLiveExactDocumentImportEvidenceInternal(input);
+}
+
+export async function listInboxDocumentDefaultPromotionCorrelations(
+  input: Parameters<typeof listInboxDocumentDefaultPromotionCorrelationsInternal>[0],
+): ReturnType<typeof listInboxDocumentDefaultPromotionCorrelationsInternal> {
+  return listInboxDocumentDefaultPromotionCorrelationsInternal(input);
+}
 
 export interface CanonicalTextWriteInput {
   relativePath: string;
@@ -515,6 +530,12 @@ export async function importDocument(
   return input.reuseExact === true
     ? withCanonicalInputWriteLock(input, importDocumentInternal)
     : importDocumentInternal(input);
+}
+
+export async function recordInboxDocumentDefaultPromotion(
+  input: Parameters<typeof recordInboxDocumentDefaultPromotionInternal>[0],
+): ReturnType<typeof recordInboxDocumentDefaultPromotionInternal> {
+  return withCanonicalInputWriteLock(input, recordInboxDocumentDefaultPromotionInternal);
 }
 
 export async function resolveWorkoutSourceImportStatus(

@@ -81,7 +81,7 @@ describe("runner bundle runtime artifact staging", () => {
     ).toThrow("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY must be a positive integer.");
   });
 
-  it("defers assistant CLI surface generation until the built workspace CLI exists", () => {
+  it("assembles the assistant CLI surface after the built workspace CLI exists", () => {
     const plan = buildHostedRunnerWorkspaceArtifactPlan(
       ["@murphai/assistant-engine", "@murphai/murph"],
       {
@@ -99,19 +99,12 @@ describe("runner bundle runtime artifact staging", () => {
       "run",
       "build",
     ]);
-    expect(plan.buildEnv).toEqual({
-      MURPH_ASSISTANT_CLI_SURFACE_GENERATION: "defer",
-    });
-    expect(plan.assistantCliSurfaceGenerationArgs).toEqual([
+    expect(plan.assistantCliSurfaceAssemblyArgs).toEqual([
       path.join(
         repoRoot,
-        "packages",
-        "assistant-engine",
-        "dist",
-        "assistant",
-        "generate-cli-surface-contract.js",
+        "scripts",
+        "assemble-assistant-cli-surface.mjs",
       ),
-      "--prefer-built-workspace-cli",
     ]);
   });
 
@@ -121,8 +114,7 @@ describe("runner bundle runtime artifact staging", () => {
       { env: {}, repoRoot },
     );
 
-    expect(plan.buildEnv).toBeUndefined();
-    expect(plan.assistantCliSurfaceGenerationArgs).toBeNull();
+    expect(plan.assistantCliSurfaceAssemblyArgs).toBeNull();
   });
 
   it("prepares runtime artifacts before scriptless runner package packing", () => {

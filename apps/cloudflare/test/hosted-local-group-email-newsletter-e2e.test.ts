@@ -109,28 +109,24 @@ describe("hosted local group email newsletter e2e", () => {
   }, 180_000);
 
   it("settles one scheduled eight-scope edition through generic group email without a chat copy", async () => {
-    await Promise.all([
-      requireScenario().seedActiveHostedLinqMember({
-        homePhone,
-        memberId: ownerMemberId,
-        memberPhone: ownerPhone,
-      }),
-      requireScenario().seedActiveHostedLinqMember({
-        homePhone: buildLinqHomePhoneNumber(missingEmailMemberId),
-        memberId: missingEmailMemberId,
-        memberPhone: missingEmailPhone,
-      }),
-    ]);
-    await Promise.all([
-      seedHostedLaunchConsentForTest({
-        environment: requireScenario().runtimeEnv,
-        memberId: ownerMemberId,
-      }),
-      seedHostedLaunchConsentForTest({
-        environment: requireScenario().runtimeEnv,
-        memberId: missingEmailMemberId,
-      }),
-    ]);
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone,
+      memberId: ownerMemberId,
+      memberPhone: ownerPhone,
+    });
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone: buildLinqHomePhoneNumber(missingEmailMemberId),
+      memberId: missingEmailMemberId,
+      memberPhone: missingEmailPhone,
+    });
+    await seedHostedLaunchConsentForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: ownerMemberId,
+    });
+    await seedHostedLaunchConsentForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: missingEmailMemberId,
+    });
     await Promise.all([
       requireScenario().runWake(buildActivationWake(ownerMemberId), ownerMemberId),
       requireScenario().runWake(
