@@ -21,7 +21,7 @@ index 166d5bef8d52e08f0aa7747a835df7ad3b2e5642..0b5276e64ea44ed5cc2829d64d359141
  export type GlobalsDescriptor = {
      schema: z.ZodObject<any>;
 diff --git a/dist/Cli.js b/dist/Cli.js
-index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9acc16940a9 100644
+index 414e8f50a05021f2c9c02e4f612db81fe490b21f..fadfc54651e7706da1bb0a23fb9cff741b7daa45 100644
 --- a/dist/Cli.js
 +++ b/dist/Cli.js
 @@ -7,7 +7,7 @@ import { estimateTokenCount, sliceByTokens } from 'tokenx';
@@ -33,15 +33,14 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
  import * as Fetch from './Fetch.js';
  import * as Filter from './Filter.js';
  import * as Formatter from './Formatter.js';
-@@ -283,6 +283,15 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -283,6 +283,14 @@ async function serveImpl(name, commands, argv, options = {}) {
      function writeln(s) {
          stdout(s.endsWith('\n') ? s : `${s}\n`);
      }
 +    function writeSafeError(error, format) {
 +        const envelope = toErrorEnvelope(error);
 +        if (tty && format === undefined) {
-+            const hint = envelope.hint ? `\n\nHint: ${envelope.hint}` : '';
-+            writeln(`${formatHumanError(envelope)}${hint}`);
++            writeln(formatHumanError(envelope));
 +            return;
 +        }
 +        writeln(Formatter.format(envelope, format ?? 'toon'));
@@ -49,7 +48,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
      async function writeBanner() {
          if (!options.banner || help)
              return;
-@@ -304,11 +313,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -304,11 +312,7 @@ async function serveImpl(name, commands, argv, options = {}) {
          builtinFlags = extractBuiltinFlags(argv, { configFlag });
      }
      catch (error) {
@@ -62,7 +61,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
          exit(1);
          return;
      }
-@@ -334,11 +339,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -334,11 +338,7 @@ async function serveImpl(name, commands, argv, options = {}) {
              return true;
          }
          catch (error) {
@@ -75,7 +74,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
              exit(1);
              return false;
          }
-@@ -451,9 +452,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -451,9 +451,8 @@ async function serveImpl(name, commands, argv, options = {}) {
          if (!isSkillsAdd && !isMcpAdd) {
              const stored = SyncSkills.readHash(name);
              if (stored && SyncSkills.hasInstalledSkills(name, { cwd: options.sync?.cwd })) {
@@ -87,7 +86,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
                      const command = process.env.npm_config_user_agent || process.env.npm_execpath
                          ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
                          : `${displayName} skills add`;
-@@ -554,10 +554,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -554,10 +553,8 @@ async function serveImpl(name, commands, argv, options = {}) {
              const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : '';
              const message = `'${skillsSub}' is not a command for '${name} skills'.${didYouMean}`;
              const ctaCommands = [];
@@ -100,7 +99,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
              ctaCommands.push({
                  command: `${name} skills --help`,
                  description: 'see all available commands',
-@@ -698,10 +696,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -698,10 +695,8 @@ async function serveImpl(name, commands, argv, options = {}) {
              const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : '';
              const message = `'${mcpSub}' is not a command for '${name} mcp'.${didYouMean}`;
              const ctaCommands = [];
@@ -113,7 +112,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
              ctaCommands.push({ command: `${name} mcp --help`, description: 'see all available commands' });
              const cta = {
                  description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
-@@ -1117,10 +1113,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -1117,10 +1112,8 @@ async function serveImpl(name, commands, argv, options = {}) {
          const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : '';
          const message = `'${effective.error}' is not a command for '${parent}'.${didYouMean}`;
          const ctaCommands = [];
@@ -126,7 +125,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
          ctaCommands.push({ command: helpCmd, description: 'see all available commands' });
          const cta = {
              description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
-@@ -1266,10 +1260,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -1266,10 +1259,7 @@ async function serveImpl(name, commands, argv, options = {}) {
          catch (error) {
              write({
                  ok: false,
@@ -138,7 +137,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
                  meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
              });
              exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
-@@ -1302,10 +1293,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -1302,10 +1292,7 @@ async function serveImpl(name, commands, argv, options = {}) {
          catch (error) {
              write({
                  ok: false,
@@ -150,7 +149,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
                  meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
              });
              exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
-@@ -1372,14 +1360,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+@@ -1372,14 +1359,7 @@ async function serveImpl(name, commands, argv, options = {}) {
          }
          write({
              ok: false,
@@ -166,7 +165,82 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
              meta: {
                  command: path,
                  duration,
-@@ -1630,14 +1611,12 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
+@@ -1542,19 +1522,6 @@ async function fetchImpl(name, commands, req, options = {}) {
+         }
+         return new Response('Not Found', { status: 404 });
+     }
+-    // Parse options from search params (GET) or body (non-GET)
+-    let inputOptions = {};
+-    if (req.method === 'GET')
+-        for (const [key, value] of url.searchParams)
+-            inputOptions[key] = value;
+-    else {
+-        try {
+-            const contentType = req.headers.get('content-type') ?? '';
+-            if (contentType.includes('application/json'))
+-                inputOptions = (await req.json());
+-        }
+-        catch { }
+-    }
+     function jsonResponse(body, status) {
+         return new Response(Json.stringify(body), {
+             status,
+@@ -1565,7 +1532,7 @@ async function fetchImpl(name, commands, req, options = {}) {
+     if (segments.length === 0) {
+         // Root path
+         if (options.rootCommand)
+-            return executeCommand(name, options.rootCommand, [], inputOptions, req, start, options);
++            return executeCommand(name, options.rootCommand, [], req, start, options);
+         return jsonResponse({
+             ok: false,
+             error: { code: 'COMMAND_NOT_FOUND', message: 'No root command defined.' },
+@@ -1599,19 +1566,43 @@ async function fetchImpl(name, commands, req, options = {}) {
+         return resolved.fetchGateway.fetch(req);
+     const { command, path, rest } = resolved;
+     const groupMiddlewares = 'middlewares' in resolved ? resolved.middlewares : [];
+-    return executeCommand(path, command, rest, inputOptions, req, start, {
++    return executeCommand(path, command, rest, req, start, {
+         ...options,
+         groupMiddlewares,
+     });
+ }
+ /** @internal Executes a resolved command for the fetch handler and returns a JSON Response. */
+-async function executeCommand(path, command, rest, inputOptions, request, start, options) {
++async function executeCommand(path, command, rest, request, start, options) {
+     function jsonResponse(body, status) {
+         return new Response(Json.stringify(body), {
+             status,
+             headers: { 'content-type': 'application/json' },
+         });
+     }
++    function invalidJsonInputResponse() {
++        return jsonResponse({
++            ok: false,
++            error: toErrorEnvelope(new ValidationError({ message: 'Invalid JSON request body.' })),
++            meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
++        }, 400);
++    }
++    // Parse ordinary command input only after routing so fetch gateways retain the raw request body.
++    let inputOptions = {};
++    if (request.method === 'GET')
++        for (const [key, value] of new URL(request.url).searchParams)
++            inputOptions[key] = value;
++    else if ((request.headers.get('content-type') ?? '').includes('application/json')) {
++        let parsed;
++        try {
++            parsed = await request.json();
++        }
++        catch {
++            return invalidJsonInputResponse();
++        }
++        if (!isRecord(parsed))
++            return invalidJsonInputResponse();
++        inputOptions = parsed;
++    }
+     const allMiddleware = [
+         ...(options.middlewares ?? []),
+         ...(options.groupMiddlewares ?? []),
+@@ -1630,14 +1621,12 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
                  commandInputOptions[key] = value;
          }
          try {
@@ -183,7 +257,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
                  meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
              }, 400);
          }
-@@ -1714,11 +1693,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
+@@ -1714,11 +1703,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
                      controller.enqueue(encoder.encode(Json.stringify({
                          type: 'error',
                          ok: false,
@@ -196,7 +270,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
                          meta: meta(),
                      }) + '\n'));
                      controller.close();
-@@ -1734,14 +1709,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
+@@ -1734,14 +1719,7 @@ async function executeCommand(path, command, rest, inputOptions, request, start,
          const cta = formatCtaBlock(options.name ?? path, result.cta);
          return jsonResponse({
              ok: false,
@@ -212,7 +286,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
              meta: {
                  command: path,
                  duration,
-@@ -1896,6 +1864,25 @@ function resolveCommand(commands, tokens) {
+@@ -1896,6 +1874,25 @@ function resolveCommand(commands, tokens) {
  }
  /** @internal Extracts built-in flags from argv. */
  const validFormats = new Set(['toon', 'json', 'yaml', 'md', 'jsonl']);
@@ -238,7 +312,68 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
  function extractBuiltinFlags(argv, options = {}) {
      let fullOutput = false;
      let llms = false;
-@@ -2466,6 +2453,14 @@ export const toRootDefinition = new WeakMap();
+@@ -1943,12 +1940,15 @@ function extractBuiltinFlags(argv, options = {}) {
+             format = 'json';
+             formatExplicit = true;
+         }
+-        else if (token === '--format' && argv[i + 1]) {
+-            if (!validFormats.has(argv[i + 1]))
++        else if (token === '--format') {
++            const value = argv[i + 1];
++            if (value === undefined)
++                throw new ParseError({ message: 'Missing value for flag: --format' });
++            if (!validFormats.has(value))
+                 throw new ParseError({
+-                    message: `Invalid format: "${argv[i + 1]}". Expected one of: ${[...validFormats].join(', ')}`,
++                    message: `Invalid format: "${value}". Expected one of: ${[...validFormats].join(', ')}`,
+                 });
+-            format = argv[i + 1];
++            format = value;
+             formatExplicit = true;
+             i++;
+         }
+@@ -1971,21 +1971,30 @@ function extractBuiltinFlags(argv, options = {}) {
+             configPath = undefined;
+             configDisabled = true;
+         }
+-        else if (token === '--filter-output' && argv[i + 1]) {
+-            filterOutput = argv[i + 1];
++        else if (token === '--filter-output') {
++            const value = argv[i + 1];
++            if (value === undefined)
++                throw new ParseError({ message: 'Missing value for flag: --filter-output' });
++            filterOutput = value;
+             i++;
+         }
+-        else if (token === '--token-limit' && argv[i + 1]) {
+-            const n = Number(argv[i + 1]);
+-            if (!Number.isFinite(n) || argv[i + 1].trim() === '')
+-                throw new ParseError({ message: `Invalid value for --token-limit: "${argv[i + 1]}"` });
++        else if (token === '--token-limit') {
++            const value = argv[i + 1];
++            if (value === undefined)
++                throw new ParseError({ message: 'Missing value for flag: --token-limit' });
++            const n = Number(value);
++            if (!Number.isFinite(n) || value.trim() === '')
++                throw new ParseError({ message: `Invalid value for --token-limit: "${value}"` });
+             tokenLimit = n;
+             i++;
+         }
+-        else if (token === '--token-offset' && argv[i + 1]) {
+-            const n = Number(argv[i + 1]);
+-            if (!Number.isFinite(n) || argv[i + 1].trim() === '')
+-                throw new ParseError({ message: `Invalid value for --token-offset: "${argv[i + 1]}"` });
++        else if (token === '--token-offset') {
++            const value = argv[i + 1];
++            if (value === undefined)
++                throw new ParseError({ message: 'Missing value for flag: --token-offset' });
++            const n = Number(value);
++            if (!Number.isFinite(n) || value.trim() === '')
++                throw new ParseError({ message: `Invalid value for --token-offset: "${value}"` });
+             tokenOffset = n;
+             i++;
+         }
+@@ -2466,6 +2475,14 @@ export const toRootDefinition = new WeakMap();
  export const toRootOptions = new WeakMap();
  /** @internal Maps CLI instances to whether config file loading is enabled. */
  export const toConfigEnabled = new WeakMap();
@@ -253,7 +388,16 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
  /** @internal Maps CLI instances to their output policy. */
  const toOutputPolicy = new WeakMap();
  /** @internal Maps CLI instances to their globals schema and alias map. */
-@@ -2593,17 +2588,10 @@ async function handleStreaming(generator, ctx) {
+@@ -2483,6 +2500,8 @@ function formatHumanError(error) {
+     if (error.fieldErrors)
+         for (const fe of error.fieldErrors)
+             out += `\n  ${fe.path}: ${fe.message}`;
++    if (error.hint)
++        out += `\n\nHint: ${error.hint}`;
+     return out;
+ }
+ /** @internal Formats a CTA block for human-readable TTY output. */
+@@ -2593,17 +2612,10 @@ async function handleStreaming(generator, ctx) {
                  ctx.writeln(JSON.stringify({
                      type: 'error',
                      ok: false,
@@ -273,7 +417,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..5d5c47dbd4438a138799c6bc6298a9ac
              ctx.exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
          }
      }
-@@ -2672,11 +2660,7 @@ async function handleStreaming(generator, ctx) {
+@@ -2672,11 +2684,7 @@ async function handleStreaming(generator, ctx) {
          catch (error) {
              ctx.write({
                  ok: false,
@@ -468,17 +612,20 @@ index 37aab660515f1efba4ad1f0c7d94423a73e492c4..10969d34504e3635af171e9919b9dec3
  /** Returns true if the response body is a stream that should be consumed incrementally. */
  export function isStreamingResponse(response) {
 diff --git a/dist/Mcp.js b/dist/Mcp.js
-index 3102a678e6c37a08be9e735485e3e1187619ea88..e32df4856ecc6b622da1114dff7072eebab897ca 100644
+index 3102a678e6c37a08be9e735485e3e1187619ea88..3f4cc832633e938fe60b4dba17f522faaabfcdfe 100644
 --- a/dist/Mcp.js
 +++ b/dist/Mcp.js
-@@ -1,5 +1,6 @@
+@@ -1,7 +1,9 @@
  import { z } from 'zod';
  import * as Command from './internal/command.js';
 +import { toErrorEnvelope } from './Errors.js';
  import { formatCtaBlock, renderCtaText } from './internal/cta.js';
  import * as Json from './internal/json.js';
++import * as Parser from './Parser.js';
  import * as Schema from './Schema.js';
-@@ -80,7 +81,7 @@ export async function callTool(tool, params, options = {}) {
+ /** Starts a stdio MCP server that exposes commands as tools. */
+ export async function serve(name, version, commands, options = {}) {
+@@ -80,7 +82,7 @@ export async function callTool(tool, params, options = {}) {
          }
          catch (err) {
              return {
@@ -487,6 +634,215 @@ index 3102a678e6c37a08be9e735485e3e1187619ea88..e32df4856ecc6b622da1114dff7072ee
                  isError: true,
              };
          }
+@@ -128,85 +130,110 @@ function registerDirectTool(server, tool, options) {
+         ...tool.command.options?.shape,
+     };
+     const hasInput = Object.keys(mergedShape).length > 0;
+-    server.registerTool(tool.name, {
++    const config = {
+         ...(tool.description ? { description: tool.description } : undefined),
+-        ...(hasInput ? { inputSchema: z.object(mergedShape) } : undefined),
+         ...(tool.outputSchema
+             ? { outputSchema: options.fromJsonSchema(tool.outputSchema) }
+             : undefined),
+         ...(tool.annotations ? { annotations: tool.annotations } : undefined),
+         ...(tool.instructions ? { _meta: { instructions: tool.instructions } } : undefined),
+-    }, async (...callArgs) => {
+-        // registerTool passes (args, extra) when inputSchema is set, (extra) when not.
+-        const params = hasInput ? callArgs[0] : {};
+-        const extra = hasInput ? callArgs[1] : callArgs[0];
+-        return callTool(tool, params, callOptions(options, extra));
+-    });
++    };
++    if (hasInput) {
++        server.registerTool(tool.name, { ...config, inputSchema: deferredInputSchema(tool.inputSchema) }, async (params, extra) => callTool(tool, params, callOptions(options, extra)));
++        return;
++    }
++    server.registerTool(tool.name, config, async (extra) => callTool(tool, {}, callOptions(options, extra)));
+ }
+ function registerDiscoveryTools(server, tools, options) {
+     const byName = new Map(tools.map((tool) => [tool.name, tool]));
++    const searchSchema = z.object({
++        limit: z.number().int().min(1).max(20).default(5).describe('Maximum matches.'),
++        offset: z.number().int().min(0).default(0).describe('Matches to skip.'),
++        query: z.string().default('').describe('Capability to find. Empty lists all tools.'),
++    });
++    const detailsSchema = z.object({ name: z.string().min(1).describe('Exact tool name.') });
+     server.registerTool('search_tools', {
+         description: 'Search or page through available tools by capability. Returns names and descriptions without loading their schemas. Inspect a result before calling it.',
+-        inputSchema: z.object({
+-            limit: z.number().int().min(1).max(20).default(5).describe('Maximum matches.'),
+-            offset: z.number().int().min(0).default(0).describe('Matches to skip.'),
+-            query: z.string().default('').describe('Capability to find. Empty lists all tools.'),
+-        }),
++        inputSchema: deferredInputSchema(buildToolSchema(undefined, searchSchema)),
+         annotations: catalogAnnotations,
+-    }, async (params) => {
+-        const matches = searchTools(tools, params.query);
+-        const page = matches.slice(params.offset, params.offset + params.limit);
+-        return toolResult({
+-            tools: page.map((tool) => ({
+-                name: tool.name,
+-                ...(tool.description ? { description: tool.description } : undefined),
+-                ...(tool.annotations ? { annotations: tool.annotations } : undefined),
+-            })),
+-            ...(params.offset + page.length < matches.length
+-                ? { nextOffset: params.offset + page.length }
+-                : undefined),
+-        });
++    }, async (rawParams) => {
++        try {
++            const params = Parser.zodParse(searchSchema, rawParams);
++            const matches = searchTools(tools, params.query);
++            const page = matches.slice(params.offset, params.offset + params.limit);
++            return toolResult({
++                tools: page.map((tool) => ({
++                    name: tool.name,
++                    ...(tool.description ? { description: tool.description } : undefined),
++                    ...(tool.annotations ? { annotations: tool.annotations } : undefined),
++                })),
++                ...(params.offset + page.length < matches.length
++                    ? { nextOffset: params.offset + page.length }
++                    : undefined),
++            });
++        }
++        catch (error) {
++            return toolInputError(error);
++        }
+     });
+     server.registerTool('get_tool_details', {
+         description: 'Inspect one tool returned by search_tools. Returns its complete input schema and metadata.',
+-        inputSchema: z.object({ name: z.string().min(1).describe('Exact tool name.') }),
++        inputSchema: deferredInputSchema(buildToolSchema(undefined, detailsSchema)),
+         annotations: catalogAnnotations,
+-    }, async (params) => {
+-        const tool = byName.get(params.name);
+-        if (!tool)
+-            return toolError(`Unknown tool: ${params.name}`);
+-        return toolResult({
+-            name: tool.name,
+-            ...(tool.description ? { description: tool.description } : undefined),
+-            inputSchema: tool.inputSchema,
+-            ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : undefined),
+-            ...(tool.annotations ? { annotations: tool.annotations } : undefined),
+-            ...(tool.instructions ? { instructions: tool.instructions } : undefined),
+-        });
++    }, async (rawParams) => {
++        try {
++            const params = Parser.zodParse(detailsSchema, rawParams);
++            const tool = byName.get(params.name);
++            if (!tool)
++                return toolError(`Unknown tool: ${params.name}`);
++            return toolResult({
++                name: tool.name,
++                ...(tool.description ? { description: tool.description } : undefined),
++                inputSchema: tool.inputSchema,
++                ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : undefined),
++                ...(tool.annotations ? { annotations: tool.annotations } : undefined),
++                ...(tool.instructions ? { instructions: tool.instructions } : undefined),
++            });
++        }
++        catch (error) {
++            return toolInputError(error);
++        }
+     });
+     server.registerTool('call_read_tool', {
+         description: 'Execute a tool marked read-only after inspecting its schema with get_tool_details.',
+-        inputSchema: callSchema,
++        inputSchema: deferredInputSchema(buildToolSchema(undefined, callSchema)),
+         annotations: readAnnotations,
+-    }, async (params, extra) => {
+-        const tool = byName.get(params.name);
+-        if (!tool)
+-            return toolError(`Unknown tool: ${params.name}`);
+-        if (tool.annotations?.readOnlyHint !== true)
+-            return toolError(`Tool is not read-only: ${params.name}`);
+-        return callTool(tool, params.arguments, callOptions(options, extra));
++    }, async (rawParams, extra) => {
++        try {
++            const params = Parser.zodParse(callSchema, rawParams);
++            const tool = byName.get(params.name);
++            if (!tool)
++                return toolError(`Unknown tool: ${params.name}`);
++            if (tool.annotations?.readOnlyHint !== true)
++                return toolError(`Tool is not read-only: ${params.name}`);
++            return callTool(tool, params.arguments, callOptions(options, extra));
++        }
++        catch (error) {
++            return toolInputError(error);
++        }
+     });
+     server.registerTool('call_write_tool', {
+         description: 'Execute a writable or unclassified tool after inspecting its schema with get_tool_details.',
+-        inputSchema: callSchema,
++        inputSchema: deferredInputSchema(buildToolSchema(undefined, callSchema)),
+         annotations: writeAnnotations,
+-    }, async (params, extra) => {
+-        const tool = byName.get(params.name);
+-        if (!tool)
+-            return toolError(`Unknown tool: ${params.name}`);
+-        if (tool.annotations?.readOnlyHint === true)
+-            return toolError(`Tool is read-only: ${params.name}`);
+-        return callTool(tool, params.arguments, callOptions(options, extra));
++    }, async (rawParams, extra) => {
++        try {
++            const params = Parser.zodParse(callSchema, rawParams);
++            const tool = byName.get(params.name);
++            if (!tool)
++                return toolError(`Unknown tool: ${params.name}`);
++            if (tool.annotations?.readOnlyHint === true)
++                return toolError(`Tool is read-only: ${params.name}`);
++            return callTool(tool, params.arguments, callOptions(options, extra));
++        }
++        catch (error) {
++            return toolInputError(error);
++        }
+     });
+ }
+ const callSchema = z.object({
+@@ -280,6 +307,29 @@ function toolResult(value) {
+ function toolError(message) {
+     return { ...toolResult({ error: message }), isError: true };
+ }
++function toolInputError(error) {
++    return { ...toolResult(toErrorEnvelope(error)), isError: true };
++}
++function isToolInput(value) {
++    return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++function deferredInputSchema(schema) {
++    return {
++        '~standard': {
++            version: 1,
++            vendor: 'incur',
++            jsonSchema: {
++                input: () => schema,
++                output: () => schema,
++            },
++            validate(value) {
++                return isToolInput(value)
++                    ? { value }
++                    : { issues: [{ message: 'Expected an object.' }] };
++            },
++        },
++    };
++}
+ /** @internal Recursively collects leaf commands as tool entries. */
+ export function collectTools(commands, prefix, parentMiddlewares = [], filter) {
+     const tools = filterTools(collectToolEntries(commands, prefix, parentMiddlewares), filter);
+diff --git a/dist/Parser.d.ts b/dist/Parser.d.ts
+index ca608190f50ade7c31769dabdaf3e9c7dbc11e9d..88921179cbbeaceb1984f01e1931ed3cd395c53d 100644
+--- a/dist/Parser.d.ts
++++ b/dist/Parser.d.ts
+@@ -22,7 +22,7 @@ export declare namespace parse {
+     };
+ }
+ /** Wraps zod schema.parse(), converting ZodError to ValidationError. */
+-export declare function zodParse(schema: z.ZodObject<any>, data: Record<string, unknown>): Record<string, unknown>;
++export declare function zodParse<const schema extends z.ZodObject<any>>(schema: schema, data: Record<string, unknown>): z.output<schema>;
+ /** Parses environment variables against a Zod schema. Falls back to `process.env` → `Deno.env` when no source is provided. */
+ export declare function parseEnv<const env extends z.ZodObject<any>>(schema: env, source?: Record<string, string | undefined>): z.output<env>;
+ /** Parses known global options from argv, passing unknown flags and positionals through to `rest`. */
 diff --git a/dist/SyncSkills.d.ts b/dist/SyncSkills.d.ts
 index a870fe0dc17c9ac1f86d195904b3610eaeec21d5..0aa82558cd2294302eeafcd83c2f1c358b9d3872 100644
 --- a/dist/SyncSkills.d.ts
@@ -541,7 +897,7 @@ index b937e09010355752b83b37c76b3c697d52c9440c..63968927c39f8cb79f87b7097d14ae78
          };
          cta?: CtaBlock | undefined;
 diff --git a/dist/internal/command.js b/dist/internal/command.js
-index 7011ed74f3d71854e57ae8e024bcd4c2459b46ef..5472bfd679625dab99fa23ec38982c7defb59a60 100644
+index 7011ed74f3d71854e57ae8e024bcd4c2459b46ef..af45fdcb9c97291c5dcd718f3fa6b6db5356ea3e 100644
 --- a/dist/internal/command.js
 +++ b/dist/internal/command.js
 @@ -1,5 +1,5 @@
@@ -551,7 +907,24 @@ index 7011ed74f3d71854e57ae8e024bcd4c2459b46ef..5472bfd679625dab99fa23ec38982c7d
  import * as Parser from '../Parser.js';
  /** @internal Sentinel symbol for `ok()` and `error()` return values. */
  const sentinel = Symbol.for('incur.sentinel');
-@@ -168,22 +168,9 @@ export async function execute(command, options) {
+@@ -8,7 +8,7 @@ export async function execute(command, options) {
+     const { argv, inputOptions, agent, format, formatExplicit, name, path, version, envSource = process.env, env: envSchema, globals = {}, vars: varsSchema, middlewares = [], request, } = options;
+     const displayName = options.displayName ?? name;
+     const parseMode = options.parseMode ?? 'argv';
+-    const varsMap = varsSchema ? varsSchema.parse({}) : {};
++    let varsMap = {};
+     let result;
+     // For streaming with middleware: runCommand suspends on streamConsumed so middleware "after"
+     // runs after the stream is consumed. The wrapped generator resolves it in its finally block.
+@@ -116,6 +116,7 @@ export async function execute(command, options) {
+         result = { ok: true, data: awaited };
+     };
+     try {
++        varsMap = varsSchema ? varsSchema.parse({}) : {};
+         // Parse CLI-level env
+         const cliEnv = envSchema ? Parser.parseEnv(envSchema, envSource) : {};
+         if (middlewares.length > 0) {
+@@ -168,22 +169,9 @@ export async function execute(command, options) {
          }
      }
      catch (error) {
@@ -576,7 +949,7 @@ index 7011ed74f3d71854e57ae8e024bcd4c2459b46ef..5472bfd679625dab99fa23ec38982c7d
                  ? { exitCode: error.exitCode }
                  : undefined),
 diff --git a/src/Cli.test.ts b/src/Cli.test.ts
-index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825024c8583 100644
+index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc0667587db3aef1bec0d8731ec30289cff62ef4 100644
 --- a/src/Cli.test.ts
 +++ b/src/Cli.test.ts
 @@ -71,6 +71,23 @@ async function serve(
@@ -603,7 +976,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
  function mockMcpServeResponses(responses: unknown[]) {
    return vi.spyOn(Mcp, 'serve').mockImplementation(async (_name, _version, _commands, options) => {
      for (const response of responses)
-@@ -488,13 +505,16 @@ describe('config defaults', () => {
+@@ -488,13 +505,43 @@ describe('config defaults', () => {
    })
 
    test('fails when an explicit config file is missing', async () => {
@@ -619,10 +992,37 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
 +    expectSafeValidationEnvelope(output, 'arguments')
 +    expect(output).not.toContain(privateMarker)
 +    expect(output).not.toContain('/private/path')
++  })
++
++  test('TTY config validation renders the shared recovery hint', async () => {
++    const wasTTY = process.stdout.isTTY
++    Object.defineProperty(process.stdout, 'isTTY', {
++      configurable: true,
++      value: true,
++      writable: true,
++    })
++    try {
++      const { exitCode, output } = await serve(createConfigCli('config'), [
++        'echo',
++        '--config',
++        '/private/path/missing.json',
++      ])
++      expect(exitCode).toBe(1)
++      expect(output).toContain(
++        'Hint: Run the command with --help and correct its arguments or options.',
++      )
++      expect(output).not.toContain('/private/path')
++    } finally {
++      Object.defineProperty(process.stdout, 'isTTY', {
++        configurable: true,
++        value: wasTTY,
++        writable: true,
++      })
++    }
    })
 
    test('fails on invalid JSON config files', async () => {
-@@ -502,7 +522,7 @@ describe('config defaults', () => {
+@@ -502,7 +549,7 @@ describe('config defaults', () => {
 
      const { exitCode, output } = await serve(createConfigCli(), ['echo'])
      expect(exitCode).toBe(1)
@@ -631,7 +1031,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('fails when the config file top level is not an object', async () => {
-@@ -510,7 +530,7 @@ describe('config defaults', () => {
+@@ -510,7 +557,7 @@ describe('config defaults', () => {
 
      const { exitCode, output } = await serve(createConfigCli(), ['echo'])
      expect(exitCode).toBe(1)
@@ -640,7 +1040,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('fails when the selected config section is not an object', async () => {
-@@ -518,7 +538,7 @@ describe('config defaults', () => {
+@@ -518,7 +565,7 @@ describe('config defaults', () => {
 
      const { exitCode, output } = await serve(createConfigCli(), ['echo'])
      expect(exitCode).toBe(1)
@@ -649,7 +1049,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('fails validation when config option values are invalid', async () => {
-@@ -788,13 +808,13 @@ describe('config defaults', () => {
+@@ -788,13 +835,13 @@ describe('config defaults', () => {
    test('--config without a value produces an error', async () => {
      const { exitCode, output } = await serve(createConfigCli('config'), ['echo', '--config'])
      expect(exitCode).toBe(1)
@@ -665,7 +1065,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('--no-settings works with custom flag name', async () => {
-@@ -1176,10 +1196,10 @@ describe('serve', () => {
+@@ -1176,10 +1223,10 @@ describe('serve', () => {
      const { output, exitCode } = await serve(cli, ['greet'])
      ;(process.stdout as any).isTTY = false
      expect(exitCode).toBe(1)
@@ -678,7 +1078,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
      const cli = Cli.create('test')
      cli.command('send', {
        options: z.object({ address: z.string().min(32) }),
-@@ -1190,17 +1210,23 @@ describe('serve', () => {
+@@ -1190,17 +1237,23 @@ describe('serve', () => {
 
      const { output, exitCode } = await serve(cli, ['send', '--address', 'abc', '--format', 'json'])
      expect(exitCode).toBe(1)
@@ -707,7 +1107,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('ValidationError shows invalid option messages in TTY', async () => {
-@@ -1216,10 +1242,8 @@ describe('serve', () => {
+@@ -1216,10 +1269,8 @@ describe('serve', () => {
      const { output, exitCode } = await serve(cli, ['send', '--address', 'abc'])
      ;(process.stdout as any).isTTY = false
      expect(exitCode).toBe(1)
@@ -720,7 +1120,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('ValidationError shows missing required options in TTY', async () => {
-@@ -1235,7 +1259,7 @@ describe('serve', () => {
+@@ -1235,7 +1286,7 @@ describe('serve', () => {
      const { output, exitCode } = await serve(cli, ['send'])
      ;(process.stdout as any).isTTY = false
      expect(exitCode).toBe(1)
@@ -729,7 +1129,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('ValidationError shows invalid enum messages in TTY', async () => {
-@@ -1251,9 +1275,7 @@ describe('serve', () => {
+@@ -1251,9 +1302,7 @@ describe('serve', () => {
      const { output, exitCode } = await serve(cli, ['list', '--state', 'invalid'])
      ;(process.stdout as any).isTTY = false
      expect(exitCode).toBe(1)
@@ -740,7 +1140,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('ValidationError shows positional refinement messages in TTY', async () => {
-@@ -1271,7 +1293,8 @@ describe('serve', () => {
+@@ -1271,7 +1320,8 @@ describe('serve', () => {
      const { output, exitCode } = await serve(cli, ['get', 'abc'])
      ;(process.stdout as any).isTTY = false
      expect(exitCode).toBe(1)
@@ -750,7 +1150,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('agent is true when not TTY', async () => {
-@@ -2897,7 +2920,7 @@ describe('env', () => {
+@@ -2897,7 +2947,7 @@ describe('env', () => {
      const { output, exitCode } = await serve(cli, ['deploy'], { env: {} })
      ;(process.stdout as any).isTTY = false
      expect(exitCode).toBe(1)
@@ -759,7 +1159,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('env validation error for invalid var shows human message in TTY', async () => {
-@@ -2915,9 +2938,8 @@ describe('env', () => {
+@@ -2915,9 +2965,8 @@ describe('env', () => {
      const { output, exitCode } = await serve(cli, ['deploy'], { env: { API_TOKEN: 'short' } })
      ;(process.stdout as any).isTTY = false
      expect(exitCode).toBe(1)
@@ -771,7 +1171,31 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('env with defaults works when var is unset', async () => {
-@@ -5192,17 +5214,15 @@ describe('Command.execute', () => {
+@@ -4288,6 +4337,23 @@ describe('outputPolicy', () => {
+     expect(output).toContain('requestId: default-id')
+   })
+
++  test('e2e: invalid vars initialization stays an unexpected typed error', async () => {
++    let handlerCalls = 0
++    const cli = Cli.create('test', {
++      vars: z.object({ requestId: z.string() }),
++    }).command('check', {
++      run() {
++        handlerCalls++
++        return { ok: true }
++      },
++    })
++
++    const { output, exitCode } = await serve(cli, ['check', '--json'])
++    expect(exitCode).toBe(1)
++    expect(JSON.parse(output)).toMatchObject({ code: 'UNKNOWN' })
++    expect(handlerCalls).toBe(0)
++  })
++
+   test('e2e: middleware does not run for --help', async () => {
+     let middlewareRan = false
+     const cli = Cli.create('test')
+@@ -5192,17 +5258,15 @@ describe('Command.execute', () => {
        name: 'split',
        command: { options: z.object({ name: z.string() }), run: () => ({ ok: true }) },
        inputOptions: { name: 123 },
@@ -790,7 +1214,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
      const result = await Command.execute(c.command, {
        agent: true,
        argv: [],
-@@ -5215,15 +5235,21 @@ describe('Command.execute', () => {
+@@ -5215,15 +5279,21 @@ describe('Command.execute', () => {
        version: undefined,
      })
 
@@ -816,7 +1240,55 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
            },
          ],
        },
-@@ -5520,8 +5546,22 @@ describe('fetch', () => {
+@@ -5456,6 +5526,47 @@ describe('fetch', () => {
+     `)
+   })
+
++  test('malformed and non-object JSON bodies cannot execute an optional write command', async () => {
++    const privateMarker = 'private-http-body-marker'
++    let handlerCalls = 0
++    const cli = Cli.create('test', {
++      globals: z.object({ trace: z.boolean().optional() }),
++    })
++    cli.command('users', {
++      options: z.object({ name: z.string().optional() }),
++      run() {
++        handlerCalls++
++        return { created: true }
++      },
++    })
++
++    for (const bodyText of [`{"name":"${privateMarker}`, 'null']) {
++      const { status, body } = await fetchJson(
++        cli,
++        new Request('http://localhost/users', {
++          method: 'POST',
++          headers: { 'content-type': 'application/json' },
++          body: bodyText,
++        }),
++      )
++      expect(status).toBe(400)
++      expect(body).toMatchObject({
++        ok: false,
++        error: {
++          code: 'VALIDATION_ERROR',
++          message: 'The command input is invalid.',
++          retryable: false,
++          hint: 'Check the command schema and correct the invalid input.',
++          stage: 'validation',
++        },
++      })
++      expect(JSON.stringify(body)).not.toContain(privateMarker)
++      expect(JSON.stringify(body)).not.toContain('UNKNOWN')
++    }
++
++    expect(handlerCalls).toBe(0)
++  })
++
+   test('serializes bigint values in command responses', async () => {
+     const cli = Cli.create('test')
+     cli.command('whois', {
+@@ -5520,8 +5631,22 @@ describe('fetch', () => {
      const { status, body } = await fetchJson(cli, new Request('http://localhost/users'))
      expect(status).toBe(400)
      expect(body.ok).toBe(false)
@@ -841,7 +1313,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('validation error includes fieldErrors for body options', async () => {
-@@ -5540,9 +5580,21 @@ describe('fetch', () => {
+@@ -5540,9 +5665,21 @@ describe('fetch', () => {
      )
      expect(status).toBe(400)
      expect(body.ok).toBe(false)
@@ -865,7 +1337,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
      })
    })
 
-@@ -5567,11 +5619,17 @@ describe('fetch', () => {
+@@ -5567,11 +5704,17 @@ describe('fetch', () => {
        ok: false,
        error: {
          code: 'VALIDATION_ERROR',
@@ -886,7 +1358,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
            },
          ],
        },
-@@ -6796,7 +6854,7 @@ describe('globals', () => {
+@@ -6796,7 +6939,7 @@ describe('globals', () => {
 
      const { output, exitCode } = await serve(cli, ['--limit', 'not-a-number', 'ping'])
      expect(exitCode).toBe(1)
@@ -895,7 +1367,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('globals position is flexible', async () => {
-@@ -6891,7 +6949,7 @@ describe('globals', () => {
+@@ -6891,7 +7034,7 @@ describe('globals', () => {
 
      const { output, exitCode } = await serve(cli, ['--rpc-url'])
      expect(exitCode).toBe(1)
@@ -904,7 +1376,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
    })
 
    test('global alias collision with -h throws at create() time', () => {
-@@ -6925,7 +6983,7 @@ describe('globals', () => {
+@@ -6925,7 +7068,7 @@ describe('globals', () => {
 
      const { output, exitCode } = await serve(cli, ['--limit', 'abc', 'ping'])
      expect(exitCode).toBe(1)
@@ -913,7 +1385,26 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
      ;(process.stdout as any).isTTY = true
    })
 
-@@ -6984,9 +7042,28 @@ test('--token-limit with non-numeric value errors', async () => {
+@@ -6979,14 +7122,47 @@ test('--format rejects invalid format values', async () => {
+   expect(output).toMatch(/invalid|unsupported|unknown.*format/i)
+ })
+
++test.each(['--format', '--filter-output', '--token-limit', '--token-offset'])(
++  '%s without a value returns a validation envelope',
++  async (flag) => {
++    const cli = Cli.create('test').command('hello', {
++      run: (c) => c.ok({ message: 'hello world' }),
++    })
++
++    const { exitCode, output } = await serve(cli, ['hello', flag])
++    expect(exitCode).toBe(1)
++    expectSafeValidationEnvelope(output, 'arguments')
++    expect(output).not.toContain('COMMAND_NOT_FOUND')
++  },
++)
++
+ test('--token-limit with non-numeric value errors', async () => {
+   const cli = Cli.create('test').command('hello', {
      run: (c) => c.ok({ message: 'hello world' }),
    })
 
@@ -944,7 +1435,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..09e0a0740685e678046ad7f63ef4d825
 
  test('--token-offset with non-numeric value errors', async () => {
 diff --git a/src/Cli.ts b/src/Cli.ts
-index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4283465eb 100644
+index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..f2c217eaef553d54399e45af207eebfb54488f6f 100644
 --- a/src/Cli.ts
 +++ b/src/Cli.ts
 @@ -9,7 +9,7 @@ import { z } from 'zod'
@@ -965,15 +1456,14 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
            /** Glob patterns for directories containing SKILL.md files to include (e.g. `"skills/*"`, `"my-skill"`). */
            include?: string[] | undefined
            /** Example prompts shown after sync to help users get started. */
-@@ -773,6 +775,16 @@ async function serveImpl(
+@@ -773,6 +775,15 @@ async function serveImpl(
      stdout(s.endsWith('\n') ? s : `${s}\n`)
    }
 
 +  function writeSafeError(error: unknown, format?: Formatter.Format) {
 +    const envelope = toErrorEnvelope(error)
 +    if (tty && format === undefined) {
-+      const hint = envelope.hint ? `\n\nHint: ${envelope.hint}` : ''
-+      writeln(`${formatHumanError(envelope)}${hint}`)
++      writeln(formatHumanError(envelope))
 +      return
 +    }
 +    writeln(Formatter.format(envelope, format ?? 'toon'))
@@ -982,7 +1472,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
    async function writeBanner() {
      if (!options.banner || help) return
      const banner =
-@@ -791,9 +803,7 @@ async function serveImpl(
+@@ -791,9 +802,7 @@ async function serveImpl(
    try {
      builtinFlags = extractBuiltinFlags(argv, { configFlag })
    } catch (error) {
@@ -993,7 +1483,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
      exit(1)
      return
    }
-@@ -838,9 +848,7 @@ async function serveImpl(
+@@ -838,9 +847,7 @@ async function serveImpl(
        filtered = result.rest
        return true
      } catch (error) {
@@ -1004,7 +1494,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
        exit(1)
        return false
      }
-@@ -953,9 +961,9 @@ async function serveImpl(
+@@ -953,9 +960,9 @@ async function serveImpl(
      if (!isSkillsAdd && !isMcpAdd) {
        const stored = SyncSkills.readHash(name)
        if (stored && SyncSkills.hasInstalledSkills(name, { cwd: options.sync?.cwd })) {
@@ -1017,7 +1507,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
            const command =
              process.env.npm_config_user_agent || process.env.npm_execpath
                ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
-@@ -1075,10 +1083,7 @@ async function serveImpl(
+@@ -1075,10 +1082,7 @@ async function serveImpl(
        const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : ''
        const message = `'${skillsSub}' is not a command for '${name} skills'.${didYouMean}`
        const ctaCommands: FormattedCta[] = []
@@ -1029,7 +1519,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
        ctaCommands.push({
          command: `${name} skills --help`,
          description: 'see all available commands',
-@@ -1227,10 +1232,7 @@ async function serveImpl(
+@@ -1227,10 +1231,7 @@ async function serveImpl(
        const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : ''
        const message = `'${mcpSub}' is not a command for '${name} mcp'.${didYouMean}`
        const ctaCommands: FormattedCta[] = []
@@ -1041,7 +1531,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
        ctaCommands.push({ command: `${name} mcp --help`, description: 'see all available commands' })
        const cta: FormattedCtaBlock = {
          description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
-@@ -1675,10 +1677,7 @@ async function serveImpl(
+@@ -1675,10 +1676,7 @@ async function serveImpl(
      const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : ''
      const message = `'${effective.error}' is not a command for '${parent}'.${didYouMean}`
      const ctaCommands: FormattedCta[] = []
@@ -1053,7 +1543,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
      ctaCommands.push({ command: helpCmd, description: 'see all available commands' })
      const cta: FormattedCtaBlock = {
        description: ctaCommands.length === 1 ? 'Suggested command:' : 'Suggested commands:',
-@@ -1834,10 +1833,7 @@ async function serveImpl(
+@@ -1834,10 +1832,7 @@ async function serveImpl(
      } catch (error) {
        write({
          ok: false,
@@ -1065,7 +1555,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
          meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
        })
        exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
-@@ -1877,10 +1873,7 @@ async function serveImpl(
+@@ -1877,10 +1872,7 @@ async function serveImpl(
      } catch (error) {
        write({
          ok: false,
@@ -1077,7 +1567,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
          meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
        })
        exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
-@@ -1961,14 +1954,7 @@ async function serveImpl(
+@@ -1961,14 +1953,7 @@ async function serveImpl(
 
      write({
        ok: false,
@@ -1093,7 +1583,86 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
        meta: {
          command: path,
          duration,
-@@ -2340,14 +2326,12 @@ async function executeCommand(
+@@ -2231,17 +2216,6 @@ async function fetchImpl(
+     return new Response('Not Found', { status: 404 })
+   }
+
+-  // Parse options from search params (GET) or body (non-GET)
+-  let inputOptions: Record<string, unknown> = {}
+-  if (req.method === 'GET') for (const [key, value] of url.searchParams) inputOptions[key] = value
+-  else {
+-    try {
+-      const contentType = req.headers.get('content-type') ?? ''
+-      if (contentType.includes('application/json'))
+-        inputOptions = (await req.json()) as Record<string, unknown>
+-    } catch {}
+-  }
+-
+   function jsonResponse(body: unknown, status: number) {
+     return new Response(Json.stringify(body), {
+       status,
+@@ -2253,7 +2227,7 @@ async function fetchImpl(
+   if (segments.length === 0) {
+     // Root path
+     if (options.rootCommand)
+-      return executeCommand(name, options.rootCommand, [], inputOptions, req, start, options)
++      return executeCommand(name, options.rootCommand, [], req, start, options)
+     return jsonResponse(
+       {
+         ok: false,
+@@ -2300,7 +2274,7 @@ async function fetchImpl(
+
+   const { command, path, rest } = resolved
+   const groupMiddlewares = 'middlewares' in resolved ? resolved.middlewares : []
+-  return executeCommand(path, command, rest, inputOptions, req, start, {
++  return executeCommand(path, command, rest, req, start, {
+     ...options,
+     groupMiddlewares,
+   })
+@@ -2311,7 +2285,6 @@ async function executeCommand(
+   path: string,
+   command: CommandDefinition<any, any, any>,
+   rest: string[],
+-  inputOptions: Record<string, unknown>,
+   request: Request,
+   start: number,
+   options: fetchImpl.Options,
+@@ -2323,6 +2296,34 @@ async function executeCommand(
+     })
+   }
+
++  function invalidJsonInputResponse() {
++    return jsonResponse(
++      {
++        ok: false,
++        error: toErrorEnvelope(
++          new ValidationError({ message: 'Invalid JSON request body.' }),
++        ),
++        meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
++      },
++      400,
++    )
++  }
++
++  // Parse ordinary command input only after routing so fetch gateways retain the raw request body.
++  let inputOptions: Record<string, unknown> = {}
++  if (request.method === 'GET')
++    for (const [key, value] of new URL(request.url).searchParams) inputOptions[key] = value
++  else if ((request.headers.get('content-type') ?? '').includes('application/json')) {
++    let parsed: unknown
++    try {
++      parsed = await request.json()
++    } catch {
++      return invalidJsonInputResponse()
++    }
++    if (!isRecord(parsed)) return invalidJsonInputResponse()
++    inputOptions = parsed
++  }
++
+   const allMiddleware = [
+     ...(options.middlewares ?? []),
+     ...((options.groupMiddlewares as MiddlewareHandler[] | undefined) ?? []),
+@@ -2340,14 +2341,12 @@ async function executeCommand(
        else commandInputOptions[key] = value
      }
      try {
@@ -1111,7 +1680,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
            meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
          },
          400,
-@@ -2437,11 +2421,7 @@ async function executeCommand(
+@@ -2437,11 +2436,7 @@ async function executeCommand(
                Json.stringify({
                  type: 'error',
                  ok: false,
@@ -1124,7 +1693,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
                  meta: meta(),
                }) + '\n',
              ),
-@@ -2461,14 +2441,7 @@ async function executeCommand(
+@@ -2461,14 +2456,7 @@ async function executeCommand(
      return jsonResponse(
        {
          ok: false,
@@ -1140,7 +1709,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
          meta: {
            command: path,
            duration,
-@@ -2726,6 +2699,7 @@ declare namespace serveImpl {
+@@ -2726,6 +2714,7 @@ declare namespace serveImpl {
            body?: string | undefined
            cwd?: string | undefined
            depth?: number | undefined
@@ -1148,7 +1717,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
            include?: string[] | undefined
            suggestions?: string[] | undefined
          }
-@@ -2740,6 +2714,24 @@ declare namespace serveImpl {
+@@ -2740,6 +2729,24 @@ declare namespace serveImpl {
  /** @internal Extracts built-in flags from argv. */
  const validFormats = new Set(['toon', 'json', 'yaml', 'md', 'jsonl'] as const)
 
@@ -1173,7 +1742,66 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
  function extractBuiltinFlags(argv: string[], options: extractBuiltinFlags.Options = {}) {
    let fullOutput = false
    let llms = false
-@@ -3444,6 +3436,14 @@ export const toRootOptions = new WeakMap<Cli, z.ZodObject<any>>()
+@@ -2780,12 +2787,15 @@ function extractBuiltinFlags(argv: string[], options: extractBuiltinFlags.Option
+     else if (token === '--json') {
+       format = 'json'
+       formatExplicit = true
+-    } else if (token === '--format' && argv[i + 1]) {
+-      if (!validFormats.has(argv[i + 1]! as any))
++    } else if (token === '--format') {
++      const value = argv[i + 1]
++      if (value === undefined)
++        throw new ParseError({ message: 'Missing value for flag: --format' })
++      if (!validFormats.has(value as Formatter.Format))
+         throw new ParseError({
+-          message: `Invalid format: "${argv[i + 1]}". Expected one of: ${[...validFormats].join(', ')}`,
++          message: `Invalid format: "${value}". Expected one of: ${[...validFormats].join(', ')}`,
+         })
+-      format = argv[i + 1] as Formatter.Format
++      format = value as Formatter.Format
+       formatExplicit = true
+       i++
+     } else if (cfgFlag && token === cfgFlag) {
+@@ -2804,19 +2814,28 @@ function extractBuiltinFlags(argv: string[], options: extractBuiltinFlags.Option
+     } else if (noCfgFlag && token === noCfgFlag) {
+       configPath = undefined
+       configDisabled = true
+-    } else if (token === '--filter-output' && argv[i + 1]) {
+-      filterOutput = argv[i + 1]!
++    } else if (token === '--filter-output') {
++      const value = argv[i + 1]
++      if (value === undefined)
++        throw new ParseError({ message: 'Missing value for flag: --filter-output' })
++      filterOutput = value
+       i++
+-    } else if (token === '--token-limit' && argv[i + 1]) {
+-      const n = Number(argv[i + 1])
+-      if (!Number.isFinite(n) || argv[i + 1]!.trim() === '')
+-        throw new ParseError({ message: `Invalid value for --token-limit: "${argv[i + 1]}"` })
++    } else if (token === '--token-limit') {
++      const value = argv[i + 1]
++      if (value === undefined)
++        throw new ParseError({ message: 'Missing value for flag: --token-limit' })
++      const n = Number(value)
++      if (!Number.isFinite(n) || value.trim() === '')
++        throw new ParseError({ message: `Invalid value for --token-limit: "${value}"` })
+       tokenLimit = n
+       i++
+-    } else if (token === '--token-offset' && argv[i + 1]) {
+-      const n = Number(argv[i + 1])
+-      if (!Number.isFinite(n) || argv[i + 1]!.trim() === '')
+-        throw new ParseError({ message: `Invalid value for --token-offset: "${argv[i + 1]}"` })
++    } else if (token === '--token-offset') {
++      const value = argv[i + 1]
++      if (value === undefined)
++        throw new ParseError({ message: 'Missing value for flag: --token-offset' })
++      const n = Number(value)
++      if (!Number.isFinite(n) || value.trim() === '')
++        throw new ParseError({ message: `Invalid value for --token-offset: "${value}"` })
+       tokenOffset = n
+       i++
+     } else if (token === '--token-count') tokenCount = true
+@@ -3444,6 +3463,14 @@ export const toRootOptions = new WeakMap<Cli, z.ZodObject<any>>()
  /** @internal Maps CLI instances to whether config file loading is enabled. */
  export const toConfigEnabled = new WeakMap<Cli, boolean>()
 
@@ -1188,7 +1816,23 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
  /** @internal Maps CLI instances to their output policy. */
  const toOutputPolicy = new WeakMap<Cli, OutputPolicy>()
 
-@@ -3638,20 +3638,10 @@ async function handleStreaming(
+@@ -3491,6 +3518,7 @@ type CtaBlock<commands extends CommandsMap = Commands> = {
+ function formatHumanError(error: {
+   code: string
+   message: string
++  hint?: string | undefined
+   fieldErrors?: FieldError[] | undefined
+ }): string {
+   const prefix =
+@@ -3499,6 +3527,7 @@ function formatHumanError(error: {
+       : `Error (${error.code})`
+   let out = `${prefix}: ${error.message}`
+   if (error.fieldErrors) for (const fe of error.fieldErrors) out += `\n  ${fe.path}: ${fe.message}`
++  if (error.hint) out += `\n\nHint: ${error.hint}`
+   return out
+ }
+
+@@ -3638,20 +3667,10 @@ async function handleStreaming(
            JSON.stringify({
              type: 'error',
              ok: false,
@@ -1211,7 +1855,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
        ctx.exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
      }
    } else {
-@@ -3722,11 +3712,7 @@ async function handleStreaming(
+@@ -3722,11 +3741,7 @@ async function handleStreaming(
      } catch (error) {
        ctx.write({
          ok: false,
@@ -1224,7 +1868,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..45ba644baf24b2df03dfb3121f6a36e4
          meta: {
            command: ctx.path,
            duration: `${Math.round(performance.now() - ctx.start)}ms`,
-@@ -4056,10 +4042,14 @@ type Output = OneOf<
+@@ -4056,10 +4071,14 @@ type Output = OneOf<
          code: string
          /** Per-field validation errors. */
          fieldErrors?: FieldError[] | undefined
@@ -1503,19 +2147,47 @@ index 2f9b5b7ec400597c2d93e432fd720032772340a7..48b0bc92848cfa4a302e6fd218d5d9e1
 
  /** Returns true if the response body is a stream that should be consumed incrementally. */
 diff --git a/src/Mcp.test.ts b/src/Mcp.test.ts
-index 40a6308362959e0da509a033e15409ebb5caac61..aeabb4d5814e485244f252158b79a461647e151e 100644
+index 40a6308362959e0da509a033e15409ebb5caac61..4e8fe0a1d0e39337b7efaf9a203cbd4d03173e77 100644
 --- a/src/Mcp.test.ts
 +++ b/src/Mcp.test.ts
-@@ -486,7 +486,7 @@ describe('Mcp', () => {
+@@ -486,16 +486,79 @@ describe('Mcp', () => {
      expect(callRes.result.content).toEqual([{ type: 'text', text: '{"count":2}' }])
    })
 
 -  test('tools/call validation error includes fieldErrors', async () => {
-+  test('tools/call validation error includes safe field details', async () => {
-     const tool = Mcp.collectTools(createTestCommands(), []).find((tool) => tool.name === 'echo')!
-     const result = await Mcp.callTool(tool, { message: 123 })
-     expect(result.isError).toBe(true)
-@@ -494,7 +494,11 @@ describe('Mcp', () => {
+-    const tool = Mcp.collectTools(createTestCommands(), []).find((tool) => tool.name === 'echo')!
+-    const result = await Mcp.callTool(tool, { message: 123 })
+-    expect(result.isError).toBe(true)
+-    const [content] = result.content
++  test('direct tools/call validation reaches the safe envelope through the real transport', async () => {
++    const privateMarker = 'private-direct-validation-marker'
++    let handlerCalls = 0
++    const commands = new Map<string, any>()
++    commands.set('check', {
++      options: z.object({
++        value: z
++          .string()
++          .refine((value) => value !== privateMarker, `Do not echo ${privateMarker}`),
++      }),
++      run() {
++        handlerCalls++
++        return { ok: true }
++      },
++    })
++
++    const [, listRes, callRes] = await mcpSession(commands, [
++      { id: 1, method: 'initialize', params: initParams },
++      { id: 2, method: 'tools/list', params: {} },
++      {
++        id: 3,
++        method: 'tools/call',
++        params: { name: 'check', arguments: { value: privateMarker } },
++      },
++    ])
++
++    expect(listRes.result.tools[0].inputSchema.properties.value).toMatchObject({ type: 'string' })
++    expect(callRes.result.isError).toBe(true)
++    const [content] = callRes.result.content
      expect(content).toBeDefined()
      expect(JSON.parse(content!.text)).toMatchObject({
        code: 'VALIDATION_ERROR',
@@ -1525,14 +2197,57 @@ index 40a6308362959e0da509a033e15409ebb5caac61..aeabb4d5814e485244f252158b79a461
 +      hint: 'Check the command schema and correct the invalid input.',
 +      stage: 'validation',
 +      fieldErrors: [{ code: 'custom', path: 'input', received: 'invalid' }],
++    })
++    expect(handlerCalls).toBe(0)
++    expect(JSON.stringify(callRes)).not.toContain(privateMarker)
++    expect(JSON.stringify(callRes)).not.toContain('UNKNOWN')
++  })
++
++  test('progressive wrapper validation reaches the safe envelope through the real transport', async () => {
++    const privateMarker = 'private-progressive-validation-marker'
++    const [, callRes] = await mcpSession(
++      createTestCommands(),
++      [
++        { id: 1, method: 'initialize', params: initParams },
++        {
++          id: 2,
++          method: 'tools/call',
++          params: {
++            name: 'search_tools',
++            arguments: { limit: 0, query: privateMarker },
++          },
++        },
++      ],
++      { tools: { discovery: 'progressive' } },
++    )
++
++    expect(callRes.result.isError).toBe(true)
++    const [content] = callRes.result.content
++    expect(JSON.parse(content!.text)).toMatchObject({
++      code: 'VALIDATION_ERROR',
++      message: 'The command input is invalid.',
++      retryable: false,
++      hint: 'Check the command schema and correct the invalid input.',
++      stage: 'validation',
++      fieldErrors: [{ code: 'custom', path: 'input', received: 'invalid' }],
      })
++    expect(JSON.stringify(callRes)).not.toContain(privateMarker)
++    expect(JSON.stringify(callRes)).not.toContain('UNKNOWN')
    })
 
+   test('tools/call with nested group command', async () => {
 diff --git a/src/Mcp.ts b/src/Mcp.ts
-index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..32b25453406d1db1222275c5b9b75684217c7103 100644
+index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..643643be0e2c59a703018ad27537c772c90105ac 100644
 --- a/src/Mcp.ts
 +++ b/src/Mcp.ts
-@@ -3,6 +3,7 @@ import type { Readable, Writable } from 'node:stream'
+@@ -1,11 +1,17 @@
+-import type { McpServer, Transport } from '@modelcontextprotocol/server'
++import type {
++  McpServer,
++  StandardSchemaWithJSON,
++  Transport,
++} from '@modelcontextprotocol/server'
+ import type { Readable, Writable } from 'node:stream'
  import { z } from 'zod'
 
  import * as Command from './internal/command.js'
@@ -1540,7 +2255,11 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..32b25453406d1db1222275c5b9b75684
  import { formatCtaBlock, type FormattedCtaBlock, renderCtaText } from './internal/cta.js'
  import * as Json from './internal/json.js'
  import type { Handler as MiddlewareHandler } from './middleware.js'
-@@ -162,7 +163,7 @@ export async function callTool(
++import * as Parser from './Parser.js'
+ import * as Schema from './Schema.js'
+
+ /** Starts a stdio MCP server that exposes commands as tools. */
+@@ -162,7 +168,7 @@ export async function callTool(
        }
      } catch (err) {
        return {
@@ -1549,6 +2268,264 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..32b25453406d1db1222275c5b9b75684
          isError: true,
        }
      }
+@@ -286,24 +292,26 @@ function registerDirectTool(
+     ...tool.command.options?.shape,
+   }
+   const hasInput = Object.keys(mergedShape).length > 0
++  const config = {
++    ...(tool.description ? { description: tool.description } : undefined),
++    ...(tool.outputSchema
++      ? { outputSchema: options.fromJsonSchema(tool.outputSchema) }
++      : undefined),
++    ...(tool.annotations ? { annotations: tool.annotations } : undefined),
++    ...(tool.instructions ? { _meta: { instructions: tool.instructions } } : undefined),
++  }
+
+-  server.registerTool(
+-    tool.name,
+-    {
+-      ...(tool.description ? { description: tool.description } : undefined),
+-      ...(hasInput ? { inputSchema: z.object(mergedShape) } : undefined),
+-      ...(tool.outputSchema
+-        ? { outputSchema: options.fromJsonSchema(tool.outputSchema) }
+-        : undefined),
+-      ...(tool.annotations ? { annotations: tool.annotations } : undefined),
+-      ...(tool.instructions ? { _meta: { instructions: tool.instructions } } : undefined),
+-    },
+-    async (...callArgs: any[]) => {
+-      // registerTool passes (args, extra) when inputSchema is set, (extra) when not.
+-      const params = hasInput ? (callArgs[0] as Record<string, unknown>) : {}
+-      const extra = hasInput ? callArgs[1] : callArgs[0]
+-      return callTool(tool, params, callOptions(options, extra))
+-    },
++  if (hasInput) {
++    server.registerTool(
++      tool.name,
++      { ...config, inputSchema: deferredInputSchema(tool.inputSchema) },
++      async (params, extra) => callTool(tool, params, callOptions(options, extra)),
++    )
++    return
++  }
++
++  server.registerTool(tool.name, config, async (extra) =>
++    callTool(tool, {}, callOptions(options, extra)),
+   )
+ }
+
+@@ -313,32 +321,39 @@ function registerDiscoveryTools(
+   options: registerTools.Options,
+ ) {
+   const byName = new Map(tools.map((tool) => [tool.name, tool]))
++  const searchSchema = z.object({
++    limit: z.number().int().min(1).max(20).default(5).describe('Maximum matches.'),
++    offset: z.number().int().min(0).default(0).describe('Matches to skip.'),
++    query: z.string().default('').describe('Capability to find. Empty lists all tools.'),
++  })
++  const detailsSchema = z.object({ name: z.string().min(1).describe('Exact tool name.') })
+
+   server.registerTool(
+     'search_tools',
+     {
+       description:
+         'Search or page through available tools by capability. Returns names and descriptions without loading their schemas. Inspect a result before calling it.',
+-      inputSchema: z.object({
+-        limit: z.number().int().min(1).max(20).default(5).describe('Maximum matches.'),
+-        offset: z.number().int().min(0).default(0).describe('Matches to skip.'),
+-        query: z.string().default('').describe('Capability to find. Empty lists all tools.'),
+-      }),
++      inputSchema: deferredInputSchema(buildToolSchema(undefined, searchSchema)),
+       annotations: catalogAnnotations,
+     },
+-    async (params: { limit: number; offset: number; query: string }) => {
+-      const matches = searchTools(tools, params.query)
+-      const page = matches.slice(params.offset, params.offset + params.limit)
+-      return toolResult({
+-        tools: page.map((tool) => ({
+-          name: tool.name,
+-          ...(tool.description ? { description: tool.description } : undefined),
+-          ...(tool.annotations ? { annotations: tool.annotations } : undefined),
+-        })),
+-        ...(params.offset + page.length < matches.length
+-          ? { nextOffset: params.offset + page.length }
+-          : undefined),
+-      })
++    async (rawParams) => {
++      try {
++        const params = Parser.zodParse(searchSchema, rawParams)
++        const matches = searchTools(tools, params.query)
++        const page = matches.slice(params.offset, params.offset + params.limit)
++        return toolResult({
++          tools: page.map((tool) => ({
++            name: tool.name,
++            ...(tool.description ? { description: tool.description } : undefined),
++            ...(tool.annotations ? { annotations: tool.annotations } : undefined),
++          })),
++          ...(params.offset + page.length < matches.length
++            ? { nextOffset: params.offset + page.length }
++            : undefined),
++        })
++      } catch (error) {
++        return toolInputError(error)
++      }
+     },
+   )
+
+@@ -347,20 +362,25 @@ function registerDiscoveryTools(
+     {
+       description:
+         'Inspect one tool returned by search_tools. Returns its complete input schema and metadata.',
+-      inputSchema: z.object({ name: z.string().min(1).describe('Exact tool name.') }),
++      inputSchema: deferredInputSchema(buildToolSchema(undefined, detailsSchema)),
+       annotations: catalogAnnotations,
+     },
+-    async (params: { name: string }) => {
+-      const tool = byName.get(params.name)
+-      if (!tool) return toolError(`Unknown tool: ${params.name}`)
+-      return toolResult({
+-        name: tool.name,
+-        ...(tool.description ? { description: tool.description } : undefined),
+-        inputSchema: tool.inputSchema,
+-        ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : undefined),
+-        ...(tool.annotations ? { annotations: tool.annotations } : undefined),
+-        ...(tool.instructions ? { instructions: tool.instructions } : undefined),
+-      })
++    async (rawParams) => {
++      try {
++        const params = Parser.zodParse(detailsSchema, rawParams)
++        const tool = byName.get(params.name)
++        if (!tool) return toolError(`Unknown tool: ${params.name}`)
++        return toolResult({
++          name: tool.name,
++          ...(tool.description ? { description: tool.description } : undefined),
++          inputSchema: tool.inputSchema,
++          ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : undefined),
++          ...(tool.annotations ? { annotations: tool.annotations } : undefined),
++          ...(tool.instructions ? { instructions: tool.instructions } : undefined),
++        })
++      } catch (error) {
++        return toolInputError(error)
++      }
+     },
+   )
+
+@@ -369,15 +389,20 @@ function registerDiscoveryTools(
+     {
+       description:
+         'Execute a tool marked read-only after inspecting its schema with get_tool_details.',
+-      inputSchema: callSchema,
++      inputSchema: deferredInputSchema(buildToolSchema(undefined, callSchema)),
+       annotations: readAnnotations,
+     },
+-    async (params: CallParams, extra: any) => {
+-      const tool = byName.get(params.name)
+-      if (!tool) return toolError(`Unknown tool: ${params.name}`)
+-      if (tool.annotations?.readOnlyHint !== true)
+-        return toolError(`Tool is not read-only: ${params.name}`)
+-      return callTool(tool, params.arguments, callOptions(options, extra))
++    async (rawParams, extra) => {
++      try {
++        const params = Parser.zodParse(callSchema, rawParams)
++        const tool = byName.get(params.name)
++        if (!tool) return toolError(`Unknown tool: ${params.name}`)
++        if (tool.annotations?.readOnlyHint !== true)
++          return toolError(`Tool is not read-only: ${params.name}`)
++        return callTool(tool, params.arguments, callOptions(options, extra))
++      } catch (error) {
++        return toolInputError(error)
++      }
+     },
+   )
+
+@@ -386,24 +411,24 @@ function registerDiscoveryTools(
+     {
+       description:
+         'Execute a writable or unclassified tool after inspecting its schema with get_tool_details.',
+-      inputSchema: callSchema,
++      inputSchema: deferredInputSchema(buildToolSchema(undefined, callSchema)),
+       annotations: writeAnnotations,
+     },
+-    async (params: CallParams, extra: any) => {
+-      const tool = byName.get(params.name)
+-      if (!tool) return toolError(`Unknown tool: ${params.name}`)
+-      if (tool.annotations?.readOnlyHint === true)
+-        return toolError(`Tool is read-only: ${params.name}`)
+-      return callTool(tool, params.arguments, callOptions(options, extra))
++    async (rawParams, extra) => {
++      try {
++        const params = Parser.zodParse(callSchema, rawParams)
++        const tool = byName.get(params.name)
++        if (!tool) return toolError(`Unknown tool: ${params.name}`)
++        if (tool.annotations?.readOnlyHint === true)
++          return toolError(`Tool is read-only: ${params.name}`)
++        return callTool(tool, params.arguments, callOptions(options, extra))
++      } catch (error) {
++        return toolInputError(error)
++      }
+     },
+   )
+ }
+
+-type CallParams = {
+-  name: string
+-  arguments: Record<string, unknown>
+-}
+-
+ const callSchema = z.object({
+   name: z.string().min(1).describe('Exact tool name.'),
+   arguments: z.record(z.string(), z.unknown()).default({}).describe('Arguments from its schema.'),
+@@ -481,6 +506,36 @@ function toolError(message: string) {
+   return { ...toolResult({ error: message }), isError: true }
+ }
+
++function toolInputError(error: unknown) {
++  return { ...toolResult(toErrorEnvelope(error)), isError: true }
++}
++
++type ToolInput = Record<string, unknown>
++
++function isToolInput(value: unknown): value is ToolInput {
++  return typeof value === 'object' && value !== null && !Array.isArray(value)
++}
++
++function deferredInputSchema(
++  schema: ToolEntry['inputSchema'],
++): StandardSchemaWithJSON<ToolInput, ToolInput> {
++  return {
++    '~standard': {
++      version: 1,
++      vendor: 'incur',
++      jsonSchema: {
++        input: () => schema,
++        output: () => schema,
++      },
++      validate(value) {
++        return isToolInput(value)
++          ? { value }
++          : { issues: [{ message: 'Expected an object.' }] }
++      },
++    },
++  }
++}
++
+ /** @internal Recursively collects leaf commands as tool entries. */
+ export function collectTools(
+   commands: Map<string, any>,
+diff --git a/src/Parser.ts b/src/Parser.ts
+index 7f0966b703dfef00377025109cbf97d7ab4ff9c3..79989b5a35dd6b940c60530ea60228c5051222b9 100644
+--- a/src/Parser.ts
++++ b/src/Parser.ts
+@@ -262,7 +262,10 @@ function setOption(
+ }
+
+ /** Wraps zod schema.parse(), converting ZodError to ValidationError. */
+-export function zodParse(schema: z.ZodObject<any>, data: Record<string, unknown>) {
++export function zodParse<const schema extends z.ZodObject<any>>(
++  schema: schema,
++  data: Record<string, unknown>,
++): z.output<schema> {
+   try {
+     return schema.parse(data)
+   } catch (err: any) {
 diff --git a/src/SyncSkills.ts b/src/SyncSkills.ts
 index 138dee8673273e410e89bfca48fe6bfbb309c2ed..c8dbf295780609a50c2016480a210741ada33ed4 100644
 --- a/src/SyncSkills.ts
@@ -1671,7 +2648,7 @@ index 86d4c2dd470cd1a9e936e5f4e969117f890af611..04ca8f46bc4e05ed47f85ac92433ce0c
 
    test('command not found returns error envelope', async () => {
 diff --git a/src/internal/command.ts b/src/internal/command.ts
-index 01f2c4a12c2a93a3bdbb39b1405327fd033bc840..3605c3fe740b94f6ec20afb4bc8ad24c331693a2 100644
+index 01f2c4a12c2a93a3bdbb39b1405327fd033bc840..fa32c7807827a3607e69242d9455dfb6434a82c4 100644
 --- a/src/internal/command.ts
 +++ b/src/internal/command.ts
 @@ -1,7 +1,7 @@
@@ -1683,7 +2660,25 @@ index 01f2c4a12c2a93a3bdbb39b1405327fd033bc840..3605c3fe740b94f6ec20afb4bc8ad24c
  import type { Context as MiddlewareContext, Handler as MiddlewareHandler } from '../middleware.js'
  import * as Parser from '../Parser.js'
 
-@@ -233,22 +233,9 @@ export async function execute(command: any, options: execute.Options): Promise<e
+@@ -52,7 +52,7 @@ export async function execute(command: any, options: execute.Options): Promise<e
+   const displayName = options.displayName ?? name
+   const parseMode = options.parseMode ?? 'argv'
+
+-  const varsMap: Record<string, unknown> = varsSchema ? varsSchema.parse({}) : {}
++  let varsMap: Record<string, unknown> = {}
+   let result: execute.Result | undefined
+   // For streaming with middleware: runCommand suspends on streamConsumed so middleware "after"
+   // runs after the stream is consumed. The wrapped generator resolves it in its finally block.
+@@ -172,6 +172,8 @@ export async function execute(command: any, options: execute.Options): Promise<e
+   }
+
+   try {
++    varsMap = varsSchema ? varsSchema.parse({}) : {}
++
+     // Parse CLI-level env
+     const cliEnv = envSchema ? Parser.parseEnv(envSchema, envSource) : {}
+
+@@ -233,22 +235,9 @@ export async function execute(command: any, options: execute.Options): Promise<e
        await runCommand()
      }
    } catch (error) {
@@ -1707,7 +2702,7 @@ index 01f2c4a12c2a93a3bdbb39b1405327fd033bc840..3605c3fe740b94f6ec20afb4bc8ad24c
        ...(error instanceof IncurError && error.exitCode !== undefined
          ? { exitCode: error.exitCode }
          : undefined),
-@@ -323,8 +310,10 @@ export declare namespace execute {
+@@ -323,8 +312,10 @@ export declare namespace execute {
          ok: false
          error: {
            code: string

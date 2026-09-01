@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { PassThrough } from 'node:stream'
 import { Cli, Errors, Mcp, z } from 'incur'
 import { EVENT_KINDS } from '@murphai/contracts'
 import { initializeVault } from '@murphai/core'
@@ -616,7 +617,32 @@ test('early validation failures honor explicit JSON and retain the human recover
     /Hint: Run the command with --help and correct its arguments or options\./u,
   )
 
-  for (const output of [builtinJson.output, globalsJson.output, human.output]) {
+  const humanInput = await runHumanCli(cli, ['ping', '--limit', privateMarker])
+  assert.equal(humanInput.exitCode, 1)
+  assert.match(humanInput.output, /Error \(VALIDATION_ERROR\): The command input is invalid\./u)
+  assert.match(
+    humanInput.output,
+    /Hint: Check the command schema and correct the invalid input\./u,
+  )
+
+  for (const flag of ['--format', '--filter-output', '--token-limit', '--token-offset']) {
+    const missingValue = await runHumanCli(cli, ['ping', flag])
+    assert.equal(missingValue.exitCode, 1, flag)
+    assert.match(missingValue.output, /Error \(VALIDATION_ERROR\)/u, flag)
+    assert.match(
+      missingValue.output,
+      /Hint: Run the command with --help and correct its arguments or options\./u,
+      flag,
+    )
+    assert.equal(missingValue.output.includes('COMMAND_NOT_FOUND'), false, flag)
+  }
+
+  for (const output of [
+    builtinJson.output,
+    globalsJson.output,
+    human.output,
+    humanInput.output,
+  ]) {
     assert.equal(output.includes(privateMarker), false)
     assert.equal(output.includes('UNKNOWN'), false)
   }
@@ -666,6 +692,159 @@ test('native command and HTTP validation errors use safe envelopes', async () =>
   assertSafeInputValidationEnvelope(fetchEnvelope)
   assert.equal(JSON.stringify(fetchEnvelope).includes(privateMarker), false)
   assert.equal(fetchCalls, 0)
+
+  let bodyCalls = 0
+  const bodyCli = Cli.create('http-body-validation-smoke', {
+    globals: z.object({ trace: z.boolean().optional() }),
+  }).command('check', {
+    options: z.object({ value: z.string().optional() }),
+    run() {
+      bodyCalls += 1
+      return { ok: true }
+    },
+  })
+
+  for (const bodyText of [`{"value":"${privateMarker}`, 'null']) {
+    const bodyResponse = await bodyCli.fetch(
+      new Request('http://localhost/check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: bodyText,
+      }),
+    )
+    const bodyEnvelope = (await bodyResponse.json()) as CliEnvelope<unknown>
+    assert.equal(bodyResponse.status, 400)
+    assertSafeInputValidationEnvelope(bodyEnvelope)
+    const serialized = JSON.stringify(bodyEnvelope)
+    assert.equal(serialized.includes(privateMarker), false)
+    assert.equal(serialized.includes('UNKNOWN'), false)
+    assert.equal(serialized.includes('TypeError'), false)
+  }
+  assert.equal(bodyCalls, 0)
+
+  let forwardedBody = ''
+  const gatewayCli = Cli.create('http-gateway-body-smoke').command('api', {
+    async fetch(request) {
+      forwardedBody = await request.text()
+      return Response.json({ ok: true })
+    },
+  })
+  const gatewayResponse = await gatewayCli.fetch(
+    new Request('http://localhost/api/write', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ value: privateMarker }),
+    }),
+  )
+  assert.equal(gatewayResponse.status, 200)
+  assert.equal(forwardedBody, JSON.stringify({ value: privateMarker }))
+})
+
+test('real MCP transports defer validation to the safe Incur envelope', async () => {
+  const privateMarker = 'PrivateMcpTransportMarker'
+  let handlerCalls = 0
+  const commands = new Map([
+    [
+      'check',
+      {
+        options: z.object({
+          value: z.string().refine(() => false, {
+            message: `Invalid submitted value: ${privateMarker}`,
+          }),
+        }),
+        run() {
+          handlerCalls += 1
+          return { ok: true }
+        },
+      },
+    ],
+  ])
+  const initializeParams = {
+    protocolVersion: '2024-11-05',
+    capabilities: {},
+    clientInfo: { name: 'transport-smoke', version: '1.0.0' },
+  }
+
+  async function runSession(
+    discovery: 'direct' | 'progressive',
+    messages: Array<{ id: number; method: string; params: unknown }>,
+  ) {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    let outputText = ''
+    output.on('data', (chunk) => {
+      outputText += chunk.toString()
+    })
+
+    const done = Mcp.serve('transport-smoke', '1.0.0', commands, {
+      input,
+      output,
+      tools: { discovery },
+    })
+    for (const message of messages)
+      input.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
+
+    const deadline = Date.now() + 2_000
+    while (outputText.trim().split('\n').filter(Boolean).length < messages.length) {
+      if (Date.now() > deadline) throw new Error('Timed out waiting for MCP transport responses.')
+      await new Promise<void>((resolve) => setTimeout(resolve, 5))
+    }
+    input.end()
+    await done
+    return outputText.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  }
+
+  const directResponses = await runSession('direct', [
+    { id: 1, method: 'initialize', params: initializeParams },
+    { id: 2, method: 'tools/list', params: {} },
+    {
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'check', arguments: { value: privateMarker } },
+    },
+  ])
+  assert.equal(
+    directResponses[1]?.result?.tools?.[0]?.inputSchema?.properties?.value?.type,
+    'string',
+  )
+
+  const progressiveResponses = await runSession('progressive', [
+    { id: 1, method: 'initialize', params: initializeParams },
+    {
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'search_tools',
+        arguments: { limit: 0, query: privateMarker },
+      },
+    },
+  ])
+
+  for (const response of [directResponses[2], progressiveResponses[1]]) {
+    assert.equal(response?.result?.isError, true)
+    const content = response?.result?.content?.[0]
+    assert.equal(content?.type, 'text')
+    assert.deepEqual(JSON.parse(content?.text ?? '{}'), {
+      code: 'VALIDATION_ERROR',
+      message: 'The command input is invalid.',
+      retryable: false,
+      hint: 'Check the command schema and correct the invalid input.',
+      stage: 'validation',
+      fieldErrors: [
+        {
+          code: 'custom',
+          path: 'input',
+          expected: '',
+          received: 'invalid',
+          message: 'This field is invalid.',
+        },
+      ],
+    })
+    const serialized = JSON.stringify(response)
+    assert.equal(serialized.includes(privateMarker), false)
+    assert.equal(serialized.includes('UNKNOWN'), false)
+  }
+  assert.equal(handlerCalls, 0)
 })
 
 test('MCP streaming parse failures use the safe validation envelope', async () => {
@@ -778,6 +957,29 @@ test('unexpected Incur command exceptions remain UNKNOWN', async () => {
     assert.equal(envelope.error.code, 'UNKNOWN')
     assert.equal(envelope.error.message, 'Synthetic unexpected failure.')
   }
+
+  let varsHandlerCalls = 0
+  const varsCli = Cli.create('unexpected-vars-error', {
+    vars: z.object({ requestId: z.string() }),
+  }).command('check', {
+    run() {
+      varsHandlerCalls += 1
+      return { ok: true }
+    },
+  })
+  const varsResult = await runHumanCli(varsCli, [
+    'check',
+    '--format',
+    'json',
+    '--full-output',
+  ])
+  assert.equal(varsResult.exitCode, 1)
+  const varsEnvelope = JSON.parse(varsResult.output) as CliEnvelope<unknown>
+  assert.equal(varsEnvelope.ok, false)
+  if (!varsEnvelope.ok) {
+    assert.equal(varsEnvelope.error.code, 'UNKNOWN')
+  }
+  assert.equal(varsHandlerCalls, 0)
 })
 
 test('built duplicate-vault failures emit one safe machine document in every mode', async () => {

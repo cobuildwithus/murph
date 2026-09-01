@@ -208,7 +208,7 @@ Updated: 2026-08-31
   of the release-age exception list. `pnpm why incur -r --depth 1` confirms
   exactly those three versions and owners.
 - 2026-08-31: Canonical patch SHA-256 is
-  `06906ed750ec6aaf4f9771b5ca3c211a3f0a1d3496ea0c392752c9ffc8b1810a`.
+  `b1daf247232c2b2abb2dc0140f668fa1f986445c5941d8461f0404d361e9a3e5`.
   Source and emitted runtime now project native parse/outer validation failures
   to fixed non-echoing `VALIDATION_ERROR` envelopes across CLI, fetch, HTTP,
   MCP streaming, and internal execution. Early built-in/global failures share
@@ -219,19 +219,19 @@ Updated: 2026-08-31
   parse/validation fix.
 - 2026-08-31: The generator resolves Incur's declared package-relative
   `bin.incur` target. Two final post-install generation passes were byte-stable:
-  config schema `6e8ccec6bbc5792d9bd131c9454e76c77bd67220dfb60d8f4635414e5bce6ec8`,
+  config schema `40e69691a36bcdd408f35e5de28a60672a6d916d491076aaabc0dbc5c2721cc5`,
   generated types `face5be567a855f3d5f7d902d0c1a984571133157d3de2b2190e9981e66334ef`,
   and canonical skill hash module
-  `342482be8bd6835fcc8655354187b1914b83208c192194e48dc4b8d816731766`.
-- 2026-08-31: Final dependency proof: forced frozen install passed for 2,070
-  packages; dependency policy and ignored-build checks passed. The workspace
-  advisory command remains red with 79 current advisories (1 critical, 34
-  high, 38 moderate, 6 low); machine-readable inspection found zero advisory
+  `f4652f05c8c6ba2e8c0174d7818cb272b8e9b2518c79f6ebe0f970c5f5157cab`.
+- 2026-08-31: Final dependency proof: the frozen install passed with the exact
+  lockfile; dependency policy and ignored-build checks passed. The workspace
+  advisory command remains red with 80 current advisories (1 critical, 34
+  high, 39 moderate, 6 low); machine-readable inspection found zero advisory
   paths referencing Incur, the new MCP server, or Scalar dependency. The only
   matching CLI-consumer path is unchanged `sharp`.
 - 2026-08-31: Final deterministic proof passed: focused Incur/config suite
-  80/80; explicit config/skill identity checks 3/3; complete `pnpm verify:cli`
-  424/424 across 21 files; setup bridge 1/1; runner bundle 17/17; focused
+  83/83; complete `pnpm verify:cli` 427/427 across 21 files; setup bridge 1/1;
+  runner bundle 17/17; focused
   release guards 2/2; CLI package shape; CLI, setup CLI,
   assistant CLI, assistant engine, and Cloudflare typechecks; CLI, setup CLI,
   assistant CLI, and Cloudflare builds; docs drift and gardening; and
@@ -281,3 +281,20 @@ Updated: 2026-08-31
   disabled. Removing only `packages/cli/typecheck.tsbuildinfo` and rerunning the
   ordinary package command also passed, confirming no tracked source or graph
   correction was required.
+- 2026-08-31: A fresh parent review found five production error-boundary gaps:
+  MCP SDK pre-validation could expose schema refinement text; malformed HTTP
+  JSON could be swallowed before an optional write; vars validation occurred
+  outside the typed error boundary; later TTY validation dropped its recovery
+  hint; and four root built-ins without values fell through to
+  `COMMAND_NOT_FOUND`. All five were accepted and fixed at their existing
+  parser/transport owners. Real direct and progressive MCP sessions, malformed
+  and null HTTP bodies with zero handler calls, fetch-gateway raw-body
+  preservation, vars failures, TTY hints, and all four missing-value flags now
+  have focused regressions.
+- 2026-08-31: The patched upstream source is independently typechecked. That
+  gate caught `Parser.zodParse` erasing concrete schema output types at the new
+  deferred MCP boundary; its generic declaration now preserves `z.output` with
+  no runtime JavaScript change. The source check, installed dist syntax checks,
+  source/dist parity review, frozen reinstall, patch-hash check, lockfile churn
+  check, clean CLI checker, assistant-engine and Cloudflare checkers, complexity
+  guard, and `git diff --check` all pass.
