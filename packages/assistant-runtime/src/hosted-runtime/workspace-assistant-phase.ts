@@ -4934,6 +4934,16 @@ async function resolveHostedDefaultProcessingWakeState(input: {
   readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
 }): Promise<HostedAssistantCronWakeState> {
   const nowMs = resolveHostedAssistantPhaseNowMs(input.phaseInput);
+  const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    now: () => new Date(nowMs).toISOString(),
+    vaultRoot: input.phaseInput.restored.vaultRoot,
+  });
+  if (
+    systemMailboxWake.executionClass === "default_owned"
+    && hostedRuntimeWakeCandidateIsDue(systemMailboxWake, nowMs)
+  ) {
+    return createUnavailableHostedAssistantCronWakeState();
+  }
   const providerCleanupWake = createHostedRuntimeWakeCandidate(
     await resolveHostedProviderCleanupScheduledWakeAt({
       nowMs,
@@ -4949,18 +4959,6 @@ async function resolveHostedDefaultProcessingWakeState(input: {
     };
   }
   return await input.readAssistantCronWakeState();
-}
-
-async function hasDueDefaultOwnedSystemMailboxWake(
-  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
-): Promise<boolean> {
-  const nowMs = resolveHostedAssistantPhaseNowMs(phaseInput);
-  const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
-    now: () => new Date(nowMs).toISOString(),
-    vaultRoot: phaseInput.restored.vaultRoot,
-  });
-  return systemMailboxWake.executionClass === "default_owned"
-    && hostedRuntimeWakeCandidateIsDue(systemMailboxWake, nowMs);
 }
 
 async function resolveDueModelFreeSystemMailboxOwnerSelection(
@@ -6003,26 +6001,22 @@ async function runSystemMailboxMaintenancePhase(input: {
     && !hasBackgroundSelection
     && shouldPreflightHostedDefaultProcessingWake(phaseInput)
   ) {
-    const dueDefaultOwnedSystemMailboxWake =
-      await hasDueDefaultOwnedSystemMailboxWake(phaseInput);
-    if (!dueDefaultOwnedSystemMailboxWake) {
-      const defaultProcessingWakeState =
-        await resolveHostedDefaultProcessingWakeState({
-          phaseInput,
-          readAssistantCronWakeState,
-        });
-      if (defaultProcessingWakeState.dueNow) {
-        return {
-          backgroundMaintenanceYielded: false,
-          continueAssistantLane: true,
-          deviceSyncMaintenanceRan: false,
-          initialProviderCleanupCheckpoint,
-          pendingAssistantInputWakeAt: null,
-          result: null,
-        };
-      }
-      staleDefaultProjectionDisproved = defaultProcessingWakeState.available;
+    const defaultProcessingWakeState =
+      await resolveHostedDefaultProcessingWakeState({
+        phaseInput,
+        readAssistantCronWakeState,
+      });
+    if (defaultProcessingWakeState.dueNow) {
+      return {
+        backgroundMaintenanceYielded: false,
+        continueAssistantLane: true,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt: null,
+        result: null,
+      };
     }
+    staleDefaultProjectionDisproved = defaultProcessingWakeState.available;
   }
 
   let deferSystemMailboxPreparationForDelivery = false;
