@@ -33,6 +33,9 @@ raw application IDs, image references, account identifiers, tokens, and provider
 errors out of the receipt. Exact-name application discovery uses the provider
 list only to resolve one application identifier; both the pre-deploy and
 post-deploy receipt snapshots come from that application's detail endpoint.
+After Wrangler reports a successful container change, the deploy helper waits
+up to two minutes for those detail snapshots to expose the exact transition;
+the bounded poll fails closed instead of issuing a stale receipt.
 The provider application version is a final-state snapshot, not a deploy
 counter; an `updated` entry requires the existing provider application identity
 to remain continuous and the detail snapshot's version or image to change. A

@@ -15,12 +15,12 @@ import {
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import {
-  buildContainerReleaseEntries,
   createCloudflareContainerApplicationLister,
   parseWranglerContainerActions,
   parseWranglerWorkerVersionId,
   readCloudflareContainerApplicationIdentities,
   readRenderedContainerIdentities,
+  waitForCloudflareContainerReleaseEntries,
 } from "./container-release-receipt.js";
 import {
   buildHostedLifecycleWranglerArgs,
@@ -89,13 +89,13 @@ export async function runDeployWorkerVersionCli(
           `${deployOutput.stdout}\n${deployOutput.stderr}`,
           renderedContainers,
         );
-        const after = await readCloudflareContainerApplicationIdentities(
-          renderedContainers,
-          listApplications,
-          "after",
-        );
         return {
-          containers: buildContainerReleaseEntries({ actions, after, before }),
+          containers: await waitForCloudflareContainerReleaseEntries({
+            actions,
+            before,
+            expectedContainers: renderedContainers,
+            listApplications,
+          }),
           workerVersionId: parseWranglerWorkerVersionId(
             `${deployOutput.stdout}\n${deployOutput.stderr}`,
           ),
