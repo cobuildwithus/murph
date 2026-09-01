@@ -808,7 +808,7 @@ export function registerWearablesCommands(
       },
     ],
     hint:
-      'Use `wearables day` as the first read for date-specific wearable questions. Use the list subcommands for longer windows and provider/source freshness checks.',
+      'Use `wearables day` as the first read for date-specific wearable questions except workout count, duration, activity types, or workout feature/split detail; use `wearables activity list` for those. Use the other list subcommands for longer windows and provider/source freshness checks.',
     output: wearablesDayResultSchema,
     async run({ args, options }) {
       const result = await services.query.showWearableDay({
@@ -980,7 +980,14 @@ export function registerWearablesCommands(
     description:
       'List semantic daily activity summaries instead of raw activity-session and sample rows.',
     args: emptyArgsSchema,
-    options: withWearableListOptions(),
+    options: withWearableListOptions().extend({
+      includeWorkoutDetails: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). For count, duration, or activity-type questions, omit this option entirely; do not pass true or false. Pass it truthy only for explicit workout-level heart rate, cadence, power, speed, or split questions.',
+        ),
+    }),
     output: wearablesActivityListResultSchema,
     async run({ options }) {
       assertWearableDateRangeOrdered(options)
@@ -992,6 +999,7 @@ export function registerWearablesCommands(
         to: options.to,
         providers: normalizeWearableProviders(options.provider),
         limit: options.limit,
+        includeWorkoutDetails: options.includeWorkoutDetails,
       })
 
       return wearablesActivityListResultSchema.parse(withoutWearableVaultPath(result))

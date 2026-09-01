@@ -307,7 +307,7 @@ declare module 'incur' {
       'vitals payload-schema': { args: {}; options: {} }
       'vitals save': { args: {}; options: { requestId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; systolic?: number; diastolic?: number; heartRate?: number; respiratoryRate?: number; temperatureF?: number; temperatureC?: number; spo2?: number; weightLb?: number; heightIn?: number } }
       'vitals scaffold': { args: {}; options: { requestId?: string } }
-      'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
+      'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number; includeWorkoutDetails: boolean } }
       'wearables body list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables day': { args: { date: string }; options: { requestId?: string; provider?: string[] } }
       'wearables drift': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }

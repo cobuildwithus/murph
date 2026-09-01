@@ -28,17 +28,24 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
   `vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json`.
   Do not run `wearables day` first; basal calories are query-only and absent
   from that summary.
-- For date-specific facts, first run
-  `vault-cli wearables day <date> --format json`; for all workouts, types,
-  count, duration, or normalized detail, next run
-  `vault-cli wearables activity list --date <date> --format json`. Its canonical
-  workout-day rollup owns the answer. When available, `workoutFeatures`
-  associates bounded heart-rate, cadence, power, speed, and split details with
-  each workout by provider and start time. Use that association for multiple
-  workouts on the same date; do not stop at one selected activity or rebuild
-  the rollup from provider records. Power fields ending in `Watts` are watts,
-  and speed fields ending in `Mps` are meters per second; include those units
-  when answering.
+- For workout count, total duration, activity types, or other high-level daily
+  activity facts, go directly to
+  `vault-cli wearables activity list --date <date> --format json`; this compact
+  routine result intentionally omits heavyweight workout feature/split detail.
+  Do not run `wearables day` first for those workout-summary questions. Count,
+  duration, and activity-type questions must omit
+  `--include-workout-details` entirely; do not pass it as true or false. Pass
+  it truthy only when the user explicitly asks for workout-level heart rate,
+  cadence, power, speed, or retained splits:
+  `vault-cli wearables activity list --date <date> --include-workout-details --format json`.
+  Its canonical workout-day rollup owns the answer, and
+  `workoutFeatures` associates the bounded detail with each workout by provider
+  and start time. Use that association for multiple workouts on the same date;
+  do not stop at one selected activity or rebuild the rollup from provider
+  records. Power fields ending in `Watts` are watts, and speed fields ending in
+  `Mps` are meters per second; include those units when answering.
+- For other date-specific wearable facts, first run
+  `vault-cli wearables day <date> --format json`.
 - When the day or activity summary omits the specific signal the user asked
   about, use the lossless global observation read
   `vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`.
