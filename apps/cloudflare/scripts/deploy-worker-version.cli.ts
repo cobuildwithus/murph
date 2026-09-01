@@ -15,7 +15,7 @@ import {
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import {
-  createCloudflareContainerApplicationLister,
+  createCloudflareContainerProvider,
   parseWranglerContainerActions,
   parseWranglerWorkerVersionId,
   readCloudflareContainerApplicationIdentities,
@@ -63,14 +63,15 @@ export async function runDeployWorkerVersionCli(
           source: env,
         });
         const renderedContainers = await readRenderedContainerIdentities(input.configPath);
-        const listApplications = createCloudflareContainerApplicationLister({
+        const containerProvider = createCloudflareContainerProvider({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),
         });
         const before = await readCloudflareContainerApplicationIdentities(
           renderedContainers,
-          listApplications,
+          containerProvider.listApplications,
           "before",
+          containerProvider.readRollout,
         );
         const deployOutput = await runWranglerLoggedCaptured([
           "deploy",
@@ -94,7 +95,8 @@ export async function runDeployWorkerVersionCli(
             actions,
             before,
             expectedContainers: renderedContainers,
-            listApplications,
+            listApplications: containerProvider.listApplications,
+            readRollout: containerProvider.readRollout,
           }),
           workerVersionId: parseWranglerWorkerVersionId(
             `${deployOutput.stdout}\n${deployOutput.stderr}`,
