@@ -996,10 +996,7 @@ function buildPatternCell(
 ): PersonalPatternCell {
   const factorDates = accumulator?.dates ?? new Set<string>();
   const confirmedAbsentDates = accumulator?.absentDates ?? new Set<string>();
-  const comparisonBasis =
-    confirmedAbsentDates.size > 0
-      ? ("confirmed_absence" as const)
-      : ("unobserved_baseline" as const);
+  const comparisonBasis = comparisonBasisForDates(confirmedAbsentDates);
   const pairs = matchComparisonDays(
     factorDates,
     accumulator?.episodeDates ?? new Map(),
@@ -1013,19 +1010,14 @@ function buildPatternCell(
   const comparisonDates = [
     ...new Set(pairs.flatMap((pair) => pair.comparisonDates)),
   ].sort();
-  const base = {
-    classification: null,
+  const base = buildPatternCellBase({
     comparisonBasis,
     comparisonDates,
-    comparisonDays: pairs.length,
-    exposedDays: pairs.length,
     exposedDates,
     factorId: factor.id,
-    firstExposedDate: exposedDates[0] ?? null,
-    grade: null,
-    lastExposedDate: exposedDates.at(-1) ?? null,
     outcomeId: outcome.id,
-  };
+    pairCount: pairs.length,
+  });
 
   if (pairs.length === 0 || !base.firstExposedDate || !base.lastExposedDate) {
     return {
@@ -1050,48 +1042,22 @@ function buildPatternCell(
     Math.abs(comparisonMean) * outcome.meaningfulRelativeDelta,
   );
   const repeatedDirection = hasRepeatedDirection(pairs, delta);
-  const direction =
-    Math.abs(delta) < meaningfulDelta ? "flat" : delta > 0 ? "higher" : "lower";
+  const direction = patternDirection(delta, meaningfulDelta);
   const spanDays = daysBetween(base.firstExposedDate, base.lastExposedDate);
-  let stage: PersonalPatternStage = "no_clear_pattern";
-  let grade: PersonalPatternGrade | null = null;
-
-  if (direction !== "flat") {
-    if (
-      pairs.length >= 12 &&
-      spanDays >= 56 &&
-      repeatedDirection &&
-      Math.abs(delta) >= meaningfulDelta * 1.5
-    ) {
-      grade = "A";
-    } else if (pairs.length >= 8 && spanDays >= 42 && repeatedDirection) {
-      grade = "B";
-    } else if (pairs.length >= 5 && spanDays >= 21 && repeatedDirection) {
-      grade = "C";
-    } else if (pairs.length >= 2 && repeatedDirection) {
-      grade = "D";
-    } else if (pairs.length === 1) {
-      grade = "E";
-    }
-
-    if (
-      grade &&
-      comparisonBasis === "unobserved_baseline" &&
-      accumulator?.implicitAbsenceAllowed !== true &&
-      gradeRank(grade) > gradeRank("D")
-    ) {
-      grade = "D";
-    }
-
-    stage =
-      grade === "A"
-        ? "worth_testing"
-        : grade === "B" || grade === "C"
-        ? "seen_again"
-        : grade === "D" || grade === "E"
-        ? "new_clue"
-        : "no_clear_pattern";
-  }
+  const initialGrade = patternGrade({
+    delta,
+    direction,
+    meaningfulDelta,
+    pairCount: pairs.length,
+    repeatedDirection,
+    spanDays,
+  });
+  const grade = boundedPatternGrade({
+    comparisonBasis,
+    grade: initialGrade,
+    implicitAbsenceAllowed: accumulator?.implicitAbsenceAllowed === true,
+  });
+  const stage = patternStageForGrade(grade);
 
   return {
     ...base,
@@ -1105,6 +1071,97 @@ function buildPatternCell(
     repeatedDirection,
     stage,
   };
+}
+
+function comparisonBasisForDates(
+  confirmedAbsentDates: ReadonlySet<string>,
+): PersonalPatternCell["comparisonBasis"] {
+  return confirmedAbsentDates.size > 0
+    ? "confirmed_absence"
+    : "unobserved_baseline";
+}
+
+function buildPatternCellBase(input: {
+  comparisonBasis: PersonalPatternCell["comparisonBasis"];
+  comparisonDates: string[];
+  exposedDates: string[];
+  factorId: string;
+  outcomeId: string;
+  pairCount: number;
+}) {
+  return {
+    classification: null,
+    comparisonBasis: input.comparisonBasis,
+    comparisonDates: input.comparisonDates,
+    comparisonDays: input.pairCount,
+    exposedDays: input.pairCount,
+    exposedDates: input.exposedDates,
+    factorId: input.factorId,
+    firstExposedDate: input.exposedDates[0] ?? null,
+    grade: null,
+    lastExposedDate: input.exposedDates.at(-1) ?? null,
+    outcomeId: input.outcomeId,
+  };
+}
+
+function patternDirection(
+  delta: number,
+  meaningfulDelta: number,
+): PersonalPatternCell["direction"] {
+  if (Math.abs(delta) < meaningfulDelta) return "flat";
+  return delta > 0 ? "higher" : "lower";
+}
+
+function patternGrade(input: {
+  delta: number;
+  direction: PersonalPatternCell["direction"];
+  meaningfulDelta: number;
+  pairCount: number;
+  repeatedDirection: boolean;
+  spanDays: number;
+}): PersonalPatternGrade | null {
+  if (input.direction === "flat") return null;
+  if (
+    input.pairCount >= 12 &&
+    input.spanDays >= 56 &&
+    input.repeatedDirection &&
+    Math.abs(input.delta) >= input.meaningfulDelta * 1.5
+  ) {
+    return "A";
+  }
+  if (input.pairCount >= 8 && input.spanDays >= 42 && input.repeatedDirection) {
+    return "B";
+  }
+  if (input.pairCount >= 5 && input.spanDays >= 21 && input.repeatedDirection) {
+    return "C";
+  }
+  if (input.pairCount >= 2 && input.repeatedDirection) return "D";
+  return input.pairCount === 1 ? "E" : null;
+}
+
+function boundedPatternGrade(input: {
+  comparisonBasis: PersonalPatternCell["comparisonBasis"];
+  grade: PersonalPatternGrade | null;
+  implicitAbsenceAllowed: boolean;
+}): PersonalPatternGrade | null {
+  if (
+    input.grade &&
+    input.comparisonBasis === "unobserved_baseline" &&
+    !input.implicitAbsenceAllowed &&
+    gradeRank(input.grade) > gradeRank("D")
+  ) {
+    return "D";
+  }
+  return input.grade;
+}
+
+function patternStageForGrade(
+  grade: PersonalPatternGrade | null,
+): PersonalPatternStage {
+  if (grade === "A") return "worth_testing";
+  if (grade === "B" || grade === "C") return "seen_again";
+  if (grade === "D" || grade === "E") return "new_clue";
+  return "no_clear_pattern";
 }
 
 function matchComparisonDays(

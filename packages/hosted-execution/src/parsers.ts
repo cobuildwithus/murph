@@ -244,12 +244,61 @@ export {
   parseHostedRuntimeSignal,
 } from "./parsers/orchestration-control.ts";
 
+function parseHostedExecutionJournalDataWake(input: {
+  eventId: string;
+  kind: string;
+  occurredAt: string;
+  record: Record<string, unknown>;
+  wireUserId: string;
+}): HostedExecutionWake | null {
+  if (input.kind === "health.daily-metric.reported") {
+    assertExactHostedExecutionKeys(
+      input.record,
+      ["dailyMetric", "eventId", "kind", "occurredAt", "userId"],
+      "Hosted execution health.daily-metric.reported wake",
+    );
+    const dailyMetric = parseHostedExecutionDailyMetricReportedPayload(
+      input.record.dailyMetric,
+    );
+    return buildHostedExecutionDailyMetricReportedWake({
+      ...dailyMetric,
+      eventId: input.eventId,
+      memberId: input.wireUserId,
+      occurredAt: input.occurredAt,
+    });
+  }
+  if (input.kind === "journal.group-fact.recorded") {
+    assertExactHostedExecutionKeys(
+      input.record,
+      ["eventId", "journalFact", "kind", "occurredAt", "userId"],
+      "Hosted execution journal.group-fact.recorded wake",
+    );
+    return buildHostedExecutionGroupJournalFactRecordedWake({
+      eventId: input.eventId,
+      journalFact: parseHostedExecutionGroupJournalFactPayload(
+        input.record.journalFact,
+      ),
+      memberId: input.wireUserId,
+      occurredAt: input.occurredAt,
+    });
+  }
+  return null;
+}
+
 export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
   const record = requireObject(value, "Hosted execution wake");
   const kind = parseHostedExecutionWakeKind(record.kind, "Hosted execution wake kind");
   const eventId = requireString(record.eventId, "Hosted execution wake eventId");
   const occurredAt = requireString(record.occurredAt, "Hosted execution wake occurredAt");
   const wireUserId = requireString(record.userId, "Hosted execution wake userId");
+  const journalDataWake = parseHostedExecutionJournalDataWake({
+    eventId,
+    kind,
+    occurredAt,
+    record,
+    wireUserId,
+  });
+  if (journalDataWake) return journalDataWake;
 
   switch (kind) {
     case "conversation.message":
@@ -509,39 +558,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
         sha256: mealPhoto.sha256,
-      });
-    }
-    case "health.daily-metric.reported": {
-      assertExactHostedExecutionKeys(record, [
-        "dailyMetric",
-        "eventId",
-        "kind",
-        "occurredAt",
-        "userId",
-      ], "Hosted execution health.daily-metric.reported wake");
-      const dailyMetric = parseHostedExecutionDailyMetricReportedPayload(
-        record.dailyMetric,
-      );
-      return buildHostedExecutionDailyMetricReportedWake({
-        ...dailyMetric,
-        eventId,
-        memberId: wireUserId,
-        occurredAt,
-      });
-    }
-    case "journal.group-fact.recorded": {
-      assertExactHostedExecutionKeys(record, [
-        "eventId",
-        "journalFact",
-        "kind",
-        "occurredAt",
-        "userId",
-      ], "Hosted execution journal.group-fact.recorded wake");
-      return buildHostedExecutionGroupJournalFactRecordedWake({
-        eventId,
-        journalFact: parseHostedExecutionGroupJournalFactPayload(record.journalFact),
-        memberId: wireUserId,
-        occurredAt,
       });
     }
     case "environment-voice.captured": {

@@ -742,7 +742,7 @@ export async function processDueAssistantCronJobsLocal(
       errorPresent: result.run.error !== null,
       job: result.job,
       onEvent: input.onEvent,
-      occurrenceAt: result.run.scheduledOccurrenceAt ?? null,
+      occurrenceAt: nullableCronValue(result.run.scheduledOccurrenceAt),
       routeValidationProfile:
         assistantCronDeliveryRouteValidationProfileForExecutionContext(
           input.executionContext,
@@ -753,6 +753,10 @@ export async function processDueAssistantCronJobsLocal(
   }
 
   return summary
+}
+
+function nullableCronValue<T>(value: T | undefined): T | null {
+  return value ?? null
 }
 
 function assistantCronRunCountsAsProcessSuccess(

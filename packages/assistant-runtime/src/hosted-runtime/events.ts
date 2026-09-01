@@ -382,7 +382,9 @@ async function executeHostedSystemWake(input: {
         mailboxLane: "device-sync",
         nextWakeAt: nextWake.at,
         ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
-        postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
+        postCheckpointRecord: nullableSystemWakeValue(
+          deviceSyncMetrics.postCheckpointRecord,
+        ),
         ...(deviceSyncMetrics.systemProgressed === true
           ? { systemProgressed: true as const }
           : {}),
@@ -490,6 +492,10 @@ async function executeHostedSystemWake(input: {
   const exhaustiveWake: never = input.wake;
   void exhaustiveWake;
   throw new TypeError('Unsupported hosted system wake kind.');
+}
+
+function nullableSystemWakeValue<T>(value: T | undefined): T | null {
+  return value ?? null;
 }
 
 function emitHostedDeviceActivityAutomationFailureLog(input: {

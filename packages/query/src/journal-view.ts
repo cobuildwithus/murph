@@ -399,7 +399,6 @@ function normalizeJournalCandidates(
   candidates: readonly JournalCandidate[],
 ): JournalCandidate[] {
   const normalized = candidates.map((candidate) => ({ ...candidate }));
-  const sleepSessionsByDate = new Map<string, JournalCandidate[]>();
   const canonicalObservationMetrics = new Set(
     normalized
       .filter(
@@ -408,8 +407,25 @@ function normalizeJournalCandidates(
       )
       .map((candidate) => `${candidate.date}:${candidate.metricKey}`),
   );
+  const sleepSessionsByDate = normalizeSleepJournalCandidates(normalized);
+  const hasSleepSession = new Set(sleepSessionsByDate.keys());
+  const scoreContext = buildJournalScoreContext(normalized);
 
-  for (const candidate of normalized) {
+  return normalized.filter((candidate) =>
+    shouldKeepJournalCandidate({
+      candidate,
+      canonicalObservationMetrics,
+      hasSleepSession,
+      ...scoreContext,
+    }),
+  );
+}
+
+function normalizeSleepJournalCandidates(
+  candidates: readonly JournalCandidate[],
+): Map<string, JournalCandidate[]> {
+  const sleepSessionsByDate = new Map<string, JournalCandidate[]>();
+  for (const candidate of candidates) {
     if (candidate.kind !== "sleep_session") continue;
     const sessions = sleepSessionsByDate.get(candidate.date) ?? [];
     sessions.push(candidate);
@@ -438,12 +454,18 @@ function normalizeJournalCandidates(
       session.timing = isMain ? "night" : "timed";
     }
   }
+  return sleepSessionsByDate;
+}
 
-  const hasSleepSession = new Set(sleepSessionsByDate.keys());
+function buildJournalScoreContext(candidates: readonly JournalCandidate[]): {
+  preferRecoveryDates: Set<string>;
+  readinessByDate: Map<string, number>;
+  recoveryByDate: Map<string, number>;
+} {
   const readinessByDate = new Map<string, number>();
   const recoveryByDate = new Map<string, number>();
   const preferRecoveryDates = new Set<string>();
-  for (const candidate of normalized) {
+  for (const candidate of candidates) {
     if (
       candidate.metricKey === "readiness-score" &&
       candidate.metricValue !== null
@@ -460,43 +482,52 @@ function normalizeJournalCandidates(
       }
     }
   }
+  return { preferRecoveryDates, readinessByDate, recoveryByDate };
+}
 
-  return normalized.filter((candidate) => {
-    if (
-      candidate.kind === "metric" &&
-      candidate.metricKey &&
-      canonicalObservationMetrics.has(
-        `${candidate.date}:${candidate.metricKey}`,
-      )
-    ) {
-      return false;
-    }
-    if (
-      candidate.metricKey === "total-sleep" &&
-      hasSleepSession.has(candidate.date)
-    ) {
-      return false;
-    }
-    if (
-      candidate.metricKey === "recovery-score" &&
-      candidate.metricValue !== null
-    ) {
-      return (
-        readinessByDate.get(candidate.date) !== candidate.metricValue ||
-        preferRecoveryDates.has(candidate.date)
-      );
-    }
-    if (
-      candidate.metricKey === "readiness-score" &&
-      candidate.metricValue !== null
-    ) {
-      return (
-        recoveryByDate.get(candidate.date) !== candidate.metricValue ||
-        !preferRecoveryDates.has(candidate.date)
-      );
-    }
-    return true;
-  });
+function shouldKeepJournalCandidate(input: {
+  candidate: JournalCandidate;
+  canonicalObservationMetrics: ReadonlySet<string>;
+  hasSleepSession: ReadonlySet<string>;
+  preferRecoveryDates: ReadonlySet<string>;
+  readinessByDate: ReadonlyMap<string, number>;
+  recoveryByDate: ReadonlyMap<string, number>;
+}): boolean {
+  const { candidate } = input;
+  if (
+    candidate.kind === "metric" &&
+    candidate.metricKey &&
+    input.canonicalObservationMetrics.has(
+      `${candidate.date}:${candidate.metricKey}`,
+    )
+  ) {
+    return false;
+  }
+  if (
+    candidate.metricKey === "total-sleep" &&
+    input.hasSleepSession.has(candidate.date)
+  ) {
+    return false;
+  }
+  if (
+    candidate.metricKey === "recovery-score" &&
+    candidate.metricValue !== null
+  ) {
+    return (
+      input.readinessByDate.get(candidate.date) !== candidate.metricValue ||
+      input.preferRecoveryDates.has(candidate.date)
+    );
+  }
+  if (
+    candidate.metricKey === "readiness-score" &&
+    candidate.metricValue !== null
+  ) {
+    return (
+      input.recoveryByDate.get(candidate.date) !== candidate.metricValue ||
+      !input.preferRecoveryDates.has(candidate.date)
+    );
+  }
+  return true;
 }
 
 function journalObservationMetric(
@@ -684,71 +715,78 @@ function journalEventDetailItems(event: CanonicalEntity): string[] {
   }
 
   if (event.kind === "experiment_context") {
-    const status = readString(event.attributes.status) ?? event.status;
-    const progress = readString(event.attributes.progress);
-    const result =
-      readString(event.attributes.resultSummary) ??
-      readString(event.attributes.result);
-    return uniqueStrings([
-      status ? `Status: ${humanize(status)}` : null,
-      progress ? `Progress: ${progress}` : null,
-      result ? `Result: ${result}` : null,
-    ]);
+    return experimentDetailItems(event);
   }
 
   if (event.kind === "meal") {
-    const nutrition = readRecord(event.attributes.nutrition);
-    const totals = readRecord(nutrition?.totals);
-    return uniqueStrings([
-      formatJournalDetail("Energy", readNumber(totals?.calories), "kcal"),
-      formatJournalDetail("Protein", readNumber(totals?.proteinGrams), "g"),
-      formatJournalDetail(
-        "Carbohydrates",
-        readNumber(totals?.carbohydrateGrams),
-        "g",
-      ),
-    ]);
+    return mealDetailItems(event.attributes);
   }
 
   if (event.kind === "test") {
-    return uniqueStrings([
-      readNumber(event.attributes.markerCount) === null
-        ? null
-        : `Markers: ${readNumber(event.attributes.markerCount)}`,
-      readNumber(event.attributes.flaggedCount) === null
-        ? null
-        : `Flagged: ${readNumber(event.attributes.flaggedCount)}`,
-      readString(event.attributes.resultSummary)
-        ? `Summary: ${readString(event.attributes.resultSummary)}`
-        : null,
-    ]);
+    return testDetailItems(event.attributes);
   }
 
   if (event.kind === "note") {
-    return uniqueStrings([
-      readString(event.attributes.detail),
-      readString(event.attributes.destination)
-        ? `Destination: ${readString(event.attributes.destination)}`
-        : null,
-      readString(event.attributes.location)
-        ? `Location: ${readString(event.attributes.location)}`
-        : null,
-      readString(event.attributes.duration)
-        ? `Duration: ${readString(event.attributes.duration)}`
-        : null,
-      readString(event.attributes.timeZoneChange)
-        ? `Time zones: ${readString(event.attributes.timeZoneChange)}`
-        : null,
-      readString(event.attributes.platform)
-        ? `Platform: ${humanize(readString(event.attributes.platform) ?? "")}`
-        : null,
-      readString(event.attributes.groupName)
-        ? `Group: ${readString(event.attributes.groupName)}`
-        : null,
-    ]);
+    return noteDetailItems(event.attributes);
   }
 
   return [];
+}
+
+function experimentDetailItems(event: CanonicalEntity): string[] {
+  const status = readString(event.attributes.status) ?? event.status;
+  const progress = readString(event.attributes.progress);
+  const result =
+    readString(event.attributes.resultSummary) ??
+    readString(event.attributes.result);
+  return uniqueStrings([
+    status ? `Status: ${humanize(status)}` : null,
+    progress ? `Progress: ${progress}` : null,
+    result ? `Result: ${result}` : null,
+  ]);
+}
+
+function mealDetailItems(attributes: Record<string, unknown>): string[] {
+  const nutrition = readRecord(attributes.nutrition);
+  const totals = readRecord(nutrition?.totals);
+  return uniqueStrings([
+    formatJournalDetail("Energy", readNumber(totals?.calories), "kcal"),
+    formatJournalDetail("Protein", readNumber(totals?.proteinGrams), "g"),
+    formatJournalDetail(
+      "Carbohydrates",
+      readNumber(totals?.carbohydrateGrams),
+      "g",
+    ),
+  ]);
+}
+
+function testDetailItems(attributes: Record<string, unknown>): string[] {
+  const markerCount = readNumber(attributes.markerCount);
+  const flaggedCount = readNumber(attributes.flaggedCount);
+  const summary = readString(attributes.resultSummary);
+  return uniqueStrings([
+    markerCount === null ? null : `Markers: ${markerCount}`,
+    flaggedCount === null ? null : `Flagged: ${flaggedCount}`,
+    summary ? `Summary: ${summary}` : null,
+  ]);
+}
+
+function noteDetailItems(attributes: Record<string, unknown>): string[] {
+  const platform = readString(attributes.platform);
+  return uniqueStrings([
+    readString(attributes.detail),
+    prefixedJournalDetail("Destination", attributes.destination),
+    prefixedJournalDetail("Location", attributes.location),
+    prefixedJournalDetail("Duration", attributes.duration),
+    prefixedJournalDetail("Time zones", attributes.timeZoneChange),
+    platform ? `Platform: ${humanize(platform)}` : null,
+    prefixedJournalDetail("Group", attributes.groupName),
+  ]);
+}
+
+function prefixedJournalDetail(label: string, value: unknown): string | null {
+  const text = readString(value);
+  return text ? `${label}: ${text}` : null;
 }
 
 function experimentJournalSummary(
@@ -773,39 +811,40 @@ function experimentJournalSummary(
 function activityDetailItems(attributes: Record<string, unknown>): string[] {
   const workout = readRecord(attributes.workout);
   const metrics = readRecord(workout?.metrics);
-  const distanceKm =
-    readNumber(attributes.distanceKm) ?? readNumber(workout?.distanceKm);
-  const averageHeartRate =
-    readNumber(metrics?.averageHeartRate) ??
-    readNumber(metrics?.averageHeartRateBpm) ??
-    readNumber(attributes.averageHeartRate);
-  const maxHeartRate =
-    readNumber(metrics?.maxHeartRate) ??
-    readNumber(metrics?.maxHeartRateBpm) ??
-    readNumber(attributes.maxHeartRate);
-  const strain =
-    readNumber(metrics?.workoutStrain) ??
-    readNumber(attributes.workoutStrain) ??
-    readNumber(attributes.strain);
-  const activeCalories =
-    readNumber(metrics?.activeCalories) ??
-    readNumber(attributes.activeCalories);
-  const totalCalories =
-    readNumber(metrics?.totalCalories) ?? readNumber(attributes.totalCalories);
-  const elevationGain =
-    readNumber(metrics?.totalElevationGainMeters) ??
-    readNumber(attributes.totalElevationGainMeters);
+  const distanceKm = firstJournalNumber(
+    attributes.distanceKm,
+    workout?.distanceKm,
+  );
+  const averageHeartRate = firstJournalNumber(
+    metrics?.averageHeartRate,
+    metrics?.averageHeartRateBpm,
+    attributes.averageHeartRate,
+  );
+  const maxHeartRate = firstJournalNumber(
+    metrics?.maxHeartRate,
+    metrics?.maxHeartRateBpm,
+    attributes.maxHeartRate,
+  );
+  const strain = firstJournalNumber(
+    metrics?.workoutStrain,
+    attributes.workoutStrain,
+    attributes.strain,
+  );
+  const activeCalories = firstJournalNumber(
+    metrics?.activeCalories,
+    attributes.activeCalories,
+  );
+  const totalCalories = firstJournalNumber(
+    metrics?.totalCalories,
+    attributes.totalCalories,
+  );
+  const elevationGain = firstJournalNumber(
+    metrics?.totalElevationGainMeters,
+    attributes.totalElevationGainMeters,
+  );
   const averagePower = readNumber(metrics?.averagePowerWatts);
-  const exercises = Array.isArray(workout?.exercises)
-    ? workout.exercises
-        .map((exercise) =>
-          typeof exercise === "string"
-            ? exercise.trim()
-            : readString(readRecord(exercise)?.name),
-        )
-        .filter((exercise): exercise is string => Boolean(exercise))
-        .slice(0, 6)
-    : [];
+  const exercises = readJournalExerciseNames(workout?.exercises);
+  const energy = activeCalories === null ? totalCalories : activeCalories;
 
   return uniqueStrings([
     readString(workout?.routineName),
@@ -816,13 +855,33 @@ function activityDetailItems(attributes: Record<string, unknown>): string[] {
     formatJournalDetail("Strain", strain),
     formatJournalDetail(
       activeCalories === null ? "Energy" : "Active energy",
-      activeCalories ?? totalCalories,
+      energy,
       "kcal",
     ),
     formatJournalDetail("Elevation gain", elevationGain, "m"),
     formatJournalDetail("Average power", averagePower, "W"),
     exercises.length > 0 ? `Exercises: ${exercises.join(", ")}` : null,
   ]);
+}
+
+function firstJournalNumber(...values: readonly unknown[]): number | null {
+  for (const value of values) {
+    const number = readNumber(value);
+    if (number !== null) return number;
+  }
+  return null;
+}
+
+function readJournalExerciseNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((exercise) =>
+      typeof exercise === "string"
+        ? exercise.trim()
+        : readString(readRecord(exercise)?.name),
+    )
+    .filter((exercise): exercise is string => Boolean(exercise))
+    .slice(0, 6);
 }
 
 function formatJournalDetail(

@@ -1075,7 +1075,7 @@ export class RuntimeInvocationService {
         veniceCredentialBeforeMintKind,
         veniceProviderCredentialMinted,
         preparedSnapshotRestorePresent: preparedSnapshotRestore !== null,
-        processingMode: input.processingMode ?? null,
+        processingMode: nullableRunnerValue(input.processingMode),
         runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,
         workspaceAttemptId: input.token.attemptId,
         workspaceWriteFenceGeneration: input.token.generation,
@@ -1323,6 +1323,10 @@ export class RuntimeInvocationService {
       return true;
     }
   }
+}
+
+function nullableRunnerValue<T>(value: T | undefined): T | null {
+  return value ?? null;
 }
 
 function isDueHostedAssistantDeliveryWake(

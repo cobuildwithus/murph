@@ -288,7 +288,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
       replicaRef: input.workspace.browserVaultReplicaRef ?? null,
     });
 
-    if (!freshness.shouldRefresh && input.force !== true) {
+    if (shouldSkipBrowserVaultReplicaRefresh(freshness, input.force)) {
       return {
         freshness,
         source,
@@ -416,6 +416,13 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
   } finally {
     cancellation.cleanup();
   }
+}
+
+function shouldSkipBrowserVaultReplicaRefresh(
+  freshness: BrowserVaultReplicaFreshnessAssessment,
+  force: boolean | null | undefined,
+): boolean {
+  return !freshness.shouldRefresh && force !== true;
 }
 
 export function summarizeHostedBrowserVaultReplicaContent(

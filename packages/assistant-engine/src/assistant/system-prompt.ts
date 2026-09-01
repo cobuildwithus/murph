@@ -422,9 +422,7 @@ function buildStableRouteCapabilityPrompt(
             input.assistantHostedDeviceConnectProviders ?? [],
         })
       : null,
-    conversationScope === "direct"
-      ? buildAssistantJournalCaptureGuidanceText()
-      : null,
+    buildAssistantJournalCaptureGuidanceText(conversationScope),
     conversationScope === "direct"
       ? buildAssistantHealthRecordIngestionInvariantText()
       : null,
@@ -1536,7 +1534,10 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 - A spawn is not durable parse state. A short plain mention of the background work in the spawning reply is fine, but never promise completion, and on later turns do not call it pending, processing, or in progress unless an existing durable owner proves that state. Claim child-structured extraction only after canonical readback confirms it; otherwise say plainly which details you do not have yet, without bookkeeping terms such as "unconfirmed" or "user-reported".`;
 }
 
-function buildAssistantJournalCaptureGuidanceText(): string {
+function buildAssistantJournalCaptureGuidanceText(
+  conversationScope: AssistantConversationScope,
+): string | null {
+  if (conversationScope !== "direct") return null;
   return `Private Journal capture:
 - Save clear facts silently; ask if ambiguous. Do not infer causes.
 - Use \`vault-cli event note add\` per independent fact; \`--related-id\` for events.

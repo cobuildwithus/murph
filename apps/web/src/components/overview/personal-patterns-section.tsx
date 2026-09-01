@@ -90,14 +90,10 @@ export function PersonalPatternsSection({
   const visibleReport = report ? selectVisiblePatternReport(report) : null;
   const hasMoreFactors =
     (visibleReport?.factors.length ?? 0) > INITIAL_VISIBLE_FACTOR_COUNT;
-  const displayedReport = visibleReport
-    ? {
-        ...visibleReport,
-        factors: showAllFactors
-          ? visibleReport.factors
-          : visibleReport.factors.slice(0, INITIAL_VISIBLE_FACTOR_COUNT),
-      }
-    : null;
+  const displayedReport = buildDisplayedPatternReport(
+    visibleReport,
+    showAllFactors,
+  );
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-8">
@@ -227,6 +223,19 @@ function PatternsEmptyState({
       </div>
     </div>
   );
+}
+
+function buildDisplayedPatternReport(
+  report: PersonalPatternReport | null,
+  showAllFactors: boolean,
+): PersonalPatternReport | null {
+  if (!report) return null;
+  return {
+    ...report,
+    factors: showAllFactors
+      ? report.factors
+      : report.factors.slice(0, INITIAL_VISIBLE_FACTOR_COUNT),
+  };
 }
 
 function PatternsLoadingState() {
@@ -894,39 +903,13 @@ function PatternBubble({
             onKeyDown={pointerAnchor.onKeyDown}
             onPointerMove={pointerAnchor.onPointerMove}
           >
-            <span
-              aria-hidden="true"
-              className={cn(
-                "inline-flex shrink-0 items-center justify-center rounded-full",
-                isFlat && "border border-border bg-card text-muted-foreground",
-                !isFlat &&
-                  tone === "positive" &&
-                  cell.classification === "pattern" &&
-                  "bg-primary text-primary-foreground",
-                !isFlat &&
-                  tone === "positive" &&
-                  cell.classification !== "pattern" &&
-                  "bg-primary/15 text-primary",
-                !isFlat &&
-                  tone === "negative" &&
-                  cell.classification === "pattern" &&
-                  "bg-red-700/80 text-white dark:bg-red-500/80",
-                !isFlat &&
-                  tone === "negative" &&
-                  cell.classification !== "pattern" &&
-                  "bg-red-700/10 text-red-700 dark:bg-red-500/15 dark:text-red-300",
-                !isFlat &&
-                  tone === "neutral" &&
-                  "bg-muted text-muted-foreground",
-              )}
-              style={{ height: indicatorSize, width: indicatorSize }}
-            >
-              {isFlat ? (
-                <Minus aria-hidden="true" className="size-3" />
-              ) : (
-                <DirectionIcon aria-hidden="true" className="size-3" />
-              )}
-            </span>
+            <PatternEffectIndicator
+              classification={cell.classification ?? null}
+              DirectionIcon={DirectionIcon}
+              isFlat={isFlat}
+              size={indicatorSize}
+              tone={tone}
+            />
             {isFlat ? null : <span>{label}</span>}
           </button>
         }
@@ -942,6 +925,47 @@ function PatternBubble({
         outcomeUnit={outcomeUnit}
       />
     </Popover>
+  );
+}
+
+function PatternEffectIndicator({
+  classification,
+  DirectionIcon,
+  isFlat,
+  size,
+  tone,
+}: {
+  classification: PersonalPatternClassification | null;
+  DirectionIcon: typeof ArrowUp;
+  isFlat: boolean;
+  size: number;
+  tone: PatternEffectTone;
+}) {
+  const isPattern = classification === "pattern";
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center rounded-full",
+        isFlat && "border border-border bg-card text-muted-foreground",
+        !isFlat && tone === "positive" && isPattern &&
+          "bg-primary text-primary-foreground",
+        !isFlat && tone === "positive" && !isPattern &&
+          "bg-primary/15 text-primary",
+        !isFlat && tone === "negative" && isPattern &&
+          "bg-red-700/80 text-white dark:bg-red-500/80",
+        !isFlat && tone === "negative" && !isPattern &&
+          "bg-red-700/10 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+        !isFlat && tone === "neutral" && "bg-muted text-muted-foreground",
+      )}
+      style={{ height: size, width: size }}
+    >
+      {isFlat ? (
+        <Minus aria-hidden="true" className="size-3" />
+      ) : (
+        <DirectionIcon aria-hidden="true" className="size-3" />
+      )}
+    </span>
   );
 }
 

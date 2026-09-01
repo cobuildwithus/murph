@@ -526,9 +526,7 @@ export async function startHostedLocalDevStack(input: {
       // The browser uses the public HTTPS origin. The local Worker must call
       // the managed Web child directly because workerd does not trust Caddy's
       // local development certificate.
-      ...(config.skipWeb
-        ? {}
-        : { HOSTED_WEB_BASE_URL: `http://${config.webHost}:${config.webPort}` }),
+      ...buildHostedWorkerWebBaseUrlEnv(config),
       ...(hostedLocalCodexModelCatalogJson !== null
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
         : {}),
@@ -958,12 +956,10 @@ export async function startHostedLocalDevStack(input: {
     }
     throwIfAbortSignalAborted(input.abortSignal);
 
-    const internalWebBaseUrl = config.skipWeb
-      ? null
-      : `http://${config.webHost}:${config.webPort}`;
-    const webBaseUrl = internalWebBaseUrl === null
-      ? null
-      : runtimeEnv.HOSTED_WEB_BASE_URL?.trim() || internalWebBaseUrl;
+    const { internalWebBaseUrl, webBaseUrl } = resolveHostedLocalWebBaseUrls(
+      config,
+      runtimeEnv,
+    );
     const temporalRuntimeEnv = buildHostedLocalTemporalProcessEnv({
       cloudflareDevVars,
       runtimeEnv,
@@ -1337,6 +1333,28 @@ function startHostedLocalMinioMonitor(input: {
         await inFlightPoll;
       }
     },
+  };
+}
+
+function buildHostedWorkerWebBaseUrlEnv(
+  config: HostedLocalDevConfig,
+): NodeJS.ProcessEnv {
+  return config.skipWeb
+    ? {}
+    : { HOSTED_WEB_BASE_URL: `http://${config.webHost}:${config.webPort}` };
+}
+
+function resolveHostedLocalWebBaseUrls(
+  config: HostedLocalDevConfig,
+  runtimeEnv: NodeJS.ProcessEnv,
+): { internalWebBaseUrl: string | null; webBaseUrl: string | null } {
+  if (config.skipWeb) {
+    return { internalWebBaseUrl: null, webBaseUrl: null };
+  }
+  const internalWebBaseUrl = `http://${config.webHost}:${config.webPort}`;
+  return {
+    internalWebBaseUrl,
+    webBaseUrl: runtimeEnv.HOSTED_WEB_BASE_URL?.trim() || internalWebBaseUrl,
   };
 }
 

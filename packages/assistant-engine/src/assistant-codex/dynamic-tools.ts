@@ -4950,11 +4950,11 @@ function hasExactStringEntries(
 }
 
 function buildGroupAccessOfferHostRequest(
-  request: Extract<MurphGroupToolRequest, { action: 'offer_access' }>,
+  request: Extract<MurphGroupToolRequest, { action: "offer_access" }>,
   repostOriginAssistantInputId: string | null,
 ): Extract<
   HostedRuntimeGroupToolRequest,
-  { action: 'create_join_link' | 'post_join_offer' }
+  { action: "create_join_link" | "post_join_offer" }
 > {
   if (request.standaloneLink === true) {
     const joinLink = {
@@ -4964,17 +4964,15 @@ function buildGroupAccessOfferHostRequest(
       ...(request.projectionScopes === undefined
         ? {}
         : {
-            requestedVaultShareProjectionScopes: [
-              ...request.projectionScopes,
-            ],
+            requestedVaultShareProjectionScopes: [...request.projectionScopes],
           }),
-    }
+    };
     return Object.keys(joinLink).length > 0
-      ? { action: 'create_join_link', joinLink }
-      : { action: 'create_join_link' }
+      ? { action: "create_join_link", joinLink }
+      : { action: "create_join_link" };
   }
   return {
-    action: 'post_join_offer',
+    action: "post_join_offer",
     joinOffer: {
       ...(request.displayName === undefined
         ? {}
@@ -4987,204 +4985,329 @@ function buildGroupAccessOfferHostRequest(
     ...(repostOriginAssistantInputId === null
       ? {}
       : { repostOriginAssistantInputId }),
+  };
+}
+
+type ExecuteGroupToolInput = {
+  abortSignal: AbortSignal | null;
+  authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer | null;
+  deliveryContextOrdinal: number | null;
+  env: NodeJS.ProcessEnv;
+  fetchImpl: typeof fetch;
+  hostedToolContext: AssistantHostedToolContext | null;
+  groupSharedReadTurnState: MurphGroupSharedReadTurnState | null;
+  materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null;
+  nextUsageOrdinal: () => number;
+  progressDelivery: AssistantProgressDelivery | null;
+  request: MurphGroupToolRequest;
+  toolCallId: string | null;
+  vaultRoot: string | null;
+};
+
+type GroupJournalRequestResolution =
+  | { kind: "not_handled" }
+  | { kind: "request"; request: HostedRuntimeGroupToolRequest }
+  | { kind: "result"; result: MurphDynamicToolExecutionResult };
+
+type GroupCurrentSenderJournalRequest = Extract<
+  MurphGroupToolRequest,
+  {
+    action:
+      | "record_current_sender_daily_metric"
+      | "record_current_sender_journal_fact"
+      | "set_current_sender_journal_capture";
+  }
+>;
+
+const GROUP_CURRENT_SENDER_JOURNAL_ACTIONS: ReadonlySet<
+  MurphGroupToolRequest["action"]
+> = new Set([
+  "record_current_sender_daily_metric",
+  "record_current_sender_journal_fact",
+  "set_current_sender_journal_capture",
+]);
+
+function isGroupCurrentSenderJournalRequest(
+  request: MurphGroupToolRequest,
+): request is GroupCurrentSenderJournalRequest {
+  return GROUP_CURRENT_SENDER_JOURNAL_ACTIONS.has(request.action);
+}
+
+function resolveGroupJournalHostRequest(
+  input: ExecuteGroupToolInput,
+): GroupJournalRequestResolution {
+  if (input.request.action === "set_journal_capture") {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
+    if (
+      userActionScope?.conversationScope !== "direct" ||
+      userActionScope.acceptedInputIds.length === 0
+    ) {
+      return {
+        kind: "result",
+        result: toolTextResult(
+          false,
+          "Journal capture settings require fresh user input in a personal direct conversation",
+        ),
+      };
+    }
+    return { kind: "request", request: input.request };
+  }
+
+  if (!isGroupCurrentSenderJournalRequest(input.request)) {
+    return { kind: "not_handled" };
+  }
+  const userActionScope =
+    input.hostedToolContext?.currentUserActionScope?.() ?? null;
+  const messageRef = input.request.messageRef;
+  if (
+    userActionScope?.conversationScope !== "group" ||
+    !userActionScope.acceptedInputIds.includes(messageRef)
+  ) {
+    return {
+      kind: "result",
+      result: toolTextResult(
+        false,
+        "current-sender Journal action requires the selected accepted message in this group turn",
+      ),
+    };
+  }
+  const origin = {
+    assistantInputId: messageRef,
+    kind: "accepted_input" as const,
+    sessionId: userActionScope.originSessionId,
+  };
+  switch (input.request.action) {
+    case "record_current_sender_daily_metric":
+      return {
+        kind: "request",
+        request: {
+          action: input.request.action,
+          dailyMetric: input.request.dailyMetric,
+          origin,
+        },
+      };
+    case "record_current_sender_journal_fact":
+      return {
+        kind: "request",
+        request: {
+          action: input.request.action,
+          confidence: input.request.confidence,
+          journalFact: input.request.journalFact,
+          origin,
+          privateQuestion: input.request.privateQuestion,
+        },
+      };
+    case "set_current_sender_journal_capture":
+      return {
+        kind: "request",
+        request: {
+          action: input.request.action,
+          enabled: input.request.enabled,
+          origin,
+          scope: input.request.scope,
+        },
+      };
+    default:
+      return { kind: "not_handled" };
   }
 }
 
-async function executeGroupTool(input: {
-  abortSignal: AbortSignal | null
-  authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer | null
-  deliveryContextOrdinal: number | null
-  env: NodeJS.ProcessEnv
-  fetchImpl: typeof fetch
-  hostedToolContext: AssistantHostedToolContext | null
-  groupSharedReadTurnState: MurphGroupSharedReadTurnState | null
-  materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
-  nextUsageOrdinal: () => number
-  progressDelivery: AssistantProgressDelivery | null
-  request: MurphGroupToolRequest
-  toolCallId: string | null
-  vaultRoot: string | null
-}): Promise<MurphDynamicToolExecutionResult> {
-  let currentSenderGroupPreviewSent = false
-  if (input.request.action === 'read_shared') {
+async function executeGroupTool(
+  input: ExecuteGroupToolInput,
+): Promise<MurphDynamicToolExecutionResult> {
+  let currentSenderGroupPreviewSent = false;
+  if (input.request.action === "read_shared") {
     if (
-      'audience' in input.request
-      && input.request.audience === 'group_email'
+      "audience" in input.request &&
+      input.request.audience === "group_email"
     ) {
       return executeGroupEmailEffect({
         hostedToolContext: input.hostedToolContext,
         request: input.request,
-      })
+      });
     }
     return executeGroupSharedRead({
       hostedToolContext: input.hostedToolContext,
       request: input.request,
       turnState: input.groupSharedReadTurnState,
-    })
+    });
   }
-  if (input.request.action === 'send_email') {
+  if (input.request.action === "send_email") {
     return executeGroupEmailEffect({
       hostedToolContext: input.hostedToolContext,
       request: input.request,
-    })
+    });
   }
-  const groupTool = input.hostedToolContext?.groupTool ?? null
+  const groupTool = input.hostedToolContext?.groupTool ?? null;
   const invocationScope =
-    input.hostedToolContext?.currentInvocationScope?.() ?? null
+    input.hostedToolContext?.currentInvocationScope?.() ?? null;
   if (
-    input.request.action === 'offer_access' &&
-    (
-      !groupTool ||
-      invocationScope?.origin.kind === 'automation_occurrence'
-    )
+    input.request.action === "offer_access" &&
+    (!groupTool || invocationScope?.origin.kind === "automation_occurrence")
   ) {
     return executeGroupPermissionOffer({
       hostedToolContext: input.hostedToolContext,
       request: input.request,
-    })
+    });
   }
   if (!groupTool) {
-    return toolTextResult(false, 'group tools are unavailable for this turn')
+    return toolTextResult(false, "group tools are unavailable for this turn");
   }
   if (
-    invocationScope?.origin.kind === 'automation_occurrence' &&
-    input.request.action !== 'ask_member' &&
-    input.request.action !== 'read_current'
+    invocationScope?.origin.kind === "automation_occurrence" &&
+    input.request.action !== "ask_member" &&
+    input.request.action !== "read_current"
   ) {
     return toolTextResult(
       false,
-      'scheduled group invocations may only read the current group or ask a consented member',
-    )
+      "scheduled group invocations may only read the current group or ask a consented member",
+    );
   }
 
-  let request: HostedRuntimeGroupToolRequest
-  let usageDraft: AssistantProviderUsageDraft | null = null
-  let generatedAvatarCapture:
-    | { savedCaptureId: string | null; savedImageRef: string }
-    | null = null
-  if (input.request.action === 'offer_access') {
-    let repostOriginAssistantInputId: string | null = null
+  let request: HostedRuntimeGroupToolRequest;
+  let usageDraft: AssistantProviderUsageDraft | null = null;
+  let generatedAvatarCapture: {
+    savedCaptureId: string | null;
+    savedImageRef: string;
+  } | null = null;
+  const journalResolution = resolveGroupJournalHostRequest(input);
+  if (journalResolution.kind === "result") {
+    return journalResolution.result;
+  }
+  if (journalResolution.kind === "request") {
+    request = journalResolution.request;
+  } else if (input.request.action === "offer_access") {
+    let repostOriginAssistantInputId: string | null = null;
     if (input.request.messageRef !== undefined) {
       const userActionScope =
-        input.hostedToolContext?.currentUserActionScope?.() ?? null
+        input.hostedToolContext?.currentUserActionScope?.() ?? null;
       if (
-        userActionScope?.conversationScope !== 'group'
-        || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+        userActionScope?.conversationScope !== "group" ||
+        !userActionScope.acceptedInputIds.includes(input.request.messageRef)
       ) {
         return toolTextResult(
           false,
-          'reposting group access requires the exact current accepted Message ref from this group conversation',
-        )
+          "reposting group access requires the exact current accepted Message ref from this group conversation",
+        );
       }
-      repostOriginAssistantInputId = input.request.messageRef
+      repostOriginAssistantInputId = input.request.messageRef;
     }
     request = buildGroupAccessOfferHostRequest(
       input.request,
       repostOriginAssistantInputId,
-    )
+    );
   } else if (isPreparedContactCardRequest(input.request)) {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
     if (
-      userActionScope?.conversationScope !== 'direct'
-      || userActionScope.acceptedInputIds.length === 0
+      userActionScope?.conversationScope !== "direct" ||
+      userActionScope.acceptedInputIds.length === 0
     ) {
       return toolTextResult(
         false,
-        'personalized contact cards require a fresh user request in a personal direct conversation',
-      )
+        "personalized contact cards require a fresh user request in a personal direct conversation",
+      );
     }
     // Refuse a route that can never carry the attachment before paying for
     // generation, capture, and publication. The post-generation binding below
     // still owns the authoritative thread.
-    const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null
-    if (routeStatus && routeStatus.status !== 'ok') {
-      return toolTextResult(true, safeToolPayloadText({
-        action: 'share_contact_card',
-        result: routeStatus,
-      }))
+    const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null;
+    if (routeStatus && routeStatus.status !== "ok") {
+      return toolTextResult(
+        true,
+        safeToolPayloadText({
+          action: "share_contact_card",
+          result: routeStatus,
+        }),
+      );
     }
-    const contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null
+    const contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null;
     if (!contactCardShareKey) {
       return toolTextResult(
         false,
-        'personalized contact cards require fresh user-sourced input for this turn',
-      )
+        "personalized contact cards require fresh user-sourced input for this turn",
+      );
     }
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
       // The accepted request, not the tool call: a replay must reuse this
       // capture rather than pay for a second stochastic generation.
       captureRequestId: contactCardShareKey,
-      captureScope: 'contact-card-avatar',
+      captureScope: "contact-card-avatar",
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedToolContext: input.hostedToolContext,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       nextUsageOrdinal: input.nextUsageOrdinal,
       request: {
-        action: 'set_chat_avatar',
+        action: "set_chat_avatar",
         avatar: input.request.avatar,
       },
       vaultRoot: input.vaultRoot,
-    })
+    });
     if (!prepared.rpcSuccess) {
       return {
         rpcResult: {
-          contentItems: [{ text: prepared.rpcText, type: 'inputText' }],
+          contentItems: [{ text: prepared.rpcText, type: "inputText" }],
           success: false,
         },
         usageDraft: prepared.usageDraft ?? null,
-      }
+      };
     }
     request = {
-      action: 'share_contact_card',
+      action: "share_contact_card",
       contactCardImageUrl: prepared.request.groupChatIconUrl,
       // Trusted-host request identity, so a retried or replayed turn collapses
       // to one card while a genuinely new accepted request has its own send
       // identity. Deliberately not the tool call id: a retry re-emits the
       // call with a new id but keeps the same accepted input.
       contactCardShareKey,
-    }
-    usageDraft = prepared.usageDraft ?? null
+    };
+    usageDraft = prepared.usageDraft ?? null;
     generatedAvatarCapture = prepared.savedImageRef
       ? {
           savedCaptureId: prepared.savedCaptureId ?? null,
           savedImageRef: prepared.savedImageRef,
         }
-      : null
+      : null;
   } else if (isPreparedGroupAvatarRequest(input.request)) {
     let preflight: Extract<
       HostedRuntimeGroupToolResponse,
-      { action: 'preflight_set_chat_avatar' }
-    >
+      { action: "preflight_set_chat_avatar" }
+    >;
     try {
-      const preflightRequest = { action: 'preflight_set_chat_avatar' } as const
+      const preflightRequest = { action: "preflight_set_chat_avatar" } as const;
       const preflightResult = input.abortSignal
-        ? await groupTool.request(preflightRequest, { signal: input.abortSignal })
-        : await groupTool.request(preflightRequest)
-      if (preflightResult.action !== 'preflight_set_chat_avatar') {
+        ? await groupTool.request(preflightRequest, {
+            signal: input.abortSignal,
+          })
+        : await groupTool.request(preflightRequest);
+      if (preflightResult.action !== "preflight_set_chat_avatar") {
         return groupAvatarUnavailableToolResult(
-          'group_avatar_preflight_unavailable',
-        )
+          "group_avatar_preflight_unavailable",
+        );
       }
-      preflight = preflightResult
+      preflight = preflightResult;
     } catch {
       return groupAvatarUnavailableToolResult(
-        'group_avatar_preflight_unavailable',
-      )
+        "group_avatar_preflight_unavailable",
+      );
     }
-    if (preflight.result.status !== 'ok') {
-      return toolTextResult(true, safeToolPayloadText({
-        action: 'set_chat_avatar',
-        result: preflight.result,
-      }))
+    if (preflight.result.status !== "ok") {
+      return toolTextResult(
+        true,
+        safeToolPayloadText({
+          action: "set_chat_avatar",
+          result: preflight.result,
+        }),
+      );
     }
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
       captureRequestId: input.toolCallId,
-      captureScope: 'group-avatar',
+      captureScope: "group-avatar",
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedToolContext: input.hostedToolContext,
@@ -5192,458 +5315,398 @@ async function executeGroupTool(input: {
       nextUsageOrdinal: input.nextUsageOrdinal,
       request: input.request,
       vaultRoot: input.vaultRoot,
-    })
+    });
     if (!prepared.rpcSuccess) {
       return {
         rpcResult: {
-          contentItems: [{ text: prepared.rpcText, type: 'inputText' }],
+          contentItems: [{ text: prepared.rpcText, type: "inputText" }],
           success: false,
         },
         usageDraft: prepared.usageDraft ?? null,
-      }
+      };
     }
-    request = prepared.request
-    usageDraft = prepared.usageDraft ?? null
+    request = prepared.request;
+    usageDraft = prepared.usageDraft ?? null;
     generatedAvatarCapture = prepared.savedImageRef
       ? {
           savedCaptureId: prepared.savedCaptureId ?? null,
           savedImageRef: prepared.savedImageRef,
         }
-      : null
-  } else if (input.request.action === 'ask') {
+      : null;
+  } else if (input.request.action === "ask") {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
-    if (userActionScope?.conversationScope !== 'direct') {
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
+    if (userActionScope?.conversationScope !== "direct") {
       return toolTextResult(
         false,
-        'group ask requires a fresh user request in a personal direct conversation',
-      )
+        "group ask requires a fresh user request in a personal direct conversation",
+      );
     }
-    const originAssistantInputId = userActionScope.acceptedInputIds.at(-1) ?? null
+    const originAssistantInputId =
+      userActionScope.acceptedInputIds.at(-1) ?? null;
     if (!originAssistantInputId) {
       return toolTextResult(
         false,
-        'group ask requires fresh user-sourced input for this turn',
-      )
+        "group ask requires fresh user-sourced input for this turn",
+      );
     }
     request = {
-      action: 'ask',
+      action: "ask",
       membershipId: input.request.membershipId,
       originAssistantInputId,
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
-    }
-  } else if (input.request.action === 'handoff') {
+    };
+  } else if (input.request.action === "handoff") {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
-    if (userActionScope?.conversationScope !== 'direct') {
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
+    if (userActionScope?.conversationScope !== "direct") {
       return toolTextResult(
         false,
-        'group handoff requires a fresh user request in a personal direct conversation',
-      )
+        "group handoff requires a fresh user request in a personal direct conversation",
+      );
     }
-    const originAssistantInputId = userActionScope.acceptedInputIds.at(-1) ?? null
+    const originAssistantInputId =
+      userActionScope.acceptedInputIds.at(-1) ?? null;
     if (!originAssistantInputId) {
       return toolTextResult(
         false,
-        'group handoff requires fresh user-sourced input for this turn',
-      )
+        "group handoff requires fresh user-sourced input for this turn",
+      );
     }
     request = {
-      action: 'handoff',
+      action: "handoff",
       context: input.request.context,
       membershipId: input.request.membershipId,
       originAssistantInputId,
-    }
-  } else if (input.request.action === 'ask_current_sender') {
+    };
+  } else if (input.request.action === "ask_current_sender") {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
     if (
-      userActionScope?.conversationScope !== 'group'
-      || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+      userActionScope?.conversationScope !== "group" ||
+      !userActionScope.acceptedInputIds.includes(input.request.messageRef)
     ) {
       return toolTextResult(
         false,
-        'current-sender request requires the selected accepted message in this group turn',
-      )
+        "current-sender request requires the selected accepted message in this group turn",
+      );
     }
     const decisionByMessageRef =
-      input.groupSharedReadTurnState?.currentSenderDecisionByMessageRef
+      input.groupSharedReadTurnState?.currentSenderDecisionByMessageRef;
     if (!decisionByMessageRef) {
       return toolTextResult(
         false,
-        'current-sender decision authority is unavailable for this turn',
-      )
+        "current-sender decision authority is unavailable for this turn",
+      );
     }
-    const decision = currentSenderTurnDecisionForGroupRequest(input.request)
-    const claim = decisionByMessageRef.get(input.request.messageRef)
+    const decision = currentSenderTurnDecisionForGroupRequest(input.request);
+    const claim = decisionByMessageRef.get(input.request.messageRef);
     if (!claim) {
       return toolTextResult(
         false,
-        'current-sender decision was not claimed at server request intake',
-      )
+        "current-sender decision was not claimed at server request intake",
+      );
     }
     if (claim.decision !== decision) {
       return toolTextResult(
         false,
-        'current-sender request conflicts with an earlier decision for this Message',
-      )
+        "current-sender request conflicts with an earlier decision for this Message",
+      );
     }
-    if (
-      input.request.audience === 'group'
-      && claim.groupNotice === null
-    ) {
+    if (input.request.audience === "group" && claim.groupNotice === null) {
       claim.groupNotice = sendCurrentSenderGroupNotice({
         deliveryContextOrdinal: input.deliveryContextOrdinal,
         messageRef: input.request.messageRef,
         progressDelivery: input.progressDelivery,
-      })
+      });
     }
-    if (input.request.audience === 'group') {
-      const previewSent = claim.groupNotice
-        ? await claim.groupNotice
-        : false
+    if (input.request.audience === "group") {
+      const previewSent = claim.groupNotice ? await claim.groupNotice : false;
       if (!previewSent) {
         return toolTextResult(
           false,
-          'group sharing is unavailable because the required advance notice could not be delivered',
-        )
+          "group sharing is unavailable because the required advance notice could not be delivered",
+        );
       }
-      currentSenderGroupPreviewSent = true
+      currentSenderGroupPreviewSent = true;
     }
     request = {
-      action: 'ask_current_sender',
+      action: "ask_current_sender",
       ...(input.request.audience === undefined
         ? {}
         : { audience: input.request.audience }),
       mode: input.request.mode,
       origin: {
         assistantInputId: input.request.messageRef,
-        kind: 'accepted_input',
+        kind: "accepted_input",
         sessionId: userActionScope.originSessionId,
       },
-    }
-  } else if (input.request.action === 'record_current_sender_daily_metric') {
-    const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
-    if (
-      userActionScope?.conversationScope !== 'group'
-      || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
-    ) {
-      return toolTextResult(
-        false,
-        'current-sender request requires the selected accepted message in this group turn',
-      )
-    }
-    request = {
-      action: 'record_current_sender_daily_metric',
-      dailyMetric: input.request.dailyMetric,
-      origin: {
-        assistantInputId: input.request.messageRef,
-        kind: 'accepted_input',
-        sessionId: userActionScope.originSessionId,
-      },
-    }
-  } else if (
-    input.request.action === 'record_current_sender_journal_fact'
-    || input.request.action === 'set_current_sender_journal_capture'
-  ) {
-    const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
-    if (
-      userActionScope?.conversationScope !== 'group'
-      || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
-    ) {
-      return toolTextResult(
-        false,
-        'current-sender Journal action requires the selected accepted message in this group turn',
-      )
-    }
-    request = input.request.action === 'record_current_sender_journal_fact'
-      ? {
-          action: input.request.action,
-          confidence: input.request.confidence,
-          journalFact: input.request.journalFact,
-          origin: {
-            assistantInputId: input.request.messageRef,
-            kind: 'accepted_input',
-            sessionId: userActionScope.originSessionId,
-          },
-          privateQuestion: input.request.privateQuestion,
-        }
-      : {
-          action: input.request.action,
-          enabled: input.request.enabled,
-          origin: {
-            assistantInputId: input.request.messageRef,
-            kind: 'accepted_input',
-            sessionId: userActionScope.originSessionId,
-          },
-          scope: input.request.scope,
-        }
-  } else if (input.request.action === 'set_journal_capture') {
-    const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
-    if (
-      userActionScope?.conversationScope !== 'direct'
-      || userActionScope.acceptedInputIds.length === 0
-    ) {
-      return toolTextResult(
-        false,
-        'Journal capture settings require fresh user input in a personal direct conversation',
-      )
-    }
-    request = input.request
-  } else if (input.request.action === 'ask_member') {
+    };
+  } else if (input.request.action === "ask_member") {
     if (!invocationScope) {
       return toolTextResult(
         false,
-        'member ask requires a trusted group input or scheduled automation occurrence',
-      )
+        "member ask requires a trusted group input or scheduled automation occurrence",
+      );
     }
     if (
-      invocationScope.origin.kind === 'accepted_input' &&
-      invocationScope.conversationScope !== 'group'
+      invocationScope.origin.kind === "accepted_input" &&
+      invocationScope.conversationScope !== "group"
     ) {
       return toolTextResult(
         false,
-        'interactive member ask requires a fresh request in the current group conversation',
-      )
+        "interactive member ask requires a fresh request in the current group conversation",
+      );
     }
     request = {
-      action: 'ask_member',
+      action: "ask_member",
       grantId: input.request.grantId,
       origin: invocationScope.origin,
       question: input.request.question,
-    }
+    };
   } else if (
-    input.request.action === 'post_disclosure_request'
-    || input.request.action === 'revoke_disclosure_grant'
+    input.request.action === "post_disclosure_request" ||
+    input.request.action === "revoke_disclosure_grant"
   ) {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
     const requiredConversationScope =
-      input.request.action === 'post_disclosure_request' ? 'group' : 'direct'
+      input.request.action === "post_disclosure_request" ? "group" : "direct";
     if (userActionScope?.conversationScope !== requiredConversationScope) {
       return toolTextResult(
         false,
-        input.request.action === 'post_disclosure_request'
-          ? 'disclosure requests require fresh user input in the current group conversation'
-          : 'personal membership and disclosure-grant actions require fresh user input in a personal direct conversation',
-      )
+        input.request.action === "post_disclosure_request"
+          ? "disclosure requests require fresh user input in the current group conversation"
+          : "personal membership and disclosure-grant actions require fresh user input in a personal direct conversation",
+      );
     }
     const originAssistantInputId =
       userActionScope.acceptedInputIds[
         userActionScope.acceptedInputIds.length - 1
-      ] ?? null
+      ] ?? null;
     if (!originAssistantInputId) {
       return toolTextResult(
         false,
-        input.request.action === 'post_disclosure_request'
-          ? 'disclosure requests require fresh user-sourced input for this turn'
-          : 'personal membership and disclosure-grant actions require fresh user-sourced input for this turn',
-      )
+        input.request.action === "post_disclosure_request"
+          ? "disclosure requests require fresh user-sourced input for this turn"
+          : "personal membership and disclosure-grant actions require fresh user-sourced input for this turn",
+      );
     }
-    request = input.request.action === 'post_disclosure_request'
-      ? {
-          ...input.request,
-          originAssistantInputId,
-        }
-      : input.request
-  } else if (input.request.action === 'create_signup_referral_link') {
+    request =
+      input.request.action === "post_disclosure_request"
+        ? {
+            ...input.request,
+            originAssistantInputId,
+          }
+        : input.request;
+  } else if (input.request.action === "create_signup_referral_link") {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
     if (!userActionScope || userActionScope.acceptedInputIds.length === 0) {
       return toolTextResult(
         false,
-        'signup referral links require a fresh explicit user request',
-      )
+        "signup referral links require a fresh explicit user request",
+      );
     }
-    if (userActionScope.conversationScope === 'direct') {
-      request = { action: 'create_signup_referral_link' }
-    } else if (userActionScope.conversationScope === 'group') {
-      const messageRef = input.request.messageRef
-      if (!messageRef || !userActionScope.acceptedInputIds.includes(messageRef)) {
+    if (userActionScope.conversationScope === "direct") {
+      request = { action: "create_signup_referral_link" };
+    } else if (userActionScope.conversationScope === "group") {
+      const messageRef = input.request.messageRef;
+      if (
+        !messageRef ||
+        !userActionScope.acceptedInputIds.includes(messageRef)
+      ) {
         return toolTextResult(
           false,
-          'group signup referral links require the exact accepted Message ref from the requesting participant',
-        )
+          "group signup referral links require the exact accepted Message ref from the requesting participant",
+        );
       }
       const participant = await authorizeDynamicToolParticipant({
         authorizer: input.authorizeAcceptedMessageTarget,
         deliveryContextOrdinal: input.deliveryContextOrdinal,
         messageRef,
-      })
+      });
       if (!participant) {
         return toolTextResult(
           false,
-          'group signup referral links require the exact accepted Message ref from the requesting participant',
-        )
+          "group signup referral links require the exact accepted Message ref from the requesting participant",
+        );
       }
       request = {
-        action: 'create_signup_referral_link',
+        action: "create_signup_referral_link",
         participant,
-      }
+      };
     } else {
       return toolTextResult(
         false,
-        'signup referral links require a verified direct or group request',
-      )
+        "signup referral links require a verified direct or group request",
+      );
     }
-  } else if (input.request.action === 'read_usage_referral') {
+  } else if (input.request.action === "read_usage_referral") {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
-    if (userActionScope?.conversationScope !== 'group') {
-      request = { action: 'read_usage_referral' }
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
+    if (userActionScope?.conversationScope !== "group") {
+      request = { action: "read_usage_referral" };
     } else {
-      const messageRef = input.request.messageRef
-      if (!messageRef || !userActionScope.acceptedInputIds.includes(messageRef)) {
+      const messageRef = input.request.messageRef;
+      if (
+        !messageRef ||
+        !userActionScope.acceptedInputIds.includes(messageRef)
+      ) {
         return toolTextResult(
           false,
-          'group usage options require the exact accepted Message ref from the requesting participant',
-        )
+          "group usage options require the exact accepted Message ref from the requesting participant",
+        );
       }
       const participant = await authorizeDynamicToolParticipant({
         authorizer: input.authorizeAcceptedMessageTarget,
         deliveryContextOrdinal: input.deliveryContextOrdinal,
         messageRef,
-      })
+      });
       if (!participant) {
         return toolTextResult(
           false,
-          'group usage options require the exact accepted Message ref from the requesting participant',
-        )
+          "group usage options require the exact accepted Message ref from the requesting participant",
+        );
       }
       request = {
-        action: 'read_usage_referral',
+        action: "read_usage_referral",
         participant,
-      }
+      };
     }
-  } else if (input.request.action === 'revoke_own_email_share') {
+  } else if (input.request.action === "revoke_own_email_share") {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
-    if (userActionScope?.conversationScope !== 'group') {
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
+    if (userActionScope?.conversationScope !== "group") {
       return toolTextResult(
         false,
-        'email-share revocation requires fresh user input in the current group conversation',
-      )
+        "email-share revocation requires fresh user input in the current group conversation",
+      );
     }
     const participant = await authorizeDynamicToolParticipant({
       authorizer: input.authorizeAcceptedMessageTarget,
       deliveryContextOrdinal: input.deliveryContextOrdinal,
       messageRef: input.request.messageRef,
-    })
+    });
     if (!participant) {
       return toolTextResult(
         false,
-        'email-share revocation requires the exact accepted Message ref from the requesting group participant',
-      )
+        "email-share revocation requires the exact accepted Message ref from the requesting group participant",
+      );
     }
     request = {
-      action: 'revoke_own_email_share',
+      action: "revoke_own_email_share",
       participant,
-    }
+    };
   } else if (
-    input.request.action === 'prepare_next_group'
-    || input.request.action === 'read_next_group'
-    || input.request.action === 'cancel_next_group'
+    input.request.action === "prepare_next_group" ||
+    input.request.action === "read_next_group" ||
+    input.request.action === "cancel_next_group"
   ) {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
     const deliveryContext =
-      input.hostedToolContext?.currentHostedDeliveryContext() ?? null
+      input.hostedToolContext?.currentHostedDeliveryContext() ?? null;
     if (
-      userActionScope?.conversationScope !== 'direct'
-      || deliveryContext?.returnContactKind !== 'text'
-      || userActionScope.acceptedInputIds.length === 0
+      userActionScope?.conversationScope !== "direct" ||
+      deliveryContext?.returnContactKind !== "text" ||
+      userActionScope.acceptedInputIds.length === 0
     ) {
       return toolTextResult(
         false,
-        'next-group preparation requires fresh user input in a private text conversation',
-      )
+        "next-group preparation requires fresh user input in a private text conversation",
+      );
     }
-    request = input.request
+    request = input.request;
   } else if (
-    input.request.action === 'arm_usage_referral'
-    || input.request.action === 'cancel_usage_referral'
+    input.request.action === "arm_usage_referral" ||
+    input.request.action === "cancel_usage_referral"
   ) {
     const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
     const originAssistantInputId =
       userActionScope?.acceptedInputIds[
         userActionScope.acceptedInputIds.length - 1
-      ] ?? null
+      ] ?? null;
     if (!originAssistantInputId) {
       return toolTextResult(
         false,
-        'usage referral changes require fresh user-sourced input for this turn',
-      )
+        "usage referral changes require fresh user-sourced input for this turn",
+      );
     }
-    request = input.request
+    request = input.request;
+  } else if (
+    isGroupCurrentSenderJournalRequest(input.request) ||
+    input.request.action === "set_journal_capture"
+  ) {
+    throw new TypeError(
+      "Group Journal request resolution did not return a request.",
+    );
   } else {
-    request = input.request
+    request = input.request;
   }
 
   try {
     const result = input.abortSignal
       ? await groupTool.request(request, { signal: input.abortSignal })
-      : await groupTool.request(request)
+      : await groupTool.request(request);
     let modelResult:
       | ReturnType<typeof groupAccessOfferModelResult>
-      | ReturnType<typeof groupToolModelResult>
-    if (input.request.action === 'offer_access') {
+      | ReturnType<typeof groupToolModelResult>;
+    if (input.request.action === "offer_access") {
       if (
-        result.action !== 'create_join_link'
-        && result.action !== 'post_join_offer'
+        result.action !== "create_join_link" &&
+        result.action !== "post_join_offer"
       ) {
-        return toolTextResult(false, 'group tool request failed')
+        return toolTextResult(false, "group tool request failed");
       }
-      modelResult = groupAccessOfferModelResult(result)
+      modelResult = groupAccessOfferModelResult(result);
     } else {
-      modelResult = groupToolModelResult(result)
+      modelResult = groupToolModelResult(result);
     }
     const payload = generatedAvatarCapture
       ? { ...modelResult, generatedImage: generatedAvatarCapture }
-      : modelResult
+      : modelResult;
     const currentSenderAccepted =
-      input.request.action === 'ask_current_sender'
-      && result.action === 'ask_current_sender'
-      && result.result.status === 'accepted'
+      input.request.action === "ask_current_sender" &&
+      result.action === "ask_current_sender" &&
+      result.result.status === "accepted";
     return {
       ...toolTextResult(true, safeToolPayloadText(payload)),
       ...(currentSenderAccepted
         ? {
             finalActionPatch: {
-              kind: 'none' as const,
-              owner: 'current-sender-ask' as const,
+              kind: "none" as const,
+              owner: "current-sender-ask" as const,
             },
           }
         : {}),
-      ...(input.request.action === 'ask_current_sender'
-        && currentSenderGroupPreviewSent
+      ...(input.request.action === "ask_current_sender" &&
+      currentSenderGroupPreviewSent
         ? { externallyVisibleOutput: true }
         : {}),
       ...(usageDraft ? { usageDraft } : {}),
-    }
+    };
   } catch (error) {
     const runtimeIssueInput = buildGroupToolFailureRuntimeIssueInput({
       action: input.request.action,
       callerSignalAborted: input.abortSignal?.aborted === true,
       error,
-    })
+    });
     return {
       ...toolTextResult(
         false,
-        input.request.action === 'ask'
+        input.request.action === "ask"
           ? buildGroupAskRequestFailureText(error)
-          : 'group tool request failed',
+          : "group tool request failed",
       ),
       ...(currentSenderGroupPreviewSent
         ? { externallyVisibleOutput: true }
         : {}),
       ...(runtimeIssueInput ? { runtimeIssueInputs: [runtimeIssueInput] } : {}),
       ...(usageDraft ? { usageDraft } : {}),
-    }
+    };
   }
 }
 
@@ -7363,22 +7426,26 @@ function parseGroupArguments(
   toolName: GroupParserToolName,
 ):
   | {
-      request: MurphGroupToolRequest
-      ok: true
+      request: MurphGroupToolRequest;
+      ok: true;
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const qualifiedToolName = `murph.${toolName}`
-  const parser = toolName === MURPH_GROUP_TOOL_NAME
-    ? groupArgumentsSchema
-    : groupArgumentsSchema.refine((request) => {
-        const acceptedActions: readonly GroupArguments['action'][] =
-          MURPH_GROUP_TOOL_FAMILY_ACTIONS[toolName]
-        return acceptedActions.includes(request.action)
-      }, {
-        message: 'Action is not accepted by this group tool family.',
-        path: ['action'],
-      })
-  const parsed = parser.safeParse(value)
+  const qualifiedToolName = `murph.${toolName}`;
+  const parser =
+    toolName === MURPH_GROUP_TOOL_NAME
+      ? groupArgumentsSchema
+      : groupArgumentsSchema.refine(
+          (request) => {
+            const acceptedActions: readonly GroupArguments["action"][] =
+              MURPH_GROUP_TOOL_FAMILY_ACTIONS[toolName];
+            return acceptedActions.includes(request.action);
+          },
+          {
+            message: "Action is not accepted by this group tool family.",
+            path: ["action"],
+          },
+        );
+  const parsed = parser.safeParse(value);
   if (!parsed.success) {
     return {
       ok: false,
@@ -7389,104 +7456,43 @@ function parseGroupArguments(
         schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
         toolName: qualifiedToolName,
       }),
-    }
+    };
   }
   if (
-    parsed.data.action === 'ask'
-    || parsed.data.action === 'handoff'
-    || parsed.data.action === 'ask_member'
-    || parsed.data.action === 'post_disclosure_request'
-    || parsed.data.action === 'revoke_disclosure_grant'
-    || parsed.data.action === 'arm_usage_referral'
-    || parsed.data.action === 'cancel_usage_referral'
+    parsed.data.action === "ask" ||
+    parsed.data.action === "handoff" ||
+    parsed.data.action === "ask_member" ||
+    parsed.data.action === "post_disclosure_request" ||
+    parsed.data.action === "revoke_disclosure_grant" ||
+    parsed.data.action === "arm_usage_referral" ||
+    parsed.data.action === "cancel_usage_referral"
   ) {
-    return { ok: true, request: parsed.data }
+    return { ok: true, request: parsed.data };
   }
-  if (
-    parsed.data.action === 'ask_current_sender'
-    || parsed.data.action === 'ask_current_sender_privately'
-    || parsed.data.action === 'clarify_current_sender'
-    || parsed.data.action === 'continue_current_sender_in_group'
-    || parsed.data.action === 'continue_current_sender_privately'
-    || parsed.data.action === 'message_current_sender'
-  ) {
-    const decision = readCurrentSenderToolDecision(parsed.data.action)
+  const currentSenderRequest = parseCurrentSenderGroupRequest(parsed.data);
+  if (currentSenderRequest) {
+    return { ok: true, request: currentSenderRequest };
+  }
+  if (parsed.data.action === "read_shared") {
     return {
       ok: true,
       request: {
-        action: 'ask_current_sender',
-        ...decision,
-        messageRef: parsed.data.message_ref,
-      },
-    }
-  }
-  if (parsed.data.action === 'record_current_sender_daily_metric') {
-    return {
-      ok: true,
-      request: {
-        action: parsed.data.action,
-        dailyMetric: {
-          date: parsed.data.date,
-          metric: parsed.data.metric,
-          unit: parsed.data.unit,
-          value: parsed.data.value,
-        },
-        messageRef: parsed.data.message_ref,
-      },
-    }
-  }
-  if (parsed.data.action === 'record_current_sender_journal_fact') {
-    return {
-      ok: true,
-      request: {
-        action: parsed.data.action,
-        confidence: parsed.data.confidence,
-        journalFact: {
-          date: parsed.data.date,
-          factIndex: parsed.data.factIndex,
-          note: parsed.data.note,
-          noteType: parsed.data.noteType,
-          title: parsed.data.title,
-        },
-        messageRef: parsed.data.message_ref,
-        privateQuestion: parsed.data.privateQuestion,
-      },
-    }
-  }
-  if (parsed.data.action === 'set_current_sender_journal_capture') {
-    return {
-      ok: true,
-      request: {
-        action: parsed.data.action,
-        enabled: parsed.data.enabled,
-        messageRef: parsed.data.message_ref,
-        scope: parsed.data.scope,
-      },
-    }
-  }
-  if (parsed.data.action === 'set_journal_capture') {
-    return { ok: true, request: parsed.data }
-  }
-  if (parsed.data.action === 'read_shared') {
-    return {
-      ok: true,
-      request: {
-        action: 'read_shared',
+        action: "read_shared",
         ...(parsed.data.audience === undefined
           ? {}
           : { audience: parsed.data.audience }),
         projectionScopes: parsed.data.projectionScopes,
       },
-    }
+    };
   }
-  if (parsed.data.action === 'send_email') {
-    return { ok: true, request: parsed.data }
+  if (parsed.data.action === "send_email") {
+    return { ok: true, request: parsed.data };
   }
-  if (parsed.data.action === 'offer_access') {
+  if (parsed.data.action === "offer_access") {
     return {
       ok: true,
       request: {
-        action: 'offer_access',
+        action: "offer_access",
         ...(parsed.data.displayName === undefined
           ? {}
           : { displayName: parsed.data.displayName }),
@@ -7500,55 +7506,55 @@ function parseGroupArguments(
           ? {}
           : { standaloneLink: parsed.data.standaloneLink }),
       },
-    }
+    };
   }
-  if (parsed.data.action === 'update_display_name') {
+  if (parsed.data.action === "update_display_name") {
     return {
       ok: true,
       request: {
-        action: 'update_display_name',
+        action: "update_display_name",
         updateDisplayName: {
           displayName: parsed.data.displayName,
         },
       },
-    }
+    };
   }
-  if (parsed.data.action === 'leave_membership') {
+  if (parsed.data.action === "leave_membership") {
     return {
       ok: true,
       request: {
-        action: 'leave_membership',
+        action: "leave_membership",
         membershipId: parsed.data.membershipId,
       },
-    }
+    };
   }
-  if (parsed.data.action === 'share_contact_card') {
+  if (parsed.data.action === "share_contact_card") {
     if (!parsed.data.avatarPrompt) {
-      return { ok: true, request: { action: 'share_contact_card' } }
+      return { ok: true, request: { action: "share_contact_card" } };
     }
     return {
       ok: true,
       request: {
-        action: 'share_contact_card',
+        action: "share_contact_card",
         avatar: {
-          source: 'generate',
+          source: "generate",
           // One fixed configuration. The card has no recipient-visible alt
           // channel, and photo quality is not a member-visible choice, so the
           // schema asks the model only for the picture description.
           args: {
             alt: null,
-            outputFormat: 'jpeg',
+            outputFormat: "jpeg",
             prompt: parsed.data.avatarPrompt,
-            quality: 'medium',
+            quality: "medium",
             referenceImageRefs: [],
-            size: '1024x1024',
+            size: "1024x1024",
           },
         },
       },
-    }
+    };
   }
-  if (parsed.data.action === 'set_chat_avatar') {
-    if (parsed.data.avatarSource === 'generate') {
+  if (parsed.data.action === "set_chat_avatar") {
+    if (parsed.data.avatarSource === "generate") {
       if (!parsed.data.prompt) {
         return {
           ok: false,
@@ -7556,9 +7562,10 @@ function parseGroupArguments(
             error: new z.ZodError([
               {
                 code: z.ZodIssueCode.custom,
-                message: 'set_chat_avatar with avatarSource="generate" requires prompt',
-                params: { murphExpectedShape: 'generated_avatar_prompt' },
-                path: ['prompt'],
+                message:
+                  'set_chat_avatar with avatarSource="generate" requires prompt',
+                params: { murphExpectedShape: "generated_avatar_prompt" },
+                path: ["prompt"],
               },
             ]),
             rawInput: value,
@@ -7566,14 +7573,14 @@ function parseGroupArguments(
             schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
             toolName: qualifiedToolName,
           }),
-        }
+        };
       }
       return {
         ok: true,
         request: {
-          action: 'set_chat_avatar',
+          action: "set_chat_avatar",
           avatar: {
-            source: 'generate',
+            source: "generate",
             args: {
               alt: parsed.data.alt,
               outputFormat: parsed.data.outputFormat,
@@ -7584,7 +7591,7 @@ function parseGroupArguments(
             },
           },
         },
-      }
+      };
     }
     if (!parsed.data.imageRef) {
       return {
@@ -7593,9 +7600,10 @@ function parseGroupArguments(
           error: new z.ZodError([
             {
               code: z.ZodIssueCode.custom,
-              message: 'set_chat_avatar with avatarSource="image_ref" requires imageRef',
-              params: { murphExpectedShape: 'existing_avatar_image_ref' },
-              path: ['imageRef'],
+              message:
+                'set_chat_avatar with avatarSource="image_ref" requires imageRef',
+              params: { murphExpectedShape: "existing_avatar_image_ref" },
+              path: ["imageRef"],
             },
           ]),
           rawInput: value,
@@ -7603,21 +7611,21 @@ function parseGroupArguments(
           schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
           toolName: qualifiedToolName,
         }),
-      }
+      };
     }
     return {
       ok: true,
       request: {
-        action: 'set_chat_avatar',
+        action: "set_chat_avatar",
         avatar: {
           alt: parsed.data.alt,
           imageRef: parsed.data.imageRef,
-          source: 'image_ref',
+          source: "image_ref",
         },
       },
-    }
+    };
   }
-  if (parsed.data.action === 'prepare_next_group') {
+  if (parsed.data.action === "prepare_next_group") {
     return {
       ok: true,
       request: {
@@ -7626,22 +7634,22 @@ function parseGroupArguments(
           ? {}
           : { setup: parsed.data.setup }),
       },
-    }
+    };
   }
   if (
-    parsed.data.action === 'read_next_group'
-    || parsed.data.action === 'cancel_next_group'
-    || parsed.data.action === 'read_chat_name'
-    || parsed.data.action === 'read_usage'
-    || parsed.data.action === 'read_chat_participants'
+    parsed.data.action === "read_next_group" ||
+    parsed.data.action === "cancel_next_group" ||
+    parsed.data.action === "read_chat_name" ||
+    parsed.data.action === "read_usage" ||
+    parsed.data.action === "read_chat_participants"
   ) {
-    return { ok: true, request: { action: parsed.data.action } }
+    return { ok: true, request: { action: parsed.data.action } };
   }
-  if (parsed.data.action === 'list_memberships') {
+  if (parsed.data.action === "list_memberships") {
     return {
       ok: true,
       request: {
-        action: 'list_memberships',
+        action: "list_memberships",
         ...(parsed.data.cursor === undefined
           ? {}
           : { cursor: parsed.data.cursor }),
@@ -7649,63 +7657,119 @@ function parseGroupArguments(
           ? {}
           : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
       },
-    }
+    };
   }
-  if (parsed.data.action === 'create_signup_referral_link') {
+  if (parsed.data.action === "create_signup_referral_link") {
     return {
       ok: true,
       request: {
-        action: 'create_signup_referral_link',
+        action: "create_signup_referral_link",
         ...(parsed.data.message_ref !== undefined
           ? { messageRef: parsed.data.message_ref }
           : {}),
       },
-    }
+    };
   }
-  if (parsed.data.action === 'read_usage_referral') {
+  if (parsed.data.action === "read_usage_referral") {
     return {
       ok: true,
       request: {
-        action: 'read_usage_referral',
+        action: "read_usage_referral",
         ...(parsed.data.message_ref !== undefined
           ? { messageRef: parsed.data.message_ref }
           : {}),
       },
-    }
+    };
   }
-  if (parsed.data.action === 'revoke_own_email_share') {
+  if (parsed.data.action === "revoke_own_email_share") {
     return {
       ok: true,
       request: {
-        action: 'revoke_own_email_share',
+        action: "revoke_own_email_share",
         messageRef: parsed.data.message_ref,
       },
-    }
+    };
   }
-  if (parsed.data.action === 'read_current') {
+  if (parsed.data.action === "read_current") {
     return {
       ok: true,
       request: {
-        action: 'read_current',
+        action: "read_current",
         ...(parsed.data.disclosureGrantCursor === undefined
           ? {}
           : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
       },
-    }
+    };
   }
   return {
     ok: false,
     validationDigest: buildDynamicToolValidationDigest({
-      error: new z.ZodError([{
-        code: z.ZodIssueCode.custom,
-        message: 'Group action has no explicit normalization path.',
-        path: ['action'],
-      }]),
+      error: new z.ZodError([
+        {
+          code: z.ZodIssueCode.custom,
+          message: "Group action has no explicit normalization path.",
+          path: ["action"],
+        },
+      ]),
       rawInput: value,
       schemaName: `${qualifiedToolName}.input`,
       schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
       toolName: qualifiedToolName,
     }),
+  };
+}
+
+function parseCurrentSenderGroupRequest(
+  data: GroupArguments,
+): MurphGroupToolRequest | null {
+  switch (data.action) {
+    case "ask_current_sender":
+    case "ask_current_sender_privately":
+    case "clarify_current_sender":
+    case "continue_current_sender_in_group":
+    case "continue_current_sender_privately":
+    case "message_current_sender":
+      return {
+        action: "ask_current_sender",
+        ...readCurrentSenderToolDecision(data.action),
+        messageRef: data.message_ref,
+      };
+    case "record_current_sender_daily_metric":
+      return {
+        action: data.action,
+        dailyMetric: {
+          date: data.date,
+          metric: data.metric,
+          unit: data.unit,
+          value: data.value,
+        },
+        messageRef: data.message_ref,
+      };
+    case "record_current_sender_journal_fact":
+      return {
+        action: data.action,
+        confidence: data.confidence,
+        journalFact: {
+          date: data.date,
+          factIndex: data.factIndex,
+          note: data.note,
+          noteType: data.noteType,
+          title: data.title,
+        },
+        messageRef: data.message_ref,
+        privateQuestion: data.privateQuestion,
+      };
+    case "set_current_sender_journal_capture":
+      return {
+        action: data.action,
+        enabled: data.enabled,
+        messageRef: data.message_ref,
+        scope: data.scope,
+      };
+    case "set_journal_capture":
+      return data;
+    default:
+      return null;
   }
 }
 

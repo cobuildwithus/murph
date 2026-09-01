@@ -325,7 +325,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   HostedRuntimeGroupToolAccessClassification
 >;
 
-export async function handleHostedRuntimeGroupTool(input: {
+type HostedRuntimeGroupToolHandlerInput = {
   includeMembershipAvailability?: boolean;
   includeParticipantRosters?: boolean;
   logger?: Pick<Console, "warn">;
@@ -341,7 +341,124 @@ export async function handleHostedRuntimeGroupTool(input: {
     expectedUserId: string;
     mailboxItemId: string;
   }) => Promise<void>;
-}): Promise<HostedRuntimeGroupToolResponse> {
+};
+
+type HostedRuntimeGroupJournalToolRequest = Extract<
+  HostedRuntimeGroupToolRequest,
+  {
+    action:
+      | "record_current_sender_daily_metric"
+      | "record_current_sender_journal_fact"
+      | "set_current_sender_journal_capture"
+      | "set_journal_capture";
+  }
+>;
+
+function isHostedRuntimeGroupJournalToolRequest(
+  request: HostedRuntimeGroupToolRequest,
+): request is HostedRuntimeGroupJournalToolRequest {
+  return new Set<HostedRuntimeGroupToolAction>([
+    "record_current_sender_daily_metric",
+    "record_current_sender_journal_fact",
+    "set_current_sender_journal_capture",
+    "set_journal_capture",
+  ]).has(request.action);
+}
+
+function handleHostedRuntimeGroupJournalTool(
+  input: HostedRuntimeGroupToolHandlerInput,
+): Promise<HostedRuntimeGroupToolResponse> | null {
+  if (input.request.action === "record_current_sender_daily_metric") {
+    return recordHostedRuntimeGroupDailyMetric(input);
+  }
+  if (input.request.action === "record_current_sender_journal_fact") {
+    return recordHostedRuntimeGroupJournalFact(input);
+  }
+  if (input.request.action === "set_current_sender_journal_capture") {
+    return setHostedGroupCurrentSenderJournalCapture({
+      enabled: input.request.enabled,
+      groupRuntimeMemberId: input.memberId,
+      origin: input.request.origin,
+      scope: input.request.scope,
+    }).then((admission) => ({
+      action: "set_current_sender_journal_capture",
+      result: admission.result,
+    }));
+  }
+  if (input.request.action === "set_journal_capture") {
+    return setHostedMemberGroupJournalCapture({
+      enabled: input.request.enabled,
+      memberId: input.memberId,
+    }).then((result) => ({ action: "set_journal_capture", result }));
+  }
+  return null;
+}
+
+async function recordHostedRuntimeGroupDailyMetric(
+  input: HostedRuntimeGroupToolHandlerInput,
+): Promise<HostedRuntimeGroupToolResponse> {
+  if (input.request.action !== "record_current_sender_daily_metric") {
+    throw new TypeError("Expected a group daily metric request.");
+  }
+  const admission = await recordHostedGroupCurrentSenderDailyMetric({
+    dailyMetric: input.request.dailyMetric,
+    groupRuntimeMemberId: input.memberId,
+    origin: input.request.origin,
+  });
+  if (admission.mailboxWake) {
+    try {
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
+    } catch (error) {
+      (input.logger ?? console).warn(
+        "Hosted member-reported daily metric handoff failed; the mailbox recovery sweep will retry it.",
+        sanitizeHostedOnboardingStructuredLogDetails({
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "post_commit_handoff_failed",
+        }),
+      );
+    }
+  }
+  return {
+    action: "record_current_sender_daily_metric",
+    result: admission.result,
+  };
+}
+
+async function recordHostedRuntimeGroupJournalFact(
+  input: HostedRuntimeGroupToolHandlerInput,
+): Promise<HostedRuntimeGroupToolResponse> {
+  if (input.request.action !== "record_current_sender_journal_fact") {
+    throw new TypeError("Expected a group Journal fact request.");
+  }
+  const admission = await recordHostedGroupCurrentSenderJournalFact({
+    confidence: input.request.confidence,
+    groupRuntimeMemberId: input.memberId,
+    journalFact: input.request.journalFact,
+    origin: input.request.origin,
+    privateQuestion: input.request.privateQuestion,
+  });
+  if (admission.mailboxWake) {
+    try {
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
+    } catch (error) {
+      (input.logger ?? console).warn(
+        "Hosted group Journal handoff failed; the mailbox recovery sweep will retry it.",
+        sanitizeHostedOnboardingStructuredLogDetails({
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "post_commit_handoff_failed",
+        }),
+      );
+    }
+  }
+  return {
+    action: "record_current_sender_journal_fact",
+    result: admission.result,
+  };
+}
+
+export async function handleHostedRuntimeGroupTool(
+  input: HostedRuntimeGroupToolHandlerInput,
+): Promise<HostedRuntimeGroupToolResponse> {
   if (input.request.action === "ask") {
     const admission = await requestHostedGroupAssistantAsk({
       memberId: input.memberId,
@@ -384,78 +501,9 @@ export async function handleHostedRuntimeGroupTool(input: {
     return { action: "ask_current_sender", result: admission.result };
   }
 
-  if (input.request.action === "record_current_sender_daily_metric") {
-    const admission = await recordHostedGroupCurrentSenderDailyMetric({
-      dailyMetric: input.request.dailyMetric,
-      groupRuntimeMemberId: input.memberId,
-      origin: input.request.origin,
-    });
-    if (admission.mailboxWake) {
-      try {
-        await input.scheduleMailboxWake?.(admission.mailboxWake);
-      } catch (error) {
-        (input.logger ?? console).warn(
-          "Hosted member-reported daily metric handoff failed; the mailbox recovery sweep will retry it.",
-          {
-            ...sanitizeHostedOnboardingStructuredLogDetails({
-              errorName: deriveHostedOnboardingTimingErrorName(error),
-              outcome: "post_commit_handoff_failed",
-            }),
-          },
-        );
-      }
-    }
-    return {
-      action: "record_current_sender_daily_metric",
-      result: admission.result,
-    };
-  }
-  if (input.request.action === "record_current_sender_journal_fact") {
-    const admission = await recordHostedGroupCurrentSenderJournalFact({
-      confidence: input.request.confidence,
-      groupRuntimeMemberId: input.memberId,
-      journalFact: input.request.journalFact,
-      origin: input.request.origin,
-      privateQuestion: input.request.privateQuestion,
-    });
-    if (admission.mailboxWake) {
-      try {
-        await input.scheduleMailboxWake?.(admission.mailboxWake);
-      } catch (error) {
-        (input.logger ?? console).warn(
-          "Hosted group Journal handoff failed; the mailbox recovery sweep will retry it.",
-          sanitizeHostedOnboardingStructuredLogDetails({
-            errorName: deriveHostedOnboardingTimingErrorName(error),
-            outcome: "post_commit_handoff_failed",
-          }),
-        );
-      }
-    }
-    return {
-      action: "record_current_sender_journal_fact",
-      result: admission.result,
-    };
-  }
-  if (input.request.action === "set_current_sender_journal_capture") {
-    const admission = await setHostedGroupCurrentSenderJournalCapture({
-      enabled: input.request.enabled,
-      groupRuntimeMemberId: input.memberId,
-      origin: input.request.origin,
-      scope: input.request.scope,
-    });
-    return {
-      action: "set_current_sender_journal_capture",
-      result: admission.result,
-    };
-  }
-  if (input.request.action === "set_journal_capture") {
-    return {
-      action: "set_journal_capture",
-      result: await setHostedMemberGroupJournalCapture({
-        enabled: input.request.enabled,
-        memberId: input.memberId,
-      }),
-    };
+  const journalResponse = handleHostedRuntimeGroupJournalTool(input);
+  if (journalResponse) {
+    return await journalResponse;
   }
   if (input.request.action === "ask_member") {
     const admission = await requestHostedGroupMemberAssistantAsk({
@@ -527,9 +575,9 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (
-    input.request.action === "prepare_next_group"
-    || input.request.action === "read_next_group"
-    || input.request.action === "cancel_next_group"
+    input.request.action === "prepare_next_group" ||
+    input.request.action === "read_next_group" ||
+    input.request.action === "cancel_next_group"
   ) {
     return handleHostedRuntimePendingGroupSetup({
       memberId: input.memberId,
@@ -674,9 +722,9 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (
-    input.request.action === "arm_usage_referral"
-    || input.request.action === "cancel_usage_referral"
-    || input.request.action === "read_usage_referral"
+    input.request.action === "arm_usage_referral" ||
+    input.request.action === "cancel_usage_referral" ||
+    input.request.action === "read_usage_referral"
   ) {
     return handleHostedUsageReferralGroupTool({
       memberId: input.memberId,
@@ -684,7 +732,13 @@ export async function handleHostedRuntimeGroupTool(input: {
     });
   }
 
-  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
+  if (isHostedRuntimeGroupJournalToolRequest(input.request)) {
+    throw new TypeError(
+      "Group Journal request resolution did not return a response.",
+    );
+  }
+
+  if (!(await hasHostedRuntimeActiveAccess(input.memberId))) {
     return {
       action: "read_current",
       result: {
@@ -719,15 +773,13 @@ export async function handleHostedRuntimeGroupTool(input: {
     action: "read_current",
     result: group
       ? {
-          disclosureGrantsTruncated:
-            disclosureGrantPage?.truncated ?? false,
+          disclosureGrantsTruncated: disclosureGrantPage?.truncated ?? false,
           status: "ok",
           group: toHostedRuntimeGroupSummary(
             group,
             disclosureGrantPage?.grants ?? [],
           ),
-          nextDisclosureGrantCursor:
-            disclosureGrantPage?.nextCursor ?? null,
+          nextDisclosureGrantCursor: disclosureGrantPage?.nextCursor ?? null,
         }
       : { status: "none", group: null },
   };

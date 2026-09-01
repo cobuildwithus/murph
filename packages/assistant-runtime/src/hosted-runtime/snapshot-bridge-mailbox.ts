@@ -37,6 +37,14 @@ type HostedWorkspaceRuntimeBridgeImportItemInput =
   Parameters<HostedWorkspaceRuntimeBridgeImportItem>[0];
 type HostedWorkspaceRuntimeBridgeImportItemContext =
   Parameters<HostedWorkspaceRuntimeBridgeImportItem>[1];
+type HostedWorkspaceBridgeMailboxImportInput = {
+  importConversationItem: HostedWorkspaceRuntimeBridgeImportItem;
+  item: HostedWorkspaceRuntimeBridgeImportItemInput;
+  context?: HostedWorkspaceRuntimeBridgeImportItemContext;
+  decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
+  runtime: HostedRuntimeBridgeNormalizedRuntime;
+  vaultRoot: string;
+};
 type HostedRuntimeBridgeNormalizedRuntime = Pick<
   NormalizedHostedAssistantRuntimeConfig,
   | "commitTimeoutMs"
@@ -142,24 +150,19 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
   };
 }
 
-async function importHostedWorkspaceBridgeMailboxItem(input: {
-  importConversationItem: HostedWorkspaceRuntimeBridgeImportItem;
-  item: HostedWorkspaceRuntimeBridgeImportItemInput;
-  context?: HostedWorkspaceRuntimeBridgeImportItemContext;
-  decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
-  runtime: HostedRuntimeBridgeNormalizedRuntime;
-  vaultRoot: string;
-}): ReturnType<HostedWorkspaceRuntimeBridgeImportItem> {
+async function importHostedWorkspaceBridgeMailboxItem(
+  input: HostedWorkspaceBridgeMailboxImportInput,
+): ReturnType<HostedWorkspaceRuntimeBridgeImportItem> {
   if (
-    input.item.route.action === "import-conversation-message"
-    && input.item.item.kind === "conversation.message"
+    input.item.route.action === "import-conversation-message" &&
+    input.item.item.kind === "conversation.message"
   ) {
     return await input.importConversationItem(input.item, input.context);
   }
 
   if (
-    input.item.route.action === "import-conversation-message"
-    || input.item.item.kind === "conversation.message"
+    input.item.route.action === "import-conversation-message" ||
+    input.item.item.kind === "conversation.message"
   ) {
     return {
       reasonCode: "cloudflare_bridge.unhandled_mailbox_route",
@@ -225,9 +228,9 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   }
 
   if (
-    input.context?.assistantAskRequestTargetKind
-    && wake.kind === "assistant.ask.requested"
-    && wake.ask.target.kind !== input.context.assistantAskRequestTargetKind
+    input.context?.assistantAskRequestTargetKind &&
+    wake.kind === "assistant.ask.requested" &&
+    wake.ask.target.kind !== input.context.assistantAskRequestTargetKind
   ) {
     return {
       reasonCode: "assistant_ask.target_not_admitted",
@@ -236,8 +239,8 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   }
 
   if (
-    input.item.route.action === "import-vault-share-delivery"
-    || wake.kind === "vault-share.delivery"
+    input.item.route.action === "import-vault-share-delivery" ||
+    wake.kind === "vault-share.delivery"
   ) {
     return {
       reasonCode: "payload.decode_mismatch",
@@ -247,8 +250,8 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   }
 
   if (
-    input.item.route.action === "import-vault-share-revoke"
-    || wake.kind === "vault-share.revoke"
+    input.item.route.action === "import-vault-share-revoke" ||
+    wake.kind === "vault-share.revoke"
   ) {
     return {
       reasonCode: "payload.decode_mismatch",
@@ -257,67 +260,17 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     };
   }
 
-  if (
-    input.item.route.action === "import-group-journal-fact"
-    && wake.kind === "journal.group-fact.recorded"
-  ) {
-    const outcome = await importHostedGroupJournalFactMailboxItem({
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
-    if (outcome.status !== "imported") return outcome;
-    return await enqueueHostedSystemMailboxItem({
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
+  const healthDataOutcome = await importHostedHealthDataMailboxItem(
+    input,
+    wake,
+  );
+  if (healthDataOutcome) {
+    return healthDataOutcome;
   }
 
   if (
-    input.item.route.action === "import-group-journal-fact"
-    || wake.kind === "journal.group-fact.recorded"
-  ) {
-    return {
-      reasonCode: "payload.decode_mismatch",
-      retryable: false,
-      status: "blocked",
-    };
-  }
-
-  if (
-    input.item.route.action === "import-reported-daily-metric"
-    && wake.kind === "health.daily-metric.reported"
-  ) {
-    const outcome = await importHostedReportedDailyMetricMailboxItem({
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
-    if (outcome.status !== "imported") {
-      return outcome;
-    }
-    return await enqueueHostedSystemMailboxItem({
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
-  }
-
-  if (
-    input.item.route.action === "import-reported-daily-metric"
-    || wake.kind === "health.daily-metric.reported"
-  ) {
-    return {
-      reasonCode: "payload.decode_mismatch",
-      retryable: false,
-      status: "blocked",
-    };
-  }
-
-  if (
-    input.item.route.action === "import-meal-photo"
-    && wake.kind === "meal-photo.captured"
+    input.item.route.action === "import-meal-photo" &&
+    wake.kind === "meal-photo.captured"
   ) {
     return await importHostedMealPhotoCapturedMailboxItem({
       effectsPort: input.runtime.platform.effectsPort,
@@ -328,8 +281,8 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   }
 
   if (
-    input.item.route.action === "import-meal-photo"
-    || wake.kind === "meal-photo.captured"
+    input.item.route.action === "import-meal-photo" ||
+    wake.kind === "meal-photo.captured"
   ) {
     return {
       reasonCode: "payload.decode_mismatch",
@@ -343,6 +296,65 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake,
   });
+}
+
+async function importHostedHealthDataMailboxItem(
+  input: HostedWorkspaceBridgeMailboxImportInput,
+  wake: HostedExecutionWake,
+): Promise<Awaited<ReturnType<HostedWorkspaceRuntimeBridgeImportItem>> | null> {
+  if (
+    input.item.route.action === "import-group-journal-fact" &&
+    wake.kind === "journal.group-fact.recorded"
+  ) {
+    const outcome = await importHostedGroupJournalFactMailboxItem({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+    if (outcome.status !== "imported") return outcome;
+    return await enqueueHostedSystemMailboxItem({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+  }
+  if (
+    input.item.route.action === "import-group-journal-fact" ||
+    wake.kind === "journal.group-fact.recorded"
+  ) {
+    return blockedMailboxDecodeMismatch();
+  }
+  if (
+    input.item.route.action === "import-reported-daily-metric" &&
+    wake.kind === "health.daily-metric.reported"
+  ) {
+    const outcome = await importHostedReportedDailyMetricMailboxItem({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+    if (outcome.status !== "imported") return outcome;
+    return await enqueueHostedSystemMailboxItem({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+  }
+  if (
+    input.item.route.action === "import-reported-daily-metric" ||
+    wake.kind === "health.daily-metric.reported"
+  ) {
+    return blockedMailboxDecodeMismatch();
+  }
+  return null;
+}
+
+function blockedMailboxDecodeMismatch() {
+  return {
+    reasonCode: "payload.decode_mismatch" as const,
+    retryable: false,
+    status: "blocked" as const,
+  };
 }
 
 function isRetiredVaultShareMailboxItem(

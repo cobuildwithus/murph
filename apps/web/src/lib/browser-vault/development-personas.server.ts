@@ -79,50 +79,24 @@ function buildPersonaFixture(
       ? buildTrainingPersonaActivityDates(asOfDate)
       : null;
 
-  for (let offset = 83; offset >= 0; offset -= 1) {
-    if (personaId === "active" || personaId === "new") continue;
+  const addSleepDay = (offset: number) => {
     const date = addDays(asOfDate, -offset);
-    const priorDate = addDays(date, -1);
-    const followsFactor = factorDates.has(priorDate);
-    const followsCycling =
-      patternedActivityDates?.cycling.has(priorDate) ?? false;
-    const followsRunning =
-      patternedActivityDates?.running.has(priorDate) ?? false;
-    const followsStrength =
-      patternedActivityDates?.strength.has(priorDate) ?? false;
-    const followsTennis =
-      patternedActivityDates?.tennis.has(priorDate) ?? false;
-    const wave = offset % 5;
-    const totalSleep =
-      430 +
-      wave * 9 -
-      (followsFactor ? 42 : 0) +
-      (followsCycling ? 32 : 0) -
-      (followsTennis ? 24 : 0);
-    const sleepScore =
-      79 +
-      (offset % 4) -
-      (followsFactor ? 9 : 0) +
-      (followsCycling ? 6 : 0) -
-      (followsTennis ? 6 : 0);
-    const efficiency =
-      87 + (offset % 3) - (followsFactor ? 4 : 0) + (followsRunning ? 5 : 0);
-    const readiness =
-      78 +
-      (offset % 6) -
-      (followsFactor ? 8 : 0) +
-      (followsCycling ? 8 : 0) -
-      (followsTennis ? 8 : 0);
-    const hrv =
-      personaId === "whoop"
-        ? 58 + (offset % 8) - (followsFactor ? 5 : 0)
-        : 48 +
-          (offset % 9) -
-          (followsFactor ? 4 : 0) +
-          (followsCycling ? 8 : 0) -
-          (followsTennis ? 5 : 0);
-    const deepSleep = 72 + (offset % 6) + (followsStrength ? 14 : 0);
-    const remSleep = 96 + (offset % 8) + (followsRunning ? 16 : 0);
+    const {
+      deepSleep,
+      efficiency,
+      followsFactor,
+      hrv,
+      readiness,
+      remSleep,
+      sleepScore,
+      totalSleep,
+    } = buildPersonaSleepDayValues({
+      date,
+      factorDates,
+      offset,
+      patternedActivityDates,
+      personaId,
+    });
 
     entities.push(
       eventEntity({
@@ -244,30 +218,15 @@ function buildPersonaFixture(
         ),
       );
     }
+  };
+
+  if (personaId !== "active" && personaId !== "new") {
+    for (let offset = 83; offset >= 0; offset -= 1) {
+      addSleepDay(offset);
+    }
   }
 
-  for (const date of personaId === "active" || personaId === "new"
-    ? []
-    : factorDates) {
-    entities.push(
-      eventEntity({
-        attributes: {
-          note: personaId === "whoop" ? "High strain" : "Late caffeine",
-          noteType: "journal-factor",
-          source: "manual",
-        },
-        date,
-        id: `${personaId}_factor_${date}`,
-        kind: "note",
-        occurredAt: `${date}T16:30:00.000Z`,
-        tags:
-          personaId === "whoop"
-            ? ["key-high-strain", "timing-evening"]
-            : ["key-late-caffeine", "timing-afternoon"],
-        title: personaId === "whoop" ? "High strain" : "Late caffeine",
-      }),
-    );
-  }
+  addPersonaFactorEvents(personaId, entities, factorDates);
 
   addPersonaSpecificEvents(
     personaId,
@@ -287,6 +246,130 @@ function buildPersonaFixture(
   };
 }
 
+function addPersonaFactorEvents(
+  personaId: DevelopmentPersonaId,
+  entities: CanonicalEntity[],
+  factorDates: ReadonlySet<string>,
+): void {
+  if (personaId === "active" || personaId === "new") return;
+  const isWhoop = personaId === "whoop";
+  const title = isWhoop ? "High strain" : "Late caffeine";
+  const tags = isWhoop
+    ? ["key-high-strain", "timing-evening"]
+    : ["key-late-caffeine", "timing-afternoon"];
+  for (const date of factorDates) {
+    entities.push(
+      eventEntity({
+        attributes: {
+          note: title,
+          noteType: "journal-factor",
+          source: "manual",
+        },
+        date,
+        id: `${personaId}_factor_${date}`,
+        kind: "note",
+        occurredAt: `${date}T16:30:00.000Z`,
+        tags,
+        title,
+      }),
+    );
+  }
+}
+
+function buildPersonaSleepDayValues(input: {
+  date: string;
+  factorDates: ReadonlySet<string>;
+  offset: number;
+  patternedActivityDates: PatternedActivityDates | null;
+  personaId: DevelopmentPersonaId;
+}) {
+  const priorDate = addDays(input.date, -1);
+  const followsFactor = input.factorDates.has(priorDate);
+  const followsCycling = patternContains(
+    input.patternedActivityDates?.cycling,
+    priorDate,
+  );
+  const followsRunning = patternContains(
+    input.patternedActivityDates?.running,
+    priorDate,
+  );
+  const followsStrength = patternContains(
+    input.patternedActivityDates?.strength,
+    priorDate,
+  );
+  const followsTennis = patternContains(
+    input.patternedActivityDates?.tennis,
+    priorDate,
+  );
+  const wave = input.offset % 5;
+  const totalSleep =
+    430 +
+    wave * 9 -
+    (followsFactor ? 42 : 0) +
+    (followsCycling ? 32 : 0) -
+    (followsTennis ? 24 : 0);
+  const sleepScore =
+    79 +
+    (input.offset % 4) -
+    (followsFactor ? 9 : 0) +
+    (followsCycling ? 6 : 0) -
+    (followsTennis ? 6 : 0);
+  const efficiency =
+    87 +
+    (input.offset % 3) -
+    (followsFactor ? 4 : 0) +
+    (followsRunning ? 5 : 0);
+  const readiness =
+    78 +
+    (input.offset % 6) -
+    (followsFactor ? 8 : 0) +
+    (followsCycling ? 8 : 0) -
+    (followsTennis ? 8 : 0);
+  const hrv = buildPersonaHrv({
+    followsCycling,
+    followsFactor,
+    followsTennis,
+    offset: input.offset,
+    personaId: input.personaId,
+  });
+  return {
+    deepSleep: 72 + (input.offset % 6) + (followsStrength ? 14 : 0),
+    efficiency,
+    followsFactor,
+    hrv,
+    readiness,
+    remSleep: 96 + (input.offset % 8) + (followsRunning ? 16 : 0),
+    sleepScore,
+    totalSleep,
+  };
+}
+
+function buildPersonaHrv(input: {
+  followsCycling: boolean;
+  followsFactor: boolean;
+  followsTennis: boolean;
+  offset: number;
+  personaId: DevelopmentPersonaId;
+}): number {
+  if (input.personaId === "whoop") {
+    return 58 + (input.offset % 8) - (input.followsFactor ? 5 : 0);
+  }
+  return (
+    48 +
+    (input.offset % 9) -
+    (input.followsFactor ? 4 : 0) +
+    (input.followsCycling ? 8 : 0) -
+    (input.followsTennis ? 5 : 0)
+  );
+}
+
+function patternContains(
+  dates: ReadonlySet<string> | undefined,
+  date: string,
+): boolean {
+  return dates?.has(date) ?? false;
+}
+
 function addPersonaSpecificEvents(
   personaId: DevelopmentPersonaId,
   asOfDate: string,
@@ -295,24 +378,7 @@ function addPersonaSpecificEvents(
   patternedActivityDates: PatternedActivityDates | null,
 ) {
   if (personaId === "oura" && patternedActivityDates) {
-    for (const date of patternedActivityDates.tennis) {
-      entities.push(activityEntity(personaId, date, "tennis", 62, "oura"));
-    }
-    for (const date of patternedActivityDates.cycling) {
-      entities.push(activityEntity(personaId, date, "cycling", 50, "oura"));
-    }
-    for (const date of patternedActivityDates.running) {
-      entities.push(activityEntity(personaId, date, "running", 39, "oura"));
-    }
-    for (const date of patternedActivityDates.hiking) {
-      entities.push(activityEntity(personaId, date, "hiking", 120, "oura"));
-    }
-    for (const date of patternedActivityDates.strength) {
-      entities.push(
-        activityEntity(personaId, date, "strength-training", 50, "oura"),
-      );
-    }
-    addContextRichEvents(asOfDate, entities);
+    addOuraPersonaEvents(asOfDate, entities, patternedActivityDates);
     return;
   }
 
@@ -557,6 +623,28 @@ function addPersonaSpecificEvents(
     return;
   }
 
+  addContextRichEvents(asOfDate, entities);
+}
+
+function addOuraPersonaEvents(
+  asOfDate: string,
+  entities: CanonicalEntity[],
+  dates: PatternedActivityDates,
+): void {
+  const activities = [
+    [dates.tennis, "tennis", 62],
+    [dates.cycling, "cycling", 50],
+    [dates.running, "running", 39],
+    [dates.hiking, "hiking", 120],
+    [dates.strength, "strength-training", 50],
+  ] as const;
+  for (const [activityDates, activityType, durationMinutes] of activities) {
+    for (const date of activityDates) {
+      entities.push(
+        activityEntity("oura", date, activityType, durationMinutes, "oura"),
+      );
+    }
+  }
   addContextRichEvents(asOfDate, entities);
 }
 
