@@ -498,7 +498,8 @@ are jointly specified by `ARCHITECTURE.md`,
 Hosted runtime-progress monitoring and Linq exact-consume reaction confirmation,
 including consumed conversation exclusion before lane head/count selection,
 canonical device-retry wake timing, bounded raw candidate scans, receipt-backed
-confirmation-failure ownership, and provider-no-replay recovery, are jointly
+confirmation-failure ownership, provider-no-replay recovery, and immediate
+quiet-hour paging for durable runtime-progress incidents, are jointly
 specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
