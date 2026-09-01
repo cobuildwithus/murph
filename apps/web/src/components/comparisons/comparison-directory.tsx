@@ -151,7 +151,7 @@ export function ComparisonDirectory({
           return (
             <section
               aria-labelledby={`category-${category.id}-heading`}
-              className="scroll-mt-6"
+              className="scroll-mt-24"
               id={`category-${category.id}`}
               key={category.id}
             >

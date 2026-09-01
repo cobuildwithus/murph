@@ -2,10 +2,6 @@ import { defineComparisons } from "../types";
 
 export const NUTRITION_COMPARISONS = defineComparisons([
   {
-    bestFor:
-      "People who want a large food database, familiar calorie logging, and broad fitness-device support.",
-    bottomLine:
-      "MyFitnessPal is the stronger dedicated calorie and macro logger. Murph is not another food database: it is a private health assistant you can text about what the diary means, how it fits the rest of your health, and what to do next.",
     category: "nutrition",
     chooseCompetitor:
       "Choose MyFitnessPal when fast food entry, barcode scanning, calorie targets, and a mature exercise ecosystem are the main job.",
@@ -64,14 +60,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "MyFitnessPal owns calorie and macro logging. Murph is a personal health assistant that connects the diary with wider context and carries the next step forward.",
     name: "MyFitnessPal",
-    overview:
-      "MyFitnessPal is built around a daily food and exercise diary. Its large database and multiple entry methods are a real advantage when the central task is counting calories or macros. Keep it for that ledger. Add or switch to Murph when logging has produced a decision rather than an answer: Murph can place meals beside symptoms, sleep, training, records, goals, and real-life constraints, then help with follow-through. No direct MyFitnessPal connection is implied.",
     quickComparison: [
       { capability: "Searchable food database", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Barcode food logging", evidence: "inputs", murph: "no", competitor: "limited" },
       { capability: "Calorie and macro diary", evidence: "primaryJob", murph: "no", competitor: "yes" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
       { capability: "Cross topic plan support", evidence: "followThrough", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "myfitnesspal",
@@ -96,10 +120,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "People who care about micronutrients, source quality, detailed charts, and nutrition data beyond calories and macros.",
-    bottomLine:
-      "Cronometer offers substantially deeper nutrient accounting. Murph is the better fit when the hard part is deciding which numbers matter in your circumstances, what other evidence changes the interpretation, and what is practical to do next.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Cronometer when verified food records, detailed nutrient targets, biometrics, and exportable nutrition reports are the priority.",
@@ -158,14 +178,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Cronometer supplies the detailed nutrient ledger. Murph, a personal health assistant, helps decide what its numbers mean in context and what is worth changing.",
     name: "Cronometer",
-    overview:
-      "Cronometer is one of the most data-dense consumer food logs, with an emphasis on curated entries and nutrient completeness. It is especially useful for inspecting vitamins, minerals, amino acids, or details that many calorie apps compress. Murph does not compete on ledger depth. Keep Cronometer when those measurements matter; use Murph when you need to connect them with other health context, challenge whether a proposed change is worth the burden, and remember the decision later. No direct Cronometer connection is claimed.",
     quickComparison: [
       { capability: "Detailed nutrient accounting", evidence: "primaryJob", murph: "no", competitor: "yes" },
       { capability: "Curated food records", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Nutrition reports", evidence: "insightStyle", murph: "no", competitor: "limited" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
       { capability: "Conversational plan support", evidence: "followThrough", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "cronometer",
@@ -198,10 +246,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "People who consistently log food and scale weight and want an adaptive calorie and macro program for body-composition goals.",
-    bottomLine:
-      "MacroFactor is the more specialized adaptive diet algorithm, and Murph does not reproduce it. Murph fits when food and weight are only part of the decision and you want a health assistant that remembers the surrounding context and helps with follow-through beyond the weekly check-in.",
     category: "nutrition",
     chooseCompetitor:
       "Choose MacroFactor when you want expenditure estimates and weekly calorie or macro adjustments based on consistent intake and weight data.",
@@ -260,14 +304,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "MacroFactor adapts calorie and macro targets from logged data. Murph is the broader personal health assistant for decisions across health; it does not reproduce that algorithm.",
     name: "MacroFactor",
-    overview:
-      "MacroFactor uses food intake and scale weight to estimate energy expenditure and update a diet program over time. Its focused design works well for people who want a quantitative feedback loop without activity-tracker calorie adjustments. Keep it when that loop is the job. Murph becomes useful when the program meets the rest of life: it can carry relevant context across conversations, help decide what tradeoff is acceptable, and support the next step without treating a missed target as the whole story.",
     quickComparison: [
       { capability: "Adaptive calorie targets", evidence: "primaryJob", murph: "no", competitor: "yes" },
       { capability: "Energy expenditure estimates", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Adaptive diet program check ins", evidence: "followThrough", murph: "no", competitor: "yes" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
       { capability: "Open ended health conversation", evidence: "format", murph: "yes", competitor: "no" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "macrofactor",
@@ -296,10 +368,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "People who want a structured psychology-based weight program, frequent lessons, and an optional path to clinician-led obesity medication care.",
-    bottomLine:
-      "Noom provides a defined weight-loss curriculum and separate clinical medication programs. Murph takes a less scripted route: start with the health question, remember what matters across topics, and help with follow-through. It does not prescribe medication or recreate Noom's curriculum.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Noom when a structured weight curriculum, food-color system, daily lessons, and optional Noom Med evaluation match your goal.",
@@ -358,14 +426,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Noom provides a weight curriculum and optional medical care. As a personal health assistant, Murph supports wider non-clinical questions beyond the program.",
     name: "Noom",
-    overview:
-      "Noom is a structured weight-management program built around lessons, food logging, calorie guidance, and behavior-change exercises. Its separate Noom Med service adds licensed clinical evaluation and, for eligible members, prescription options. That combination is the sensible choice when a defined weight curriculum and clinical pathway are motivating. Murph fits when weight is only one health thread and the next step must account for other goals, data, decisions, and life constraints, while medication decisions stay with clinicians.",
     quickComparison: [
       { capability: "Structured daily curriculum", evidence: "format", murph: "no", competitor: "yes" },
       { capability: "Food color guidance", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Clinician led medication care", evidence: "clinicalRole", murph: "no", competitor: "limited" },
       { capability: "Open ended health questions", evidence: "format", murph: "yes", competitor: "limited" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "noom",
@@ -391,10 +487,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["WW"],
-    bestFor:
-      "People who want a recognizable Points program, recipes, community, live workshops, or one brand that also offers obesity-medicine care.",
-    bottomLine:
-      "Weight Watchers offers a defined Points system, recipes, community, and separate Clinic services. Murph works outside that program model: it remembers why food or weight matters alongside other health threads and supports the next step without making weight the organizing center.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Weight Watchers when Points, recipe planning, peer community, workshops, or its Clinic pathway are central to the experience you want.",
@@ -453,14 +545,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Weight Watchers brings Points, community, workshops, and a clinic. Murph works as a personal health assistant; it has none of those program tools.",
     name: "Weight Watchers",
-    overview:
-      "Weight Watchers organizes weight management around its Points system, recipe library, social community, and optional workshops or coaching. Weight Watchers Clinic extends the brand into licensed obesity care, but plan fees and medication costs are distinct. Keep Weight Watchers when its rules and community are the useful part. Add or switch to Murph when you want a private conversation that remembers why food or weight matters, connects it with the rest of your health, and helps with follow-through without becoming a diet program or prescriber.",
     quickComparison: [
       { capability: "Points based food guidance", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Peer community", evidence: "followThrough", murph: "no", competitor: "yes" },
       { capability: "Live workshops", evidence: "followThrough", murph: "no", competitor: "limited" },
       { capability: "Clinical medication care", evidence: "clinicalRole", murph: "no", competitor: "limited" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "weight-watchers",
@@ -489,10 +609,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "People who want a straightforward calorie budget, quick food logging, weight trends, and a lower-complexity path than a lesson-based program.",
-    bottomLine:
-      "Lose It! is the more focused calorie and weight diary. Murph can start with the question instead of the log, remember relevant context across health, and help turn the answer into a realistic plan; it does not reproduce Lose It!'s food database.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Lose It! when calorie budgeting, a large food database, barcode or camera entry, and weight-loss tracking are the core tasks.",
@@ -551,14 +667,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Lose It! is a focused calorie and weight diary. Murph, the personal health assistant, starts with the wider question and remembers the resulting plan.",
     name: "Lose It!",
-    overview:
-      "Lose It! turns a weight goal into a calorie budget and supports that loop with quick food entry, progress charts, challenges, and optional premium metrics. It can also record medication use, but that remains tracking rather than prescribing. If a dependable ledger is the answer, Lose It! already owns the job. Murph is the better starting point when you have a wider question about food or weight, need other health context to answer it, and want the resulting plan remembered later. No direct Lose It! connection is implied.",
     quickComparison: [
       { capability: "Calorie budgeting", evidence: "primaryJob", murph: "no", competitor: "yes" },
       { capability: "Barcode food logging", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Food and weight diary", evidence: "format", murph: "no", competitor: "yes" },
       { capability: "Medication logging", evidence: "inputs", murph: "no", competitor: "limited" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "lose-it",
@@ -583,10 +727,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "Apple users who want a private, native nutrition log with optional AI entry and no advertising.",
-    bottomLine:
-      "Foodnoms is the stronger Apple-native food diary. Murph trades that logging depth for a conversation that can connect the food question to relevant health context and keep the chosen next step moving.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Foodnoms when an Apple-first, privacy-conscious calorie and macro tracker with Siri, Shortcuts, and Health support is the main need.",
@@ -645,14 +785,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Foodnoms is an Apple-native nutrition diary. As a personal health assistant, Murph handles questions beyond the log; it is not a barcode or nutrient-tracking app.",
     name: "Foodnoms",
-    overview:
-      "Foodnoms is designed specifically for people who want a capable nutrition log inside the Apple ecosystem. It offers free core tracking and adds AI entry, richer nutrients, fasting, and analysis through Plus while emphasizing privacy and native Apple workflows. That makes it the natural choice for an Apple-first diary. Murph is useful when the decision extends beyond the log: what the pattern means beside the rest of your health, whether a change is worth the effort, and how to follow through.",
     quickComparison: [
       { capability: "Apple ecosystem food diary", evidence: "platforms", murph: "no", competitor: "yes" },
       { capability: "Barcode food logging", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Voice and automation logging", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Detailed nutrient totals", evidence: "insightStyle", murph: "no", competitor: "limited" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "foodnoms",
@@ -677,10 +845,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "People who want a generous ad-free food diary, detailed nutrients, broad device support, and optional AI or GLP-1 tracking tools.",
-    bottomLine:
-      "MyNetDiary is the stronger structured tracker and nutrient database. Murph is the better fit when collecting more fields is not the problem and you need a private health assistant to connect the evidence, decide what matters, and help with the next step.",
     category: "nutrition",
     chooseCompetitor:
       "Choose MyNetDiary when you want a full food, exercise, weight, fasting, or glucose log with useful free features and optional AI analysis.",
@@ -739,14 +903,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "MyNetDiary combines nutrition, weight and medication logs with an AI Coach. Murph acts as a personal health assistant across wider context and follow-through.",
     name: "MyNetDiary",
-    overview:
-      "MyNetDiary combines a substantial free food diary with advanced nutrient tracking, planning, health metrics, and an optional AI Coach. Its GLP-1 Companion can organize medication-related self-reports, but that is distinct from prescribing or clinical management. MyNetDiary is the stronger fit when a detailed nutrition record and diet-focused AI are the center of the job. Murph earns its place when nutrition is one thread in a broader health question or task and the decision needs to be remembered and followed through across topics. No direct MyNetDiary connection is implied.",
     quickComparison: [
       { capability: "Ad free food diary", evidence: "format", murph: "no", competitor: "yes" },
       { capability: "Barcode and voice logging", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Detailed nutrient tracking", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Medication companion", evidence: "followThrough", murph: "no", competitor: "limited" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "my-net-diary",
@@ -775,10 +967,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "People who want a polished visual food diary, meal plans, recipes, habit scores, and multiple ways to capture meals.",
-    bottomLine:
-      "Lifesum packages food logging, ratings, recipes, and lifestyle plans into a polished app. Murph is for people who would rather begin with their own question and have a health assistant weigh the evidence, constraints, and follow-through without defaulting to a preset program.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Lifesum when visual meal feedback, recipes, preset eating plans, water, fasting, and wearable-fed activity are the desired daily workflow.",
@@ -837,14 +1025,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Lifesum offers meal plans, ratings, and a nutrition routine. As a personal health assistant, Murph weighs wider context rather than supplying preset diet tools.",
     name: "Lifesum",
-    overview:
-      "Lifesum blends calorie and macro tracking with food ratings, recipes, habit prompts, fasting, and preset meal plans. Its approachable design is a genuine strength for people who want daily visual guidance. Keep it when that routine is useful. Switch to or add Murph when the important work is deciding whether a recommendation fits your health and your life, choosing a lower-burden alternative, and getting support after the choice rather than selecting another packaged diet.",
     quickComparison: [
       { capability: "Visual food logging", evidence: "format", murph: "no", competitor: "yes" },
       { capability: "Preset meal plans", evidence: "followThrough", murph: "no", competitor: "limited" },
       { capability: "Meal ratings", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Recipe library", evidence: "followThrough", murph: "no", competitor: "limited" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "lifesum",
@@ -874,10 +1090,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["Yazio"],
-    bestFor:
-      "People who want an international calorie tracker that combines food logging, intermittent fasting, recipes, and social accountability.",
-    bottomLine:
-      "YAZIO is the stronger structured food and fasting app. Murph fits when the timer or daily target is only one part of the question and relevant context should be remembered when you decide what to try next.",
     category: "nutrition",
     chooseCompetitor:
       "Choose YAZIO when calorie and macro targets, a large food database, fasting timers, recipes, and multilingual mobile support are the priority.",
@@ -936,14 +1148,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "YAZIO bundles calorie logging, fasting timers, recipes, and goals. Murph serves as a personal health assistant when the plan itself needs examination.",
     name: "YAZIO",
-    overview:
-      "YAZIO brings calorie and macro logging, intermittent fasting, recipes, body metrics, and social features into one multilingual app. It suits someone who wants daily targets and a defined mobile routine. Murph suits the different moment when the target itself needs examination, the tradeoffs reach into other parts of your health, or following through requires more than another streak or timer.",
     quickComparison: [
       { capability: "Multilingual food database", evidence: "platforms", murph: "no", competitor: "yes" },
       { capability: "Fasting timer", evidence: "followThrough", murph: "no", competitor: "yes" },
       { capability: "Barcode meal logging", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Recipe guidance", evidence: "followThrough", murph: "no", competitor: "limited" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "yazio",
@@ -972,10 +1212,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "People who want a physical breath-measurement ritual and daily fuel-use guidance rather than food logging alone.",
-    bottomLine:
-      "Lumen provides a proprietary breath device and a specific daily metabolic program. Murph does not measure breath or replace that program; it adds a private health conversation for judging the signal beside sleep, training, symptoms, goals, and the burden of the routine.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Lumen when breath readings, metabolic-flexibility scores, daily carb guidance, and a device-centered routine are specifically motivating.",
@@ -1034,14 +1270,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Lumen measures breath and turns it into daily fuel guidance. A personal health assistant, Murph helps judge that signal in context but cannot take the reading.",
     name: "Lumen",
-    overview:
-      "Lumen pairs a handheld breath device with an app that infers relative fuel use and recommends daily nutrition or activity choices. The device makes it a distinctive option for people who find a repeated measurement ritual useful. The decision hinges on whether that measurement loop is the value: Lumen owns the reading and its device-specific program, while Murph can compare a result you share with wider health context, help judge the burden, and remember what happened without pretending it produced the reading.",
     quickComparison: [
       { capability: "Breath fuel measurements", evidence: "hardware", murph: "no", competitor: "yes" },
       { capability: "Daily macro guidance", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Metabolic flexibility scores", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Works without dedicated hardware", evidence: "hardware", murph: "yes", competitor: "no" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     relationship: "complement",
     slug: "lumen",
@@ -1065,10 +1329,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["January AI"],
-    bestFor:
-      "iPhone users who want fast AI food capture, predicted glucose responses, and a metabolic-health view that can include labs or records.",
-    bottomLine:
-      "January combines fast AI food capture, device-free glucose predictions, and an AI coach grounded in records and activity. Murph does not outpredict it; Murph is a broader messaging-based health assistant for questions, decisions, and follow-through that are not organized around food or glucose.",
     category: "nutrition",
     chooseCompetitor:
       "Choose January when photo, barcode, voice, or search-based meal logging and model-generated glucose predictions are the experience you want.",
@@ -1127,14 +1387,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "January scans meals and predicts glucose responses through its model. Murph is a personal health assistant for broader questions and tasks, not prediction.",
     name: "January",
-    overview:
-      "January uses AI to simplify food logging, estimate likely glucose responses without a sensor, and ground its coach in labs, medications, activity, and other available inputs. Predicted and measured values remain different kinds of evidence, but January is more than a scanner. It is the stronger fit for a food-and-glucose-centered metabolic coach. Murph is broader: a conversation-first assistant for health questions, decisions, plans, and tasks that should persist beyond that model. Murph does not offer device-free glucose measurement or a direct January connection.",
     quickComparison: [
       { capability: "AI meal capture", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Predicted glucose responses", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Actual CGM data", evidence: "inputs", murph: "no", competitor: "limited" },
       { capability: "Health record context", evidence: "inputs", murph: "yes", competitor: "yes" },
       { capability: "Broad health task support", evidence: "primaryJob", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "complement",
     slug: "january-ai",
@@ -1165,10 +1453,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       "Let January own meal capture, glucose predictions, and its app's metabolic coaching. Murph can handle broader health threads and follow-through around an estimate you choose to share. This is a complementary workflow, not a claimed direct integration.",
   },
   {
-    bestFor:
-      "Adults who specifically want continuous glucose feedback for weight habits, including programs designed around existing or newly prescribed GLP-1 use.",
-    bottomLine:
-      "Signos combines CGM hardware, a structured app, and optional clinical medication programs. Murph does not replace the sensor or prescriber; it adds a private health relationship that can keep glucose in proportion to the rest of the person's evidence, priorities, and follow-through.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Signos when continuous glucose data, meal and habit scores, dietitian support, or its clinician-led Signos+ medication program are the specific goal.",
@@ -1227,14 +1511,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Signos pairs CGM feedback with structured and clinical programs. Murph, a personal health assistant, adds wider context; it neither measures glucose nor prescribes.",
     name: "Signos",
-    overview:
-      "Signos centers its experience on continuous glucose data, pairing sensors with food, weight, activity, sleep, and habit guidance. Its offerings range from wellness feedback and support for people already using a GLP-1 to a separate clinician-led prescription program. The decision turns on whether that sensor-led program is the goal. Signos owns the measurement and any prescribing; Murph can keep glucose in proportion to wider health context and support the non-clinical plan that follows. Murph does not replace CGM safety screening.",
     quickComparison: [
       { capability: "Continuous glucose readings", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Meal response scoring", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Clinician led medication care", evidence: "clinicalRole", murph: "no", competitor: "limited" },
       { capability: "Works without a sensor", evidence: "hardware", murph: "yes", competitor: "no" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     relationship: "different-role",
     slug: "signos",
@@ -1265,10 +1577,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       "Keep Signos for sensor data, its program, and any clinician-led medication care. Add Murph only for findings you choose to discuss beside other health information and for day-to-day execution of the resulting plan. No direct integration is implied, and medication or CGM decisions remain with the relevant clinician and Signos program.",
   },
   {
-    bestFor:
-      "People who want a single metabolic dashboard for food, optional CGM data, activity, sleep, labs, and structured health experiments.",
-    bottomLine:
-      "Levels combines a metabolic dashboard with adaptive programs and optional sensors, labs, clinician review, and nutritionist support. Murph does not replace that system; it is a broader conversation-first assistant for health questions, tasks, and follow-through outside a metabolic program.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Levels when organizing meals, glucose, wearables, labs, habits, and metabolic programs in one structured app is the main need.",
@@ -1327,14 +1635,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Levels combines metabolic dashboards, programs, sensors, labs, and expert support. Murph, a personal health assistant, handles wider questions and follow-through.",
     name: "Levels",
-    overview:
-      "Levels brings meals, optional continuous glucose, sleep, activity, labs, and habits into a metabolic-health view. Its base membership can work without a sensor, and its programs plus professional add-ons mean it is not merely a dashboard. Levels is the stronger fit when metabolic measurement and structured guidance are the center. Murph is the broader relationship for questions or tasks that cross health domains and need context, decisions, and follow-through remembered outside that program. Murph does not replace Levels' sensors, labs, or experts.",
     quickComparison: [
       { capability: "Metabolic dashboard", evidence: "format", murph: "no", competitor: "yes" },
       { capability: "Optional CGM support", evidence: "hardware", murph: "no", competitor: "yes" },
       { capability: "Optional laboratory testing", evidence: "format", murph: "no", competitor: "limited" },
       { capability: "Works without a sensor", evidence: "hardware", murph: "yes", competitor: "yes" },
       { capability: "Broad health task support", evidence: "primaryJob", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "hardware",
+      },
     ],
     relationship: "complement",
     slug: "levels",
@@ -1361,10 +1697,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       "Let Levels own its dashboard, programs, measurements, and any expert review. Murph can support broader health threads and the agreed action around a finding you choose to share. No direct product connection is implied.",
   },
   {
-    bestFor:
-      "People who want meal-quality scoring, plant-diversity guidance, predicted metabolic responses, and optional microbiome personalization.",
-    bottomLine:
-      "ZOE is the more specialized personalized-nutrition program, with meal scores, AI guidance, and optional testing. Murph does not reproduce that model; its advantage is a broader messaging relationship that can connect food with other health threads and carry the chosen plan forward.",
     category: "nutrition",
     chooseCompetitor:
       "Choose ZOE when food-quality scores, plant diversity, processing risk, personalized meal guidance, and optional microbiome testing fit the question you want to answer.",
@@ -1423,14 +1755,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "ZOE provides nutrition scores, predictions, and optional testing. As a personal health assistant, Murph connects the result to wider health; it does not score meals.",
     name: "ZOE",
-    overview:
-      "ZOE emphasizes meal quality, plant diversity, processing, and predicted personal response rather than calorie counting alone. Its current model does not require the older CGM and blood-fat testing protocol, while optional microbiome testing depends on the market. ZOE is the stronger choice when its scoring, AI guidance, and test pathway answer the nutrition question. Murph is useful when that question crosses into other health goals or practical tasks and the resulting decision needs support beyond the food model.",
     quickComparison: [
       { capability: "Meal quality scoring", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Predicted metabolic responses", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Optional microbiome testing", evidence: "hardware", murph: "no", competitor: "limited" },
       { capability: "Plant diversity guidance", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "zoe",
@@ -1459,10 +1819,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "People who want recurring, licensed dietitian care for a medical condition, eating concern, sports goal, or medication-supported weight journey.",
-    bottomLine:
-      "Nourish provides licensed clinical nutrition care and may bill insurance. Murph is not a substitute for that care; it can be the ongoing educational and follow-through layer around it, especially when nutrition intersects with the rest of a person's health.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Nourish when assessment and medical nutrition therapy from a registered dietitian are the core need, especially when insurance may cover visits.",
@@ -1521,14 +1877,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Nourish delivers licensed dietitian care. Murph remains a non-clinical personal health assistant for wider questions and between-visit follow-through.",
     name: "Nourish",
-    overview:
-      "Nourish is a telehealth practice that matches people with registered dietitians for recurring clinical nutrition care. Its apps add meal capture, goals, messaging, labs, recipes, and AI assistance around that professional relationship. Choose Nourish when licensed assessment and treatment are the job. Use Murph instead only for non-clinical questions, or alongside Nourish as a private conversation that can connect the dietitian's plan with other health context and everyday follow-through. Murph does not prescribe or replace medical nutrition therapy.",
     quickComparison: [
       { capability: "Licensed dietitian care", evidence: "clinicalRole", murph: "no", competitor: "yes" },
       { capability: "Medical nutrition therapy", evidence: "clinicalRole", murph: "no", competitor: "yes" },
       { capability: "Insurance billed visits", evidence: "pricing", murph: "no", competitor: "limited" },
       { capability: "Between visit support", evidence: "followThrough", murph: "yes", competitor: "yes" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "different-role",
     slug: "nourish",
@@ -1559,10 +1943,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       "Let the registered dietitian own assessment and medical nutrition therapy. Add Murph to prepare questions, connect the care plan with other health threads, and support agreed steps between visits. Murph should not override the care plan, and medication decisions remain with the prescribing clinician.",
   },
   {
-    bestFor:
-      "People who want to select a specific registered dietitian by specialty, style, availability, insurance, or virtual versus local care.",
-    bottomLine:
-      "Fay is a marketplace and care platform for choosing a licensed dietitian. Murph does not replace that professional relationship; it can provide the broader educational conversation and everyday follow-through that sit outside scheduled clinical care.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Fay when finding and working with a particular RD or RDN, with insurance billing and direct between-visit chat, is the primary goal.",
@@ -1621,14 +2001,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Fay helps you choose and work with a registered dietitian. Murph instead is a personal health assistant for non-clinical context and support between visits.",
     name: "Fay",
-    overview:
-      "Fay helps people choose a registered dietitian and continue that relationship through appointments, direct chat, goals, meal photos, and progress tracking. It handles insurance access as part of the service and also publishes an approximate uncovered price. Choose Fay when selecting and working with an RD is the job. Use Murph instead for non-clinical support, or alongside Fay to connect the care plan with wider health questions and everyday follow-through. Murph is neither a marketplace nor a licensed nutrition practice.",
     quickComparison: [
       { capability: "Choice of a specific dietitian", evidence: "primaryJob", murph: "no", competitor: "yes" },
       { capability: "Medical nutrition therapy", evidence: "clinicalRole", murph: "no", competitor: "yes" },
       { capability: "Insurance billing", evidence: "format", murph: "no", competitor: "yes" },
       { capability: "Direct dietitian chat", evidence: "followThrough", murph: "no", competitor: "yes" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "different-role",
     slug: "fay",
@@ -1659,10 +2067,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       "Let the selected Fay dietitian own individualized nutrition care. Add Murph when a question crosses into other health domains or when a practical step needs support between appointments. Murph should not override the dietitian's plan.",
   },
   {
-    bestFor:
-      "Adults who want continuous glucose experiments plus AI and optional human nutrition coaching, whether bringing a sensor or buying a program.",
-    bottomLine:
-      "Nutrisense is a specialized CGM analysis and metabolic-coaching service. Murph does not measure glucose or replace its coaches; it adds a private conversation for keeping the sensor experiment in context and deciding whether the insight is worth the cost, attention, and next action.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Nutrisense when glucose sensors, meal-response analysis, Nora AI, and access to an RD or CNS are the central experience you want.",
@@ -1721,14 +2125,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Nutrisense centers CGM analysis, AI, and optional nutrition coaching. Murph is a broader personal health assistant, not a sensor-analysis dashboard or clinician.",
     name: "Nutrisense",
-    overview:
-      "Nutrisense combines continuous glucose sensors with food, sleep, activity, mood, AI, and optional nutrition-professional coaching. People can bring a supported sensor or choose a package that includes sensors, although current promotional pricing varies. Choose Nutrisense when that sensor experiment and coaching are the value. Add Murph when you want to compare the findings with the rest of your health, decide whether the burden is justified, and support the chosen next step. Murph does not measure glucose or deliver medical nutrition therapy.",
     quickComparison: [
       { capability: "Continuous glucose analysis", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Supported bring your own CGM", evidence: "format", murph: "no", competitor: "limited" },
       { capability: "AI glucose explanations", evidence: "insightStyle", murph: "limited", competitor: "yes" },
       { capability: "Nutrition professional coaching", evidence: "clinicalRole", murph: "no", competitor: "limited" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     relationship: "complement",
     slug: "nutrisense",
@@ -1759,10 +2191,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       "Let Nutrisense own the sensor experiment and any professional coaching. Add Murph to discuss the results you choose to share alongside wider health context and support the resulting plan. No direct data connection is claimed.",
   },
   {
-    bestFor:
-      "People following keto or another low-carb approach who want net-carb targets, fasting, recipes, and optional glucose or ketone logs.",
-    bottomLine:
-      "Carb Manager is the stronger specialist for living inside a keto or low-carb plan. Murph fits better when the question is whether that plan belongs in your life at all, what other evidence changes the answer, and how to follow through without turning a diet into an identity.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Carb Manager when net carbs, keto macros, fasting, low-carb recipes, meal planning, and metabolic self-tracking define the daily job.",
@@ -1821,14 +2249,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Carb Manager specializes in keto tracking, net carbs, fasting, and recipes. The personal health assistant Murph helps decide whether the plan fits wider health.",
     name: "Carb Manager",
-    overview:
-      "Carb Manager is a specialist food diary for keto and low-carb eating. It combines net-carb tracking with fasting, recipes, meal planning, community, and optional metabolic measurements. Once the approach is chosen, Carb Manager owns the daily ledger. Before that commitment, or when new evidence changes the tradeoff, Murph can treat the diet as a bounded hypothesis, place it beside other health evidence, and help decide whether to continue or change course.",
     quickComparison: [
       { capability: "Net carb tracking", evidence: "primaryJob", murph: "no", competitor: "yes" },
       { capability: "Fasting timer", evidence: "followThrough", murph: "no", competitor: "yes" },
       { capability: "Low carb recipes", evidence: "followThrough", murph: "no", competitor: "yes" },
       { capability: "Metabolic measurement logs", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "carb-manager",
@@ -1853,10 +2309,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     ],
   },
   {
-    bestFor:
-      "People who value very fast photo-based calorie estimates and are comfortable correcting AI-generated ingredients and portions.",
-    bottomLine:
-      "Cal AI is the stronger camera-first calorie logger. Murph tackles the questions a calorie estimate cannot settle, and it does not present a meal photo as a precise nutritional measurement.",
     category: "nutrition",
     chooseCompetitor:
       "Choose Cal AI when the fastest possible photo, barcode, or text meal entry matters more than detailed manual logging or human coaching.",
@@ -1915,14 +2367,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "Cal AI turns meal photos into fast calorie and macro estimates. Murph works as the personal health assistant for the wider decision; it is not a camera-based food logger.",
     name: "Cal AI",
-    overview:
-      "Cal AI makes food logging fast by estimating a meal's ingredients, portions, calories, and macros from a photo, barcode, or description. That convenience depends on accepting and correcting uncertainty rather than treating the camera result as a measurement. Cal AI wins when reducing logging friction is the job. Murph fits when the estimate has raised a wider health question, the answer depends on more context, and the next step needs support beyond another scan.",
     quickComparison: [
       { capability: "Photo calorie estimates", evidence: "primaryJob", murph: "no", competitor: "yes" },
       { capability: "Barcode meal logging", evidence: "inputs", murph: "no", competitor: "yes" },
       { capability: "Calorie and macro ledger", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "Cross domain health context", evidence: "inputs", murph: "yes", competitor: "limited" },
       { capability: "Remembered plan follow through", evidence: "followThrough", murph: "yes", competitor: "limited" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "cal-ai",
@@ -1952,10 +2432,6 @@ export const NUTRITION_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["Ate Food Journal"],
-    bestFor:
-      "People who want a low-pressure photo-led health journal with an AI coach that can connect food, mood, hydration, movement, and sleep over time.",
-    bottomLine:
-      "AteMate is stronger for maintaining a structured journal and asking an AI coach about months of those entries. Murph is broader outside the journal: it can start with any health question, use relevant authorized records and connected data, remember decisions, and help carry plans or actions forward.",
     category: "nutrition",
     chooseCompetitor:
       "Choose AteMate when quick photo journaling of meals and day-to-day wellbeing, plus an AI coach grounded in that record, are the behavior-change tools you want.",
@@ -2014,14 +2490,42 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     metaDescription:
       "AteMate is a five-pillar photo journal with AI pattern coaching. Murph is a question-first personal health assistant for decisions and action beyond the journal.",
     name: "AteMate",
-    overview:
-      "AteMate is more than a mindful meal log. It is a five-pillar health journal whose AI coach can look across months of food, mood, hydration, movement, and sleep entries, with optional nutrition estimates and human-coach sharing. That focused journal is the genuine advantage when reflection is the intervention. Murph is the broader choice when you want to begin with a question or task, use authorized context beyond journal entries, and keep a decision moving without maintaining AteMate's journal. No direct product connection is implied.",
     quickComparison: [
       { capability: "Photo health journaling", evidence: "format", murph: "no", competitor: "yes" },
       { capability: "Five pillar journal reviews", evidence: "insightStyle", murph: "no", competitor: "yes" },
       { capability: "AI journal pattern coaching", evidence: "insightStyle", murph: "limited", competitor: "limited" },
       { capability: "Question first support", evidence: "primaryJob", murph: "yes", competitor: "limited" },
       { capability: "Authorized health record context", evidence: "inputs", murph: "yes", competitor: "no" },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     relationship: "alternative",
     slug: "atemate",

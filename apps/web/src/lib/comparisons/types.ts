@@ -101,8 +101,6 @@ export interface ComparisonQuickRow {
 
 export interface ComparisonEntry {
   aliases?: readonly string[];
-  bestFor: string;
-  bottomLine: string;
   category: ComparisonCategoryId;
   chooseCompetitor: string;
   chooseMurph: string;
@@ -113,7 +111,6 @@ export interface ComparisonEntry {
   lastVerified: ComparisonIsoDate;
   metaDescription: string;
   name: string;
-  overview: string;
   quickComparison: readonly ComparisonQuickRow[];
   relationship: ComparisonRelationship;
   slug: string;

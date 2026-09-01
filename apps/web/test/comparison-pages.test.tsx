@@ -36,17 +36,66 @@ import {
 } from "../src/lib/site-metadata";
 
 const HUMAN_COPY_FIELDS = [
-  "bestFor",
-  "bottomLine",
   "chooseCompetitor",
   "chooseMurph",
   "headline",
   "metaDescription",
   "name",
-  "overview",
 ] as const;
 
 const QUICK_STATUS_RANK = { limited: 1, no: 0, yes: 2 } as const;
+
+const PRODUCT_SPECIFIC_STATUS_EXAMPLES = {
+  ada: {
+    "Longitudinal history": "limited",
+    "No dedicated device": "yes",
+    "Proactive follow up": "no",
+  },
+  bodybuddy: {
+    "Familiar messaging access": "yes",
+    "Handles changing priorities": "yes",
+    "Longitudinal history": "yes",
+    "No dedicated device": "yes",
+    "Proactive follow up": "yes",
+  },
+  "function-health": {
+    "Longitudinal history": "yes",
+    "No dedicated device": "yes",
+    "Proactive follow up": "limited",
+  },
+  "future-pro": {
+    "Familiar messaging access": "limited",
+    "Handles changing priorities": "yes",
+    "Proactive follow up": "yes",
+  },
+  guava: {
+    "Handles changing priorities": "yes",
+    "Proactive follow up": "yes",
+  },
+  "hume-health": {
+    "No dedicated device": "no",
+  },
+  "january-ai": {
+    "Handles changing priorities": "yes",
+    "Proactive follow up": "yes",
+  },
+  "sleep-reset": {
+    "Familiar messaging access": "limited",
+    "Proactive follow up": "yes",
+  },
+  whoop: {
+    "No dedicated device": "no",
+    "Proactive follow up": "yes",
+  },
+} as const;
+
+const PRODUCT_SPECIFIC_ROW_EVIDENCE = {
+  "Familiar messaging access": "format",
+  "Handles changing priorities": "primaryJob",
+  "Longitudinal history": "inputs",
+  "No dedicated device": "hardware",
+  "Proactive follow up": "followThrough",
+} as const;
 
 function comparisonBySlug(slug: string) {
   const comparison = COMPARISONS.find((entry) => entry.slug === slug);
@@ -83,6 +132,12 @@ describe("comparison catalog", () => {
       (markup.match(/href="\/compare\/murph-vs-/gu) ?? []).length,
       COMPARISONS.length,
     );
+    assert.equal(
+      (markup.match(/scroll-mt-24/gu) ?? []).length,
+      COMPARISON_CATEGORIES.length,
+      "Every category target needs clearance below the sticky navigation.",
+    );
+    assert.doesNotMatch(markup, /scroll-mt-6/gu);
   });
 
   it("publishes a substantial, unique, source-backed catalog", () => {
@@ -263,6 +318,40 @@ describe("comparison catalog", () => {
     expect(categories).toEqual(
       new Set(COMPARISON_CATEGORIES.map((category) => category.id)),
     );
+  });
+
+  it("keeps the shared decision rows product specific and evidence backed", () => {
+    for (const comparison of COMPARISONS) {
+      const rowsByCapability = new Map(
+        comparison.quickComparison.map((row) => [row.capability, row]),
+      );
+
+      for (const [capability, evidence] of Object.entries(
+        PRODUCT_SPECIFIC_ROW_EVIDENCE,
+      )) {
+        const row = rowsByCapability.get(capability);
+        assert.ok(row, `${comparison.slug} is missing ${capability}.`);
+        assert.equal(row.evidence, evidence);
+        assert.equal(row.murph, "yes");
+      }
+    }
+
+    for (const [slug, expectedStatuses] of Object.entries(
+      PRODUCT_SPECIFIC_STATUS_EXAMPLES,
+    )) {
+      const comparison = comparisonBySlug(slug);
+      const rowsByCapability = new Map(
+        comparison.quickComparison.map((row) => [row.capability, row]),
+      );
+
+      for (const [capability, competitor] of Object.entries(expectedStatuses)) {
+        assert.equal(
+          rowsByCapability.get(capability)?.competitor,
+          competitor,
+          `${slug}.${capability} must reflect its own sourced product profile.`,
+        );
+      }
+    }
   });
 
   it("ships one local, high-resolution logo asset for every competitor", () => {

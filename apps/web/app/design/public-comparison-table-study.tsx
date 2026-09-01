@@ -2,10 +2,6 @@ import { ComparisonTable } from "@/src/components/comparisons/comparison-table";
 import type { ComparisonEntry } from "@/src/lib/comparisons/types";
 
 const DESIGN_COMPARISON = {
-  bestFor:
-    "People who want a dedicated recovery signal from a lightweight wearable.",
-  bottomLine:
-    "The wearable measures recovery directly. Murph helps connect that signal to the rest of a person's context and follow-through.",
   category: "wearables",
   chooseCompetitor:
     "Choose the wearable when continuous sensing and a daily recovery score are the main job.",
@@ -55,8 +51,6 @@ const DESIGN_COMPARISON = {
   metaDescription:
     "Compare Murph with a representative recovery wearable across inputs, interpretation, follow-through, hardware, platforms, pricing, and clinical role.",
   name: "Recovery wearable",
-  overview:
-    "This synthetic design study exercises the production comparison table without representing a real company or product claim.",
   quickComparison: [
     {
       capability: "Continuous sensing",

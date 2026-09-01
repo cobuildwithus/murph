@@ -3,10 +3,6 @@ import { defineComparisons } from "../types";
 export const WEARABLE_COMPARISONS = defineComparisons([
   {
     aliases: ["WHOOP 5.0", "WHOOP MG", "WHOOP Peak", "WHOOP Life"],
-    bestFor:
-      "Keep WHOOP if you want a dedicated, screen-free recovery sensor and daily training guidance. Murph fits when the score is only the start of the question: what changed, what else matters, and what will you actually do next?",
-    bottomLine:
-      "If continuous sleep, strain, and recovery measurement is the requirement, WHOOP is the stronger product and Murph cannot replace it. Murph can make those signals more useful by connecting them with the rest of your health and carrying a decision beyond the dashboard.",
     category: "wearables",
     chooseCompetitor:
       "Choose WHOOP when continuous recovery, sleep, strain, and training guidance from a dedicated sensor are the main job, and you are comfortable with an ongoing hardware membership.",
@@ -96,10 +92,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "no",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "WHOOP",
-    overview:
-      "A WHOOP owner already has a strong answer to 'How recovered am I?' Murph is for the harder follow-up: whether the signal fits what you felt, which part of your life may explain it, what change is worth trying, and whether that change helped. WHOOP remains the source of truth for its sensor data and training scores. Murph provides a private conversation that can connect a report you share with records, symptoms, routines, constraints, and prior outcomes without pretending to be the measuring device.",
     relationship: "complement",
     slug: "whoop",
     sources: [
@@ -139,10 +163,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["Oura", "Oura Ring 5", "Oura Membership", "Oura App"],
-    bestFor:
-      "Keep Oura if you want passive sleep and readiness trends from a discreet ring. Add Murph when you want to test an explanation for a trend, relate it to information outside Oura, and carry the resulting change through ordinary life.",
-    bottomLine:
-      "Oura wins on effortless ring-based sensing and polished sleep or readiness scores. Murph has no competing sensor; its value begins when a pattern needs context, a decision, and follow-through that extends beyond the Oura app.",
     category: "wearables",
     chooseCompetitor:
       "Choose Oura when a small ring, passive overnight sensing, temperature trends, and established sleep and readiness scoring are your priorities.",
@@ -232,10 +252,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "no",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "Oura Ring",
-    overview:
-      "You do not need Murph to make Oura better at sensing sleep. You may want Murph when three low Readiness scores raise a question the ring cannot settle on its own. Murph can discuss the Oura information you choose to share alongside symptoms, routines, records, goals, and earlier attempts, then help turn one plausible explanation into a manageable action and later review. Oura remains the better tool for passive measurement; Murph is the relationship around the decision.",
     relationship: "complement",
     slug: "oura-ring",
     sources: [
@@ -279,10 +327,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["Garmin", "Garmin Connect+", "Garmin CIRQA", "CIRQA Smart Band"],
-    bestFor:
-      "Stay with Garmin Connect for deep sports metrics, navigation, training analysis, and one of the widest device ecosystems. Murph becomes useful when a training decision also depends on symptoms, records, nutrition, schedule, or what has worked for you before.",
-    bottomLine:
-      "Garmin is markedly stronger for GPS, maps, sport-specific analysis, and native device detail. Murph should not replace it. Murph earns a place only when the question escapes the Garmin dashboard and needs cross-domain reasoning or support after the plan is chosen.",
     category: "wearables",
     chooseCompetitor:
       "Choose Garmin Connect when GPS sports tracking, performance metrics, maps, courses, training status, or access to Garmin's wide hardware range is central to the decision.",
@@ -372,10 +416,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "limited",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "Garmin Connect",
-    overview:
-      "A serious Garmin user should keep Garmin Connect. Murph does not offer its GPS tracks, maps, device controls, training status, or coach-facing sport detail. The additional value is outside that lane: a private conversation that can put a Garmin summary beside a symptom, record, meal pattern, work trip, or prior outcome and help decide what the full picture supports. Murph can then hold onto the reasoning and help with the reminder, check-in, or experiment that the decision requires.",
     relationship: "complement",
     slug: "garmin-connect",
     sources: [
@@ -413,10 +485,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       "Google Fitbit Air",
       "Fitbit Air",
     ],
-    bestFor:
-      "Choose Google Health Premium if you own a Fitbit or Pixel Watch and want coaching built directly on that hardware's data. Choose Murph if you want the ongoing relationship to start in familiar messaging and range beyond device-led fitness and sleep coaching.",
-    bottomLine:
-      "This is the closest wearable comparison because both products converse and follow up. Google may be enough when Fitbit or Pixel Watch coaching is the whole job. Murph is less hardware-dependent and fits when questions, records, logistics, experiments, and remembered context must continue across a wider health relationship.",
     category: "wearables",
     chooseCompetitor:
       "Choose Google Health Premium when you already use a Fitbit device or Pixel Watch and want its Gemini coach, adaptive fitness plans, sleep guidance, and first-party health metrics.",
@@ -506,10 +574,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "no",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "Google Health Premium",
-    overview:
-      "If your Pixel Watch or Fitbit data is the center of the problem, Google Health Premium has the tighter loop: it owns the measurements and can coach directly from them. Murph is the better fit when the starting point could instead be a lab, symptom, health errand, meal, record, or question and the useful answer needs history from several parts of life. Murph still does not replace Google's sensor data or device-specific calculations. The distinction is first-party wearable coaching versus a hardware-independent relationship that can keep reasoning and follow-through together.",
     relationship: "different-role",
     slug: "google-health",
     sources: [
@@ -553,10 +649,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["Apple Health", "Apple Fitness", "Apple Fitness+", "Apple Watch"],
-    bestFor:
-      "Use Apple Health and Fitness if you want the native repository and activity experience for an iPhone and Apple Watch. Use Murph when storing the data is not the hard part and you need help understanding it, making a decision, and carrying that decision forward.",
-    bottomLine:
-      "Apple is the better home for HealthKit data, activity rings, device measurements, and Fitness+ content. Murph is not another repository or workout library. It adds a private conversation that can connect selected Apple information with context Apple does not hold and help with the next action.",
     category: "wearables",
     chooseCompetitor:
       "Choose Apple Health and Fitness when you want the native Apple home for HealthKit data, activity rings, Apple Watch measurements, records, sharing, and optional trainer-led Fitness+ content.",
@@ -646,10 +738,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "limited",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "hardware",
+      },
     ],
     name: "Apple Health and Fitness",
-    overview:
-      "An Apple user already has an excellent place to collect HealthKit data and review activity. Murph is for the moment after collection: a trend needs an explanation, a workout plan conflicts with a symptom or schedule, a record creates a question, or a useful intention keeps slipping. You can share the relevant information without moving the whole Apple repository. Murph can then use the surrounding history, help choose an action, and return to whether it happened or helped.",
     relationship: "complement",
     slug: "apple-health-fitness",
     sources: [
@@ -686,10 +806,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       "Galaxy Ring",
       "Galaxy Watch",
     ],
-    bestFor:
-      "Choose Samsung Health for the deepest native experience across a Galaxy phone, watch, and ring. Choose Murph when the measurements are already available but the useful answer depends on records, symptoms, routines, goals, or action outside the Galaxy ecosystem.",
-    bottomLine:
-      "Samsung Health is stronger for Galaxy sensor data, Energy Score, device reports, and eligible regulated companion features. Murph cannot replace any of that hardware. It can provide the connective tissue between a Samsung signal, the rest of your health story, and the plan that follows.",
     category: "wearables",
     chooseCompetitor:
       "Choose Samsung Health when you own or plan to buy Galaxy hardware and want native sleep, Energy Score, workouts, nutrition, body composition, and eligible heart-health features.",
@@ -779,10 +895,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "limited",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "Samsung Health",
-    overview:
-      "Samsung Health already covers an unusually broad set of wellness functions, especially for someone invested in Galaxy hardware. Murph is not a reason to give up that ecosystem. It is useful when an Energy Score, sleep pattern, nutrition log, or device report cannot answer a cross-domain question by itself. Murph can combine the observation you share with relevant history and constraints, help settle on a next step, and keep the decision alive after you close the app.",
     relationship: "complement",
     slug: "samsung-health",
     sources: [
@@ -819,10 +963,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       "Ring AIR",
       "Jade by Ultrahuman",
     ],
-    bestFor:
-      "Consider Ring PRO if you want a screen-free ring with unusually long advertised battery life, substantial offline storage, and no mandatory core subscription, and you accept its preorder status. Choose Murph for the reasoning and action around health information, not for sensing it.",
-    bottomLine:
-      "Ultrahuman offers the more ambitious ring hardware and a growing ecosystem, while some PowerPlugs cost extra and Ring PRO availability was still prospective. Murph does not compete on sensors; it helps separate an interesting index from a decision worth making and tracks what follows.",
     category: "wearables",
     chooseCompetitor:
       "Choose Ultrahuman Ring PRO when a discreet ring, passive sleep and recovery sensing, long offline retention, and subscription-free core data matter most.",
@@ -912,10 +1052,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "no",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "Ultrahuman Ring PRO",
-    overview:
-      "Ring PRO is compelling hardware on paper: screen-free sensing, long advertised battery life, deep offline storage, and core data without a mandatory subscription. It was also still a preorder at verification, and the broader Ultrahuman experience can include paid or region-limited services. Murph offers none of the ring's measurements. Its value is helping you decide whether a signal matters after it is compared with symptoms, labs, meals, training, and prior outcomes, then supporting the action you choose.",
     relationship: "complement",
     slug: "ultrahuman-ring-pro",
     sources: [
@@ -951,10 +1119,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["Polar", "Polar Flow", "POLAR Flow"],
-    bestFor:
-      "Choose POLAR Loop for a distraction-free recovery and activity band backed by established sports analysis with no software subscription. Choose Murph when the training signal must be balanced with health context or turned into support outside Polar Flow.",
-    bottomLine:
-      "POLAR Loop is a strong one-time purchase for focused sensing and free sports analysis, with clear hardware limits such as no onboard GPS, display, or haptics. Murph cannot replace the band or Flow; it adds judgment and follow-through when training data is not the whole story.",
     category: "wearables",
     chooseCompetitor:
       "Choose POLAR Loop when you want passive heart rate, sleep, and recovery tracking plus training-load analysis in a simple screen-free band with free Polar Flow software.",
@@ -1044,10 +1208,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "no",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "POLAR Loop",
-    overview:
-      "Loop and Flow already give an athlete a focused, subscription-free measurement and training system. Murph should not dilute that strength with generic coaching. Its role begins when Polar's result meets a competing fact: poor sleep during travel, a symptom, a lab concern, a demanding schedule, or a plan that has repeatedly fallen apart. Murph can help weigh the full situation, choose a proportionate response, and check whether it was workable.",
     relationship: "complement",
     slug: "polar-loop",
     sources: [
@@ -1083,10 +1275,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["COROS App", "COROS Training Hub", "COROS EvoLab"],
-    bestFor:
-      "Choose COROS for endurance and outdoor sport, especially if GPS, battery life, structured training, routes, and subscription-free analysis matter. Choose Murph only when the question crosses from performance data into the rest of your health or daily life.",
-    bottomLine:
-      "COROS is the clear winner for recording and analyzing endurance training. Murph has no competing watch, navigation, or EvoLab stack. It can complement COROS when a training recommendation must be reconciled with symptoms, records, nutrition, constraints, or a plan outside sport.",
     category: "wearables",
     chooseCompetitor:
       "Choose COROS when accurate GPS training, racing, routes, sport-specific load, structured workouts, and coach-facing web analysis are the primary needs.",
@@ -1176,10 +1364,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "limited",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "COROS",
-    overview:
-      "COROS users already have deep training analysis without a monthly software bill, and coaches have a purpose-built web hub. Murph is not a better place for routes, race predictions, workouts, or load. It is the place to continue when the decision also involves symptoms, records, nutrition, stressors, or life constraints. A private conversation can preserve why a plan changed, help with the non-training actions around it, and revisit the result without displacing COROS.",
     relationship: "complement",
     slug: "coros",
     sources: [
@@ -1229,10 +1445,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       "Helio Strap",
       "Amazfit Helio Strap",
     ],
-    bestFor:
-      "Choose Helio Strap Pro for affordable, screen-free hybrid-training measurement without a required subscription, especially if flexible body placement matters. Choose Murph when the useful question begins after the movement and recovery analysis is already on screen.",
-    bottomLine:
-      "Helio Strap Pro offers unusual hardware value and sport-specific movement analysis for its price. Murph cannot provide its heart-rate or motion signals. It can help decide how a training finding fits symptoms, nutrition, goals, and real constraints, then keep the response from ending as another unread score.",
     category: "wearables",
     chooseCompetitor:
       "Choose Helio Strap Pro when heart rate, recovery, movement quality, muscle load, HybridCharge, HYROX support, and flexible wrist, arm, or waist placement are the main priorities.",
@@ -1322,10 +1534,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "limited",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "Amazfit Helio Strap Pro",
-    overview:
-      "Helio Strap Pro makes a credible case on value: screen-free heart-rate and movement modules, flexible placement, hybrid-training analysis, and no required core subscription. Murph is not an upgrade to those sensors. It becomes relevant when a HybridCharge or muscle-load result needs context the Zepp app may not own, such as symptoms, meals, records, time constraints, or previous attempts. Murph can help choose a response and stay with the outcome after the training session ends.",
     relationship: "complement",
     slug: "amazfit-helio-strap",
     sources: [
@@ -1357,10 +1597,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["RingConn Gen 3", "RingConn Gen 2", "RingConn Gen 2 Air"],
-    bestFor:
-      "Choose RingConn for passive ring sensing, long advertised battery life, and no recurring membership. Choose Murph when you need to move from a ring trend or alert to a reasoned decision that includes information RingConn does not collect.",
-    bottomLine:
-      "RingConn is the better tool for quiet, subscription-free sensing and selected on-ring alerts. Murph has no competing hardware. It adds a place to question the trend, compare it with the rest of your health, and support the action that follows, while Gen 3 stock and some advertised AI details merit rechecking.",
     category: "wearables",
     chooseCompetitor:
       "Choose RingConn when passive sleep and recovery sensing, a ring form factor, long battery life, vibration health alerts, and no subscription are the main priorities.",
@@ -1450,10 +1686,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "limited",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "RingConn",
-    overview:
-      "RingConn appeals to people who want long-battery passive sensing without another monthly fee, and Gen 3 adds useful vibration alerts. Those strengths do not make every app insight conclusive: vascular readings are trends rather than blood-pressure measurements, wellness flags are not diagnoses, and some AI availability was unclear at verification. Murph does not replace the ring. It can help keep a trend in proportion, compare it with relevant history, and decide what, if anything, deserves action.",
     relationship: "complement",
     slug: "ringconn",
     sources: [
@@ -1485,10 +1749,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["Circular", "Circular Ring", "Kira AI"],
-    bestFor:
-      "Consider Circular Ring 2 if you want a jewelry-oriented ring, a short ECG check, haptic reminders, and core features advertised without a forced subscription. Choose Murph for the wider reasoning around the available data, not for promised ring features that have not shipped clearly.",
-    bottomLine:
-      "Circular offers distinctive hardware and useful native sleep, energy, ECG, and haptic features, but its own pages conflict on blood-pressure and glucose availability. Murph cannot replace the ring; it can help ground a decision in what is actually measured now and connect that evidence with the wider health story.",
     category: "wearables",
     chooseCompetitor:
       "Choose Circular Ring 2 when ring-based sleep, energy, stress, live measurements, a short ECG check, and a core no-forced-subscription model matter most.",
@@ -1578,10 +1838,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "yes",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "no",
+        evidence: "hardware",
+      },
     ],
     name: "Circular Ring 2",
-    overview:
-      "Circular Ring 2 has a differentiated current feature set, including a short ECG check, detailed sleep views, Kira guidance, and haptic alerts. The purchasing decision is less simple because official pages conflict on the rollout of blood-pressure and glucose trends. Murph contributes no hardware and should not be used to fill that evidence gap. It can help you reason from the measurements Circular actually provides, connect them with relevant records and symptoms, and choose a practical response without treating a roadmap item as present data.",
     relationship: "complement",
     slug: "circular",
     sources: [
@@ -1613,10 +1901,6 @@ export const WEARABLE_COMPARISONS = defineComparisons([
   },
   {
     aliases: ["Withings App", "Withings+", "Health Mate"],
-    bestFor:
-      "Choose Withings when you want one ecosystem for unobtrusive watches, scales, blood-pressure monitors, sleep devices, thermometry, and long-term reports. Choose Murph when those measurements need to be connected with questions, records, routines, and action in one continuing conversation.",
-    bottomLine:
-      "Withings is the strongest option here for measuring several kinds of health data at home, including selected regulated capabilities. Murph measures none of them. It can help make the longitudinal record more useful by connecting trends across devices with personal context, care questions, and the next action.",
     category: "wearables",
     chooseCompetitor:
       "Choose Withings when connected weight, body composition, blood pressure, sleep, temperature, ECG, or hybrid-watch measurements and clinician-shareable reports are the priority.",
@@ -1706,10 +1990,38 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         murph: "yes",
         competitor: "limited",
       },
+      {
+        capability: "Longitudinal history",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "inputs",
+      },
+      {
+        capability: "Handles changing priorities",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "primaryJob",
+      },
+      {
+        capability: "Familiar messaging access",
+        murph: "yes",
+        competitor: "no",
+        evidence: "format",
+      },
+      {
+        capability: "Proactive follow up",
+        murph: "yes",
+        competitor: "yes",
+        evidence: "followThrough",
+      },
+      {
+        capability: "No dedicated device",
+        murph: "yes",
+        competitor: "limited",
+        evidence: "hardware",
+      },
     ],
     name: "Withings",
-    overview:
-      "Withings can build a richer home-measurement record than Murph ever could: weight and body composition, blood pressure, sleep, temperature, activity, and selected ECG data all have purpose-built devices. The remaining burden is making sense of changes across those categories and doing something appropriate with them. Murph can discuss the specific trends you choose to share alongside symptoms, meals, records, goals, and constraints, then help prepare a care question, plan a habit, handle a task, or revisit the result.",
     relationship: "complement",
     slug: "withings",
     sources: [

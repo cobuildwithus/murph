@@ -5,13 +5,12 @@ import { LABS_LONGEVITY_COMPARISONS } from "./data/labs-longevity";
 import { NUTRITION_COMPARISONS } from "./data/nutrition";
 import { SLEEP_MENTAL_COMPARISONS } from "./data/sleep-mental";
 import { WEARABLE_COMPARISONS } from "./data/wearables";
-import { expandQuickComparison } from "./quick-comparison";
 import type { ComparisonEntry } from "./types";
 
 export const COMPARISON_ROUTE_PREFIX = "murph-vs-";
 export const COMPARISON_REVIEWED_ON = "2026-08-31";
 
-const AUTHORED_COMPARISONS: readonly ComparisonEntry[] = [
+export const COMPARISONS: readonly ComparisonEntry[] = [
   ...WEARABLE_COMPARISONS,
   ...HEALTH_DATA_COMPARISONS,
   ...LABS_LONGEVITY_COMPARISONS,
@@ -20,12 +19,6 @@ const AUTHORED_COMPARISONS: readonly ComparisonEntry[] = [
   ...SLEEP_MENTAL_COMPARISONS,
   ...HEALTH_ASSISTANT_COMPARISONS,
 ];
-
-export const COMPARISONS: readonly ComparisonEntry[] =
-  AUTHORED_COMPARISONS.map((comparison) => ({
-    ...comparison,
-    quickComparison: expandQuickComparison(comparison),
-  }));
 
 const COMPARISONS_BY_SLUG = new Map(
   COMPARISONS.map((comparison) => [comparison.slug, comparison] as const),
