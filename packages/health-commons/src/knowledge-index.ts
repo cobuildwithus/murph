@@ -437,10 +437,7 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
   const entitiesByKey = new Map(catalog.entities.map((entity) => [entity.key, entity]));
   const chunks: KnowledgeChunk[] = [];
 
-  for (const entity of catalog.entities) {
-    if (entity.entityType === "goal_template") {
-      continue;
-    }
+  for (const entity of catalog.entities.filter(canBuildKnowledgeChunks)) {
     const entityTopic = entityTopicText(entity);
     for (const [claimIndex, claim] of (entity.claims ?? []).entries()) {
       chunks.push({
@@ -488,6 +485,10 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
     .filter((chunk) => chunk.sources.length > 0)
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((chunk, index) => ({ ...chunk, id: `${chunk.id}:${index}` }));
+}
+
+function canBuildKnowledgeChunks(entity: HealthCommonsCatalogEntity): boolean {
+  return entity.entityType !== "goal_template";
 }
 
 function resolveSources(

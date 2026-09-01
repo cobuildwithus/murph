@@ -27,6 +27,21 @@ const SENSITIVE_SOURCE_URL_SEARCH_PARAMS = new Set([
   "token",
 ]);
 
+const NON_PUBLIC_IPV4_RANGES = [
+  [0x00000000, 0xff000000],
+  [0x0a000000, 0xff000000],
+  [0x64400000, 0xffc00000],
+  [0x7f000000, 0xff000000],
+  [0xa9fe0000, 0xffff0000],
+  [0xac100000, 0xfff00000],
+  [0xc0000000, 0xffff0000],
+  [0xc0a80000, 0xffff0000],
+  [0xc6120000, 0xfffe0000],
+  [0xc6336400, 0xffffff00],
+  [0xcb007100, 0xffffff00],
+  [0xe0000000, 0xe0000000],
+] as const;
+
 /**
  * Extract the visible Markdown links from a goal guide's Sources section.
  * These links are the guide's direct public citations; source-artifact edges
@@ -255,19 +270,17 @@ function isNonPublicIpv4Address([
   first,
   second,
   third,
+  fourth,
 ]: [number, number, number, number]): boolean {
-  return first === 0
-    || first === 10
-    || first === 127
-    || (first === 100 && second >= 64 && second <= 127)
-    || (first === 169 && second === 254)
-    || (first === 172 && second >= 16 && second <= 31)
-    || (first === 192 && second === 0)
-    || (first === 192 && second === 168)
-    || (first === 198 && (second === 18 || second === 19))
-    || (first === 198 && second === 51 && third === 100)
-    || (first === 203 && second === 0 && third === 113)
-    || first >= 224;
+  const address = (
+    first * 0x1000000
+    + second * 0x10000
+    + third * 0x100
+    + fourth
+  ) >>> 0;
+  return NON_PUBLIC_IPV4_RANGES.some(
+    ([network, mask]) => ((address & mask) >>> 0) === network,
+  );
 }
 
 function isNonPublicIpv6Address(hostname: string): boolean {

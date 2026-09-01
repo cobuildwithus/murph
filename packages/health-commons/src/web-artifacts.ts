@@ -639,10 +639,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
     if (!WEB_BUNDLE_ENTITY_TYPES.has(entity.entityType)) {
       continue;
     }
-    if (entity.entityType === "protocol_variant" && !isPublicProtocolVariant(entity)) {
-      continue;
-    }
-    if (entity.entityType === "goal_template" && !isPublicGoalTemplate(entity)) {
+    if (!isPublicWebBundleEntity(entity)) {
       continue;
     }
 
@@ -713,20 +710,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
     }
   }
 
-  for (const bundle of routeBundles.values()) {
-    if (bundle.route.entityType !== "goal_template") {
-      continue;
-    }
-    const goal = entitiesByKey.get(bundle.primaryKey);
-    if (!isPublicGoalTemplate(goal)) {
-      continue;
-    }
-
-    projectionArtifacts.set(
-      goalPagePathForRouteId(bundle.route.routeId),
-      buildGoalPage({ bundle, goal }),
-    );
-  }
+  addGoalPageArtifacts(routeBundles, entitiesByKey, projectionArtifacts);
 
   for (const bundle of routeBundles.values()) {
     if (bundle.route.entityType !== "biomarker") {
@@ -884,6 +868,36 @@ export function buildHealthCommonsWebGeneratedArtifacts(
       schemaVersion: HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION,
     },
   };
+}
+
+function isPublicWebBundleEntity(entity: HealthCommonsCatalogEntity): boolean {
+  if (entity.entityType === "protocol_variant") {
+    return isPublicProtocolVariant(entity);
+  }
+  if (entity.entityType === "goal_template") {
+    return isPublicGoalTemplate(entity);
+  }
+  return true;
+}
+
+function addGoalPageArtifacts(
+  routeBundles: ReadonlyMap<string, HealthCommonsWebRouteBundle>,
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+  projectionArtifacts: Map<string, HealthCommonsWebProjectionArtifact>,
+): void {
+  for (const bundle of routeBundles.values()) {
+    if (bundle.route.entityType !== "goal_template") {
+      continue;
+    }
+    const goal = entitiesByKey.get(bundle.primaryKey);
+    if (!isPublicGoalTemplate(goal)) {
+      continue;
+    }
+    projectionArtifacts.set(
+      goalPagePathForRouteId(bundle.route.routeId),
+      buildGoalPage({ bundle, goal }),
+    );
+  }
 }
 
 function buildGoalPage(input: {
@@ -2574,12 +2588,7 @@ function collectRouteClosureKeys(
     addKey(signal.biomarkerKey);
   }
 
-  if (primary.entityType === "goal_template" && primary.goal) {
-    addKey(primary.goal.parentGoalKey);
-    for (const sourceKey of primary.goal.evidenceSourceKeys) {
-      addKey(sourceKey);
-    }
-  }
+  addGoalClosureKeys(primary, addKey);
 
   if (primary.entityType === "biomarker") {
     for (const entity of catalog.entities) {
@@ -2611,6 +2620,19 @@ function collectRouteClosureKeys(
   }
 
   return keys;
+}
+
+function addGoalClosureKeys(
+  primary: HealthCommonsCatalogEntity,
+  addKey: (key: string | null | undefined) => void,
+): void {
+  if (primary.entityType !== "goal_template" || !primary.goal) {
+    return;
+  }
+  addKey(primary.goal.parentGoalKey);
+  for (const sourceKey of primary.goal.evidenceSourceKeys) {
+    addKey(sourceKey);
+  }
 }
 
 function prepareEntityForWebBundle(

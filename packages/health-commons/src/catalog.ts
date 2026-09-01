@@ -109,39 +109,7 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
   );
 
   for (const page of content.pages) {
-    if (page.frontmatter.entityType === "goal_template" && page.frontmatter.goal) {
-      if (page.frontmatter.goal.indexable) {
-        validateIndexableGoalBody(page);
-      }
-
-      if (page.frontmatter.goal.parentGoalKey) {
-        assertTargetExists(
-          keys,
-          page.frontmatter.goal.parentGoalKey,
-          `${page.frontmatter.key} goal.parentGoalKey`,
-        );
-        assertTargetEntityType(
-          pagesByKey,
-          page.frontmatter.goal.parentGoalKey,
-          "goal_template",
-          `${page.frontmatter.key} goal.parentGoalKey`,
-        );
-      }
-
-      for (const sourceKey of page.frontmatter.goal.evidenceSourceKeys) {
-        assertTargetExists(
-          keys,
-          sourceKey,
-          `${page.frontmatter.key} goal.evidenceSourceKeys`,
-        );
-        assertTargetEntityType(
-          pagesByKey,
-          sourceKey,
-          "source_artifact",
-          `${page.frontmatter.key} goal.evidenceSourceKeys`,
-        );
-      }
-    }
+    validateGoalTemplateReferences(page, keys, pagesByKey);
 
     for (const relation of page.frontmatter.relations ?? []) {
       assertTargetExists(keys, relation.target, `${page.frontmatter.key} relation ${relation.type}`);
@@ -339,6 +307,40 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
   warnDuplicateRecipeHashes(content.pages);
 }
 
+function validateGoalTemplateReferences(
+  page: HealthCommonsSourcePage,
+  keys: ReadonlyMap<string, string>,
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
+): void {
+  if (page.frontmatter.entityType !== "goal_template" || !page.frontmatter.goal) {
+    return;
+  }
+  if (page.frontmatter.goal.indexable) {
+    validateIndexableGoalBody(page);
+  }
+
+  const parentGoalKey = page.frontmatter.goal.parentGoalKey;
+  if (parentGoalKey) {
+    assertTargetExists(keys, parentGoalKey, `${page.frontmatter.key} goal.parentGoalKey`);
+    assertTargetEntityType(
+      pagesByKey,
+      parentGoalKey,
+      "goal_template",
+      `${page.frontmatter.key} goal.parentGoalKey`,
+    );
+  }
+
+  for (const sourceKey of page.frontmatter.goal.evidenceSourceKeys) {
+    assertTargetExists(keys, sourceKey, `${page.frontmatter.key} goal.evidenceSourceKeys`);
+    assertTargetEntityType(
+      pagesByKey,
+      sourceKey,
+      "source_artifact",
+      `${page.frontmatter.key} goal.evidenceSourceKeys`,
+    );
+  }
+}
+
 function validateIndexableGoalBody(page: HealthCommonsSourcePage): void {
   const body = page.body.trim();
   if (body.length < HEALTH_COMMONS_INDEXABLE_GOAL_BODY_MIN_CHARACTERS) {
@@ -415,6 +417,32 @@ function validateGoalBodyLinks(
   redirects: readonly HealthCommonsRedirect[],
   pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
 ): void {
+  const publicGoalRouteIds = collectPublicGoalRouteIds(pages, redirects, pagesByKey);
+
+  for (const page of pages) {
+    if (page.frontmatter.entityType !== "goal_template") {
+      continue;
+    }
+    for (const match of page.body.matchAll(
+      /(?<!!)\[[^\]\r\n]+\]\((\/goals\/[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)/gu,
+    )) {
+      const destination = match[1] ?? "";
+      const routePath = destination.split(/[?#]/u)[0]?.replace(/\/+$/u, "") ?? "";
+      const routeId = routePath.replace(/^\/goals\//u, "");
+      if (!routeId || routeId.includes("/") || !publicGoalRouteIds.has(routeId)) {
+        throw new Error(
+          `${page.frontmatter.key} links to missing public goal route ${destination}.`,
+        );
+      }
+    }
+  }
+}
+
+function collectPublicGoalRouteIds(
+  pages: readonly HealthCommonsSourcePage[],
+  redirects: readonly HealthCommonsRedirect[],
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
+): Set<string> {
   const publicGoalRouteIds = new Set<string>();
   const publicGoalKeys = new Set<string>();
 
@@ -448,24 +476,7 @@ function validateGoalBodyLinks(
       );
     }
   }
-
-  for (const page of pages) {
-    if (page.frontmatter.entityType !== "goal_template") {
-      continue;
-    }
-    for (const match of page.body.matchAll(
-      /(?<!!)\[[^\]\r\n]+\]\((\/goals\/[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)/gu,
-    )) {
-      const destination = match[1] ?? "";
-      const routePath = destination.split(/[?#]/u)[0]?.replace(/\/+$/u, "") ?? "";
-      const routeId = routePath.replace(/^\/goals\//u, "");
-      if (!routeId || routeId.includes("/") || !publicGoalRouteIds.has(routeId)) {
-        throw new Error(
-          `${page.frontmatter.key} links to missing public goal route ${destination}.`,
-        );
-      }
-    }
-  }
+  return publicGoalRouteIds;
 }
 
 export function buildHealthCommonsSourceIndex(catalog: HealthCommonsCatalog): HealthCommonsSourceIndex {

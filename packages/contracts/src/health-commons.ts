@@ -2016,92 +2016,7 @@ export const healthCommonsPageFrontmatterSchema = z
       });
     }
 
-    if (page.entityType === "goal_template") {
-      if (!page.key.startsWith("goal_template:")) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "goal_template page keys must start with goal_template:.",
-          path: ["key"],
-        });
-      }
-      if (!page.goal) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "goal_template pages must include a goal block.",
-          path: ["goal"],
-        });
-      }
-      if (!page.summary) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "goal_template pages must include a summary.",
-          path: ["summary"],
-        });
-      }
-      if (!page.safety) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "goal_template pages must include a safety block.",
-          path: ["safety"],
-        });
-      }
-      if (!page.status) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "goal_template pages must include status.",
-          path: ["status"],
-        });
-      }
-      if (!page.quality) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "goal_template pages must include quality.",
-          path: ["quality"],
-        });
-      }
-      if (page.title.length > 80) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "goal_template titles must be 80 characters or fewer.",
-          path: ["title"],
-        });
-      }
-      if (page.slug.includes("/")) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "goal_template slugs must be flat; use goal.category and the content path for grouping.",
-          path: ["slug"],
-        });
-      }
-      if (page.goal?.parentGoalKey === page.key) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "A goal_template cannot be its own parent.",
-          path: ["goal", "parentGoalKey"],
-        });
-      }
-      if (
-        page.goal?.indexable === true
-        && (
-          !page.status
-          || !["field-testing", "reviewed", "community"].includes(page.status)
-          || page.hidden === true
-          || page.quality === "stub"
-        )
-      ) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Indexable goal_template pages must be visible, usable, and published.",
-          path: ["goal", "indexable"],
-        });
-      }
-    } else if (page.goal) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "goal is only valid on goal_template pages.",
-        path: ["goal"],
-      });
-    }
+    addGoalTemplatePageIssues(page, context);
 
     if (page.entityType !== "biomarker" && page.referenceGuidance) {
       context.addIssue({
@@ -2160,6 +2075,93 @@ export const healthCommonsPageFrontmatterSchema = z
   });
 
 export type HealthCommonsPageFrontmatter = z.infer<typeof healthCommonsPageFrontmatterSchema>;
+
+function addGoalTemplatePageIssues(
+  page: {
+    entityType: HealthCommonsEntityType;
+    goal?: HealthCommonsGoalTemplate;
+    hidden?: boolean;
+    key: string;
+    quality?: "stub" | "usable" | "reviewed" | "excellent";
+    safety?: HealthCommonsSafety;
+    slug: string;
+    status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community";
+    summary?: string;
+    title: string;
+  },
+  context: z.RefinementCtx,
+): void {
+  if (page.entityType !== "goal_template") {
+    if (page.goal) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "goal is only valid on goal_template pages.",
+        path: ["goal"],
+      });
+    }
+    return;
+  }
+
+  if (!page.key.startsWith("goal_template:")) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "goal_template page keys must start with goal_template:.",
+      path: ["key"],
+    });
+  }
+  const requiredFields = [
+    [page.goal, "goal", "goal block"],
+    [page.summary, "summary", "summary"],
+    [page.safety, "safety", "safety block"],
+    [page.status, "status", "status"],
+    [page.quality, "quality", "quality"],
+  ] as const;
+  for (const [value, path, label] of requiredFields) {
+    if (!value) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `goal_template pages must include ${label}.`,
+        path: [path],
+      });
+    }
+  }
+  if (page.title.length > 80) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "goal_template titles must be 80 characters or fewer.",
+      path: ["title"],
+    });
+  }
+  if (page.slug.includes("/")) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "goal_template slugs must be flat; use goal.category and the content path for grouping.",
+      path: ["slug"],
+    });
+  }
+  if (page.goal?.parentGoalKey === page.key) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "A goal_template cannot be its own parent.",
+      path: ["goal", "parentGoalKey"],
+    });
+  }
+  if (
+    page.goal?.indexable === true
+    && (
+      !page.status
+      || !["field-testing", "reviewed", "community"].includes(page.status)
+      || page.hidden === true
+      || page.quality === "stub"
+    )
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Indexable goal_template pages must be visible, usable, and published.",
+      path: ["goal", "indexable"],
+    });
+  }
+}
 
 export const healthCommonsRedirectSchema = z
   .object({
