@@ -67,11 +67,17 @@ Last verified: 2026-08-31
   `agent-docs/operations/native-android-hosted-e2e.md`.
 - Required Temporal compatibility is one public commit status backed by a
   trusted default-branch controller and the private owner's live Current and
-  Ramping reader attestation. Irrelevant changes complete without private work;
-  relevant changes require the same current public head throughout selection
-  and dispatch. The exact candidate producer runs in unprivileged public CI;
-  the trusted controller sends only its bounded canonical fixture JSON and
-  digest to private CI. Using the repository-scoped GitHub App token, it first
+  Ramping reader attestation over the bounded reconciliation fixture corpus.
+  While the private standby guard remains, the reader set also includes the
+  active legacy Render worker's exact live deploy revision. Final protected
+  attestation re-reads the complete set and fails on identity or routing drift.
+  This is a fixture-only pull-request gate: private CI never checks out or
+  imports public pull-request candidate code. Irrelevant changes complete
+  without private work; relevant changes require the same current public head
+  throughout selection and dispatch. The exact candidate producer runs in
+  unprivileged public CI; the trusted controller sends only its bounded
+  canonical fixture JSON and digest to private CI. Using the repository-scoped
+  GitHub App token, it first
   resolves private `main` to an exact commit, validates the fixed
   `public-murph-integration.yml` workflow identity, revalidates the exact public
   PR head, and dispatches that workflow at `main` with returned run details. It
@@ -90,6 +96,16 @@ Last verified: 2026-08-31
   exact run is visible, uncertain polling or timeout cancels only that run,
   escalates to force-cancel only if ordinary cancellation does not make it
   terminal, and never searches for or cancels a guessed run.
+  This fixture proof is not deployment admission and does not claim full
+  application integration. Separately, after both revisions reach protected
+  `main`, private unprivileged full-integration CI checks out the exact resolved
+  public `main` revision, never an arbitrary public candidate, and emits an
+  exact private-main/public-main candidate receipt. Protected release admission
+  binds that receipt to both still-current main heads, exhaustive synthetic
+  migration replay, the exact production target, and live reader routing before
+  deployment can mutate production. Bounded replay of histories returned by
+  Temporal Visibility is additional production evidence, not an exhaustive
+  registry guarantee.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
   HTTP 400, 415, or 422. Before that text enters the provider, the existing

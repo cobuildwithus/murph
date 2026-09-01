@@ -1370,12 +1370,17 @@ locally readable.
   attestation and fails closed on movement. The public repository stores no
   private SHA/tag pointer and no private Current/Ramping reader policy; those
   reader revisions are derived and attested inside private protected CI.
-  Credentialed compatibility and release-admission jobs must never check out or
-  import public candidate code. Unprivileged full-integration jobs may check out
-  the exact public candidate they exercise. Neither side may restore
-  candidate-controlled caches beside credentials, read private logs or
-  artifacts, expose reader revisions publicly, or accept workflow/check names
-  from the candidate.
+  Private CI must never check out or import public pull-request candidate code
+  for Temporal compatibility. The protected pull-request compatibility lane is
+  fixture-only: it receives only the bounded canonical artifact produced by
+  unprivileged public CI. Separately, after revisions reach the protected main
+  branches, private unprivileged full-integration CI may check out only the
+  exact resolved public `main` revision, never an arbitrary public candidate.
+  The credentialed release-admission job consumes that exact main/main
+  integration receipt without checking out or importing public code. Neither
+  side may restore candidate-controlled caches beside credentials, read private
+  logs or artifacts, expose reader revisions publicly, or accept workflow/check
+  names from the candidate.
 - The public automated live Junction wearable canary uses only sandbox Junction
   authority, Kernel browser authority, and a dedicated Garmin test account. Keep
   those five credentials
