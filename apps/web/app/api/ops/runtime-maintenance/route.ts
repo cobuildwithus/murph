@@ -3,6 +3,7 @@ import {
   readHostedRuntimeStalledRecheckOverview,
   signalHostedRuntimeMaintenanceBatch,
   signalHostedRuntimeRecheckBatch,
+  verifyHostedRuntimeRecheckBatch,
 } from "@/src/lib/hosted-ops/runtime-maintenance";
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -19,6 +20,7 @@ export const revalidate = 0;
 const HOSTED_RUNTIME_MAINTENANCE_BODY_LIMIT_BYTES = 4 * 1024;
 const STALLED_RECHECK_DISCOVERY_OPERATION = "recheck-stalled-device-sync";
 const RUNTIME_RECHECK_OPERATION = "recheck-runtimes";
+const RUNTIME_RECHECK_VERIFICATION_OPERATION = "verify-runtime-rechecks";
 
 export const GET = withJsonError(async (request: Request) => {
   await requireHostedOpsRequestAccess(request);
@@ -55,6 +57,11 @@ export const POST = withJsonError(async (request: Request) => {
       userIds: readRequiredStringArrayField(body, "userIds"),
     }));
   }
+  if (operation === RUNTIME_RECHECK_VERIFICATION_OPERATION) {
+    return jsonOk(await verifyHostedRuntimeRecheckBatch({
+      baselines: readRequiredArrayField(body, "baselines"),
+    }));
+  }
   assertKnownRuntimeMaintenanceOperation(operation);
 
   return jsonOk(await signalHostedRuntimeMaintenanceBatch({
@@ -85,6 +92,19 @@ function readRequiredStringArrayField(
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
     throw invalidRuntimeMaintenanceOperation(
       `Hosted runtime maintenance ${key} must be an array of strings.`,
+    );
+  }
+  return value;
+}
+
+function readRequiredArrayField(
+  body: Record<string, unknown>,
+  key: string,
+): unknown[] {
+  const value = body[key];
+  if (!Array.isArray(value)) {
+    throw invalidRuntimeMaintenanceOperation(
+      `Hosted runtime maintenance ${key} must be an array.`,
     );
   }
   return value;
