@@ -1159,6 +1159,7 @@ Set these in the selected GitHub environment as vars:
 - `CF_BUNDLES_BUCKET`
 - `CF_BUNDLES_PREVIEW_BUCKET`
 - `CF_PUBLIC_BASE_URL`
+- `CF_STANDBY_CONTAINER_MAX_INSTANCES=1`
 - `HOSTED_WEB_BASE_URL`
 - `HOSTED_WEB_PRODUCTION_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
@@ -1171,6 +1172,17 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
+
+`CF_STANDBY_CONTAINER_MAX_INSTANCES` is a non-secret deploy input, not a Worker
+runtime variable. Private `cobuildwithus/murph-cloud` must map it in
+`.github/workflows/deploy-cloudflare-hosted.yml` on the `Prepare deploy
+artifacts` step's `env` as
+`CF_STANDBY_CONTAINER_MAX_INSTANCES: ${{ vars.CF_STANDBY_CONTAINER_MAX_INSTANCES || '1' }}`.
+The owning `preview` and `production` GitHub Environments must both start at
+`1`. A deployment is incomplete until artifact validation shows the rendered
+standby maximum and the live Cloudflare container declaration reports the same
+value. Raising it before `allocate`, retaining it through rollback, and reducing
+it after the bound-target drain use that same Environment variable and mapping.
 
 `MURPH_ANDROID_APP_ENABLED` is an optional, fail-closed rollout variable. Leave
 it unset until the public Android app and the compatible Web, Worker, and runner
@@ -1379,6 +1391,12 @@ Core execution tuning:
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
 - `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`. This restores the two-vCPU production shape after measured cold-start and same-size workspace-restore regressions on the smaller allocation. The post-completion conversation idle lease remains independently configured at ten minutes.
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
+- `CF_STANDBY_CONTAINER_MAX_INSTANCES` defaults to `1` and independently owns
+  the `StandbyRunnerContainer` platform declaration. Before enabling standby
+  allocation, set it to at least `CF_CONTAINER_MAX_INSTANCES`; retain that
+  raised value through `off` or `shadow` rollback until every bound standby
+  target has been proven retired. Current never-allocated production remains at
+  `1`.
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
@@ -1395,7 +1413,10 @@ Core execution tuning:
   release-scoped ENAM standby and measures readiness without allocating it;
   `allocate` lets `UserRunner` claim it with a 250 ms total coordinator/bind
   deadline and uses the unchanged exact-user cold path when no ready slot is
-  available. Invalid values fail deploy/runtime parsing closed.
+  available. Invalid values fail deploy/runtime parsing closed. The rendered
+  `StandbyRunnerContainer` remains declared in every mode so its class, binding,
+  and migration history stay available. Mode changes do not change its platform
+  capacity; `CF_STANDBY_CONTAINER_MAX_INSTANCES` owns that separate lifecycle.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting
@@ -1419,7 +1440,14 @@ effective standby mode, expected Worker release, and runner bundle/source
 fingerprints first. Then use `shadow` for at least one ordinary
 observation window and verify that exactly one current-release ENAM slot stays
 ready, failed/stale slots retire, and no processing reports a claimed standby.
-Only then set `allocate`; no Web or Temporal deploy is required.
+Before any future `allocate` activation, raise
+`CF_STANDBY_CONTAINER_MAX_INSTANCES` to at least
+`CF_CONTAINER_MAX_INSTANCES`, deploy and prove that live declaration while the
+mode remains `shadow`, and budget the account-wide container ceiling for the
+active runner, deploy-smoke runner, and standby declaration together. Reduce
+the configured maxima or raise the Cloudflare account limit first when that
+composed maximum would exceed capacity. Only then set `allocate`; no Web or
+Temporal deploy is required.
 
 At the current 2-vCPU, 6-GiB-memory, 6-GB-disk shape, one continuously ready
 slot costs about $40.52 per average 730-hour month for allocated memory and
@@ -1429,12 +1457,17 @@ preflight. In `allocate`, temporarily add the
 ordinary cost of claimed same-member containers until their existing idle
 lifecycle retires them. Check current Cloudflare rates before activation.
 
-The immediate operational rollback is to set the mode to `off`; current and
-stale release coordinators converge by retiring only coordinator-owned slots,
-while already bound member containers finish or stop through their exact
-`UserRunner` owner. Once migration `v7` has deployed, do not roll Worker code
-back to a version that removes the new class exports, bindings, or migration
-history. Forward-deploy compatible code with mode `off` instead.
+This release's deployment claim is limited to current `off` or `shadow`
+production after proving that `allocate` has never bound a standby target. In
+that state, the one-instance declaration is safe and preserves the class,
+binding, and migration history. After any future allocation, the immediate
+operational rollback is mode `off` while retaining the raised independent
+standby capacity: runtime mode `off` retires coordinator-owned slots while
+already-bound member containers finish or stop through their exact `UserRunner`
+owner. Reduce `CF_STANDBY_CONTAINER_MAX_INSTANCES` back to `1` only after proving
+that every bound standby target has retired. Once migration `v7` has deployed,
+do not roll Worker code back to a version that removes the new class exports,
+bindings, or migration history.
 
 Observability:
 
@@ -1691,6 +1724,7 @@ If the selected GitHub environment already defines container sizing overrides, u
 
 - `CF_CONTAINER_INSTANCE_TYPE={"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES=1000`
+- `CF_STANDBY_CONTAINER_MAX_INSTANCES=1`
 
 When hosted email sender identity is configured, deploy automation renders one native `send_email` binding named `HOSTED_EMAIL` and constrains it with `allowed_sender_addresses` to that resolved sender address. Hosted email outbound send no longer requires a runtime Cloudflare account id or email-send API token inside the Worker.
 

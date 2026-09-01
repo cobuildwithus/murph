@@ -336,9 +336,9 @@ describe("hosted deploy automation helpers", () => {
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         image_build_context: "..",
         instance_type: "standard-1",
-        max_instances: 250,
+        max_instances: 1,
         rollout_active_grace_period: 300,
-        rollout_step_percentage: [10, 25, 50, 100],
+        rollout_step_percentage: [100],
         ssh: { enabled: false },
       },
     ]);
@@ -506,6 +506,95 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
+  });
+
+  it.each([
+    ["current off", "off", undefined, 1, [100], 1_500],
+    ["current shadow", "shadow", undefined, 1, [100], 1_500],
+    ["raised allocate", "allocate", "748", 748, [10, 25, 50, 100], 2_994],
+    ["raised off rollback", "off", "748", 748, [10, 25, 50, 100], 2_994],
+    ["raised shadow rollback", "shadow", "748", 748, [10, 25, 50, 100], 2_994],
+  ] as const)(
+    "renders %s standby capacity without changing its durable declaration",
+    (
+      _scenario,
+      standbyMode,
+      configuredStandbyMaxInstances,
+      expectedStandbyMaxInstances,
+      expectedRolloutSteps,
+      expectedDeclaredMaxVcpu,
+    ) => {
+      const environment = readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_CONTAINER_MAX_INSTANCES: "748",
+        CF_STANDBY_CONTAINER_MAX_INSTANCES: configuredStandbyMaxInstances,
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+        HOSTED_EXECUTION_STANDBY_MODE: standbyMode,
+      });
+      const config = buildHostedWranglerDeployConfig(environment) as {
+        containers: Array<{
+          class_name: string;
+          constraints?: { regions: string[] };
+          instance_type: string | {
+            disk_mb: number;
+            memory_mib: number;
+            vcpu: number;
+          };
+          max_instances: number;
+          rollout_step_percentage: number[];
+        }>;
+        durable_objects: {
+          bindings: Array<{ class_name: string; name: string }>;
+        };
+        migrations: Array<{ new_sqlite_classes: string[]; tag: string }>;
+      };
+
+      expect(config.containers).toMatchObject([
+        { class_name: "RunnerContainer", max_instances: 748 },
+        { class_name: "DeploySmokeRunnerContainer", max_instances: 1 },
+        {
+          class_name: "StandbyRunnerContainer",
+          constraints: { regions: ["ENAM"] },
+          max_instances: expectedStandbyMaxInstances,
+          rollout_step_percentage: expectedRolloutSteps,
+        },
+      ]);
+      const declaredMaxVcpu = config.containers.reduce((total, container) => {
+        if (typeof container.instance_type === "string") {
+          throw new TypeError("Expected the production custom container shape.");
+        }
+        return total + container.max_instances * container.instance_type.vcpu;
+      }, 0);
+      expect(declaredMaxVcpu).toBe(expectedDeclaredMaxVcpu);
+      expect(config.durable_objects.bindings).toContainEqual({
+        class_name: "StandbyRunnerContainer",
+        name: "STANDBY_RUNNER_CONTAINER",
+      });
+      expect(config.migrations).toContainEqual({
+        new_sqlite_classes: [
+          "StandbyRunnerCoordinatorDurableObject",
+          "StandbyRunnerContainer",
+        ],
+        tag: "v7",
+      });
+    },
+  );
+
+  it("requires full independent standby capacity before allocation", () => {
+    expect(() => readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_CONTAINER_MAX_INSTANCES: "748",
+      CF_STANDBY_CONTAINER_MAX_INSTANCES: "747",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+    })).toThrow(
+      "CF_STANDBY_CONTAINER_MAX_INSTANCES must be at least "
+      + "CF_CONTAINER_MAX_INSTANCES before standby allocation is enabled.",
+    );
   });
 
   it("passes an explicit preview OIDC environment through to generated Worker vars", () => {

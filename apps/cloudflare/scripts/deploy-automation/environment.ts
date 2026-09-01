@@ -3,6 +3,7 @@ import {
   MURPH_ANDROID_APP_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 
+import { readHostedStandbyMode } from "../../src/standby-runner-contract.ts";
 import {
   HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
@@ -48,6 +49,7 @@ const DEFAULT_CONTAINER_INSTANCE_TYPE: HostedContainerInstanceType = {
   vcpu: 2,
 };
 const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
+const DEFAULT_STANDBY_CONTAINER_MAX_INSTANCES = 1;
 const RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
 
 export interface HostedDeployAutomationEnvironment {
@@ -62,6 +64,7 @@ export interface HostedDeployAutomationEnvironment {
   retryDelayMs: string;
   runnerCommitTimeoutMs: string;
   runnerReadyTimeoutMs: string;
+  standbyContainerMaxInstances: number;
   traceHeadSamplingRate: number;
   webControlTimeoutMs: string;
   workerName: string;
@@ -111,6 +114,25 @@ export function readHostedDeployAutomationEnvironment(
   const workerName = requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME");
   const timeouts = readHostedDeployAutomationTimeouts(source);
   const workerVars = readHostedWorkerVars(source);
+  const containerMaxInstances = normalizePositiveInteger(
+    source.CF_CONTAINER_MAX_INSTANCES,
+    DEFAULT_CONTAINER_MAX_INSTANCES,
+    "CF_CONTAINER_MAX_INSTANCES",
+  );
+  const standbyContainerMaxInstances = normalizePositiveInteger(
+    source.CF_STANDBY_CONTAINER_MAX_INSTANCES,
+    DEFAULT_STANDBY_CONTAINER_MAX_INSTANCES,
+    "CF_STANDBY_CONTAINER_MAX_INSTANCES",
+  );
+  if (
+    readHostedStandbyMode(workerVars) === "allocate"
+    && standbyContainerMaxInstances < containerMaxInstances
+  ) {
+    throw new Error(
+      "CF_STANDBY_CONTAINER_MAX_INSTANCES must be at least "
+      + "CF_CONTAINER_MAX_INSTANCES before standby allocation is enabled.",
+    );
+  }
   assertHostedR2Configuration({
     bundlesBucketName,
     workerVars,
@@ -126,11 +148,7 @@ export function readHostedDeployAutomationEnvironment(
       DEFAULT_CONTAINER_INSTANCE_TYPE,
       "CF_CONTAINER_INSTANCE_TYPE",
     ),
-    containerMaxInstances: normalizePositiveInteger(
-      source.CF_CONTAINER_MAX_INSTANCES,
-      DEFAULT_CONTAINER_MAX_INSTANCES,
-      "CF_CONTAINER_MAX_INSTANCES",
-    ),
+    containerMaxInstances,
     logHeadSamplingRate: normalizeSamplingRate(
       source.CF_LOG_HEAD_SAMPLING_RATE,
       DEFAULT_LOG_HEAD_SAMPLING_RATE,
@@ -152,6 +170,7 @@ export function readHostedDeployAutomationEnvironment(
       "20000",
       "CF_RUNNER_READY_TIMEOUT_MS",
     ),
+    standbyContainerMaxInstances,
     traceHeadSamplingRate: normalizeSamplingRate(
       source.CF_TRACE_HEAD_SAMPLING_RATE,
       DEFAULT_TRACE_HEAD_SAMPLING_RATE,

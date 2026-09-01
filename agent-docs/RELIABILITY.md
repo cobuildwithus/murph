@@ -373,7 +373,13 @@ Last verified: 2026-08-30
   uses one 250 ms claim/bind deadline. A miss before slot ownership uses the
   ordinary exact-user fallback; an ambiguous bind after the per-member stop
   target is durably reserved retries that exact target instead of risking two
-  live containers.
+  live containers. The standby class, binding, and migration remain deployed in
+  every mode. Its independent platform-capacity input defaults to one for the
+  never-allocated deployment. Before `allocate`, operators raise it to at least
+  the active-runner maximum and retain that raised value through an `off` or
+  `shadow` rollback; they reduce it only after proving every bound standby target
+  has retired. Mode changes never implicitly narrow capacity beneath persisted
+  same-member targets.
   A coordinator transaction admits at most one winner, then replacement
   provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
   retirement, expire unbound claim tombstones, and drain stale releases. The
