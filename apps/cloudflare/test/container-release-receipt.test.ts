@@ -286,7 +286,7 @@ describe("container release receipt", () => {
     ];
     const after: CloudflareContainerApplicationIdentity[] = [
       identity("app-z", "id-z", 1, "image-created"),
-      identity("app-b", "id-b", 6, "image-updated"),
+      identity("app-b", "id-b", 4, "image-updated"),
       identity("app-a", "id-a", 2, "image-stable"),
     ];
 
@@ -299,7 +299,7 @@ describe("container release receipt", () => {
           className: "AContainer",
           disposition: "updated",
           imageSha256: "9ff7d52d53b3639b959907155509b1795020364a2db9fdf186ba499792689655",
-          version: 6,
+          version: 4,
         },
         {
           applicationName: "app-a",
@@ -336,7 +336,7 @@ describe("container release receipt", () => {
       })).toThrow("Container release evidence did not form an exact provider transition.");
     });
 
-    it("requires modified identity continuity and a newer provider version", () => {
+    it("requires modified identity continuity without treating provider version as a counter", () => {
       const modifiedAction = [
         { action: "modified", applicationName: "app", className: "Container" },
       ] as const;
@@ -349,13 +349,19 @@ describe("container release receipt", () => {
       expect(() => buildContainerReleaseEntries({
         actions: modifiedAction,
         after: [identity("app", "id", 2, "new-image")],
-        before: [identity("app", "id", 2, "old-image")],
+        before: [],
       })).toThrow("Container release evidence did not form an exact provider transition.");
-      expect(() => buildContainerReleaseEntries({
+
+      expect(buildContainerReleaseEntries({
         actions: modifiedAction,
-        after: [identity("app", "id", 1, "new-image")],
+        after: [identity("app", "id", 2, "new-image")],
         before: [identity("app", "id", 2, "old-image")],
-      })).toThrow("Container release evidence did not form an exact provider transition.");
+      })).toEqual([expect.objectContaining({ disposition: "updated", version: 2 })]);
+      expect(buildContainerReleaseEntries({
+        actions: modifiedAction,
+        after: [identity("app", "id", 1, "newer-image")],
+        before: [identity("app", "id", 2, "new-image")],
+      })).toEqual([expect.objectContaining({ disposition: "updated", version: 1 })]);
     });
 
     it("requires unchanged identity, version, and exact image equality", () => {
