@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-29
+Last verified: 2026-08-31
 
 ## Decision
 
@@ -93,6 +93,10 @@ invocation compares its invocation provider with the live Web-owned preference.
 A mismatch stops that invocation from servicing further wakes, makes its dirty
 workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
 so Cloudflare releases the provider-specific invocation and starts a fresh one.
+When the package invocation settles, Cloudflare closes runtime-wake admission
+and drains the coalesced signal in the same synchronous turn. An already
+accepted wake becomes that same positive immediate-recheck edge; a later wake
+is rejected for the existing outer reconciliation owner.
 A failed best-effort signal
 leaves the durable preference intact; the next invocation and the mandatory
 provider-entry revalidation remain the recovery path. The signal carries no
@@ -218,7 +222,10 @@ preservation and stops heartbeat liveness before detached session cleanup.
 If `/complete` loses its response at the transport boundary, the runtime replays
 that exact completion request at most once under the original heartbeat,
 stored write-fence headers, and remaining commit timeout; non-OK HTTP responses
-and parse/validation failures are terminal. After Web accepts the checkpoint,
+and parse/validation failures are terminal. A queued runtime wake does not veto
+this exact replay because the original publication was already
+non-interruptible; the wake remains available after the canonical result. After
+Web accepts the checkpoint,
 the runtime stops heartbeating and best-effort records completion; a failed
 marker falls back to stale-heartbeat expiry. Absent, mismatched, completed, or
 stale sessions do not delay replacement. This
@@ -1610,8 +1617,29 @@ the platform wait continues under the existing container lifecycle owner. It
 does not select a mailbox owner, create a write fence, wait for health
 readiness, or invoke workspace work. Withdrawal and account deletion consume
 the reserved exact target, and `destroyInstance()` supersedes an in-progress
-hint before stopping that container. A denied admission starts nothing. The
-  active-member replan durably
+hint before stopping that container. A denied admission starts nothing.
+
+The release-scoped ENAM standby is a separate optimization and does not trust
+that typing hint. A memberless coordinator maintains at most one advertised
+pristine slot after exact release, image fingerprints, architecture,
+heavy-runtime, and content-free Codex App Server initialize/stop readiness all
+pass. In allocation mode, one storage transaction removes that slot from ready
+and records an opaque claim tombstone. The requesting `UserRunner` durably
+reserves the opaque stop target before immutable bind-once member attachment,
+then opens its normal write fence and restores the encrypted workspace. The
+real resident Codex App Server remains post-restore because its launch identity
+is member-specific. Coordinator claim and bind share one 250 ms deadline;
+no-ready, stale-release, or coordinator failure before slot ownership uses the
+unchanged exact-user cold target. An ambiguous bind after the opaque target is
+reserved yields for retry against that exact target instead of starting a
+second container. Replenishment, readiness re-proving, orphan retirement, and
+stale-release drain run outside the accepted-message path. A bound slot can
+be retained only by that same member under the ordinary conversation idle
+lifecycle and is never returned to ready. Slot invocation,
+provider-credential minting, withdrawal, account deletion, and retirement all
+re-read the exact durable binding; a member mismatch fails closed.
+
+The active-member replan durably
 appends the original conversation item. For an exact model-approved instant
 start, Web may already have a bounded tool-free Murph result generated beside
 admission and enrollment after the exact chat/event acquired its delivery-ledger
@@ -2433,6 +2461,35 @@ and stop on the first unknown result. Each accepted request sends only
 grants no new work authority. Signal acceptance proves only that the runtime was
 asked to reread canonical facts, not that recovery completed.
 
+For those same at-most-three ids, a successful request captures one bounded
+request-time database read before signaling and returns a server-signed recovery
+witness. The signature protects only the witness's integrity across the browser
+round trip; it grants no mutation or signal authority. The witness fixes the
+request-time system-lane imported target from
+`redacted_status_json.hostedMailboxSystemImportedSeq` and records the live
+system-lane head plus the canonical
+`hosted_mailbox_lane_counter.consumed_seq`. A later, explicit Verify action
+performs one bounded read of current active access, workspace checkpoint, and
+system-lane facts. It neither polls nor persists recovery state, and it sends no
+signal. The browser presents at most one successful signaled batch at a time:
+another request stays disabled until every signaled witness is Recovered or the
+operator explicitly discards that ephemeral proof. A failed-only batch does not
+block another request, and discarding proof does not remove ids still queued in
+the editor.
+
+Recovery is proved only when canonical system-lane `consumed_seq` reaches the
+fixed imported target. Reaching the captured live head but not that target is
+progressing. A checkpoint-only intermediate result requires both a strictly
+higher workspace version and a strictly later checkpoint timestamp while the
+captured head remains live and unconsumed; changing only one member of that pair
+proves nothing. The verifier fails closed as Unknown when the signed baseline is
+missing, malformed, expired, or inconsistent; active access or workspace facts
+disappear; canonical counters regress; the captured head disappears before
+canonical consumption proves it; or the current facts otherwise cannot prove
+one of those states. Current imported-status projection, workflow handled
+diagnostics, progress-generation counters, logs, discovery, and signal
+acknowledgement are diagnostic context, never recovery authority.
+
 Automatic discovery may seed that same explicit-id control with active
 checkpointed system lanes matching the legacy device-sync stall signature for
 at least 15 minutes. Discovery and effect authority stay separate; manually
@@ -2724,6 +2781,14 @@ This matches the runner readiness ceiling without weakening invalidated-shell
 or destroy-settlement checks. Accepted background invocations begin their
 pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
+Within that unchanged outer budget, the shell-prewarm, direct cold-start, and
+deploy-smoke paths make each native TCP readiness request abortable after 1.5
+seconds and retry sequentially on the existing 250 ms interval. The helper
+awaits cancellation before another probe begins. A probe timeout is therefore
+only a retry signal: it cannot publish healthy state, run `onStart`, invoke
+workspace work, or replace the existing crash and caller-abort paths. The
+helper's inherited implicit `containerFetch()` auto-start fallback retains the
+upstream five-second default.
 Container readiness receives at most 15 wall-clock seconds, including time
 queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
 allows one absolute five-second fail-closed cleanup deadline shared by the
@@ -3834,6 +3899,9 @@ An actual cold readiness RPC also carries optional numeric-only subdivisions.
 `freshStartContainerOnStartAtEpochMs` records Cloudflare's lifecycle hook; and
 `freshStartContainerPortsReadyAtEpochMs` records resolution of
 `startAndWaitForPorts`, after both the configured port and `onStart` are ready.
+The local cold-start benchmark reports start-to-ports, process-to-listen, and
+listen-to-ports percentiles from these stamps so a hosted canary can distinguish
+container boot time from managed port-proxy delay.
 The explicit private health fetch is bounded by
 `freshStartContainerHealthStartedAtEpochMs` and
 `freshStartContainerHealthFinishedAtEpochMs`, followed by

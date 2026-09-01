@@ -367,6 +367,20 @@ Last verified: 2026-08-30
 
 ## Runtime Expectations
 
+- Cloudflare standby allocation is an optional one-slot optimization, not a
+  scheduler. `off` is the source-controlled default, `shadow` maintains and
+  re-proves one current-release ENAM slot without allocating it, and `allocate`
+  uses one 250 ms claim/bind deadline. A miss before slot ownership uses the
+  ordinary exact-user fallback; an ambiguous bind after the per-member stop
+  target is durably reserved retries that exact target instead of risking two
+  live containers.
+  A coordinator transaction admits at most one winner, then replacement
+  provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
+  retirement, expire unbound claim tombstones, and drain stale releases. The
+  slot transition is one-way (`unbound` to `bound` to `retiring` to `retired`),
+  and ambiguous bind/cleanup state stays assigned to its exact `UserRunner`
+  stop target until reconciliation succeeds. Mode `off` retires only
+  coordinator-owned slots and never interrupts bound member work.
 - Initial onboarding has one Postgres completion owner across website and
   native clients. Existing members are backfilled complete. During the
   migration-first rolling deploy, a temporary database default also completes

@@ -22,6 +22,10 @@ import type {
 } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import type {
+  HostedStandbyCoordinatorNamespaceLike,
+  HostedStandbyRunnerContainerNamespaceLike,
+} from "../standby-runner-contract.js";
+import type {
   HostedWorkspaceSnapshotOrphanCandidate,
   HostedWorkspaceSnapshotUploadSession,
 } from "../workspace-snapshot-store.ts";
@@ -101,6 +105,8 @@ export interface WorkerEnvironmentSource
   extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
   RUNNER_CONTAINER_SMOKE: HostedExecutionContainerNamespaceLike;
+  STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
+  STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
 }
 
 export interface WorkerExecutionContext {

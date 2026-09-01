@@ -21,6 +21,8 @@ import {
 } from "@/src/components/ui/table";
 import { Textarea } from "@/src/components/ui/textarea";
 import type {
+  HostedRuntimeRecoveryVerificationResult,
+  HostedRuntimeRecoveryVerificationStatus,
   HostedRuntimeRecheckResult,
   HostedRuntimeStalledRecheckOverview,
 } from "@/src/lib/hosted-ops/runtime-maintenance";
@@ -74,33 +76,62 @@ export function removeSignaledRuntimeRecheckUserIds(
     .join("\n");
 }
 
+export function hasUnresolvedRuntimeRecheckWitness(
+  result: HostedRuntimeRecheckResult | null,
+  verificationResult: HostedRuntimeRecoveryVerificationResult | null,
+): boolean {
+  const recoveredUserIds = new Set(
+    verificationResult?.results.flatMap((entry) => (
+      entry.status === "recovered" && entry.userId !== null
+        ? [entry.userId]
+        : []
+    )) ?? [],
+  );
+
+  return result?.results.some((entry) => (
+    entry.status === "signaled" && !recoveredUserIds.has(entry.userId)
+  )) ?? false;
+}
+
 export function RuntimeRecheckPanel({
   disabled,
   error,
   onInputChange,
   onRecheck,
   onRefresh,
+  onStopTracking,
   onUseDetectedCandidates,
+  onVerify,
   overview,
   pendingAction,
   result,
   userIdsText,
+  verificationError,
+  verificationResult,
 }: {
   disabled: boolean;
   error: RuntimeRecheckError | null;
   onInputChange: (value: string) => void;
   onRecheck: () => void;
   onRefresh: () => void;
+  onStopTracking: () => void;
   onUseDetectedCandidates: () => void;
+  onVerify: () => void;
   overview: HostedRuntimeStalledRecheckOverview;
-  pendingAction: "recheck" | "refresh" | null;
+  pendingAction: "recheck" | "refresh" | "verify" | null;
   result: HostedRuntimeRecheckResult | null;
   userIdsText: string;
+  verificationError: string | null;
+  verificationResult: HostedRuntimeRecoveryVerificationResult | null;
 }) {
   const parsedInput = parseRuntimeRecheckUserIds(userIdsText);
   const hasInvalidInput = parsedInput.invalidEntries.length > 0;
   const queuedCount = parsedInput.userIds.length;
   const nextBatchCount = Math.min(queuedCount, 3);
+  const hasUnresolvedSignaledWitness = hasUnresolvedRuntimeRecheckWitness(
+    result,
+    verificationResult,
+  );
 
   return (
     <section
@@ -200,7 +231,13 @@ export function RuntimeRecheckPanel({
             Use detected candidates
           </Button>
           <Button
-            disabled={disabled || hasInvalidInput || queuedCount === 0}
+            aria-describedby="runtime-recheck-next-batch-status"
+            disabled={
+              disabled
+              || hasInvalidInput
+              || queuedCount === 0
+              || hasUnresolvedSignaledWitness
+            }
             onClick={onRecheck}
             size="sm"
             type="button"
@@ -212,12 +249,18 @@ export function RuntimeRecheckPanel({
           </Button>
         </div>
 
-        <div aria-live="polite" className="min-h-5 pt-3 text-sm text-muted-foreground">
+        <div
+          aria-live="polite"
+          className="min-h-5 pt-3 text-sm text-muted-foreground"
+          id="runtime-recheck-next-batch-status"
+        >
           {pendingAction === "refresh"
             ? "Refreshing automatic legacy-stall discovery. The member ID queue is unchanged."
             : pendingAction === "recheck"
               ? `Requesting ${formatInteger(nextBatchCount)} runtime recheck${nextBatchCount === 1 ? "" : "s"}.`
-              : ""}
+              : hasUnresolvedSignaledWitness
+                ? "Another batch is paused until every signaled member is verified as Recovered or this batch is explicitly discarded."
+                : ""}
         </div>
       </div>
 
@@ -237,16 +280,39 @@ export function RuntimeRecheckPanel({
         </div>
       ) : null}
 
-      <RuntimeRecheckResultPanel result={result} />
+      <RuntimeRecheckResultPanel
+        disabled={disabled}
+        hasUnresolvedSignaledWitness={hasUnresolvedSignaledWitness}
+        onStopTracking={onStopTracking}
+        onVerify={onVerify}
+        pending={pendingAction === "verify"}
+        result={result}
+        verificationError={verificationError}
+        verificationResult={verificationResult}
+      />
       <RuntimeRecheckDiscovery overview={overview} />
     </section>
   );
 }
 
 function RuntimeRecheckResultPanel({
+  disabled,
+  hasUnresolvedSignaledWitness,
+  onStopTracking,
+  onVerify,
+  pending,
   result,
+  verificationError,
+  verificationResult,
 }: {
+  disabled: boolean;
+  hasUnresolvedSignaledWitness: boolean;
+  onStopTracking: () => void;
+  onVerify: () => void;
+  pending: boolean;
   result: HostedRuntimeRecheckResult | null;
+  verificationError: string | null;
+  verificationResult: HostedRuntimeRecoveryVerificationResult | null;
 }) {
   if (!result) {
     return null;
@@ -256,6 +322,11 @@ function RuntimeRecheckResultPanel({
     (entry) => entry.status === "failed",
   ).length;
   const signaledCount = result.results.length - failedCount;
+  const verificationByUserId = new Map(
+    verificationResult?.results.flatMap((entry) =>
+      entry.userId === null ? [] : [[entry.userId, entry] as const]
+    ) ?? [],
+  );
 
   return (
     <div className="mx-5 mt-4 rounded-lg border border-border/70 bg-muted/20">
@@ -265,8 +336,13 @@ function RuntimeRecheckResultPanel({
             Recheck result
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Generated {formatDateTime(result.generatedAt)}
+            Requested {formatDateTime(result.generatedAt)}
           </p>
+          {verificationResult ? (
+            <p aria-live="polite" className="mt-1 text-xs text-muted-foreground">
+              Verified {formatDateTime(verificationResult.generatedAt)}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge className="tabular-nums" variant="secondary">
@@ -277,38 +353,125 @@ function RuntimeRecheckResultPanel({
               {formatInteger(failedCount)} failed
             </Badge>
           ) : null}
+          {signaledCount > 0 ? (
+            <Button
+              disabled={disabled}
+              onClick={onVerify}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              {pending ? "Verifying..." : "Verify progress"}
+            </Button>
+          ) : null}
         </div>
       </div>
-      <div className="divide-y divide-border/70">
-        {result.results.map((entry) => (
-          <div
-            className="grid min-w-0 gap-2 px-4 py-3 text-sm sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.4fr)] sm:items-center"
-            key={`${entry.userId}:${entry.status}`}
-          >
-            <Badge variant={entry.status === "signaled" ? "secondary" : "destructive"}>
-              {entry.status === "signaled" ? (
-                <CheckCircle2Icon data-icon="inline-start" />
-              ) : (
-                <AlertCircleIcon data-icon="inline-start" />
-              )}
-              {entry.status === "signaled" ? "Requested" : "Failed"}
-            </Badge>
-            <span className="min-w-0 break-all font-mono text-xs text-foreground">
-              {entry.userId}
-            </span>
-            <span className="min-w-0 break-words text-xs text-muted-foreground">
-              {entry.status === "signaled"
-                ? "Signal acknowledged; removed from queue"
-                : entry.errorMessage}
-            </span>
-          </div>
-        ))}
+      {verificationError ? (
+        <div className="border-b border-border/70 px-4 py-3">
+          <Alert variant="destructive">
+            <AlertCircleIcon data-icon="inline-start" />
+            <AlertDescription className="min-w-0 break-words">
+              <p>{verificationError}</p>
+              <p>The captured baselines and prior results are retained so verification can be retried.</p>
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+      <div aria-live="polite" className="divide-y divide-border/70">
+        {result.results.map((entry) => {
+          const verification = entry.status === "signaled"
+            ? verificationByUserId.get(entry.userId)
+            : undefined;
+          const displayStatus = verification?.status
+            ?? (verificationResult ? "unknown" : "requested");
+          return (
+            <div
+              className="grid min-w-0 gap-2 px-4 py-3 text-sm sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.4fr)] sm:items-center"
+              key={`${entry.userId}:${entry.status}`}
+            >
+              <Badge variant={entry.status === "failed" || displayStatus === "unknown" ? "destructive" : "secondary"}>
+                {entry.status === "failed" || displayStatus === "unknown" ? (
+                  <AlertCircleIcon data-icon="inline-start" />
+                ) : displayStatus === "recovered" ? (
+                  <CheckCircle2Icon data-icon="inline-start" />
+                ) : (
+                  <RefreshCwIcon data-icon="inline-start" />
+                )}
+                {entry.status === "failed"
+                  ? "Failed"
+                  : formatRecoveryVerificationStatus(displayStatus)}
+              </Badge>
+              <span className="min-w-0 break-all font-mono text-xs text-foreground">
+                {entry.userId}
+              </span>
+              <span className="min-w-0 break-words text-xs text-muted-foreground">
+                {entry.status === "failed"
+                  ? entry.errorMessage
+                  : verification?.explanation
+                    ?? (verificationResult
+                      ? "Verification returned no matching result for this captured witness."
+                      : describeRequestedWitness(entry.witness))}
+              </span>
+            </div>
+          );
+        })}
       </div>
+      {hasUnresolvedSignaledWitness ? (
+        <div className="flex flex-col gap-3 border-t border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="max-w-2xl text-pretty text-xs leading-5 text-muted-foreground">
+            Verify this batch before starting another. Stopping tracking discards its request-time recovery proof; queued member IDs stay in the editor.
+          </p>
+          <Button
+            className="min-h-10 whitespace-normal"
+            disabled={disabled}
+            onClick={onStopTracking}
+            type="button"
+            variant="outline"
+          >
+            Stop tracking this batch and continue
+          </Button>
+        </div>
+      ) : null}
       <div className="border-t border-border/70 px-4 py-3 text-pretty text-xs leading-5 text-muted-foreground">
-        Acknowledged IDs are removed from the queue. Failed and unsent IDs remain. A recheck request is not proof of recovery.
+        Requested means only that the signal was accepted. Recovered means only that the captured request-time prefix was canonically consumed with a newer checkpoint; it does not prove global health or idleness. Failed and unsent IDs remain queued.
       </div>
     </div>
   );
+}
+
+function formatRecoveryVerificationStatus(
+  status: HostedRuntimeRecoveryVerificationStatus,
+): string {
+  switch (status) {
+    case "checkpoint_advanced":
+      return "Checkpoint advanced";
+    case "progressing":
+      return "Progressing";
+    case "recovered":
+      return "Recovered";
+    case "requested":
+      return "Requested";
+    case "unknown":
+      return "Unknown";
+  }
+}
+
+function describeRequestedWitness(
+  witness: Extract<
+    HostedRuntimeRecheckResult["results"][number],
+    { status: "signaled" }
+  >["witness"],
+): string {
+  if (
+    witness.capturedHeadSequence === null
+    || witness.importedSystemSequence === null
+    || witness.workspaceVersion === null
+    || witness.checkpointedAt === null
+  ) {
+    return "Signal accepted; the captured canonical evidence is incomplete, so later verification will remain Unknown.";
+  }
+  return `Signal accepted; captured head ${witness.capturedHeadSequence} through fixed target ${witness.importedSystemSequence} at workspace version ${witness.workspaceVersion}.`;
 }
 
 function RuntimeRecheckDiscovery({

@@ -3493,6 +3493,35 @@ describe("hosted local dev stack", () => {
     );
   });
 
+  it("preserves an exited child's port-bind classification past verbose sibling output", async () => {
+    const cloudflareChild = createBufferedChild({
+      exitCode: 1,
+      name: "cloudflare",
+      pid: 503,
+      stderrText:
+        "Address already in use (0.0.0.0:43001).\n"
+        + "x".repeat(4_000),
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(createBufferedChild({
+        exitCode: null,
+        name: "web",
+        pid: 504,
+        stdoutText: "y".repeat(4_000),
+      }));
+    waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
+    waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+
+    await expect(stack.ready).rejects.toThrow("Address already in use");
+  });
+
   it("skips Vercel link and env pull when the caller already provides a Vercel OIDC token", async () => {
     const configModule = await import("../../src/dev-hosted-local/config.ts");
     const vercelModule = await import("../../src/dev-hosted-local/vercel.ts");

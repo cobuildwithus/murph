@@ -503,8 +503,9 @@ gate unset and makes no paid request.
   Webpack build worker and memory optimizations because Workflow contributes
   Webpack configuration. Three consecutive forced-cold Webpack previews, a
   later integration preview, and the final corrected head previously completed
-  on the Standard builder without OOM. The shared production runner owns the
-  versioned `.next/cache` epoch and the per-build cold-Webpack-cache policy;
+  on the Standard builder without OOM. The Next config disables the production
+  Webpack cache, while the shared production runner owns the versioned
+  `.next/cache` transition epoch;
   see `apps/web/README.md` § "Production build memory guard" for the exact
   contract. Missing or mismatched stamps fail toward a cold build instead of
   trusting cross-compiler state.
@@ -718,6 +719,17 @@ gate unset and makes no paid request.
   six-hour fresh-evidence reminders with stable per-generation identity,
   quiet-hour deferral, recovery/rearm, and independence from the latency
   monitor.
+- `apps/web/test/runtime-recheck-verification-postgres.test.ts` is an opt-in
+  local-PostgreSQL proof for the allowlisted runtime-recheck recovery witness.
+  It executes the production bounded read against the canonical system lane,
+  proves that items exactly on either live-retention boundary are excluded,
+  selects the exact first later live pending item, and confirms that observation
+  does not mutate mailbox state. The focused service, route, classifier, and
+  rendered-panel suites prove capture-before-signal ordering, partial failure,
+  strict presentation-evidence validation, fail-closed progress classification,
+  authenticated read-only verification, one tracked signaled batch across a
+  six-id mounted journey, recovered-only automatic unlock, explicit proof
+  discard, failed-only continuation, and manual retryable UI states.
 - `apps/web/test/hosted-ai-usage-overshoot-alert-monitor.test.ts` proves the
   five-minute runtime-alert cron reuses the operational Resend incident owner
   under a distinct allowance-overshoot identity and locks the privacy-safe
@@ -1115,6 +1127,9 @@ keep the one-second presentation-only deadline and late-result rejection.
 - Auth, OTP, legal/HealthKit consent, provider-token, and native-run stages may emit only privacy-safe structured stage names/statuses. Do not upload screenshots, video, raw xcresult bundles, traces, response bodies, or log tails. The production-canary controllers prove the current production alias without passing a Vercel protection secret to the private dispatch. They publish no commit status and are not protected-branch requirements.
 - No other pull-request check hits a live wearable OAuth provider. The default hosted-local device-connect smoke remains hermetic and creates signed Garmin, Oura, and WHOOP links against synthetic Junction config. Its explicit `MURPH_E2E_JUNCTION_WEARABLE_LIVE=1` mode runs alone, uses `MURPH_E2E_JUNCTION_WEARABLE_SOURCES` to select one or more real providers, drives each selected signed intent through Junction and provider browser authorization, verifies the proof-bound automatic callback plus persisted reload, and disconnects each provider during cleanup. The suite owner strips all live-mode Junction authority, provider login values, browser controls, Kernel authority, and the retired `MURPH_E2E_OURA_PASSWORD` name from generic bundle, image, generated-artifact, cleanup, runtime, and browser commands, forwarding only current selected-provider inputs to the isolated owners. The test then keeps Junction authority in the hosted platform and passes only the current provider login plus any selected browser authority to the isolated browser driver. `.github/workflows/junction-wearable-canary.yml` runs the unattended Garmin proof after every push to protected `main` and by manual dispatch under the dedicated `junction-wearable-canary` GitHub Environment, with read-only repository permission, fixed non-overlapping concurrency, sandbox-only configuration, step-scoped credentials, no uploaded artifacts, and Temporal disabled because connection persistence does not own orchestration. Before hosted-local preparation, that credential-free workflow exposes and smoke-checks the exact workspace Codex CLI installed by the frozen dependency graph so model-catalog discovery cannot depend on the ambient runner `PATH` or a second registry fetch. It also installs and smoke-checks a checksum-pinned Kernel CLI plus checksum-pinned `websocat`. The browser child creates a telemetry-disabled headed remote stealth Kernel browser on a dedicated persistent Garmin profile, reaches hosted-local Web through the CLI's reverse SSH tunnel, keeps CI manual authorization disabled and provider challenges fail-closed, requires the exact Garmin partner-consent route to expose exactly three available data-sharing checkboxes and one enabled `Save` action, recognizes only the paired `permissionsUpdated` plus `selectedCapabilities` same-route progression before resuming the existing positive/negative action classifier, and retains the same exact authorization/callback/reload/disconnect assertions. Oura's current passwordless web login requires a fresh emailed code, so its full live proof keeps the local headed operator flow with the Oura account email and manual code entry; the code and a nonexistent reusable Oura password are not persisted as CI secrets. Device-syncd auth/webhook behavior otherwise remains covered through local service tests, route tests, and stubbed control-plane callers; the private integration matrix retains the production-shaped external Temporal worker proof.
 - Meal-photo capture is covered by hosted-web automatic enrollment/upload, schema-v2 authority ordering and tombstone cases, lost-response prepared-state denial, exact bodyless activation and replay, activation/deletion ordering, real-PostgreSQL direct-access, consent, scoped-deletion, sponsored-member, and sponsoring-group ordering, schema-v1 compatibility and revocation-generation proof, strict request bounds, manual UUID normalization and member-bound capture identity, manual Privy/access/consent final rechecks, shared staging and ambiguous-cleanup behavior, static migration shape, and an opt-in local-PostgreSQL test that executes the exact expand/contract files with a legacy-window write and validated row constraints; companion bearer-consent status/acceptance, verified-email route fallback and current-recipient resolution, accepted-capture member-wide engagement, and model-gate-with-system-lag tests; hosted-execution wake/route parsing tests; Cloudflare private-object, processing-mode, and signed control-proxy tests; Temporal blocked-system and foreground-fairness tests; assistant-runtime system-only cron projection/post-checkpoint cleanup, canonical import/idempotency/automation-postcondition, and fail-closed email-authority tests; managed-automation tests; oldest-first closeout-work CLI tests; and canonical meal photo-retirement tests. Routine CI does not grant real iPhone Photos permission or upload to the production R2 bucket, so deployed product proof still requires an explicit signed physical-iPhone capture and manual selection.
+- The opt-in focused real-Codex closeout journey proves historical-only work
+  completes canonical enrichment/read-back/photo cleanup, then returns `skip`
+  without Goal, totals, card, or meal-add work.
 - Cloudflare storage coverage locks one canonical `BUNDLES` binding and presign
   target, direct-upload drain fencing, canonical-only restore and account
   deletion, and deploy preflight rejection unless canonical buckets are ENAM

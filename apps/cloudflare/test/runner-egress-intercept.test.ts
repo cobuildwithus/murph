@@ -77,6 +77,7 @@ import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
 import { RunnerContainer } from "../src/runner-container.ts";
+import { StandbyRunnerContainer } from "../src/standby-runner-container.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
@@ -5107,6 +5108,42 @@ describe("hostedRunnerIntercept", () => {
     await Promise.all(deferred.promises);
     expect(reportCompleted).toBe(true);
     expect(await response.text()).toBe("private-upstream-response-body");
+  });
+
+  it("routes standby provider and internal hosts through concrete class interception", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response("provider-ok", { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const proxy = new ContainerProxy(
+      {
+        props: {
+          className: StandbyRunnerContainer.name,
+          containerId: "standby--v-version_1--0123456789abcdef0123456789abcdef",
+          enableInternet: true,
+        },
+      },
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+    );
+
+    const providerResponse = await proxy.fetch(createAuthorizedOpenAiModelsRequest());
+
+    expect(providerResponse.status).toBe(200);
+    expect(await providerResponse.text()).toBe("provider-ok");
+    expect(readForwardedRequest(fetchMock).headers.get("authorization"))
+      .toBe("Bearer openai-worker-secret");
+
+    const internalResponse = await proxy.fetch(new Request(
+      `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort}/missing-identity`,
+      { method: "POST" },
+    ));
+
+    expect(internalResponse.status).toBe(403);
+    expect(await internalResponse.text()).toBe("Missing hosted runner identity.");
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("awaits alert admission through the real Containers outbound context", async () => {

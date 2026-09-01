@@ -43,6 +43,54 @@ describe("RunnerStateStore write-fence state", () => {
     });
   });
 
+  it("retains a claimed standby target after a transport failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { db, store } = createHarness();
+    const runnerContainerName =
+      "standby--v-release_1--0123456789abcdef0123456789abcdef";
+    const token = await store.beginWriteFence({
+      runnerContainerName,
+      userId: "member_123",
+    });
+
+    const mismatched = await store.clearWriteFenceAfterTransportFailure({
+      error: new Error("mismatched failure"),
+      finishedAt: NOW,
+      token: {
+        ...token,
+        runnerContainerName: "member_123",
+      },
+    });
+    expect(mismatched.failed).toBe(false);
+    expect(mismatched.record).toMatchObject({
+      pendingRunnerContainerName: null,
+      writeFence: {
+        attemptId: token.attemptId,
+        runnerContainerName,
+      },
+    });
+
+    const failed = await store.clearWriteFenceAfterTransportFailure({
+      error: new Error("runner failed"),
+      finishedAt: NOW,
+      token,
+    });
+    expect(failed).toMatchObject({
+      failed: true,
+      record: {
+        failureCount: 1,
+        pendingRunnerContainerName: runnerContainerName,
+        writeFence: null,
+      },
+    });
+    const restartedStore = new RunnerStateStore(createDurableObjectState(db));
+    await expect(restartedStore.readState()).resolves.toMatchObject({
+      pendingRunnerContainerName: runnerContainerName,
+      writeFence: null,
+    });
+  });
+
   it("clears completed write fences and resets failure diagnostics", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
@@ -62,6 +110,29 @@ describe("RunnerStateStore write-fence state", () => {
     expect(completed.record).toMatchObject({
       failureCount: 0,
       lastInvocationAt: NOW,
+      writeFence: null,
+    });
+  });
+
+  it("retains a claimed standby target after successful completion for the same member", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { store } = createHarness();
+    const runnerContainerName =
+      "standby--v-release_1--0123456789abcdef0123456789abcdef";
+    const token = await store.beginWriteFence({
+      runnerContainerName,
+      userId: "member_123",
+    });
+
+    const completed = await store.clearWriteFenceAfterCompletion({
+      finishedAt: NOW,
+      token,
+    });
+
+    expect(completed.completed).toBe(true);
+    expect(completed.record).toMatchObject({
+      pendingRunnerContainerName: runnerContainerName,
       writeFence: null,
     });
   });
@@ -268,6 +339,39 @@ describe("RunnerStateStore write-fence state", () => {
         lastErrorAt: NOW,
         writeFence: null,
       },
+    });
+  });
+
+  it("retains a claimed standby target when replacing its write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { db, store } = createHarness();
+    const runnerContainerName =
+      "standby--v-release_1--fedcba9876543210fedcba9876543210";
+    const token = await store.beginWriteFence({
+      runnerContainerName,
+      userId: "member_123",
+    });
+
+    const cleared = await store.clearWriteFenceForReplacement({
+      attemptId: token.attemptId,
+      error: new Error("no active child"),
+      finishedAt: NOW,
+      generation: token.generation,
+      userId: "member_123",
+    });
+
+    expect(cleared).toMatchObject({
+      cleared: true,
+      record: {
+        pendingRunnerContainerName: runnerContainerName,
+        writeFence: null,
+      },
+    });
+    const restartedStore = new RunnerStateStore(createDurableObjectState(db));
+    await expect(restartedStore.readState()).resolves.toMatchObject({
+      pendingRunnerContainerName: runnerContainerName,
+      writeFence: null,
     });
   });
 

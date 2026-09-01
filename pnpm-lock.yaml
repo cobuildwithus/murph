@@ -55,6 +55,9 @@ overrides:
   fast-xml-parser@5.7.2>fast-xml-builder: 1.2.0
 
 patchedDependencies:
+  '@cloudflare/containers@0.3.7':
+    hash: 1f85f122210f2e6cb141f20bb4657d7b31b6bae5f5f91face7259905cf78bb1a
+    path: patches/@cloudflare__containers@0.3.7.patch
   '@cobuild/repo-tools@0.1.17':
     hash: 679266b778f8ed833acc0ead5be87d57dbcff877ce899a72fbec8052563ab4fb
     path: patches/@cobuild__repo-tools@0.1.17.patch
@@ -130,8 +133,8 @@ importers:
   apps/cloudflare:
     dependencies:
       '@cloudflare/containers':
-        specifier: ^0.3.6
-        version: 0.3.6
+        specifier: 0.3.7
+        version: 0.3.7(patch_hash=1f85f122210f2e6cb141f20bb4657d7b31b6bae5f5f91face7259905cf78bb1a)
       '@linqapp/sdk':
         specifier: 0.34.0
         version: 0.34.0
@@ -1455,8 +1458,8 @@ packages:
     resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
     engines: {node: '>= 20.12.0'}
 
-  '@cloudflare/containers@0.3.6':
-    resolution: {integrity: sha512-8RrbK/Et165gjvXccui3pgkUuySVWysTC6bJRXfgqmbCA2vAmh8pm7cAKDh2nZFR/GSjW4BgxeKpffCTD8SJEg==}
+  '@cloudflare/containers@0.3.7':
+    resolution: {integrity: sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw==}
 
   '@cloudflare/kv-asset-handler@0.5.0':
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
@@ -11070,7 +11073,7 @@ snapshots:
       fast-wrap-ansi: 0.2.0
       sisteransi: 1.0.5
 
-  '@cloudflare/containers@0.3.6': {}
+  '@cloudflare/containers@0.3.7(patch_hash=1f85f122210f2e6cb141f20bb4657d7b31b6bae5f5f91face7259905cf78bb1a)': {}
 
   '@cloudflare/kv-asset-handler@0.5.0': {}
 

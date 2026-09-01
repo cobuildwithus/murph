@@ -1659,7 +1659,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test("system projection retries a preempted suffix and a definitive failed scope without starving later scopes", async () => {
+  test("foreground wake interrupts system projection without starving a failed scope", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -1850,7 +1850,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           interruptedRunSettled = true;
         },
       );
-      runtimeWakeSignal.notify({ requestedProcessingMode: "system_mailbox" });
+      runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
       await Promise.resolve();
       assert.equal(interruptedRunSettled, false);
       assert.equal(projectionCalls, 1);
@@ -1868,7 +1868,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         () => "System mailbox did not release after its owned projection completed.",
       );
 
-      assert.equal(interruptedResult.immediateRecheckRequested, undefined);
+      assert.equal(interruptedResult.immediateRecheckRequested, true);
       assert.equal(dirtyAckCalls, 0);
       assert.equal(events.includes("device-sync.dirty-ack"), false);
       const interruptedState = await readHostedSystemMailboxState(vaultRoot);
