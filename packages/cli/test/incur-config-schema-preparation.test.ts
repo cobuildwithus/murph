@@ -25,7 +25,12 @@ vi.mock('node:child_process', async () => {
   }
 })
 
-import { prepareBuiltCliRuntime } from '../scripts/incur-config-schema.js'
+import {
+  packageDir,
+  prepareBuiltCliRuntime,
+  resolveIncurBinPathFromManifest,
+  resolveInstalledIncurBinPath,
+} from '../scripts/incur-config-schema.js'
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -46,5 +51,44 @@ test('prepares the dependency-aware CLI runtime before schema generation', async
   assert.equal(
     path.resolve(String(execOptions.cwd)),
     path.resolve(fileURLToPath(new URL('../../../', import.meta.url))),
+  )
+})
+
+test('resolves the installed generator through the declared Incur package bin', async () => {
+  const generatorPath = await resolveInstalledIncurBinPath()
+  const incurPackageDirectory = path.join(packageDir, 'node_modules', 'incur')
+  const relativePath = path.relative(incurPackageDirectory, generatorPath)
+
+  assert.notEqual(relativePath, '')
+  assert.equal(relativePath.startsWith(`..${path.sep}`), false)
+  assert.equal(path.isAbsolute(relativePath), false)
+})
+
+test('keeps the declared Incur generator inside its package', () => {
+  const packageDirectory = path.resolve('synthetic-incur-package')
+
+  assert.equal(
+    resolveIncurBinPathFromManifest(packageDirectory, {
+      bin: { incur: './dist/cli/index.js' },
+    }),
+    path.join(packageDirectory, 'dist', 'cli', 'index.js'),
+  )
+  assert.throws(
+    () =>
+      resolveIncurBinPathFromManifest(packageDirectory, {
+        bin: { incur: '../outside.mjs' },
+      }),
+    /must be package-relative and stay inside its package/u,
+  )
+  assert.throws(
+    () =>
+      resolveIncurBinPathFromManifest(packageDirectory, {
+        bin: { incur: path.join(packageDirectory, 'dist', 'cli', 'index.js') },
+      }),
+    /must be package-relative and stay inside its package/u,
+  )
+  assert.throws(
+    () => resolveIncurBinPathFromManifest(packageDirectory, { bin: {} }),
+    /must declare bin\.incur/u,
   )
 })

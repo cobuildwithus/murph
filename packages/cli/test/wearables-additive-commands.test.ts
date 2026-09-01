@@ -728,9 +728,9 @@ test('wearables metric validation rejects unsupported metrics without echoing th
     result.envelope.error.fieldErrors?.some((issue) => issue.path === 'metric'),
     true,
   )
-  assert.match(
+  assert.equal(
     result.envelope.error.fieldErrors?.find((issue) => issue.path === 'metric')?.message ?? '',
-    /Unsupported wearable metric/u,
+    'This field is invalid.',
   )
   assert.equal(JSON.stringify(result.envelope).includes(unsupportedMetric), false)
   assert.equal(showWearableMetricLatest.mock.calls.length, 0)

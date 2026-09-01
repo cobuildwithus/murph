@@ -531,7 +531,9 @@ test.sequential('workout format save rejects raw input because JSON imports are 
   assert.equal(result.exitCode, 1)
   assert.equal(result.envelope.ok, false)
   if (!result.envelope.ok) {
-    assert.match(result.envelope.error.message ?? '', /input/u)
+    assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
+    assert.equal(result.envelope.error.message, 'The command arguments are invalid.')
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'arguments')
   }
 })
 

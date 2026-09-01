@@ -117,9 +117,9 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // and deferring its typed-save core import. Compose that 30% ratchet with
     // the one reviewed CLI-owned domain-projector module; the exact candidate
     // resolved 290 modules locally and on Linux CI without adding a package.
-    // Remeasured 291 modules on 2026-08-28 after the stateless calendar link
-    // contract joined the public @murphai/contracts barrel.
-    maxResolvedModules: 291,
+    // Remeasured 300 modules on 2026-09-01 after Incur 0.5.1 added nine
+    // modules to its deliberate scoped import graph without adding a package.
+    maxResolvedModules: 300,
   },
 ]
 

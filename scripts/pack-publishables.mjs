@@ -84,7 +84,9 @@ function shouldSkipExternalPayloadArtifact(sourcePath) {
 }
 
 function isNonRuntimeIncurPayloadPath(relativePath) {
-  return /(?:^|\/)[^/]+\.test\.[cm]?[jt]sx?$/u.test(relativePath);
+  return relativePath === 'docs'
+    || relativePath.startsWith('docs/')
+    || /(?:^|\/)[^/]+\.test(?:-d)?\.[cm]?[jt]sx?$/u.test(relativePath);
 }
 
 async function pathExists(targetPath) {

@@ -1596,7 +1596,8 @@ test("blood-test save rejects non-vault raw refs before writing an event", async
     assert.equal(result.exitCode, 1);
     assert.equal(result.envelope.ok, false);
     assert.equal(result.envelope.error.code, "VALIDATION_ERROR");
-    assert.match(result.envelope.error.message ?? "", /raw/i);
+    assert.equal(result.envelope.error.message, "The command input is invalid.");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "rawRef");
     assert.equal(
       await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
       false,
@@ -1641,7 +1642,8 @@ test("blood-test save rejects raw refs with traversal segments before writing an
     assert.equal(result.exitCode, 1);
     assert.equal(result.envelope.ok, false);
     assert.equal(result.envelope.error.code, "VALIDATION_ERROR");
-    assert.match(result.envelope.error.message ?? "", /raw/i);
+    assert.equal(result.envelope.error.message, "The command input is invalid.");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "rawRef");
     assert.equal(
       await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
       false,
