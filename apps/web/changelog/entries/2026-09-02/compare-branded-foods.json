@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-02",
+  "order": 100,
+  "item": {
+    "id": "compare-branded-foods",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Compare branded foods at a glance",
+    "summary": "The new Food page compares two to four products and marks the strongest option for calories, protein, sugar, and fat.",
+    "details": "Exact test alerts and evidence gaps stay separate from nutrition. Missing evidence is not a failed test, and the top match is not a health or safety score.",
+    "relevanceTags": ["food", "nutrition", "product-evidence"],
+    "sourcePullRequests": [2703],
+    "tryIt": {
+      "label": "Compare foods",
+      "href": "/food"
+    }
+  }
+}
