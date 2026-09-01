@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-01",
+  "order": 100,
+  "item": {
+    "id": "background-work-recovers-from-stale-timers",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Background work recovers from stale timers",
+    "summary": "Murph now recovers when an outdated assistant timer and connected-device work become due together, so follow-through does not stay stuck behind a timer with no work left.",
+    "details": "Current conversations, reminders, pending deliveries, and other genuinely due assistant work keep priority. Murph changes owners only after a live check confirms the projected timer is stale.",
+    "relevanceTags": ["assistant", "wearables", "reliability"],
+    "sourcePullRequests": [2679]
+  }
+}
