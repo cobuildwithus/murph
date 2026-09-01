@@ -229,7 +229,12 @@ On a scheduled run:
    this scheduled occurrence instant: that removal revision proves an earlier
    attempt of the same occurrence already cleaned it. `closeout-work` includes
    that evidence without carrying it into a later occurrence. Group captures
-   by local capture date. A late import gets one dated catch-up.
+   by local capture date. A capture is eligible for member-visible presentation
+   only when its local capture date equals the engine-supplied `Occurrence local
+   date`. A late import from an earlier date remains full cleanup work, but it
+   never authorizes a dated catch-up, card, question, or closeout text. When
+   current and historical captures are selected together, exclude every
+   historical capture from current-date presentation inputs.
 3. Compare nearby meals before counting so a manual record or second photo of
    the same eating occasion is not silently double counted.
 4. Run `vault-cli meal show <meal-id> --format json` for each selected meal and
@@ -247,16 +252,21 @@ On a scheduled run:
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
 
-Before step 6, apply the estimation-eligibility rule above. When estimation is
-skipped, complete photo cleanup and stop with the established non-numeric
-closeout: ask no estimate-enabling question and run no Goal, totals, or card
-work. Otherwise, after cleaning each capture that still fails the last-resort
-threshold, send one compact question for only those meals and stop before Goal,
-totals, or card work. Use local time when all share the occurrence date; include
-date and time for any historical or multi-date set. Ask only for missing identity
-and amount, expose no meal ids, and do not substitute ordinary closeout or a
-dashboard refusal. This is the sole scheduled-question exception; its answer
-uses the existing-meal recovery above.
+After all selected cleanup, stop before any presentation work when no selected
+capture has the occurrence local date. Return
+`{"kind":"skip","privateSummary":"Historical meal cleanup completed."}` and
+run no Goal, totals, card, or clarification work. When current and historical
+captures were selected together, continue with current-date captures only.
+
+Before step 6, apply the estimation-eligibility rule above to those current-date
+captures. When estimation is skipped, complete photo cleanup and stop with the
+established non-numeric closeout: ask no estimate-enabling question and run no
+Goal, totals, or card work. Otherwise, after cleaning each current-date capture
+that still fails the last-resort threshold, send one compact question for only
+those meals and stop before Goal, totals, or card work. Use local time for the
+occurrence date. Ask only for missing identity and amount, expose no meal ids,
+and do not substitute ordinary closeout or a dashboard refusal. This is the sole
+scheduled-question exception; its answer uses the existing-meal recovery above.
 
 6. After inspection, enrichment, read-back, and photo cleanup, first prove the
    cheap read-only active Goal discovery is complete. Run `vault-cli goal list --status active
@@ -297,7 +307,7 @@ uses the existing-meal recovery above.
    explicit targets are unambiguous,
    and already-known inputs prove one responsible five-target bundle, create
    that single canonical Goal as
-   `paused`, with `window.startAt` equal to the selected capture/card local date.
+   `paused`, with `window.startAt` equal to the occurrence local date.
    Read it back, then explain all five provisional values, their material facts
    and assumptions, and the effective date in ordinary text. Ask no question,
    attach no card, and never activate it on the scheduled turn. Member
@@ -305,10 +315,8 @@ uses the existing-meal recovery above.
    interactive turn. If numeric presentation is suppressed, or the active
    target bundle is ambiguous, unit-incompatible, or comparator-incompatible,
    retain the ordinary compact closeout and do not attach a card. Keep the occurrence
-   local date from step 1 only as the work and retry boundary. Resolve target
-   applicability against the single selected card `localDate`: the capture date
-   whose totals and card are being closed out, including a historical catch-up
-   date. A target
+   local date from step 1 as both the work boundary and the only scheduled card
+   `localDate`. Historical captures are cleanup-only and never card inputs. A target
    qualifies only when that card date is on or after the containing Goal's
    `window.startAt`, on or before its optional `window.targetAt`, and inside the
    target's optional inclusive `startAt`/`targetAt` interval. Ignore an
@@ -347,20 +355,20 @@ uses the existing-meal recovery above.
    closeout text without a card.
 7. Only when the complete target-authority read in step 6 resolves one
    unambiguous card-authorizing bundle, run the exact canonical
-   `vault-cli meal totals --from <date> --to <date>` read for the selected date
-   range immediately before any response-card attachment; do not reuse an
+   `vault-cli meal totals --from <occurrence-local-date> --to
+   <occurrence-local-date>` read immediately before any response-card
+   attachment; do not reuse an
    earlier total or calculate nutrition independently. On an interactive card
    request, apply food-journal's selected-date incomplete-meal recovery to
    every saved meal whose nutrition coverage blocks the card, including a
    manual, conversation, provider, or device meal not selected by this
    closeout. Do not widen the scheduled-question exception above: a scheduled
    run follows its existing compact closeout when an unselected meal remains
-   incomplete. When the run covers
-   exactly one local date, the canonical read includes a calorie total, and
+   incomplete. When the canonical read includes a calorie total and
    the card-time safety gate from step 6 still passes, call
    `murph.attach_response_card` with this exact mapping:
-   `card: { kind: "daily_nutrition", version: 2, localDate: <the single
-   selected date>, mealCount: <top-level mealCount>, totals: { calories,
+   `card: { kind: "daily_nutrition", version: 2, localDate:
+   <occurrence-local-date>, mealCount: <top-level mealCount>, totals: { calories,
    proteinGrams, carbsGrams, fatGrams, fiberGrams }, goals: { calories,
    proteinGrams, carbsGrams, fatGrams, fiberGrams } }`. Copy every metric's
    complete `{ total, mealCount }` pair unchanged from the canonical read,
@@ -380,11 +388,11 @@ uses the existing-meal recovery above.
    replaces that text with the deterministic closeout derived from the card.
    Do not author a second nutrition summary. The runtime labels partial totals
    as partial and identifies missing or under-supported nutrition honestly. For
-   multi-date catch-up, missing calories, an incomplete or conflicting active
-   target bundle, or numerical suppression, retain the current compact text,
-   one-question, or non-numeric behavior and do not attach a card. Never attach
-   the photos. Suppress the message only when neither a retained photo nor a
-   same-occurrence removal revision is selected.
+   missing calories, an incomplete or conflicting active target bundle, or
+   numerical suppression, retain the current compact text, one-question, or
+   non-numeric behavior and do not attach a card. Never attach the photos.
+   Historical-only work already returned the required skip before this step;
+   historical captures never become presentation inputs for current-date work.
 
 ## Handle edge cases
 

@@ -445,7 +445,13 @@ describe('assistant nutrition strategy skill', () => {
     )
     expect(compactGoals).toContain('Effective dates are also part of target authority.')
     expect(compactGoals).toContain(
-      'Resolve them against the exact card `localDate`: the selected capture date for a scheduled closeout, which may be a historical catch-up date rather than the occurrence date, or the explicitly requested date.',
+      'Resolve them against the exact card `localDate`: the engine-supplied occurrence local date for a scheduled closeout, or the explicitly requested date for an interactive request.',
+    )
+    expect(compactGoals).toContain(
+      'A historical automatic capture cannot authorize a scheduled card.',
+    )
+    expect(compactGoals).not.toContain(
+      'historical catch-up date',
     )
     expect(compactGoals).toContain(
       'Never use wall-clock today as a substitute.',
