@@ -619,10 +619,40 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
   sending: AssistantOutboxIntent
 }): boolean {
   return isLinqAttachmentReservationAmbiguity(input) ||
+    isLinqIMessageAppCardAmbiguityWithoutProviderIds(input) ||
     isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
     isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
     isLinqPartialDeliveryWithoutProviderIds(input) ||
     isEmailGroupFanoutAmbiguityWithoutProviderIds(input)
+}
+
+function isLinqIMessageAppCardAmbiguityWithoutProviderIds(input: {
+  deliveryMayHaveSucceeded: boolean
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (
+    !input.deliveryMayHaveSucceeded ||
+    input.sending.channel !== 'linq' ||
+    input.sending.card == null
+  ) {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const code =
+    readNonEmptyString(errorRecord?.code) ??
+    readNonEmptyString(context?.code) ??
+    null
+
+  return code === 'LINQ_API_REQUEST_FAILED' &&
+    readNonEmptyString(context?.provider) === 'linq' &&
+    readNonEmptyString(context?.operation) === 'send_imessage_app_card' &&
+    readNonEmptyString(context?.failureStage) === 'http' &&
+    context?.status === undefined &&
+    context?.retryable === true &&
+    readProviderMessageIdsFromErrorRecord(errorRecord, context) === null
 }
 
 function isLinqAttachmentReservationAmbiguity(input: {

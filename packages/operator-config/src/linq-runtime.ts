@@ -537,6 +537,7 @@ async function sendLinqChatMessageParts(
     body,
     chatId,
     idempotencyKey,
+    operation: 'send_message',
     replyToMessageId:
       input.nativeReplyRequested === true ? replyToMessageId : null,
   }, dependencies)
@@ -579,6 +580,7 @@ async function sendLinqChatRichLink(
     body,
     chatId,
     idempotencyKey,
+    operation: 'send_message',
     replyToMessageId,
   }, dependencies)
   const providerMessageEffects = buildLinqProviderMessageEffects({
@@ -635,6 +637,7 @@ async function sendLinqChatMessageBody(
     body: MessageSendParams
     chatId: string
     idempotencyKey: string | null
+    operation: 'send_imessage_app_card' | 'send_message'
     replyToMessageId: string | null
   },
   dependencies: {
@@ -648,7 +651,7 @@ async function sendLinqChatMessageBody(
     details: {
       hasIdempotencyKey: input.idempotencyKey !== null,
       hasReplyToMessageId: input.replyToMessageId !== null,
-      operation: 'send_message',
+      operation: input.operation,
       provider: 'linq',
     },
     env: dependencies.env ?? process.env,
@@ -661,7 +664,7 @@ async function sendLinqChatMessageBody(
   })
   requireLinqPrimaryMessageId({
     messageId: response.message?.id,
-    operation: 'send_message',
+    operation: input.operation,
   })
   return response
 }
@@ -739,20 +742,13 @@ export async function sendLinqIMessageAppCard(
     },
   }
 
-  return requestLinqSdk<MessageSendResponse>({
+  return sendLinqChatMessageBody({
     body,
-    details: {
-      hasIdempotencyKey: true,
-      operation: 'send_imessage_app_card',
-      provider: 'linq',
-    },
-    env: dependencies.env ?? process.env,
-    fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: `/chats/${encodeURIComponent(chatId)}/messages`,
-    request: (client, signal) => client.chats.messages.send(chatId, body, { signal }),
-    signal: dependencies.signal,
-  })
+    chatId,
+    idempotencyKey,
+    operation: 'send_imessage_app_card',
+    replyToMessageId: null,
+  }, dependencies)
 }
 
 async function createLinqAttachmentUpload(
@@ -1348,7 +1344,7 @@ function requireLinqCreatedChatIdForRichLink(result: CreateLinqChatResult): stri
 
 function requireLinqPrimaryMessageId(input: {
   messageId: unknown
-  operation: 'create_chat' | 'send_message'
+  operation: 'create_chat' | 'send_imessage_app_card' | 'send_message'
   richLinkFollowUp?: boolean
 }): string {
   const messageId = normalizeNullableString(

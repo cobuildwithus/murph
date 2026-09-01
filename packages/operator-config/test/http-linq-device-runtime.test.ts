@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import {
   buildLinqIMessageAppCardUrl,
+  buildLinqIMessageAppLayout,
   renderAssistantWorkoutResponseCardText,
   type CompactTableWorkoutResponseCardV1,
 } from '../src/assistant-response-cards.ts'
@@ -508,6 +509,53 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
     },
     method: 'POST',
     url: 'https://linq.example.test/api/partner/v3/chats/chat-123/messages',
+  })
+})
+
+test('linq app-card 2xx without provider identity remains ambiguous after one request', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestBody: Record<string, unknown> | null = null
+  const fetchImplementation: LinqFetch = vi.fn(async (_url, init) => {
+    requestBody = parseJsonRequestBody(init.body)
+    return createJsonResponse({ message: {} })
+  })
+
+  await assert.rejects(
+    () => sendLinqIMessageAppCard({
+      card: NUTRITION_CARD,
+      chatId: 'chat-123',
+      idempotencyKey: 'card-delivery-1',
+    }, { env, fetchImplementation }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.operation === 'send_imessage_app_card' &&
+      error.context?.retryable === true &&
+      'deliveryMayHaveSucceeded' in error &&
+      error.deliveryMayHaveSucceeded === true,
+  )
+  expect(fetchImplementation).toHaveBeenCalledOnce()
+  assert.deepEqual(requestBody, {
+    message: {
+      idempotency_key: 'card-delivery-1',
+      parts: [{
+        app: {
+          bundle_id: 'ai.withmurph.app.messages',
+          name: 'Murph',
+          team_id: 'G9DJH2XUMK',
+        },
+        fallback_text: 'Your daily nutrition.',
+        interactive: true,
+        layout: buildLinqIMessageAppLayout(NUTRITION_CARD),
+        type: 'imessage_app',
+        url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),
+      }],
+      preferred_service: 'iMessage',
+    },
   })
 })
 

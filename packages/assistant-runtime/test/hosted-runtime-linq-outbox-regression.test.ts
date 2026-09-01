@@ -16,6 +16,7 @@ import {
 import {
   buildHostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryMedia,
+  type HostedAssistantResponseCard,
 } from "@murphai/hosted-execution/side-effects";
 
 import {
@@ -35,6 +36,18 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const cleanupTasks: Array<() => Promise<void>> = [];
+
+const HOSTED_DIRECT_APP_CARD: HostedAssistantResponseCard = {
+  kind: "daily_nutrition",
+  localDate: "2026-08-06",
+  mealCount: 1,
+  totals: {
+    calories: { mealCount: 1, total: 500 },
+    carbsGrams: { mealCount: 1, total: 45 },
+    fatGrams: { mealCount: 1, total: 20 },
+    proteinGrams: { mealCount: 1, total: 35 },
+  },
+};
 
 afterEach(async () => {
   vi.useRealTimers();
@@ -777,6 +790,144 @@ it("retries an identity-less hosted Linq link-only acknowledgement before accept
   });
 });
 
+it("terminalizes an identity-less hosted Linq direct app-card acknowledgement without consuming answered mailbox work", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const mailboxItemId = "mailbox_item_identity_less_direct_app_card";
+  const fixture = await createHostedLinqAttachmentFixture({
+    answeredMailboxItemIds: [mailboxItemId],
+    card: HOSTED_DIRECT_APP_CARD,
+    homeRoute: {
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+    },
+    imageCount: 0,
+    key: "identity-less-direct-app-card",
+    message: "Your daily nutrition.",
+    target: "linq_chat_identity_less_direct_app_card",
+  });
+  const pendingMailboxItemIds = new Set([mailboxItemId]);
+  const requestBodies: Array<{ body: string; method: string; url: string }> = [];
+  const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+    const url = String(request);
+    requestBodies.push({
+      body: await readFetchRequestBody(request, init),
+      method: (
+        request instanceof Request ? request.method : init?.method ?? "GET"
+      ).toUpperCase(),
+      url,
+    });
+    if (url.endsWith("/capability/check_imessage")) {
+      return new Response(JSON.stringify({ available: true }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.endsWith(`/chats/${fixture.target}/messages`)) {
+      return new Response(JSON.stringify({ message: {} }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error(`Unexpected Linq provider request: ${url}`);
+  });
+  const publicInternetFetch = vi.fn<typeof fetch>();
+  const recordLinqDeliveryOutcome = vi.fn<
+    NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+  >(async (request) => {
+    for (const answeredMailboxItemId of request.answeredMailboxItemIds ?? []) {
+      pendingMailboxItemIds.delete(answeredMailboxItemId);
+    }
+  });
+  const drainInput = {
+    ...buildHostedLinqDrainInput({
+      fixture,
+      providerFetch,
+      publicInternetFetch,
+    }),
+    effectsPort: createHostedRuntimeEffectsPortStub({
+      recordLinqDeliveryOutcome,
+    }),
+  };
+
+  const outcomes = await drainHostedPreparedAssistantDeliveries(drainInput);
+
+  expect(outcomes).toEqual([
+    expect.objectContaining({
+      deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      deliveryStatus: "failed_ambiguous",
+      effectId: fixture.intent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(providerFetch).toHaveBeenCalledTimes(2);
+  expect(requestBodies.map(({ url }) => url)).toEqual([
+    expect.stringMatching(/\/capability\/check_imessage$/u),
+    expect.stringMatching(new RegExp(`/chats/${fixture.target}/messages$`, "u")),
+  ]);
+  expect(JSON.parse(requestBodies[0]?.body ?? "null")).toEqual({
+    address: "+15550001",
+    from: "+15550000",
+  });
+  expect(JSON.parse(requestBodies[1]?.body ?? "null")).toMatchObject({
+    message: {
+      idempotency_key:
+        fixture.intent.deliveryIdempotencyKey
+        ?? `assistant-outbox:${fixture.intent.intentId}`,
+      parts: [{ type: "imessage_app" }],
+      preferred_service: "iMessage",
+    },
+  });
+  expect(recordLinqDeliveryOutcome).not.toHaveBeenCalled();
+  expect([...pendingMailboxItemIds]).toEqual([mailboxItemId]);
+  expect(publicInternetFetch).not.toHaveBeenCalled();
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    answeredMailboxItemIds: [mailboxItemId],
+    deliveryConfirmationPending: false,
+    lastError: { code: "ASSISTANT_DELIVERY_AMBIGUOUS" },
+    nextAttemptAt: null,
+    status: "abandoned",
+  });
+
+  vi.setSystemTime(new Date("2026-08-07T20:00:00.000Z"));
+  await expect(resolveHostedAssistantOutboxNextWakeAt({
+    now: new Date(),
+    vaultRoot: fixture.vaultRoot,
+  })).resolves.toBeNull();
+  const laterEffects = await collectHostedAssistantDeliverySideEffects({
+    includeBackgroundDueIntents: true,
+    vaultRoot: fixture.vaultRoot,
+  });
+  expect(laterEffects).toEqual([]);
+  await expect(drainHostedPreparedAssistantDeliveries({
+    ...drainInput,
+    assistantDeliveryEffects: laterEffects,
+  })).resolves.toEqual([]);
+  const capabilityRequests = requestBodies.filter(({ url }) =>
+    url.endsWith("/capability/check_imessage")
+  );
+  const messageRequests = requestBodies.filter(({ url }) =>
+    url.endsWith(`/chats/${fixture.target}/messages`)
+  );
+  expect(capabilityRequests).toHaveLength(1);
+  expect(capabilityRequests[0]?.method).toBe("POST");
+  expect(messageRequests).toHaveLength(1);
+  expect(messageRequests[0]?.method).toBe("POST");
+  expect(JSON.parse(messageRequests[0]?.body ?? "null")).toMatchObject({
+    message: {
+      idempotency_key:
+        fixture.intent.deliveryIdempotencyKey
+        ?? `assistant-outbox:${fixture.intent.intentId}`,
+      parts: [{ type: "imessage_app" }],
+      preferred_service: "iMessage",
+    },
+  });
+  expect(recordLinqDeliveryOutcome).not.toHaveBeenCalled();
+  expect([...pendingMailboxItemIds]).toEqual([mailboxItemId]);
+  expect(publicInternetFetch).not.toHaveBeenCalled();
+});
+
 it("terminalizes an identity-less hosted Linq private-image acknowledgement without a second reservation", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
@@ -1346,6 +1497,7 @@ it.each([
 
 async function createHostedLinqAttachmentFixture(input: {
   answeredMailboxItemIds?: readonly string[];
+  card?: HostedAssistantResponseCard;
   homeRoute?: {
     directRecipientPhoneNumber: string;
     fromPhoneNumber: string;
@@ -1436,6 +1588,7 @@ async function createHostedLinqAttachmentFixture(input: {
           explicitTarget: null,
         }
       : { explicitTarget: input.target }),
+    ...(input.card ? { card: input.card } : {}),
     channel: "linq",
     dedupeToken: input.key,
     identityId: `identity_${input.key}`,
@@ -1456,6 +1609,7 @@ async function createHostedLinqAttachmentFixture(input: {
       answeredMailboxItemIds: intent.answeredMailboxItemIds,
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: input.target,
+      ...(intent.card ? { card: intent.card } : {}),
       channel: "linq",
       deliverySourceKey: input.homeRoute
         ? `linq:${input.homeRoute.fromPhoneNumber}`
