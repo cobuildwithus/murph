@@ -1700,7 +1700,7 @@ describe("buildWranglerLocalDevConfig", () => {
         HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
         HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
       },
-      max_instances: 50,
+      max_instances: 1,
     });
   });
 
