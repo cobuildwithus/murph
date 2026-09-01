@@ -61,6 +61,7 @@ import {
 } from "@murphai/core";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -4709,7 +4710,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
   test.each([
     "runtime.maintenance-requested",
     "runtime.browser-vault-refresh-requested",
-  ] as const)("system mailbox mode drains model-free %s control work", async (kind) => {
+    "health.daily-metric.reported",
+  ] as const)("system mailbox mode drains model-free %s work", async (kind) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -4726,15 +4728,34 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     try {
       vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resolvedItem = createResolvedRuntimeControlSystemMailboxItem(maintenanceItem);
       await enqueueHostedSystemMailboxItem({
-        item: createResolvedRuntimeControlSystemMailboxItem(maintenanceItem),
+        item: kind === "health.daily-metric.reported"
+          ? {
+              ...resolvedItem,
+              route: {
+                ...resolvedItem.route,
+                action: "import-reported-daily-metric",
+              },
+            }
+          : resolvedItem,
         vaultRoot,
-        wake: buildHostedExecutionRuntimeControlWake({
-          eventId: maintenanceItem.dedupeKey,
-          kind,
-          occurredAt: maintenanceItem.occurredAt,
-          userId: TEST_USER_ID,
-        }),
+        wake: kind === "health.daily-metric.reported"
+          ? buildHostedExecutionDailyMetricReportedWake({
+              date: "2026-04-27",
+              eventId: maintenanceItem.dedupeKey,
+              memberId: TEST_USER_ID,
+              metric: "steps",
+              occurredAt: maintenanceItem.occurredAt,
+              unit: "count",
+              value: 8_000,
+            })
+          : buildHostedExecutionRuntimeControlWake({
+              eventId: maintenanceItem.dedupeKey,
+              kind,
+              occurredAt: maintenanceItem.occurredAt,
+              userId: TEST_USER_ID,
+            }),
       });
       const importState = createEmptyHostedMailboxImportState();
       importState.watermarks.system = "1";
@@ -4770,6 +4791,20 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
             deviceSyncPort,
             mailboxPort: createMailboxPort({ events, items: [] }),
+            vaultSharePort: {
+              async listActiveProjectionScopes(input) {
+                return {
+                  ...(input?.projectionMode
+                    ? { projectionMode: input.projectionMode }
+                    : {}),
+                  projectionKinds: [],
+                  projectionScopes: [],
+                };
+              },
+              async deliver() {
+                throw new Error("No inactive vault-share projection should be delivered.");
+              },
+            },
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,

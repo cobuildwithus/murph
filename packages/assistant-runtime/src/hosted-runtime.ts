@@ -441,6 +441,7 @@ const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as c
 const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
   "dispatch-assistant-notification",
+  "import-reported-daily-metric",
   "run-device-sync-wake",
   "run-environment-interview",
 ] as const;
