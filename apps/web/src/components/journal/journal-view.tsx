@@ -583,9 +583,6 @@ function JournalDaySection({
         >
           {Number(date.slice(8, 10))}
         </span>
-        <span className="font-mono text-[10px] uppercase leading-[15px] tracking-[0.1em] text-muted-foreground">
-          {isToday ? "Today" : null}
-        </span>
       </div>
 
       <div className="min-w-0 pt-0.5">
