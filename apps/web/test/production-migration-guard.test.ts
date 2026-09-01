@@ -1980,9 +1980,9 @@ describe("hosted web production migration guard", () => {
     assert.match(productionNextBuildScript, /typecheck_old_space_mb=3584/u);
     assert.match(
       productionNextBuildScript,
-      /build_cache_epoch=webpack-next-16\.3-v5-isolated-worker-cold-webpack/u,
+      /build_cache_epoch=webpack-next-16\.3-v6-isolated-worker-no-webpack-cache/u,
     );
-    assert.match(productionNextBuildScript, /webpack_cache_dir=\.next\/cache\/webpack/u);
+    assert.doesNotMatch(productionNextBuildScript, /webpack_cache_dir/u);
     assert.match(
       productionNextBuildScript,
       /node \.\.\/\.\.\/scripts\/rm-paths\.mjs \.next\/cache/u,
@@ -2000,10 +2000,7 @@ describe("hosted web production migration guard", () => {
       productionNextBuildScript,
       /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
-    assert.match(
-      productionNextBuildScript,
-      /node \.\.\/\.\.\/scripts\/rm-paths\.mjs "\$webpack_cache_dir"/u,
-    );
+    assert.doesNotMatch(productionNextBuildScript, /\.next\/cache\/webpack/u);
 
     // Vercel owns the production build lifecycle. The application does not
     // add a second deadline or route production through the local host slot.
@@ -2038,7 +2035,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(readmeDoc, /## Production build memory guard/u);
     assert.match(readmeDoc, /Vercel owns cancellation and build deadlines/u);
-    assert.match(readmeDoc, /`\.next\/cache\/webpack` before every compile/u);
+    assert.match(readmeDoc, /disables Webpack's production cache/u);
     for (const [docName, doc] of [
       ["verification-and-runtime.md", verificationDoc],
       ["testing-ci-map.md", testingCiMapDoc],
