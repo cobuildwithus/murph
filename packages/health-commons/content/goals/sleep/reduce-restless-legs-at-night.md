@@ -41,42 +41,42 @@ safety:
   cautionLevel: moderate
 ---
 
-Restless legs syndrome typically causes an urge to move the legs with uncomfortable sensations that begin or worsen during rest, improve temporarily with movement, and are worse in the evening or night. It is different from an ordinary muscle cramp. Effective treatment begins by confirming the pattern, reviewing aggravating factors, and checking iron status appropriately.
+Restless legs syndrome is an urge to move the legs, usually with uncomfortable sensations, that starts or worsens at rest, eases briefly with movement, and is worse in the evening or night. It isn't an ordinary cramp. Treatment starts by confirming that pattern, reviewing aggravators, and checking iron properly.
 
 ## What to do
 
-- Describe the sensation and timing. Note whether movement relieves it and whether it is clearly worse at rest and at night.
-- Ask a clinician to review ferritin and other iron measures when restless legs is persistent. Brain iron can be relevant even when a basic blood count is normal.
-- Review medicines that may worsen symptoms, including some antihistamines, antidepressants, antipsychotics, and anti-nausea drugs. Do not stop prescribed medicine without the prescriber.
+- Describe the sensation and timing: does movement relieve it, and is it clearly worse at rest and at night?
+- If it persists, ask a clinician to check ferritin and other iron measures. Brain iron can matter even when a basic blood count is normal.
+- Review medicines that can worsen symptoms, including some antihistamines, antidepressants, antipsychotics, and anti-nausea drugs. Do not stop a prescribed medicine without the prescriber.
 - Limit caffeine and alcohol if symptoms track with them, especially later in the day.
-- Keep sleep timing regular. Sleep loss can make the sensations and the ability to cope with them worse.
-- Use brief movement, walking, stretching, massage, or heat for temporary relief while a longer-term plan is being developed.
+- Keep sleep timing regular; sleep loss can make the sensations worse and harder to bear.
+- For temporary relief, use brief movement, walking, stretching, massage, or heat.
 
 ## A simple plan
 
-For two weeks, record symptom nights, start time, intensity from 0 to 10, and the degree to which movement helps. Add only major context: caffeine, alcohol, a new medicine, pregnancy, blood donation, or a very short night.
+For two weeks, record symptom nights, start time, intensity from 0 to 10, and how much movement helps. Add only major context: caffeine, alcohol, a new medicine, pregnancy, blood donation, or a very short night.
 
-Schedule a primary-care or sleep visit if symptoms are frequent or impair sleep. Bring the pattern and ask specifically about iron studies and medication review. If iron treatment is recommended, follow the dose and monitoring plan rather than buying high-dose iron independently.
+If symptoms are frequent or disrupt sleep, book a primary-care or sleep visit, bring the pattern, and ask about iron studies and a medication review. If iron is recommended, follow the dose and monitoring plan rather than buying high-dose iron yourself.
 
-During the wait, set a consistent sleep window and a short response for symptoms: five minutes of walking, a gentle calf and thigh stretch, and a warm shower or heating pad if comfortable. The aim is relief without turning bedtime into a long workout.
+Meanwhile, set a consistent sleep window and a short symptom routine: five minutes of walking, a gentle calf and thigh stretch, and a warm shower or heating pad if comfortable. Don't turn bedtime into a workout.
 
 ## How to know it is working
 
-Use symptom nights per week, intensity, time to relief, and sleep delay. Progress can mean fewer nights, milder sensations, or less time lost before sleep. Wearable movement counts cannot diagnose restless legs and may miss the internal urge that defines the condition.
+Track symptom nights per week, intensity, time to relief, and sleep delay. Wearable movement counts can't diagnose restless legs and may miss the internal urge that defines it.
 
-If iron is treated, symptom improvement and repeat laboratory timing should be interpreted with the clinician. More iron is not automatically better, and ferritin can be affected by inflammation.
+If iron is treated, go over symptom changes and repeat-lab timing with the clinician. More iron isn't automatically better, and inflammation can affect ferritin.
 
 ## If you get stuck
 
-Recheck the diagnosis. Leg cramps cause painful muscle tightening; neuropathy can cause burning or numbness that is not specifically worse at rest; akathisia causes a broader inner restlessness; positional discomfort may not follow an evening pattern.
+Recheck the diagnosis. Leg cramps are painful muscle tightening. Neuropathy can cause burning or numbness not specifically worse at rest. Akathisia is a broader inner restlessness. Positional discomfort may not follow an evening pattern.
 
-The 2025 AASM guideline changed the medication landscape. Some dopamine medicines used historically can cause augmentation, in which symptoms start earlier, become stronger, or spread. Current treatment may favor other medication classes depending on the person. If symptoms are worsening on a dopamine drug, contact the prescriber rather than raising the dose yourself.
+The 2025 AASM guideline changed the medication landscape. Some dopamine medicines used historically can cause augmentation: symptoms start earlier, get stronger, or spread. Current treatment may favor other drug classes depending on the person. If symptoms worsen on a dopamine drug, contact the prescriber; don't raise the dose yourself.
 
-Pregnancy, kidney disease, and iron deficiency require population-specific management. Sleep apnea can also coexist and should be treated.
+Pregnancy, kidney disease, and iron deficiency each need their own management, and coexisting sleep apnea should be treated.
 
 ## A quick note
 
-Do not take iron without appropriate testing and guidance; excess iron can be harmful. Seek prompt evaluation for one-sided swelling, redness, warmth, sudden weakness, or severe new pain, which are not typical restless legs symptoms.
+Do not take iron without proper testing and guidance; excess iron can be harmful. Get prompt evaluation for one-sided swelling, redness, warmth, sudden weakness, or severe new pain; those aren't typical restless legs symptoms.
 
 ## Sources
 

@@ -38,51 +38,51 @@ safety:
     - Mediterranean-style eating is a flexible pattern, not a requirement to reproduce one country’s menu.
 ---
 
-A Mediterranean diet is best understood as a pattern: vegetables, fruit, beans, lentils, whole grains, nuts, seeds, and olive oil show up often; fish and seafood appear regularly; dairy, eggs, and poultry can fit; red and processed meat, sweets, and highly refined foods are less central. You do not need imported ingredients, wine, or a rigid scorecard. The strongest version is built from foods that fit your culture, budget, and kitchen.
+A Mediterranean diet is a pattern. Vegetables, fruit, beans, lentils, whole grains, nuts, seeds, and olive oil show up often; fish and seafood appear regularly; dairy, eggs, and poultry can fit; red and processed meat, sweets, and highly refined foods are less central. You do not need imported ingredients, wine, or a rigid scorecard. The strongest version is built from foods that fit your culture, budget, and kitchen.
 
 ## What to do
 
-Start with substitutions rather than adding a separate “Mediterranean” menu on top of your normal food.
+Substitute within the meals you already eat rather than adding a separate “Mediterranean” menu.
 
 - Make vegetables, beans, or lentils a visible part of lunch and dinner.
-- Use olive oil or another unsaturated plant oil for routine cooking and dressings.
+- Cook and dress with olive oil or another unsaturated plant oil.
 - Choose whole grains often: oats, whole-grain bread, brown rice, corn, barley, bulgur, farro, or similar local staples.
-- Eat nuts or seeds regularly in portions that fit your energy needs.
+- Eat nuts or seeds regularly, in portions that fit your energy needs.
 - If you eat seafood, plan it about twice a week and vary the type.
-- Replace some red or processed meat meals with beans, fish, poultry, tofu, or other minimally processed proteins.
-- Keep fruit available for snacks or dessert, while allowing sweets to remain an occasional enjoyable food.
+- Swap some red or processed meat meals for beans, fish, poultry, tofu, or other minimally processed proteins.
+- Keep fruit on hand for snacks or dessert, and let sweets stay an occasional pleasure.
 
-Alcohol is not required. If you do not drink, do not start for health reasons. If you do drink, less is generally better for health.
+Alcohol is not required. If you do not drink, do not start for health reasons. If you do, less is generally better for health.
 
 ## A simple plan
 
-For week one, change one lunch and one dinner. A lunch could be a grain-and-bean bowl with vegetables and olive-oil dressing. Dinner could be fish, potatoes, and vegetables; lentil soup with whole-grain bread; or pasta with beans, greens, tomatoes, and olive oil.
+In week one, change one lunch and one dinner. Lunch could be a grain-and-bean bowl with vegetables and olive-oil dressing. Dinner could be fish, potatoes, and vegetables; lentil soup with whole-grain bread; or pasta with beans, greens, tomatoes, and olive oil.
 
-In week two, make three defaults: one breakfast, one snack, and one pantry meal. Examples are oats with fruit and nuts; fruit with yogurt; and canned beans with frozen vegetables, a grain, and a flavorful sauce. In weeks three and four, add variety without changing the structure. Rotate the vegetables, legumes, grains, herbs, and protein source.
+In week two, set three defaults: a breakfast, a snack, and a pantry meal. For example, oats with fruit and nuts; fruit with yogurt; and canned beans with frozen vegetables, a grain, and a good sauce. In weeks three and four, add variety without changing the structure: rotate the vegetables, legumes, grains, herbs, and protein.
 
-There is no need to change every meal. A plan that covers most ordinary meals and leaves room for social food is more useful than a perfect seven-day menu you stop following.
+A plan that covers most ordinary meals and leaves room for social food beats a perfect seven-day menu you stop following.
 
 ## How to know it is working
 
-Track behaviors once a week: how many meals included vegetables, how many included beans or lentils, whether seafood appeared if desired, and which fat was used most often. Also notice hunger, energy, digestion, cost, and enjoyment. If your larger goal involves LDL cholesterol, blood pressure, blood sugar, or weight, use the appropriate validated measure over months; do not infer success from a “clean eating” feeling.
+Once a week, count how many meals included vegetables, how many included beans or lentils, whether seafood appeared if you want it, and which fat you used most. Also notice hunger, energy, digestion, cost, and enjoyment. If your larger goal involves LDL cholesterol, blood pressure, blood sugar, or weight, use the right validated measure over months; a “clean eating” feeling is not evidence.
 
 ## What to expect
 
-Shopping and meal assembly can become easier within two to four weeks. Fiber increases may change bowel habits sooner. Trials and prospective research support Mediterranean-style patterns for cardiovascular risk reduction, but results reflect the whole pattern and sustained adherence—not a single ingredient such as olive oil. Individual changes in weight or lab values vary, and medication remains important when prescribed.
+Shopping and meal assembly usually get easier within two to four weeks. More fiber may change bowel habits sooner. Trials and prospective research support Mediterranean-style patterns for reducing cardiovascular risk, but the results reflect the whole pattern and sustained adherence, not a single ingredient such as olive oil. Individual changes in weight or lab values vary, and prescribed medication still matters.
 
 ## If you get stuck
 
-If the plan feels expensive, use dried or canned beans, frozen vegetables, tinned fish, oats, in-season fruit, and store-brand olive oil. If cooking is the barrier, repeat meals and use convenient staples. If family members dislike a full change, keep the shared base meal and change your sides or protein. If you are hungry, check that meals include enough total food, protein, fiber-rich carbohydrate, and fat; a plate of vegetables alone is not the goal.
+If the plan feels expensive, use dried or canned beans, frozen vegetables, tinned fish, oats, in-season fruit, and store-brand olive oil. If cooking is the barrier, repeat meals and lean on convenient staples. If family members do not want a full change, keep the shared base meal and change your sides or protein. If you are hungry, check that meals include enough total food, protein, fiber-rich carbohydrate, and fat; a plate of vegetables alone is not the goal.
 
 ## Make it last
 
-Keep the pattern recognizable across different cuisines. Beans, vegetables, whole grains, nuts, fish, and unsaturated oils do not need Italian or Greek flavors. Use the herbs, spices, grains, and legumes you already know. This prevents the plan from becoming an expensive themed menu.
+Keep the pattern recognizable across cuisines. Beans, vegetables, whole grains, nuts, fish, and unsaturated oils do not need Italian or Greek flavors; use the herbs, spices, grains, and legumes you already know.
 
-Choose a few recurring anchors: olive oil or another suitable plant oil for cooking, legumes twice weekly, fish when desired, fruit available, and vegetables at main meals. Review the pattern by week rather than expecting every restaurant meal to match it. If weight loss is not a goal, eat enough; the Mediterranean label does not require small portions. If cholesterol or blood pressure is the goal, monitor those outcomes and use medication as prescribed. A durable Mediterranean pattern leaves room for bread, pasta, cheese, desserts, and celebrations in amounts that fit the full diet instead of turning them into forbidden deviations.
+Choose a few recurring anchors: olive oil or another suitable plant oil for cooking, legumes twice a week, fish if you want it, fruit on hand, and vegetables at main meals. Review the pattern by the week rather than expecting every restaurant meal to match. If weight loss is not a goal, eat enough; the Mediterranean label does not require small portions. If cholesterol or blood pressure is the goal, monitor those outcomes and take medication as prescribed. Leave room for bread, pasta, cheese, desserts, and celebrations in amounts that fit the whole diet; they are not forbidden deviations.
 
 ## A quick note
 
-People with food allergies, celiac disease, kidney disease, diabetes treated with medicines that can cause low blood sugar, or a clinician-prescribed diet need appropriate substitutions. “Mediterranean” does not make a food safe for a medical condition. Supplements marketed as Mediterranean are not substitutes for the eating pattern.
+People with food allergies, celiac disease, kidney disease, diabetes treated with medicines that can cause low blood sugar, or a clinician-prescribed diet need appropriate substitutions. “Mediterranean” does not make a food safe for a medical condition. Supplements marketed as Mediterranean are no substitute for the eating pattern.
 
 ## Sources
 

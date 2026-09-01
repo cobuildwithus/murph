@@ -59,8 +59,8 @@ export function GoalSearchExperience({
               Goals
             </h1>
             <p className="mt-5 max-w-[56ch] text-base/7 text-pretty text-[#635a48] sm:text-lg/8">
-              Choose an outcome you care about. Every guide gives you a practical
-              plan you can use on your own or carry out with Murph.
+              Pick something you want to change. Each guide gives you a plan
+              you can follow on your own or with Murph.
             </p>
             <div
               className="relative mt-8 w-full"

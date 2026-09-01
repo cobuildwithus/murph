@@ -37,50 +37,50 @@ safety:
     - Travel food should support the trip, not turn it into a diet-compliance test.
 ---
 
-Healthy eating while traveling is not reproducing your home routine perfectly. It is protecting a few anchors—enough food, protein, produce, fluids, and regular meals—so you can feel good and enjoy the trip. Travel changes time zones, food access, sleep, movement, and social plans, so flexibility is part of success.
+Eating well on a trip comes down to protecting a few anchors: enough food, protein, produce, fluids, and regular meals. Travel changes time zones, food access, sleep, movement, and social plans, so flexibility is part of the job.
 
 ## What to do
 
-Separate transit days from destination days. Transit is where delays and limited choices create the most trouble. Pack or buy one filling snack with protein and carbohydrate, such as nuts and fruit, a sandwich, yogurt and cereal, roasted chickpeas, or a bar you have used before. Carry an empty refillable bottle through airport security.
+Plan transit days separately; that's where delays and limited choices bite. Pack or buy one filling snack with protein and carbohydrate: nuts and fruit, a sandwich, yogurt and cereal, roasted chickpeas, or a bar you've used before. Carry an empty refillable bottle through airport security.
 
 At the destination, use meal anchors rather than restaurant rules:
 
-- Choose one dependable breakfast or first meal.
-- Include a meaningful protein source at main meals.
-- Add fruit or vegetables when they are available and appealing.
+- Pick one dependable breakfast or first meal.
+- Get a real protein source at main meals.
+- Add fruit or vegetables when they're available and appealing.
 - Eat enough earlier in the day instead of “saving calories” for dinner and arriving ravenous.
-- Enjoy local foods deliberately; a special meal does not need compensation.
-- Resume your ordinary pattern at the next meal rather than waiting for the trip to end.
+- Enjoy local food on purpose; a special meal needs no compensation.
+- Resume your usual pattern at the next meal, not after the trip.
 
 ## A simple plan
 
-Before departure, check the travel duration, food restrictions, kitchen or refrigerator access, and first destination meal. Pack two snacks for any leg long enough to miss a meal. Save a nearby grocery store and one restaurant option on the map.
+Before you leave, check travel duration, food restrictions, kitchen or refrigerator access, and the first destination meal. Pack two snacks for any leg long enough to miss a meal. Save a nearby grocery store and one restaurant on the map.
 
-For the trip, choose three anchors: for example, a protein-rich breakfast, water during transit, and produce twice per day. If training or an event is involved, add a familiar pre-event meal and recovery option. For international travel, prioritize food and water safety appropriate to the destination.
+For the trip, choose three anchors, such as a protein-rich breakfast, water during transit, and produce twice a day. If training or an event is involved, add a familiar pre-event meal and recovery option. For international travel, put destination-appropriate food and water safety first.
 
-After returning, shop for one easy meal before or immediately after arrival. The first day home is part of the plan.
+Shop for one easy meal before or right after you get home. The first day back is part of the plan.
 
 ## How to know it is working
 
-Track the anchors, not calories. Ask whether you avoided long accidental gaps without food, stayed reasonably hydrated, included protein and produce, and returned without feeling that every meal was a negotiation. Digestion, energy, sleep, and enjoyment are useful feedback.
+Track the anchors, not calories. Did you avoid long accidental gaps without food, stay reasonably hydrated, include protein and produce, and come home without feeling every meal was a negotiation? Digestion, energy, sleep, and enjoyment are useful feedback too.
 
 ## What to expect
 
-Scale weight commonly changes during travel because of sodium, carbohydrate, hydration, bowel patterns, and time-zone changes. A short-term increase is not a direct measure of fat gain. Appetite and digestion may be irregular for several days. The goal is continuity, not a perfect biological response to an unusual environment.
+Scale weight often shifts during travel because of sodium, carbohydrate, hydration, bowel patterns, and time-zone changes. A short-term rise doesn't directly measure fat gain. Appetite and digestion may be off for several days.
 
 ## If you get stuck
 
-If choices are limited, build the best available combination rather than skipping: a convenience-store sandwich and fruit may beat waiting hours. If restaurant portions are large, stop when comfortably satisfied and take leftovers when practical. If family or business meals dominate, protect breakfast and snacks. If travel triggers rigid tracking or food anxiety, deliberately reduce monitoring and focus on regular nourishment.
+If choices are limited, build the best combination available instead of skipping; a convenience-store sandwich and fruit may beat waiting hours. If portions are large, stop when comfortably satisfied and take leftovers when practical. If family or business meals take over, protect breakfast and snacks. If travel triggers rigid tracking or food anxiety, deliberately monitor less and focus on regular meals.
 
 ## Make it last
 
-Create a reusable travel checklist rather than solving the same problem for every trip. Include a bottle, two shelf-stable snacks, essential supplements or medicines, allergy or celiac communication, and the first destination food plan. Restock the kit after returning. Save reliable airport, highway, or hotel options in a note.
+Make a reusable travel checklist: a bottle, two shelf-stable snacks, essential supplements or medicines, allergy or celiac communication, and the first destination meal plan. Restock it after each trip. Save reliable airport, highway, or hotel options in a note.
 
-Match effort to trip length. A weekend may need only snacks and one breakfast anchor; a month abroad may need grocery routines, a kitchen plan, and destination-specific food safety. Let enjoyable local meals be part of the purpose of travel. Use ordinary meals around them rather than turning the trip into alternating restriction and excess. Expect the routine to bend during delays and time-zone changes. The long-term skill is recovering quickly: eat the next available balanced meal, resume fluids, and shop after arrival. A flexible pattern that works on most trips is more valuable than perfect food on one itinerary.
+Match effort to trip length. A weekend may need only snacks and one breakfast anchor; a month abroad may need grocery routines, a kitchen plan, and destination-specific food safety. Let good local meals be part of why you travel, with ordinary meals around them instead of swings between restriction and excess. Expect the routine to bend during delays and time-zone changes. The lasting skill is recovering quickly: eat the next balanced meal, get fluids back up, and shop after you arrive. A flexible pattern that works on most trips beats perfect food on one itinerary.
 
 ## A quick note
 
-Use destination-specific food and water guidance, particularly where sanitation risks are higher. People with severe food allergies, celiac disease, diabetes, or medicines tied to meals should carry an explicit backup plan, necessary medication, and translated communication when useful.
+Follow destination-specific food and water guidance, especially where sanitation risks are higher. If you have severe food allergies, celiac disease, diabetes, or medicines tied to meals, carry an explicit backup plan, necessary medication, and translated communication when useful.
 
 ## Sources
 

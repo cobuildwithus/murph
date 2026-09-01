@@ -42,38 +42,38 @@ safety:
   cautionLevel: low
 ---
 
-A good nap has a job. It may restore alertness after a short night, support a night-shift plan, or give a brief reset before an evening demand. The best timing and length depend on that job. For many daytime workers, a short nap in the early afternoon provides benefit with less grogginess and less interference with nighttime sleep.
+A good nap has a job: restoring alertness after a short night, fitting a night-shift plan, or giving a brief reset before an evening demand. Timing and length depend on that job. For many daytime workers, a short early-afternoon nap gives the benefit with less grogginess and less interference with nighttime sleep.
 
 ## What to do
 
-- Decide why you are napping: ordinary afternoon dip, acute sleep loss, preparation for a night shift, or illness and recovery.
-- For a routine alertness boost, start with 20 to 30 minutes. Set an alarm and include a few minutes to settle.
-- Nap earlier rather than close to bedtime. The later the nap, the more likely it is to reduce the sleep pressure you need at night.
-- Use a dark, quiet, comfortable place, but do not spend an hour trying to force a nap. Quiet rest is still useful.
-- Leave a buffer after waking before driving, making important decisions, or doing hazardous work. Sleep inertia can briefly slow thinking and reaction time.
-- Treat long naps as a specific tool. A roughly 90-minute opportunity may help after major sleep loss or before a night shift, but it also takes more time and can produce grogginess.
+- Decide why you're napping: the ordinary afternoon dip, acute sleep loss, preparing for a night shift, or illness and recovery.
+- For a routine alertness boost, start with 20 to 30 minutes. Set an alarm and allow a few minutes to settle.
+- Nap earlier rather than near bedtime. The later the nap, the more it eats the sleep pressure you need at night.
+- Use a dark, quiet, comfortable spot, but don't spend an hour trying to force it. Quiet rest still helps.
+- Leave a buffer after waking before driving, important decisions, or hazardous work. Sleep inertia briefly slows thinking and reaction time.
+- Treat long naps as a specific tool. A roughly 90-minute opportunity may help after major sleep loss or before a night shift, but it costs more time and can leave you groggy.
 
 ## A simple plan
 
-Choose a consistent early-afternoon window for one week. Lie down for no more than 30 minutes and note three things: whether you slept, how alert you felt 30 minutes later, and whether nighttime sleep was harder. Keep the nap only if it improves the day without repeatedly delaying sleep at night.
+Pick a consistent early-afternoon window for one week. Lie down for no more than 30 minutes and note whether you slept, how alert you felt 30 minutes later, and whether nighttime sleep was harder. Keep the nap only if it improves the day without repeatedly delaying sleep at night.
 
-If 20 minutes leaves you consistently groggy, test a 10- to 15-minute opportunity or allow a longer wake-up buffer. If you need recovery after a severely short night, test a roughly 90-minute opportunity earlier in the day, but do not assume it replaces the missing night. The tradeoff is more time and a greater chance of delaying bedtime.
+If 20 minutes leaves you consistently groggy, try a 10- to 15-minute opportunity or a longer wake-up buffer. After a severely short night, try a roughly 90-minute opportunity earlier in the day, but don't assume it replaces the missing night; it costs more time and is more likely to push bedtime later.
 
-If you work nights, the plan is different. A longer nap before the shift and a strategically timed short nap during an authorized break can help, but workplace rules and the need to clear sleep inertia matter. Protect a main sleep period at home; naps should not be expected to replace it.
+Night work changes the plan. A longer nap before the shift and a well-timed short nap during an authorized break can help, but workplace rules and the need to clear sleep inertia matter. Protect a main sleep period at home; naps can't replace it.
 
 ## How to know it is working
 
-The nap leaves you more alert after the initial grogginess, does not regularly push bedtime later, and helps you function without escalating caffeine. Judge the effect over several attempts, because whether you actually fall asleep will vary.
+The nap leaves you more alert once the initial grogginess passes, doesn't regularly push bedtime later, and helps you function without escalating caffeine. Judge it over several attempts, since whether you actually fall asleep varies.
 
-Use the same checkpoint each time: alertness 30 minutes after waking, then nighttime sleep onset. A nap that feels wonderful immediately but repeatedly adds an hour of wakefulness at bedtime may not be worthwhile. People who sleep normally at night and feel good during the day do not need naps for optimization.
+Use the same checkpoint each time: alertness 30 minutes after waking, then how easily you fell asleep that night. A nap that feels great but repeatedly adds an hour of wakefulness at bedtime may not be worth it. If you sleep normally at night and feel good by day, you don't need to add naps.
 
 ## If you get stuck
 
-If a short nap always becomes a two-hour sleep, the underlying issue may be inadequate nighttime sleep. If you cannot nap, use quiet eyes-closed rest and focus on the main sleep window. If naps worsen insomnia, stop them temporarily while addressing nighttime sleep. People with very late schedules may need an individualized timing plan.
+If a short nap always becomes a two-hour sleep, the real issue may be too little nighttime sleep. If you can't nap, use quiet eyes-closed rest and focus on the main sleep window. If naps worsen insomnia, stop them for now and work on nighttime sleep. People with very late schedules may need an individualized timing plan.
 
 ## A quick note
 
-An irresistible need to nap every day despite adequate nighttime sleep can signal a sleep disorder or another health problem. Discuss persistent excessive sleepiness with a clinician.
+An irresistible need to nap every day despite enough nighttime sleep can signal a sleep disorder or another health problem. Discuss persistent excessive sleepiness with a clinician.
 
 ## Sources
 

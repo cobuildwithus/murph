@@ -43,40 +43,40 @@ safety:
   cautionLevel: moderate
 ---
 
-Sleep bruxism is grinding, clenching, or jaw activity during sleep. Many mild cases do not need treatment, but frequent bruxism can contribute to tooth wear, cracked teeth, jaw pain, and morning headaches. Because you cannot simply remind yourself to stop while asleep, the plan focuses on protecting the teeth, reducing contributors, and checking for related sleep problems.
+Sleep bruxism is grinding, clenching, or other jaw activity during sleep. Mild cases often need no treatment, but frequent grinding can wear or crack teeth and cause jaw pain and morning headaches. The plan protects the teeth, reduces contributors, and checks for related sleep problems.
 
 ## What to do
 
 - Get a dental exam if you have pain, tooth sensitivity, visible wear, cracked restorations, or a partner hears regular grinding.
-- Ask whether a fitted night guard is appropriate. A guard mainly protects teeth; it does not necessarily eliminate the underlying muscle activity.
-- Review stress, anxiety, caffeine, alcohol, nicotine, and sleep loss. These can be associated with bruxism, although no single trigger explains every case.
+- Ask whether a fitted night guard makes sense. It protects teeth but won't necessarily stop the muscle activity underneath.
+- Review stress, anxiety, caffeine, alcohol, nicotine, and sleep loss. All can be linked with bruxism, but no single trigger explains every case.
 - Review medicines with the prescriber. Some antidepressants and other drugs can contribute in susceptible people.
-- Pay attention to snoring, gasping, dry mouth, and daytime sleepiness. Sleep bruxism can coexist with obstructive sleep apnea.
-- During the day, practice a relaxed jaw position: lips together, teeth apart, and tongue resting comfortably. Reducing daytime clenching can ease the total jaw load.
+- Watch for snoring, gasping, dry mouth, and daytime sleepiness; sleep bruxism can coexist with obstructive sleep apnea.
+- During the day, keep a relaxed jaw, with lips together, teeth apart, and tongue resting comfortably, to cut total jaw load.
 
 ## A simple plan
 
-For two weeks, rate morning jaw pain or headache from 0 to 10, note partner-reported grinding, and record only major exposures such as late caffeine, alcohol, a highly stressful day, or a medication change. Avoid repeatedly recording yourself all night.
+For two weeks, rate morning jaw pain or headache from 0 to 10, note partner-reported grinding, and record only major exposures: late caffeine, alcohol, a very stressful day, or a medication change. Don't record yourself all night.
 
-Book a dental visit if symptoms are more than occasional. Bring the timeline and ask the dentist to look for tooth wear, restoration damage, jaw-muscle tenderness, and signs that suggest a sleep evaluation. If a guard is provided, follow fitting and cleaning instructions and report new jaw pain or bite changes.
+If symptoms are more than occasional, book a dental visit. Bring the timeline and ask the dentist to check for tooth wear, damaged restorations, tender jaw muscles, and signs that point to a sleep evaluation. If you get a guard, follow the fitting and cleaning instructions and report new jaw pain or bite changes.
 
-Add a short daytime downshift: several times per day, release the tongue and jaw, lower the shoulders, and take five slow breaths. This is more likely to help daytime clenching and stress load than to guarantee the end of sleep bruxism, but it is low burden and testable. Avoid chewing gum for long periods when the jaw is already sore.
+Add a short daytime downshift: several times a day, release the tongue and jaw, drop the shoulders, and take five slow breaths. It helps daytime clenching and stress more than sleep bruxism itself, but it's cheap to test. Skip long gum chewing when the jaw is sore.
 
 ## How to know it is working
 
-The most useful outcomes are less morning pain, fewer headaches, no new tooth damage, and less frequent partner-reported grinding. A worn mouth guard shows that it is protecting the teeth; it does not prove the problem is getting worse or better without clinical context.
+Watch for less morning pain, fewer headaches, no new tooth damage, and less partner-reported grinding. A worn guard shows it's protecting your teeth, not whether the problem is improving.
 
-Phone audio can capture some grinding sounds but may confuse them with movement, snoring, or environmental noise. A formal sleep study is not needed for every case, but it can help when the diagnosis is uncertain or sleep apnea is suspected.
+Phone audio can pick up grinding but may confuse it with movement, snoring, or room noise. Not every case needs a sleep study, but one helps when the diagnosis is unclear or apnea is suspected.
 
 ## If you get stuck
 
-Do not keep buying harder guards when symptoms worsen. An ill-fitting over-the-counter guard can change comfort and may be unsuitable with dental work, jaw disorders, or suspected apnea. Return to the dentist for fit and diagnosis.
+Don't keep buying harder guards as symptoms worsen. An ill-fitting over-the-counter guard can change comfort and may not suit dental work, jaw disorders, or suspected apnea. See the dentist for fit and diagnosis.
 
-If pain persists, a clinician or physical therapist experienced in temporomandibular disorders can address jaw-muscle and neck contributors. If symptoms began after a medicine change, discuss options with the prescriber. If snoring or gasping is present, evaluate the airway rather than assuming grinding is only stress.
+If pain persists, a clinician or physical therapist experienced in temporomandibular disorders can address jaw-muscle and neck contributors. If symptoms began after a medicine change, ask the prescriber about options. If you snore or gasp, get the airway checked rather than blaming stress alone.
 
 ## A quick note
 
-Seek prompt dental care for a cracked tooth, severe tooth pain, facial swelling, or inability to open the jaw normally. Do not stop a psychiatric medicine abruptly because you suspect it contributes.
+Get prompt dental care for a cracked tooth, severe tooth pain, facial swelling, or a jaw you can't open normally. Do not stop a psychiatric medicine abruptly because you suspect it contributes.
 
 ## Sources
 

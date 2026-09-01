@@ -45,7 +45,7 @@ safety:
     - Supplements are secondary to enough food, carbohydrate, protein, fluid, and recovery.
 ---
 
-Training nutrition should match the work. A short easy session may need nothing beyond ordinary meals, while long endurance work, two-a-day training, tournaments, or a demanding strength block can require deliberate carbohydrate, protein, fluid, and sodium. The goal is not to eat like a professional athlete on every rest day. It is to arrive at key sessions fueled, recover before the next one, and keep enough energy available for health as well as performance.
+Training nutrition should match the work. A short easy session may need nothing beyond ordinary meals. Long endurance work, two-a-day training, tournaments, or a demanding strength block can call for deliberate carbohydrate, protein, fluid, and sodium. The point is to arrive at key sessions fueled, recover before the next one, and keep enough energy available for health as well as performance.
 
 ## What to do
 
@@ -53,38 +53,38 @@ Cover the foundations first:
 
 - Eat enough total energy for your training load and body-composition goal.
 - Include a substantial protein source at several meals across the day.
-- Use carbohydrate as the main adjustable fuel for harder and longer exercise: grains, potatoes, fruit, dairy, legumes, or sports products when convenience and rapid digestion matter.
-- Begin sessions normally hydrated. Replace meaningful fluid and sodium losses during long, hot, or very sweaty training.
+- Use carbohydrate as the main adjustable fuel for harder and longer exercise: grains, potatoes, fruit, dairy, legumes, or sports products when convenience and fast digestion matter.
+- Start sessions normally hydrated. Replace meaningful fluid and sodium losses during long, hot, or very sweaty training.
 - Eat after demanding sessions, especially when another session follows within 24 hours.
-- Keep fats, fiber, and unfamiliar foods farther from competition if they reliably cause gastrointestinal distress.
+- Keep fat, fiber, and unfamiliar foods farther from competition if they reliably cause gut trouble.
 
-Sports drinks, gels, chews, and powders are tools. They are most useful when ordinary food is impractical, not automatically superior to it.
+Sports drinks, gels, chews, and powders are tools for when ordinary food is impractical, not automatic upgrades.
 
 ## A simple plan
 
-Classify sessions as easy, standard, or demanding. On easy days, use your normal balanced meals. For a standard session, eat a familiar meal one to four hours beforehand that contains carbohydrate and some protein. For a demanding session lasting longer than about an hour, test carbohydrate and fluid during training instead of waiting for race day.
+Classify sessions as easy, standard, or demanding. On easy days, eat your normal balanced meals. Before a standard session, eat a familiar meal with carbohydrate and some protein one to four hours ahead. For a demanding session longer than about an hour, test carbohydrate and fluid during training instead of waiting for race day.
 
-After training, eat a meal with protein, carbohydrate, and fluid within a practical window. Immediate minute-by-minute timing is rarely necessary unless recovery time is short. A recovery meal might be rice, vegetables, and chicken or tofu; yogurt, oats, and fruit; or a sandwich with milk and fruit.
+After training, eat a meal with protein, carbohydrate, and fluid within a practical window. Minute-by-minute timing is rarely necessary unless recovery time is short. A recovery meal might be rice, vegetables, and chicken or tofu; yogurt, oats, and fruit; or a sandwich with milk and fruit.
 
-For two weeks, match food to the hardest three sessions. Keep products, timing, and amounts stable enough to learn what your stomach and performance tolerate.
+For two weeks, match food to your three hardest sessions. Keep products, timing, and amounts stable enough to learn what your stomach and performance tolerate.
 
 ## How to know it is working
 
-Track perceived energy during training, completion of planned work, power or pace at a given effort, strength performance, recovery between sessions, sleep, soreness, and gastrointestinal symptoms. Body weight before and after long hot sessions can help estimate personal sweat loss, but day-to-day scale changes are not a performance grade.
+Track perceived energy during training, whether you complete planned work, power or pace at a given effort, strength performance, recovery between sessions, sleep, soreness, and gut symptoms. Weighing before and after long hot sessions helps estimate your sweat loss, but day-to-day scale changes are not a performance grade.
 
-For athletes who menstruate, loss of regular cycles can be a warning sign of low energy availability. In all athletes, persistent fatigue, recurrent injury, declining performance, irritability, and frequent illness deserve attention.
+For athletes who menstruate, losing regular cycles can be a warning sign of low energy availability. In all athletes, persistent fatigue, recurrent injury, declining performance, irritability, and frequent illness deserve attention.
 
 ## What to expect
 
-Correcting under-fueling can improve energy within days, while body composition and performance adaptations take weeks to months. More fuel can temporarily increase scale weight through glycogen and water without representing unwanted fat gain. The exact carbohydrate, protein, and fluid needs vary widely by sport, duration, intensity, body size, environment, and tolerance.
+Correcting under-fueling can improve energy within days; body composition and performance adaptations take weeks to months. More fuel can temporarily raise scale weight through glycogen and water without meaning unwanted fat gain. Exact carbohydrate, protein, and fluid needs vary widely by sport, duration, intensity, body size, environment, and tolerance.
 
 ## If you get stuck
 
-If food sits heavily, move the meal earlier, reduce fat and fiber close to training, or use a smaller snack. If energy fades late in long sessions, test more carbohydrate or fluid during training. If recovery is poor, check total intake and sleep before buying supplements. If weight loss is a goal but performance is falling, the calorie deficit may be too aggressive. Practice the event plan in training and change only one variable at a time.
+If food sits heavily, eat earlier, reduce fat and fiber close to training, or use a smaller snack. If energy fades late in long sessions, test more carbohydrate or fluid during training. If recovery is poor, check total intake and sleep before buying supplements. If weight loss is a goal but performance is falling, the calorie deficit may be too aggressive. Practice the event plan in training and change one variable at a time.
 
 ## A quick note
 
-Fainting, chest pain, confusion, heat-illness symptoms, repeated vomiting, or inability to keep fluids down requires prompt care. Persistent signs of low energy availability, stress fractures, menstrual disruption, low libido, or disordered eating call for sports-medicine and nutrition support. Supplements can contain undeclared or banned substances; tested products reduce but do not eliminate risk.
+Fainting, chest pain, confusion, heat-illness symptoms, repeated vomiting, or inability to keep fluids down needs prompt care. Persistent signs of low energy availability, stress fractures, menstrual disruption, low libido, or disordered eating call for sports-medicine and nutrition support. Supplements can contain undeclared or banned substances; tested products reduce but do not eliminate that risk.
 
 ## Sources
 

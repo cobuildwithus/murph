@@ -39,51 +39,51 @@ safety:
     - Most dietary sodium comes from packaged, prepared, and restaurant foods rather than the salt shaker alone.
 ---
 
-Eating less sodium usually means changing a few repeat foods, not making everything taste bland. Bread, deli meats, restaurant meals, sauces, soups, snack foods, cheese, and prepared dishes can contribute large amounts because they are eaten often.
+Eating less sodium usually comes down to changing a few repeat foods. Bread, deli meats, restaurant meals, sauces, soups, snack foods, cheese, and prepared dishes add up because you eat them often. None of it has to taste bland.
 
 ## What to do
 
-1. Identify the three packaged or restaurant foods you eat most often.
-2. Compare sodium per serving within the same category and replace one item at a time.
-3. Rinse canned beans or vegetables when practical and choose “no salt added” options you enjoy.
+1. Find the three packaged or restaurant foods you eat most.
+2. Compare sodium per serving within a category and replace one item at a time.
+3. Rinse canned beans or vegetables when practical, and choose “no salt added” options you like.
 4. Flavor home cooking with herbs, spices, citrus, vinegar, garlic, or chiles.
-5. At restaurants, ask for sauces or dressings on the side and balance higher-sodium meals with ordinary lower-sodium meals—not a punishment fast.
+5. At restaurants, ask for sauces or dressings on the side, and balance a higher-sodium meal with ordinary lower-sodium meals, not a punishment fast.
 
 ## A simple plan
 
-Start with the foods that repeat, since most sodium comes from prepared and packaged food rather than a dramatic use of the salt shaker.
+Start with the foods that repeat; most sodium comes from prepared and packaged food, not the salt shaker.
 
-In week one, save the labels or nutrition information for three ordinary days. Identify the largest recurring categories: bread, sandwiches, soup, deli meat, cheese, sauces, frozen meals, restaurant food, snack food, or another staple. Do not try to achieve a perfect daily calculation.
+Week one: save labels or nutrition information for three ordinary days and find the biggest recurring categories: bread, sandwiches, soup, deli meat, cheese, sauces, frozen meals, restaurant food, snack food, or another staple. Don't try for a perfect daily total.
 
-In week two, compare brands or menu choices within the biggest category. A lower-sodium bread eaten twice daily can matter more than a salt-free food you rarely eat. Choose one swap with a meaningful difference that still tastes good.
+Week two: compare brands or menu choices within the biggest category. A lower-sodium bread eaten twice a day can matter more than a salt-free food you rarely touch. Pick one swap with a real difference that still tastes good.
 
-In week three, change flavor at home. Use acid, herbs, spices, garlic, onion, chile, toasted seeds, or browning to build flavor. If you currently use a great deal of salt, reduce it in steps so taste can adapt. Rinse canned beans and vegetables when practical, but keep them if their convenience helps you eat well.
+Week three: change flavor at home with acid, herbs, spices, garlic, onion, chile, toasted seeds, or browning. If you use a lot of salt now, cut back in steps so taste can adapt. Rinse canned beans and vegetables when practical, but keep them if the convenience helps you eat well.
 
-In week four, address restaurants. Choose one meal with sauce on the side, fewer cured ingredients, or a simpler preparation. Avoid compensating with dehydration or an extreme restriction the next day; return to the usual pattern.
+Week four: deal with restaurants. Choose one meal with sauce on the side, fewer cured ingredients, or a simpler preparation. Don't compensate the next day with dehydration or extreme restriction; go back to the usual pattern.
 
-If you monitor blood pressure, keep medicines, caffeine timing, posture, cuff, and measurement routine stable enough to interpret the trend. Diet changes and medication changes should not be mixed without the prescribing clinician.
+If you monitor blood pressure, keep medicines, caffeine timing, posture, cuff, and routine steady enough to read the trend. Don't mix diet and medication changes without the prescribing clinician.
 
 ## How to know it is working
 
-Label tracking for a few representative days can reveal the main sources. After that, track the specific defaults you changed. If lowering blood pressure is the larger goal, use a validated home monitor and look at an average rather than one reading.
+Track labels for a few representative days to find the main sources, then track the specific defaults you changed. If lower blood pressure is the larger goal, use a validated home monitor and go by the average, not one reading.
 
 ## What to expect
 
-Taste preferences can adapt over a few weeks. Blood-pressure response varies, and a lower number cannot be assumed without measurement.
+Taste can adapt over a few weeks. Blood-pressure response varies, so don't assume a lower number without measuring.
 
 ## If you get stuck
 
-Focus on frequency before perfection. A modest reduction in a food eaten daily can matter more than eliminating a salty food eaten monthly. Restaurant intake often explains why careful home cooking does not change the weekly average.
+Frequency before perfection. A modest cut in a daily food can matter more than eliminating a salty food you eat monthly. Restaurant meals often explain why careful home cooking doesn't move the weekly average.
 
 ## Make it last
 
-Taste changes gradually, so preserve changes that are almost invisible. Use the lower-sodium bread, broth, sauce, or canned food as the house default and save deliberate higher-sodium foods for occasions you value. Keep a small collection of seasoning combinations—lemon and herbs, vinegar and garlic, chile and lime, toasted spices—so lower sodium does not mean one bland flavor.
+Taste shifts gradually, so favor changes that are almost invisible. Make lower-sodium bread, broth, sauce, or canned food the house default and save deliberate higher-sodium foods for occasions you value. Keep a few seasoning combinations on hand (lemon and herbs, vinegar and garlic, chile and lime, toasted spices) so lower sodium doesn't mean one bland flavor.
 
-Review the plan after travel, a restaurant-heavy month, or a medication change. Day-to-day body weight can jump after sodium-rich meals because of water; do not respond with dehydration or fasting. If blood pressure is the outcome, continue home measurements under consistent conditions and review the average. A sodium strategy is one part of care alongside activity, sleep, alcohol, potassium-rich food when safe, medication, and weight when relevant. The best plan lowers the regular background intake without making social eating or exercise hydration unnecessarily difficult.
+Review the plan after travel, a restaurant-heavy month, or a medication change. Weight can jump the day after a sodium-rich meal because of water; don't respond with dehydration or fasting. If blood pressure is the outcome, keep measuring at home under consistent conditions and go by the average. Sodium is one part of care alongside activity, sleep, alcohol, potassium-rich food when safe, medication, and weight when relevant. Lower everyday background intake without making social eating or exercise hydration harder than necessary.
 
 ## A quick note
 
-Some people need extra sodium because of high sweat loss or specific medical conditions. Do not override a clinician-prescribed sodium or fluid plan.
+Some people need extra sodium because of high sweat loss or specific medical conditions. Don't override a sodium or fluid plan prescribed by a clinician.
 
 ## Sources
 

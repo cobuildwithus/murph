@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:reduce-emotional-eating
 slug: reduce-emotional-eating
 title: Reduce Emotional Eating
-summary: Build more ways to respond to difficult emotions while keeping food neutral and meals adequately nourishing.
+summary: Build more ways to handle hard feelings while keeping food neutral and meals regular and nourishing.
 status: field-testing
 quality: usable
 aliases:
@@ -42,44 +42,44 @@ safety:
     - Eating for comfort is human; the goal is more choice and less harm, not perfect separation of food and emotion.
 ---
 
-Emotional eating means using food in response to feelings such as stress, loneliness, anger, boredom, or sadness rather than—or in addition to—physical hunger. It is common and not a moral failure. Food can be comforting. The goal is to make it one option among several, reduce episodes that feel unwanted or out of control, and avoid the restrict–overeat–guilt cycle.
+Emotional eating is eating in response to feelings such as stress, loneliness, anger, boredom, or sadness, whether or not you're physically hungry. It's common and not a moral failure. Food can be comforting. You want it to be one option among several, with fewer episodes that feel unwanted or out of control and no restrict–overeat–guilt cycle.
 
 ## What to do
 
-Protect regular meals first. Skipping food to compensate for an emotional-eating episode makes the next episode more likely because physical hunger joins the emotional trigger.
+Protect regular meals first. Skipping food to make up for an episode makes the next one more likely, because physical hunger joins the emotional trigger.
 
-Learn the recurring sequence:
+Learn your recurring sequence:
 
-1. **Trigger:** a meeting, conflict, loneliness, fatigue, or arriving home.
+1. **Trigger:** a meeting, conflict, loneliness, fatigue, or getting home.
 2. **Feeling and body state:** tension, numbness, agitation, or exhaustion.
-3. **Automatic action:** opening an app, pantry, or package.
+3. **Automatic action:** opening an app, the pantry, or a package.
 4. **Short-term result:** relief, distraction, pleasure, or regret.
 
-Insert one small choice before the action. Pause for five to ten minutes, name the feeling, and ask whether you also need food. Then choose a response: eat a real meal, have a planned portion, call someone, walk, shower, journal, breathe slowly, leave the room, or address the practical problem.
+Put one small choice before the action. Pause for five to ten minutes, name the feeling, and ask whether you also need food. Then pick a response: eat a real meal, have a planned portion, call someone, walk, shower, journal, breathe slowly, leave the room, or deal with the practical problem.
 
 ## A simple plan
 
-For one week, note only episodes that feel unwanted. Record the situation, hunger level, emotion, and what food provided in that moment. Do not calculate calories.
+For one week, note only episodes that feel unwanted. Record the situation, hunger level, emotion, and what the food gave you in that moment. Don't count calories.
 
-Choose the most common situation and build an “if–then” plan. For example: “If I finish a difficult workday and want to eat immediately, I will have my planned dinner, then take a ten-minute walk before deciding on dessert.” Or: “If I feel lonely at night, I will text one person and make tea; if I still want the snack, I will put a portion on a plate and eat it sitting down.”
+Take the most common situation and write an “if–then” plan. For example: “If I finish a hard workday and want to eat right away, I'll have my planned dinner, then take a ten-minute walk before deciding on dessert.” Or: “If I feel lonely at night, I'll text one person and make tea; if I still want the snack, I'll put a portion on a plate and eat it sitting down.”
 
-After an episode, return to the next regular meal. Review what the system missed rather than imposing a punishment.
+After an episode, go on to the next regular meal. Look at what the system missed instead of punishing yourself.
 
 ## How to know it is working
 
-Track episodes per week, average sense of loss of control, and how often you used an alternative response. A useful outcome may be a smaller episode, a shorter duration, less guilt, or a quicker return to normal eating—not necessarily zero emotional eating.
+Track episodes per week, how out of control they felt, and how often you used an alternative response. A smaller episode, a shorter one, less guilt, or a faster return to normal eating all count as progress. Zero emotional eating isn't the bar.
 
 ## What to expect
 
-Awareness often improves before behavior. Strong patterns tied to chronic stress or trauma take time and may need therapy. Emotional eating can temporarily increase during sleep loss, grief, major transitions, or restrictive dieting. Progress is usually uneven.
+Awareness usually improves before behavior. Strong patterns tied to chronic stress or trauma take time and may need therapy. Emotional eating can rise for a while during sleep loss, grief, major transitions, or restrictive dieting. Progress is usually uneven.
 
 ## If you get stuck
 
-If every emotion seems to trigger food, broaden the support plan: regular sleep, movement, social contact, therapy, and changes to the stressor itself. If trigger foods feel impossible to keep at home, use smaller packages while building skills, but avoid turning foods into forbidden objects. If an episode includes an objectively large amount of food and loss of control, seek assessment for binge-eating disorder; effective treatments exist.
+If every emotion seems to lead to food, widen the support plan: regular sleep, movement, social contact, therapy, and changes to the stressor itself. If trigger foods feel impossible to keep at home, buy smaller packages while you build skills, but don't turn foods into forbidden objects. If an episode involves an objectively large amount of food and loss of control, get assessed for binge-eating disorder. Effective treatments exist.
 
 ## A quick note
 
-Purging, laxative misuse, fasting, compulsive exercise, severe restriction, rapid weight change, or thoughts of self-harm need professional support. In the United States, the 988 Lifeline is available for crisis support. For non-crisis eating concerns, a clinician or eating-disorder specialist can help without requiring you to “get worse first.”
+Purging, laxative misuse, fasting, compulsive exercise, severe restriction, rapid weight change, or thoughts of self-harm need professional support. In the United States, the 988 Lifeline is available for crisis support. For eating concerns that aren't a crisis, a clinician or eating-disorder specialist can help without requiring you to “get worse first.”
 
 ## Sources
 

@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:lose-fat-keep-muscle
 slug: lose-fat-keep-muscle
 title: Lose Fat and Keep Muscle
-summary: Use a moderate weight-loss pace, sufficient protein, and progressive strength training to protect lean tissue.
+summary: Lose fat at a moderate pace with enough protein and regular strength training so you keep your muscle.
 status: field-testing
 quality: usable
 aliases:
@@ -44,42 +44,42 @@ safety:
     - Home body-fat devices are noisy; use trends and functional outcomes rather than one reading.
 ---
 
-Any meaningful weight loss includes some risk of losing lean tissue. The best-supported protection is a moderate calorie deficit, enough dietary protein, and regular resistance training. The goal is not to make the scale fall as fast as possible. It is to reduce fat over time while preserving strength, training quality, and the muscle that supports long-term function.
+Any meaningful weight loss risks some lean tissue. The best-supported protection is a moderate calorie deficit, enough protein, and regular resistance training. Fat should come off over time while strength, training quality, and the muscle behind long-term function stay intact.
 
 ## What to do
 
-Use four foundations:
+Four foundations:
 
-- **Choose a moderate pace.** Rapid loss and very large deficits make training, recovery, and lean-tissue retention harder.
-- **Eat enough protein.** Spread substantial protein foods across the day. The right target depends on body size, training, age, energy deficit, and medical context; more is not always better.
-- **Lift consistently.** Train major movement patterns at least twice weekly with progressive resistance appropriate to your experience.
-- **Recover.** Sleep, rest days, carbohydrate around demanding training, and adequate micronutrients all help preserve performance.
+- **Choose a moderate pace.** Rapid loss and very large deficits hurt training, recovery, and lean-tissue retention.
+- **Eat enough protein.** Spread protein foods across the day. The right target depends on body size, training, age, deficit size, and medical context. More is not always better.
+- **Lift consistently.** Train the major movement patterns at least twice a week with progressive resistance that fits your experience.
+- **Recover.** Sleep, rest days, carbohydrate around hard sessions, and enough micronutrients all protect performance.
 
-Keep cardiovascular exercise for health and fitness, but do not add so much volume that it overwhelms recovery. Steps and ordinary activity can support the deficit without requiring punishing workouts.
+Keep cardio for health and fitness, but not so much that it swamps recovery. Steps and ordinary activity add to the deficit without punishing workouts.
 
 ## A simple plan
 
-Establish a two-week baseline for body weight, waist if desired, usual protein, and two to four key lifts or functional tests. Then choose a modest eating change that can persist: slightly smaller portions of energy-dense extras, fewer liquid calories, or more structured meals.
+Take a two-week baseline: body weight, waist if you want it, usual protein, and two to four key lifts or functional tests. Then pick one modest eating change you can keep: slightly smaller portions of energy-dense extras, fewer liquid calories, or more structured meals.
 
-Build each main meal around a protein source—fish, poultry, lean meat, eggs, dairy, soy, seitan, beans, or lentils—and add produce and a useful carbohydrate. Use protein powder only when it solves a real convenience gap.
+Build each main meal around a protein source (fish, poultry, lean meat, eggs, dairy, soy, seitan, beans, or lentils), then add produce and a useful carbohydrate. Use protein powder only when it fills a real convenience gap.
 
-Strength train two to four days per week. Keep a few repeatable movements and try to maintain loads or repetitions. Review every two weeks. If weight is falling quickly while performance, sleep, mood, or recovery deteriorate, reduce the deficit.
+Strength train two to four days a week with a few repeatable movements, and try to hold your loads or reps. Review every two weeks. If weight is dropping fast while performance, sleep, mood, or recovery slide, shrink the deficit.
 
 ## How to know it is working
 
-Use a set of imperfect but complementary signals: multiweek weight trend, waist trend, progress photos under consistent conditions if welcome, clothing fit, and performance on key lifts. Bioelectrical-impedance scales can swing with hydration and should not drive daily decisions. DEXA also has measurement error and is rarely needed for routine fat loss.
+Use several imperfect signals together: multiweek weight trend, waist trend, progress photos under consistent conditions if you want them, clothing fit, and performance on key lifts. Bioelectrical-impedance scales swing with hydration and shouldn't drive daily decisions. DEXA has error too and is rarely needed for routine fat loss.
 
 ## What to expect
 
-Strength can fluctuate during a calorie deficit, particularly in advanced lifters. Beginners may gain strength while losing weight. Visible body-composition change often takes months, not days. Plateaus of one or two weeks can reflect water and are not evidence that fat loss stopped.
+Strength can wobble in a deficit, especially for advanced lifters. Beginners may get stronger while losing weight. Visible body-composition change often takes months, not days. A plateau of a week or two can be water, not a sign that fat loss stopped.
 
 ## If you get stuck
 
-If hunger is high, increase vegetables, fruit, legumes, whole grains, lean protein, and meal regularity. If strength falls, check sleep, total calories, carbohydrate availability, and training volume before simply adding protein. If weight is not changing over four or more consistent weeks, make one small adjustment to intake or activity. If tracking becomes obsessive, use meal templates and scheduled reviews instead of daily calculation.
+If hunger is high, add vegetables, fruit, legumes, whole grains, lean protein, and meal regularity. If strength drops, check sleep, total calories, carbohydrate, and training volume before adding protein. If weight hasn't moved in four or more consistent weeks, make one small change to intake or activity. If tracking turns obsessive, switch to meal templates and scheduled reviews instead of daily counting.
 
 ## A quick note
 
-Stop pursuing a deficit if you develop fainting, persistent injury, major menstrual disruption, marked fatigue, bingeing, purging, or escalating food anxiety. Older adults, people recovering from illness, and anyone with frailty may benefit more from strength and adequate nutrition than from weight loss. Kidney disease and other clinical conditions can change an appropriate protein target.
+Stop the deficit if you develop fainting, persistent injury, major menstrual disruption, marked fatigue, bingeing, purging, or escalating food anxiety. Older adults, people recovering from illness, and anyone with frailty may gain more from strength and enough nutrition than from weight loss. Kidney disease and other clinical conditions can change the right protein target.
 
 ## Sources
 

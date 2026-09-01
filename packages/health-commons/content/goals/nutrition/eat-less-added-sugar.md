@@ -37,55 +37,55 @@ safety:
     - The goal is lower added sugar, not fear of fruit, milk, or all carbohydrates.
 ---
 
-The most effective way to eat less added sugar is to target your largest repeat sources. For many people that means sweetened drinks, coffee additions, desserts, candy, or sweet snacks—not the naturally occurring sugar in whole fruit or plain dairy.
+Go after your biggest repeat sources of added sugar. For many people that means sweetened drinks, coffee additions, desserts, candy, or sweet snacks, not the sugar that occurs naturally in whole fruit or plain dairy.
 
 ## What to do
 
-For one week, notice where added sugar shows up without trying to eliminate it. Then choose one high-frequency source:
+Spend a week noticing where added sugar shows up, without cutting anything yet. Then choose one high-frequency source:
 
 - make a usual drink unsweetened, smaller, or less frequent;
 - mix sweetened yogurt or cereal with an unsweetened version;
 - move dessert from automatic to planned;
-- keep a satisfying lower-sugar snack available;
-- compare labels within the same food category rather than judging foods in isolation.
+- keep a satisfying lower-sugar snack on hand;
+- compare labels within the same food category instead of judging foods in isolation.
 
-Change one default for two weeks before adding another. Keep meals substantial enough that cutting sweets does not simply create more hunger later.
+Change one default for two weeks before adding another. Keep meals big enough that cutting sweets doesn't just create hunger later.
 
 ## A simple plan
 
-Use a four-week sequence that begins with the largest source.
+Work through four weeks, starting with the largest source.
 
-**Week one: find the default.** Review drinks, coffee additions, breakfast foods, sauces, desserts, and snacks. Use the Nutrition Facts label to compare added sugar within the same product category. Do not count the sugar naturally present in whole fruit or plain milk as the problem this plan is trying to solve.
+**Week one: find the default.** Review drinks, coffee additions, breakfast foods, sauces, desserts, and snacks. Use the Nutrition Facts label to compare added sugar within a product category. Sugar naturally present in whole fruit or plain milk isn't the problem here.
 
-**Week two: change beverages.** If sweetened drinks are frequent, replace one serving per day with water, sparkling water, unsweetened tea, or a smaller or less-sweet version. Gradually reduce sugar in coffee or tea if an abrupt change makes the drink unenjoyable.
+**Week two: change beverages.** If sweetened drinks are frequent, replace one serving a day with water, sparkling water, unsweetened tea, or a smaller or less-sweet version. Cut sugar in coffee or tea gradually if an abrupt change ruins the drink.
 
-**Week three: change one food default.** Mix sweetened cereal with an unsweetened cereal, choose plain yogurt and add fruit, or schedule dessert on chosen days instead of letting it appear automatically. Keep the replacement satisfying; a tiny “diet” snack that leaves you hungry may simply move the eating later.
+**Week three: change one food default.** Mix sweetened cereal with unsweetened, choose plain yogurt and add fruit, or schedule dessert on chosen days instead of letting it appear automatically. Keep the replacement satisfying; a tiny “diet” snack that leaves you hungry may just push the eating later.
 
-**Week four: practice flexibility.** Plan one favorite sweet food, eat it without multitasking, and return to ordinary meals afterward. This tests whether the pattern can include celebration and pleasure without becoming all-or-nothing.
+**Week four: practice flexibility.** Plan one favorite sweet food, eat it without multitasking, and return to ordinary meals afterward. This tests whether the pattern can hold celebration and pleasure without turning all-or-nothing.
 
-At the end of the month, estimate the reduction from the changed defaults. A sustainable decrease matters more than reaching zero. If non-sugar sweeteners help with a transition, use them thoughtfully; long-term health benefit is not guaranteed simply because a product has no sugar.
+After the month, estimate the reduction from the changed defaults. A decrease you can keep beats reaching zero. Non-sugar sweeteners can ease the transition if used thoughtfully, but sugar-free doesn't guarantee a long-term health benefit.
 
 ## How to know it is working
 
-Track servings or occasions, especially beverages, rather than demanding zero grams. The Nutrition Facts “Added Sugars” line can help compare products. A weekly pattern is more informative than one celebration.
+Track servings or occasions, especially drinks, rather than demanding zero grams. The Nutrition Facts “Added Sugars” line helps compare products. A weekly pattern tells you more than one celebration.
 
 ## What to expect
 
-The habit and palate may adjust over several weeks. Weight or metabolic changes are not guaranteed; they depend on what replaces the sugar and the rest of your routine.
+The habit and your palate may adjust over several weeks. Weight or metabolic changes aren't guaranteed; they depend on what replaces the sugar and the rest of your routine.
 
 ## If you get stuck
 
-Do not rely on avoiding every sweet taste. Make the main source less available, shrink the default portion, and eat regular meals. If a rigid rule triggers rebound eating, use planned flexibility instead.
+Don't rely on avoiding every sweet taste. Make the main source less available, shrink the default portion, and eat regular meals. If a rigid rule sets off rebound eating, plan flexibility instead.
 
 ## Make it last
 
-Decide which sweet foods are meaningful and which are simply defaults. Keep the meaningful ones in portions and settings you enjoy. Change the automatic sources through purchasing, recipes, or routines: buy fewer sweetened drinks, keep plain and sweetened yogurt to mix, or serve dessert after a complete meal rather than grazing from a package. Taste preferences can adapt, but there is no prize for making every food as unsweet as possible.
+Decide which sweet foods matter to you and which are just defaults. Keep the meaningful ones in portions and settings you enjoy. Change the automatic ones through shopping, recipes, and routines: buy fewer sweetened drinks, keep plain and sweetened yogurt to mix, or serve dessert after a full meal instead of grazing from a package. There's no prize for making everything as unsweet as possible.
 
-Expect holidays, travel, and celebrations to raise intake temporarily. Return to ordinary choices at the next meal instead of compensating. Review labels when a product changes or when a new default enters the routine, not every time you shop. If lowering sugar makes hunger, cravings, or food preoccupation worse, assess total food and meal satisfaction. The long-term plan should reduce exposure to added sugar while preserving flexibility, adequate carbohydrate, and a calm relationship with naturally sweet foods.
+Holidays, travel, and celebrations will raise intake for a while; return to ordinary choices at the next meal instead of compensating. Check labels when a product changes or a new default enters the routine, not every time you shop. If lowering sugar makes hunger, cravings, or food preoccupation worse, look at total food and meal satisfaction. The long-term plan cuts added sugar while keeping flexibility, enough carbohydrate, and a calm relationship with naturally sweet foods.
 
 ## A quick note
 
-People taking insulin or medicines that can cause low blood sugar should not change carbohydrate intake without an appropriate monitoring and medication plan.
+If you take insulin or medicines that can cause low blood sugar, don't change carbohydrate intake without an appropriate monitoring and medication plan.
 
 ## Sources
 

@@ -42,40 +42,40 @@ safety:
     - A dependable vitamin B12 source is essential in a vegan diet.
 ---
 
-A healthy vegan diet can support everyday life and athletic goals, but it should be planned rather than defined only by what it excludes. The foundation is enough total food plus beans, lentils, soy foods, seitan, peas, nuts, seeds, whole grains, fruit, vegetables, and fortified foods. Vitamin B12 is the non-negotiable planning point because unfortified plant foods are not a reliable source.
+A vegan diet can support everyday life and athletic goals if you plan it. The foundation is enough total food plus beans, lentils, soy foods, seitan, peas, nuts, seeds, whole grains, fruit, vegetables, and fortified foods. Vitamin B12 is the one non-negotiable: unfortified plant foods are not a reliable source.
 
 ## What to do
 
-Anchor each meal with a substantial protein food: tofu, tempeh, edamame, textured vegetable protein, seitan, beans, lentils, peas, soy milk, or an appropriately composed meat alternative. Include varied grains, legumes, nuts, and seeds across the day.
+Anchor each meal with a substantial protein food: tofu, tempeh, edamame, textured vegetable protein, seitan, beans, lentils, peas, soy milk, or a well-composed meat alternative. Vary grains, legumes, nuts, and seeds through the day.
 
-Build an explicit nutrient plan:
+Make the nutrient plan explicit:
 
-- **Vitamin B12:** use a reliable fortified food or supplement with a schedule that provides enough B12; check the label rather than assuming nutritional yeast is fortified.
-- **Calcium:** choose calcium-fortified plant milk, calcium-set tofu, or other regular sources. Shake fortified drinks before using.
-- **Vitamin D:** use fortified foods, safe sun exposure where appropriate, or a supplement when indicated.
-- **Iodine:** iodized salt can help, but seaweed iodine is highly variable and can be excessive.
-- **Iron and zinc:** legumes, tofu, seeds, fortified grains, and whole grains contribute; vitamin C improves plant-iron absorption.
-- **Omega-3s:** include flax, chia, walnuts, canola, or soy. Algae-derived DHA/EPA is an option to discuss when appropriate.
+- **Vitamin B12:** use a reliable fortified food or supplement on a schedule that gives you enough. Check the label; nutritional yeast is not always fortified.
+- **Calcium:** calcium-fortified plant milk, calcium-set tofu, or other regular sources. Shake fortified drinks before pouring.
+- **Vitamin D:** fortified foods, safe sun exposure where appropriate, or a supplement when indicated.
+- **Iodine:** iodized salt can help. Seaweed iodine varies widely and can be excessive.
+- **Iron and zinc:** legumes, tofu, seeds, fortified grains, and whole grains. Vitamin C improves plant-iron absorption.
+- **Omega-3s:** flax, chia, walnuts, canola, or soy. Algae-derived DHA/EPA is worth discussing when appropriate.
 
 ## A simple plan
 
-For week one, select one reliable breakfast and two protein-centered dinners. Examples include oatmeal made with fortified soy milk and seeds; tofu stir-fry; lentil curry; bean chili; or seitan with grains and vegetables.
+Week one: pick one reliable breakfast and two protein-centered dinners. Oatmeal with fortified soy milk and seeds, tofu stir-fry, lentil curry, bean chili, or seitan with grains and vegetables all work.
 
-In week two, establish the vitamin B12 routine and verify calcium on the label of your plant milk or tofu. In week three, plan portable protein for work or travel. In week four, review whether meals provide enough energy—especially if you train hard, have a small appetite, or eat very high volumes of vegetables.
+Week two: set up the B12 routine and check the calcium on your plant milk or tofu label. Week three: plan portable protein for work or travel. Week four: check that meals give you enough energy, especially if you train hard, have a small appetite, or eat very large volumes of vegetables.
 
-Keep emergency foods available: canned beans, shelf-stable soy milk, nut butter, microwavable grains, frozen edamame, baked tofu, or a balanced frozen meal.
+Keep emergency foods on hand: canned beans, shelf-stable soy milk, nut butter, microwavable grains, frozen edamame, baked tofu, or a balanced frozen meal.
 
 ## How to know it is working
 
-Track protein anchors per meal and whether your B12 routine actually happens. Review several representative days for calcium, iron, and total energy rather than continuously logging forever. Stable energy, normal training recovery, a comfortable digestion pattern, and weight moving in the intended direction are useful signals. Laboratory testing should be guided by symptoms, history, and a clinician—not used to chase ideal numbers without context.
+Track protein anchors per meal and whether the B12 routine actually happens. Review a few typical days for calcium, iron, and total energy rather than logging forever. Steady energy, normal training recovery, comfortable digestion, and weight moving as intended are good signs. Lab tests should follow symptoms, history, and a clinician’s judgment, not a hunt for ideal numbers.
 
 ## What to expect
 
-The meal pattern usually becomes easier within a month. Fiber intake may rise sharply and can initially cause gas or fullness. Muscle gain and athletic recovery are possible with vegan eating when protein and total energy are sufficient. A vegan label does not guarantee that a product is nutritious, minimally processed, or appropriate for your goal.
+Meals usually get easier within a month. Fiber intake may rise sharply and cause gas or fullness at first. Muscle gain and athletic recovery are possible on vegan eating when protein and total energy are enough. A vegan label does not make a product nutritious, minimally processed, or right for your goal.
 
 ## If you get stuck
 
-If you are hungry or losing weight unintentionally, increase portions and use calorie-dense foods such as nut butter, tahini, avocado, olive oil, tofu, and grains. If protein seems difficult, make soy foods, seitan, legumes, or textured vegetable protein the center of meals instead of treating them as garnish. If digestion is uncomfortable, increase legumes gradually, use tofu or tempeh, and vary fiber sources. If supplements feel confusing, a dietitian can turn them into a simple, minimal plan.
+If you are hungry or losing weight unintentionally, increase portions and add calorie-dense foods: nut butter, tahini, avocado, olive oil, tofu, and grains. If protein is hard, make soy foods, seitan, legumes, or textured vegetable protein the center of the meal, not a garnish. If digestion is uncomfortable, add legumes gradually, use tofu or tempeh, and vary fiber sources. If supplements feel confusing, a dietitian can make a short, minimal plan.
 
 ## A quick note
 

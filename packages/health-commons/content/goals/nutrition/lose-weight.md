@@ -51,48 +51,48 @@ safety:
     - "Weight is one possible outcome, not a moral score or the only measure of health."
 ---
 
-Weight loss occurs when energy intake stays below energy use over time, but the best plan is rarely the most aggressive deficit. It is the smallest set of food and activity changes that produces a gradual trend while preserving strength, nutrition, energy, and ordinary life. There is no single required diet, and body weight is not a moral score. This goal only makes sense when intentional weight loss is appropriate for you.
+Weight comes off when you take in less energy than you use over time, but the most aggressive deficit is rarely the best plan. The best plan is the smallest set of food and activity changes that produces a gradual trend while keeping strength, nutrition, energy, and ordinary life intact. No single diet is required, and weight is not a moral score. This goal only makes sense when intentional weight loss is appropriate for you.
 
 ## What to do
 
-Define what you want weight loss to improve: mobility, blood pressure, comfort, athletic performance, a clinician-supported health target, or something else. That reason should shape how fast you move and what you refuse to sacrifice.
+Decide what you want weight loss to improve: mobility, blood pressure, comfort, athletic performance, a clinician-supported health target, or something else. That reason sets your pace and what you won't give up.
 
-Build meals that are filling without demanding constant calculation. A useful default is a protein source, a fruit or vegetable, a satisfying high-fiber carbohydrate when desired, and enough fat for taste. Then identify one high-impact source of calories you barely value—such as sugary drinks, frequent alcohol, distracted grazing, or restaurant portions—and change that before banning foods you love.
+Build meals that fill you up without constant calculation: a protein source, a fruit or vegetable, a satisfying high-fiber carbohydrate if you want one, and enough fat for taste. Then find one big source of calories you barely value, such as sugary drinks, frequent alcohol, distracted grazing, or restaurant portions, and change that before banning foods you love.
 
-Keep moving. Build toward at least 150 minutes of moderate activity per week and strength train twice weekly. Activity improves health, fitness, and weight maintenance even when the scale response is modest. For weight loss, food changes often create most of the energy deficit; movement helps preserve capacity and makes the result easier to maintain.
+Keep moving. Work toward at least 150 minutes of moderate activity a week plus strength training twice a week. Activity improves health, fitness, and weight maintenance even when the scale barely moves. Food usually creates most of the deficit; movement preserves capacity and makes the result easier to keep.
 
 ## A simple plan
 
 Try an eight-week block:
 
-1. **Week 1: measure a calm baseline.** Weigh under similar conditions on three to seven mornings, or once weekly if frequent weighing feels unhelpful. Record the average. Note waist circumference only if it adds useful context and is not distressing.
-2. **Week 2: make meals visible.** Photograph or briefly record three ordinary days without trying to be perfect. Look for liquid calories, low-protein meals, large portions of energy-dense foods, and long gaps that lead to rebound eating.
-3. **Weeks 3–4: change one food lever.** Examples: replace a daily sugary drink, halve the automatic restaurant side, serve a smaller first portion, or add a protein-and-produce breakfast. Keep pleasurable foods in planned amounts.
-4. **Weeks 3–8: set a movement floor.** Choose a minimum you can maintain on a difficult week, such as a daily 20-minute walk, three cardio sessions, and two brief strength sessions. Add gradually from your current level.
-5. **Week 5: solve the hardest context.** Plan the meal before a long shift, the restaurant order, the weekend breakfast, or the snack that prevents arriving home ravenous.
-6. **Week 8: review the trend.** Keep changes that survived busy days and social meals. Remove rules that created guilt without affecting the trend.
+1. **Week 1: measure a calm baseline.** Weigh under similar conditions on three to seven mornings, or once weekly if frequent weighing feels unhelpful, and record the average. Note waist only if it adds useful context and doesn't upset you.
+2. **Week 2: make meals visible.** Photograph or jot down three ordinary days without trying to be perfect. Look for liquid calories, low-protein meals, big portions of energy-dense foods, and long gaps that lead to rebound eating.
+3. **Weeks 3–4: change one food lever.** Replace a daily sugary drink, halve the automatic restaurant side, serve a smaller first portion, or add a protein-and-produce breakfast. Keep foods you enjoy in planned amounts.
+4. **Weeks 3–8: set a movement floor.** Pick a minimum you can hold on a bad week, such as a daily 20-minute walk, three cardio sessions, and two short strength sessions. Build up gradually from your current level.
+5. **Week 5: solve the hardest context.** Plan the meal before a long shift, the restaurant order, the weekend breakfast, or the snack that keeps you from getting home ravenous.
+6. **Week 8: review the trend.** Keep changes that survived busy days and social meals. Drop rules that created guilt without moving the trend.
 
-Calorie tracking is optional. If you use it, treat the number as an estimate and a short learning tool. Portion changes, repeatable meals, and regular weighing can work without logging every ingredient. The plan should also include maintenance from day one: use behaviors you would be willing to continue after weight stabilizes.
+Calorie tracking is optional. If you use it, treat the number as an estimate and a short-term learning tool. Portion changes, repeatable meals, and regular weighing work without logging every ingredient. Build maintenance in from day one: choose behaviors you'd keep after your weight settles.
 
 ## How to know it is working
 
-Use a 7-day weight average or compare the same day each week. Daily shifts mostly reflect water, sodium, carbohydrate storage, food in the digestive tract, hormones, and training—not instant fat gain or loss. Look for a trend across at least three to four weeks.
+Use a 7-day weight average or compare the same day each week. Daily shifts mostly reflect water, sodium, carbohydrate storage, food in the gut, hormones, and training, not instant fat gain or loss. Look for a trend across at least three to four weeks.
 
-There is no single right weekly rate. For many people, a slow, gradual trend is easier to sustain, and the appropriate pace depends on the starting point, health, and context. Larger early drops are often water. Track strength, energy, hunger, sleep, mood, and whether the plan survives weekends. A downward scale trend with collapsing performance, constant preoccupation, or binge eating is not a good trade.
+There is no single right weekly rate. A slow, gradual trend is easier for many people to keep, and the right pace depends on your starting point, health, and context. Larger early drops are often water. Track strength, energy, hunger, sleep, mood, and whether the plan survives weekends. A falling scale with collapsing performance, constant preoccupation, or binge eating is a bad trade.
 
-Plateaus are normal because a smaller body uses less energy and because hunger, spontaneous movement, and adherence shift over time. A maintenance period is not failure. It can stabilize routines, improve training, and show whether the result is livable.
+Plateaus are normal: a smaller body uses less energy, and hunger, spontaneous movement, and adherence shift over time. A maintenance period is not failure. It can settle routines, improve training, and show whether the result is livable.
 
 ## If you get stuck
 
-Do not call two noisy weeks a plateau. Wait for at least three reasonably consistent weeks, then examine the pattern without blame. Common explanations include larger weekend portions, liquid calories, declining daily movement, a plan that causes rebound hunger, or measurement conditions that changed.
+Don't call two noisy weeks a plateau. Wait for at least three fairly consistent weeks, then look at the pattern without blame. Usual culprits: bigger weekend portions, liquid calories, less daily movement, rebound hunger from the plan, or changed measurement conditions.
 
-Adjust one lever modestly. Examples include a smaller restaurant portion, a planned afternoon snack, an extra walk, or replacing a drink. Reassess for another two to three weeks instead of making daily corrections.
+Adjust one lever modestly, such as a smaller restaurant portion, a planned afternoon snack, an extra walk, or swapping a drink. Reassess after two to three weeks instead of correcting daily.
 
-If strength, mood, sleep, libido, or menstrual function is deteriorating, the deficit may be too large. Hold or increase intake rather than pushing harder. If hunger is extreme despite a modest plan, or weight does not respond over a longer period, review medications, sleep, health conditions, and treatment options with a qualified clinician. Prescription weight-loss medicines and bariatric procedures can be effective for some people, but they need individual assessment, monitoring, and a plan for nutrition and lean-mass preservation.
+If strength, mood, sleep, libido, or menstrual function is worsening, the deficit may be too large. Hold or raise intake rather than pushing harder. If hunger is extreme on a modest plan, or weight doesn't respond over a longer period, review medications, sleep, health conditions, and treatment options with a qualified clinician. Prescription weight-loss medicines and bariatric procedures work for some people but need individual assessment, monitoring, and a plan for nutrition and lean mass.
 
 ## A quick note
 
-Do not pursue intentional weight loss during pregnancy, with untreated eating-disorder symptoms, or when weight is falling without trying. Get individualized care for diabetes medications, prescription weight-loss drugs, bariatric surgery, major organ disease, adolescence, underweight, or persistent symptoms. Fainting, chest pain, severe weakness, repeated vomiting, purging, or rapid unexplained loss needs prompt care.
+Don't pursue intentional weight loss during pregnancy, with untreated eating-disorder symptoms, or when weight is falling without trying. Get individualized care for diabetes medications, prescription weight-loss drugs, bariatric surgery, major organ disease, adolescence, underweight, or persistent symptoms. Fainting, chest pain, severe weakness, repeated vomiting, purging, or rapid unexplained loss needs prompt care.
 
 ## Sources
 

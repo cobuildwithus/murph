@@ -42,46 +42,46 @@ safety:
     - Cravings are normal; the goal is less disruption, not never wanting a food.
 ---
 
-Food cravings are strong, specific urges that can be driven by hunger, learned cues, stress, sleep loss, restriction, reward, or simple availability. Trying to eliminate every craving often makes food more salient. A better goal is to reduce preventable triggers and create enough space to choose what to do next—including sometimes eating the desired food intentionally.
+Food cravings are strong, specific urges driven by hunger, learned cues, stress, sleep loss, restriction, reward, or plain availability. Trying to stamp out every craving usually makes food loom larger. A better aim is to cut preventable triggers and leave enough room to choose what happens next, which sometimes means eating the food on purpose.
 
 ## What to do
 
-First distinguish a craving from general hunger. If many foods sound good, you may need a meal. If only one specific food feels compelling, a cue or emotion may be involved.
+First, tell a craving from plain hunger. If many foods sound good, you probably need a meal. If one specific food feels compelling, a cue or emotion is likely involved.
 
-Reduce common drivers:
+Cut the common drivers:
 
 - Eat regular meals with enough protein, fiber-rich carbohydrate, and total energy.
-- Avoid long periods of restriction followed by an environment full of easy snack food.
-- Protect sleep; short or irregular sleep can make appetite regulation harder.
-- Move the most automatic trigger food out of immediate sight or buy it in a size that supports intentional portions.
-- Pair predictable cue moments—arriving home, watching television, finishing work—with a different first action.
-- Allow enjoyable food. Rigid “never” rules can intensify preoccupation and rebound eating.
+- Don't follow long stretches of restriction with a kitchen full of easy snack food.
+- Protect sleep. Short or irregular sleep makes appetite harder to regulate.
+- Move your most automatic trigger food out of sight, or buy it in a size that makes a deliberate portion easy.
+- Pair predictable cue moments (getting home, watching television, finishing work) with a different first action.
+- Allow food you enjoy. Rigid “never” rules can fuel preoccupation and rebound eating.
 
-When a craving arrives, pause for ten minutes, name the likely driver, and choose: eat a meal, have a planned portion, delay and do something else, or remove the cue.
+When a craving hits, pause for ten minutes, name the likely driver, and choose: eat a meal, have a planned portion, delay and do something else, or remove the cue.
 
 ## A simple plan
 
-For seven days, record only strong cravings: time, hunger level, situation, sleep, and what happened next. Look for one repeating pattern. Then choose one two-week intervention.
+For seven days, record only strong cravings: time, hunger level, situation, sleep, and what happened next. Look for one repeating pattern, then pick one intervention for two weeks.
 
-If cravings happen at 4 p.m. after a light lunch, strengthen lunch or add a planned snack. If they happen while watching television, pre-portion the food and put the package away. If they follow a stressful workday, eat a real dinner before deciding on dessert and add a non-food transition such as a walk or shower.
+If cravings hit at 4 p.m. after a light lunch, make lunch bigger or add a planned snack. If they hit while you watch television, portion the food first and put the package away. If they follow a stressful workday, eat a real dinner before deciding on dessert and add a non-food transition such as a walk or shower.
 
-Rate urge intensity from 0 to 10 at the start and 15 minutes later. The goal is not a zero; it is learning that urges change and that the response can be chosen.
+Rate the urge from 0 to 10 when it starts and again 15 minutes later. You're not chasing a zero; you're learning that urges change and that you can choose the response.
 
 ## How to know it is working
 
-Track strong-craving episodes per week, average intensity, and the share that led to a response you felt good about. Also watch whether regular eating, sleep, and stress improved. Do not use shame or “days without sugar” as the primary metric.
+Track strong-craving episodes per week, average intensity, and the share that ended in a response you felt good about. Watch whether regular eating, sleep, and stress improved too. Don't make shame or “days without sugar” the main metric.
 
 ## What to expect
 
-Hunger-driven cravings can improve within days when meals become adequate. Cue-driven cravings take repeated exposure to a new routine. Stress and menstrual-cycle changes may still produce harder weeks. A reduction in urgency and loss of control is meaningful even if the desired food remains appealing.
+Hunger-driven cravings can ease within days once meals are big enough. Cue-driven cravings take repeated practice with a new routine. Stress and the menstrual cycle can still bring harder weeks. Less urgency and less loss of control is real progress even if the food still appeals.
 
 ## If you get stuck
 
-If cravings intensify, check whether the plan became another restrictive diet. If a specific food always leads to overeating, experiment with a planned single portion after a meal rather than keeping a large package nearby. If medication, cannabis, alcohol, or sleep deprivation changes appetite, address that context. Persistent episodes of eating unusually large amounts with loss of control deserve professional assessment.
+If cravings get stronger, check whether the plan has become another restrictive diet. If one food always leads to overeating, try a planned single portion after a meal instead of keeping a large package nearby. If medication, cannabis, alcohol, or sleep deprivation is changing your appetite, deal with that. Repeated episodes of eating unusually large amounts with loss of control deserve professional assessment.
 
 ## A quick note
 
-Recurrent binge eating, compensatory exercise, vomiting, laxative use, fasting after eating, or severe distress around food are not willpower problems. Evidence-based eating-disorder care can help. People taking diabetes medicines should distinguish an ordinary craving from symptoms of low blood sugar and follow their treatment plan.
+Recurrent binge eating, compensatory exercise, vomiting, laxative use, fasting after eating, or severe distress around food are not willpower problems. Evidence-based eating-disorder care can help. If you take diabetes medicines, learn to tell an ordinary craving from low blood sugar and follow your treatment plan.
 
 ## Sources
 

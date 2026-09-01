@@ -46,44 +46,44 @@ safety:
     - "A higher number is not automatically better, and supplements are optional."
 ---
 
-Hitting a protein target is easiest when the number is realistic and ordinary meals do most of the work. For generally healthy adults, the basic recommended allowance is 0.8 grams per kilogram of body weight per day. Healthy adults who train regularly—especially with resistance training, including during a calorie deficit—often use a higher range of roughly 1.2 to 1.6 g/kg/day to support muscle. Health, total energy intake, body size, and training still matter. More is not automatically better.
+Hitting a protein target is easiest when the number is realistic and ordinary meals do most of the work. For generally healthy adults, the basic recommended allowance is 0.8 grams per kilogram of body weight per day. Healthy adults who train regularly, especially with resistance training and including during a calorie deficit, often use a higher range of roughly 1.2 to 1.6 g/kg/day to support muscle. Health, total energy intake, body size, and training still matter, and more is not automatically better.
 
 ## What to do
 
-Choose a working range rather than a perfect single number. Convert pounds to kilograms by dividing by 2.2, then multiply by the intake that fits your situation. For example, a 165-pound person is about 75 kilograms: 0.8 g/kg is 60 grams, 1.2 g/kg is 90 grams, and 1.6 g/kg is 120 grams per day. These are examples, not personalized prescriptions.
+Choose a working range rather than a single perfect number. Convert pounds to kilograms by dividing by 2.2, then multiply by the intake that fits your situation. A 165-pound person is about 75 kilograms: 0.8 g/kg is 60 grams, 1.2 g/kg is 90 grams, and 1.6 g/kg is 120 grams per day. These are examples, not personalized prescriptions.
 
-Audit three ordinary days, including one weekend day. You only need enough detail to see where the gaps are. Breakfast and lunch are common weak points. Add one dependable protein “anchor” to the weakest meal before rebuilding the entire day.
+Audit three ordinary days, including one weekend day, with just enough detail to see the gaps. Breakfast and lunch are common weak points. Add one dependable protein “anchor” to the weakest meal before rebuilding the whole day.
 
-Spread useful portions across three or four eating occasions. For many healthy, exercising adults, roughly 25 to 40 grams in a meal is practical, though body size and the daily target matter. Food options include Greek yogurt, eggs, cottage cheese, milk or fortified soy milk, tofu, tempeh, lentils, beans, fish, poultry, lean meat, seitan, or a grain-and-legume combination. Supplements are optional convenience, not a requirement.
+Spread useful portions across three or four eating occasions. For many healthy, exercising adults, roughly 25 to 40 grams in a meal is practical, though body size and the daily target matter. Options include Greek yogurt, eggs, cottage cheese, milk or fortified soy milk, tofu, tempeh, lentils, beans, fish, poultry, lean meat, seitan, or a grain-and-legume combination. Supplements are an optional convenience, not a requirement.
 
 ## A simple plan
 
 Use this one-week setup, then repeat it:
 
-1. **Pick the range.** Use 0.8 g/kg/day as the general adult RDA/reference target, not a universal personalized floor. If you are a generally healthy adult who trains regularly, consider roughly 1.2 to 1.6 g/kg/day when building or preserving muscle is a meaningful goal. If you have a relevant medical condition or are not sure the range fits your situation, get an individualized target first.
-2. **Choose three anchors.** Pick one reliable option for breakfast, lunch, and dinner. Write the approximate protein amount next to each; package labels and a reputable food database are sufficient.
-3. **Close the remaining gap.** If the three meals leave 15 to 25 grams, add a purposeful snack such as yogurt, cottage cheese, edamame, milk, soy milk, or a shake. Do not turn all-day grazing into the default.
-4. **Prepare for the hard context.** Keep a portable option for travel, work, or the period after training. Convenience is often the real bottleneck.
-5. **Protect the rest of the diet.** Keep fruits, vegetables, whole grains or other fiber-rich carbohydrates, and sources of unsaturated fat in the pattern. A protein target should not crowd out total energy, fiber, or variety.
-6. **Review after a week.** If you are consistently far below the range, add to one meal. If you feel overfull or are forcing food late at night, lower an unnecessarily aggressive target or distribute it earlier.
+1. **Pick the range.** Use 0.8 g/kg/day as the general adult RDA/reference target, not a universal personalized floor. If you are a generally healthy adult who trains regularly, consider roughly 1.2 to 1.6 g/kg/day when building or preserving muscle matters to you. If you have a relevant medical condition or are unsure the range fits, get an individualized target first.
+2. **Choose three anchors.** Pick one reliable option each for breakfast, lunch, and dinner. Write the approximate protein amount next to each; package labels and a reputable food database are enough.
+3. **Close the remaining gap.** If the three meals leave 15 to 25 grams, add a purposeful snack such as yogurt, cottage cheese, edamame, milk, soy milk, or a shake. Do not let all-day grazing become the default.
+4. **Prepare for the hard context.** Keep a portable option for travel, work, or after training. Convenience is often the real bottleneck.
+5. **Protect the rest of the diet.** Keep fruits, vegetables, whole grains or other fiber-rich carbohydrates, and unsaturated fats in the pattern. A protein target should not crowd out total energy, fiber, or variety.
+6. **Review after a week.** If you are consistently far below the range, add to one meal. If you feel overfull or are forcing food late at night, lower an unnecessarily aggressive target or shift it earlier.
 
-A shake can fill a real gap. If you use one, choose a simple product from a company that provides credible independent testing, especially if you compete in drug-tested sport. Whole foods still contribute vitamins, minerals, fiber, and enjoyment that a powder may not.
+A shake can fill a real gap. If you use one, choose a simple product from a company with credible independent testing, especially if you compete in drug-tested sport. Whole foods still bring vitamins, minerals, fiber, and enjoyment that a powder may not.
 
 ## How to know it is working
 
-Track the weekly pattern rather than demanding perfection. Two signals are enough: the number of days within the range and the number of regular meals with a protein anchor. After two weeks, you should be able to reach the target without recalculating every bite.
+Track the weekly pattern, not perfection. Two signals are enough: days within the range and regular meals with a protein anchor. After two weeks you should reach the target without recalculating every bite.
 
-If the goal is strength or muscle, pair protein consistency with training performance and a monthly body-weight or body-composition trend. Protein supports adaptation; it does not replace progressive resistance training, enough total food, or recovery. Research suggests that increasing protein adds a modest benefit to lean-mass and strength gains during resistance training, with diminishing returns once intake is already adequate.
+If the goal is strength or muscle, pair protein consistency with training performance and a monthly body-weight or body-composition trend. Protein supports adaptation; it does not replace progressive resistance training, enough total food, or recovery. Research suggests more protein adds a modest benefit to lean-mass and strength gains during resistance training, with diminishing returns once intake is already adequate.
 
-If the goal is appetite or weight management, notice whether meals are satisfying and whether the plan reduces rebound snacking without creating rigid food rules. A higher protein number is not a win if it makes the diet joyless or causes chronic under-eating.
+If the goal is appetite or weight management, notice whether meals satisfy you and whether the plan reduces rebound snacking without creating rigid food rules. A higher protein number is not a win if it makes the diet joyless or causes chronic under-eating.
 
 ## If you get stuck
 
-If the target feels difficult, make breakfast or lunch more repeatable, use one portable option, or lower a number that was chosen for aspiration rather than need. Smaller protein-dense foods can work better than enormous portions when appetite is low.
+If the target feels hard, make breakfast or lunch more repeatable, use one portable option, or lower a number chosen for aspiration rather than need. Smaller protein-dense foods often work better than huge portions when appetite is low.
 
-If you hit the target but strength or muscle is not improving, inspect the training program, total calories, sleep, and time horizon before adding more protein. If constipation increases, check fluids and whether protein displaced fruit, vegetables, legumes, and whole grains. If cost is the problem, eggs, dairy, tofu, canned fish, lentils, beans, and textured vegetable protein can be economical anchors.
+If you hit the target but strength or muscle is not improving, look at the training program, total calories, sleep, and time horizon before adding more protein. If constipation increases, check fluids and whether protein displaced fruit, vegetables, legumes, and whole grains. If cost is the problem, eggs, dairy, tofu, canned fish, lentils, beans, and textured vegetable protein are economical anchors.
 
-Do not obsess over meal timing. Total daily intake and repeatable training matter more than finding an exact “anabolic window.” Timing becomes useful after the fundamentals are consistent.
+Do not obsess over meal timing. Total daily intake and repeatable training matter more than an exact “anabolic window.” Timing becomes useful once the fundamentals are consistent.
 
 ## A quick note
 

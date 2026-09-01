@@ -42,41 +42,41 @@ safety:
   cautionLevel: low
 ---
 
-A drifted sleep schedule is usually easier to move with **consistent timing, morning light, and small steps** than with an all-nighter. Decide where the schedule needs to land, then shift the whole day toward it.
+A drifted sleep schedule moves more easily with **consistent timing, morning light, and small steps** than with an all-nighter. Decide where the schedule needs to land, then shift the whole day toward it.
 
 ## What to do
 
-- Set the target wake time first. It is the strongest practical anchor because it determines when sleep pressure begins building again.
-- Start with a small wake-time shift—often 15 to 30 minutes—and hold it for one to three days before deciding whether to move again. This is a practical starting pace, not a universal prescription.
-- Get outdoor light after waking. In the evening, lower bright light and stop activities that repeatedly push bedtime later.
-- Move meals, exercise, and social activity toward the new schedule too. The body clock listens to a pattern of cues.
-- Avoid sleeping far into the day after a poor night. If needed, use a short early-afternoon nap while the schedule settles.
+- Set the target wake time first. It is the strongest anchor because it sets when sleep pressure starts building again.
+- Start with a small wake-time shift, often 15 to 30 minutes, and hold it for one to three days before moving again. This is a starting pace, not a universal prescription.
+- Get outdoor light after waking. In the evening, dim bright light and stop whatever keeps pushing bedtime later.
+- Move meals, exercise, and social plans toward the new schedule too; the body clock reads the whole pattern of cues.
+- Don't sleep far into the day after a poor night. Use a short early-afternoon nap instead while the schedule settles.
 
 ## A simple plan
 
-Write down your current average sleep and wake times and the target times. Choose a wake-time step that feels sustainable. Hold each step until you can get up without repeatedly falling back asleep, then shift again. Keep the final target for at least two weeks, including weekends when possible.
+Write down your current average sleep and wake times and the targets, and pick a wake-time step you can keep up. Hold each step until you can get up without falling back asleep, then shift again. Keep the final target for at least two weeks, weekends included where possible.
 
-If you must make a large shift for work or school, begin several days ahead. Expect the first mornings to feel harder and protect enough total sleep during the change.
+If you need a large shift for work or school, start several days ahead. Expect the first mornings to feel harder, and protect enough total sleep during the change.
 
-Use the direction of the shift to guide the evening. To move earlier, bring wake time, morning light, meals, and the work cutoff earlier together. To move later, avoid unintentionally locking in a very early rhythm with pre-dawn light and an early bedtime. Because light timing affects the body clock, poorly timed exposure can work against the intended change.
+Let the direction of the shift guide the evening. To move earlier, bring wake time, morning light, meals, and the work cutoff earlier together. To move later, don't lock in a very early rhythm with pre-dawn light and an early bedtime; badly timed light works against you.
 
-Do not use an all-nighter as the default reset. It creates sleepiness but does not reliably place the body clock where you want it, and the resulting long recovery sleep can restart the drift. When a deadline requires a fast change, preserve a safe minimum of sleep and return to gradual steps afterward.
+An all-nighter is not a reset. It makes you sleepy but does not reliably put the body clock where you want it, and the long recovery sleep afterward can restart the drift. When a deadline forces a fast change, keep a safe minimum of sleep and return to gradual steps afterward.
 
 ## How to know it is working
 
-The new wake time becomes less punishing, sleepiness arrives closer to the target bedtime, and weekend timing stops undoing the week. Judge the trend across seven days.
+The new wake time gets less punishing, sleepiness arrives closer to the target bedtime, and weekends stop undoing the week. Judge the trend over seven days.
 
-Track the midpoint of sleep—the halfway point between estimated sleep onset and final waking—as well as the two clock times. It should move gradually toward the target without total sleep collapsing. If the clock shifts but daytime sleepiness rises sharply, slow the progression or hold the current step for several days.
+Also track the midpoint of sleep, halfway between estimated sleep onset and final waking, alongside the two clock times. It should move gradually toward the target without total sleep collapsing. If the clock shifts but daytime sleepiness jumps, slow down or hold the current step for several days.
 
 ## If you get stuck
 
-If you are consistently unable to sleep until very late despite a stable routine, you may have delayed sleep-wake phase disorder rather than a bad habit. Shift work, medications, mood changes, and insomnia can also require a more tailored approach.
+If you consistently cannot sleep until very late despite a stable routine, you may have delayed sleep-wake phase disorder rather than a bad habit. Shift work, medications, mood changes, and insomnia can also need a more tailored approach.
 
-Social constraints can be the real blocker. A partner's schedule, late work messages, gaming with friends in another time zone, or a household morning routine may continually pull the clock back. Change the recurring cue or negotiate the schedule rather than treating each night as a new failure.
+Often the real blocker is social. A partner's schedule, late work messages, gaming with friends in another time zone, or the household morning routine may keep pulling the clock back. Change the recurring cue or negotiate the schedule instead of treating each night as a fresh failure.
 
 ## A quick note
 
-Melatonin and bright-light devices are timing tools, not generic sedatives. Timing matters, so ask a clinician when you have bipolar disorder, significant eye disease, pregnancy, medication interactions, or a suspected circadian disorder.
+Melatonin and bright-light devices are timing tools, not generic sedatives. Timing matters, so ask a clinician if you have bipolar disorder, significant eye disease, pregnancy, medication interactions, or a suspected circadian disorder.
 
 ## Sources
 

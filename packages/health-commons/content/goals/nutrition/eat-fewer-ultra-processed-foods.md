@@ -37,56 +37,56 @@ safety:
     - Processing alone does not determine whether a food is useful; convenience and nutritional adequacy still matter.
 ---
 
-Eating fewer ultra-processed foods works best as a substitution goal, not a purity contest. Frozen vegetables, canned beans, yogurt, whole-grain bread, and other processed staples can be useful. Focus on products that are easy to overconsume or that repeatedly displace filling meals.
+Eating fewer ultra-processed foods works best as a substitution goal, not a purity test. Frozen vegetables, canned beans, yogurt, whole-grain bread, and other processed staples are useful. Aim at products that are easy to overeat or keep displacing filling meals.
 
 ## What to do
 
-Review one ordinary week and identify the most frequent target: sugary drinks, packaged sweets, processed meat, chips, fast food, or a meal-replacement snack that never satisfies you.
+Review one ordinary week and find the most frequent target: sugary drinks, packaged sweets, processed meat, chips, fast food, or a meal-replacement snack that never fills you up.
 
 Build one easier replacement:
 
 - a repeatable breakfast from oats, eggs, yogurt, fruit, or toast;
-- a freezer meal assembled from vegetables, beans, rice, and a protein;
+- a freezer meal of vegetables, beans, rice, and a protein;
 - fruit and nuts, cheese and crackers, or yogurt instead of an unsatisfying snack;
 - sparkling water, tea, or a smaller serving instead of a routine sugary drink.
 
-Keep convenient food convenient. The best replacement may still come in a package.
+The best replacement may still come in a package.
 
 ## A simple plan
 
-Choose a four-week substitution rather than trying to classify the entire supermarket.
+Run a four-week substitution; don't try to classify the whole supermarket.
 
-In week one, record the ultra-processed item that appears most often and the job it does. A packaged breakfast may save time; a snack may manage hunger; takeout may solve exhaustion. The replacement must solve the same job.
+Week one: note the ultra-processed item that shows up most and the job it does. A packaged breakfast saves time, a snack manages hunger, takeout solves exhaustion. The replacement must do the same job.
 
-In week two, build one practical substitute. Examples include overnight oats instead of a pastry, a sandwich and fruit instead of vending-machine snacks, or a frozen grain-and-vegetable bowl improved with beans or chicken instead of repeated takeout. If the replacement takes much longer, it will need advance preparation.
+Week two: build one practical substitute: overnight oats for a pastry, a sandwich and fruit for vending-machine snacks, or a frozen grain-and-vegetable bowl with beans or chicken for repeated takeout. If it takes much longer, prep it ahead.
 
-In week three, improve availability. Put the chosen ingredients on the standard shopping list, prepare two portions, and keep a shelf-stable or frozen backup. Keep useful processed foods such as canned beans, frozen produce, yogurt, tofu, whole-grain bread, or a balanced frozen meal.
+Week three: make it available. Put the ingredients on the standard shopping list, make two portions, and keep a shelf-stable or frozen backup. Keep useful processed foods: canned beans, frozen produce, yogurt, tofu, whole-grain bread, a balanced frozen meal.
 
-In week four, review the result. Did hunger, energy, cost, sodium, added sugar, or produce intake improve? Did food waste or cooking burden rise? Keep the swap only if the full tradeoff works.
+Week four: review whether hunger, energy, cost, sodium, added sugar, or produce intake improved and whether waste or cooking burden rose. Keep the swap only if the whole tradeoff works.
 
-Repeat with the next frequent item if helpful. Do not spend hours debating whether a borderline food meets a technical processing category. A short ingredient list is not automatically nutritious, and a long one is not automatically harmful. The behavior that matters is what the product repeatedly displaces and how it affects the overall pattern.
+Repeat with the next frequent item if that helps. Don't spend hours debating whether a borderline food meets a technical processing category. A short ingredient list isn't automatically nutritious, and a long one isn't automatically harmful. What matters is what the product displaces.
 
 ## How to know it is working
 
-Track the number of home-assembled meals or the weekly frequency of the specific target food. Avoid assigning moral scores to every ingredient list.
+Count home-assembled meals, or how often the target food shows up each week. Skip the moral scoring of ingredient lists.
 
 ## What to expect
 
-Fullness, energy, cost, or digestion may improve within weeks if the replacements are better matched to your needs. Weight change is not automatic; portions and total intake still matter.
+Fullness, energy, cost, or digestion may improve within weeks if the replacements fit your needs better. Weight change isn't automatic; portions and total intake still matter.
 
 ## If you get stuck
 
-The replacement may require too much preparation or may not be filling. Make it faster, add protein or fiber, and keep an emergency option available. Change the food environment rather than repeatedly testing willpower.
+If the replacement takes too much prep or isn't filling, make it faster, add protein or fiber, and keep an emergency option on hand. Change the food environment instead of retesting willpower.
 
 ## Make it last
 
-Keep the goal focused on a few high-frequency substitutions. Processing classifications are useful in research but can be frustrating at the grocery store, where foods fall on a continuum. Make a personal list of products that help—such as frozen vegetables, whole-grain bread, canned soup, fortified cereal, or a protein bar for travel—and products that repeatedly displace meals or lead to mindless eating. The same item can play a different role in another person’s life.
+Keep the goal to a few high-frequency substitutions. Processing categories help in research but frustrate at the grocery store, where foods sit on a continuum. Make your own list of products that help (frozen vegetables, whole-grain bread, canned soup, fortified cereal, a protein bar for travel) and products that displace meals or lead to mindless eating.
 
-Recheck the system when work, caregiving, disability, or budget changes. A period of greater reliance on packaged food does not require a cleanse afterward. Restore one home-assembled meal and one produce or protein anchor. If the plan raises grocery cost or preparation time sharply, use a less ambitious replacement. Durable reduction comes from making minimally processed food convenient enough to compete, not from memorizing ingredient rules or fearing an occasional packaged snack.
+Recheck the system when work, caregiving, disability, or budget changes. A stretch of leaning on packaged food doesn't call for a cleanse; bring back one home-assembled meal and one produce or protein anchor. If the plan sharply raises grocery cost or prep time, pick a less ambitious replacement. Lasting reduction comes from making minimally processed food convenient enough to compete, not from memorizing ingredient rules or fearing an occasional packaged snack.
 
 ## A quick note
 
-Food access, disability, work schedules, and budget shape what is realistic. A packaged food that helps someone eat consistently can be more useful than an ideal meal they cannot make.
+Food access, disability, work schedules, and budget shape what's realistic. A packaged food that helps someone eat consistently can be more useful than an ideal meal they can't make.
 
 ## Sources
 

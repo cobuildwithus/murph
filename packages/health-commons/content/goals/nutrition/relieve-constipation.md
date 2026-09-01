@@ -44,45 +44,45 @@ safety:
     - Normal bowel frequency varies; comfort and change from your usual pattern matter.
 ---
 
-Constipation can mean infrequent bowel movements, hard stool, straining, a sense of incomplete emptying, or a major change from your normal pattern. The first-line approach is usually gradual fiber, adequate fluid, movement, and a consistent chance to use the bathroom. More fiber is not always the answer, especially when it is added too quickly or when stool is blocked.
+Constipation can mean infrequent bowel movements, hard stool, straining, a feeling of incomplete emptying, or a big change from your normal pattern. The first-line approach is usually gradual fiber, enough fluid, movement, and a consistent chance to use the bathroom. More fiber isn't always the answer, especially if added too fast or when stool is blocked.
 
 ## What to do
 
-Build a bowel routine around physiology:
+Build a bowel routine that works with your body:
 
-- Eat regular meals. The colon often becomes more active after eating, particularly after breakfast.
-- Sit on the toilet for five to ten unhurried minutes after a meal when the urge is likely. Do not strain for long periods.
-- Use a footstool so the knees sit above the hips if that position is comfortable.
-- Increase fiber slowly through fruit, vegetables, oats, whole grains, beans, lentils, nuts, seeds, or a fiber supplement when appropriate.
-- Drink regularly. Extra water alone does not cure every case, but dehydration can worsen hard stool.
+- Eat regular meals. The colon often gets more active after eating, especially breakfast.
+- Sit on the toilet for five to ten unhurried minutes after a meal, when the urge is likely. Don't strain for long.
+- Use a footstool so your knees sit above your hips, if that's comfortable.
+- Raise fiber slowly through fruit, vegetables, oats, whole grains, beans, lentils, nuts, seeds, or a fiber supplement when appropriate.
+- Drink regularly. Extra water alone doesn't fix every case, but dehydration can worsen hard stool.
 - Walk or move daily.
 - Review medicines and supplements that can contribute, including opioids, some antacids, iron, anticholinergic medicines, and others.
 
-Soluble fiber such as psyllium has evidence for chronic constipation, but it must be taken with adequate fluid and introduced carefully.
+Soluble fiber such as psyllium has evidence for chronic constipation, but take it with enough fluid and introduce it carefully.
 
 ## A simple plan
 
-For the first week, establish a daily post-meal bathroom opportunity, regular fluids, and a walk. Add one fiber-rich food each day rather than changing the whole diet.
+In the first week, set up a daily post-meal bathroom window, regular fluids, and a walk. Add one fiber-rich food each day instead of overhauling your diet.
 
-In week two, add a second fiber source or consider a modest psyllium dose according to product instructions and clinical advice. Track stool form using the Bristol Stool Form Scale, ease of passage, and bowel frequency. Adjust every several days, not every few hours.
+In week two, add a second fiber source or consider a modest psyllium dose, following product instructions and clinical advice. Track stool form with the Bristol Stool Form Scale, plus ease of passage and frequency. Adjust every several days, not every few hours.
 
-If stool remains hard or bowel movements remain difficult, an evidence-based over-the-counter osmotic laxative may be appropriate; ask a pharmacist or clinician which product and schedule fit your situation. Stimulant laxatives also have a role but should not be used randomly without understanding the plan.
+If stool stays hard or bowel movements stay difficult, an evidence-based over-the-counter osmotic laxative may be appropriate; ask a pharmacist or clinician which product and schedule fit you. Stimulant laxatives have a role too, but don't use them at random without understanding the plan.
 
 ## How to know it is working
 
-Success is comfortable, complete bowel movements without excessive straining—not necessarily a bowel movement every day. Track days between bowel movements, stool form, straining, pain, and rescue medication. A trend over one or two weeks is more useful than one difficult day.
+Success is comfortable, complete bowel movements without much straining, which doesn't have to mean one every day. Track days between bowel movements, stool form, straining, pain, and rescue medication. A trend over one or two weeks tells you more than one bad day.
 
 ## What to expect
 
-Routine, fluid, and movement can help within days. Fiber may take days to weeks and can initially increase gas. Chronic constipation can involve slow colon transit or pelvic-floor coordination, which may not respond to simply eating more fiber. Improvement may be partial until the specific cause is treated.
+Routine, fluid, and movement can help within days. Fiber may take days to weeks and can raise gas at first. Chronic constipation can involve slow colon transit or pelvic-floor coordination, which may not respond to more fiber alone. Improvement may be partial until the specific cause is treated.
 
 ## If you get stuck
 
-If fiber causes worsening bloating and no easier stool, pause the increase and review whether stool is impacted or whether another treatment is needed. If you feel an urge but cannot empty, pelvic-floor dysfunction is possible and pelvic-floor biofeedback may help. If constipation began after a new medicine, contact the prescriber. Long-standing constipation that does not improve with a structured plan deserves clinical evaluation rather than repeated cleanses.
+If more fiber brings worse bloating and no easier stool, pause the increase and check whether stool is impacted or another treatment is needed. If you feel the urge but can't empty, pelvic-floor dysfunction is possible, and pelvic-floor biofeedback may help. If constipation started after a new medicine, contact the prescriber. Long-standing constipation that doesn't improve with a structured plan deserves clinical evaluation, not repeated cleanses.
 
 ## A quick note
 
-Do not use “detox” teas or repeated colon cleanses; they can cause diarrhea, electrolyte problems, and dependence on the ritual without correcting the cause. New constipation with blood, anemia, weight loss, severe pain, vomiting, or a strong family history of colorectal cancer needs prompt assessment.
+Don't use “detox” teas or repeated colon cleanses. They can cause diarrhea, electrolyte problems, and dependence on the ritual without fixing the cause. New constipation with blood, anemia, weight loss, severe pain, vomiting, or a strong family history of colorectal cancer needs prompt assessment.
 
 ## Sources
 

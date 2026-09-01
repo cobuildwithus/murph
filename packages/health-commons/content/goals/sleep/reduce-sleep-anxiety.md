@@ -43,36 +43,36 @@ safety:
   cautionLevel: moderate
 ---
 
-Sleep anxiety grows when sleep becomes a nightly test: checking the time, predicting disaster tomorrow, trying harder to switch off, and inspecting every wearable score in the morning. That effort increases arousal and can keep the cycle going. The aim is not to guarantee sleep. It is to make wakefulness less threatening and rebuild confidence that your body can sleep without constant supervision.
+Sleep anxiety grows when sleep becomes a nightly test: checking the time, predicting disaster tomorrow, trying harder to switch off, inspecting the wearable score. That effort raises arousal and feeds the cycle. The aim is to make lying awake less threatening and rebuild confidence that your body can sleep unsupervised.
 
 ## What to do
 
-- Remove the clock from view. Knowing it is 2:13, 2:26, and 2:41 rarely improves the next decision.
-- Stop using the wearable as a morning verdict. If the score changes your mood before you know how you feel, hide sleep-stage details for two weeks.
-- Create a short daytime “worry appointment.” Write the problem, the next action, and when you will revisit it. Bedtime is not a useful planning meeting.
-- Go to bed when sleepy, not only because the planned time arrived. Sleepiness feels like heavy eyelids and drifting attention; fatigue can feel exhausted but wired.
-- If frustration builds in bed, move to a quiet dim place and do something neutral until sleepiness returns.
-- Practice a downshift skill without making it a sleep requirement. Slow breathing, progressive muscle relaxation, or calm audio can make the moment easier even when sleep is not immediate.
+- Get the clock out of sight. Knowing it is 2:13, 2:26, and 2:41 rarely helps.
+- Stop treating the wearable as a morning verdict. If the score sets your mood before you know how you feel, hide sleep-stage details for two weeks.
+- Set a short daytime “worry appointment”: write the problem, the next action, and when you'll revisit it.
+- Go to bed when sleepy, not just because it's the planned time. Sleepiness is heavy eyelids and drifting attention; fatigue can feel exhausted but wired.
+- If frustration builds in bed, go somewhere quiet and dim and do something neutral until sleepy.
+- Practice a downshift skill without making it a sleep requirement. Slow breathing, progressive muscle relaxation, or calm audio can ease the moment even when sleep is slow.
 
 ## A simple plan
 
-For two weeks, choose three rules: no visible clock, no sleep score until noon or no score at all, and one consistent response to prolonged wakefulness. Before the evening begins, spend ten minutes writing unfinished concerns and one next step for each. Stop when the timer ends.
+For two weeks, pick three rules: no visible clock, no sleep score until noon (or none at all), and one consistent response to long stretches awake. Before evening, spend ten minutes writing unfinished concerns and one next step for each; stop when the timer ends.
 
-At bedtime, use a more flexible statement: “I am making room for rest; sleep can arrive on its own.” If you notice catastrophic predictions, write the balanced version you would offer a friend: one poor night will be unpleasant, but you have functioned after poor sleep before and can simplify tomorrow.
+At bedtime, try a looser line: “I am making room for rest; sleep can arrive on its own.” When you catch a catastrophic prediction, write what you'd tell a friend: one poor night is unpleasant, but you've functioned after poor sleep before and can simplify tomorrow.
 
-After a bad night, keep the day as normal as safety allows. Get daylight, eat, move gently, and avoid canceling every activity. Use a short nap if needed for safety, but do not spend the whole day trying to compensate.
+After a bad night, keep the day as normal as safety allows: daylight, meals, gentle movement, most of your plans. Nap briefly if needed for safety, but don't spend the day compensating.
 
 ## How to know it is working
 
-Track anxiety and recovery, not just sleep. Rate pre-bed anxiety from 0 to 10, note whether you checked the time or tracker, and rate how well you handled the next day. Progress can mean the same sleep with less panic before sleep duration changes.
+Track anxiety and recovery, not just sleep. Rate pre-bed anxiety from 0 to 10, note any clock or tracker checks, and rate how you handled the next day. Progress can be the same sleep with less panic, before duration changes.
 
-Look at weekly patterns. A single calm night may be chance, and one anxious night does not erase progress. The strongest signal is that bedtime occupies less mental space and a rough night no longer triggers several days of repair behavior.
+Look at weekly patterns, not single nights. The strongest signal: bedtime takes up less mental space, and a rough night no longer sets off days of repair behavior.
 
 ## If you get stuck
 
-If relaxation becomes another task you must perform perfectly, shorten it or drop it. If the sleep diary fuels monitoring, record less. If reassurance seeking keeps expanding—rechecking data, asking others if you look tired, researching consequences—set a boundary around it.
+If relaxation becomes another task to perform perfectly, shorten it or drop it. If the sleep diary feeds the monitoring, record less. If reassurance seeking keeps growing (rechecking data, asking others if you look tired, researching consequences), set a boundary.
 
-Persistent sleep anxiety is often part of chronic insomnia and responds well to CBT-I. Anxiety disorders, panic, trauma, obsessive-compulsive symptoms, and depression may also need their own treatment rather than a more elaborate bedtime routine.
+Persistent sleep anxiety is often part of chronic insomnia and responds well to CBT-I. Anxiety disorders, panic, trauma, obsessive-compulsive symptoms, and depression may need their own treatment, not a more elaborate bedtime routine.
 
 ## A quick note
 

@@ -42,40 +42,40 @@ safety:
   cautionLevel: moderate
 ---
 
-After several short nights, the most effective recovery tool is more sleep. One long lie-in may help you feel better, but it does not guarantee that every effect of repeated sleep loss has been erased. Recover over several nights, protect safety now, and then remove the schedule problem that created the debt.
+After several short nights, the best recovery tool is more sleep. One long lie-in may make you feel better, but it does not guarantee that every effect of repeated sleep loss is gone. Recover over several nights, protect safety now, then fix the schedule problem that created the debt.
 
 ## What to do
 
-- Make the next two to four nights unusually easy to sleep: reduce optional evening commitments and reserve a larger sleep window.
-- Go to bed earlier when sleepy rather than shifting wake time several hours later. Keeping wake time near normal makes the return to routine easier.
+- Make the next two to four nights unusually easy to sleep: drop optional evening commitments and set aside a bigger sleep window.
+- Go to bed earlier when sleepy rather than pushing wake time several hours later. Keeping wake time near normal makes the return to routine easier.
 - Use a short early-afternoon nap if you are struggling, especially before a safety-sensitive evening. Leave time for grogginess to clear.
-- Reduce hard training, late-night work, and alcohol while recovering. They add load or fragment the sleep you are trying to restore.
-- Use caffeine strategically rather than continuously. It can support alertness temporarily but does not replace sleep, and late use can extend the problem.
-- Expect performance and mood to be imperfect. Postpone nonessential high-stakes decisions when severely sleep deprived.
+- Cut back on hard training, late-night work, and alcohol while you recover. They add load or fragment the sleep you are trying to restore.
+- Use caffeine deliberately, not continuously. It props up alertness for a while but does not replace sleep, and late doses extend the problem.
+- Expect performance and mood to be off. Postpone nonessential high-stakes decisions while severely sleep deprived.
 
 ## A simple plan
 
-Tonight, create at least an extra hour of sleep opportunity and keep the room dark, quiet, and comfortable. Tomorrow, get daylight after waking and take a 20- to 30-minute early-afternoon nap only if needed. Repeat the larger sleep window for at least two more nights, then return to a sustainable regular schedule.
+Tonight, create at least an extra hour of sleep opportunity and keep the room dark, quiet, and comfortable. Tomorrow, get daylight after waking and take a 20- to 30-minute early-afternoon nap only if needed. Repeat the larger sleep window for at least two more nights, then return to a regular schedule you can hold.
 
-Rate alertness in the morning and afternoon from 1 to 5. Do not use a hard workout, huge caffeine dose, or cold exposure to prove you are recovered. Those can change how alert you feel without restoring sleep.
+Rate alertness in the morning and afternoon from 1 to 5. Don't use a hard workout, a huge caffeine dose, or cold exposure to prove you have recovered; they change how alert you feel without restoring sleep.
 
-If the debt came from a deadline, travel, caregiving, or night shift, decide what recovery time belongs on the calendar the next time that event occurs. Planning recovery before the loss is more reliable than finding spare time afterward.
+If the debt came from a deadline, travel, caregiving, or a night shift, decide now what recovery time goes on the calendar next time. Planning recovery before the loss beats finding spare time afterward.
 
-Adjust training and workload to the size of the deficit. After one mildly short night, an ordinary day with an earlier bedtime may be enough. After several very short nights, choose lower-risk exercise, avoid personal records, and build multiple recovery nights. Do not use one very long weekend sleep as permission to keep the same weekday pattern.
+Match training and workload to the size of the deficit. After one mildly short night, an ordinary day with an earlier bedtime may be enough. After several very short nights, choose lower-risk exercise, skip personal records, and build in multiple recovery nights. Don't treat one very long weekend sleep as permission to keep the same weekday pattern.
 
 ## How to know it is working
 
-Sleepiness, irritability, concentration, and physical heaviness should move back toward your normal baseline across several days. You should no longer need unusually long sleep, and the regular schedule should feel possible again. A wearable recovery score is secondary to safe wakefulness and normal function.
+Sleepiness, irritability, concentration, and physical heaviness should move back toward your baseline over several days. You should no longer need unusually long sleep, and the regular schedule should feel possible again. A wearable recovery score comes second to safe wakefulness and normal function.
 
-Compare alertness at the same times each day. Reaction time and judgment can remain impaired even when you feel less sleepy, so return to demanding driving, competition, or hazardous work conservatively. An increased need for sleep during recovery is expected; a need that stays extreme after the schedule is restored is not.
+Compare alertness at the same times each day. Reaction time and judgment can stay impaired even when you feel less sleepy, so ease back into demanding driving, competition, or hazardous work. Needing more sleep during recovery is expected; a need that stays extreme after the schedule is restored is not.
 
 ## If you get stuck
 
-If you remain exhausted after several nights with adequate opportunity, do not assume you still “owe” more hours. Illness, sleep apnea, anemia, thyroid problems, depression, medication effects, and other conditions can look like sleep debt. Repeatedly accumulating debt every workweek means the baseline schedule needs to change.
+If you are still exhausted after several nights with enough opportunity, don't assume you still "owe" more hours. Illness, sleep apnea, anemia, thyroid problems, depression, medication effects, and other conditions can look like sleep debt. Running up new debt every workweek means the baseline schedule needs to change.
 
 ## A quick note
 
-Do not drive when you are fighting sleep, missing road details, or drifting across lanes. A nap, a ride, or stopping overnight is safer than trying to push through.
+Don't drive when you are fighting sleep, missing road details, or drifting across lanes. A nap, a ride, or stopping overnight is safer than pushing through.
 
 ## Sources
 

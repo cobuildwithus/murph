@@ -43,40 +43,40 @@ safety:
   cautionLevel: low
 ---
 
-Travel sleep is affected by more than jet lag. Early departures, unfamiliar rooms, noise, temperature, schedule pressure, alcohol, and the “first-night effect” can disrupt sleep even when you stay in one time zone. A good plan protects the sleep opportunity and makes the new environment feel predictable without requiring you to recreate home perfectly.
+Jet lag is only part of travel sleep. Early departures, unfamiliar rooms, noise, temperature, schedule pressure, alcohol, and the “first-night effect” can disrupt sleep even in your own time zone. A good plan protects the sleep opportunity and makes the new room feel predictable; you don't have to recreate home.
 
 ## What to do
 
-- Put sleep on the itinerary. If an early flight requires a 4 a.m. wake-up, the night before is not a normal night; reduce evening commitments or plan recovery.
-- Pack a small, reliable kit: eye mask, earplugs, charging cable that lets the phone stay away from the pillow, and any prescribed sleep or breathing equipment.
-- Keep one or two familiar cues, such as the same book, audio, or five-minute routine. Familiarity can reduce the friction of a new room.
-- On arrival, inspect the room before bedtime. Adjust temperature, cover blinking lights, place water and essentials, and solve noise while you still have options.
-- Keep caffeine and alcohol intentional. Travel encourages both at unusual times, which can push sleep in opposite directions.
-- Get daylight and movement during the day. If time zones changed, follow a jet-lag plan rather than treating every exposure as interchangeable.
+- Put sleep on the itinerary. If an early flight means a 4 a.m. wake-up, the night before isn't a normal night; cut evening commitments or plan recovery.
+- Pack a small, reliable kit: eye mask, earplugs, a charging cable that keeps the phone away from the pillow, and any prescribed sleep or breathing equipment.
+- Keep one or two familiar cues, like the same book, audio, or five-minute routine, to take the friction out of a new room.
+- On arrival, check the room before bedtime: adjust temperature, cover blinking lights, set out water and essentials, and deal with noise while you still have options.
+- Keep caffeine and alcohol deliberate; travel invites both at odd times, and they can push sleep in opposite directions.
+- Get daylight and movement during the day. If time zones changed, follow a jet-lag plan instead of treating every exposure alike.
 
 ## A simple plan
 
-The day before departure, identify the trip's three hardest sleep moments: perhaps the early alarm, the overnight flight, and the first hotel night. Give each one a response. Examples include moving bedtime earlier for two nights, using an eye mask during destination nighttime, calling ahead for a quiet room, or scheduling a short recovery nap.
+The day before departure, name the trip's three hardest sleep moments: perhaps the early alarm, the overnight flight, and the first hotel night. Give each a response: an earlier bedtime for two nights, an eye mask during destination nighttime, a call ahead for a quiet room, or a short recovery nap.
 
-At the hotel, set a wake time based on the trip's purpose and allow enough sleep. Follow a short version of your home routine. If you are awake after arrival, avoid turning the bed into a workstation; use a quiet activity elsewhere until sleepy.
+At the hotel, set a wake time based on the trip's purpose and leave enough room for sleep. Run a short version of your home routine. If you're awake after arrival, don't turn the bed into a workstation; do something quiet elsewhere until sleepy.
 
-On leisure trips, decide which late nights are worth it. Protect the nights before driving, hiking, racing, presenting, or caring for others. The goal is not to make travel joyless—it is to spend sleep loss where the experience is valuable and recover afterward.
+On leisure trips, decide which late nights are worth it. Protect the nights before driving, hiking, racing, presenting, or caring for others. Spend sleep loss where the experience earns it, and recover afterward.
 
 ## How to know it is working
 
-Useful outcomes are enough total sleep across the trip, fewer long awakenings from preventable room problems, and adequate alertness for the day's activities. One poor first night does not mean the routine failed. Compare this trip with similar trips, not with an ideal week at home.
+Look for enough total sleep across the trip, fewer long awakenings from preventable room problems, and enough alertness for the day's activities. One poor first night doesn't mean the routine failed. Compare this trip with similar trips, not an ideal week at home.
 
-A wearable may help show approximate timing, but unfamiliar motion, time-zone changes, and device clock settings can make travel data messy. Your ability to stay awake safely and enjoy the day matters more.
+A wearable may show rough timing, but unfamiliar motion, time-zone changes, and device clock settings can make travel data messy. Staying awake safely and enjoying the day matter more.
 
 ## If you get stuck
 
-Separate schedule from environment. If you are sleepy at the wrong local time, use a jet-lag plan. If you are tired but cannot settle, reduce stimulation and recreate a familiar cue. If noise, temperature, or bedding is the issue, ask the hotel for a change rather than trying to meditate through a solvable problem.
+Separate schedule from environment. If you're sleepy at the wrong local time, use a jet-lag plan. If you're tired but can't settle, cut stimulation and bring back a familiar cue. If noise, temperature, or bedding is the problem, ask the hotel for a change rather than trying to meditate through it.
 
-People with CPAP should bring the equipment, power adapters, and a backup plan for water or battery needs. Do not casually replace prescribed treatment with a travel gadget.
+If you use CPAP, bring the equipment, power adapters, and a backup plan for water or battery needs. Don't casually swap prescribed treatment for a travel gadget.
 
 ## A quick note
 
-Avoid combining alcohol with sleep medicines or other sedatives. If severe sleep loss makes driving unsafe, change drivers, nap, or delay the trip rather than pushing through.
+Don't combine alcohol with sleep medicines or other sedatives. If severe sleep loss makes driving unsafe, switch drivers, nap, or delay the trip rather than pushing through.
 
 ## Sources
 

@@ -37,8 +37,8 @@ export default function GoalMethodologyPage() {
           How these guides are made
         </h1>
         <p className="mt-4 text-lg/8 text-pretty text-muted-foreground">
-          Murph Health Commons creates and maintains these guides as practical,
-          public starting points for common health and fitness goals.
+          Murph Health Commons writes and maintains these guides as public
+          starting points for common health and fitness goals.
         </p>
       </header>
 
@@ -47,58 +47,59 @@ export default function GoalMethodologyPage() {
           <p>
             Each page starts with one outcome a person can say plainly, such as
             sleeping longer, lowering resting heart rate, or running a first 5K.
-            The guide then turns that outcome into practical steps, ways to track
-            progress, realistic expectations, common reasons progress stalls, and
-            a brief safety note.
+            From there it lays out the steps that move that outcome, how to
+            tell whether they are working, what to expect, the usual reasons
+            progress stalls, and a short safety note.
           </p>
           <p>
-            Sources favor current guidance from public-health agencies and
-            professional bodies, along with primary research and high-quality
-            reviews when they add useful detail. Citations stay visible on the
-            page so readers can inspect them directly. A citation supports a
-            specific point; it does not mean every suggestion fits every person.
+            Sources lean on current guidance from public health agencies and
+            professional bodies, with primary research and good reviews where
+            they add something useful. Citations stay visible on the page so
+            you can check them yourself. A citation backs a specific point. It
+            does not mean every suggestion fits every person.
           </p>
         </MethodologySection>
 
         <MethodologySection title="How automation is used">
           <p>
-            AI and automated tools assist with research organization, drafting,
-            consistency checks, link checks, and structured publishing. They also
-            check that every page has a clear outcome, an exact editable Murph
-            prompt, visible sources, and required safety boundaries.
+            AI and automated tools assist with organizing research, drafting,
+            consistency checks, link checks, and publishing. They also confirm
+            that every page has a clear outcome, an exact editable Murph
+            prompt, visible sources, and the required safety boundaries.
           </p>
           <p>
-            The current goal library is field-testing material. That means the
-            pages are usable and actively maintained, but they should not be read
-            as individually reviewed medical advice or as a claim that a clinician
-            reviewed every sentence.
+            The current library is field-testing material. The pages are
+            usable and actively maintained, but they are not individually
+            reviewed medical advice, and no clinician has checked every
+            sentence.
           </p>
         </MethodologySection>
 
         <MethodologySection title="Updates and versioning">
           <p>
-            Each guide has a stable canonical URL plus internal page and workflow
-            revision identifiers. A meaningful change to the article or to the
-            Murph setup workflow creates a new revision while the public URL stays
-            stable. Corpus checks catch broken relationships, duplicate outcomes,
-            missing sources, and invalid action prompts before publication.
+            Each guide has a stable public URL plus internal revision
+            identifiers for the article and for the Murph setup workflow. A
+            meaningful change to either creates a new revision while the URL
+            stays the same. Automated checks catch broken relationships,
+            duplicate outcomes, missing sources, and invalid prompts before
+            anything is published.
           </p>
           <p>
-            Health guidance and source URLs change. Murph Health Commons updates
-            guides when evidence, public guidance, safety language, or the product
-            workflow changes. We do not add a review date or named reviewer unless
-            that review actually occurred and can be supported.
+            Health guidance and source links change over time. We update guides
+            when the evidence, public guidance, safety language, or product
+            workflow changes. We do not add a review date or a named reviewer
+            unless that review actually happened.
           </p>
         </MethodologySection>
 
         <MethodologySection title="What these guides cannot do">
           <p>
-            These pages are educational starting points, not diagnoses or
-            personalized care. Your medical history, medications, symptoms,
-            pregnancy status, disability, and training background can change what
-            is appropriate. Use the safety note on each guide, involve a qualified
-            clinician when the situation calls for it, and use emergency services
-            for urgent symptoms.
+            These pages are educational starting points, not diagnoses or personalized care.
+            Your medical history, medications, symptoms, pregnancy status,
+            disability, and training background can change what is right for
+            you. Read the safety note on each guide, involve a clinician when
+            the situation calls for one, and use emergency services for urgent
+            symptoms.
           </p>
         </MethodologySection>
 

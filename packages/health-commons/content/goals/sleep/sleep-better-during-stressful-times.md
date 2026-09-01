@@ -43,38 +43,38 @@ safety:
   cautionLevel: low
 ---
 
-Stress can delay sleep, cause more awakenings, and make the mind start problem-solving as soon as the room becomes quiet. During a demanding period, the goal is not perfect sleep. It is to preserve enough opportunity, create a clear boundary between action and rest, and keep one rough night from becoming a new insomnia cycle.
+Stress can delay sleep, add awakenings, and set the mind problem-solving once the room is quiet. During a demanding stretch, aim for enough sleep opportunity, a clear line between action and rest, and no rough night becoming a new insomnia cycle.
 
 ## What to do
 
-- Protect the wake time and a reasonable sleep window even when the day expands. Sleep is part of handling the stressor, not spare time left after it.
-- Create a daily work cutoff. Write what is unfinished, the next action, and when you will return to it.
+- Protect your wake time and a reasonable sleep window even when the day expands. Sleep is part of handling the stressor.
+- Set a daily work cutoff: write what's unfinished, the next action, and when you'll return to it.
 - Use a short physical downshift: slower breathing, progressive muscle release, a warm shower, gentle stretching, or a quiet walk.
-- Move worry earlier. Set a 10- to 15-minute planning period in the late afternoon or early evening rather than letting bed become the planning space.
-- Keep caffeine and alcohol visible. Stress often increases both, and each can worsen sleep in different ways.
-- Maintain daylight, regular meals, and some movement. When life loses structure, these cues help stabilize sleep timing.
+- Move worry earlier: 10 to 15 minutes in the late afternoon or early evening, so bed isn't the planning space.
+- Watch caffeine and alcohol; stress often raises both, and each can hurt sleep.
+- Keep daylight, regular meals, and some movement; these cues help hold sleep timing steady when life loses structure.
 
 ## A simple plan
 
-Choose a “minimum viable night” for the next two weeks. It needs only four parts: a work stop, a five-minute tomorrow list, a normal wash-up routine, and a protected sleep window. Put the list away when the timer ends; it is a parking place, not a second work session.
+For the next two weeks, run a “minimum viable night” with four parts: a work stop, a five-minute tomorrow list, your normal wash-up routine, and a protected sleep window. Put the list away when the timer ends.
 
-If thoughts begin racing in bed, use one sentence: “This is important, and I have a time to handle it tomorrow.” If wakefulness becomes frustrating, move to a quiet dim activity until sleepy. Avoid reopening work or searching for sleep solutions.
+If thoughts race in bed, use one sentence: “This is important, and I have a time to handle it tomorrow.” If lying awake gets frustrating, move to a quiet, dim activity until sleepy. Don't reopen work or hunt for sleep fixes.
 
-After a poor night, keep the day steady where safe. Get daylight, eat, do gentle movement, and reduce optional demands. A short early-afternoon nap can help acute sleep loss, but a long late nap can make the next night harder.
+After a poor night, keep the day steady where safe: daylight, meals, gentle movement, fewer optional demands. A short early-afternoon nap can help after acute sleep loss; a long late nap can make the next night harder.
 
-Decide what can be “good enough” during this period. Lowering the standard for dinner, household work, or nonessential training can preserve sleep without abandoning health routines entirely.
+Decide what's good enough for now; a lower bar for dinner, housework, or nonessential training can protect sleep without dropping health routines.
 
 ## How to know it is working
 
-Rate pre-sleep stress from 0 to 10, record whether you kept the sleep window, and note morning function. Success can be less escalation even before sleep duration improves: fewer nights spent working in bed, less clock checking, and a faster return to routine after a rough night.
+Rate pre-sleep stress from 0 to 10, record whether you kept the sleep window, and note morning function. Success can show before sleep duration improves: fewer nights working in bed, less clock checking, and a quicker return to routine after a rough night.
 
-Compare similar stress days rather than comparing a crisis week with vacation. Wearable data may capture timing, but stress can change perception and physiology in ways a single score cannot summarize.
+Compare similar stress days, not a crisis week with a vacation. A wearable may capture timing, but stress changes perception and physiology in ways no single score can summarize.
 
 ## If you get stuck
 
-If the tomorrow list becomes an expanding backlog, limit it to three next actions. If relaxation feels like another performance, use something neutral and pleasant instead. If the actual workload makes seven hours impossible, remove or delegate a demand; no sleep ritual can solve a schedule with no sleep opportunity.
+If the tomorrow list keeps growing, cap it at three next actions. If relaxation feels like another performance, do something neutral and pleasant instead. If the workload truly makes seven hours impossible, remove or delegate a demand; no ritual fixes a schedule with no room for sleep.
 
-Stress-related insomnia that persists after the stressor passes can respond to CBT-I. Anxiety, trauma, depression, grief, and caregiving strain may also need direct support rather than sleep advice alone.
+Stress-related insomnia that outlasts the stressor can respond to CBT-I. Anxiety, trauma, depression, grief, and caregiving strain may need direct support rather than sleep advice alone.
 
 ## A quick note
 

@@ -42,42 +42,42 @@ safety:
   cautionLevel: moderate
 ---
 
-Occasional bad dreams are common. Recurring nightmares become a health goal when they repeatedly wake you, create fear of sleep, or affect mood and function the next day. One of the best-supported psychological treatments is **imagery rehearsal therapy**, which changes the nightmare story while awake and mentally rehearses the safer version.
+Occasional bad dreams are common. Recurring nightmares become a health goal when they keep waking you, make you afraid to sleep, or affect the next day. One of the best-supported psychological treatments is **imagery rehearsal therapy**, which rewrites the nightmare while you are awake and rehearses the safer version.
 
 ## What to do
 
-- Track frequency and impact for two weeks without writing every graphic detail. Record whether a nightmare occurred, distress from 0 to 10, and whether it changed the next day.
+- Track frequency and impact for two weeks, without graphic detail: whether a nightmare happened, distress from 0 to 10, and whether it changed the next day.
 - Look for a new trigger: trauma reminders, acute stress, fever, sleep loss, alcohol withdrawal, or a new or changed medicine.
-- Keep enough sleep opportunity. Sleep deprivation and irregular schedules can make dreams feel more intense and increase distress.
-- Use a grounding routine after waking: orient to the room, name the date and place, slow the exhale, and do a quiet neutral activity until the body settles.
+- Keep enough sleep opportunity; sleep deprivation and irregular schedules can make dreams more intense and upsetting.
+- Use a grounding routine after waking: orient to the room, name the date and place, slow your exhale, and do something quiet and neutral until your body settles.
 - Consider imagery rehearsal therapy with a qualified clinician, especially for frequent or trauma-related nightmares.
-- Protect the daytime from becoming a full review of the dream. Process it intentionally with support rather than repeatedly replaying it alone.
+- Don't let the day become a replay of the dream. Process it on purpose, with support, rather than going over it alone.
 
 ## A simple plan
 
-Choose one recurring nightmare that feels tolerable enough to work with. During the day—not at bedtime—write a brief version without unnecessary detail. Change the story so it becomes nonthreatening, empowering, or simply ends safely. The new version does not need to be realistic.
+Choose one recurring nightmare that feels tolerable to work with. During the day, not at bedtime, write a brief version without unnecessary detail. Change the story so it becomes nonthreatening, puts you in control, or simply ends safely. It does not need to be realistic.
 
-For about 10 to 20 minutes each day, imagine the revised version from beginning to end. Practice when you are calm and stop if distress escalates. Continue for at least a week before judging the effect. A therapist can help choose the right level of exposure and adapt the method for trauma.
+For about 10 to 20 minutes each day, imagine the revised version from start to finish. Practice when calm and stop if distress climbs. Keep going for at least a week before judging the effect. A therapist can help set the right level of exposure and adapt the method for trauma.
 
-Choose a rehearsal time that leaves room to recover before bed. Pair it with a grounding activity afterward and keep ordinary pleasant evening routines intact. More vivid or longer rehearsal is not automatically better; consistent tolerable practice is the goal.
+Pick a rehearsal time that leaves room to recover before bed. Follow it with a grounding activity and keep your usual pleasant evening routine. Longer or more vivid rehearsal is not better; consistent, tolerable practice is.
 
-At night, keep a short grounding card nearby: “I am awake, I am here, the dream ended.” Use low light, avoid searching for meanings on the phone, and return to bed when settled and sleepy.
+At night, keep a short grounding card nearby: "I am awake, I am here, the dream ended." Keep the light low, don't search for meanings on your phone, and go back to bed once settled and sleepy.
 
 ## How to know it is working
 
-Track nightmare nights, distress intensity, time needed to settle, and sleep avoidance. Success can mean fewer nightmares, a less frightening version, quicker recovery, or less fear of going to bed. Dreams do not need to disappear completely for treatment to be worthwhile.
+Track nightmare nights, distress intensity, time needed to settle, and sleep avoidance. Success can mean fewer nightmares, a less frightening version, quicker recovery, or less fear of going to bed. Dreams don't have to vanish for treatment to be worthwhile.
 
-Do not use consumer REM estimates to evaluate nightmares. A device cannot reliably identify the content of a dream, and changes in reported REM do not tell you whether the treatment is working.
+Don't use consumer REM estimates to judge nightmares. A device cannot reliably tell what a dream contained, and changes in reported REM say nothing about whether treatment is working.
 
 ## If you get stuck
 
-If rewriting the nightmare makes symptoms worse, stop and work with a trauma-informed clinician. PTSD-associated nightmares may improve with trauma-focused therapy, CBT-I, imagery rehearsal, or medication selected with a prescriber. Medication effects and substance withdrawal need direct medical review.
+If rewriting the nightmare makes symptoms worse, stop and work with a trauma-informed clinician. PTSD-associated nightmares may improve with trauma-focused therapy, CBT-I, imagery rehearsal, or medication chosen with a prescriber. Medication effects and substance withdrawal need direct medical review.
 
-If the event involves shouting, punching, kicking, falling from bed, or injuring a partner, it may be dream enactment rather than an ordinary nightmare. That calls for a sleep evaluation and immediate bedroom-safety steps.
+If episodes involve shouting, punching, kicking, falling out of bed, or hurting a partner, it may be dream enactment rather than an ordinary nightmare. That calls for a sleep evaluation and immediate bedroom-safety steps.
 
 ## A quick note
 
-Seek prompt support if nightmares are connected to suicidal thoughts, severe trauma symptoms, or danger to you or a bed partner. Do not stop alcohol, benzodiazepines, or other sedatives abruptly without appropriate medical guidance when dependence is possible.
+Get prompt support if nightmares are tied to suicidal thoughts, severe trauma symptoms, or danger to you or a bed partner. Don't stop alcohol, benzodiazepines, or other sedatives abruptly without appropriate medical guidance when dependence is possible.
 
 ## Sources
 

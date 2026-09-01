@@ -37,7 +37,7 @@ safety:
     - Replacing saturated fat with unsaturated fat is more useful than replacing it with refined starch or sugar.
 ---
 
-The goal is not a fat-free diet. It is to replace some of the saturated fat in butter, fatty and processed meats, high-fat dairy, coconut or palm oils, and many baked foods with unsaturated fats from liquid plant oils, nuts, seeds, avocado, and fish.
+The aim is to replace some of the saturated fat in butter, fatty and processed meats, high-fat dairy, coconut or palm oils, and many baked foods with unsaturated fats from liquid plant oils, nuts, seeds, avocado, and fish. It isn't a fat-free diet.
 
 ## What to do
 
@@ -48,45 +48,45 @@ Choose the two sources you eat most often, then make a like-for-like swap:
 - beans, fish, tofu, or leaner meat for some processed or fatty meat meals;
 - a lower-saturated-fat dairy choice when you genuinely like it.
 
-Keep the meal satisfying. Replacing fat with a small, joyless portion tends not to last.
+Keep the meal satisfying; a small, joyless portion tends not to last.
 
 ## A simple plan
 
-Use a replacement audit over four weeks.
+Run a replacement audit over four weeks.
 
-**Week one:** identify the top two sources in your normal diet. Common candidates are butter, cheese, fatty or processed meat, coconut oil, pastries, ice cream, or restaurant meals. Ignore foods you eat rarely even if they contain saturated fat.
+**Week one:** find your top two sources. Common ones: butter, cheese, fatty or processed meat, coconut oil, pastries, ice cream, restaurant meals. Ignore foods you rarely eat.
 
-**Week two:** replace one cooking or meal component. Use olive or canola oil instead of butter for routine cooking, beans or fish for one meat meal, or nuts and fruit for one pastry snack. Keep enough energy and flavor in the meal.
+**Week two:** replace one cooking or meal component: olive or canola oil instead of butter for everyday cooking, beans or fish for one meat meal, or nuts and fruit for one pastry snack. Keep enough energy and flavor in the meal.
 
-**Week three:** compare packaged foods within a category. Yogurts, frozen meals, snacks, and meat alternatives can differ substantially. Check saturated fat, sodium, added sugar, fiber, protein, price, and enjoyment rather than optimizing one line in isolation.
+**Week three:** compare packaged foods within a category. Yogurts, frozen meals, snacks, and meat alternatives vary widely. Weigh saturated fat, sodium, added sugar, fiber, protein, price, and enjoyment together rather than one line on the label.
 
-**Week four:** test the pattern in social meals. Decide which saturated-fat-rich foods you value and enjoy them deliberately. Use the replacements for ordinary defaults so special meals do not need moral accounting.
+**Week four:** test the pattern at social meals. Decide which saturated-fat-rich foods you value and enjoy them on purpose. Use the replacements for everyday defaults so special meals need no moral accounting.
 
-If lowering LDL cholesterol is the reason, keep the plan stable until the clinician-recommended recheck. Adding soluble fiber, legumes, nuts, and whole grains can complement the fat replacement. If LDL remains high, that does not mean the diet failed; genetics and overall risk may make medication appropriate.
+If lowering LDL cholesterol is the reason, hold the plan steady until your clinician's recommended recheck. Soluble fiber, legumes, nuts, and whole grains can complement the fat swap. If LDL stays high, the diet didn't fail; genetics and overall risk may make medication appropriate.
 
-The target is a dietary shift, not fear of all animal food or all fat. Replacement with unsaturated fat is better supported than replacement with refined carbohydrate.
+This is a dietary shift, not fear of all animal food or all fat. Unsaturated fat is a better-supported replacement than refined carbohydrate.
 
 ## How to know it is working
 
-Track the planned swaps per week or review saturated fat on labels for a few common products. If the goal is lower LDL cholesterol, evaluate a repeat lipid panel at the interval recommended by your clinician rather than expecting a daily signal.
+Count the planned swaps each week, or check saturated fat on labels of a few common products. For LDL, judge by a repeat lipid panel at your clinician's recommended interval, not a daily signal.
 
 ## What to expect
 
-The eating pattern can change immediately; cholesterol changes, when they occur, are generally assessed after several weeks. Response depends on genetics, baseline diet, weight change, and what replaced the saturated fat.
+The eating pattern can change right away. Cholesterol changes, when they happen, are generally assessed after several weeks and depend on genetics, baseline diet, weight change, and what replaced the saturated fat.
 
 ## If you get stuck
 
-Look beyond cooking oil. Restaurant meals, cheese, desserts, processed meat, and snack foods may contribute more than the visible butter at home. Change the highest-frequency source first.
+Look past the cooking oil. Restaurant meals, cheese, desserts, processed meat, and snack foods may contribute more than the butter at home. Change the most frequent source first.
 
 ## Make it last
 
-Put the replacements into recurring meals and the shopping list. Keep olive or canola oil beside the stove, nuts where snacks are chosen, and beans or fish in the pantry or freezer. Use flavor and texture so the change does not feel like a lesser version of dinner. A lentil curry, fish taco, or pasta with olive oil and vegetables is more durable than a meal defined mainly by what it lacks.
+Build the replacements into recurring meals and the shopping list: olive or canola oil by the stove, nuts where you grab snacks, beans or fish in the pantry or freezer. Use flavor and texture so dinner doesn't feel lesser. A lentil curry, fish taco, or pasta with olive oil and vegetables outlasts a meal defined by what it's missing.
 
-Judge the pattern across a week. Cheese at one meal or cake at a celebration does not erase repeated replacements. If a favorite food is a major saturated-fat source, keep a smaller or less frequent version rather than cycling between prohibition and overuse. Recheck clinical outcomes on an appropriate schedule and revise with the full cardiovascular picture. When LDL response is limited, do not keep shrinking the diet indefinitely; discuss genetics, medication, soluble fiber, weight, activity, and other evidence-based tools with a clinician.
+Judge the pattern over a week. Cheese at one meal or cake at a celebration doesn't erase repeated replacements. If a favorite food is a major source, keep a smaller or less frequent version rather than swinging between banning and overdoing it. Recheck clinical results on schedule and revise with the full cardiovascular picture. If LDL response is limited, don't keep shrinking the diet; talk with a clinician about genetics, medication, soluble fiber, weight, activity, and other evidence-based tools.
 
 ## A quick note
 
-Do not treat one food as poison. Overall pattern and replacement matter. Very low LDL targets or known cardiovascular disease require a clinician-led treatment plan; diet may be only one part.
+Don't treat one food as poison; overall pattern and replacement matter. Very low LDL targets or known cardiovascular disease need a clinician-led treatment plan, and diet may be only one part.
 
 ## Sources
 

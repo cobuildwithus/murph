@@ -43,42 +43,42 @@ safety:
   cautionLevel: low
 ---
 
-The spring clock change effectively asks you to wake an hour earlier overnight; the fall change moves the clock later. Most people adapt, but sleep loss and circadian misalignment can make the first several days harder. A gradual shift, enough sleep, and correctly timed light can make the change less disruptive.
+The spring clock change asks you to wake an hour earlier overnight; the fall change moves the clock later. Most people adapt, but sleep loss and a misaligned body clock can make the first several days rough. A gradual shift, enough sleep, and well-timed light take most of the sting out.
 
 ## What to do
 
 - For the spring change, move bedtime and wake time 15 to 20 minutes earlier for three or four days before the clock moves.
-- For the fall change, move later in similar small steps if early waking is a recurring problem. Many people need less preparation for this direction.
-- Shift meals, exercise, and children's or household routines along with sleep. The body clock responds to a pattern of timing cues.
-- Get outdoor light after the new wake time. In spring, reduce very bright late-evening light that encourages a later rhythm.
-- Protect the weekend from avoidable sleep loss. The clock change is a poor night to add a late party, early drive, or overnight work if those can be moved.
-- Use a short early-afternoon nap when needed, but avoid a long late nap that delays the new bedtime.
+- For the fall change, move later in the same small steps if early waking is a recurring problem; many people need less preparation here.
+- Shift meals, exercise, and the household routine with sleep. The body clock reads the whole pattern of cues.
+- Get outdoor light after the new wake time. In spring, avoid very bright late-evening light, which pushes your rhythm later.
+- Protect the weekend from avoidable sleep loss. Move a late party, early drive, or overnight shift off the clock-change night if you can.
+- A short early-afternoon nap is fine; skip long or late naps that push the new bedtime back.
 
 ## A simple plan
 
-Beginning Wednesday or Thursday before the change, shift the household schedule by 15 minutes each day. Move the alarm, first light exposure, breakfast, dinner, and wind-down together. On the transition night, set clocks before bed and keep the morning commitment simple.
+Starting Wednesday or Thursday before the change, shift the household schedule by 15 minutes a day: alarm, first light, breakfast, dinner, and wind-down together. On the transition night, set the clocks before bed and keep the morning simple.
 
-For the first three mornings, get daylight and light activity soon after waking. Keep caffeine earlier in the day and aim for an extra 30 minutes of sleep opportunity. If you have a safety-sensitive commute, allow extra time and consider an alternative if you are unusually sleepy.
+For the first three mornings, get daylight and light activity soon after waking. Keep caffeine earlier and allow an extra 30 minutes of sleep opportunity. If your commute is safety-sensitive, leave extra time, and find another way in if you are unusually sleepy.
 
-After three to five days, hold the new wake time rather than drifting back on the weekend. If the schedule still feels wrong after a week, check whether bedtime actually moved or whether late light and weekend timing are pulling it back.
+After three to five days, hold the new wake time instead of drifting back on the weekend. If it still feels wrong after a week, check whether bedtime actually moved or late light and weekend timing are pulling it back.
 
-Parents and caregivers can shift meals, baths, and bedtime stories in the same small increments. Morning light and the household wake routine often matter more than asking someone to become sleepy an hour earlier on command.
+Parents and caregivers can shift meals, baths, and bedtime stories in the same steps. Morning light and the wake routine do more than asking someone to feel sleepy an hour early on command.
 
 ## How to know it is working
 
-You fall asleep and wake closer to the intended clock times, total sleep returns to normal, and morning alertness improves across the week. A single difficult Monday is not a failure. Look for a steady reduction in the mismatch.
+You fall asleep and wake closer to the intended times, total sleep returns to normal, and mornings sharpen over the week. One rough Monday is not a failure; look for a steady drop in the mismatch.
 
-Children, adolescents, later chronotypes, and people already short on sleep may take longer. Compare the transition with your own prior time changes rather than expecting everyone in the household to adapt together.
+Children, adolescents, later chronotypes, and people already short on sleep may take longer. Compare with your own past transitions rather than expecting the whole household to adapt at once.
 
 ## If you get stuck
 
-The spring change often exposes an existing problem: a schedule that was already too late or too short. Continue a gradual earlier shift and morning light rather than using an all-nighter. If the fall change produces very early waking, avoid moving bedtime too early and keep pre-dawn light low until near the intended rise time.
+The spring change often exposes a schedule that was already too late or too short. Keep shifting earlier in small steps with morning light rather than pulling an all-nighter. If the fall change leaves you waking very early, don't move bedtime too early, and keep pre-dawn light low until near the intended rise time.
 
-If clock changes trigger weeks of insomnia or severe mood symptoms, a circadian or mood disorder may need a more specific plan.
+If clock changes set off weeks of insomnia or severe mood symptoms, a circadian or mood disorder may need a more specific plan.
 
 ## A quick note
 
-Take extra care with driving and hazardous work during the sleepiest days. People with bipolar disorder should seek guidance before using bright-light therapy or changing sleep timing aggressively.
+Take extra care with driving and hazardous work on the sleepiest days. If you have bipolar disorder, get guidance before using bright-light therapy or aggressively changing sleep timing.
 
 ## Sources
 

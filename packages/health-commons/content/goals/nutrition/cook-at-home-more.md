@@ -37,47 +37,47 @@ safety:
     - Home cooking can include frozen, canned, pre-cut, and partly prepared foods.
 ---
 
-Cooking at home more does not require becoming a hobbyist cook or making every ingredient from scratch. The useful outcome is having more meals whose ingredients, portions, and cost you can shape. A home-assembled meal built from canned beans, frozen vegetables, microwavable rice, and a sauce counts. The best system reduces decisions on tired days.
+Cooking at home more means more meals where you control ingredients, portions, and cost. You don't need to be a hobbyist cook or make everything from scratch. Canned beans, frozen vegetables, microwavable rice, and a jar of sauce count. The best system cuts decisions on tired days.
 
 ## What to do
 
-Choose meals by effort level rather than collecting recipes:
+Choose meals by effort level instead of collecting recipes:
 
 - **Five-minute meal:** yogurt, fruit, oats, and nuts; eggs and toast; a sandwich with fruit; or a balanced frozen meal.
 - **Fifteen-minute meal:** tofu or chicken stir-fry with frozen vegetables; pasta with beans and greens; tacos with canned beans; or a grain bowl.
 - **Cook-once meal:** chili, soup, curry, tray-bake vegetables and protein, or a large pot of grains.
 
-Stock the ingredients for two five-minute meals and two fifteen-minute meals at all times. Use flavor shortcuts—jarred sauce, spice blends, salsa, curry paste, pesto, or frozen aromatics—so the meal tastes finished. Convenience is part of the system, not a failure.
+Always have ingredients for two five-minute and two fifteen-minute meals. Flavor shortcuts like jarred sauce, spice blends, salsa, curry paste, pesto, or frozen aromatics make a meal taste finished. Convenience is part of the system.
 
 ## A simple plan
 
-Set a goal slightly above your current baseline. If you currently cook once a week, aim for two or three meals, not seven days of meal production.
+Set a target just above your current baseline. If you cook once a week, aim for two or three meals, not seven.
 
-In week one, choose three meals and write the ingredients as a reusable shopping list. In week two, cook one component in extra quantity: grains, protein, vegetables, or sauce. In week three, add an emergency freezer or pantry meal. In week four, review what was actually eaten and remove any aspirational ingredients that repeatedly spoiled.
+Week one: pick three meals and turn their ingredients into a reusable shopping list. Week two: bulk-cook one component: grains, protein, vegetables, or sauce. Week three: add an emergency freezer or pantry meal. Week four: check what you actually ate and drop the aspirational ingredients that kept spoiling.
 
-Use a simple formula when you do not know what to make: protein + vegetable or fruit + carbohydrate + flavorful fat or sauce. The combination can become tacos, soup, pasta, a bowl, a sandwich, or breakfast.
+When you're stuck for ideas, use a formula: protein + vegetable or fruit + carbohydrate + flavorful fat or sauce. It can be tacos, soup, pasta, a bowl, a sandwich, or breakfast.
 
 ## How to know it is working
 
-Track home-cooked or home-assembled meals per week, the number of times takeout was chosen because there was no workable option, and food discarded unused. Preparation time, grocery cost, satisfaction, and cleanup burden are important outcomes. A system that creates impressive meals but an exhausting kitchen is not yet working.
+Count home-cooked or home-assembled meals per week, takeout ordered because nothing workable was on hand, and food thrown out unused. Prep time, grocery cost, satisfaction, and cleanup matter too. Impressive meals from an exhausting kitchen aren't a working system.
 
 ## What to expect
 
-The first improvement is usually logistical: fewer last-minute decisions and a shorter grocery list. Nutrition may improve when home meals make produce, protein, and fiber-rich foods easier to include, but home cooking is not automatically healthy. Portions, ingredients, and the overall pattern still matter.
+The first gain is usually logistical: fewer last-minute decisions and a shorter grocery list. Home meals can make produce, protein, and fiber-rich foods easier to include, but home cooking isn't automatically healthy. Portions, ingredients, and the overall pattern still matter.
 
 ## If you get stuck
 
-If time is the barrier, reduce chopping and cleanup with frozen produce, sheet-pan meals, one-pot meals, or a rice cooker. If planning is the barrier, repeat the same breakfast and two dinners. If skill is the barrier, learn one method at a time—roasting, sautéing, or cooking a grain—rather than following complex recipes. If another person controls the kitchen, agree on one shared meal and one personal fallback.
+If time is the problem, cut chopping and cleanup with frozen produce, sheet-pan meals, one-pot meals, or a rice cooker. If planning is the problem, repeat one breakfast and two dinners. If skill is the problem, learn one method at a time, like roasting, sautéing, or cooking a grain, rather than complex recipes. If someone else controls the kitchen, agree on one shared meal and one personal fallback.
 
 ## Make it last
 
-Design the kitchen around the version of you who is tired. Keep the pan, knife, seasonings, and staple ingredients easy to reach. Put one reliable meal on a recurring calendar day, but allow the exact ingredients to change. Share the burden when you live with other people: one person can shop, another can cook, and another can clean. If no one enjoys cooking, rotate assembly meals rather than pretending enthusiasm will appear.
+Set up the kitchen for the tired version of you: pan, knife, seasonings, and staples within reach. Give one reliable meal a recurring calendar day and let the ingredients vary. If you live with others, split the work: one shops, one cooks, one cleans. If nobody enjoys cooking, rotate assembly meals rather than waiting for enthusiasm.
 
-Review the system monthly. Remove recipes that require special ingredients used once, and keep the meals that solved real evenings. Treat takeout and restaurants as planned parts of life rather than proof that home cooking failed. The durable outcome is a higher proportion of useful meals made at home, not a streak. When illness, travel, or work pressure interrupts the routine, restart with the easiest five-minute meal and the next grocery trip instead of scheduling a major reset.
+Review the system monthly. Drop recipes that need a special ingredient you used once; keep the meals that solved real evenings. Takeout and restaurants are planned parts of life, not proof that home cooking failed. Aim for a higher share of meals at home, not a streak. When illness, travel, or work pressure breaks the routine, restart with the easiest five-minute meal and the next grocery trip.
 
 ## A quick note
 
-Use basic food-safety practices: separate raw meat from ready-to-eat food, cook foods to safe temperatures, refrigerate leftovers promptly, and reheat appropriately. If disability, fatigue, or illness makes cooking difficult, prepared food and support services can be the maintainable solution.
+Follow basic food safety: separate raw meat from ready-to-eat food, cook to safe temperatures, refrigerate leftovers promptly, and reheat properly. If disability, fatigue, or illness makes cooking hard, prepared food and support services can be the lasting solution.
 
 ## Sources
 

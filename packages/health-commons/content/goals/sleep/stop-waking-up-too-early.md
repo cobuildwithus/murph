@@ -42,38 +42,38 @@ safety:
   cautionLevel: moderate
 ---
 
-Waking before you want to can come from several different problems: going to bed earlier than your current sleep need supports, a body clock shifted too early, light or noise near dawn, alcohol-related sleep fragmentation, hot flashes, pain, reflux, low mood, or insomnia. The right fix depends on the pattern, so begin by identifying it rather than adding a long list of bedtime rules.
+Waking too early has many possible causes: a bedtime earlier than your sleep need supports, a body clock shifted too early, light or noise near dawn, alcohol, hot flashes, pain, reflux, low mood, or insomnia. The fix depends on the pattern, so identify it before piling on bedtime rules.
 
 ## What to do
 
-- For one week, record bedtime, the first unwanted waking, final rise time, and whether you felt sleepy or fully awake. Keep the clock out of direct view during the night.
-- Check whether you are simply finishing your sleep. If you go to bed at 8:30 p.m. and wake at 4:30 a.m. feeling alert, a later bedtime may fit better than trying to force more sleep.
-- Block predictable dawn light and early noise with curtains, an eye mask, earplugs, or steady background sound.
-- Keep alcohol visible in the pattern. It can shorten the first trip to sleep but make the later night more fragmented.
-- If you wake tense and begin trying hard to sleep, use a quiet reset. Leave bed for a dim, unstimulating activity and return when sleepy rather than turning the bed into a place for frustration.
-- Keep wake time and morning light reasonably consistent. Large sleep-ins can make the next night's timing less predictable.
+- For one week, record bedtime, first unwanted waking, final rise time, and whether you felt sleepy or fully awake. Keep the clock out of view at night.
+- You may simply be done sleeping. Going to bed at 8:30 p.m. and waking at 4:30 a.m. feeling alert suggests a later bedtime, not forcing more sleep.
+- Block dawn light and early noise with curtains, an eye mask, earplugs, or steady background sound.
+- Keep alcohol visible in the pattern. It can shorten the time to fall asleep but fragment the later night.
+- If you wake tense and start straining to sleep, leave bed for a dim, unstimulating activity and return when sleepy, so the bed doesn't become a frustration cue.
+- Keep wake time and morning light consistent. Big sleep-ins make the next night less predictable.
 
 ## A simple plan
 
-Choose one likely cause and work on it for two weeks. If bedtime is very early, move it later by 15 minutes every few nights while keeping your intended wake time. If the environment is the problem, fix the light or noise first. If worry starts at the same hour, keep paper nearby to park the thought in one line, then use the same low-stimulation reset each time.
+Pick one likely cause and work on it for two weeks. If bedtime is very early, move it later by 15 minutes every few nights while holding your intended wake time. If the environment is the problem, fix the light or noise first. If worry starts at the same hour, park the thought in one line on paper, then use the same low-stimulation reset.
 
-If you exercise, eat breakfast, or turn on intense light during the unwanted waking, those cues may reinforce the early schedule. Keep pre-target light and activity low, then make the intended rise time distinct with daylight, food, and movement.
+Exercising, eating breakfast, or turning on bright light during the unwanted waking can lock in the early schedule. Keep light and activity low before your target time, then mark the intended rise time with daylight, food, and movement.
 
 Hold each timing change for several mornings before adjusting again.
 
-Rate the morning with two questions: “How long was I awake before the intended rise time?” and “How functional did I feel by late morning?” Estimates are enough. Exact sleep-stage data will not identify the cause.
+Rate the morning with two questions: how long were you awake before the intended rise time, and how functional did you feel by late morning? Estimates are enough; exact sleep-stage data won't identify the cause.
 
 ## How to know it is working
 
-The unwanted waking moves closer to your intended rise time, happens on fewer nights, or feels less disruptive because you return to sleep more easily. Total sleep and daytime function should stay stable or improve. One early morning after stress, alcohol, travel, or illness is normal variation.
+The unwanted waking moves closer to your intended rise time, happens less often, or bothers you less because you fall back asleep more easily. Total sleep and daytime function hold steady or improve. One early morning after stress, alcohol, travel, or illness is normal.
 
 ## If you get stuck
 
-Early waking is a common form of insomnia. If it happens at least several nights a week and affects your days, cognitive behavioral therapy for insomnia is the best-supported first-line treatment. Also review new medications, mood symptoms, pain, hot flashes, breathing problems, and repeated bathroom trips with a clinician when relevant. Trying to extend time in bed can sometimes worsen insomnia by creating more awake time there.
+Early waking is a common form of insomnia. If it happens at least several nights a week and affects your days, cognitive behavioral therapy for insomnia is the best-supported first-line treatment. Review new medications, mood symptoms, pain, hot flashes, breathing problems, and repeated bathroom trips with a clinician when relevant. Extending time in bed can sometimes worsen insomnia by adding awake time there.
 
 ## A quick note
 
-Early waking alongside persistent low mood, loss of interest, or thoughts of self-harm needs prompt professional support. Markedly reduced need for sleep with unusual energy or impulsivity also deserves medical attention.
+Early waking alongside persistent low mood, loss of interest, or thoughts of self-harm needs prompt professional support. A markedly reduced need for sleep with unusual energy or impulsivity also deserves medical attention.
 
 ## Sources
 

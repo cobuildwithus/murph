@@ -37,48 +37,48 @@ safety:
     - Food access is a material constraint, not a motivation problem.
 ---
 
-Eating well on a budget is mostly a systems problem: choose affordable staples, use them across several meals, and reduce food that spoils before it is eaten. Nutritious food does not have to be fresh, organic, artisanal, or sold as a wellness product. Frozen vegetables, canned beans, eggs, oats, potatoes, peanut butter, tinned fish, store-brand dairy, and fortified staples can do a great deal of work.
+Eating well on a budget is mostly a systems problem: pick affordable staples, use them across several meals, and lose less food to spoilage. Nutritious food doesn't have to be fresh, organic, artisanal, or a wellness product. Frozen vegetables, canned beans, eggs, oats, potatoes, peanut butter, tinned fish, store-brand dairy, and fortified staples can do most of the work.
 
 ## What to do
 
 Build the shopping list around four categories:
 
-- **Affordable protein:** beans, lentils, eggs, tofu, canned tuna or salmon, peanut butter, yogurt, chicken thighs, or whatever is economical locally.
+- **Affordable protein:** beans, lentils, eggs, tofu, canned tuna or salmon, peanut butter, yogurt, chicken thighs, or whatever is cheap locally.
 - **Filling carbohydrates:** oats, rice, potatoes, corn, pasta, bread, or other grains.
-- **Produce that will be eaten:** frozen vegetables, cabbage, carrots, onions, bananas, apples, canned tomatoes, or seasonal options.
+- **Produce you'll actually eat:** frozen vegetables, cabbage, carrots, onions, bananas, apples, canned tomatoes, or seasonal options.
 - **Flavor:** oil, spices, salsa, soy sauce, cheese, citrus, or a sauce that makes staples enjoyable.
 
-Compare unit prices only when you will use the larger amount. A cheaper bulk package that is discarded is not a saving. Plan one meal around food already in the kitchen before buying more.
+Compare unit prices only when you'll use the larger amount; a bulk package that gets thrown out saved nothing. Before buying more, plan one meal around what's already in the kitchen.
 
 ## A simple plan
 
-Choose five inexpensive meals that share ingredients. For example: bean tacos, lentil soup, eggs with potatoes and vegetables, pasta with beans and tomato sauce, and rice bowls with frozen vegetables and tofu or chicken.
+Choose five cheap meals that share ingredients: bean tacos, lentil soup, eggs with potatoes and vegetables, pasta with beans and tomato sauce, rice bowls with frozen vegetables and tofu or chicken.
 
-In week one, record the total grocery bill and the food thrown away without judging it. In week two, replace one expensive convenience purchase with a prepared backup. In week three, test one lower-cost protein swap. In week four, create a “use first” area in the refrigerator and freeze portions before they become leftovers nobody wants.
+Week one: record the grocery bill and the food you threw away, without judgment. Week two: replace one expensive convenience purchase with a prepared backup. Week three: test one lower-cost protein swap. Week four: set up a “use first” shelf in the refrigerator and freeze portions before they become unwanted leftovers.
 
-Keep one no-cook option for days when time or utilities are limited. A peanut-butter sandwich with fruit, canned fish with crackers and vegetables, or shelf-stable milk and cereal can be a legitimate meal.
+Keep one no-cook option for days when time or utilities are short. A peanut-butter sandwich with fruit, canned fish with crackers and vegetables, or shelf-stable milk and cereal is a real meal.
 
 ## How to know it is working
 
-Track weekly food spending, unplanned takeout, and discarded food alongside whether meals include enough protein and produce. Cost per serving is useful, but satisfaction matters: a meal that leads to another purchase an hour later was not truly cheap.
+Track weekly food spending, unplanned takeout, and discarded food, plus whether meals include enough protein and produce. Cost per serving is useful, but so is satisfaction: a meal that sends you out for another purchase an hour later wasn't cheap.
 
 ## What to expect
 
-The largest savings often come from fewer emergency purchases and less waste, not from finding the absolute lowest price for every ingredient. A repeatable list can lower decision fatigue after a few weeks. The plan may need seasonal changes as prices and schedules change.
+The biggest savings usually come from fewer emergency purchases and less waste, not from hunting the lowest price on every ingredient. A repeatable list eases decision fatigue after a few weeks. Adjust as seasonal prices and schedules change.
 
 ## If you get stuck
 
-If fresh produce spoils, shift toward frozen and canned. If cooking fuel or time is costly, use microwavable grains, canned legumes, and batch cooking. If family preferences create waste, keep the base meal simple and let people add toppings. If food is genuinely insufficient, budgeting advice is not the answer: use eligible food-assistance programs, community resources, school meals, or a health-system social worker.
+If fresh produce spoils, shift to frozen and canned. If cooking fuel or time is costly, use microwavable grains, canned legumes, and batch cooking. If family preferences create waste, keep the base meal simple and let people add toppings. If there genuinely isn't enough food, budgeting advice isn't the answer: use eligible food-assistance programs, community resources, school meals, or a health-system social worker.
 
 ## Make it last
 
-Keep a “price and use” list for the ten foods that carry most meals, not every item in the store. Note the usual price, cheapest practical package, and how it is stored. Rotate only one or two sale items into the plan so discounts do not create waste. Freeze bread, meat, cooked grains, and leftovers in usable portions.
+Keep a “price and use” list for the ten foods that carry most meals: usual price, cheapest practical package, and how to store it. Rotate only one or two sale items in at a time so discounts don't turn into waste. Freeze bread, meat, cooked grains, and leftovers in usable portions.
 
-Revisit the budget monthly and after rent, benefits, work hours, or household size changes. Nutrition plans must respond to money honestly. A week with more convenience food can still succeed if it prevents skipped meals. Share shopping and cooking when possible, and use community resources before the pantry is empty rather than after. Do not compare your basket with an influencer’s specialty groceries. The durable system uses available funds to cover adequate food first, then improves variety and preference. When money increases, spending more is not automatically healthier; keep the affordable staples that already work.
+Revisit the budget monthly and whenever rent, benefits, work hours, or household size changes. A week with more convenience food still counts if it prevented skipped meals. Share shopping and cooking when you can, and use community resources before the pantry is empty. Don't compare your basket with an influencer's specialty groceries. Cover enough food first, then work on variety and preference. More money doesn't automatically mean healthier; keep the affordable staples that already work.
 
 ## A quick note
 
-Do not sacrifice food safety to avoid waste. Food insecurity can affect health directly; there is no shame in using assistance. Medical diets can raise costs, and a dietitian or social worker may know covered services and local resources.
+Don't sacrifice food safety to avoid waste. Food insecurity affects health directly, and there's no shame in using assistance. Medical diets can raise costs; a dietitian or social worker may know covered services and local resources.
 
 ## Sources
 

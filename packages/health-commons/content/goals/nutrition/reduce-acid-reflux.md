@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:reduce-acid-reflux
 slug: reduce-acid-reflux
 title: Reduce Acid Reflux
-summary: Reduce heartburn and regurgitation with meal timing, individual trigger management, and appropriate treatment.
+summary: Cut heartburn and regurgitation with meal timing, your own trigger list, and the right treatment.
 status: field-testing
 quality: usable
 aliases:
@@ -46,45 +46,45 @@ safety:
     - Chest pain should not automatically be assumed to be reflux.
 ---
 
-Acid reflux commonly causes heartburn or regurgitation when stomach contents move into the esophagus. Occasional symptoms may respond to meal and position changes; frequent symptoms can represent gastroesophageal reflux disease and may need medication or testing. The practical goal is to reduce the patterns that matter to you without banning a generic list of foods you tolerate well.
+Acid reflux is stomach contents moving up into the esophagus, usually felt as heartburn or regurgitation. Occasional symptoms often respond to changes in meal timing and position. Frequent symptoms can mean gastroesophageal reflux disease and may need medication or testing. Aim to reduce the patterns that bother you without banning a generic list of foods you tolerate fine.
 
 ## What to do
 
-Focus on the measures with the clearest practical value:
+Start with the measures that pay off most:
 
-- Leave about three hours between the last substantial meal and lying down when nighttime symptoms are a problem.
-- Reduce very large meals, especially late in the day.
-- Identify personal triggers rather than automatically removing coffee, tomatoes, citrus, chocolate, mint, spicy food, and every high-fat food.
+- If nighttime symptoms are the problem, leave about three hours between your last substantial meal and lying down.
+- Cut back on very large meals, especially late in the day.
+- Find your own triggers instead of automatically dropping coffee, tomatoes, citrus, chocolate, mint, spicy food, and every high-fat food.
 - If higher body weight contributes and weight loss is appropriate, gradual loss can improve symptoms.
-- Stop smoking and reduce alcohol if either worsens reflux.
-- For nighttime reflux, elevate the head of the bed with a wedge or bed risers rather than stacking ordinary pillows.
-- Use acid-suppressing medicine correctly when prescribed; timing matters for proton-pump inhibitors.
+- Stop smoking and cut alcohol if either worsens reflux.
+- For nighttime reflux, raise the head of the bed with a wedge or bed risers, not stacked pillows.
+- Take prescribed acid-suppressing medicine correctly. Timing matters for proton-pump inhibitors.
 
-Avoid bending, heavy straining, or vigorous exercise immediately after a large meal if that predictably provokes symptoms.
+Skip bending, heavy straining, or hard exercise right after a large meal if that reliably sets off symptoms.
 
 ## A simple plan
 
-Track symptoms for one week: meal timing and size, bedtime, body position, alcohol, and the main suspected trigger. Choose the strongest pattern.
+Track symptoms for a week along with meal timing and size, bedtime, body position, alcohol, and your main suspected trigger. Pick the strongest pattern.
 
-If symptoms occur at night, move dinner earlier or make it smaller for two weeks and elevate the head of the bed. If one food is strongly suspected, remove only that food for a defined period, then reintroduce it. If symptoms happen more than occasionally, ask a clinician or pharmacist whether an evidence-based medication trial is appropriate and how to take it.
+If symptoms hit at night, move dinner earlier or make it smaller for two weeks, and raise the head of the bed. If you strongly suspect one food, remove only that food for a set period, then bring it back. If symptoms happen more than occasionally, ask a clinician or pharmacist whether an evidence-based medication trial makes sense and how to take it.
 
-Review after two to four weeks. Keep changes that clearly help and restore foods that do not.
+Review after two to four weeks. Keep changes that clearly help and bring back foods that didn't matter.
 
 ## How to know it is working
 
-Track symptom days per week, nighttime awakenings, rescue-antacid use, regurgitation, and interference with meals or activity. A reduction in symptoms and medication burden under clinician guidance is more useful than trying to change stomach acidity with consumer tests.
+Track symptom days per week, nighttime awakenings, rescue-antacid use, regurgitation, and interference with meals or activity. Fewer symptoms and less medication, under a clinician's guidance, is a better target than trying to change stomach acidity with consumer tests.
 
 ## What to expect
 
-Meal timing and positioning can help within days. Acid-suppressing medicines may take several days for full effect. Some people have reflux hypersensitivity or other conditions that mimic reflux, so persistent symptoms despite appropriate treatment do not justify endless food restriction.
+Meal timing and positioning can help within days. Acid-suppressing medicines may take several days to reach full effect. Some people have reflux hypersensitivity or other conditions that mimic reflux, so symptoms that persist despite appropriate treatment are no reason for endless food restriction.
 
 ## If you get stuck
 
-Confirm medication timing and adherence with a clinician. Review constipation, large late meals, alcohol, smoking, and weight change. If symptoms are primarily throat clearing, cough, or hoarseness without typical heartburn, other causes should be considered. Persistent symptoms may require endoscopy or reflux monitoring depending on age, history, and alarm features.
+Check medication timing and adherence with a clinician. Review constipation, large late meals, alcohol, smoking, and weight change. If your main symptoms are throat clearing, cough, or hoarseness without typical heartburn, consider other causes. Persistent symptoms may call for endoscopy or reflux monitoring, depending on age, history, and alarm features.
 
 ## A quick note
 
-Chest pressure with exertion, sweating, shortness of breath, pain spreading to the arm or jaw, or a new severe episode needs urgent evaluation. Difficulty swallowing, food sticking, bleeding, anemia, persistent vomiting, or weight loss also requires medical care. Do not stop a prescribed proton-pump inhibitor abruptly without discussing the plan.
+Chest pressure with exertion, sweating, shortness of breath, pain spreading to the arm or jaw, or a new severe episode needs urgent evaluation. Difficulty swallowing, food sticking, bleeding, anemia, persistent vomiting, or weight loss also needs medical care. Don't stop a prescribed proton-pump inhibitor abruptly without discussing the plan.
 
 ## Sources
 

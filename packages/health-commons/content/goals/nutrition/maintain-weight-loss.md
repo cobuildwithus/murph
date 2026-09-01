@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:maintain-weight-loss
 slug: maintain-weight-loss
 title: Maintain Weight Loss
-summary: Turn a successful weight-loss phase into a sustainable maintenance routine with enough food, flexibility, and support.
+summary: Keep weight off after a loss phase with a routine that has enough food, flexibility, and support.
 status: field-testing
 quality: usable
 aliases:
@@ -43,46 +43,46 @@ safety:
     - Some regain pressure is biological and environmental; it is not proof of personal failure.
 ---
 
-Maintaining weight loss is a different phase from losing weight. Energy needs are usually lower at a lower body weight, appetite can increase, and the intense structure used during weight loss may be unrealistic forever. A good maintenance plan keeps the few behaviors that mattered most, allows normal fluctuation, and responds early to a sustained change without turning every meal into a test.
+Keeping weight off is a different job from losing it. Energy needs are usually lower at a lower weight, appetite can climb, and the tight structure of a diet phase may not be realistic forever. A good maintenance plan keeps the few behaviors that mattered most, allows normal fluctuation, and responds early to a sustained change without making every meal a test.
 
 ## What to do
 
-Define a maintenance **range**, not a single number. Day-to-day weight changes reflect water, sodium, carbohydrate, bowel contents, menstrual-cycle changes, and travel. The range should be wide enough to absorb ordinary variation but narrow enough to notice a real trend.
+Set a maintenance **range**, not a single number. Daily weight moves with water, sodium, carbohydrate, bowel contents, the menstrual cycle, and travel. Make the range wide enough to absorb ordinary variation but narrow enough to show a real trend.
 
-Keep several anchors from the weight-loss phase:
+Keep several anchors from the loss phase:
 
-- regular meals with enough protein and fiber to be satisfying;
-- an activity routine that is enjoyable enough to continue;
-- resistance training to support muscle and function;
+- regular meals with enough protein and fiber to satisfy you;
+- an activity routine you enjoy enough to continue;
+- resistance training to protect muscle and function;
 - a predictable grocery and meal system;
-- enough sleep and recovery to reduce avoidable hunger and disruption;
+- enough sleep and recovery to cut avoidable hunger and disruption;
 - periodic self-monitoring at a frequency that informs rather than consumes you.
 
-Increase food from the loss phase gradually if needed and watch the multiweek trend. Maintenance does not mean eating as little as possible indefinitely.
+If you need more food than during the loss phase, add it gradually and watch the multiweek trend. Maintenance is not eating as little as possible forever.
 
 ## A simple plan
 
-For the first month, choose three maintenance habits and write them in plain language: for example, “protein at breakfast,” “walk after work four days,” and “weigh once weekly.” Keep them stable while you relax unnecessary rules.
+For the first month, pick three maintenance habits and write them plainly: “protein at breakfast,” “walk after work four days,” “weigh once weekly.” Hold those steady while you relax rules you no longer need.
 
-Create two review points. At two weeks, check hunger, energy, training, and whether the plan fits social life. At six to eight weeks, review the weight trend and waist or clothing fit if useful. If the trend is stable, reduce monitoring to the lightest frequency that still helps.
+Set two review points. At two weeks, check hunger, energy, training, and fit with social life. At six to eight weeks, review the weight trend, plus waist or clothing fit if useful. If the trend is stable, cut monitoring to the lightest frequency that still helps.
 
-Write an early-response plan before you need it. It might say: if the four-week average rises beyond my chosen range, review liquid calories, portions, meal regularity, activity, sleep, and medication changes; then restore two proven habits for two weeks. Avoid emergency restriction.
+Write an early-response plan before you need it. It might say: if the four-week average rises past my range, review liquid calories, portions, meal regularity, activity, sleep, and medication changes, then bring back two proven habits for two weeks. No emergency restriction.
 
 ## How to know it is working
 
-Maintenance is working when weight stays in a reasonable band, the habits are not taking over life, and energy, strength, and health remain supported. Use averages rather than reacting to one measurement. People who dislike weighing can use a consistent clothing fit, waist measurement, or scheduled clinical check, though each has limitations.
+It's working when weight stays in a reasonable band, the habits aren't running your life, and energy, strength, and health hold up. Use averages, not single readings. If you dislike weighing, consistent clothing fit, a waist measurement, or a scheduled clinical check can stand in, though each has limits.
 
 ## What to expect
 
-Some fluctuation and some regain are common. Maintenance may require more ongoing support than the initial loss phase, not less. Holidays, injury, medication changes, stress, and life transitions can temporarily move weight. Success is the ability to return to useful routines, not uninterrupted control.
+Some fluctuation and some regain are common. Maintenance may need more ongoing support than the loss phase, not less. Holidays, injury, medication changes, stress, and life transitions can move weight for a while. Success means getting back to useful routines, not uninterrupted control.
 
 ## If you get stuck
 
-If hunger is persistent, check whether meals are too small or low in protein, fiber, or volume. If activity dropped because of pain or schedule change, adapt it rather than waiting for the old plan to return. If weighing causes distress, change the monitoring method. If regain continues despite a sound plan, review medications, sleep apnea, menopause, depression, and other clinical factors with a professional; obesity is a chronic condition, and additional treatment can be appropriate.
+If hunger persists, check whether meals are too small or low in protein, fiber, or volume. If activity dropped because of pain or a schedule change, adapt it instead of waiting for the old plan to return. If weighing upsets you, change the monitoring method. If regain continues despite a sound plan, review medications, sleep apnea, menopause, depression, and other clinical factors with a professional. Obesity is a chronic condition, and more treatment can be appropriate.
 
 ## A quick note
 
-Stopping a GLP-1 or another anti-obesity medicine often changes appetite and regain risk; make that transition with the prescriber. After bariatric surgery, continue the surgical team’s nutrition, supplement, and follow-up plan. If maintenance efforts trigger bingeing, purging, severe restriction, or obsessive monitoring, prioritize eating-disorder support over the scale.
+Stopping a GLP-1 or another anti-obesity medicine often changes appetite and regain risk, so make that transition with your prescriber. After bariatric surgery, keep following the surgical team’s nutrition, supplement, and follow-up plan. If maintenance efforts trigger bingeing, purging, severe restriction, or obsessive monitoring, put eating-disorder support ahead of the scale.
 
 ## Sources
 

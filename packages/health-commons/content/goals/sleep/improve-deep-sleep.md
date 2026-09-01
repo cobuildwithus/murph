@@ -51,44 +51,44 @@ safety:
     - "Consumer sleep-stage estimates are supporting clues, not diagnostic measurements."
 ---
 
-Deep sleep—also called slow-wave or N3 sleep—is one part of a normal night. There is no reliable switch that selectively turns it up. The practical route is to improve the conditions that support sleep as a whole: enough time to sleep, a steady body clock, regular activity, fewer overnight disruptions, and treatment for a sleep disorder when one is present. A wearable may offer a rough trend, but it cannot measure sleep stages as accurately as a clinical sleep study and should not outrank how restored and functional you feel.
+Deep sleep, also called slow-wave or N3 sleep, is one part of a normal night, and there is no reliable switch that turns it up on its own. The practical route is to improve the conditions that support sleep as a whole: enough time to sleep, a steady body clock, regular activity, fewer overnight disruptions, and treatment for any sleep disorder. A wearable can show a rough trend, but it cannot measure sleep stages as accurately as a clinical sleep study, and its number should not outrank how restored you feel.
 
 ## What to do
 
-Start with sleep opportunity. Most adults need roughly seven to nine hours of sleep, so an eight-hour window is a reasonable experiment—not a universal prescription. If you routinely cut the night short, no supplement or temperature gadget can restore time you never gave yourself.
+Start with sleep opportunity. Most adults need roughly seven to nine hours, so an eight-hour window is a reasonable experiment, though not a universal prescription. If you routinely cut the night short, no supplement or temperature gadget can give back time you never allowed.
 
-Anchor your wake time within about an hour on most days. A consistent wake time helps the body clock and sleep pressure line up the following night. Keep regular movement in your week in forms you can sustain, but treat it as general support for health and sleep rather than a selective deep-sleep treatment. Choose timing that does not leave you wired at bedtime. Move caffeine earlier; if sleep is fragile, start by leaving at least six to eight hours between a meaningful dose and bed, then test an earlier cutoff if needed. Keep alcohol from doing the job of a sleep aid. It may make sleep begin sooner but often fragments the later night.
+Anchor your wake time within about an hour on most days so the body clock and sleep pressure line up the next night. Keep regular movement in your week in forms you can keep up, as general support for health and sleep rather than a targeted deep-sleep treatment, timed so you are not wired at bedtime. Move caffeine earlier: if sleep is fragile, leave at least six to eight hours between a meaningful dose and bed, then test an earlier cutoff if needed. Don't let alcohol stand in for a sleep aid; it may bring sleep on sooner but often fragments the later night.
 
-Finally, make the room reliably dark, quiet, and comfortably cool. These basics matter more than buying a perfect mattress pad or chasing a precise bedroom temperature. Change one or two levers at a time so you can tell what actually helps.
+Finally, make the room reliably dark, quiet, and comfortably cool. These basics matter more than a perfect mattress pad or a precise bedroom temperature. Change one or two things at a time so you can tell what helps.
 
 ## A simple plan
 
 Use this four-week plan before judging the result:
 
-1. **Week 1: establish a baseline.** Keep your usual routine. Each morning record bedtime, wake time, remembered long awakenings, and how restored you feel from 1 to 5. If you already wear a tracker, record its deep-sleep estimate without changing behavior to improve the score.
+1. **Week 1: establish a baseline.** Keep your usual routine. Each morning record bedtime, wake time, any long awakenings you remember, and how restored you feel from 1 to 5. If you wear a tracker, log its deep-sleep estimate without trying to improve it.
 2. **Week 2: protect the night.** Set a wake-time anchor and a sleep window long enough for your needs. Put the phone on do-not-disturb, make the room dark and quiet, and keep work out of bed.
-3. **Week 3: remove one likely disruptor.** Pick the clearest issue: late caffeine, alcohol near bedtime, an overheated room, late heavy meals that worsen reflux, or irregular sleep timing. Keep everything else steady.
-4. **Week 4: add repeatable movement.** Choose a few moderate movement sessions that fit your current baseline. If strength training is already part of your week, keep it regular; if not, add it gradually when appropriate. Even a brisk walk counts. Avoid suddenly adding exhausting training; soreness and overreaching can disrupt sleep too.
+3. **Week 3: remove one likely disruptor.** Pick the clearest problem: late caffeine, alcohol near bedtime, an overheated room, late heavy meals that worsen reflux, or irregular sleep timing. Keep everything else steady.
+4. **Week 4: add repeatable movement.** Choose a few moderate sessions that fit your current baseline. If strength training is already part of your week, keep it regular; if not, add it gradually when appropriate. A brisk walk counts. Don't suddenly pile on exhausting training; soreness and overreaching disrupt sleep too.
 
-Keep the pieces that feel sustainable. A complicated evening protocol that makes you anxious about sleep is not an upgrade. If life makes an eight-hour window impossible, protect the most consistent window you can and work on the constraint that is actually limiting it.
+Keep the pieces you can maintain. A complicated evening protocol that makes you anxious about sleep is not an upgrade. If an eight-hour window is impossible, protect the most consistent window you can and work on whatever is actually limiting it.
 
 ## How to know it is working
 
-Judge the plan by a two- to four-week pattern, not one night. The strongest signs are fewer long awakenings, waking more restored, less daytime sleepiness, and steadier attention or mood. If you track sleep stages, compare medians from the same device under similar conditions. Do not compare one brand’s “deep sleep” with another brand’s number.
+Judge the plan by a two- to four-week pattern, not one night. The strongest signs are fewer long awakenings, waking more restored, less daytime sleepiness, and steadier attention or mood. If you track stages, compare medians from the same device under similar conditions, never one brand's number with another's.
 
-A higher deep-sleep estimate can support the story, but it is not required for success. Device algorithms may change, nights naturally vary, and clinical scoring itself divides a continuous process into categories. If your tracker is flat while sleep continuity and daytime function improve, the useful outcome still improved.
+A higher deep-sleep estimate is supporting evidence, not a requirement. Device algorithms change, nights vary, and even clinical scoring divides a continuous process into categories. If your tracker is flat while sleep continuity and daytime function improve, the outcome that matters still improved.
 
 ## If you get stuck
 
-Check the obvious bottlenecks first. Is your sleep window actually long enough? Does wake time drift by several hours on weekends? Has caffeine moved later? Are alcohol, pain, reflux, temperature, noise, caregiving, or frequent bathroom trips breaking up the night?
+Check the obvious bottlenecks first: a sleep window that is too short, a wake time that drifts by several hours on weekends, caffeine that has crept later, or alcohol, pain, reflux, temperature, noise, caregiving, or bathroom trips breaking up the night.
 
-If the basics are handled but sleep remains poor, stop stacking supplements and investigate the pattern. Persistent trouble falling or staying asleep is better addressed with cognitive behavioral therapy for insomnia than with sleep hygiene alone. Loud snoring, witnessed breathing pauses, gasping, morning headaches, uncomfortable leg urges, dream enactment, or severe daytime sleepiness can point to a sleep disorder worth evaluating.
+If the basics are handled and sleep is still poor, stop stacking supplements and look at the pattern. Persistent trouble falling or staying asleep responds better to cognitive behavioral therapy for insomnia than to sleep hygiene alone. Loud snoring, witnessed breathing pauses, gasping, morning headaches, uncomfortable leg urges, dream enactment, or severe daytime sleepiness can point to a sleep disorder worth evaluating.
 
-Also ask whether the tracker itself is making sleep worse. If checking the score creates dread or changes how you interpret an otherwise decent night, hide the stage data for two weeks and track only sleep opportunity, awakenings, and next-day function.
+Also ask whether the tracker itself is making sleep worse. If checking the score creates dread or colors an otherwise decent night, hide the stage data for two weeks and track only sleep opportunity, awakenings, and next-day function.
 
 ## A quick note
 
-Seek prompt help for drowsy driving, breathing pauses, chest or breathing symptoms at night, new unusual sleep behaviors, or a major decline in daytime function. Get guidance before using an aggressive sleep-restriction plan if you have bipolar disorder, a seizure disorder, or another condition that makes added sleepiness unsafe.
+Get prompt help for drowsy driving, breathing pauses, chest or breathing symptoms at night, new unusual sleep behaviors, or a major decline in daytime function. Get guidance before using an aggressive sleep-restriction plan if you have bipolar disorder, a seizure disorder, or another condition that makes added sleepiness unsafe.
 
 ## Sources
 

@@ -43,41 +43,41 @@ safety:
   cautionLevel: moderate
 ---
 
-Feeling rested is a more useful target than earning a perfect sleep score. It depends on getting enough sleep, sleeping at a time that fits your body clock, limiting major disruptions, and treating health problems that make sleep unrefreshing.
+Feeling rested is a better target than a perfect sleep score. It takes enough sleep, timing that fits your body clock, few major disruptions, and treatment of any health problem that makes sleep unrefreshing.
 
 ## What to do
 
-- First test sleep amount. Reserve at least seven hours for sleep, and more if you consistently need it.
-- Keep your wake time reasonably steady for two weeks. Large weekday-to-weekend swings can create a miniature jet lag every Monday.
-- Get daylight soon after waking and move your body during the day. Morning light helps set timing; regular activity supports sleep and daytime energy.
-- Track what you feel, not just what the device says. Rate the first hour of the morning and your mid-afternoon alertness on a simple 1-to-5 scale.
+- Test sleep amount first. Reserve at least seven hours, more if you consistently need it.
+- Keep your wake time fairly steady for two weeks. Big weekday-to-weekend swings create a small jet lag every Monday.
+- Get daylight soon after waking and move during the day. Morning light sets timing; activity helps sleep and daytime energy.
+- Track what you feel, not just what the device says. Rate the first hour of the morning and mid-afternoon alertness from 1 to 5.
 - Review late alcohol, caffeine, heavy meals, pain, congestion, and medications if mornings are predictably worse after them.
 
 ## A simple plan
 
-Choose a wake time and keep it within an hour for 14 days. Give yourself 30 minutes more sleep opportunity than usual, get outside in the first part of the day, and record only three things: estimated sleep length, how refreshed you feel, and whether you became very sleepy later.
+Choose a wake time and hold it within an hour for 14 days. Add 30 minutes of sleep opportunity, get outside early, and record only three things: estimated sleep length, how refreshed you feel, and whether you got very sleepy later.
 
-If mornings improve, keep the smallest routine that produced the change. If they do not, do not keep adding rituals. Investigate why the sleep is unrefreshing.
+If mornings improve, keep the smallest routine that produced the change. If not, stop adding rituals and look into why the sleep is unrefreshing.
 
-Separate ordinary sleep inertia from an all-day problem. Grogginess for the first 15 to 30 minutes can be normal, especially when an alarm wakes you from deeper sleep. Build a gentle launch—light, standing up, water, and a few minutes of movement—then judge how you feel after the first hour. If the heaviness lasts for hours or you repeatedly doze, the issue is larger than the morning routine.
+Separate ordinary sleep inertia from an all-day problem. Grogginess for the first 15 to 30 minutes can be normal, especially when an alarm pulls you out of deeper sleep. Build a gentle launch: light, standing, water, a few minutes of movement. Then judge the first hour. If the heaviness lasts for hours or you keep dozing, the problem is bigger than the morning routine.
 
-Run the plan without making weekends a different experiment. A very late weekend wake time may feel restorative in the moment but can make the next weekday harder. If the schedule is demanding, recover with a somewhat earlier night or a short nap while keeping the wake anchor close.
+Don't make weekends a separate experiment. A very late weekend wake time feels restorative but can make the next weekday harder. If the schedule is demanding, recover with a somewhat earlier night or a short nap and keep the wake anchor close.
 
-Also separate physical fatigue from sleepiness. Hard training, illness, under-fueling, and emotional strain can make the body feel depleted even after adequate sleep. If you can stay awake but feel exhausted, review recovery, nutrition, stress, and health rather than assuming another hour in bed is always the answer.
+Also separate physical fatigue from sleepiness. Hard training, illness, under-fueling, and emotional strain can leave the body depleted even after enough sleep. If you can stay awake but feel exhausted, review recovery, nutrition, stress, and health before assuming you need another hour in bed.
 
 ## How to know it is working
 
-Look for more refreshed mornings, less snoozing, clearer thinking after waking, and steadier daytime alertness. A higher wearable score without better function is not meaningful progress.
+Look for more refreshed mornings, less snoozing, clearer thinking after waking, and steadier daytime alertness. A higher wearable score without better function isn't progress.
 
-Compare the same days of the week because work, alcohol, training, and alarms differ. Use a weekly median for “rested on waking” and note the proportion of mornings that improve within an hour. If the tracker says sleep duration increased but morning and afternoon function remain unchanged, examine breathing, movement, pain, mood, and medication rather than chasing a higher stage score.
+Compare the same days of the week; work, alcohol, training, and alarms differ. Use a weekly median for “rested on waking” and note what share of mornings improve within an hour. If the tracker says duration rose but morning and afternoon function didn't change, look at breathing, movement, pain, mood, and medication instead of chasing a higher stage score.
 
 ## If you get stuck
 
-Persistent unrefreshing sleep despite adequate time can occur with sleep apnea, insomnia, restless legs, depression, anemia, thyroid problems, medication effects, and other conditions. Loud snoring, witnessed breathing pauses, morning headaches, or severe daytime sleepiness make a sleep evaluation especially reasonable.
+Persistent unrefreshing sleep despite enough time can come from sleep apnea, insomnia, restless legs, depression, anemia, thyroid problems, medication effects, and other conditions. Loud snoring, witnessed breathing pauses, morning headaches, or severe daytime sleepiness make a sleep evaluation especially reasonable.
 
 ## A quick note
 
-Do not drive or do safety-sensitive work when you are struggling to stay awake. Sudden or severe sleepiness deserves medical evaluation.
+Do not drive or do safety-sensitive work when you're struggling to stay awake. Sudden or severe sleepiness deserves medical evaluation.
 
 ## Sources
 

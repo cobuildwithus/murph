@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:manage-ibs-symptoms
 slug: manage-ibs-symptoms
 title: Manage IBS Symptoms
-summary: Reduce IBS disruption with a plan matched to constipation, diarrhea, or both while protecting diet variety and focusing on the main symptom.
+summary: Match your IBS plan to constipation, diarrhea, or both, aim at the main symptom, and keep as much diet variety as you can.
 status: field-testing
 quality: usable
 aliases:
@@ -44,44 +44,44 @@ safety:
     - IBS is a disorder of gut–brain interaction; symptoms are real even when structural tests are normal.
 ---
 
-Irritable bowel syndrome causes recurrent abdominal pain related to bowel movements along with constipation, diarrhea, or both. Management should match the subtype and the person. Food matters, but IBS is not proof that dozens of foods are “inflammatory” or that the gut is damaged. Bowel habits, gut sensitivity, stress, sleep, and nervous-system signaling all interact.
+Irritable bowel syndrome causes recurring abdominal pain tied to bowel movements, plus constipation, diarrhea, or both. Treatment should fit the subtype and the person. Food matters, but IBS doesn't mean dozens of foods are “inflammatory” or that your gut is damaged. Bowel habits, gut sensitivity, stress, sleep, and nervous-system signaling all interact.
 
 ## What to do
 
-Begin with the least restrictive useful steps:
+Start with the least restrictive steps that help:
 
-- Eat at reasonably regular times and avoid very large meals if they trigger symptoms.
-- For constipation-predominant IBS, increase soluble fiber gradually; psyllium is generally better supported than wheat bran.
+- Eat at fairly regular times, and skip very large meals if they set off symptoms.
+- For constipation-predominant IBS, raise soluble fiber gradually. Psyllium has better support than wheat bran.
 - For diarrhea-predominant IBS, review caffeine, alcohol, very fatty meals, sugar alcohols, and medicines that loosen stool.
-- Use walking, sleep support, and stress-regulation tools as part of treatment rather than treating symptoms as “all in your head.”
-- Discuss peppermint oil, bowel-directed medicines, or gut-directed psychotherapy with a clinician when appropriate.
-- Consider a time-limited low-FODMAP trial only if simpler measures are insufficient, followed by structured reintroduction and personalization.
+- Use walking, sleep support, and stress-regulation tools as part of treatment. That isn't calling symptoms “all in your head.”
+- Ask a clinician about peppermint oil, bowel-directed medicines, or gut-directed psychotherapy when appropriate.
+- Consider a time-limited low-FODMAP trial only if simpler measures aren't enough, followed by structured reintroduction and personalization.
 
-Testing every food sensitivity panel is not recommended. IgG food panels commonly lead to unnecessary restriction and do not diagnose IBS triggers.
+Food sensitivity panels aren't recommended. IgG food panels often lead to unnecessary restriction and don't diagnose IBS triggers.
 
 ## A simple plan
 
-For two weeks, track abdominal pain, bloating, stool form, urgency or straining, and the degree of disruption. Note meal timing and only obvious food patterns. Identify whether constipation, diarrhea, pain, or bloating is the main target.
+For two weeks, track abdominal pain, bloating, stool form, urgency or straining, and how much it disrupts your day. Note meal timing and only obvious food patterns. Decide whether constipation, diarrhea, pain, or bloating is the main target.
 
-Choose one intervention for three to four weeks. For constipation, try gradual soluble fiber and a bowel routine. For diarrhea, reduce one strong trigger and discuss appropriate medicine. For pain and stress-linked flares, practice a daily gut–brain skill such as slow breathing, relaxation, or a structured therapy exercise.
+Pick one intervention for three to four weeks. For constipation, try gradual soluble fiber and a bowel routine. For diarrhea, cut one strong trigger and ask about appropriate medicine. For pain and stress-linked flares, practice a daily gut–brain skill such as slow breathing, relaxation, or a structured therapy exercise.
 
-If a low-FODMAP trial is chosen, use three phases: short elimination, systematic reintroduction, and a personalized long-term diet. The objective is to add foods back, not remain on the strict phase.
+If you try low-FODMAP, use three phases: short elimination, systematic reintroduction, and a personalized long-term diet. The point is to add foods back, not stay on the strict phase.
 
 ## How to know it is working
 
-Use weekly average pain, number of high-symptom days, stool form, urgency, straining, and interference with work, exercise, sleep, or social life. A 30% reduction in pain or a meaningful improvement in daily function can be worthwhile even when symptoms are not zero.
+Track weekly average pain, high-symptom days, stool form, urgency, straining, and interference with work, exercise, sleep, or social life. A 30% drop in pain or a real improvement in daily function is worth having even if symptoms never reach zero.
 
 ## What to expect
 
-IBS commonly fluctuates. A plan may take several weeks to judge, and stress or illness can cause flares without erasing progress. Different treatments work for different symptoms; a fiber strategy that helps constipation may worsen bloating if increased too quickly. Long-term success often comes from combining diet, bowel treatment, and gut–brain support.
+IBS fluctuates. A plan can take several weeks to judge, and stress or illness can cause flares without erasing progress. Different treatments suit different symptoms; a fiber strategy that helps constipation can worsen bloating if increased too fast. Long-term success usually combines diet, bowel treatment, and gut–brain support.
 
 ## If you get stuck
 
-Reconsider the diagnosis and the dominant symptom. Celiac disease, inflammatory bowel disease, microscopic colitis, bile-acid diarrhea, pelvic-floor dysfunction, endometriosis, and medication effects can overlap. Work with a gastroenterologist or GI dietitian if the diet keeps shrinking, weight is falling, or symptoms remain severe. Avoid stacking probiotics, enzymes, supplements, and eliminations simultaneously because you cannot tell what helped.
+Revisit the diagnosis and the dominant symptom. Celiac disease, inflammatory bowel disease, microscopic colitis, bile-acid diarrhea, pelvic-floor dysfunction, endometriosis, and medication effects can overlap. Work with a gastroenterologist or GI dietitian if your diet keeps shrinking, weight is falling, or symptoms stay severe. Don't stack probiotics, enzymes, supplements, and eliminations at once, because you can't tell what helped.
 
 ## A quick note
 
-IBS itself does not cause bleeding, fever, anemia, persistent nighttime diarrhea, or progressive weight loss. Those features need evaluation. New symptoms later in life or a strong family history of inflammatory bowel disease, celiac disease, or colorectal cancer also warrant a lower threshold for care.
+IBS itself does not cause bleeding, fever, anemia, persistent nighttime diarrhea, or progressive weight loss. Those need evaluation. New symptoms later in life, or a strong family history of inflammatory bowel disease, celiac disease, or colorectal cancer, also call for a lower threshold for care.
 
 ## Sources
 

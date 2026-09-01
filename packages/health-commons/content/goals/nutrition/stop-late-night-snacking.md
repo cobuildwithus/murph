@@ -40,45 +40,45 @@ safety:
     - A planned evening snack can be appropriate; the target is eating that feels unwanted or disruptive.
 ---
 
-Late-night snacking is not automatically unhealthy. A planned snack can make sense after training, with an early dinner, during pregnancy, or when total intake is otherwise too low. The useful goal is to reduce eating that feels automatic, worsens reflux or sleep, or repeatedly conflicts with your intentions. Daytime eating is one useful place to look for a contributing pattern.
+Late-night snacking isn't automatically a problem. A planned snack can make sense after training, with an early dinner, during pregnancy, or when you're not eating enough overall. What you want to cut is eating that feels automatic, worsens reflux or sleep, or keeps clashing with your intentions. Daytime eating is a good first place to look for the cause.
 
 ## What to do
 
-Check daytime nourishment first. Skipping breakfast is not inherently a problem, but arriving at dinner after many hours with too little food can make evening hunger harder to manage. Build lunch and dinner with protein, fiber-rich carbohydrate, produce, and enough total energy.
+Check daytime eating first. Skipping breakfast isn't a problem in itself, but reaching dinner after many hours on too little food makes evening hunger harder to handle. Build lunch and dinner around protein, fiber-rich carbohydrate, produce, and enough total energy.
 
 Then change the evening environment:
 
 - Decide whether a planned snack is allowed and what it will be.
-- Put the kitchen “away” after the final eating occasion: store food, clean up, dim lights, and brush teeth.
-- Keep trigger foods out of immediate view and portion them before sitting down.
-- Separate eating from television, gaming, or scrolling when those activities reliably cue snacking.
-- Create a transition after work or caregiving—tea, shower, walk, stretching, or another activity—so food is not the only signal that the day is over.
+- Put the kitchen “away” after the last eating occasion: store food, clean up, dim the lights, and brush your teeth.
+- Keep trigger foods out of sight and portion them before you sit down.
+- Separate eating from television, gaming, or scrolling when those reliably cue snacking.
+- Build a transition after work or caregiving, such as tea, a shower, a walk, or stretching, so food isn't the only signal that the day is over.
 
-If reflux is part of the problem, leave about three hours between the last substantial meal and lying down when feasible.
+If reflux is part of the problem, leave about three hours between your last substantial meal and lying down when you can.
 
 ## A simple plan
 
-For one week, record dinner time, bedtime, hunger before the snack, and what was happening. Classify each episode as physical hunger, habit, emotion, social eating, or “not sure.”
+For one week, record dinner time, bedtime, hunger before the snack, and what was going on. Label each episode as physical hunger, habit, emotion, social eating, or “not sure.”
 
-For the next two weeks, strengthen the most likely weak point. If hungry, add a planned snack such as yogurt and fruit, cereal and milk, or toast with nut butter. If it is habit, change the location or activity. If dinner is too early, move it later or add a deliberate snack. If bedtime is drifting later, work on the sleep schedule as part of the food plan.
+For the next two weeks, shore up the likeliest weak point. If you're hungry, add a planned snack such as yogurt and fruit, cereal and milk, or toast with nut butter. If it's habit, change the location or activity. If dinner is too early, move it later or add a deliberate snack. If bedtime keeps drifting later, work on the sleep schedule as part of the food plan.
 
-Aim for fewer unwanted episodes, not an absolute kitchen curfew.
+Aim for fewer unwanted episodes, not a hard kitchen curfew.
 
 ## How to know it is working
 
-Count nights with unwanted snacking and rate pre-snack hunger. Track reflux, sleep disruption, morning appetite, and whether the plan causes preoccupation. A planned snack that meets genuine hunger and does not cause problems is not a failed night.
+Count nights with unwanted snacking and rate hunger before each snack. Track reflux, sleep disruption, morning appetite, and whether the plan makes you preoccupied with food. A planned snack that meets real hunger and causes no problems is not a failed night.
 
 ## What to expect
 
-Hunger-related episodes may improve when earlier meals change. Habit-linked episodes can take longer because the cue remains. Stressful or sleep-deprived nights may still be harder. Weight change is not guaranteed; it depends on the broader energy pattern and what replaces the snack.
+Hunger-driven episodes may improve once earlier meals change. Habit-driven ones can take longer because the cue is still there. Stressful or sleep-deprived nights may still be harder. Weight change isn't guaranteed; it depends on your overall energy pattern and what replaces the snack.
 
 ## If you get stuck
 
-If the urge is intense every night, increase daytime intake before adding more rules. If you wake from sleep to eat or have little memory of eating, seek clinical assessment. If cannabis, alcohol, or a medication increases appetite, include it in the plan. If a strict cutoff creates bingeing before the cutoff, remove the rule and use regular eating plus professional support.
+If the urge is intense every night, eat more during the day before adding rules. If you wake from sleep to eat or barely remember eating, get a clinical assessment. If cannabis, alcohol, or a medication boosts your appetite, factor it into the plan. If a strict cutoff leads to bingeing before the cutoff, drop the rule and use regular eating plus professional support.
 
 ## A quick note
 
-Diabetes medicines, long endurance sessions, pregnancy, eating-disorder recovery, and unintentional weight loss can make an evening snack useful or necessary. Night eating with marked distress, recurrent loss of control, or sleep-related eating warrants evaluation rather than a stricter diet.
+Diabetes medicines, long endurance sessions, pregnancy, eating-disorder recovery, and unintentional weight loss can make an evening snack useful or necessary. Night eating with marked distress, recurrent loss of control, or sleep-related eating calls for evaluation, not a stricter diet.
 
 ## Sources
 

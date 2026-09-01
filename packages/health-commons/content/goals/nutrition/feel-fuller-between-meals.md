@@ -39,44 +39,44 @@ safety:
     - Hunger is a normal signal; the goal is predictable satisfaction, not suppressing appetite all day.
 ---
 
-Meals tend to be more satisfying when they contain enough total food plus protein, fiber-rich carbohydrate, water-rich foods, and some fat. No single “satiety food” works for everyone, and feeling hungry again is not failure. The aim is to move from abrupt, distracting hunger to a pattern that fits your schedule and lets you make deliberate food choices.
+Meals satisfy longer when they contain enough total food plus protein, fiber-rich carbohydrate, water-rich foods, and some fat. No single “satiety food” works for everyone, and getting hungry again is not failure. The aim is hunger that arrives predictably, fits your schedule, and leaves room for deliberate choices.
 
 ## What to do
 
-Review the meal that leaves you hungry soonest. Common gaps include a low-protein breakfast, a salad without enough energy, liquid calories that do not satisfy, or a meal made almost entirely of refined carbohydrate.
+Start with the meal that leaves you hungry soonest. Common gaps: a low-protein breakfast, a salad without enough energy, liquid calories that do not satisfy, or a meal that is almost all refined carbohydrate.
 
 Use a four-part structure:
 
 - **Protein:** eggs, yogurt, fish, poultry, tofu, tempeh, beans, lentils, meat, or another suitable source.
 - **Fiber-rich carbohydrate or produce:** oats, potatoes, whole grains, beans, fruit, or vegetables.
 - **Some fat:** nuts, seeds, avocado, olive oil, cheese, or another source that fits the meal.
-- **Enough volume and energy:** increase the meal rather than expecting one ingredient to erase hunger.
+- **Enough volume and energy:** make the meal bigger instead of expecting one ingredient to erase hunger.
 
-Solid and minimally processed foods often satisfy better than sweet drinks, but convenience foods can still be assembled into a filling meal.
+Solid, minimally processed foods usually satisfy better than sweet drinks, but convenience foods can still be assembled into a filling meal.
 
 ## A simple plan
 
-Choose one weak meal and test a stronger version for seven days. Add 20–30 grams of protein if appropriate, a fiber-rich food, and enough carbohydrate or fat to make the meal complete. For example, add Greek yogurt and fruit to cereal; beans and rice to a salad; or eggs and whole-grain toast to a light breakfast.
+Pick one weak meal and test a stronger version for seven days. Add 20–30 grams of protein if appropriate, a fiber-rich food, and enough carbohydrate or fat to complete the meal: Greek yogurt and fruit on cereal, beans and rice in a salad, or eggs and whole-grain toast with a light breakfast.
 
-Rate fullness after the meal and hunger two to four hours later. If you still become extremely hungry, increase the portion or add a planned snack. A snack with protein plus carbohydrate—such as yogurt and fruit, cheese and crackers, or nuts and a banana—usually lasts longer than a small sweet alone.
+Rate fullness after the meal and hunger two to four hours later. If you still get extremely hungry, increase the portion or add a planned snack. A snack with protein plus carbohydrate, such as yogurt and fruit, cheese and crackers, or nuts and a banana, usually lasts longer than a small sweet alone.
 
-Repeat the process with another meal only after the first change is clear.
+Move to another meal only after the first change is clear.
 
 ## How to know it is working
 
-Use a simple 0–10 hunger rating before eating and a few hours later, not continuous monitoring. Track the time until comfortable hunger returns, concentration, energy, and unplanned snack episodes. A meal is successful if it supports the next part of your day, not if it keeps you full for an arbitrary number of hours.
+Use a simple 0–10 hunger rating before eating and a few hours later; skip continuous monitoring. Track how long comfortable hunger takes to return, plus concentration, energy, and unplanned snacks. Judge a meal by whether it carries you through the next part of your day, not by an arbitrary number of hours.
 
 ## What to expect
 
-You can often tell within a few meals whether the structure helps. Fiber increases may need time for digestion to adapt. Protein can improve satiety for some people, but effects vary and should not justify extreme targets. Sleep loss, stress, high activity, menstrual-cycle changes, and medication can alter hunger even when meals are well built.
+You can usually tell within a few meals whether the structure helps. Digestion may need time to adapt to more fiber. Protein improves satiety for some people, but effects vary and do not justify extreme targets. Sleep loss, stress, high activity, menstrual-cycle changes, and medication can change hunger even when meals are well built.
 
 ## If you get stuck
 
-If adding vegetables makes the meal bulky but not satisfying, add energy and protein. If breakfast is difficult, use a drinkable meal with meaningful protein and energy rather than coffee alone. If hunger spikes during a weight-loss plan, the deficit may be too aggressive. If you never feel hunger but are losing weight or under-eating, use a schedule rather than waiting for appetite.
+If adding vegetables makes the meal bulky but not satisfying, add energy and protein. If breakfast is hard, use a drinkable meal with real protein and energy rather than coffee alone. If hunger spikes during a weight-loss plan, the deficit may be too aggressive. If you never feel hungry but are losing weight or under-eating, eat on a schedule instead of waiting for appetite.
 
 ## A quick note
 
-Persistent extreme hunger can occur with poorly controlled diabetes, thyroid disease, medication changes, sleep loss, or inadequate intake. Seek care when hunger comes with excessive thirst, frequent urination, rapid weight change, faintness, or other concerning symptoms. Do not use appetite-suppressing supplements as a shortcut.
+Persistent extreme hunger can come with poorly controlled diabetes, thyroid disease, medication changes, sleep loss, or not eating enough. Seek care when hunger comes with excessive thirst, frequent urination, rapid weight change, faintness, or other concerning symptoms. Do not use appetite-suppressing supplements as a shortcut.
 
 ## Sources
 

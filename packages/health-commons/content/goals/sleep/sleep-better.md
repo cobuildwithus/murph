@@ -42,46 +42,46 @@ safety:
   cautionLevel: low
 ---
 
-Better sleep is not one number. It can mean falling asleep without a long struggle, staying asleep, getting enough total sleep, waking at a useful time, or feeling more alert during the day. Start by choosing the part that is actually failing. A focused change is more likely to help than adopting ten “perfect sleep” habits at once.
+Better sleep can mean falling asleep faster, staying asleep, getting enough total sleep, waking at a useful time, or feeling more alert by day. Pick the part that is actually failing. One focused change helps more than ten “perfect sleep” habits at once.
 
 ## What to do
 
-- **Name the main problem.** Is sleep too short, too late, broken, hard to start, or simply unrefreshing? Choose one primary outcome for the next two weeks.
-- **Protect enough opportunity.** Most adults need at least seven hours of sleep regularly. Work backward from a realistic wake time and reserve a window that allows for that need.
-- **Anchor the day.** Keep wake time reasonably steady, get daylight after waking, move regularly, and avoid letting weekends completely reverse the weekday schedule.
-- **Make the evening easier to leave.** Set a work and scrolling stop point. Dim the environment and choose a short repeatable transition such as washing up, reading, stretching, or preparing tomorrow's essentials.
-- **Keep major disruptors visible.** Late caffeine, alcohol, large meals, pain, congestion, hot flashes, medications, and a noisy or hot room can each matter. Do not assume all of them are your problem.
-- **Treat the bed as a cue for sleep.** If you are awake and increasingly frustrated, a quiet dim reset outside bed can be more useful than fighting for sleep there.
+- **Name the main problem.** Too short, too late, broken, hard to start, or just unrefreshing? Pick one outcome for the next two weeks.
+- **Protect enough opportunity.** Most adults need at least seven hours of sleep regularly. Work backward from a realistic wake time and reserve that much.
+- **Anchor the day.** Keep wake time fairly steady, get daylight after waking, move regularly, and don't let weekends reverse the weekday schedule.
+- **Make the evening easier to leave.** Set a stop point for work and scrolling, dim the lights, and pick a short repeatable transition: washing up, reading, stretching, or setting out tomorrow's essentials.
+- **Keep the major disruptors visible.** Late caffeine, alcohol, large meals, pain, congestion, hot flashes, medications, and a noisy or hot room can each matter. Don't assume they all apply to you.
+- **Treat the bed as a cue for sleep.** If you're awake and getting frustrated, a quiet, dim reset out of bed beats fighting for sleep there.
 
 ## A simple plan
 
-For the first three nights, change nothing. Record approximate bedtime, final wake time, the biggest sleep problem, and how functional you felt the next day. Avoid reconstructing every awakening or chasing perfect accuracy.
+For the first three nights, change nothing. Record rough bedtime, final wake time, the biggest sleep problem, and how functional you felt the next day. Don't chase perfect accuracy.
 
 Then choose one lever for eleven nights:
 
 1. If sleep is too short, add 30 minutes of protected opportunity.
 2. If timing is erratic, anchor wake time within about an hour.
-3. If falling asleep is the problem, create a clear work cutoff and use a consistent low-stimulation reset when stuck awake.
-4. If awakenings are the problem, address the most obvious trigger—noise, reflux, alcohol, pain, temperature, or breathing symptoms.
-5. If sleep is long enough but unrefreshing, prioritize evaluation of snoring, breathing pauses, restless legs, medication effects, and daytime sleepiness.
+3. If falling asleep is the problem, set a clear work cutoff and use one low-stimulation reset when stuck awake.
+4. If awakenings are the problem, address the most obvious trigger: noise, reflux, alcohol, pain, temperature, or breathing symptoms.
+5. If sleep is long enough but unrefreshing, get snoring, breathing pauses, restless legs, medication effects, and daytime sleepiness evaluated.
 
-Keep the change small enough to survive a busy week. A bedtime routine that takes five minutes and happens is more valuable than a 60-minute routine you abandon.
+Keep the change small enough to survive a busy week. A five-minute routine that happens beats a 60-minute one you abandon.
 
 ## How to know it is working
 
-Choose one night signal and one day signal. A night signal might be estimated time to fall asleep, number of long awakenings, or typical sleep duration. A day signal might be morning restfulness, afternoon sleepiness, mood, or ability to concentrate. Review the weekly pattern, not one night.
+Pick one night signal and one day signal. Night: time to fall asleep, long awakenings, or typical duration. Day: morning restfulness, afternoon sleepiness, mood, or concentration. Judge the weekly pattern, not one night.
 
-Wearables can help with timing and trends, but their sleep-stage estimates vary by device and person. If a score rises while you feel worse, investigate the lived outcome. If the score falls after a normal late night but your week is otherwise good, you do not need to repair it.
+Wearables help with timing and trends, but their sleep-stage estimates vary by device and person. If a score rises while you feel worse, trust how you feel. If it drops after a normal late night but the week is otherwise good, leave it alone.
 
 ## If you get stuck
 
-When the first change does not help, ask whether you chose the right problem. More time in bed can worsen insomnia if it becomes more awake time. An earlier bedtime can fail when the body clock is not ready. A beautiful bedroom cannot treat sleep apnea. Change the hypothesis, not just the intensity.
+When the first change doesn't help, ask whether you picked the right problem. More time in bed can worsen insomnia if it becomes more awake time. An earlier bedtime fails when the body clock isn't ready. A beautiful bedroom can't treat sleep apnea. Change the hypothesis, not just the intensity.
 
-Persistent insomnia is best addressed with cognitive behavioral therapy for insomnia, a structured treatment that includes more than basic sleep hygiene. Loud snoring, gasping, repeated leg discomfort, severe nightmares, chronic pain, mood symptoms, and medication effects each deserve their own path.
+Persistent insomnia is best treated with cognitive behavioral therapy for insomnia, which goes well beyond sleep hygiene. Loud snoring, gasping, repeated leg discomfort, severe nightmares, chronic pain, mood symptoms, and medication effects each need their own path.
 
 ## A quick note
 
-Get prompt help for dangerous daytime sleepiness, especially while driving. Seek clinical care for breathing pauses, chest symptoms, major mood changes, or sleep problems that remain frequent and impairing despite a reasonable self-care attempt.
+Get prompt help for dangerous daytime sleepiness, especially while driving. See a clinician for breathing pauses, chest symptoms, major mood changes, or sleep problems that stay frequent and impairing despite a reasonable self-care attempt.
 
 ## Sources
 

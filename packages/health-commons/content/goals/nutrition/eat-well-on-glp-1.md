@@ -49,44 +49,44 @@ safety:
     - Do not change or stop prescription medication based on this page alone.
 ---
 
-GLP-1–based medicines can reduce appetite and slow stomach emptying, which helps many people with diabetes or obesity but can also make it harder to eat enough protein, fiber, fluids, and micronutrient-rich food. The nutrition goal is not to exploit the lowest possible appetite. It is to support the medication’s purpose while protecting muscle, strength, hydration, and a tolerable relationship with food.
+GLP-1 medicines reduce appetite and slow stomach emptying. That helps many people with diabetes or obesity, but it can make it hard to eat enough protein, fiber, fluids, and micronutrient-rich food. The aim is to let the medication work while protecting muscle, strength, hydration, and a workable relationship with food, not to eat as little as possible.
 
 ## What to do
 
 When appetite is small, eat the most useful parts of the meal first:
 
-- Start with a protein source such as eggs, yogurt, fish, poultry, tofu, beans, cottage cheese, or a shake when solid food is difficult.
-- Include fruit, vegetables, whole grains, or legumes in portions your digestion tolerates.
-- Drink regularly between meals; large drinks with meals may worsen fullness for some people.
-- Use smaller meals and stop when comfortably full. Large, high-fat, fried, or very spicy meals can worsen nausea or reflux in some people.
-- Strength train at least twice weekly if medically appropriate, and maintain ordinary walking or activity.
-- Keep the prescriber informed about side effects, very rapid loss, inability to eat, and changes in diabetes readings.
+- Start with protein: eggs, yogurt, fish, poultry, tofu, beans, cottage cheese, or a shake when solid food is hard.
+- Add fruit, vegetables, whole grains, or legumes in portions your digestion tolerates.
+- Drink regularly between meals. Large drinks with meals can worsen fullness for some people.
+- Eat smaller meals and stop when comfortably full. Large, high-fat, fried, or very spicy meals can worsen nausea or reflux for some people.
+- Strength train at least twice a week if medically appropriate, and keep up ordinary walking and activity.
+- Tell the prescriber about side effects, very rapid loss, inability to eat, and changes in diabetes readings.
 
-Protein needs are individual. A blanket very-high-protein target can crowd out fiber or worsen symptoms and may be inappropriate with kidney disease.
+Protein needs are individual, and a blanket very-high-protein target can crowd out fiber, worsen symptoms, or be inappropriate with kidney disease.
 
 ## A simple plan
 
-Choose three small protein-centered meals and one backup. Breakfast might be yogurt with fruit; lunch, soup with beans or chicken; dinner, fish or tofu with rice and cooked vegetables. The backup might be a smoothie, fortified milk, or a balanced ready-to-drink option.
+Pick three small protein-centered meals and one backup: yogurt with fruit; soup with beans or chicken; fish or tofu with rice and cooked vegetables; and a smoothie, fortified milk, or balanced ready-to-drink option as the backup.
 
-For two weeks, track meal completion, protein sources, fluids, bowel pattern, nausea, vomiting, reflux, and strength training. Adjust texture and portion size before removing whole food groups. Increase fiber gradually and pair it with fluid; constipation may need a specific plan.
+For two weeks, track meal completion, protein sources, fluids, bowel pattern, nausea, vomiting, reflux, and strength training. Change texture and portion size before dropping whole food groups. Raise fiber gradually and pair it with fluid; constipation may need its own plan.
 
-Schedule a medication review around dose increases or persistent symptoms. If diabetes medicines are also used, ask how lower intake and weight loss affect hypoglycemia risk and monitoring.
+Book a medication review around dose increases or persistent symptoms. If you also take diabetes medicines, ask how lower intake and weight loss affect hypoglycemia risk and monitoring.
 
 ## How to know it is working
 
-The plan is working when weight moves at an appropriate rate, you can eat and drink enough, strength and daily function remain supported, and side effects are manageable. Track body weight as a multiweek trend. Use a few repeatable strength markers—chair stands, a gym lift, or carrying tasks—rather than relying only on a home body-fat scale.
+Success looks like weight moving at an appropriate rate, eating and drinking enough, strength and daily function holding up, and manageable side effects. Track weight as a multiweek trend. For strength, use a few repeatable markers (chair stands, a gym lift, carrying tasks) rather than a home body-fat scale alone.
 
 ## What to expect
 
-Appetite and symptoms can change after starting or increasing a dose. Early weight loss includes water and lean tissue as well as fat; some muscle loss occurs with most substantial weight loss. Resistance training and adequate protein help reduce, but cannot guarantee elimination of, lean-mass loss. Weight regain is common after stopping treatment, so discontinuation needs a maintenance plan.
+Appetite and symptoms can change after you start or raise a dose. Early weight loss includes water and lean tissue as well as fat, and most substantial weight loss includes some muscle. Resistance training and enough protein reduce lean-mass loss but cannot guarantee to prevent it. Weight regain is common after stopping treatment, so stopping needs a maintenance plan.
 
 ## If you get stuck
 
-If nausea limits intake, use smaller, lower-fat meals and bland tolerated foods, and contact the prescriber rather than simply skipping food for days. If constipation develops, review fluid, activity, fiber pace, and medication options. If you cannot hit a large protein target, prioritize a tolerable protein source at each eating occasion. If food tracking adds distress, use a short checklist rather than calories and macros.
+If nausea limits intake, use smaller, lower-fat, bland meals you tolerate, and contact the prescriber rather than skipping food for days. If constipation develops, review fluid, activity, fiber pace, and medication options. If a large protein target is out of reach, aim for a tolerable protein source at each eating occasion. If food tracking adds distress, use a short checklist instead of calories and macros.
 
 ## A quick note
 
-Severe or persistent abdominal pain, especially with vomiting, needs prompt assessment. Repeated vomiting, very dark urine, faintness, or inability to drink can signal dehydration. Follow the medication’s approved warnings and your prescriber’s instructions. Pregnancy, planned pregnancy, eating disorders, advanced kidney disease, and complex diabetes treatment require individualized care.
+Severe or persistent abdominal pain, especially with vomiting, needs prompt assessment. Repeated vomiting, very dark urine, faintness, or being unable to drink can signal dehydration. Follow the medication’s approved warnings and your prescriber’s instructions. Pregnancy, planned pregnancy, eating disorders, advanced kidney disease, and complex diabetes treatment need individualized care.
 
 ## Sources
 
