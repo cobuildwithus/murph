@@ -9,7 +9,9 @@ on:
 
 # This workflow always executes trusted default-branch code. It classifies the
 # exact PR head before entering the protected environment and never checks out
-# pull-request code on a runner that can reach the private repository.
+# pull-request code on a runner that can reach the private repository. The
+# credentialed controller resolves private main before dispatch and
+# accepts success only while that exact private head remains current.
 permissions:
   contents: read
   pull-requests: read
@@ -111,7 +113,7 @@ jobs:
           permission-actions: write
           permission-contents: read
 
-      - name: Dispatch exact private reader matrix
+      - name: Dispatch trusted private main reader matrix
         env:
           EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
@@ -123,7 +125,6 @@ jobs:
           node scripts/hosted-orchestration-compatibility.mjs run
           --sha "${PUBLIC_SHA}"
           --pr-number "${PR_NUMBER}"
-          --policy .github/temporal-compatibility-controller.json
           --fixtures "${TEMPORAL_COMPATIBILITY_PRODUCER_FIXTURES_PATH}"
           --request-id "temporal-${PUBLIC_SHA}-${{ github.run_id }}-${{ github.run_attempt }}"
 

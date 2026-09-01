@@ -1372,10 +1372,18 @@ locally readable.
   and checks out only the public default branch. Candidate code executes only
   in the unprivileged Repo Hygiene job, which uploads one exact-run/head fixture
   artifact. The trusted controller bounds and canonicalizes that artifact as
-  untrusted JSON, pins the reviewed private SHA and SHA-suffixed immutable
-  lightweight tag from `.github/temporal-compatibility-controller.json`, and
-  accepts only the returned exact private run and proof-digest job. Private CI
-  must never check out or import public candidate code. Neither side may restore
+  untrusted JSON. With the repository-scoped App token, it resolves private
+  `main` to an exact commit before dispatch, validates the fixed
+  `public-murph-integration.yml` workflow identity, dispatches only that workflow
+  at `main` with returned run details, and accepts only its returned
+  first-attempt run when the workflow identity and `head_sha` match the
+  pre-resolved private commit. It re-reads private `main` after successful job
+  attestation and fails closed on movement. The public repository stores no
+  private SHA/tag pointer and no private Current/Ramping reader policy; those
+  reader revisions are derived and attested inside private protected CI.
+  Credentialed compatibility and release-admission jobs must never check out or
+  import public candidate code. Unprivileged full-integration jobs may check out
+  the exact public candidate they exercise. Neither side may restore
   candidate-controlled caches beside credentials, read private logs or
   artifacts, expose reader revisions publicly, or accept workflow/check names
   from the candidate.
