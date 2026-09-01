@@ -1859,6 +1859,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     }
     const checkpointMetadata = {
       attemptId: input.request.attemptId,
+      currentSnapshotRef: readHostedWorkspaceCurrentSnapshotRef(activeWorkspace),
       expectedWorkspaceVersion: activeWorkspace?.version ?? input.request.workspaceVersion,
       inboxMediaRetentionWakeAt: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
       leaseGeneration: input.request.leaseGeneration,
@@ -9104,4 +9105,10 @@ function hasHostedRuntimeEnvValue(
   key: string,
 ): boolean {
   return typeof env[key] === "string" && env[key].trim().length > 0;
+}
+
+function readHostedWorkspaceCurrentSnapshotRef(
+  workspace: HostedWorkspaceState | null,
+): HostedWorkspaceState["snapshotRef"] {
+  return workspace?.snapshotRef ?? null;
 }

@@ -299,7 +299,8 @@ describe("hosted workspace runtime entrypoint", () => {
   });
 
   test("retains the default workspace read and restore path without prepared work", async () => {
-    const fixture = await createWorkspaceRestoreFixture("snapshot-default-restore-path");
+    const snapshotId = "snapshot-default-restore-path";
+    const fixture = await createWorkspaceRestoreFixture(snapshotId);
 
     try {
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(fixture.job, {
@@ -323,6 +324,12 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(fixture.events.filter((event) => event === "workspace.read").length, 1);
       assert.equal(fixture.events.filter((event) => event === "workspace.restore").length, 1);
       assert.ok(fixture.events.includes("mailbox.fetch"));
+      const checkpointBuilderInput =
+        mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mock.calls.at(-1)?.[0];
+      assert.deepEqual(
+        checkpointBuilderInput?.metadata.currentSnapshotRef,
+        createWorkspaceSnapshotV2Ref(snapshotId),
+      );
     } finally {
       fixture.mailboxRelease.resolve();
       await removeTempRoot(fixture.vaultRoot);

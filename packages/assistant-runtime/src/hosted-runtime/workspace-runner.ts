@@ -132,6 +132,8 @@ export interface HostedWorkspaceCheckpointMetadata {
 
 export interface HostedWorkspaceSnapshotCheckpointMetadata {
   attemptId: string;
+  // Legacy materialization input only; Web remains checkpoint/CAS authority.
+  currentSnapshotRef?: HostedWorkspaceCheckpointRequest["snapshotRef"];
   expectedWorkspaceVersion: string;
   inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
@@ -166,6 +168,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
       reason: "idle_shutdown";
     }
   ) & {
+    currentSnapshotRef?: HostedWorkspaceCheckpointRequest["snapshotRef"];
     expectedWorkspaceVersion?: string;
     handledConversationFrontierSelected?: boolean;
     handledConversationMailboxItemIds?: string[];
@@ -551,6 +554,7 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
     if (!response.checkpointed) {
       return;
     }
+    input.metadata.currentSnapshotRef = response.workspace.snapshotRef;
     input.metadata.expectedWorkspaceVersion = response.workspace.version;
     input.metadata.inboxMediaRetentionWakeAt =
       response.workspace.inboxMediaRetentionWakeAt ?? null;
@@ -567,6 +571,9 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
     requestInput: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
   ): HostedWorkspaceSnapshotCheckpointRequestBuilderInput => ({
     ...requestInput,
+    ...(Object.hasOwn(input.metadata, "currentSnapshotRef")
+      ? { currentSnapshotRef: input.metadata.currentSnapshotRef ?? null }
+      : {}),
     ...resolveHostedWorkspaceCheckpointProgressProjection({
       input: requestInput,
       metadata: input.metadata,
