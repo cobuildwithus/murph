@@ -1448,9 +1448,8 @@ locally readable.
   source refs and SHAs live in `.github/native-hosted-e2e-controller.json` so a
   source rotation must pass ordinary protected-main review. Each controller
   proves the policy tag is an immutable lightweight tag resolving to the exact
-  policy SHA and dispatches the exact current production alias SHA. An alias
-  behind scheduled `main` is accepted only when the existing Vercel classifier
-  proves every intervening path is an eligible dated release note.
+  policy SHA and dispatches only when the current production alias equals the
+  exact current `main` SHA. Any alias lag fails closed.
   Android's public controller may hold only Actions write and Contents read in
   the private repository. It mints repository-scoped installation tokens just
   in time, refreshes them before expiry, and removes the App private key from

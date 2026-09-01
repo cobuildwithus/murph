@@ -11,6 +11,9 @@ import {
   TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY,
   TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
   TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+  TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS,
+  TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
+  TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS,
   buildAttestationJobName,
   buildDispatchInputs,
   buildReaderJobName,
@@ -526,19 +529,16 @@ test("attestation rejects a producer digest, public SHA, or request-id mismatch"
   }), /does not bind the requested proof/u);
 });
 
-test("job pagination fails closed on incomplete or changing totals", () => {
-  assert.deepEqual(inspectJobPage({ jobs: proofJobs(), total_count: 4 }, {
-    expectedTotal: null,
-    page: 1,
-  }), { jobs: proofJobs(), total: 4 });
-  assert.throws(() => inspectJobPage({ jobs: [], total_count: 4 }, {
-    expectedTotal: null,
-    page: 1,
-  }), /pagination is incomplete/u);
-  assert.throws(() => inspectJobPage({ jobs: [], total_count: 4 }, {
-    expectedTotal: 3,
-    page: 2,
-  }), /count changed/u);
+test("job proof is one bounded page and fails closed on incomplete totals", () => {
+  assert.deepEqual(inspectJobPage({ jobs: proofJobs(), total_count: 4 }), proofJobs());
+  assert.throws(
+    () => inspectJobPage({ jobs: [], total_count: 4 }),
+    /pagination is incomplete/u,
+  );
+  assert.throws(
+    () => inspectJobPage({ jobs: [], total_count: 101 }),
+    /malformed/u,
+  );
 });
 
 test("controller dispatches main only after exact private-head, workflow, and public-head proof", async () => {
@@ -605,6 +605,55 @@ test("controller dispatches main only after exact private-head, workflow, and pu
       "main",
     ]);
   }));
+});
+
+test("controller finalizes a last-admitted success before the private token safety boundary", async () => {
+  let nowMs = 0;
+  let dispatchFinishedAt = null;
+  let privateMainReads = 0;
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+    nowMs += 30_000;
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      privateMainReads += 1;
+      return jsonResponse(privateMainRef());
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+    if (url.endsWith("/dispatches")) {
+      dispatchFinishedAt = nowMs;
+      return jsonResponse({ workflow_run_id: RUN_ID });
+    }
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+      assert.notEqual(dispatchFinishedAt, null);
+      nowMs = dispatchFinishedAt + TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS;
+      return jsonResponse(privateRun());
+    }
+    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
+      return jsonResponse({ jobs: proofJobs(), total_count: 4 });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    const proof = await runTemporalCompatibility(compatibilityArgs({
+      now: () => nowMs,
+      sleepFn: async (duration) => {
+        nowMs += duration;
+      },
+    }));
+    assert.equal(proof.readerCount, 3);
+  }));
+  assert.equal(privateMainReads, 2);
+  assert.ok(nowMs < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
+  assert.ok(
+    TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - nowMs
+      > TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
+  );
 });
 
 test("deployment controller binds both rereads to exact public main", async () => {
@@ -892,12 +941,11 @@ test("controller cancels only its accepted run when status polling becomes uncer
 
 test("controller times out and cancels only its accepted run", async () => {
   const controlUrls = [];
-  const originalNow = Date.now;
-  let deadlineReached = false;
+  let nowMs = 0;
+  let forceCancelFinishedAt = null;
   let runReads = 0;
-  try {
-    Date.now = () => deadlineReached ? 1_000_000_000_000 : 0;
-    await withCompatibilityEnv(async () => withFetch(async (url) => {
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+      nowMs += 30_000;
       if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
         return jsonResponse(privateMainRef());
       }
@@ -915,27 +963,34 @@ test("controller times out and cancels only its accepted run", async () => {
         controlUrls.push(url);
         return new Response(null, { status: 202 });
       }
+      if (url.endsWith(`/actions/runs/${RUN_ID}/force-cancel`)) {
+        controlUrls.push(url);
+        forceCancelFinishedAt = nowMs;
+        return new Response(null, { status: 202 });
+      }
       if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
         runReads += 1;
-        return jsonResponse(privateRun(runReads === 1
-          ? { conclusion: null, status: "in_progress" }
-          : { conclusion: "cancelled", status: "completed" }));
+        const forceCancellationSettled = forceCancelFinishedAt !== null
+          && nowMs - forceCancelFinishedAt >= 2 * 60_000;
+        return jsonResponse(privateRun(forceCancellationSettled
+          ? { conclusion: "cancelled", status: "completed" }
+          : { conclusion: null, status: "in_progress" }));
       }
       throw new Error(`unexpected URL ${url}`);
     }, async () => {
       await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
-        sleepFn: async () => {
-          deadlineReached = true;
+        now: () => nowMs,
+        sleepFn: async (duration) => {
+          nowMs += duration;
         },
       })), /run timed out/u);
     }));
-  } finally {
-    Date.now = originalNow;
-  }
   assert.deepEqual(controlUrls, [
     `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
+    `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/force-cancel`,
   ]);
-  assert.equal(runReads, 2);
+  assert.ok(runReads > 2);
+  assert.ok(nowMs < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
 });
 
 test("missing dispatch identity never issues a broad or guessed cancellation", async () => {
@@ -967,32 +1022,41 @@ test("missing dispatch identity never issues a broad or guessed cancellation", a
 
 test("accepted-run cancellation force-cancels only after ordinary cancellation stays nonterminal", async () => {
   const controls = [];
-  let runReads = 0;
+  let nowMs = 0;
+  let forceCancelFinishedAt = null;
   await withFetch(async (url) => {
+    nowMs += 30_000;
     if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
       controls.push("cancel");
       return new Response(null, { status: 202 });
     }
     if (url.endsWith(`/actions/runs/${RUN_ID}/force-cancel`)) {
       controls.push("force-cancel");
+      forceCancelFinishedAt = nowMs;
       return new Response(null, { status: 202 });
     }
     if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
-      runReads += 1;
-      return jsonResponse(privateRun(runReads <= 8
-        ? { conclusion: null, status: "in_progress" }
-        : { conclusion: "cancelled", status: "completed" }));
+      const forceCancellationSettled = forceCancelFinishedAt !== null
+        && nowMs - forceCancelFinishedAt >= 2 * 60_000;
+      return jsonResponse(privateRun(forceCancellationSettled
+        ? { conclusion: "cancelled", status: "completed" }
+        : { conclusion: null, status: "in_progress" }));
     }
     throw new Error(`unexpected URL ${url}`);
   }, async () => {
     await cancelAcceptedRun({
       privateSha: PRIVATE_SHA,
+      now: () => nowMs,
       runId: RUN_ID,
-      sleepFn: async () => undefined,
+      sleepFn: async (duration) => {
+        nowMs += duration;
+      },
       token: "private-token",
       workflowId: WORKFLOW_ID,
     });
     assert.deepEqual(controls, ["cancel", "force-cancel"]);
+    assert.equal(forceCancelFinishedAt, 3 * 60_000);
+    assert.equal(nowMs, 5 * 60_000);
   });
 });
 
@@ -1129,6 +1193,12 @@ test("Web production admission runs only for exact public main", async () => {
   assert.match(workflow, /--sha "\$\{GITHUB_SHA\}"/u);
   assert.match(workflow, /permission-actions: write/u);
   assert.match(workflow, /repositories: murph-cloud/u);
+  const timeoutMinutes = Number(/timeout-minutes: (\d+)/u.exec(admissionJob)?.[1]);
+  assert.ok(Number.isSafeInteger(timeoutMinutes));
+  assert.ok(
+    timeoutMinutes * 60_000
+      > 15 * 60_000 + TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS,
+  );
   assert.doesNotMatch(workflow, /pull_request:/u);
   assert.doesNotMatch(admissionJob, /\n    needs:/u);
   assert.doesNotMatch(workflow, /\n  producer:|upload-artifact|download-artifact/u);

@@ -13,8 +13,10 @@ export const TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH =
 
 const GITHUB_API_VERSION = "2026-03-10";
 const HTTP_TIMEOUT_MS = 30_000;
-const PRIVATE_RUN_TIMEOUT_MS = 60 * 60_000;
+export const TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS = 58 * 60_000;
+export const TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS = 40 * 60_000;
 const CANCEL_GRACE_MS = 2 * 60_000;
+export const TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS = 6 * 60_000;
 const POLL_MS = 15_000;
 const PRIVATE_RUN_VISIBILITY_READS = 5;
 const MAX_CHANGED_FILES = 3_000;
@@ -394,41 +396,28 @@ export function inspectAttestationJobs(jobs, {
   return { digest, proofDigest, readerCount: readers.length };
 }
 
-export function inspectJobPage(raw, { expectedTotal, page }) {
+export function inspectJobPage(raw) {
   assertRecord(raw, "private compatibility job page");
-  if (!Number.isSafeInteger(raw.total_count) || raw.total_count < 0 || !Array.isArray(raw.jobs)) {
+  if (
+    !Number.isSafeInteger(raw.total_count)
+    || raw.total_count < 0
+    || raw.total_count > PAGE_SIZE
+    || !Array.isArray(raw.jobs)
+  ) {
     throw new Error("Private compatibility job page is malformed.");
   }
-  const total = expectedTotal === null ? raw.total_count : expectedTotal;
-  if (raw.total_count !== total) {
-    throw new Error("Private compatibility job count changed during pagination.");
-  }
-  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const expectedLength = page === lastPage ? total - PAGE_SIZE * (page - 1) : PAGE_SIZE;
-  if (raw.jobs.length !== expectedLength) {
+  if (raw.jobs.length !== raw.total_count) {
     throw new Error("Private compatibility job pagination is incomplete.");
   }
-  return { jobs: raw.jobs, total };
+  return raw.jobs;
 }
 
 export async function listAllRunJobs({ runId, token }) {
-  const jobs = [];
-  let total = null;
-  let pages = 1;
-  for (let page = 1; page <= pages; page += 1) {
-    const inspected = inspectJobPage(await fetchJson(
-      `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}/jobs?filter=latest&per_page=${PAGE_SIZE}&page=${page}`,
-      { headers: githubHeaders(token) },
-      "private compatibility job lookup",
-    ), { expectedTotal: total, page });
-    total = inspected.total;
-    pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    jobs.push(...inspected.jobs);
-  }
-  if (jobs.length !== total) {
-    throw new Error("Private compatibility jobs did not match the declared count.");
-  }
-  return jobs;
+  return inspectJobPage(await fetchJson(
+    `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}/jobs?filter=latest&per_page=${PAGE_SIZE}&page=1`,
+    { headers: githubHeaders(token) },
+    "private compatibility job lookup",
+  ));
 }
 
 async function resolvePrivateMain({ encodedPrivateRepository, token }) {
@@ -450,6 +439,7 @@ export async function runTemporalCompatibility({
   prNumber,
   requestId,
   sleepFn = sleep,
+  now = Date.now,
 }) {
   assertRepository(publicRepository, "public repository");
   assertSafeId(expectedBaseRef, "expected public base ref", 255, /^[A-Za-z0-9._/-]+$/u);
@@ -460,6 +450,7 @@ export async function runTemporalCompatibility({
   if (prNumber !== null && (!Number.isSafeInteger(prNumber) || prNumber <= 0)) {
     throw new Error("Pull request number must be a positive integer.");
   }
+  const tokenDeadline = now() + TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS;
   const encodedPrivateRepository = encodeRepository(TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY);
   const privateSha = await resolvePrivateMain({
     encodedPrivateRepository,
@@ -496,6 +487,10 @@ export async function runTemporalCompatibility({
   };
   await revalidatePublicTarget();
 
+  if (now() >= tokenDeadline - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS - HTTP_TIMEOUT_MS) {
+    throw new Error("Private GitHub token budget was exhausted before dispatch.");
+  }
+
   const runId = inspectDispatchReceipt(await fetchJson(
     `https://api.github.com/repos/${encodedPrivateRepository}/actions/workflows/${encodeURIComponent(TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW)}/dispatches`,
     {
@@ -513,9 +508,14 @@ export async function runTemporalCompatibility({
   let terminal = false;
   let runVisible = false;
   try {
-    const deadline = Date.now() + PRIVATE_RUN_TIMEOUT_MS;
-    while (Date.now() < deadline) {
+    const deadline = Math.min(
+      now() + TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS,
+      tokenDeadline - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
+    );
+    while (now() < deadline) {
       const run = inspectPrivateRun(await readPrivateRun(runId, privateToken, {
+        deadline,
+        now,
         retryNotFound: !runVisible,
         sleepFn,
       }), {
@@ -547,7 +547,8 @@ export async function runTemporalCompatibility({
         console.log(`::notice::temporal-compatibility result=success readers=${proof.readerCount} digest=${proof.digest}`);
         return proof;
       }
-      await sleepFn(POLL_MS);
+      const remainingMs = deadline - now();
+      if (remainingMs > 0) await sleepFn(Math.min(POLL_MS, remainingMs));
     }
     throw new Error("Private compatibility run timed out.");
   } catch (error) {
@@ -555,6 +556,7 @@ export async function runTemporalCompatibility({
       try {
         await cancelAcceptedRun({
           privateSha,
+          now,
           runId,
           sleepFn,
           token: privateToken,
@@ -573,6 +575,7 @@ export async function runTemporalCompatibility({
 
 export async function cancelAcceptedRun({
   privateSha,
+  now = Date.now,
   runId,
   sleepFn = sleep,
   token,
@@ -591,6 +594,7 @@ export async function cancelAcceptedRun({
   }
   if (!ordinaryCancelFailed && await waitForTerminal({
     privateSha,
+    now,
     runId,
     sleepFn,
     timeoutMs: CANCEL_GRACE_MS,
@@ -605,6 +609,7 @@ export async function cancelAcceptedRun({
   );
   if (!await waitForTerminal({
     privateSha,
+    now,
     runId,
     sleepFn,
     timeoutMs: CANCEL_GRACE_MS,
@@ -617,36 +622,51 @@ export async function cancelAcceptedRun({
 
 async function waitForTerminal({
   privateSha,
+  now,
   runId,
   sleepFn,
   timeoutMs,
   token,
   workflowId,
 }) {
-  const attempts = Math.max(1, Math.ceil(timeoutMs / POLL_MS));
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const run = inspectPrivateRun(await readPrivateRun(runId, token), {
-      privateSha,
-      runId,
-      workflowId,
-    });
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    let run;
+    try {
+      run = inspectPrivateRun(await readPrivateRun(runId, token, { deadline, now }), {
+        privateSha,
+        runId,
+        workflowId,
+      });
+    } catch (error) {
+      if (now() >= deadline) return false;
+      throw error;
+    }
     if (run.complete) return true;
-    await sleepFn(POLL_MS);
+    const remainingMs = deadline - now();
+    if (remainingMs > 0) await sleepFn(Math.min(POLL_MS, remainingMs));
   }
   return false;
 }
 
 async function readPrivateRun(runId, token, {
+  deadline = Number.POSITIVE_INFINITY,
+  now = Date.now,
   retryNotFound = false,
   sleepFn = sleep,
 } = {}) {
   const reads = retryNotFound ? PRIVATE_RUN_VISIBILITY_READS : 1;
   for (let read = 1; read <= reads; read += 1) {
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) {
+      throw new Error("Private compatibility run lookup exceeded its timing budget.");
+    }
     try {
       return await fetchJson(
         `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}`,
         { headers: githubHeaders(token) },
         "private compatibility run lookup",
+        Math.min(HTTP_TIMEOUT_MS, remainingMs),
       );
     } catch (error) {
       if (
@@ -654,7 +674,9 @@ async function readPrivateRun(runId, token, {
         || error.status !== 404
         || read === reads
       ) throw error;
-      await sleepFn(POLL_MS);
+      const retryRemainingMs = deadline - now();
+      if (retryRemainingMs <= 0) throw error;
+      await sleepFn(Math.min(POLL_MS, retryRemainingMs));
     }
   }
   throw new Error("Private compatibility run visibility retry was exhausted.");
@@ -746,8 +768,8 @@ async function main(argv) {
   throw new Error("Expected select, run, or run-main.");
 }
 
-async function fetchJson(url, init, label) {
-  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+async function fetchJson(url, init, label, timeoutMs = HTTP_TIMEOUT_MS) {
+  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
     throw new HttpStatusError(label, response.status);

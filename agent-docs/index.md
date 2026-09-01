@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-31
+Last verified: 2026-09-01
 
 ## Purpose
 
@@ -190,7 +190,9 @@ SHA and fixed workflow identity, and re-reads private `main` before success so
 branch movement fails closed. It tolerates only the bounded `404` visibility
 window for that exact returned run id, never searches for or guesses a run, and
 keeps every later polling, identity, reader, and attestation failure
-fail-closed. This boundary and its focused proof are specified by
+fail-closed. Its single installation token has one bounded controller lifetime,
+a shorter run window, and wall-clock-bounded cancellation and force-cancellation
+graces. This boundary and its focused proof are specified by
 `agent-docs/RELIABILITY.md` and `agent-docs/references/testing-ci-map.md`.
 
 Direct iMessage workout apply may carry bounded rendering context and return an

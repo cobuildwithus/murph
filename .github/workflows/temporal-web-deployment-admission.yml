@@ -20,7 +20,9 @@ jobs:
     name: Temporal Web production admission
     environment: temporal-compatibility
     runs-on: ubuntu-24.04
-    timeout-minutes: 70
+    # 15 minutes for setup, then the controller's 58-minute token budget, with
+    # two minutes left for runner cleanup and status publication.
+    timeout-minutes: 75
     permissions:
       contents: read
     steps:
