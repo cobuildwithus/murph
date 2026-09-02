@@ -229,6 +229,7 @@ describe.skipIf(!runPostgresProof)(
           providerWhileLocked,
           "Expected provider-start row claim to skip a conflicting lock.",
         )).resolves.toEqual({
+          contendedCount: 1,
           matchedCount: 0,
           recorded: false,
           unmatchedCount: 1,
@@ -262,6 +263,7 @@ describe.skipIf(!runPostgresProof)(
           assistantWhileLocked,
           "Expected assistant-milestone row claim to skip a conflicting lock.",
         )).resolves.toEqual({
+          contendedCount: 1,
           matchedCount: 0,
           recorded: false,
           unmatchedCount: 1,
@@ -314,6 +316,7 @@ describe.skipIf(!runPostgresProof)(
           batchedProviderWhileLocked,
           "Expected provider-start to update free rows without waiting.",
         )).resolves.toEqual({
+          contendedCount: 1,
           matchedCount: 1,
           recorded: true,
           unmatchedCount: 1,
@@ -332,6 +335,7 @@ describe.skipIf(!runPostgresProof)(
           batchedAssistantWhileLocked,
           "Expected assistant milestone to update free rows without waiting.",
         )).resolves.toEqual({
+          contendedCount: 1,
           matchedCount: 1,
           recorded: true,
           unmatchedCount: 1,
